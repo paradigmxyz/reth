@@ -1318,7 +1318,7 @@ mod tests {
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
-        PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TrieReader,
+        PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
     };
     use reth_trie::MultiProof;
     use reth_trie_db::changesets::ChangesetCacheHandle;
@@ -1342,7 +1342,6 @@ mod tests {
     where
         F: DatabaseProviderFactory<
                 Provider: BlockReader
-                              + TrieReader
                               + StageCheckpointReader
                               + PruneCheckpointReader
                               + ChangeSetReader
@@ -1365,7 +1364,7 @@ mod tests {
     fn create_cached_provider<F>(factory: F) -> CachedStateProvider<StateProviderBox>
     where
         F: DatabaseProviderFactory<
-                Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+                Provider: BlockReader + StageCheckpointReader + PruneCheckpointReader,
             > + Clone
             + Send
             + 'static,

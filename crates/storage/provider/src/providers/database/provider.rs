@@ -18,7 +18,7 @@ use crate::{
     PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
     RocksDBProviderFactory, RocksTxRefArg, StageCheckpointReader, StateProviderBox, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieReader, TrieWriter,
+    TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -27,7 +27,7 @@ use alloy_consensus::{
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, B256Map, HashMap, HashSet},
+    map::{hash_map, HashMap, HashSet},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
@@ -2656,61 +2656,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         }
 
         Ok(())
-    }
-}
-
-impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
-    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
-        let tx = self.tx_ref();
-
-        // Read account trie changes directly into a Vec - data is already sorted by nibbles
-        // within each block, and we want the oldest (first) version of each node sorted by path.
-        let mut account_nodes = Vec::new();
-        let mut seen_account_keys = HashSet::new();
-        let mut accounts_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
-
-        for entry in accounts_cursor.walk_range(from..)? {
-            let (_, TrieChangeSetsEntry { nibbles, node }) = entry?;
-            // Only keep the first (oldest) version of each node
-            if seen_account_keys.insert(nibbles.0) {
-                account_nodes.push((nibbles.0, node));
-            }
-        }
-
-        account_nodes.sort_by_key(|(path, _)| *path);
-
-        // Read storage trie changes - data is sorted by (block, hashed_address, nibbles)
-        // Keep track of seen (address, nibbles) pairs to only keep the oldest version per address,
-        // sorted by path.
-        let mut storage_tries = B256Map::<Vec<_>>::default();
-        let mut seen_storage_keys = HashSet::new();
-        let mut storages_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
-
-        // Create storage range starting from `from` block
-        let storage_range_start = BlockNumberHashedAddress((from, B256::ZERO));
-
-        for entry in storages_cursor.walk_range(storage_range_start..)? {
-            let (
-                BlockNumberHashedAddress((_, hashed_address)),
-                TrieChangeSetsEntry { nibbles, node },
-            ) = entry?;
-
-            // Only keep the first (oldest) version of each node for this address
-            if seen_storage_keys.insert((hashed_address, nibbles.0)) {
-                storage_tries.entry(hashed_address).or_default().push((nibbles.0, node));
-            }
-        }
-
-        // Convert to StorageTrieUpdatesSorted
-        let storage_tries = storage_tries
-            .into_iter()
-            .map(|(address, mut nodes)| {
-                nodes.sort_by_key(|(path, _)| *path);
-                (address, StorageTrieUpdatesSorted { storage_nodes: nodes, is_deleted: false })
-            })
-            .collect();
-
-        Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
     }
 }
 

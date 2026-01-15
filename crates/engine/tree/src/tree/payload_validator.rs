@@ -43,7 +43,7 @@ use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, ExecutionOutcome,
     HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
-    StateProvider, StateProviderFactory, StateReader, TrieReader,
+    StateProvider, StateProviderFactory, StateReader,
 };
 use reth_revm::db::State;
 use reth_trie::{
@@ -148,7 +148,6 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + TrieReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
@@ -1293,7 +1292,6 @@ impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm
 where
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + TrieReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader

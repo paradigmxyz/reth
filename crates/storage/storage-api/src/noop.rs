@@ -6,7 +6,7 @@ use crate::{
     HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider, TrieReader,
+    StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -643,12 +643,6 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<Chai
         use reth_db_api::transaction::DbTx;
 
         Ok(self.tx.commit()?)
-    }
-}
-
-impl<C: Send + Sync, N: NodePrimitives> TrieReader for NoopProvider<C, N> {
-    fn trie_reverts(&self, _from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
-        Ok(TrieUpdatesSorted::default())
     }
 }
 

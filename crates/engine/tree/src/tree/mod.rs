@@ -32,7 +32,7 @@ use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, Sealed
 use reth_provider::{
     BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider,
     ProviderError, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
-    TransactionVariant, TrieReader,
+    TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -312,7 +312,6 @@ where
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
         + HashedPostStateProvider
-        + TrieReader
         + Clone
         + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>

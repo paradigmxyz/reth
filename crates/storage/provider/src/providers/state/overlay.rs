@@ -8,7 +8,7 @@ use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader, TrieReader,
+    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -131,8 +131,7 @@ impl<F> OverlayStateProviderFactory<F> {
 impl<F> OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: TrieReader
-        + StageCheckpointReader
+    F::Provider: StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
         + DBProvider
@@ -382,11 +381,7 @@ where
 impl<F> DatabaseProviderROFactory for OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: TrieReader
-        + StageCheckpointReader
-        + PruneCheckpointReader
-        + BlockNumReader
-        + ChangeSetReader,
+    F::Provider: StageCheckpointReader + PruneCheckpointReader + BlockNumReader + ChangeSetReader,
 {
     type Provider = OverlayStateProvider<F::Provider>;
 
