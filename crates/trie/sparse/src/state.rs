@@ -806,14 +806,75 @@ where
         storage_trie.remove_leaf(slot, provider)?;
         Ok(())
     }
+
+    /// Generate proof targets for the given account keys (generic fallback).
+    ///
+    /// This generic implementation returns full proofs (`min_len=0`) for all keys,
+    /// excluding keys that are already revealed as leaves.
+    ///
+    /// For an optimized implementation that calculates partial proof depths based on
+    /// revealed nodes, see the `SerialSparseTrie` specialization.
+    pub fn generate_account_proof_targets(&self, keys: &[B256]) -> Vec<(B256, u8)> {
+        let mut targets = Vec::with_capacity(keys.len());
+
+        for key in keys {
+            let path = Nibbles::unpack(key);
+
+            // Check if already fully revealed as a leaf using the trait interface
+            if let Some(trie) = self.state.as_revealed_ref() &&
+                trie.get_leaf_value(&path).is_some()
+            {
+                continue;
+            }
+
+            // For generic types, we can't walk the node structure, so request full proof
+            targets.push((*key, 0u8));
+        }
+
+        targets
+    }
+
+    /// Generate storage proof targets for the given storage keys of an account (generic fallback).
+    ///
+    /// This generic implementation returns full proofs (`min_len=0`) for all keys,
+    /// excluding keys that are already revealed as leaves.
+    ///
+    /// For an optimized implementation that calculates partial proof depths based on
+    /// revealed nodes, see the `SerialSparseTrie` specialization.
+    pub fn generate_storage_proof_targets(
+        &self,
+        account: B256,
+        storage_keys: &[B256],
+    ) -> Vec<(B256, u8)> {
+        let mut targets = Vec::with_capacity(storage_keys.len());
+
+        let storage_trie = self.storage.tries.get(&account).and_then(|t| t.as_revealed_ref());
+
+        for key in storage_keys {
+            let path = Nibbles::unpack(key);
+
+            // Check if already fully revealed as a leaf using the trait interface
+            if let Some(trie) = storage_trie &&
+                trie.get_leaf_value(&path).is_some()
+            {
+                continue;
+            }
+
+            // For generic types, we can't walk the node structure, so request full proof
+            targets.push((*key, 0u8));
+        }
+
+        targets
+    }
 }
 
-/// Implementation of proof v2 target generation for `SparseStateTrie` using `SerialSparseTrie`.
+/// Implementation of optimized proof v2 target generation for `SparseStateTrie` using
+/// `SerialSparseTrie`.
 ///
 /// These methods allow generating partial proof targets based on what's already revealed
-/// in the sparse trie, enabling efficient incremental proof fetching.
+/// in the sparse trie, enabling efficient incremental proof fetching with accurate `min_len`.
 impl SparseStateTrie<SerialSparseTrie, SerialSparseTrie> {
-    /// Generate proof targets for the given account keys.
+    /// Generate proof targets for the given account keys with optimized `min_len` calculation.
     ///
     /// For each key, walks down the account trie to find the deepest revealed node.
     /// Returns a vector of `(key, min_len)` pairs where:
@@ -823,7 +884,7 @@ impl SparseStateTrie<SerialSparseTrie, SerialSparseTrie> {
     /// Keys that are already fully revealed (leaf exists) are excluded from the result.
     ///
     /// This allows generating partial proofs - we only need to fetch nodes we don't already have.
-    pub fn generate_account_proof_targets(&self, keys: &[B256]) -> Vec<(B256, u8)> {
+    pub fn generate_account_proof_targets_optimized(&self, keys: &[B256]) -> Vec<(B256, u8)> {
         let Some(trie) = self.state.as_revealed_ref() else {
             // If the trie is blind, we need full proofs for all keys
             return keys.iter().map(|key| (*key, 0u8)).collect();
@@ -847,7 +908,8 @@ impl SparseStateTrie<SerialSparseTrie, SerialSparseTrie> {
         targets
     }
 
-    /// Generate storage proof targets for the given storage keys of an account.
+    /// Generate storage proof targets for the given storage keys of an account with optimized
+    /// `min_len` calculation.
     ///
     /// For each storage key, walks down the storage trie to find the deepest revealed node.
     /// Returns a vector of `(key, min_len)` pairs where:
@@ -855,7 +917,11 @@ impl SparseStateTrie<SerialSparseTrie, SerialSparseTrie> {
     /// - `min_len` is the depth of the deepest already-revealed node (in nibbles)
     ///
     /// Keys that are already fully revealed (leaf exists) are excluded from the result.
-    pub fn generate_storage_proof_targets(&self, account: B256, storage_keys: &[B256]) -> Vec<(B256, u8)> {
+    pub fn generate_storage_proof_targets_optimized(
+        &self,
+        account: B256,
+        storage_keys: &[B256],
+    ) -> Vec<(B256, u8)> {
         let Some(trie) = self.storage.tries.get(&account).and_then(|t| t.as_revealed_ref()) else {
             // If the storage trie is blind or doesn't exist, we need full proofs for all keys
             return storage_keys.iter().map(|key| (*key, 0u8)).collect();
@@ -1531,10 +1597,8 @@ mod tests {
 
         let key1 = B256::repeat_byte(0x00);
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        let leaf = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
-            Nibbles::unpack(key1),
-            leaf_value,
-        )));
+        let leaf =
+            alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(Nibbles::unpack(key1), leaf_value)));
 
         let multiproof = MultiProof {
             account_subtree: ProofNodes::from_iter([(Nibbles::default(), leaf.into())]),
