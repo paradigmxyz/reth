@@ -75,6 +75,7 @@ std = [
     "reth-evm/std",
     "op-alloy-rpc-types-engine/std",
     "reth-storage-errors/std",
+    "alloy-rpc-types-engine/std",
 ]
 portable = [
     "reth-revm/portable",
