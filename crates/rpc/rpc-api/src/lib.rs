@@ -41,7 +41,7 @@ pub mod servers {
     pub use crate::{
         admin::AdminApiServer,
         debug::{DebugApiServer, DebugExecutionWitnessApiServer},
-        engine::{EngineApiServer, EngineEthApiServer, IntoEngineApiRpcModule},
+        engine::{EngineApiHackedServer, EngineApiServer, EngineEthApiServer, IntoEngineApiRpcModule},
         mev::{MevFullApiServer, MevSimApiServer},
         miner::MinerApiServer,
         net::NetApiServer,

@@ -40,7 +40,7 @@ use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
     TestingApi, ValidationApi,
 };
-use reth_rpc_api::servers::{BlockSubmissionValidationApiServer, TestingApiServer};
+use reth_rpc_api::servers::{BlockSubmissionValidationApiServer, EngineApiHackedServer, TestingApiServer};
 use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
 use reth_rpc_eth_api::{
     helpers::{
@@ -314,16 +314,26 @@ where
                     .modules
                     .merge_if_module_configured(RethRpcModule::Eth, eth_config.into_rpc())?;
 
-                // testing_buildBlockV1: only wire when the hidden testing module is explicitly
-                // requested on any transport. Default stays disabled to honor security guidance.
-                let testing_api = TestingApi::new(
-                    container.registry.eth_api().clone(),
-                    container.registry.evm_config().clone(),
-                )
-                .into_rpc();
-                container
-                    .modules
-                    .merge_if_module_configured(RethRpcModule::Testing, testing_api)?;
+                // testing_buildBlockV1 and engine_getPayloadV4Hacked: only wire when the hidden
+                // testing module is explicitly requested. Default stays disabled for security.
+                if container.modules.module_config().contains_any(&RethRpcModule::Testing) {
+                    let testing_api = TestingApi::new(
+                        container.registry.eth_api().clone(),
+                        container.registry.evm_config().clone(),
+                    );
+                    
+                    // Register testing_buildBlockV1 on the regular RPC
+                    container.modules.merge_if_module_configured(
+                        RethRpcModule::Testing,
+                        TestingApiServer::into_rpc(testing_api.clone()),
+                    )?;
+                    
+                    // Register engine_getPayloadV4Hacked on the auth RPC for Nethermind compatibility
+                    debug!(target: "reth::cli", "Installing engine_getPayloadV4Hacked on auth RPC");
+                    container.auth_module.merge_auth_methods(
+                        EngineApiHackedServer::into_rpc(testing_api),
+                    )?;
+                }
 
                 Ok(())
             })

@@ -254,6 +254,29 @@ pub trait EngineApi<Engine: EngineTypes> {
     ) -> RpcResult<Option<Vec<Option<BlobAndProofV2>>>>;
 }
 
+/// Hacked Engine API for megablock creation (benchmarking).
+///
+/// This trait provides `engine_getPayloadV4Hacked` which matches Nethermind's implementation
+/// from the `cber/get-payload-hacked` branch for compatibility with execution-payloads-benchmarks.
+///
+/// **Warning:** This is a powerful testing-only API. It should only be enabled for benchmarking
+/// and never exposed on public-facing RPC.
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine"))]
+pub trait EngineApiHacked {
+    /// Builds a megablock using the current head as parent.
+    ///
+    /// Takes raw signed transaction RLP bytes, builds a block with all transactions executed,
+    /// and returns the V4 payload envelope with execution requests.
+    ///
+    /// This matches Nethermind's `engine_getPayloadV4Hacked` from `cber/get-payload-hacked`.
+    #[method(name = "getPayloadV4Hacked")]
+    async fn get_payload_v4_hacked(
+        &self,
+        transactions: Vec<Bytes>,
+    ) -> RpcResult<alloy_rpc_types_engine::ExecutionPayloadEnvelopeV4>;
+}
+
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>
 ///
 /// This also includes additional eth functions required by optimism.
