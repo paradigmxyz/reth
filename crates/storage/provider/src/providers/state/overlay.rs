@@ -256,22 +256,6 @@ where
                 accumulated_reverts
             };
 
-            // Validate that the trie reverts from cache match those from the database
-            {
-                let db_trie_reverts = provider.trie_reverts(from_block + 1)?;
-                tracing::info!(
-                target: "providers::state::overlay",
-                mem_len = ?trie_reverts.total_len(),
-                db_len = ?db_trie_reverts.total_len(),
-                "Asserting trie changesets against db",
-                );
-                pretty_assertions::assert_eq!(
-                    trie_reverts, db_trie_reverts,
-                    "Trie reverts from cache do not match database (from_block={}, db_tip_block={})",
-                    from_block, db_tip_block
-                );
-            }
-
             // Collect state reverts
             let mut hashed_state_reverts = {
                 let _guard = debug_span!(target: "providers::state::overlay", "Retrieving hashed state reverts").entered();
