@@ -1,7 +1,9 @@
 //! clap [Args](clap::Args) for engine purposes
 
 use clap::{builder::Resettable, Args};
-use reth_engine_primitives::{TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE};
+use reth_engine_primitives::{
+    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_PREWARM_MAX_CONCURRENCY,
+};
 use std::sync::OnceLock;
 
 use crate::node_config::{
@@ -37,6 +39,7 @@ pub struct DefaultEngineValues {
     storage_worker_count: Option<usize>,
     account_worker_count: Option<usize>,
     enable_proof_v2: bool,
+    prewarm_concurrency: usize,
 }
 
 impl DefaultEngineValues {
@@ -172,6 +175,12 @@ impl DefaultEngineValues {
         self.enable_proof_v2 = v;
         self
     }
+
+    /// Set the default prewarm concurrency
+    pub const fn with_prewarm_concurrency(mut self, v: usize) -> Self {
+        self.prewarm_concurrency = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -197,6 +206,7 @@ impl Default for DefaultEngineValues {
             storage_worker_count: None,
             account_worker_count: None,
             enable_proof_v2: false,
+            prewarm_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY,
         }
     }
 }
@@ -320,6 +330,10 @@ pub struct EngineArgs {
     /// Enable V2 storage proofs for state root calculations
     #[arg(long = "engine.enable-proof-v2", default_value_t = DefaultEngineValues::get_global().enable_proof_v2)]
     pub enable_proof_v2: bool,
+
+    /// Configure the maximum number of concurrent prewarm threads.
+    #[arg(long = "engine.prewarm-concurrency", default_value_t = DefaultEngineValues::get_global().prewarm_concurrency)]
+    pub prewarm_concurrency: usize,
 }
 
 #[allow(deprecated)]
@@ -346,6 +360,7 @@ impl Default for EngineArgs {
             storage_worker_count,
             account_worker_count,
             enable_proof_v2,
+            prewarm_concurrency,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -371,6 +386,7 @@ impl Default for EngineArgs {
             storage_worker_count,
             account_worker_count,
             enable_proof_v2,
+            prewarm_concurrency,
         }
     }
 }
@@ -407,6 +423,7 @@ impl EngineArgs {
         }
 
         config = config.with_enable_proof_v2(self.enable_proof_v2);
+        config = config.with_prewarm_max_concurrency(self.prewarm_concurrency);
 
         config
     }
