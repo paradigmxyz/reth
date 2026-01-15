@@ -1357,7 +1357,7 @@ where
         self
     }
 
-    fn commit(self) -> ProviderResult<bool> {
+    fn commit(self) -> ProviderResult<()> {
         unimplemented!("commit not supported for RPC provider")
     }
 

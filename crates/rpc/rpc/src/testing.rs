@@ -4,7 +4,7 @@
 
 use alloy_consensus::{Header, Transaction};
 use alloy_evm::Evm;
-use alloy_primitives::U256;
+use alloy_primitives::{map::HashSet, Address, U256};
 use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV5;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -19,19 +19,31 @@ use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::{BlockReader, HeaderProvider};
 use revm::context::Block;
+use revm_primitives::map::DefaultHashBuilder;
 use std::sync::Arc;
+use tracing::debug;
 
 /// Testing API handler.
 #[derive(Debug, Clone)]
 pub struct TestingApi<Eth, Evm> {
     eth_api: Eth,
     evm_config: Evm,
+    /// If true, skip invalid transactions instead of failing.
+    skip_invalid_transactions: bool,
 }
 
 impl<Eth, Evm> TestingApi<Eth, Evm> {
     /// Create a new testing API handler.
     pub const fn new(eth_api: Eth, evm_config: Evm) -> Self {
-        Self { eth_api, evm_config }
+        Self { eth_api, evm_config, skip_invalid_transactions: false }
+    }
+
+    /// Enable skipping invalid transactions instead of failing.
+    /// When a transaction fails, all subsequent transactions from the same sender are also
+    /// skipped.
+    pub const fn with_skip_invalid_transactions(mut self) -> Self {
+        self.skip_invalid_transactions = true;
+        self
     }
 }
 
@@ -46,6 +58,7 @@ where
         request: TestingBuildBlockRequestV1,
     ) -> Result<ExecutionPayloadEnvelopeV5, Eth::Error> {
         let evm_config = self.evm_config.clone();
+        let skip_invalid_transactions = self.skip_invalid_transactions;
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
                 let state = state.database.0;
@@ -79,11 +92,33 @@ where
                 let mut total_fees = U256::ZERO;
                 let base_fee = builder.evm_mut().block().basefee();
 
+                let mut invalid_senders: HashSet<Address, DefaultHashBuilder> = HashSet::default();
+
                 for tx in request.transactions {
                     let tx: Recovered<TxTy<Evm::Primitives>> = recover_raw_transaction(&tx)?;
+                    let sender = tx.signer();
+
+                    if skip_invalid_transactions && invalid_senders.contains(&sender) {
+                        continue;
+                    }
+
                     let tip = tx.effective_tip_per_gas(base_fee).unwrap_or_default();
-                    let gas_used =
-                        builder.execute_transaction(tx).map_err(Eth::Error::from_eth_err)?;
+                    let gas_used = match builder.execute_transaction(tx) {
+                        Ok(gas_used) => gas_used,
+                        Err(err) => {
+                            if skip_invalid_transactions {
+                                debug!(
+                                    target: "rpc::testing",
+                                    ?sender,
+                                    error = ?err,
+                                    "Skipping invalid transaction"
+                                );
+                                invalid_senders.insert(sender);
+                                continue;
+                            }
+                            return Err(Eth::Error::from_eth_err(err));
+                        }
+                    };
 
                     total_fees += U256::from(tip) * U256::from(gas_used);
                 }
