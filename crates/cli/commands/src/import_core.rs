@@ -133,7 +133,12 @@ where
 
         let latest_block_number =
             provider_factory.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-        tokio::spawn(reth_node_events::node::handle_events(None, latest_block_number, events));
+        tokio::spawn(reth_node_events::node::handle_events(
+            None,
+            latest_block_number,
+            events,
+            None,
+        ));
 
         // Run pipeline
         info!(target: "reth::import", "Starting sync pipeline");
