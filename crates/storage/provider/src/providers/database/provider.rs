@@ -496,6 +496,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
+            let mut trie_updates_acc = TrieUpdatesSorted::default();
+
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
@@ -528,14 +530,23 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     self.write_hashed_state(&trie_data.hashed_state)?;
                     timings.write_hashed_state += start.elapsed();
 
+                    // Changesets must see the accumulated overlay from prior blocks
                     let start = Instant::now();
-                    self.write_trie_changesets(block_number, &trie_data.trie_updates, None)?;
+                    let overlay =
+                        if trie_updates_acc.is_empty() { None } else { Some(&trie_updates_acc) };
+                    self.write_trie_changesets(block_number, &trie_data.trie_updates, overlay)?;
                     timings.write_trie_changesets += start.elapsed();
 
-                    let start = Instant::now();
-                    self.write_trie_updates_sorted(&trie_data.trie_updates)?;
-                    timings.write_trie_updates += start.elapsed();
+                    // Accumulate trie updates for batch write after loop
+                    trie_updates_acc.extend_ref(&trie_data.trie_updates);
                 }
+            }
+
+            // Write all accumulated trie updates in a single batch
+            if save_mode.with_state() {
+                let start = Instant::now();
+                self.write_trie_updates_sorted(&trie_updates_acc)?;
+                timings.write_trie_updates = start.elapsed();
             }
 
             // Full mode: update history indices
@@ -5296,5 +5307,119 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Tests that trie changesets correctly see accumulated overlay from prior blocks.
+    /// This simulates the accumulation logic used in `save_blocks`.
+    #[test]
+    fn test_trie_changesets_with_accumulated_overlay() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie::{updates::TrieUpdatesSorted, BranchNodeCompact};
+
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let account_nibbles = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        let account_nibbles_key = StoredNibbles(account_nibbles);
+        let account_nibbles_subkey = StoredNibblesSubKey(account_nibbles);
+
+        let node0 = BranchNodeCompact::new(
+            0b1111_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+        let node1 = BranchNodeCompact::new(
+            0b0000_1111_0000_0000,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+        let node2 = BranchNodeCompact::new(
+            0b0000_0000_1111_0000,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        // Pre-populate the trie with node0 as the initial db state
+        {
+            let mut cursor = provider_rw.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
+            cursor.upsert(account_nibbles_key.clone(), &node0).unwrap();
+        }
+
+        // Simulate save_blocks accumulation logic:
+        // For block 1: write changeset with no overlay (sees db state = node0)
+        // For block 2: write changeset with overlay containing block 1's updates (sees node1)
+
+        let trie_updates_block1 = TrieUpdatesSorted::new(
+            vec![(account_nibbles, Some(node1.clone()))],
+            B256Map::default(),
+        );
+        let trie_updates_block2 = TrieUpdatesSorted::new(
+            vec![(account_nibbles, Some(node2.clone()))],
+            B256Map::default(),
+        );
+
+        // Accumulator starts empty
+        let mut trie_updates_acc = TrieUpdatesSorted::default();
+
+        // Block 1: no overlay (sees db)
+        let overlay = if trie_updates_acc.is_empty() { None } else { Some(&trie_updates_acc) };
+        provider_rw.write_trie_changesets(1, &trie_updates_block1, overlay).unwrap();
+        trie_updates_acc.extend_ref(&trie_updates_block1);
+
+        // Block 2: overlay contains block 1's updates
+        let overlay = if trie_updates_acc.is_empty() { None } else { Some(&trie_updates_acc) };
+        provider_rw.write_trie_changesets(2, &trie_updates_block2, overlay).unwrap();
+        trie_updates_acc.extend_ref(&trie_updates_block2);
+
+        // Write all accumulated trie updates in single batch
+        provider_rw.write_trie_updates_sorted(&trie_updates_acc).unwrap();
+
+        // Block 1 changeset should see the pre-existing db value (node0)
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_read::<tables::AccountsTrieChangeSets>().unwrap();
+            let entries =
+                cursor.walk_dup(Some(1u64), None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+            assert_eq!(
+                entries,
+                vec![(
+                    1u64,
+                    TrieChangeSetsEntry {
+                        nibbles: account_nibbles_subkey.clone(),
+                        node: Some(node0)
+                    }
+                )]
+            );
+        }
+
+        // Block 2 changeset should see block 1's update (node1) via the overlay
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_read::<tables::AccountsTrieChangeSets>().unwrap();
+            let entries =
+                cursor.walk_dup(Some(2u64), None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+            assert_eq!(
+                entries,
+                vec![(
+                    2u64,
+                    TrieChangeSetsEntry { nibbles: account_nibbles_subkey, node: Some(node1) }
+                )]
+            );
+        }
+
+        // Final trie state should reflect the last update (node2)
+        {
+            let mut cursor = provider_rw.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
+            let entry = cursor.seek_exact(account_nibbles_key).unwrap();
+            assert_eq!(entry.map(|(_, v)| v), Some(node2));
+        }
+
+        provider_rw.commit().unwrap();
     }
 }
