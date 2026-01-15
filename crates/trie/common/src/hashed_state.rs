@@ -653,6 +653,9 @@ impl HashedPostStateSorted {
 
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
 
+        // Accumulate storage slices per address from newest to oldest state.
+        // Once we see a `wiped` flag, the account was cleared at that point,
+        // so older storage slots are irrelevant - we "seal" and stop collecting.
         for state in &states {
             for (addr, storage) in &state.storages {
                 let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
