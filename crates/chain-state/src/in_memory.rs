@@ -952,35 +952,16 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     }
 
     /// Converts a slice of executed blocks into a [`Chain`].
-    ///
-    /// Optimized for the single-block case to avoid unnecessary folding.
     fn blocks_to_chain(blocks: &[ExecutedBlock<N>]) -> Chain<N> {
-        match blocks {
-            [] => Chain::default(),
-            [single] => Chain::from_block(
-                single.recovered_block().clone(),
-                single.execution_outcome().clone(),
-                single.trie_updates(),
-                single.hashed_state(),
-            ),
-            [first, rest @ ..] => {
-                let mut chain = Chain::from_block(
-                    first.recovered_block().clone(),
-                    first.execution_outcome().clone(),
-                    first.trie_updates(),
-                    first.hashed_state(),
-                );
-                for exec in rest {
-                    chain.append_block(
-                        exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
-                        exec.trie_updates(),
-                        exec.hashed_state(),
-                    );
-                }
-                chain
-            }
-        }
+        blocks.iter().fold(Chain::default(), |mut chain, exec| {
+            chain.append_block(
+                exec.recovered_block().clone(),
+                exec.execution_outcome().clone(),
+                exec.trie_updates(),
+                exec.hashed_state(),
+            );
+            chain
+        })
     }
 
     /// Returns the new tip of the chain.
