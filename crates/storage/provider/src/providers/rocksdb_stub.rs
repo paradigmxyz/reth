@@ -45,6 +45,16 @@ impl RocksDBProvider {
     pub fn builder(path: impl AsRef<Path>) -> RocksDBBuilder {
         RocksDBBuilder::new(path)
     }
+
+    /// Check consistency of `RocksDB` tables (stub implementation).
+    ///
+    /// Returns `None` since there is no `RocksDB` data to check when the feature is disabled.
+    pub const fn check_consistency<Provider>(
+        &self,
+        _provider: &Provider,
+    ) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
+    }
 }
 
 /// A stub batch writer for `RocksDB`.
