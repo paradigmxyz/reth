@@ -13,7 +13,9 @@ use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
 };
-use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
+
+use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
@@ -35,6 +37,71 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
+
+/// Collects shards to unwind from a `RocksDB` reverse iterator.
+///
+/// This is a generic helper for the `RocksDB` unwind logic used by both account and storage
+/// history. It iterates through shards from highest to lowest block number, collecting shards to
+/// delete and identifying any partial shard that needs to be preserved.
+///
+/// # Arguments
+/// * `iter` - An iterator yielding `(K, BlockNumberList)` pairs in reverse order
+/// * `belongs_to_target` - Predicate that returns `true` if the key belongs to the target being
+///   unwound
+/// * `highest_block_number` - Function to extract the highest block number from the key
+/// * `block_number` - The unwind target block number
+///
+/// # Returns
+/// A tuple of `(shards_to_delete, partial_shard_to_keep)` where:
+/// - `shards_to_delete` contains all keys that should be deleted
+/// - `partial_shard_to_keep` contains block numbers to preserve if a boundary shard was found
+#[cfg(all(unix, feature = "rocksdb"))]
+fn collect_shards_for_unwind<K, I, E>(
+    iter: I,
+    belongs_to_target: impl Fn(&K) -> bool,
+    highest_block_number: impl Fn(&K) -> BlockNumber,
+    block_number: BlockNumber,
+) -> Result<(Vec<K>, Option<Vec<u64>>), E>
+where
+    I: Iterator<Item = Result<(K, BlockNumberList), E>>,
+{
+    let mut shards_to_delete = Vec::new();
+    let mut partial_shard_to_keep: Option<Vec<u64>> = None;
+
+    for result in iter {
+        let (key, list) = result?;
+
+        if !belongs_to_target(&key) {
+            break;
+        }
+
+        shards_to_delete.push(key);
+        let key = shards_to_delete.last().unwrap();
+
+        let first = list.iter().next().expect("List can't be empty");
+
+        // Case 1: Entire shard is at or above the unwinding point - keep it deleted
+        if first >= block_number {
+            continue;
+        }
+
+        // Case 2: Boundary shard - spans across the unwinding point
+        if block_number <= highest_block_number(key) {
+            let indices_to_keep: Vec<_> = list.iter().take_while(|i| *i < block_number).collect();
+            if !indices_to_keep.is_empty() {
+                partial_shard_to_keep = Some(indices_to_keep);
+            }
+            break;
+        }
+
+        // Case 3: Entire shard is below the unwinding point - keep all indices
+        let indices_to_keep: Vec<_> = list.iter().collect();
+        partial_shard_to_keep = Some(indices_to_keep);
+        break;
+    }
+
+    Ok((shards_to_delete, partial_shard_to_keep))
+}
 
 /// Type alias for [`EitherReader`] constructors.
 type EitherReaderTy<'a, P, T> =
@@ -104,6 +171,67 @@ pub enum EitherWriter<'a, CURSOR, N> {
     /// Write to `RocksDB` using a write-only batch (historical tables).
     #[cfg(all(unix, feature = "rocksdb"))]
     RocksDB(RocksDBBatch<'a>),
+}
+
+/// Creates a `RocksDB` batch from the provider for use in [`EitherWriter`] constructors.
+///
+/// On `RocksDB`-enabled builds, returns a real batch.
+/// On other builds, returns `()` to allow the same API without feature gates.
+///
+/// The `rocksdb` parameter should be obtained from [`make_rocksdb_provider`].
+#[cfg(all(unix, feature = "rocksdb"))]
+pub fn make_rocksdb_batch_arg(
+    rocksdb: &crate::providers::rocksdb::RocksDBProvider,
+) -> RocksBatchArg<'_> {
+    rocksdb.batch()
+}
+
+/// Stub for non-`RocksDB` builds.
+#[cfg(not(all(unix, feature = "rocksdb")))]
+pub const fn make_rocksdb_batch_arg<T>(_rocksdb: &T) -> RocksBatchArg<'static> {}
+
+/// Gets the `RocksDB` provider from a provider that implements [`RocksDBProviderFactory`].
+///
+/// On `RocksDB`-enabled builds, returns the real provider.
+/// On other builds, returns `()` to allow the same API without feature gates.
+///
+/// This should be called first, and the result passed to [`make_rocksdb_batch_arg`].
+/// The returned value must be kept alive for as long as the batch is used.
+#[cfg(all(unix, feature = "rocksdb"))]
+pub fn make_rocksdb_provider<P>(provider: &P) -> crate::providers::rocksdb::RocksDBProvider
+where
+    P: crate::RocksDBProviderFactory,
+{
+    provider.rocksdb_provider()
+}
+
+/// Stub for non-`RocksDB` builds.
+#[cfg(not(all(unix, feature = "rocksdb")))]
+pub const fn make_rocksdb_provider<P>(_provider: &P) {}
+
+/// Registers a `RocksDB` batch extracted from an [`EitherWriter`] with the provider.
+///
+/// This should be called after operations on an [`EitherWriter`] that may use `RocksDB`,
+/// to ensure the batch is committed when the provider commits.
+///
+/// On non-`RocksDB` builds, this is a no-op.
+#[cfg(all(unix, feature = "rocksdb"))]
+pub fn register_rocksdb_batch<P, CURSOR, N>(provider: &P, writer: EitherWriter<'_, CURSOR, N>)
+where
+    P: crate::RocksDBProviderFactory,
+    N: NodePrimitives,
+{
+    if let Some(batch) = writer.into_raw_rocksdb_batch() {
+        provider.set_pending_rocksdb_batch(batch);
+    }
+}
+
+/// Stub for non-`RocksDB` builds.
+#[cfg(not(all(unix, feature = "rocksdb")))]
+pub fn register_rocksdb_batch<P, CURSOR, N>(_provider: &P, _writer: EitherWriter<'_, CURSOR, N>)
+where
+    N: NodePrimitives,
+{
 }
 
 impl<'a> EitherWriter<'a, (), ()> {
@@ -273,7 +401,7 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
     #[cfg(all(unix, feature = "rocksdb"))]
     pub fn into_raw_rocksdb_batch(self) -> Option<rocksdb::WriteBatchWithTransaction<true>> {
         match self {
-            Self::Database(_) | Self::StaticFile(_) => None,
+            Self::Database(_) | Self::StaticFile(..) => None,
             Self::RocksDB(batch) => Some(batch.into_inner()),
         }
     }
@@ -284,7 +412,7 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
     #[cfg(not(all(unix, feature = "rocksdb")))]
     pub fn into_raw_rocksdb_batch(self) -> Option<RawRocksDBBatch> {
         match self {
-            Self::Database(_) | Self::StaticFile(_) => None,
+            Self::Database(_) | Self::StaticFile(..) => None,
         }
     }
 
@@ -423,7 +551,7 @@ where
                     Ok(cursor.upsert(hash, &tx_num)?)
                 }
             }
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::TransactionHashNumbers>(hash, &tx_num),
         }
@@ -438,7 +566,7 @@ where
                 }
                 Ok(())
             }
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.delete::<tables::TransactionHashNumbers>(hash),
         }
@@ -457,7 +585,7 @@ where
     ) -> ProviderResult<()> {
         match self {
             Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
         }
@@ -472,9 +600,102 @@ where
                 }
                 Ok(())
             }
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.delete::<tables::StoragesHistory>(key),
+        }
+    }
+
+    /// Unwinds storage history shards for a given address and storage key.
+    ///
+    /// Walks through all shards for the given key, collecting indices below the unwind point,
+    /// then deletes all shards and reinserts the kept indices as a single sentinel shard.
+    pub fn unwind_storage_history_shards(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        block_number: BlockNumber,
+    ) -> ProviderResult<()> {
+        let start_key = StorageShardedKey::last(address, storage_key);
+
+        match self {
+            Self::Database(cursor) => {
+                // Walk through shards from highest to lowest, following the same algorithm
+                // as unwind_history_shards in provider.rs
+                let mut item = cursor.seek_exact(start_key.clone())?;
+
+                while let Some((sharded_key, list)) = item {
+                    // Check if shard belongs to this (address, storage_key)
+                    if sharded_key.address != address || sharded_key.sharded_key.key != storage_key
+                    {
+                        break;
+                    }
+
+                    // Delete this shard
+                    cursor.delete_current()?;
+
+                    // Get the first (lowest) block number in this shard
+                    let first = list.iter().next().expect("List can't be empty");
+
+                    // Case 1: Entire shard is at or above the unwinding point
+                    // Keep it deleted (already done above) and continue to next shard
+                    if first >= block_number {
+                        item = cursor.prev()?;
+                        continue;
+                    }
+
+                    // Case 2: Boundary shard - spans across the unwinding point
+                    // Reinsert only indices below unwind point, then STOP
+                    if block_number <= sharded_key.sharded_key.highest_block_number {
+                        let indices_to_keep: Vec<_> =
+                            list.iter().take_while(|i| *i < block_number).collect();
+                        if !indices_to_keep.is_empty() {
+                            cursor.insert(
+                                start_key,
+                                &BlockNumberList::new_pre_sorted(indices_to_keep),
+                            )?;
+                        }
+                        return Ok(());
+                    }
+
+                    // Case 3: Entire shard is below the unwinding point
+                    // Reinsert all indices, then STOP (preserves earlier shards)
+                    let indices_to_keep: Vec<_> = list.iter().collect();
+                    cursor.insert(start_key, &BlockNumberList::new_pre_sorted(indices_to_keep))?;
+                    return Ok(());
+                }
+
+                Ok(())
+            }
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => {
+                let provider = batch.provider();
+                let iter =
+                    provider.iter_from_reverse::<tables::StoragesHistory>(start_key.clone())?;
+
+                let (shards_to_delete, partial_shard_to_keep) = collect_shards_for_unwind(
+                    iter,
+                    |k: &StorageShardedKey| {
+                        k.address == address && k.sharded_key.key == storage_key
+                    },
+                    |k| k.sharded_key.highest_block_number,
+                    block_number,
+                )?;
+
+                for key in shards_to_delete {
+                    batch.delete::<tables::StoragesHistory>(key)?;
+                }
+
+                if let Some(indices) = partial_shard_to_keep {
+                    batch.put::<tables::StoragesHistory>(
+                        start_key,
+                        &BlockNumberList::new_pre_sorted(indices),
+                    )?;
+                }
+
+                Ok(())
+            }
         }
     }
 }
@@ -491,7 +712,7 @@ where
     ) -> ProviderResult<()> {
         match self {
             Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, value),
         }
@@ -506,9 +727,95 @@ where
                 }
                 Ok(())
             }
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.delete::<tables::AccountsHistory>(key),
+        }
+    }
+
+    /// Unwinds account history shards for a given address.
+    ///
+    /// Walks through all shards for the given address, following the same algorithm
+    /// as `unwind_history_shards` in provider.rs: only delete/modify shards at or above
+    /// the unwind point, preserving earlier shards.
+    pub fn unwind_account_history_shards(
+        &mut self,
+        address: Address,
+        block_number: BlockNumber,
+    ) -> ProviderResult<()> {
+        let start_key = ShardedKey::last(address);
+
+        match self {
+            Self::Database(cursor) => {
+                // Walk through shards from highest to lowest
+                let mut item = cursor.seek_exact(start_key.clone())?;
+
+                while let Some((sharded_key, list)) = item {
+                    // Check if shard belongs to this address
+                    if sharded_key.key != address {
+                        break;
+                    }
+
+                    // Delete this shard
+                    cursor.delete_current()?;
+
+                    // Get the first (lowest) block number in this shard
+                    let first = list.iter().next().expect("List can't be empty");
+
+                    // Case 1: Entire shard is at or above the unwinding point
+                    if first >= block_number {
+                        item = cursor.prev()?;
+                        continue;
+                    }
+
+                    // Case 2: Boundary shard - spans across the unwinding point
+                    if block_number <= sharded_key.highest_block_number {
+                        let indices_to_keep: Vec<_> =
+                            list.iter().take_while(|i| *i < block_number).collect();
+                        if !indices_to_keep.is_empty() {
+                            cursor.insert(
+                                start_key,
+                                &BlockNumberList::new_pre_sorted(indices_to_keep),
+                            )?;
+                        }
+                        return Ok(());
+                    }
+
+                    // Case 3: Entire shard is below the unwinding point
+                    let indices_to_keep: Vec<_> = list.iter().collect();
+                    cursor.insert(start_key, &BlockNumberList::new_pre_sorted(indices_to_keep))?;
+                    return Ok(());
+                }
+
+                Ok(())
+            }
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => {
+                let provider = batch.provider();
+                let iter =
+                    provider.iter_from_reverse::<tables::AccountsHistory>(start_key.clone())?;
+
+                let (shards_to_delete, partial_shard_to_keep) = collect_shards_for_unwind(
+                    iter,
+                    |k: &ShardedKey<Address>| k.key == address,
+                    |k| k.highest_block_number,
+                    block_number,
+                )?;
+
+                for key in shards_to_delete {
+                    batch.delete::<tables::AccountsHistory>(key)?;
+                }
+
+                if let Some(indices) = partial_shard_to_keep {
+                    batch.put::<tables::AccountsHistory>(
+                        start_key,
+                        &BlockNumberList::new_pre_sorted(indices),
+                    )?;
+                }
+
+                Ok(())
+            }
         }
     }
 }
@@ -545,10 +852,13 @@ where
 }
 
 /// Represents a source for reading data, either from database, static files, or `RocksDB`.
+///
+/// Note: The `StaticFile` variant holds `PhantomData<&'a ()>` to ensure the lifetime `'a`
+/// is used even when the `rocksdb` feature is disabled (where `RocksDB` variant is absent).
 #[derive(Debug, Display)]
 pub enum EitherReader<'a, CURSOR, N> {
     /// Read from database table via cursor
-    Database(CURSOR, PhantomData<&'a ()>),
+    Database(CURSOR),
     /// Read from static file
     StaticFile(StaticFileProvider<N>, PhantomData<&'a ()>),
     /// Read from `RocksDB` transaction
@@ -570,7 +880,6 @@ impl<'a> EitherReader<'a, (), ()> {
         } else {
             Ok(EitherReader::Database(
                 provider.tx_ref().cursor_read::<tables::TransactionSenders>()?,
-                PhantomData,
             ))
         }
     }
@@ -589,10 +898,7 @@ impl<'a> EitherReader<'a, (), ()> {
             return Ok(EitherReader::RocksDB(_rocksdb_tx));
         }
 
-        Ok(EitherReader::Database(
-            provider.tx_ref().cursor_read::<tables::StoragesHistory>()?,
-            PhantomData,
-        ))
+        Ok(EitherReader::Database(provider.tx_ref().cursor_read::<tables::StoragesHistory>()?))
     }
 
     /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
@@ -611,7 +917,6 @@ impl<'a> EitherReader<'a, (), ()> {
 
         Ok(EitherReader::Database(
             provider.tx_ref().cursor_read::<tables::TransactionHashNumbers>()?,
-            PhantomData,
         ))
     }
 
@@ -629,10 +934,7 @@ impl<'a> EitherReader<'a, (), ()> {
             return Ok(EitherReader::RocksDB(_rocksdb_tx));
         }
 
-        Ok(EitherReader::Database(
-            provider.tx_ref().cursor_read::<tables::AccountsHistory>()?,
-            PhantomData,
-        ))
+        Ok(EitherReader::Database(provider.tx_ref().cursor_read::<tables::AccountsHistory>()?))
     }
 
     /// Creates a new [`EitherReader`] for account changesets based on storage settings.
@@ -648,7 +950,6 @@ impl<'a> EitherReader<'a, (), ()> {
         } else {
             Ok(EitherReader::Database(
                 provider.tx_ref().cursor_dup_read::<tables::AccountChangeSets>()?,
-                PhantomData,
             ))
         }
     }
@@ -664,7 +965,7 @@ where
         range: Range<TxNumber>,
     ) -> ProviderResult<HashMap<TxNumber, Address>> {
         match self {
-            Self::Database(cursor, _) => cursor
+            Self::Database(cursor) => cursor
                 .walk_range(range)?
                 .map(|result| result.map_err(ProviderError::from))
                 .collect::<ProviderResult<HashMap<_, _>>>(),
@@ -696,8 +997,8 @@ where
         hash: TxHash,
     ) -> ProviderResult<Option<TxNumber>> {
         match self {
-            Self::Database(cursor, _) => Ok(cursor.seek_exact(hash)?.map(|(_, v)| v)),
-            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            Self::Database(cursor) => Ok(cursor.seek_exact(hash)?.map(|(_, v)| v)),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.get::<tables::TransactionHashNumbers>(hash),
         }
@@ -714,10 +1015,66 @@ where
         key: StorageShardedKey,
     ) -> ProviderResult<Option<BlockNumberList>> {
         match self {
-            Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
-            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            Self::Database(cursor) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.get::<tables::StoragesHistory>(key),
+        }
+    }
+
+    /// Lookup storage history and return [`HistoryInfo`] directly.
+    ///
+    /// Uses the rank/select logic to efficiently find the first block >= target
+    /// where the storage slot was modified.
+    pub fn storage_history_info(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        match self {
+            Self::Database(cursor) => {
+                // Lookup the history chunk in the history index. If the key does not appear in the
+                // index, the first chunk for the next key will be returned so we filter out chunks
+                // that have a different key.
+                let key = StorageShardedKey::new(address, storage_key, block_number);
+                if let Some(chunk) = cursor
+                    .seek(key)?
+                    .filter(|(k, _)| k.address == address && k.sharded_key.key == storage_key)
+                    .map(|x| x.1)
+                {
+                    let (rank, found_block) = compute_history_rank(&chunk, block_number);
+
+                    // Check if this is before the first write by looking at the previous shard.
+                    let is_before_first_write =
+                        needs_prev_shard_check(rank, found_block, block_number) &&
+                            cursor.prev()?.is_none_or(|(k, _)| {
+                                k.address != address || k.sharded_key.key != storage_key
+                            });
+
+                    Ok(HistoryInfo::from_lookup(
+                        found_block,
+                        is_before_first_write,
+                        lowest_available_block_number,
+                    ))
+                } else if lowest_available_block_number.is_some() {
+                    // The key may have been written, but due to pruning we may not have changesets
+                    // and history, so we need to make a plain state lookup.
+                    Ok(HistoryInfo::MaybeInPlainState)
+                } else {
+                    // The key has not been written to at all.
+                    Ok(HistoryInfo::NotYetWritten)
+                }
+            }
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.storage_history_info(
+                address,
+                storage_key,
+                block_number,
+                lowest_available_block_number,
+            ),
         }
     }
 }
@@ -732,10 +1089,58 @@ where
         key: ShardedKey<Address>,
     ) -> ProviderResult<Option<BlockNumberList>> {
         match self {
-            Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
-            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            Self::Database(cursor) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.get::<tables::AccountsHistory>(key),
+        }
+    }
+
+    /// Lookup account history and return [`HistoryInfo`] directly.
+    ///
+    /// Uses the rank/select logic to efficiently find the first block >= target
+    /// where the account was modified.
+    pub fn account_history_info(
+        &mut self,
+        address: Address,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        match self {
+            Self::Database(cursor) => {
+                // Lookup the history chunk in the history index. If the key does not appear in the
+                // index, the first chunk for the next key will be returned so we filter out chunks
+                // that have a different key.
+                let key = ShardedKey::new(address, block_number);
+                if let Some(chunk) =
+                    cursor.seek(key)?.filter(|(k, _)| k.key == address).map(|x| x.1)
+                {
+                    let (rank, found_block) = compute_history_rank(&chunk, block_number);
+
+                    // Check if this is before the first write by looking at the previous shard.
+                    let is_before_first_write =
+                        needs_prev_shard_check(rank, found_block, block_number) &&
+                            cursor.prev()?.is_none_or(|(k, _)| k.key != address);
+
+                    Ok(HistoryInfo::from_lookup(
+                        found_block,
+                        is_before_first_write,
+                        lowest_available_block_number,
+                    ))
+                } else if lowest_available_block_number.is_some() {
+                    // The key may have been written, but due to pruning we may not have changesets
+                    // and history, so we need to make a plain state lookup.
+                    Ok(HistoryInfo::MaybeInPlainState)
+                } else {
+                    // The key has not been written to at all.
+                    Ok(HistoryInfo::NotYetWritten)
+                }
+            }
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => {
+                tx.account_history_info(address, block_number, lowest_available_block_number)
+            }
         }
     }
 }
@@ -775,7 +1180,7 @@ where
 
                 Ok(changed_accounts)
             }
-            Self::Database(provider, _) => provider
+            Self::Database(provider) => provider
                 .walk_range(range)?
                 .map(|entry| {
                     entry.map(|(_, account_before)| account_before.address).map_err(Into::into)
@@ -870,7 +1275,7 @@ mod tests {
             if transaction_senders_in_static_files {
                 assert!(matches!(reader, EitherReader::StaticFile(_, _)));
             } else {
-                assert!(matches!(reader, EitherReader::Database(_, _)));
+                assert!(matches!(reader, EitherReader::Database(_)));
             }
 
             assert_eq!(

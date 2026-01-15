@@ -1,21 +1,16 @@
-# op-reth db settings set
+# reth db settings set tx_hash_numbers
 
-Set storage settings in database
+Store transaction hash numbers in RocksDB instead of MDBX
 
 ```bash
-$ op-reth db settings set --help
+$ reth db settings set tx_hash_numbers --help
 ```
 ```txt
-Usage: op-reth db settings set [OPTIONS] <COMMAND>
+Usage: reth db settings set tx_hash_numbers [OPTIONS] <VALUE>
 
-Commands:
-  receipts             Store receipts in static files instead of the database
-  transaction_senders  Store transaction senders in static files instead of the database
-  account_changesets   Store account changesets in static files instead of the database
-  storages_history     Store storages history in RocksDB instead of MDBX
-  account_history      Store account history in RocksDB instead of MDBX
-  tx_hash_numbers      Store transaction hash numbers in RocksDB instead of MDBX
-  help                 Print this message or the help of the given subcommand(s)
+Arguments:
+  <VALUE>
+          [possible values: true, false]
 
 Options:
   -h, --help
@@ -27,9 +22,9 @@ Datadir:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              optimism, optimism_sepolia, optimism-sepolia, base, base_sepolia, base-sepolia, arena-z, arena-z-sepolia, automata, base-devnet-0-sepolia-dev-0, bob, boba-sepolia, boba, camp-sepolia, celo, creator-chain-testnet-sepolia, cyber, cyber-sepolia, ethernity, ethernity-sepolia, fraxtal, funki, funki-sepolia, hashkeychain, ink, ink-sepolia, lisk, lisk-sepolia, lyra, metal, metal-sepolia, mint, mode, mode-sepolia, oplabs-devnet-0-sepolia-dev-0, orderly, ozean-sepolia, pivotal-sepolia, polynomial, race, race-sepolia, radius_testnet-sepolia, redstone, rehearsal-0-bn-0-rehearsal-0-bn, rehearsal-0-bn-1-rehearsal-0-bn, settlus-mainnet, settlus-sepolia-sepolia, shape, shape-sepolia, silent-data-mainnet, snax, soneium, soneium-minato-sepolia, sseed, swan, swell, tbn, tbn-sepolia, unichain, unichain-sepolia, worldchain, worldchain-sepolia, xterio-eth, zora, zora-sepolia, dev
+              mainnet, sepolia, holesky, hoodi, dev
 
-          [default: optimism]
+          [default: mainnet]
 
 Logging:
       --log.stdout.format <FORMAT>

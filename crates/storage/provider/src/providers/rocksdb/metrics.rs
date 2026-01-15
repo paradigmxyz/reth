@@ -6,7 +6,11 @@ use reth_db::Tables;
 use reth_metrics::Metrics;
 use strum::{EnumIter, IntoEnumIterator};
 
-const ROCKSDB_TABLES: &[&str] = &[Tables::TransactionHashNumbers.name()];
+const ROCKSDB_TABLES: &[&str] = &[
+    Tables::TransactionHashNumbers.name(),
+    Tables::AccountsHistory.name(),
+    Tables::StoragesHistory.name(),
+];
 
 /// Metrics for the `RocksDB` provider.
 #[derive(Debug)]

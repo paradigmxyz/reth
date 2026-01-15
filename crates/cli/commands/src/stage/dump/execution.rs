@@ -42,7 +42,7 @@ where
                 Arc::new(output_db),
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
-                RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+                RocksDBProvider::builder(output_datadir.rocksdb()).with_default_tables().build()?,
             )?,
             to,
             from,
