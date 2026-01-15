@@ -92,10 +92,10 @@ impl DbTx for TxMock {
 
     /// Commits the transaction.
     ///
-    /// **Mock behavior**: Always returns `Ok(true)`, indicating successful commit.
+    /// **Mock behavior**: Always returns `Ok(())`, indicating successful commit.
     /// No actual data is persisted since this is a mock implementation.
-    fn commit(self) -> Result<bool, DatabaseError> {
-        Ok(true)
+    fn commit(self) -> Result<(), DatabaseError> {
+        Ok(())
     }
 
     /// Aborts the transaction.
