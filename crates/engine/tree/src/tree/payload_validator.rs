@@ -1,6 +1,6 @@
 //! Types and traits for validating blocks and payloads.
 
-/// Threshold for switching from `extend_ref` loop to `merge_batch` in [`merge_overlay_trie_input`].
+/// Threshold for switching from `extend_ref` loop to `merge_batch` in `merge_overlay_trie_input`.
 ///
 /// Benchmarked crossover: `extend_ref` wins up to ~64 blocks, `merge_batch` wins beyond.
 /// Using 64 as threshold since they're roughly equal there.
