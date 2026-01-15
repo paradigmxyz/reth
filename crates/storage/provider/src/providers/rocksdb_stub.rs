@@ -8,7 +8,7 @@ use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use reth_db_api::models::StorageSettings;
 use reth_prune_types::PruneMode;
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::{db::LogLevel, provider::ProviderResult};
 use std::{path::Path, sync::Arc};
 
 /// Pending `RocksDB` batches type alias (stub - uses unit type).
@@ -93,10 +93,7 @@ impl RocksDBBuilder {
     }
 
     /// Sets the log level from `DatabaseArgs` configuration (stub implementation).
-    pub const fn with_database_log_level(
-        self,
-        _log_level: Option<reth_storage_errors::db::LogLevel>,
-    ) -> Self {
+    pub const fn with_database_log_level(self, _log_level: Option<LogLevel>) -> Self {
         self
     }
 
