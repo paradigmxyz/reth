@@ -7810,7 +7810,6 @@ dependencies = [
  "reth-ethereum-forks",
  "reth-network-peers",
  "reth-primitives-traits",
- "revm-primitives",
  "serde_json",
 ]
 

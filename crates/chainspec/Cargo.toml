@@ -25,9 +25,6 @@ alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["rlp"] }
 alloy-consensus.workspace = true
 
-# revm
-revm-primitives.workspace = true
-
 # misc
 auto_impl.workspace = true
 serde_json.workspace = true
@@ -55,7 +52,6 @@ std = [
     "reth-network-peers/std",
     "serde_json/std",
     "alloy-evm/std",
-    "revm-primitives/std",
 ]
 arbitrary = [
     "alloy-chains/arbitrary",
@@ -65,7 +61,6 @@ arbitrary = [
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
     "alloy-trie/arbitrary",
-    "revm-primitives/arbitrary",
 ]
 test-utils = [
     "reth-primitives-traits/test-utils",

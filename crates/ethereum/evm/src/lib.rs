@@ -314,7 +314,6 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::Header;
-    use alloy_eips::eip7825::MAX_TX_GAS_LIMIT_OSAKA;
     use alloy_genesis::Genesis;
     use alloy_primitives::{Address, Bloom, B256};
     use alloy_rpc_types_engine::{ExecutionPayloadSidecar, ExecutionPayloadV1};
@@ -326,7 +325,7 @@ mod tests {
         database::CacheDB,
         database_interface::EmptyDBTyped,
         inspector::NoOpInspector,
-        primitives::{eip170, eip3860, eip7825},
+        primitives::{eip170, eip3860},
     };
 
     fn test_next_block_attributes() -> NextBlockEnvAttributes {
@@ -522,42 +521,6 @@ mod tests {
     }
 
     #[test]
-    fn test_fill_cfg_and_block_env_osaka() {
-        let header = Header::default();
-        let chain_spec = Arc::new(
-            ChainSpec::builder()
-                .chain(Chain::mainnet())
-                .genesis(Genesis::default())
-                .osaka_activated()
-                .build(),
-        );
-        let evm_config = EthEvmConfig::new(chain_spec.clone());
-
-        let evm_env = evm_config.evm_env(&header).unwrap();
-        let evm_limits = chain_spec.evm_limit_params_at_timestamp(header.timestamp);
-        assert_eq!(evm_env.cfg_env.chain_id(), chain_spec.chain().id());
-        assert_eq!(evm_env.cfg_env.max_code_size(), evm_limits.max_code_size);
-        assert_eq!(evm_env.cfg_env.max_initcode_size(), evm_limits.max_initcode_size);
-        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), MAX_TX_GAS_LIMIT_OSAKA);
-
-        assert_eq!(evm_env.cfg_env.max_code_size(), eip170::MAX_CODE_SIZE);
-        assert_eq!(evm_env.cfg_env.max_initcode_size(), eip3860::MAX_INITCODE_SIZE);
-        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), eip7825::TX_GAS_LIMIT_CAP);
-
-        let attributes = test_next_block_attributes();
-        let evm_env = evm_config.next_evm_env(&header, &attributes).unwrap();
-        let evm_limits = chain_spec.evm_limit_params_at_timestamp(attributes.timestamp);
-        assert_eq!(evm_env.cfg_env.chain_id(), chain_spec.chain().id());
-        assert_eq!(evm_env.cfg_env.max_code_size(), evm_limits.max_code_size);
-        assert_eq!(evm_env.cfg_env.max_initcode_size(), evm_limits.max_initcode_size);
-        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), MAX_TX_GAS_LIMIT_OSAKA);
-
-        assert_eq!(evm_env.cfg_env.max_code_size(), eip170::MAX_CODE_SIZE);
-        assert_eq!(evm_env.cfg_env.max_initcode_size(), eip3860::MAX_INITCODE_SIZE);
-        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), eip7825::TX_GAS_LIMIT_CAP);
-    }
-
-    #[test]
     fn test_fill_cfg_and_block_env_custom_limits() {
         let mut chain_spec = ChainSpec::builder()
             .chain(Chain::mainnet())
@@ -627,31 +590,6 @@ mod tests {
         assert_eq!(evm_env.cfg_env.max_code_size(), evm_limits.max_code_size);
         assert_eq!(evm_env.cfg_env.max_initcode_size(), evm_limits.max_initcode_size);
         assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), u64::MAX); // pre-Osaka default
-
-        assert_eq!(evm_env.cfg_env.max_code_size(), eip170::MAX_CODE_SIZE);
-        assert_eq!(evm_env.cfg_env.max_initcode_size(), eip3860::MAX_INITCODE_SIZE);
-    }
-
-    #[test]
-    fn test_fill_cfg_and_block_env_for_payload_osaka() {
-        let chain_spec = Arc::new(
-            ChainSpec::builder()
-                .chain(Chain::mainnet())
-                .genesis(Genesis::default())
-                .osaka_activated()
-                .build(),
-        );
-        let evm_config = EthEvmConfig::new(chain_spec.clone());
-        let payload = test_execution_data(1);
-
-        let evm_env = evm_config.evm_env_for_payload(&payload).unwrap();
-
-        let evm_limits = chain_spec.evm_limit_params_at_timestamp(payload.payload.timestamp());
-        assert_eq!(evm_env.cfg_env.chain_id, chain_spec.chain().id());
-        assert_eq!(evm_env.cfg_env.max_code_size(), evm_limits.max_code_size);
-        assert_eq!(evm_env.cfg_env.max_initcode_size(), evm_limits.max_initcode_size);
-        // Osaka spec, so getter returns Osaka default
-        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), eip7825::TX_GAS_LIMIT_CAP);
 
         assert_eq!(evm_env.cfg_env.max_code_size(), eip170::MAX_CODE_SIZE);
         assert_eq!(evm_env.cfg_env.max_initcode_size(), eip3860::MAX_INITCODE_SIZE);

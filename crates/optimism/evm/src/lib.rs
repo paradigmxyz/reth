@@ -239,8 +239,7 @@ where
 
         let spec = revm_spec_by_timestamp_after_bedrock(self.chain_spec(), timestamp);
 
-        let cfg_env =
-            CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
 
         let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(timestamp);
 
