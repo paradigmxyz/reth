@@ -1245,7 +1245,7 @@ pub enum PeerAction {
     PeerRemoved(PeerId),
 }
 
-/// Error thrown when a incoming connection is rejected right away
+/// Error thrown when an incoming connection is rejected right away
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum InboundConnectionError {
     /// The remote's ip address is banned

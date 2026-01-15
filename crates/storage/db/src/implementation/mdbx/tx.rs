@@ -67,16 +67,23 @@ impl<K: TransactionKind> Tx<K> {
         self.metrics_handler.as_ref().map_or_else(|| self.inner.id(), |handler| Ok(handler.txn_id))
     }
 
-    /// Gets a table database handle if it exists, otherwise creates it.
-    pub fn get_dbi<T: Table>(&self) -> Result<MDBX_dbi, DatabaseError> {
-        if let Some(dbi) = self.dbis.get(T::NAME) {
+    /// Gets a table database handle by name if it exists, otherwise, check the
+    /// database, opening the DB if it exists.
+    pub fn get_dbi_raw(&self, name: &str) -> Result<MDBX_dbi, DatabaseError> {
+        if let Some(dbi) = self.dbis.get(name) {
             Ok(*dbi)
         } else {
             self.inner
-                .open_db(Some(T::NAME))
+                .open_db(Some(name))
                 .map(|db| db.dbi())
                 .map_err(|e| DatabaseError::Open(e.into()))
         }
+    }
+
+    /// Gets a table database handle by name if it exists, otherwise, check the
+    /// database, opening the DB if it exists.
+    pub fn get_dbi<T: Table>(&self) -> Result<MDBX_dbi, DatabaseError> {
+        self.get_dbi_raw(T::NAME)
     }
 
     /// Create db Cursor
@@ -295,10 +302,10 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         })
     }
 
-    fn commit(self) -> Result<bool, DatabaseError> {
+    fn commit(self) -> Result<(), DatabaseError> {
         self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
             match this.inner.commit().map_err(|e| DatabaseError::Commit(e.into())) {
-                Ok((v, latency)) => (Ok(v), Some(latency)),
+                Ok(latency) => (Ok(()), Some(latency)),
                 Err(e) => (Err(e), None),
             }
         })
@@ -460,10 +467,9 @@ mod tests {
         sleep(MAX_DURATION + Duration::from_millis(100));
 
         // Transaction has not timed out.
-        assert_eq!(
-            tx.get::<tables::Transactions>(0),
-            Err(DatabaseError::Open(reth_libmdbx::Error::NotFound.into()))
-        );
+        assert!(matches!(
+            tx.get::<tables::Transactions>(0).unwrap_err(),
+            DatabaseError::Open(err) if err == reth_libmdbx::Error::NotFound.into()));
         // Backtrace is not recorded.
         assert!(!tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
     }
@@ -485,10 +491,9 @@ mod tests {
         sleep(MAX_DURATION + Duration::from_millis(100));
 
         // Transaction has timed out.
-        assert_eq!(
-            tx.get::<tables::Transactions>(0),
-            Err(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionTimeout.into()))
-        );
+        assert!(matches!(
+            tx.get::<tables::Transactions>(0).unwrap_err(),
+            DatabaseError::Open(err) if err == reth_libmdbx::Error::ReadTransactionTimeout.into()));
         // Backtrace is recorded.
         assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
     }

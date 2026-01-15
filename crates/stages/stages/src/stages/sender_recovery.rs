@@ -7,7 +7,7 @@ use reth_db_api::{
     table::Value,
     tables,
     transaction::{DbTx, DbTxMut},
-    DbTxUnwindExt, RawValue,
+    RawValue,
 };
 use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
@@ -140,6 +140,9 @@ where
             recover_range(range, block_numbers, provider, tx_batch_sender.clone(), &mut writer)?;
         }
 
+        // Advance the static file header to the end of this range to account for empty blocks.
+        writer.ensure_at_block(end_block)?;
+
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(end_block)
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
@@ -155,12 +158,13 @@ where
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        // Lookup latest tx id that we should unwind to
-        let latest_tx_id = provider
+        // Lookup the next tx id after unwind_to block (first tx to remove)
+        let unwind_tx_from = provider
             .block_body_indices(unwind_to)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
-            .last_tx_num();
-        provider.tx_ref().unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
+            .next_tx_num();
+
+        EitherWriter::new_senders(provider, unwind_to)?.prune_senders(unwind_tx_from, unwind_to)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
@@ -415,7 +419,7 @@ mod tests {
     };
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
-    use reth_db_api::cursor::DbCursorRO;
+    use reth_db_api::{cursor::DbCursorRO, models::StorageSettings};
     use reth_ethereum_primitives::{Block, TransactionSigned};
     use reth_primitives_traits::{SealedBlock, SignerRecoverable};
     use reth_provider::{
@@ -424,6 +428,7 @@ mod tests {
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_api::StageUnitCheckpoint;
+    use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
@@ -479,6 +484,50 @@ mod tests {
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    /// Ensure the static file header advances to trailing empty blocks.
+    #[tokio::test]
+    async fn execute_advances_static_file_for_trailing_empty_blocks() {
+        let (stage_progress, target) = (0, 3);
+        let mut rng = generators::rng();
+
+        let runner = SenderRecoveryTestRunner::default();
+        runner.db.factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_transaction_senders_in_static_files(true),
+        );
+        let input = ExecInput {
+            target: Some(target),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
+        };
+
+        let non_empty_block_number = stage_progress + 1;
+        let blocks = (stage_progress..=input.target())
+            .map(|number| {
+                random_block(
+                    &mut rng,
+                    number,
+                    BlockParams {
+                        tx_count: Some((number == non_empty_block_number) as u8),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        runner
+            .db
+            .insert_blocks(blocks.iter(), StorageKind::Static)
+            .expect("failed to insert blocks");
+
+        let result = runner.execute(input).await.unwrap();
+        assert_matches!(result, Ok(ExecOutput { checkpoint, done: true }) if checkpoint.block_number == target);
+
+        let highest_block = runner
+            .db
+            .factory
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::TransactionSenders);
+        assert_eq!(Some(target), highest_block);
     }
 
     /// Execute the stage twice with input range that exceeds the commit threshold

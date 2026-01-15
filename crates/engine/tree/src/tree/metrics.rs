@@ -321,7 +321,7 @@ impl NewPayloadStatusMetrics {
 }
 
 /// Metrics for non-execution related block validation.
-#[derive(Metrics)]
+#[derive(Metrics, Clone)]
 #[metrics(scope = "sync.block_validation")]
 pub(crate) struct BlockValidationMetrics {
     /// Total number of storage tries updated in the state root calculation
@@ -348,6 +348,14 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) post_execution_validation_duration: Histogram,
     /// Total duration of the new payload call
     pub(crate) total_duration: Histogram,
+    /// Size of `HashedPostStateSorted` (`total_len`)
+    pub(crate) hashed_post_state_size: Histogram,
+    /// Size of `TrieUpdatesSorted` (`total_len`)
+    pub(crate) trie_updates_sorted_size: Histogram,
+    /// Size of `AnchoredTrieInput` overlay `TrieUpdatesSorted` (`total_len`)
+    pub(crate) anchored_overlay_trie_updates_size: Histogram,
+    /// Size of `AnchoredTrieInput` overlay `HashedPostStateSorted` (`total_len`)
+    pub(crate) anchored_overlay_hashed_state_size: Histogram,
 }
 
 impl BlockValidationMetrics {

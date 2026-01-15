@@ -19,29 +19,22 @@ concurrency:
 
 jobs:
   test:
-    name: test / ${{ matrix.type }} (${{ matrix.partition }}/${{ matrix.total_partitions }})
+    name: test / ${{ matrix.type }} / ${{ matrix.storage }}
     runs-on: depot-ubuntu-latest-4
     env:
       RUST_BACKTRACE: 1
+      EDGE_FEATURES: ${{ matrix.storage == 'edge' && 'edge' || '' }}
     strategy:
       matrix:
+        type: [ethereum, optimism]
+        storage: [stable, edge]
         include:
           - type: ethereum
-            args: --features "asm-keccak ethereum" --locked
-            partition: 1
-            total_partitions: 2
-          - type: ethereum
-            args: --features "asm-keccak ethereum" --locked
-            partition: 2
-            total_partitions: 2
+            features: asm-keccak ethereum
+            exclude_args: ""
           - type: optimism
-            args: --features "asm-keccak" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum"
-            partition: 1
-            total_partitions: 2
-          - type: optimism
-            args: --features "asm-keccak" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum"
-            partition: 2
-            total_partitions: 2
+            features: asm-keccak
+            exclude_args: --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum"
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -59,9 +52,9 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
-            ${{ matrix.args }} --workspace \
+            --features "${{ matrix.features }} $EDGE_FEATURES" --locked \
+            ${{ matrix.exclude_args }} --workspace \
             --exclude ef-tests --no-tests=warn \
-            --partition hash:${{ matrix.partition }}/2 \
             -E "!kind(test) and not binary(e2e_testsuite)"
 
   state:

@@ -85,6 +85,11 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
         self.metrics = Some(metrics);
         self
     }
+
+    /// Returns the total size of the data and offsets files (from the in-memory mmap).
+    pub fn size(&self) -> usize {
+        self.jar.value().size()
+    }
 }
 
 impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProvider<'_, N> {

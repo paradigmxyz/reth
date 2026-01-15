@@ -147,9 +147,9 @@ impl PrefixSetMut {
         self.keys.len()
     }
 
-    /// Returns `true` if the set is empty.
+    /// Returns `true` if the set is empty and `all` flag is not set.
     pub const fn is_empty(&self) -> bool {
-        self.keys.is_empty()
+        !self.all && self.keys.is_empty()
     }
 
     /// Clears the inner vec for reuse, setting `all` to `false`.
@@ -240,9 +240,9 @@ impl PrefixSet {
         self.keys.len()
     }
 
-    /// Returns `true` if the set is empty.
+    /// Returns `true` if the set is empty and `all` flag is not set.
     pub fn is_empty(&self) -> bool {
-        self.keys.is_empty()
+        !self.all && self.keys.is_empty()
     }
 }
 

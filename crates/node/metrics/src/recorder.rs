@@ -11,8 +11,25 @@ use std::sync::{atomic::AtomicBool, OnceLock};
 ///
 /// Caution: This only configures the global recorder and does not spawn the exporter.
 /// Callers must run [`PrometheusRecorder::spawn_upkeep`] manually.
+///
+/// Use [`init_prometheus_recorder`] to install a custom recorder.
 pub fn install_prometheus_recorder() -> &'static PrometheusRecorder {
-    PROMETHEUS_RECORDER_HANDLE.get_or_init(|| PrometheusRecorder::install().unwrap())
+    PROMETHEUS_RECORDER_HANDLE.get_or_init(|| {
+        PrometheusRecorder::install().expect("Failed to install Prometheus recorder")
+    })
+}
+
+/// Installs the provided recorder as the global recorder.
+///
+/// To customize the builder, first construct a recorder with
+/// [`PrometheusRecorder::install_with_builder`], then pass it here.
+///
+/// # Panics
+///
+/// Panics if a recorder has already been installed.
+pub fn init_prometheus_recorder(recorder: PrometheusRecorder) -> &'static PrometheusRecorder {
+    PROMETHEUS_RECORDER_HANDLE.set(recorder).expect("Prometheus recorder already installed");
+    PROMETHEUS_RECORDER_HANDLE.get().expect("Prometheus recorder is set")
 }
 
 /// The default Prometheus recorder handle. We use a global static to ensure that it is only
@@ -90,7 +107,11 @@ impl PrometheusRecorder {
         Self::install_with_builder(PrometheusBuilder::new())
     }
 
-    fn install_with_builder(builder: PrometheusBuilder) -> eyre::Result<Self> {
+    /// Installs Prometheus as the metrics recorder with a custom builder.
+    ///
+    /// Caution: This only configures the global recorder and does not spawn the exporter.
+    /// Callers must run [`Self::spawn_upkeep`] manually.
+    pub fn install_with_builder(builder: PrometheusBuilder) -> eyre::Result<Self> {
         let recorder = builder.build_recorder();
         let handle = recorder.handle();
 

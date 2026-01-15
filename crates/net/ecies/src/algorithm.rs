@@ -9,12 +9,12 @@ use crate::{
 use aes::{cipher::StreamCipher, Aes128, Aes256};
 use alloy_primitives::{
     bytes::{BufMut, Bytes, BytesMut},
-    B128, B256, B512 as PeerId,
+    Keccak256, B128, B256, B512 as PeerId,
 };
 use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
-use digest::{crypto_common::KeyIvInit, Digest};
+use digest::crypto_common::KeyIvInit;
 use rand_08::{thread_rng as rng, Rng};
 use reth_network_peers::{id2pk, pk2id};
 use secp256k1::{
@@ -22,7 +22,6 @@ use secp256k1::{
     PublicKey, SecretKey, SECP256K1,
 };
 use sha2::Sha256;
-use sha3::Keccak256;
 
 const PROTOCOL_VERSION: usize = 4;
 

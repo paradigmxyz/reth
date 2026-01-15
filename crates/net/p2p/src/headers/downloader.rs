@@ -100,9 +100,7 @@ impl<H: BlockHeader + Sealable> HeaderSyncGap<H> {
     }
 }
 
-/// Validate whether the header is valid in relation to it's parent
-///
-/// Returns Ok(false) if the
+/// Validate whether the header is valid in relation to its parent.
 pub fn validate_header_download<H: BlockHeader>(
     consensus: &dyn HeaderValidator<H>,
     header: &SealedHeader<H>,

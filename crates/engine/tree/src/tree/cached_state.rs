@@ -629,6 +629,11 @@ impl SavedCache {
         Arc::strong_count(&self.usage_guard) == 1
     }
 
+    /// Returns the current strong count of the usage guard.
+    pub(crate) fn usage_count(&self) -> usize {
+        Arc::strong_count(&self.usage_guard)
+    }
+
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
     pub(crate) const fn cache(&self) -> &ExecutionCache {
         &self.caches

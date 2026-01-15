@@ -179,7 +179,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
         let request = self.queued_requests.pop_front().expect("not empty");
         let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
-            // need to put back the the request
+            // need to put back the request
             self.queued_requests.push_front(request);
             return PollAction::NoPeersAvailable;
         };
@@ -397,7 +397,7 @@ impl Peer {
     /// A peer has a "better range" if:
     /// 1. It can fully cover the requested range while the other cannot
     /// 2. None can fully cover the range, but this peer has lower start value
-    /// 3. If a peer doesnt announce a range we assume it has full history, but check the other's
+    /// 3. If a peer doesn't announce a range we assume it has full history, but check the other's
     ///    range and treat that as better if it can cover the range
     fn has_better_range(&self, other: &Self, range: &RangeInclusive<u64>) -> bool {
         let self_range = self.range();

@@ -42,7 +42,7 @@ mod subnode;
 pub use subnode::StoredSubNode;
 
 mod trie;
-pub use trie::{BranchNodeMasks, BranchNodeMasksMap, ProofTrieNode, TrieMasks};
+pub use trie::{BranchNodeMasks, BranchNodeMasksMap, ProofTrieNode};
 
 /// The implementation of a container for storing intermediate changes to a trie.
 /// The container indicates when the trie has been modified.
@@ -71,7 +71,10 @@ mod utils;
 /// Read more: <https://github.com/paradigmxyz/reth/issues/11370>
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub mod serde_bincode_compat {
-    pub use super::updates::serde_bincode_compat as updates;
+    pub use super::{
+        hashed_state::serde_bincode_compat as hashed_state,
+        updates::serde_bincode_compat as updates,
+    };
 }
 
 /// Re-export

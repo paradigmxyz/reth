@@ -108,7 +108,7 @@ where
         self.init_tracing(&runner)?;
 
         // Install the prometheus recorder to be sure to record all metrics
-        let _ = install_prometheus_recorder();
+        install_prometheus_recorder();
 
         run_commands_with::<C, Ext, Rpc, N, SubCmd>(self.cli, runner, components, launcher)
     }

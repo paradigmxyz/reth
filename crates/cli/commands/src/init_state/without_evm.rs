@@ -99,6 +99,7 @@ where
 /// * Headers: It will push an empty block.
 /// * Transactions: It will not push any tx, only increments the end block range.
 /// * Receipts: It will not push any receipt, only increments the end block range.
+/// * TransactionSenders: If the segment exists, increments the end block range.
 fn append_dummy_chain<N, F>(
     sf_provider: &StaticFileProvider<N>,
     target_height: BlockNumber,
@@ -110,8 +111,15 @@ where
 {
     let (tx, rx) = std::sync::mpsc::channel();
 
-    // Spawn jobs for incrementing the block end range of transactions and receipts
-    for segment in [StaticFileSegment::Transactions, StaticFileSegment::Receipts] {
+    // Spawn jobs for incrementing the block end range of transactions, receipts, and senders.
+    for segment in [
+        StaticFileSegment::Transactions,
+        StaticFileSegment::Receipts,
+        StaticFileSegment::TransactionSenders,
+    ] {
+        if sf_provider.get_highest_static_file_block(segment).is_none() {
+            continue
+        }
         let tx_clone = tx.clone();
         let provider = sf_provider.clone();
         std::thread::spawn(move || {
@@ -151,9 +159,15 @@ where
 
     // If, for any reason, rayon crashes this verifies if all segments are at the same
     // target_height.
-    for segment in
-        [StaticFileSegment::Headers, StaticFileSegment::Receipts, StaticFileSegment::Transactions]
-    {
+    for segment in [
+        StaticFileSegment::Headers,
+        StaticFileSegment::Receipts,
+        StaticFileSegment::Transactions,
+        StaticFileSegment::TransactionSenders,
+    ] {
+        if sf_provider.get_highest_static_file_block(segment).is_none() {
+            continue
+        }
         assert_eq!(
             sf_provider.latest_writer(segment)?.user_header().block_end(),
             Some(target_height),

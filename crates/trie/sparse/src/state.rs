@@ -15,8 +15,8 @@ use reth_primitives_traits::Account;
 use reth_trie_common::{
     proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
-    BranchNodeMasksMap, DecodedMultiProof, DecodedStorageMultiProof, MultiProof, Nibbles,
-    ProofTrieNode, RlpNode, StorageMultiProof, TrieAccount, TrieMasks, TrieNode, EMPTY_ROOT_HASH,
+    BranchNodeMasks, BranchNodeMasksMap, DecodedMultiProof, DecodedStorageMultiProof, MultiProof,
+    Nibbles, ProofTrieNode, RlpNode, StorageMultiProof, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use tracing::{instrument, trace};
@@ -497,17 +497,13 @@ where
 
                     if path.is_empty() {
                         // Handle special storage state root node case.
-                        storage_trie_entry.reveal_root(
-                            trie_node,
-                            TrieMasks::none(),
-                            retain_updates,
-                        )?;
+                        storage_trie_entry.reveal_root(trie_node, None, retain_updates)?;
                     } else {
                         // Reveal non-root storage trie node.
                         storage_trie_entry
                             .as_revealed_mut()
                             .ok_or(SparseTrieErrorKind::Blind)?
-                            .reveal_node(path, trie_node, TrieMasks::none())?;
+                            .reveal_node(path, trie_node, None)?;
                     }
 
                     // Track the revealed path.
@@ -518,14 +514,13 @@ where
             else if !self.revealed_account_paths.contains(&path) {
                 if path.is_empty() {
                     // Handle special state root node case.
-                    self.state.reveal_root(trie_node, TrieMasks::none(), self.retain_updates)?;
+                    self.state.reveal_root(trie_node, None, self.retain_updates)?;
                 } else {
                     // Reveal non-root state trie node.
-                    self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?.reveal_node(
-                        path,
-                        trie_node,
-                        TrieMasks::none(),
-                    )?;
+                    self.state
+                        .as_revealed_mut()
+                        .ok_or(SparseTrieErrorKind::Blind)?
+                        .reveal_node(path, trie_node, None)?;
                 }
 
                 // Track the revealed path.
@@ -577,9 +572,8 @@ where
                     })
                     .transpose()?
                     .unwrap_or((TrieNode::EmptyRoot, None, None));
-                self.state
-                    .reveal_root(root_node, TrieMasks { hash_mask, tree_mask }, self.retain_updates)
-                    .map_err(Into::into)
+                let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
+                self.state.reveal_root(root_node, masks, self.retain_updates).map_err(Into::into)
             }
             SparseTrie::Revealed(ref mut trie) => Ok(trie),
         }
@@ -973,21 +967,14 @@ fn filter_map_revealed_nodes(
                 // If it's a branch node, increase the number of new nodes by the number of children
                 // according to the state mask.
                 result.new_nodes += branch.state_mask.count_ones() as usize;
-                if let Some(branch_masks) = branch_node_masks.get(&path) {
-                    TrieMasks {
-                        hash_mask: Some(branch_masks.hash_mask),
-                        tree_mask: Some(branch_masks.tree_mask),
-                    }
-                } else {
-                    TrieMasks::none()
-                }
+                branch_node_masks.get(&path).copied()
             }
             TrieNode::Extension(_) => {
                 // There is always exactly one child of an extension node.
                 result.new_nodes += 1;
-                TrieMasks::none()
+                None
             }
-            _ => TrieMasks::none(),
+            _ => None,
         };
 
         let node = ProofTrieNode { path, node: proof_node, masks };
@@ -1369,12 +1356,12 @@ mod tests {
                 root_node: Some(ProofTrieNode {
                     path: Nibbles::default(),
                     node: branch,
-                    masks: TrieMasks::none(),
+                    masks: None,
                 }),
                 nodes: vec![ProofTrieNode {
                     path: Nibbles::from_nibbles([0x1]),
                     node: leaf,
-                    masks: TrieMasks::none(),
+                    masks: None,
                 }],
                 // Branch, two of its children, one leaf
                 new_nodes: 4,

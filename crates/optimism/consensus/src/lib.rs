@@ -89,8 +89,6 @@ where
     B: Block,
     ChainSpec: EthChainSpec<Header = B::Header> + OpHardforks + Debug + Send + Sync,
 {
-    type Error = ConsensusError;
-
     fn validate_body_against_header(
         &self,
         body: &B::Body,
@@ -249,7 +247,7 @@ mod tests {
     use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
     use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder, OP_MAINNET};
     use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
-    use reth_primitives_traits::{proofs, GotExpected, RecoveredBlock, SealedBlock, SealedHeader};
+    use reth_primitives_traits::{proofs, RecoveredBlock, SealedBlock, SealedHeader};
     use reth_provider::BlockExecutionResult;
 
     use crate::OpBeaconConsensus;
@@ -344,11 +342,10 @@ mod tests {
         // validate blob, it should fail blob gas used validation
         let pre_execution = beacon_consensus.validate_block_pre_execution(&block);
 
-        assert!(pre_execution.is_err());
-        assert_eq!(
+        assert!(matches!(
             pre_execution.unwrap_err(),
-            ConsensusError::BlobGasUsedDiff(GotExpected { got: 10, expected: 0 })
-        );
+            ConsensusError::BlobGasUsedDiff(diff) if diff.got == 10 && diff.expected == 0
+        ));
     }
 
     #[test]
@@ -486,14 +483,11 @@ mod tests {
         );
 
         // validate blob, it should fail blob gas used validation post execution.
-        assert!(post_execution.is_err());
-        assert_eq!(
+        assert!(matches!(
             post_execution.unwrap_err(),
-            ConsensusError::BlobGasUsedDiff(GotExpected {
-                got: BLOB_GAS_USED + 1,
-                expected: BLOB_GAS_USED,
-            })
-        );
+            ConsensusError::BlobGasUsedDiff(diff)
+                if diff.got == BLOB_GAS_USED + 1 && diff.expected == BLOB_GAS_USED
+        ));
     }
 
     #[test]
@@ -635,14 +629,11 @@ mod tests {
 
         let result = beacon_consensus.validate_header_against_parent(&header, &parent);
 
-        assert!(result.is_err());
-        assert_eq!(
+        assert!(matches!(
             result.unwrap_err(),
-            ConsensusError::BaseFeeDiff(GotExpected {
-                got: MIN_BASE_FEE - 1,
-                expected: MIN_BASE_FEE,
-            })
-        );
+            ConsensusError::BaseFeeDiff(diff)
+                if diff.got == MIN_BASE_FEE - 1 && diff.expected == MIN_BASE_FEE
+        ));
     }
 
     #[test]
@@ -786,10 +777,10 @@ mod tests {
 
         let result = beacon_consensus.validate_header_against_parent(&header, &parent);
 
-        assert!(result.is_err());
-        assert_eq!(
+        assert!(matches!(
             result.unwrap_err(),
-            ConsensusError::BlobGasUsedDiff(GotExpected { got: DA_FOOTPRINT, expected: 0 })
-        );
+            ConsensusError::BlobGasUsedDiff(diff)
+                if diff.got == DA_FOOTPRINT && diff.expected == 0
+        ));
     }
 }

@@ -26,7 +26,7 @@ pub use log::{ColorMode, LogArgs, Verbosity};
 
 /// `TraceArgs` for tracing and spans support
 mod trace;
-pub use trace::{OtlpInitStatus, TraceArgs};
+pub use trace::{OtlpInitStatus, OtlpLogsStatus, TraceArgs};
 
 /// `MetricArgs` to configure metrics.
 mod metric;
@@ -78,7 +78,7 @@ pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
 
 /// `StaticFilesArgs` for configuring static files.
 mod static_files;
-pub use static_files::StaticFilesArgs;
+pub use static_files::{StaticFilesArgs, MINIMAL_BLOCKS_PER_FILE};
 
 mod error;
 pub mod types;

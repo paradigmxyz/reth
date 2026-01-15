@@ -409,7 +409,7 @@ impl<T> MockTransactionValidator<T> {
     pub fn no_propagate_local() -> Self {
         Self { propagate_local: false, return_invalid: false, _marker: Default::default() }
     }
-    /// Creates a new [`MockTransactionValidator`] that always return a invalid outcome.
+    /// Creates a new [`MockTransactionValidator`] that always returns an invalid outcome.
     pub fn return_invalid() -> Self {
         Self { propagate_local: false, return_invalid: true, _marker: Default::default() }
     }

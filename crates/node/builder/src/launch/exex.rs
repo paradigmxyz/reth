@@ -6,7 +6,7 @@ use reth_chain_state::ForkChoiceSubscriptions;
 use reth_chainspec::EthChainSpec;
 use reth_exex::{
     ExExContext, ExExHandle, ExExManager, ExExManagerHandle, ExExNotificationSource, Wal,
-    DEFAULT_EXEX_MANAGER_CAPACITY,
+    DEFAULT_EXEX_MANAGER_CAPACITY, DEFAULT_WAL_BLOCKS_WARNING,
 };
 use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_provider::CanonStateSubscriptions;
@@ -22,6 +22,8 @@ pub struct ExExLauncher<Node: FullNodeComponents> {
     extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
     components: Node,
     config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
+    /// The threshold for the number of blocks in the WAL before emitting a warning.
+    wal_blocks_warning: usize,
 }
 
 impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
@@ -32,7 +34,23 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
         config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     ) -> Self {
-        Self { head, extensions, components, config_container }
+        Self {
+            head,
+            extensions,
+            components,
+            config_container,
+            wal_blocks_warning: DEFAULT_WAL_BLOCKS_WARNING,
+        }
+    }
+
+    /// Sets the threshold for the number of blocks in the WAL before emitting a warning.
+    ///
+    /// For L2 chains with faster block times, this value should be increased proportionally
+    /// to avoid excessive warnings. For example, a chain with 2-second block times might use
+    /// a value 6x higher than the default (768 instead of 128).
+    pub const fn with_wal_blocks_warning(mut self, threshold: usize) -> Self {
+        self.wal_blocks_warning = threshold;
+        self
     }
 
     /// Launches all execution extensions.
@@ -42,7 +60,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     pub async fn launch(
         self,
     ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<Node::Types>>>> {
-        let Self { head, extensions, components, config_container } = self;
+        let Self { head, extensions, components, config_container, wal_blocks_warning } = self;
         let head = BlockNumHash::new(head.number, head.hash);
 
         if extensions.is_empty() {
@@ -119,7 +137,8 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
             DEFAULT_EXEX_MANAGER_CAPACITY,
             exex_wal,
             components.provider().finalized_block_stream(),
-        );
+        )
+        .with_wal_blocks_warning(wal_blocks_warning);
         let exex_manager_handle = exex_manager.handle();
         components.task_executor().spawn_critical("exex manager", async move {
             exex_manager.await.expect("exex manager crashed");
@@ -153,6 +172,7 @@ impl<Node: FullNodeComponents> Debug for ExExLauncher<Node> {
             .field("extensions", &self.extensions.iter().map(|(id, _)| id).collect::<Vec<_>>())
             .field("components", &"...")
             .field("config_container", &self.config_container)
+            .field("wal_blocks_warning", &self.wal_blocks_warning)
             .finish()
     }
 }

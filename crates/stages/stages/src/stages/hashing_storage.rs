@@ -356,6 +356,7 @@ mod tests {
             );
 
             self.db.insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
+            let mut tx_hash_numbers = Vec::new();
 
             let iter = blocks.iter();
             let mut next_tx_num = 0;
@@ -366,10 +367,7 @@ mod tests {
                 self.db.commit(|tx| {
                     progress.body().transactions.iter().try_for_each(
                         |transaction| -> Result<(), reth_db::DatabaseError> {
-                            tx.put::<tables::TransactionHashNumbers>(
-                                *transaction.tx_hash(),
-                                next_tx_num,
-                            )?;
+                            tx_hash_numbers.push((*transaction.tx_hash(), next_tx_num));
                             tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;
 
                             let (addr, _) = accounts
@@ -419,6 +417,7 @@ mod tests {
                     Ok(())
                 })?;
             }
+            self.db.insert_tx_hash_numbers(tx_hash_numbers)?;
 
             Ok(blocks)
         }

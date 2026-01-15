@@ -347,11 +347,27 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
     /// Commits configuration and offsets to disk. It drains the internal offset list.
     pub fn commit(&mut self) -> Result<(), NippyJarError> {
+        self.sync_all()?;
+        self.finalize()?;
+        Ok(())
+    }
+
+    /// Syncs data and offsets to disk.
+    ///
+    /// This does NOT commit the configuration. Call [`Self::finalize`] after to write the
+    /// configuration and mark the writer as clean.
+    pub fn sync_all(&mut self) -> Result<(), NippyJarError> {
         self.data_file.flush()?;
         self.data_file.get_ref().sync_all()?;
 
         self.commit_offsets()?;
+        Ok(())
+    }
 
+    /// Commits configuration to disk and marks the writer as clean.
+    ///
+    /// Must be called after [`Self::sync_all`] to complete the commit.
+    pub fn finalize(&mut self) -> Result<(), NippyJarError> {
         // Flushes `max_row_size` and total `rows` to disk.
         self.jar.freeze_config()?;
         self.dirty = false;

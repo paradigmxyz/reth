@@ -138,7 +138,7 @@ impl ChunkedMultiProofTargets {
                     )
                 }
             })
-            .sorted();
+            .sorted_unstable();
         Self { flattened_targets, size }
     }
 }
