@@ -96,13 +96,6 @@ pub trait TrieReader: Send {
     /// given block and onwards having been processed.
     #[deprecated]
     fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted>;
-
-    /// Returns the trie updates that were applied by the specified block.
-    #[deprecated]
-    fn get_block_trie_updates(
-        &self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<TrieUpdatesSorted>;
 }
 
 /// Trie Writer

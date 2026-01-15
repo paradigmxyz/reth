@@ -1005,13 +1005,6 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> TrieReader for MockEthProvider<T
     fn trie_reverts(&self, _from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
         Ok(TrieUpdatesSorted::default())
     }
-
-    fn get_block_trie_updates(
-        &self,
-        _block_number: BlockNumber,
-    ) -> ProviderResult<TrieUpdatesSorted> {
-        Ok(TrieUpdatesSorted::default())
-    }
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> CanonStateSubscriptions

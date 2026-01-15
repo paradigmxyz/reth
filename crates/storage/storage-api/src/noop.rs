@@ -650,13 +650,6 @@ impl<C: Send + Sync, N: NodePrimitives> TrieReader for NoopProvider<C, N> {
     fn trie_reverts(&self, _from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
         Ok(TrieUpdatesSorted::default())
     }
-
-    fn get_block_trie_updates(
-        &self,
-        _block_number: BlockNumber,
-    ) -> ProviderResult<TrieUpdatesSorted> {
-        Ok(TrieUpdatesSorted::default())
-    }
 }
 
 #[cfg(feature = "db-api")]

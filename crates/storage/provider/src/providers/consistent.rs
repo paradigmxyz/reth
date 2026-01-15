@@ -1563,13 +1563,6 @@ impl<N: ProviderNodeTypes> TrieReader for ConsistentProvider<N> {
     fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
         self.storage_provider.trie_reverts(from)
     }
-
-    fn get_block_trie_updates(
-        &self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<TrieUpdatesSorted> {
-        self.storage_provider.get_block_trie_updates(block_number)
-    }
 }
 
 #[cfg(test)]
