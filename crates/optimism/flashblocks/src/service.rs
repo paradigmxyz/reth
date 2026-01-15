@@ -1,20 +1,36 @@
 use crate::{
-    cache::SequenceManager, worker::FlashBlockBuilder, FlashBlock, FlashBlockCompleteSequence,
-    FlashBlockCompleteSequenceRx, InProgressFlashBlockRx, PendingFlashBlock,
+    cache::SequenceManager,
+    pending_state::PendingStateRegistry,
+    tx_cache::TransactionCache,
+    validation::ReconciliationStrategy,
+    worker::{BuildResult, FlashBlockBuilder},
+    FlashBlock, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx, InProgressFlashBlockRx,
+    PendingFlashBlock,
 };
 use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
-use metrics::{Gauge, Histogram};
+use metrics::{Counter, Gauge, Histogram};
 use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_evm::ConfigureEvm;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy};
-use reth_revm::cached::CachedReads;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskExecutor;
 use std::{sync::Arc, time::Instant};
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tracing::*;
+
+/// Default maximum depth for pending blocks ahead of canonical.
+const DEFAULT_MAX_DEPTH: u64 = 64;
+
+/// Notification about a new canonical block for reconciliation.
+#[derive(Debug, Clone)]
+pub struct CanonicalBlockNotification {
+    /// The canonical block number.
+    pub block_number: u64,
+    /// Transaction hashes in the canonical block.
+    pub tx_hashes: Vec<B256>,
+}
 
 /// The `FlashBlockService` maintains an in-memory [`PendingFlashBlock`] built out of a sequence of
 /// [`FlashBlock`]s.
@@ -27,6 +43,8 @@ pub struct FlashBlockService<
 > {
     /// Incoming flashblock stream.
     incoming_flashblock_rx: S,
+    /// Receiver for canonical block notifications.
+    canonical_block_rx: Option<mpsc::UnboundedReceiver<CanonicalBlockNotification>>,
     /// Signals when a block build is in progress.
     in_progress_tx: watch::Sender<Option<FlashBlockBuildInfo>>,
     /// Broadcast channel to forward received flashblocks from the subscription.
@@ -40,7 +58,13 @@ pub struct FlashBlockService<
     job: Option<BuildJob<N>>,
     /// Manages flashblock sequences with caching and intelligent build selection.
     sequences: SequenceManager<N::SignedTx>,
+    /// Registry for pending block states to enable speculative building.
+    pending_states: PendingStateRegistry<N>,
+    /// Transaction execution cache for incremental flashblock building.
+    tx_cache: TransactionCache<N>,
 
+    /// Maximum depth for pending blocks ahead of canonical before clearing.
+    max_depth: u64,
     /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
 }
@@ -74,14 +98,39 @@ where
         let (received_flashblocks_tx, _) = tokio::sync::broadcast::channel(128);
         Self {
             incoming_flashblock_rx,
+            canonical_block_rx: None,
             in_progress_tx,
             received_flashblocks_tx,
             builder: FlashBlockBuilder::new(evm_config, provider),
             spawner,
             job: None,
             sequences: SequenceManager::new(compute_state_root),
+            pending_states: PendingStateRegistry::new(),
+            tx_cache: TransactionCache::new(),
+            max_depth: DEFAULT_MAX_DEPTH,
             metrics: FlashBlockServiceMetrics::default(),
         }
+    }
+
+    /// Sets the canonical block receiver for reconciliation.
+    ///
+    /// When canonical blocks are received, the service will reconcile the pending
+    /// flashblock state to handle catch-up and reorg scenarios.
+    pub fn with_canonical_block_rx(
+        mut self,
+        rx: mpsc::UnboundedReceiver<CanonicalBlockNotification>,
+    ) -> Self {
+        self.canonical_block_rx = Some(rx);
+        self
+    }
+
+    /// Sets the maximum depth for pending blocks ahead of canonical.
+    ///
+    /// If pending blocks get too far ahead of the canonical chain, the pending
+    /// state will be cleared to prevent unbounded memory growth.
+    pub const fn with_max_depth(mut self, max_depth: u64) -> Self {
+        self.max_depth = max_depth;
+        self
     }
 
     /// Returns the sender half for the received flashblocks broadcast channel.
@@ -113,14 +162,15 @@ where
     /// This loop:
     /// 1. Checks if any build job has completed and processes results
     /// 2. Receives and batches all immediately available flashblocks
-    /// 3. Attempts to build a block from the complete sequence
+    /// 3. Processes canonical block notifications for reconciliation
+    /// 4. Attempts to build a block from the complete sequence
     ///
     /// Note: this should be spawned
     pub async fn run(mut self, tx: watch::Sender<Option<PendingFlashBlock<N>>>) {
         loop {
             tokio::select! {
                 // Event 1: job exists, listen to job results
-                Some(result) = async {
+                Some((result, returned_cache)) = async {
                     match self.job.as_mut() {
                         Some((_, rx)) => rx.await.ok(),
                         None => std::future::pending().await,
@@ -129,11 +179,18 @@ where
                     let (start_time, _) = self.job.take().unwrap();
                     let _ = self.in_progress_tx.send(None);
 
+                    // Restore the transaction cache from the spawned task
+                    self.tx_cache = returned_cache;
+
                     match result {
-                        Ok(Some((pending, cached_reads))) => {
+                        Ok(Some(build_result)) => {
+                            let pending = build_result.pending_flashblock;
                             let parent_hash = pending.parent_hash();
                             self.sequences
-                                .on_build_complete(parent_hash, Some((pending.clone(), cached_reads)));
+                                .on_build_complete(parent_hash, Some((pending.clone(), build_result.cached_reads)));
+
+                            // Record pending state for speculative building of subsequent blocks
+                            self.pending_states.record_build(build_result.pending_state);
 
                             let elapsed = start_time.elapsed();
                             self.metrics.execution_duration.record(elapsed.as_secs_f64());
@@ -175,6 +232,46 @@ where
                         }
                     }
                 }
+
+                // Event 3: Canonical block notification for reconciliation
+                Some(notification) = async {
+                    match self.canonical_block_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    self.process_canonical_block(notification);
+                    // Try to build after reconciliation in case we can now build
+                    self.try_start_build_job();
+                }
+            }
+        }
+    }
+
+    /// Processes a canonical block notification and reconciles pending state.
+    fn process_canonical_block(&mut self, notification: CanonicalBlockNotification) {
+        let strategy = self.sequences.process_canonical_block(
+            notification.block_number,
+            &notification.tx_hashes,
+            self.max_depth,
+        );
+
+        // Record metrics and handle state clearing based on strategy
+        match strategy {
+            ReconciliationStrategy::HandleReorg => {
+                self.metrics.reorg_count.increment(1);
+                // Clear pending states and transaction cache on reorg
+                self.pending_states.clear();
+                self.tx_cache.clear();
+            }
+            ReconciliationStrategy::CatchUp | ReconciliationStrategy::DepthLimitExceeded { .. } => {
+                // State was cleared, clear the pending block output, pending states,
+                // and transaction cache (will be rebuilt on next flashblock)
+                self.pending_states.clear();
+                self.tx_cache.clear();
+            }
+            ReconciliationStrategy::Continue | ReconciliationStrategy::NoPendingState => {
+                // No action needed
             }
         }
     }
@@ -210,7 +307,11 @@ where
             return;
         };
 
-        let Some(args) = self.sequences.next_buildable_args(latest.hash(), latest.timestamp())
+        // Get pending parent state for speculative building (if enabled and available)
+        let pending_parent = self.pending_states.current().cloned();
+
+        let Some(args) =
+            self.sequences.next_buildable_args(latest.hash(), latest.timestamp(), pending_parent)
         else {
             return; // Nothing buildable
         };
@@ -225,10 +326,14 @@ where
         self.metrics.current_index.set(fb_info.index as f64);
         let _ = self.in_progress_tx.send(Some(fb_info));
 
+        // Take ownership of the transaction cache for the spawned task
+        let mut tx_cache = std::mem::take(&mut self.tx_cache);
+
         let (tx, rx) = oneshot::channel();
         let builder = self.builder.clone();
         self.spawner.spawn_blocking(Box::pin(async move {
-            let _ = tx.send(builder.execute(args));
+            let result = builder.execute(args, Some(&mut tx_cache));
+            let _ = tx.send((result, tx_cache));
         }));
         self.job = Some((Instant::now(), rx));
     }
@@ -245,8 +350,12 @@ pub struct FlashBlockBuildInfo {
     pub block_number: u64,
 }
 
+/// A running build job with its start time and result receiver.
+///
+/// The result includes both the build result and the transaction cache,
+/// which is returned from the spawned task to maintain ownership.
 type BuildJob<N> =
-    (Instant, oneshot::Receiver<eyre::Result<Option<(PendingFlashBlock<N>, CachedReads)>>>);
+    (Instant, oneshot::Receiver<(eyre::Result<Option<BuildResult<N>>>, TransactionCache<N>)>);
 
 #[derive(Metrics)]
 #[metrics(scope = "flashblock_service")]
@@ -259,4 +368,6 @@ struct FlashBlockServiceMetrics {
     current_block_height: Gauge,
     /// Current flashblock index.
     current_index: Gauge,
+    /// Number of reorgs detected during canonical block reconciliation.
+    reorg_count: Counter,
 }
