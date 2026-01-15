@@ -496,6 +496,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
+            // Collect hashed state across all blocks for batched write
+            let mut batched_hashed_state: Option<HashedPostStateSorted> = None;
+
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
@@ -523,19 +526,31 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                     let trie_data = block.trie_data();
 
-                    // insert hashes and intermediate merkle nodes
-                    let start = Instant::now();
-                    self.write_hashed_state(&trie_data.hashed_state)?;
-                    timings.write_hashed_state += start.elapsed();
-
+                    // Trie changesets must be written per-block (keyed by block number)
                     let start = Instant::now();
                     self.write_trie_changesets(block_number, &trie_data.trie_updates, None)?;
                     timings.write_trie_changesets += start.elapsed();
 
+                    // Trie updates written per-block
                     let start = Instant::now();
                     self.write_trie_updates_sorted(&trie_data.trie_updates)?;
                     timings.write_trie_updates += start.elapsed();
+
+                    // Accumulate hashed state for batched write (sorted keys for sequential I/O)
+                    match &mut batched_hashed_state {
+                        Some(existing) => existing.extend_ref(&trie_data.hashed_state),
+                        None => {
+                            batched_hashed_state = Some((*trie_data.hashed_state).clone())
+                        }
+                    }
                 }
+            }
+
+            // Write batched hashed state (sorted keys across all blocks for sequential I/O)
+            if let Some(hashed_state) = &batched_hashed_state {
+                let start = Instant::now();
+                self.write_hashed_state(hashed_state)?;
+                timings.write_hashed_state = start.elapsed();
             }
 
             // Full mode: update history indices
