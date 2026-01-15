@@ -10,5 +10,8 @@ pub use trie::*;
 mod lower;
 use lower::*;
 
+mod state;
+pub use state::*;
+
 #[cfg(feature = "metrics")]
 mod metrics;

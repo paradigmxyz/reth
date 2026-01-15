@@ -1600,6 +1600,81 @@ impl ParallelSparseTrie {
             self.lower_subtries[index] = LowerSparseSubtrie::Revealed(subtrie);
         }
     }
+
+    /// Find the deepest revealed depth for a path in the parallel sparse trie.
+    ///
+    /// Walks the trie from root following the path until:
+    /// - We hit a Hash node (blinded) - return the current depth
+    /// - We hit an Empty node or missing node - return the current depth
+    /// - We reach the end of the path - return the full path length
+    pub fn find_deepest_revealed_depth(&self, full_path: &Nibbles) -> u8 {
+        let mut current = Nibbles::default();
+        let mut deepest_revealed = 0u8;
+
+        while current.len() < full_path.len() {
+            let subtrie = if SparseSubtrieType::path_len_is_upper(current.len()) {
+                Some(self.upper_subtrie.as_ref())
+            } else {
+                self.lower_subtrie_for_path(&current)
+            };
+
+            let Some(subtrie) = subtrie else {
+                break;
+            };
+
+            match subtrie.nodes.get(&current) {
+                Some(SparseNode::Empty | SparseNode::Hash(_)) | None => break,
+                Some(SparseNode::Leaf { key, .. }) => {
+                    let leaf_path_len = current.len() + key.len();
+                    deepest_revealed = leaf_path_len.min(64) as u8;
+                    break;
+                }
+                Some(SparseNode::Extension { key, .. }) => {
+                    deepest_revealed = current.len() as u8;
+                    current.extend(key);
+                    if full_path.len() < current.len() || !full_path.starts_with(&current) {
+                        break;
+                    }
+                }
+                Some(SparseNode::Branch { state_mask, .. }) => {
+                    deepest_revealed = current.len() as u8;
+                    let next_nibble = full_path.get_unchecked(current.len());
+                    if !state_mask.is_bit_set(next_nibble) {
+                        break;
+                    }
+                    current.push_unchecked(next_nibble);
+                }
+            }
+        }
+
+        deepest_revealed
+    }
+
+    /// Generate proof targets for the given keys.
+    ///
+    /// For each key, finds the deepest revealed node and returns a `(key, min_len)` pair.
+    /// Keys that are fully revealed (have a leaf) are excluded.
+    pub fn generate_proof_targets(&self, keys: &[B256]) -> Vec<(B256, u8)> {
+        let mut targets = Vec::with_capacity(keys.len());
+
+        for key in keys {
+            let path = Nibbles::unpack(key);
+
+            // Check if already fully revealed as a leaf in either upper or lower subtrie
+            let has_leaf = std::iter::once(self.upper_subtrie.as_ref())
+                .chain(self.lower_subtrie_for_path(&path))
+                .any(|subtrie| subtrie.inner.values.contains_key(&path));
+
+            if has_leaf {
+                continue;
+            }
+
+            let min_len = self.find_deepest_revealed_depth(&path);
+            targets.push((*key, min_len));
+        }
+
+        targets
+    }
 }
 
 /// This is a subtrie of the [`ParallelSparseTrie`] that contains a map from path to sparse trie
@@ -6967,5 +7042,130 @@ mod tests {
         );
 
         assert_eq!(branch_0x3_update, &expected_branch);
+    }
+
+    #[test]
+    fn test_generate_proof_targets_empty_trie() {
+        // Default trie is revealed with an empty root
+        let trie = ParallelSparseTrie::default();
+
+        let key1 = B256::repeat_byte(0x11);
+        let key2 = B256::repeat_byte(0x22);
+
+        // Since root is Empty (not a leaf for these keys), both should need proofs
+        let targets = trie.generate_proof_targets(&[key1, key2]);
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0], (key1, 0));
+        assert_eq!(targets[1], (key2, 0));
+    }
+
+    #[test]
+    fn test_generate_proof_targets_revealed_leaf() {
+        let mut trie = ParallelSparseTrie::default();
+
+        let key1 = B256::repeat_byte(0x00);
+        let nibbles = Nibbles::unpack(key1);
+        let leaf_node = create_leaf_node(nibbles.to_vec(), 1);
+
+        // Reveal root as the leaf
+        trie = trie.with_root(leaf_node, None, false).unwrap();
+
+        // Key1 is fully revealed as a leaf, should be excluded from targets
+        let targets = trie.generate_proof_targets(&[key1]);
+        assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn test_generate_proof_targets_partial_reveal() {
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create a branch node at root with blinded children at nibbles 0 and 1
+        let key_0 = B256::repeat_byte(0x00);
+        let key_1 = B256::repeat_byte(0x11);
+
+        let child_hash_0 = B256::repeat_byte(0xaa);
+        let child_hash_1 = B256::repeat_byte(0xbb);
+        let branch_node = create_branch_node_with_children(
+            &[0x0, 0x1],
+            vec![RlpNode::word_rlp(&child_hash_0), RlpNode::word_rlp(&child_hash_1)],
+        );
+
+        trie = trie.with_root(branch_node, None, false).unwrap();
+
+        // Both keys have blinded children, so both need proofs
+        let targets = trie.generate_proof_targets(&[key_0, key_1]);
+        assert_eq!(targets.len(), 2);
+        // Branch at depth 0 is revealed, children at depth 1 are blinded
+        assert_eq!(targets[0], (key_0, 0));
+        assert_eq!(targets[1], (key_1, 0));
+
+        // A key at nibble 2 has no child in the branch
+        let key_2 = B256::repeat_byte(0x22);
+        let targets = trie.generate_proof_targets(&[key_2]);
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0], (key_2, 0));
+    }
+
+    #[test]
+    fn test_find_deepest_revealed_depth_extension() {
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create extension -> blinded child structure
+        let child_hash = B256::repeat_byte(0xbb);
+        let ext_node = create_extension_node([0x1, 0x2, 0x3], child_hash);
+
+        trie = trie.with_root(ext_node, None, false).unwrap();
+
+        // For a path that follows the extension but then hits the blinded child
+        let following_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5]);
+        let depth = trie.find_deepest_revealed_depth(&following_path);
+        // Extension is at root (depth 0), after following it we're at depth 3,
+        // then we hit the blinded hash, so deepest revealed is 0 (the extension itself)
+        assert_eq!(depth, 0);
+
+        // For a path that diverges from the extension
+        let diverging_path = Nibbles::from_nibbles([0x1, 0x2, 0x4, 0x0, 0x0]);
+        let depth = trie.find_deepest_revealed_depth(&diverging_path);
+        // Extension at depth 0, but path diverges so we stop there
+        assert_eq!(depth, 0);
+
+        // For a path that doesn't match at all
+        let non_matching_path = Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x0, 0x0]);
+        let depth = trie.find_deepest_revealed_depth(&non_matching_path);
+        // Extension at depth 0 doesn't match, so depth is 0
+        assert_eq!(depth, 0);
+    }
+
+    #[test]
+    fn test_find_deepest_revealed_depth_branch() {
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create branch with blinded children at nibbles 0 and 1
+        let child_hash_0 = B256::repeat_byte(0xaa);
+        let child_hash_1 = B256::repeat_byte(0xbb);
+
+        let branch_node = create_branch_node_with_children(
+            &[0x0, 0x1],
+            vec![RlpNode::word_rlp(&child_hash_0), RlpNode::word_rlp(&child_hash_1)],
+        );
+
+        trie = trie.with_root(branch_node, None, false).unwrap();
+
+        // Path going through nibble 0 - hits blinded hash at depth 1
+        let path_0 = Nibbles::from_nibbles([0x0, 0x0, 0x0, 0x0]);
+        let depth = trie.find_deepest_revealed_depth(&path_0);
+        // Branch at depth 0 is revealed, child at depth 1 is blinded
+        assert_eq!(depth, 0);
+
+        // Path going through nibble 1 - hits blinded hash at depth 1
+        let path_1 = Nibbles::from_nibbles([0x1, 0x0, 0x0, 0x0]);
+        let depth = trie.find_deepest_revealed_depth(&path_1);
+        assert_eq!(depth, 0);
+
+        // Path going through nibble 2 - no child at this nibble
+        let path_2 = Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x0]);
+        let depth = trie.find_deepest_revealed_depth(&path_2);
+        // Branch at depth 0 doesn't have child at nibble 2
+        assert_eq!(depth, 0);
     }
 }
