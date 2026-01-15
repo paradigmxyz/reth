@@ -54,36 +54,44 @@ where
     }
 
     if target.is_empty() {
-        target.extend(other.iter().cloned());
+        target.extend_from_slice(other);
         return;
     }
 
-    // Merge two sorted slices into a new sorted Vec (O(n + m) complexity)
-    let mut result = Vec::with_capacity(target.len() + other.len());
-    let mut target_iter = target.iter().peekable();
-    let mut other_iter = other.iter().peekable();
+    // Fast path: non-overlapping ranges - just append
+    if target.last().map(|(k, _)| k) < other.first().map(|(k, _)| k) {
+        target.extend_from_slice(other);
+        return;
+    }
 
-    while let (Some(t), Some(o)) = (target_iter.peek(), other_iter.peek()) {
-        match t.0.cmp(&o.0) {
+    // Move ownership of target to avoid cloning owned elements
+    let left = core::mem::take(target);
+    let mut out = Vec::with_capacity(left.len() + other.len());
+
+    let mut a = left.into_iter().peekable();
+    let mut b = other.iter().peekable();
+
+    while let (Some(aa), Some(bb)) = (a.peek(), b.peek()) {
+        match aa.0.cmp(&bb.0) {
             Ordering::Less => {
-                result.push(target_iter.next().unwrap().clone());
+                out.push(a.next().unwrap());
             }
             Ordering::Greater => {
-                result.push(other_iter.next().unwrap().clone());
+                out.push(b.next().unwrap().clone());
             }
             Ordering::Equal => {
-                // `other` takes precedence for duplicate keys
-                target_iter.next();
-                result.push(other_iter.next().unwrap().clone());
+                // `other` takes precedence for duplicate keys - reuse key from `a`
+                let (k, _) = a.next().unwrap();
+                out.push((k, b.next().unwrap().1.clone()));
             }
         }
     }
 
-    // Drain remaining elements from whichever iterator has leftovers
-    result.extend(target_iter.cloned());
-    result.extend(other_iter.cloned());
+    // Drain remaining: `a` moves, `b` clones
+    out.extend(a);
+    out.extend(b.cloned());
 
-    *target = result;
+    *target = out;
 }
 
 #[cfg(test)]
