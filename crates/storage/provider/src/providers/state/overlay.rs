@@ -253,7 +253,7 @@ where
             let trie_updates = match self.trie_overlay.as_ref() {
                 Some(trie_overlay) if trie_reverts.is_empty() => Arc::clone(trie_overlay),
                 Some(trie_overlay) => {
-                    trie_reverts.extend_ref(trie_overlay);
+                    trie_reverts.extend_ref_and_sort(trie_overlay);
                     Arc::new(trie_reverts)
                 }
                 None => Arc::new(trie_reverts),
@@ -264,7 +264,7 @@ where
                     Arc::clone(hashed_state_overlay)
                 }
                 Some(hashed_state_overlay) => {
-                    hashed_state_reverts.extend_ref(hashed_state_overlay);
+                    hashed_state_reverts.extend_ref_and_sort(hashed_state_overlay);
                     Arc::new(hashed_state_reverts)
                 }
                 None => Arc::new(hashed_state_reverts),

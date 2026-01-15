@@ -677,7 +677,7 @@ where
         // Extend state overlay with current block's sorted state.
         input.prefix_sets.extend(hashed_state.construct_prefix_sets());
         let sorted_hashed_state = hashed_state.clone_into_sorted();
-        Arc::make_mut(&mut input.state).extend_ref(&sorted_hashed_state);
+        Arc::make_mut(&mut input.state).extend_ref_and_sort(&sorted_hashed_state);
 
         let TrieInputSorted { nodes, state, prefix_sets: prefix_sets_mut } = input;
 
@@ -706,7 +706,7 @@ where
         // Extend state overlay with current block's sorted state.
         input.prefix_sets.extend(hashed_state.construct_prefix_sets());
         let sorted_hashed_state = hashed_state.clone_into_sorted();
-        Arc::make_mut(&mut input.state).extend_ref(&sorted_hashed_state);
+        Arc::make_mut(&mut input.state).extend_ref_and_sort(&sorted_hashed_state);
 
         let TrieInputSorted { nodes, state, .. } = input;
         let prefix_sets = hashed_state.construct_prefix_sets();
@@ -1033,8 +1033,8 @@ where
                 let nodes_mut = Arc::make_mut(&mut input.nodes);
                 for block in blocks_iter {
                     let data = block.trie_data();
-                    state_mut.extend_ref(data.hashed_state.as_ref());
-                    nodes_mut.extend_ref(data.trie_updates.as_ref());
+                    state_mut.extend_ref_and_sort(data.hashed_state.as_ref());
+                    nodes_mut.extend_ref_and_sort(data.trie_updates.as_ref());
                 }
             }
         }

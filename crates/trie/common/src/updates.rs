@@ -593,7 +593,10 @@ impl TrieUpdatesSorted {
     /// This merges the account nodes and storage tries from `other` into `self`.
     /// Account nodes are merged and re-sorted, with `other`'s values taking precedence
     /// for duplicate keys.
-    pub fn extend_ref(&mut self, other: &Self) {
+    ///
+    /// Sorts the account nodes after extending. Sorts the storage tries after extending, for each
+    /// storage trie.
+    pub fn extend_ref_and_sort(&mut self, other: &Self) {
         // Extend account nodes
         extend_sorted_vec(&mut self.account_nodes, &other.account_nodes);
 
@@ -743,7 +746,7 @@ mod tests {
         // Test extending with empty updates
         let mut updates1 = TrieUpdatesSorted::default();
         let updates2 = TrieUpdatesSorted::default();
-        updates1.extend_ref(&updates2);
+        updates1.extend_ref_and_sort(&updates2);
         assert_eq!(updates1.account_nodes.len(), 0);
         assert_eq!(updates1.storage_tries.len(), 0);
 
@@ -762,7 +765,7 @@ mod tests {
             ],
             storage_tries: B256Map::default(),
         };
-        updates1.extend_ref(&updates2);
+        updates1.extend_ref_and_sort(&updates2);
         assert_eq!(updates1.account_nodes.len(), 3);
         // Should be sorted: 0x01, 0x02, 0x03
         assert_eq!(updates1.account_nodes[0].0, Nibbles::from_nibbles_unchecked([0x01]));
@@ -798,7 +801,7 @@ mod tests {
                 (hashed_address2, storage_trie1),
             ]),
         };
-        updates1.extend_ref(&updates2);
+        updates1.extend_ref_and_sort(&updates2);
         assert_eq!(updates1.storage_tries.len(), 2);
         assert!(updates1.storage_tries.contains_key(&hashed_address1));
         assert!(updates1.storage_tries.contains_key(&hashed_address2));

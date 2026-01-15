@@ -621,7 +621,9 @@ impl HashedPostStateSorted {
 
     /// Extends this state with contents of another sorted state.
     /// Entries in `other` take precedence for duplicate keys.
-    pub fn extend_ref(&mut self, other: &Self) {
+    ///
+    /// Sorts the accounts after extending. Sorts the storage after extending, for each account.
+    pub fn extend_ref_and_sort(&mut self, other: &Self) {
         // Extend accounts
         extend_sorted_vec(&mut self.accounts, &other.accounts);
 
@@ -1343,7 +1345,7 @@ mod tests {
             storages: B256Map::default(),
         };
 
-        state1.extend_ref(&state2);
+        state1.extend_ref_and_sort(&state2);
 
         // Check accounts are merged and sorted
         assert_eq!(state1.accounts.len(), 6);
