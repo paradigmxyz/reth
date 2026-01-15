@@ -85,8 +85,7 @@ mod tests {
         let slice2 = vec![(2, "b2"), (3, "c2")];
         let slice3 = vec![(1, "a3"), (4, "d3")];
 
-        let result =
-            kway_merge_sorted([slice1.as_slice(), slice2.as_slice(), slice3.as_slice()]);
+        let result = kway_merge_sorted([slice1.as_slice(), slice2.as_slice(), slice3.as_slice()]);
         // First occurrence wins: key 1 -> a1 (slice1), key 3 -> c1 (slice1)
         assert_eq!(result, vec![(1, "a1"), (2, "b2"), (3, "c1"), (4, "d3")]);
     }
@@ -97,8 +96,7 @@ mod tests {
         let slice2 = vec![(1, "a")];
         let slice3: Vec<(i32, &str)> = vec![];
 
-        let result =
-            kway_merge_sorted([slice1.as_slice(), slice2.as_slice(), slice3.as_slice()]);
+        let result = kway_merge_sorted([slice1.as_slice(), slice2.as_slice(), slice3.as_slice()]);
         assert_eq!(result, vec![(1, "a")]);
     }
 
@@ -108,8 +106,7 @@ mod tests {
         let slice2 = vec![(5, "middle")];
         let slice3 = vec![(5, "last")];
 
-        let result =
-            kway_merge_sorted([slice1.as_slice(), slice2.as_slice(), slice3.as_slice()]);
+        let result = kway_merge_sorted([slice1.as_slice(), slice2.as_slice(), slice3.as_slice()]);
         // First occurrence wins (slice1 has highest priority)
         assert_eq!(result, vec![(5, "first")]);
     }

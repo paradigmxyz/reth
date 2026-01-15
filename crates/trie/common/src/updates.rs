@@ -635,8 +635,7 @@ impl TrieUpdatesSorted {
         }
 
         // Merge account nodes using k-way merge. Newest (index 0) takes precedence.
-        let account_nodes =
-            kway_merge_sorted(updates.iter().map(|u| u.account_nodes.as_slice()));
+        let account_nodes = kway_merge_sorted(updates.iter().map(|u| u.account_nodes.as_slice()));
 
         // Accumulator for collecting storage trie slices per address.
         // We process updates newest-to-oldest and stop collecting for an address
@@ -787,8 +786,7 @@ impl StorageTrieUpdatesSorted {
         // Discard updates older than the first deletion since the trie was wiped at that point.
         let del_idx = updates.iter().position(|u| u.is_deleted);
         let relevant = del_idx.map_or(&updates[..], |idx| &updates[..=idx]);
-        let storage_nodes =
-            kway_merge_sorted(relevant.iter().map(|u| u.storage_nodes.as_slice()));
+        let storage_nodes = kway_merge_sorted(relevant.iter().map(|u| u.storage_nodes.as_slice()));
 
         Self { is_deleted: del_idx.is_some(), storage_nodes }
     }

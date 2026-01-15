@@ -643,8 +643,7 @@ impl HashedPostStateSorted {
             return Self::default();
         }
 
-        let accounts =
-            kway_merge_sorted(states.iter().map(|s| s.accounts.as_slice()));
+        let accounts = kway_merge_sorted(states.iter().map(|s| s.accounts.as_slice()));
 
         struct StorageAcc<'a> {
             wiped: bool,
@@ -756,8 +755,7 @@ impl HashedStorageSorted {
 
         let wipe_idx = updates.iter().position(|u| u.wiped);
         let relevant = wipe_idx.map_or(&updates[..], |idx| &updates[..=idx]);
-        let storage_slots =
-            kway_merge_sorted(relevant.iter().map(|u| u.storage_slots.as_slice()));
+        let storage_slots = kway_merge_sorted(relevant.iter().map(|u| u.storage_slots.as_slice()));
 
         Self { wiped: wipe_idx.is_some(), storage_slots }
     }

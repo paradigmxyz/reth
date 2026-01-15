@@ -1,8 +1,8 @@
 //! Types and traits for validating blocks and payloads.
 
-/// Threshold for switching from extend_ref loop to merge_batch in [`merge_overlay_trie_input`].
+/// Threshold for switching from `extend_ref` loop to `merge_batch` in [`merge_overlay_trie_input`].
 ///
-/// Benchmarked crossover: extend_ref wins up to ~64 blocks, merge_batch wins beyond.
+/// Benchmarked crossover: `extend_ref` wins up to ~64 blocks, `merge_batch` wins beyond.
 /// Using 64 as threshold since they're roughly equal there.
 const MERGE_BATCH_THRESHOLD: usize = 64;
 
@@ -1026,10 +1026,9 @@ where
     ///
     /// The input `blocks` vector is ordered newest -> oldest (see `TreeState::blocks_by_hash`).
     ///
-    /// Uses extend_ref loop for small k, k-way merge_batch for large k.
+    /// Uses `extend_ref` loop for small k, k-way `merge_batch` for large k.
     /// See [`MERGE_BATCH_THRESHOLD`] for crossover point.
     fn merge_overlay_trie_input(blocks: &[ExecutedBlock<N>]) -> TrieInputSorted {
-
         if blocks.is_empty() {
             return TrieInputSorted::default();
         }
@@ -1063,9 +1062,8 @@ where
             let merged_state = HashedPostStateSorted::merge_batch(
                 trie_data.iter().map(|d| d.hashed_state.as_ref()),
             );
-            let merged_nodes = TrieUpdatesSorted::merge_batch(
-                trie_data.iter().map(|d| d.trie_updates.as_ref()),
-            );
+            let merged_nodes =
+                TrieUpdatesSorted::merge_batch(trie_data.iter().map(|d| d.trie_updates.as_ref()));
 
             TrieInputSorted {
                 state: Arc::new(merged_state),
