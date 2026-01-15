@@ -22,7 +22,7 @@ pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<()>>>;
 
 /// Context for `RocksDB` block writes (stub).
 #[derive(Debug, Clone)]
-pub struct RocksDBWriteCtx {
+pub(crate) struct RocksDBWriteCtx {
     /// The first block number being written.
     pub first_block_number: BlockNumber,
     /// The prune mode for transaction lookup, if any.
