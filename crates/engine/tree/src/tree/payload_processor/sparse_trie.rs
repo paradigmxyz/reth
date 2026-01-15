@@ -87,7 +87,7 @@ impl ProofSequencer {
 
     /// Sets the next sequence number (for testing purposes).
     #[cfg(test)]
-    pub(super) fn set_next_sequence(&mut self, seq: u64) {
+    pub(super) const fn set_next_sequence(&mut self, seq: u64) {
         self.next_sequence = seq;
     }
 }
