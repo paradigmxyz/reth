@@ -2,6 +2,22 @@ use alloc::vec::Vec;
 use core::cmp::Ordering;
 use itertools::Itertools;
 
+/// Minimum average items per source to prefer pairwise sorted merge over HashMap merge.
+pub(crate) const PAIRWISE_MIN_AVG_ITEMS: usize = 2000;
+
+/// Minimum number of sources that triggers k-way merge instead of pairwise sorted merge.
+pub(crate) const KWAY_MIN_SOURCES: usize = 30;
+
+/// Returns true if pairwise sorted merge is preferred over HashMap merge.
+/// Returns false if k >= KWAY_MIN_SOURCES (use kway) or avg items < threshold (use HashMap).
+#[inline]
+pub(crate) fn prefer_sorted_merge(num_sources: usize, total_items: usize) -> bool {
+    if num_sources >= KWAY_MIN_SOURCES {
+        return false;
+    }
+    total_items >= PAIRWISE_MIN_AVG_ITEMS.saturating_mul(num_sources)
+}
+
 /// Merge sorted slices into a sorted `Vec`. First occurrence wins for duplicate keys.
 ///
 /// Callers pass slices in priority order (index 0 = highest priority), so the first
@@ -122,5 +138,25 @@ mod tests {
     fn test_kway_merge_sorted_no_slices() {
         let result: Vec<(i32, &str)> = kway_merge_sorted(Vec::<&[(i32, &str)]>::new());
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_prefer_sorted_merge_kway_threshold() {
+        assert!(!prefer_sorted_merge(30, 100_000));
+        assert!(!prefer_sorted_merge(50, 200_000));
+        assert!(prefer_sorted_merge(29, 29 * PAIRWISE_MIN_AVG_ITEMS));
+    }
+
+    #[test]
+    fn test_prefer_sorted_merge_pairwise_threshold() {
+        assert!(prefer_sorted_merge(5, 5 * PAIRWISE_MIN_AVG_ITEMS));
+        assert!(prefer_sorted_merge(10, 10 * PAIRWISE_MIN_AVG_ITEMS + 1));
+        assert!(!prefer_sorted_merge(5, 5 * PAIRWISE_MIN_AVG_ITEMS - 1));
+    }
+
+    #[test]
+    fn test_prefer_sorted_merge_small_data() {
+        assert!(!prefer_sorted_merge(2, 100));
+        assert!(!prefer_sorted_merge(5, 1000));
     }
 }

@@ -626,33 +626,45 @@ impl TrieUpdatesSorted {
 
     /// Batch-merge sorted trie updates. Iterator yields **newest to oldest**.
     ///
-    /// This is more efficient than repeated `extend_ref` calls for large batches,
-    /// using k-way merge for O(n log k) complexity instead of O(n * k).
+    /// Uses adaptive merge strategy:
+    /// - k >= 30 sources: k-way merge (avoids O(k) copying amplification)
+    /// - Large avg items/source (>= 2000): pairwise extend_ref (better cache locality)
+    /// - Otherwise: HashMap merge then sort (lower per-element overhead for small data)
     pub fn merge_batch<'a>(updates: impl IntoIterator<Item = &'a Self>) -> Self {
         let updates: Vec<_> = updates.into_iter().collect();
-        if updates.is_empty() {
-            return Self::default();
-        }
+        match updates.len() {
+            0 => return Self::default(),
+            1 => return updates[0].clone(),
+            n => {
+                let total_items: usize = updates.iter().map(|u| u.total_len()).sum();
 
-        // Merge account nodes using k-way merge. Newest (index 0) takes precedence.
+                if n >= crate::utils::KWAY_MIN_SOURCES {
+                    Self::merge_batch_kway(&updates)
+                } else if crate::utils::prefer_sorted_merge(n, total_items) {
+                    let mut result = updates[0].clone();
+                    for update in &updates[1..] {
+                        result.extend_ref(update);
+                    }
+                    result
+                } else {
+                    Self::merge_batch_hashmap(&updates)
+                }
+            }
+        }
+    }
+
+    fn merge_batch_kway<'a>(updates: &[&'a Self]) -> Self {
         let account_nodes = kway_merge_sorted(updates.iter().map(|u| u.account_nodes.as_slice()));
 
-        // Accumulator for collecting storage trie slices per address.
-        // We process updates newest-to-oldest and stop collecting for an address
-        // once we hit a "deleted" storage (sealed=true), since older data is irrelevant.
         struct StorageAcc<'a> {
-            /// Storage trie was deleted (account removed or cleared).
             is_deleted: bool,
-            /// Stop collecting older slices after seeing a deletion.
             sealed: bool,
-            /// Storage trie node slices to merge, ordered newest to oldest.
             slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
         }
 
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
 
-        // Collect storage slices per address, respecting deletion boundaries
-        for update in &updates {
+        for update in updates {
             for (addr, storage) in &update.storage_tries {
                 let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
                     is_deleted: false,
@@ -660,14 +672,12 @@ impl TrieUpdatesSorted {
                     slices: Vec::new(),
                 });
 
-                // Skip if we already hit a deletion for this address (older data is irrelevant)
                 if entry.sealed {
                     continue;
                 }
 
                 entry.slices.push(storage.storage_nodes.as_slice());
 
-                // If this storage was deleted, mark as deleted and seal to ignore older updates
                 if storage.is_deleted {
                     entry.is_deleted = true;
                     entry.sealed = true;
@@ -675,7 +685,6 @@ impl TrieUpdatesSorted {
             }
         }
 
-        // Merge each address's storage slices using k-way merge
         let storage_tries = acc
             .into_iter()
             .map(|(addr, entry)| {
@@ -685,6 +694,14 @@ impl TrieUpdatesSorted {
             .collect();
 
         Self { account_nodes, storage_tries }
+    }
+
+    fn merge_batch_hashmap<'a>(updates: &[&'a Self]) -> Self {
+        let mut unsorted = TrieUpdates::default();
+        for update in updates.iter().rev() {
+            unsorted.extend_from_sorted(update);
+        }
+        unsorted.into_sorted()
     }
 }
 
@@ -780,18 +797,51 @@ impl StorageTrieUpdatesSorted {
 
     /// Batch-merge sorted storage trie updates. Iterator yields **newest to oldest**.
     /// If any update is deleted, older data is discarded.
+    ///
+    /// Uses adaptive merge strategy:
+    /// - k >= 30 sources: k-way merge (avoids O(k) copying amplification)
+    /// - Large avg items/source (>= 2000): pairwise extend_ref (better cache locality)
+    /// - Otherwise: HashMap merge then sort (lower per-element overhead for small data)
     pub fn merge_batch<'a>(updates: impl IntoIterator<Item = &'a Self>) -> Self {
         let updates: Vec<_> = updates.into_iter().collect();
-        if updates.is_empty() {
-            return Self::default();
-        }
-
-        // Discard updates older than the first deletion since the trie was wiped at that point.
         let del_idx = updates.iter().position(|u| u.is_deleted);
         let relevant = del_idx.map_or(&updates[..], |idx| &updates[..=idx]);
-        let storage_nodes = kway_merge_sorted(relevant.iter().map(|u| u.storage_nodes.as_slice()));
 
-        Self { is_deleted: del_idx.is_some(), storage_nodes }
+        match relevant.len() {
+            0 => return Self::default(),
+            1 => return Self { is_deleted: del_idx.is_some(), ..relevant[0].clone() },
+            n => {
+                let total_items: usize = relevant.iter().map(|u| u.len()).sum();
+
+                let storage_nodes = if n >= crate::utils::KWAY_MIN_SOURCES {
+                    kway_merge_sorted(relevant.iter().map(|u| u.storage_nodes.as_slice()))
+                } else if crate::utils::prefer_sorted_merge(n, total_items) {
+                    let mut result = relevant[0].storage_nodes.clone();
+                    for update in &relevant[1..] {
+                        extend_sorted_vec(&mut result, &update.storage_nodes);
+                    }
+                    result
+                } else {
+                    Self::merge_batch_hashmap(relevant)
+                };
+
+                Self { is_deleted: del_idx.is_some(), storage_nodes }
+            }
+        }
+    }
+
+    fn merge_batch_hashmap(
+        updates: &[&Self],
+    ) -> Vec<(Nibbles, Option<BranchNodeCompact>)> {
+        let mut map: HashMap<Nibbles, Option<BranchNodeCompact>> = HashMap::default();
+        for update in updates.iter().rev() {
+            for (nibbles, node) in &update.storage_nodes {
+                map.insert(*nibbles, node.clone());
+            }
+        }
+        let mut result: Vec<_> = map.into_iter().collect();
+        result.sort_unstable_by_key(|(k, _)| *k);
+        result
     }
 }
 

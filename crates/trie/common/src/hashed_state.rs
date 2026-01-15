@@ -636,30 +636,46 @@ impl HashedPostStateSorted {
 
     /// Batch-merge sorted hashed post states. Iterator yields **newest to oldest**.
     ///
-    /// Uses k-way merge for O(n log k) complexity and one-pass accumulation for storages.
+    /// Uses adaptive merge strategy:
+    /// - k >= 30 sources: k-way merge (avoids O(k) copying amplification)
+    /// - Large avg items/source (>= 2000): pairwise extend_ref (better cache locality)
+    /// - Otherwise: HashMap merge then sort (lower per-element overhead for small data)
     pub fn merge_batch<'a>(states: impl IntoIterator<Item = &'a Self>) -> Self {
         let states: Vec<_> = states.into_iter().collect();
-        if states.is_empty() {
-            return Self::default();
-        }
+        match states.len() {
+            0 => return Self::default(),
+            1 => return states[0].clone(),
+            n => {
+                let total_items: usize = states.iter().map(|s| s.total_len()).sum();
 
+                if n >= crate::utils::KWAY_MIN_SOURCES {
+                    Self::merge_batch_kway(&states)
+                } else if crate::utils::prefer_sorted_merge(n, total_items) {
+                    let mut result = states[0].clone();
+                    for state in &states[1..] {
+                        result.extend_ref(state);
+                    }
+                    result
+                } else {
+                    Self::merge_batch_hashmap(&states)
+                }
+            }
+        }
+    }
+
+    /// K-way merge implementation for many sources.
+    fn merge_batch_kway<'a>(states: &[&'a Self]) -> Self {
         let accounts = kway_merge_sorted(states.iter().map(|s| s.accounts.as_slice()));
 
         struct StorageAcc<'a> {
-            /// Account storage was cleared (e.g., SELFDESTRUCT).
             wiped: bool,
-            /// Stop collecting older slices after seeing a wipe.
             sealed: bool,
-            /// Storage slot slices to merge, ordered newest to oldest.
             slices: Vec<&'a [(B256, U256)]>,
         }
 
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
 
-        // Accumulate storage slices per address from newest to oldest state.
-        // Once we see a `wiped` flag, the account was cleared at that point,
-        // so older storage slots are irrelevant - we "seal" and stop collecting.
-        for state in &states {
+        for state in states {
             for (addr, storage) in &state.storages {
                 let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
                     wiped: false,
@@ -688,6 +704,15 @@ impl HashedPostStateSorted {
             .collect();
 
         Self { accounts, storages }
+    }
+
+    /// HashMap-based merge for small data with low per-element overhead.
+    fn merge_batch_hashmap<'a>(states: &[&'a Self]) -> Self {
+        let mut unsorted = HashedPostState::default();
+        for state in states.iter().rev() {
+            unsorted.extend_from_sorted(state);
+        }
+        unsorted.into_sorted()
     }
 
     /// Clears all accounts and storage data.
@@ -753,17 +778,49 @@ impl HashedStorageSorted {
 
     /// Batch-merge sorted hashed storage. Iterator yields **newest to oldest**.
     /// If any update is wiped, prior data is discarded.
+    ///
+    /// Uses adaptive merge strategy:
+    /// - k >= 30 sources: k-way merge (avoids O(k) copying amplification)
+    /// - Large avg items/source (>= 2000): pairwise extend_ref (better cache locality)
+    /// - Otherwise: HashMap merge then sort (lower per-element overhead for small data)
     pub fn merge_batch<'a>(updates: impl IntoIterator<Item = &'a Self>) -> Self {
         let updates: Vec<_> = updates.into_iter().collect();
-        if updates.is_empty() {
-            return Self::default();
-        }
-
         let wipe_idx = updates.iter().position(|u| u.wiped);
         let relevant = wipe_idx.map_or(&updates[..], |idx| &updates[..=idx]);
-        let storage_slots = kway_merge_sorted(relevant.iter().map(|u| u.storage_slots.as_slice()));
 
-        Self { wiped: wipe_idx.is_some(), storage_slots }
+        match relevant.len() {
+            0 => return Self::default(),
+            1 => return Self { wiped: wipe_idx.is_some(), ..relevant[0].clone() },
+            n => {
+                let total_items: usize = relevant.iter().map(|u| u.len()).sum();
+
+                let storage_slots = if n >= crate::utils::KWAY_MIN_SOURCES {
+                    kway_merge_sorted(relevant.iter().map(|u| u.storage_slots.as_slice()))
+                } else if crate::utils::prefer_sorted_merge(n, total_items) {
+                    let mut result = relevant[0].storage_slots.clone();
+                    for update in &relevant[1..] {
+                        extend_sorted_vec(&mut result, &update.storage_slots);
+                    }
+                    result
+                } else {
+                    Self::merge_batch_hashmap(relevant)
+                };
+
+                Self { wiped: wipe_idx.is_some(), storage_slots }
+            }
+        }
+    }
+
+    fn merge_batch_hashmap(updates: &[&Self]) -> Vec<(B256, U256)> {
+        let mut map: B256Map<U256> = B256Map::default();
+        for update in updates.iter().rev() {
+            for &(slot, value) in &update.storage_slots {
+                map.insert(slot, value);
+            }
+        }
+        let mut result: Vec<_> = map.into_iter().collect();
+        result.sort_unstable_by_key(|(k, _)| *k);
+        result
     }
 }
 
