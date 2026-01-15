@@ -171,19 +171,6 @@ where
         self.metrics.save_blocks_block_count.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
 
-        // Evict changesets for blocks below the persistence watermark
-        // Keep a 64-block retention window for reorg support
-        if let Some(BlockNumHash { number: last_persisted_block_number, .. }) = last_block {
-            let eviction_threshold = last_persisted_block_number.saturating_sub(64);
-            debug!(
-                target: "engine::persistence",
-                last_persisted = last_persisted_block_number,
-                eviction_threshold,
-                "Evicting changesets below threshold"
-            );
-            self.changesets_cache.evict(eviction_threshold);
-        }
-
         Ok(last_block)
     }
 }
