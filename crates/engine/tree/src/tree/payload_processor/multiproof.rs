@@ -1,6 +1,8 @@
 //! Multiproof task related functionality.
 
-use crate::tree::payload_processor::bal::bal_to_hashed_post_state;
+use crate::tree::payload_processor::{
+    bal::bal_to_hashed_post_state, sparse_trie::SparseTrieMessage,
+};
 use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, map::HashSet, B256};
@@ -497,8 +499,8 @@ pub(super) struct MultiProofTask {
     tx: CrossbeamSender<MultiProofMessage>,
     /// Receiver for proof results directly from workers.
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
-    /// Sender for state updates emitted by this type.
-    to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
+    /// Sender for messages to the sparse trie task.
+    to_sparse_trie: std::sync::mpsc::Sender<SparseTrieMessage>,
     /// Proof targets that have been already fetched.
     fetched_proof_targets: MultiProofTargets,
     /// Tracks keys which have been added and removed throughout the entire block.
@@ -520,7 +522,7 @@ impl MultiProofTask {
     /// `proof_result_rx`.
     pub(super) fn new(
         proof_worker_handle: ProofWorkerHandle,
-        to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
+        to_sparse_trie: std::sync::mpsc::Sender<SparseTrieMessage>,
         chunk_size: Option<usize>,
         tx: CrossbeamSender<MultiProofMessage>,
         rx: CrossbeamReceiver<MultiProofMessage>,
@@ -825,7 +827,9 @@ impl MultiProofTask {
                                 sequence_number,
                                 SparseTrieUpdate { state, multiproof: Default::default() },
                             ) {
-                                let _ = self.to_sparse_trie.send(combined_update);
+                                let _ = self
+                                    .to_sparse_trie
+                                    .send(SparseTrieMessage::ProofUpdate(combined_update));
                             }
                         }
                         Ok(other_msg) => {
@@ -957,7 +961,8 @@ impl MultiProofTask {
                     sequence_number,
                     SparseTrieUpdate { state, multiproof: Default::default() },
                 ) {
-                    let _ = self.to_sparse_trie.send(combined_update);
+                    let _ =
+                        self.to_sparse_trie.send(SparseTrieMessage::ProofUpdate(combined_update));
                 }
 
                 if self.is_done(batch_metrics, ctx) {
@@ -1064,7 +1069,9 @@ impl MultiProofTask {
                                     if let Some(combined_update) =
                                         self.on_proof(proof_result.sequence_number, update)
                                     {
-                                        let _ = self.to_sparse_trie.send(combined_update);
+                                        let _ = self
+                                            .to_sparse_trie
+                                            .send(SparseTrieMessage::ProofUpdate(combined_update));
                                     }
                                 }
                                 Err(error) => {

@@ -3,7 +3,7 @@
 use crate::tree::payload_processor::multiproof::{MultiProofTaskMetrics, SparseTrieUpdate};
 use alloy_primitives::B256;
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use reth_trie::{updates::TrieUpdates, Nibbles};
+use reth_trie::{updates::TrieUpdates, HashedPostState, Nibbles};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
@@ -17,6 +17,21 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, instrument, trace};
+
+/// Message types for the sparse trie task.
+#[derive(Debug)]
+pub(super) enum SparseTrieMessage {
+    /// Already computed proof update (existing flow from `MultiProofTask`).
+    ProofUpdate(SparseTrieUpdate),
+    /// State update needing proof target generation (new flow for sparse trie caching).
+    #[allow(dead_code)]
+    StateUpdate {
+        /// The sequence number for ordering.
+        sequence_number: u64,
+        /// The hashed post state to process.
+        state: HashedPostState,
+    },
+}
 
 /// Handle to track proof calculation ordering.
 ///
@@ -42,7 +57,11 @@ impl ProofSequencer {
 
     /// Adds a proof with the corresponding state update and returns all sequential proofs and state
     /// updates if we have a continuous sequence
-    pub(super) fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
+    pub(super) fn add_proof(
+        &mut self,
+        sequence: u64,
+        update: SparseTrieUpdate,
+    ) -> Vec<SparseTrieUpdate> {
         if sequence >= self.next_to_deliver {
             self.pending_proofs.insert(sequence, update);
         }
@@ -80,13 +99,16 @@ where
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
 {
-    /// Receives updates from the state root task.
-    pub(super) updates: mpsc::Receiver<SparseTrieUpdate>,
+    /// Receives messages from the state root task (either proof updates or state updates).
+    pub(super) messages: mpsc::Receiver<SparseTrieMessage>,
     /// `SparseStateTrie` used for computing the state root.
     pub(super) trie: SparseStateTrie<A, S>,
     pub(super) metrics: MultiProofTaskMetrics,
     /// Trie node provider factory.
     blinded_provider_factory: BPF,
+    /// Proof sequencer for ordering state updates.
+    #[allow(dead_code)]
+    proof_sequencer: ProofSequencer,
 }
 
 impl<BPF, A, S> SparseTrieTask<BPF, A, S>
@@ -99,12 +121,18 @@ where
 {
     /// Creates a new sparse trie, pre-populating with a [`ClearedSparseStateTrie`].
     pub(super) fn new_with_cleared_trie(
-        updates: mpsc::Receiver<SparseTrieUpdate>,
+        messages: mpsc::Receiver<SparseTrieMessage>,
         blinded_provider_factory: BPF,
         metrics: MultiProofTaskMetrics,
         sparse_state_trie: ClearedSparseStateTrie<A, S>,
     ) -> Self {
-        Self { updates, metrics, trie: sparse_state_trie.into_inner(), blinded_provider_factory }
+        Self {
+            messages,
+            metrics,
+            trie: sparse_state_trie.into_inner(),
+            blinded_provider_factory,
+            proof_sequencer: ProofSequencer::default(),
+        }
     }
 
     /// Runs the sparse trie task to completion.
@@ -138,35 +166,49 @@ where
 
         let mut num_iterations = 0;
 
-        while let Ok(mut update) = self.updates.recv() {
+        while let Ok(message) = self.messages.recv() {
             num_iterations += 1;
-            let mut num_updates = 1;
             let _enter =
-                debug_span!(target: "engine::tree::payload_processor::sparse_trie", "drain updates")
+                debug_span!(target: "engine::tree::payload_processor::sparse_trie", "process message")
                     .entered();
-            while let Ok(next) = self.updates.try_recv() {
-                update.extend(next);
-                num_updates += 1;
+
+            match message {
+                SparseTrieMessage::ProofUpdate(mut update) => {
+                    let mut num_updates = 1;
+                    while let Ok(next) = self.messages.try_recv() {
+                        match next {
+                            SparseTrieMessage::ProofUpdate(next_update) => {
+                                update.extend(next_update);
+                                num_updates += 1;
+                            }
+                            SparseTrieMessage::StateUpdate { sequence_number, state } => {
+                                self.handle_state_update(sequence_number, state)?;
+                            }
+                        }
+                    }
+
+                    debug!(
+                        target: "engine::root",
+                        num_updates,
+                        account_proofs = update.multiproof.account_subtree.len(),
+                        storage_proofs = update.multiproof.storages.len(),
+                        "Updating sparse trie"
+                    );
+
+                    let elapsed =
+                        update_sparse_trie(&mut self.trie, update, &self.blinded_provider_factory)
+                            .map_err(|e| {
+                                ParallelStateRootError::Other(format!(
+                                    "could not calculate state root: {e:?}"
+                                ))
+                            })?;
+                    self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
+                    trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
+                }
+                SparseTrieMessage::StateUpdate { sequence_number, state } => {
+                    self.handle_state_update(sequence_number, state)?;
+                }
             }
-            drop(_enter);
-
-            debug!(
-                target: "engine::root",
-                num_updates,
-                account_proofs = update.multiproof.account_subtree.len(),
-                storage_proofs = update.multiproof.storages.len(),
-                "Updating sparse trie"
-            );
-
-            let elapsed =
-                update_sparse_trie(&mut self.trie, update, &self.blinded_provider_factory)
-                    .map_err(|e| {
-                        ParallelStateRootError::Other(format!(
-                            "could not calculate state root: {e:?}"
-                        ))
-                    })?;
-            self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
-            trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
         }
 
         debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
@@ -182,6 +224,31 @@ where
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
+    }
+
+    /// Handles a state update by generating proof targets from the sparse trie's knowledge
+    /// of revealed nodes and processing the state.
+    ///
+    /// This is a placeholder for the sparse-trie-as-cache optimization. Currently, it logs
+    /// the state update information but doesn't generate proof targets since that requires
+    /// access to the internal trie nodes which is only available for `SerialSparseTrie`.
+    fn handle_state_update(
+        &self,
+        sequence_number: u64,
+        state: HashedPostState,
+    ) -> Result<(), ParallelStateRootError> {
+        let num_accounts = state.accounts.len();
+        let num_storage_updates: usize = state.storages.values().map(|s| s.storage.len()).sum();
+
+        debug!(
+            target: "engine::root",
+            sequence_number,
+            num_accounts,
+            num_storage_updates,
+            "Received state update for sparse trie caching (proof target generation pending)"
+        );
+
+        Ok(())
     }
 }
 
