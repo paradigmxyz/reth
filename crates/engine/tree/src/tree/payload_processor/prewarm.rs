@@ -800,6 +800,46 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) 
     (targets, storage_targets)
 }
 
+/// Returns v2 proof targets based on the given state.
+///
+/// This generates account targets from touched accounts. Storage targets are handled
+/// separately per-account by the proof workers.
+///
+/// For prefetch targets, `min_len` is set to 0 to request full proofs.
+#[allow(dead_code)]
+fn proof_v2_targets_from_state(state: &EvmState) -> Vec<reth_trie::proof_v2::Target> {
+    let mut targets = Vec::with_capacity(state.len());
+    for (addr, account) in state {
+        if !account.is_touched() || account.is_selfdestructed() {
+            continue
+        }
+        targets.push(reth_trie::proof_v2::Target::new(keccak256(addr)));
+    }
+    targets
+}
+
+/// Returns v2 storage proof targets for a specific account based on the given state.
+///
+/// For prefetch targets, `min_len` is set to 0 to request full proofs.
+#[allow(dead_code)]
+fn proof_v2_storage_targets_from_state(
+    state: &EvmState,
+    address: alloy_primitives::Address,
+) -> Vec<reth_trie::proof_v2::Target> {
+    let Some(account) = state.get(&address) else {
+        return Vec::new();
+    };
+
+    let mut targets = Vec::with_capacity(account.storage.len());
+    for (key, slot) in &account.storage {
+        if !slot.is_changed() {
+            continue
+        }
+        targets.push(reth_trie::proof_v2::Target::new(keccak256(B256::new(key.to_be_bytes()))));
+    }
+    targets
+}
+
 /// The events the pre-warm task can handle.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
