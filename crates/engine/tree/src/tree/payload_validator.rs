@@ -997,10 +997,12 @@ where
                 anchor_hash == block_hash
             {
                 trace!(target: "engine::tree::payload_validator", %block_hash,"Reusing trie input with matching anchor hash");
+                let wait_duration = wait_start.elapsed();
                 self.metrics
                     .block_validation
                     .deferred_trie_wait_duration
-                    .record(wait_start.elapsed().as_secs_f64());
+                    .record(wait_duration.as_secs_f64());
+                info!(target: "engine::tree::payload_validator", ?wait_duration, "Waited for trie input");
                 return Ok(((*trie_input).clone(), block_hash));
             }
         }
@@ -1014,10 +1016,12 @@ where
         // Extend with contents of parent in-memory blocks directly in sorted form.
         let input = Self::merge_overlay_trie_input(&blocks);
 
+        let wait_duration = wait_start.elapsed();
         self.metrics
             .block_validation
             .deferred_trie_wait_duration
-            .record(wait_start.elapsed().as_secs_f64());
+            .record(wait_duration.as_secs_f64());
+        info!(target: "engine::tree::payload_validator", ?wait_duration, "Waited for trie input (non fast path)");
         Ok((input, block_hash))
     }
 
