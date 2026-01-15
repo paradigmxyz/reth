@@ -44,7 +44,7 @@ use std::{
 use tracing::trace;
 
 mod provider;
-pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, SaveBlocksMode};
 
 use super::ProviderNodeTypes;
 use reth_trie::KeccakKeyHasher;

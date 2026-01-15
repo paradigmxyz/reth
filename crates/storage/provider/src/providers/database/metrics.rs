@@ -40,15 +40,8 @@ pub(crate) enum Action {
     InsertHeaderNumbers,
     InsertBlockBodyIndices,
     InsertTransactionBlocks,
-    GetNextTxNum,
     InsertTransactionSenders,
     InsertTransactionHashNumbers,
-    SaveBlocksInsertBlock,
-    SaveBlocksWriteState,
-    SaveBlocksWriteHashedState,
-    SaveBlocksWriteTrieUpdates,
-    SaveBlocksUpdateHistoryIndices,
-    SaveBlocksUpdatePipelineStages,
 }
 
 /// Database provider metrics
@@ -65,19 +58,24 @@ pub(crate) struct DatabaseProviderMetrics {
     insert_history_indices: Histogram,
     /// Duration of update pipeline stages
     update_pipeline_stages: Histogram,
-    /// Duration of insert canonical headers
     /// Duration of insert header numbers
     insert_header_numbers: Histogram,
     /// Duration of insert block body indices
     insert_block_body_indices: Histogram,
     /// Duration of insert transaction blocks
     insert_tx_blocks: Histogram,
-    /// Duration of get next tx num
-    get_next_tx_num: Histogram,
     /// Duration of insert transaction senders
     insert_transaction_senders: Histogram,
     /// Duration of insert transaction hash numbers
     insert_transaction_hash_numbers: Histogram,
+    /// Duration of `save_blocks`
+    save_blocks_total: Histogram,
+    /// Duration of MDBX work in `save_blocks`
+    save_blocks_mdbx: Histogram,
+    /// Duration of static file work in `save_blocks`
+    save_blocks_sf: Histogram,
+    /// Duration of `RocksDB` work in `save_blocks`
+    save_blocks_rocksdb: Histogram,
     /// Duration of `insert_block` in `save_blocks`
     save_blocks_insert_block: Histogram,
     /// Duration of `write_state` in `save_blocks`
@@ -90,6 +88,39 @@ pub(crate) struct DatabaseProviderMetrics {
     save_blocks_update_history_indices: Histogram,
     /// Duration of `update_pipeline_stages` in `save_blocks`
     save_blocks_update_pipeline_stages: Histogram,
+    /// Number of blocks per `save_blocks` call
+    save_blocks_block_count: Histogram,
+    /// Duration of MDBX commit in `save_blocks`
+    save_blocks_commit_mdbx: Histogram,
+    /// Duration of static file commit in `save_blocks`
+    save_blocks_commit_sf: Histogram,
+    /// Duration of `RocksDB` commit in `save_blocks`
+    save_blocks_commit_rocksdb: Histogram,
+}
+
+/// Timings collected during a `save_blocks` call.
+#[derive(Debug, Default)]
+pub(crate) struct SaveBlocksTimings {
+    pub total: Duration,
+    pub mdbx: Duration,
+    pub sf: Duration,
+    pub rocksdb: Duration,
+    pub insert_block: Duration,
+    pub write_state: Duration,
+    pub write_hashed_state: Duration,
+    pub write_trie_changesets: Duration,
+    pub write_trie_updates: Duration,
+    pub update_history_indices: Duration,
+    pub update_pipeline_stages: Duration,
+    pub block_count: u64,
+}
+
+/// Timings collected during a `commit` call.
+#[derive(Debug, Default)]
+pub(crate) struct CommitTimings {
+    pub mdbx: Duration,
+    pub sf: Duration,
+    pub rocksdb: Duration,
 }
 
 impl DatabaseProviderMetrics {
@@ -104,25 +135,33 @@ impl DatabaseProviderMetrics {
             Action::InsertHeaderNumbers => self.insert_header_numbers.record(duration),
             Action::InsertBlockBodyIndices => self.insert_block_body_indices.record(duration),
             Action::InsertTransactionBlocks => self.insert_tx_blocks.record(duration),
-            Action::GetNextTxNum => self.get_next_tx_num.record(duration),
             Action::InsertTransactionSenders => self.insert_transaction_senders.record(duration),
             Action::InsertTransactionHashNumbers => {
                 self.insert_transaction_hash_numbers.record(duration)
             }
-            Action::SaveBlocksInsertBlock => self.save_blocks_insert_block.record(duration),
-            Action::SaveBlocksWriteState => self.save_blocks_write_state.record(duration),
-            Action::SaveBlocksWriteHashedState => {
-                self.save_blocks_write_hashed_state.record(duration)
-            }
-            Action::SaveBlocksWriteTrieUpdates => {
-                self.save_blocks_write_trie_updates.record(duration)
-            }
-            Action::SaveBlocksUpdateHistoryIndices => {
-                self.save_blocks_update_history_indices.record(duration)
-            }
-            Action::SaveBlocksUpdatePipelineStages => {
-                self.save_blocks_update_pipeline_stages.record(duration)
-            }
         }
+    }
+
+    /// Records all `save_blocks` timings.
+    pub(crate) fn record_save_blocks(&self, timings: &SaveBlocksTimings) {
+        self.save_blocks_total.record(timings.total);
+        self.save_blocks_mdbx.record(timings.mdbx);
+        self.save_blocks_sf.record(timings.sf);
+        self.save_blocks_rocksdb.record(timings.rocksdb);
+        self.save_blocks_insert_block.record(timings.insert_block);
+        self.save_blocks_write_state.record(timings.write_state);
+        self.save_blocks_write_hashed_state.record(timings.write_hashed_state);
+        self.save_blocks_write_trie_changesets.record(timings.write_trie_changesets);
+        self.save_blocks_write_trie_updates.record(timings.write_trie_updates);
+        self.save_blocks_update_history_indices.record(timings.update_history_indices);
+        self.save_blocks_update_pipeline_stages.record(timings.update_pipeline_stages);
+        self.save_blocks_block_count.record(timings.block_count as f64);
+    }
+
+    /// Records all commit timings.
+    pub(crate) fn record_commit(&self, timings: &CommitTimings) {
+        self.save_blocks_commit_mdbx.record(timings.mdbx);
+        self.save_blocks_commit_sf.record(timings.sf);
+        self.save_blocks_commit_rocksdb.record(timings.rocksdb);
     }
 }
