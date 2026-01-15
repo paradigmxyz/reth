@@ -155,7 +155,7 @@ where
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {
-        let mut evm_env = EvmEnv::for_eth_block(
+        let evm_env = EvmEnv::for_eth_block(
             header,
             self.chain_spec(),
             self.chain_spec().chain().id(),
@@ -163,13 +163,8 @@ where
         );
 
         let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(header.timestamp);
-        evm_env.cfg_env.limit_contract_code_size = Some(evm_limits.max_code_size);
-        evm_env.cfg_env.limit_contract_initcode_size = Some(evm_limits.max_initcode_size);
-        if let Some(cap) = evm_limits.tx_gas_limit_cap {
-            evm_env.cfg_env.tx_gas_limit_cap = Some(cap);
-        }
 
-        Ok(evm_env)
+        Ok(evm_env.with_limits(evm_limits))
     }
 
     fn next_evm_env(
@@ -177,7 +172,7 @@ where
         parent: &Header,
         attributes: &NextBlockEnvAttributes,
     ) -> Result<EvmEnv, Self::Error> {
-        let mut evm_env = EvmEnv::for_eth_next_block(
+        let evm_env = EvmEnv::for_eth_next_block(
             parent,
             NextEvmEnvAttributes {
                 timestamp: attributes.timestamp,
@@ -192,13 +187,8 @@ where
         );
 
         let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(attributes.timestamp);
-        evm_env.cfg_env.limit_contract_code_size = Some(evm_limits.max_code_size);
-        evm_env.cfg_env.limit_contract_initcode_size = Some(evm_limits.max_initcode_size);
-        if let Some(cap) = evm_limits.tx_gas_limit_cap {
-            evm_env.cfg_env.tx_gas_limit_cap = Some(cap);
-        }
 
-        Ok(evm_env)
+        Ok(evm_env.with_limits(evm_limits))
     }
 
     fn context_for_block<'a>(
@@ -264,9 +254,6 @@ where
         }
 
         let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(timestamp);
-        cfg_env.limit_contract_code_size = Some(evm_limits.max_code_size);
-        cfg_env.limit_contract_initcode_size = Some(evm_limits.max_initcode_size);
-        cfg_env.tx_gas_limit_cap = evm_limits.tx_gas_limit_cap;
 
         // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
         // blobparams
@@ -291,7 +278,7 @@ where
             blob_excess_gas_and_price,
         };
 
-        Ok(EvmEnv { cfg_env, block_env })
+        Ok(EvmEnv { cfg_env, block_env }.with_limits(evm_limits))
     }
 
     fn context_for_payload<'a>(

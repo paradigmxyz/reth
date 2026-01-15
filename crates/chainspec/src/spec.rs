@@ -1,5 +1,5 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
-use alloy_evm::eth::spec::EthExecutorSpec;
+use alloy_evm::{eth::spec::EthExecutorSpec, EvmLimitParams};
 
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
@@ -391,40 +391,6 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 /// activation order. This is used to specify dynamic EIP-1559 parameters for chains like Optimism.
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
-
-/// Parameters for EVM execution limits.
-///
-/// These parameters control configurable limits in the EVM that can be
-/// overridden from their spec defaults (EIP-170, EIP-3860, EIP-7825).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EvmLimitParams {
-    /// Maximum bytecode size for deployed contracts.
-    /// EIP-170 default: 24576 bytes (24KB)
-    pub max_code_size: usize,
-    /// Maximum initcode size for CREATE transactions.
-    /// EIP-3860 default: 49152 bytes (48KB, 2x `max_code_size`)
-    pub max_initcode_size: usize,
-    /// Transaction gas limit cap override.
-    /// If `None`, revm defaults to 2^24 post-Osaka (EIP-7825), no limit pre-Osaka.
-    pub tx_gas_limit_cap: Option<u64>,
-}
-
-impl Default for EvmLimitParams {
-    fn default() -> Self {
-        Self::ethereum()
-    }
-}
-
-impl EvmLimitParams {
-    /// Returns the Ethereum default EVM limit params.
-    pub const fn ethereum() -> Self {
-        Self {
-            max_code_size: revm_primitives::eip170::MAX_CODE_SIZE,
-            max_initcode_size: revm_primitives::eip3860::MAX_INITCODE_SIZE,
-            tx_gas_limit_cap: None,
-        }
-    }
-}
 
 /// Enum for constant or fork-dependent EVM limit parameters.
 #[derive(Clone, Debug, PartialEq, Eq)]

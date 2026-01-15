@@ -747,7 +747,10 @@ vergen-git2 = "1.0.5"
 # networking
 ipnet = "2.11"
 
-# [patch.crates-io]
+[patch.crates-io]
+alloy-evm = { path = "/Users/rezmah/Code/evm/crates/evm" }
+alloy-op-evm = { path = "/Users/rezmah/Code/evm/crates/op-evm" }
+
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
