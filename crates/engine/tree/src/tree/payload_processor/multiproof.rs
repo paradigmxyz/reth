@@ -366,6 +366,42 @@ impl VersionedMultiProofTargets {
     }
 }
 
+/// Returns v2 proof targets from the given EVM state update.
+///
+/// This generates account-level v2 targets from touched accounts.
+/// For state update targets, `min_len` is set to 0 to request full proofs.
+#[allow(dead_code)]
+pub(crate) fn evm_state_to_v2_targets(update: &EvmState) -> Vec<reth_trie::proof_v2::Target> {
+    let mut targets = Vec::with_capacity(update.len());
+    for (address, account) in update {
+        if account.is_touched() && !account.is_selfdestructed() {
+            targets.push(reth_trie::proof_v2::Target::new(keccak256(address)));
+        }
+    }
+    targets
+}
+
+/// Returns v2 storage proof targets for a specific account from the EVM state.
+///
+/// For state update targets, `min_len` is set to 0 to request full proofs.
+#[allow(dead_code)]
+pub(crate) fn evm_state_to_v2_storage_targets(
+    update: &EvmState,
+    address: alloy_primitives::Address,
+) -> Vec<reth_trie::proof_v2::Target> {
+    let Some(account) = update.get(&address) else {
+        return Vec::new();
+    };
+
+    let mut targets = Vec::with_capacity(account.storage.len());
+    for (key, slot) in &account.storage {
+        if slot.is_changed() {
+            targets.push(reth_trie::proof_v2::Target::new(keccak256(B256::from(*key))));
+        }
+    }
+    targets
+}
+
 /// Input parameters for dispatching a multiproof calculation.
 #[derive(Debug)]
 struct MultiproofInput {
