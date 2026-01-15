@@ -17,21 +17,26 @@ workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
 reth-engine-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-fs-util.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-primitives-traits.workspace = true
+reth-rpc-api.workspace = true
+
 reth-tracing.workspace = true
+reth-chainspec.workspace = true
 
 # alloy
 alloy-eips.workspace = true
 alloy-json-rpc.workspace = true
+alloy-consensus.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-provider = { workspace = true, features = ["engine-api", "pubsub", "reqwest-rustls-tls"], default-features = false }
 alloy-pubsub.workspace = true
 alloy-rpc-client = { workspace = true, features = ["pubsub"] }
-alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-engine = { workspace = true, features = ["kzg"] }
 alloy-transport-http.workspace = true
 alloy-transport-ipc.workspace = true
 alloy-transport-ws.workspace = true
