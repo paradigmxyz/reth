@@ -160,12 +160,8 @@ where
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnv<OpSpecId>, Self::Error> {
-        let evm_env =
-            EvmEnv::for_op_block(header, self.chain_spec(), self.chain_spec().chain().id());
-
-        let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(header.timestamp());
-
-        Ok(evm_env.with_limits(evm_limits))
+        Ok(EvmEnv::for_op_block(header, self.chain_spec(), self.chain_spec().chain().id())
+            .with_limits(self.chain_spec().evm_limit_params_at_timestamp(header.timestamp())))
     }
 
     fn next_evm_env(
@@ -173,7 +169,7 @@ where
         parent: &Header,
         attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnv<OpSpecId>, Self::Error> {
-        let evm_env = EvmEnv::for_op_next_block(
+        Ok(EvmEnv::for_op_next_block(
             parent,
             NextEvmEnvAttributes {
                 timestamp: attributes.timestamp,
@@ -184,11 +180,8 @@ where
             self.chain_spec().next_block_base_fee(parent, attributes.timestamp).unwrap_or_default(),
             self.chain_spec(),
             self.chain_spec().chain().id(),
-        );
-
-        let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(attributes.timestamp);
-
-        Ok(evm_env.with_limits(evm_limits))
+        )
+        .with_limits(self.chain_spec().evm_limit_params_at_timestamp(attributes.timestamp)))
     }
 
     fn context_for_block(
@@ -241,8 +234,6 @@ where
 
         let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
 
-        let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(timestamp);
-
         let blob_excess_gas_and_price = spec
             .into_eth_spec()
             .is_enabled_in(SpecId::CANCUN)
@@ -265,7 +256,8 @@ where
             blob_excess_gas_and_price,
         };
 
-        Ok(EvmEnv { cfg_env, block_env }.with_limits(evm_limits))
+        Ok(EvmEnv { cfg_env, block_env }
+            .with_limits(self.chain_spec().evm_limit_params_at_timestamp(timestamp)))
     }
 
     fn context_for_payload<'a>(

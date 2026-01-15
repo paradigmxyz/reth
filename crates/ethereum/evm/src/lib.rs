@@ -155,16 +155,13 @@ where
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {
-        let evm_env = EvmEnv::for_eth_block(
+        Ok(EvmEnv::for_eth_block(
             header,
             self.chain_spec(),
             self.chain_spec().chain().id(),
             self.chain_spec().blob_params_at_timestamp(header.timestamp),
-        );
-
-        let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(header.timestamp);
-
-        Ok(evm_env.with_limits(evm_limits))
+        )
+        .with_limits(self.chain_spec().evm_limit_params_at_timestamp(header.timestamp)))
     }
 
     fn next_evm_env(
@@ -172,7 +169,7 @@ where
         parent: &Header,
         attributes: &NextBlockEnvAttributes,
     ) -> Result<EvmEnv, Self::Error> {
-        let evm_env = EvmEnv::for_eth_next_block(
+        Ok(EvmEnv::for_eth_next_block(
             parent,
             NextEvmEnvAttributes {
                 timestamp: attributes.timestamp,
@@ -184,11 +181,8 @@ where
             self.chain_spec(),
             self.chain_spec().chain().id(),
             self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
-        );
-
-        let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(attributes.timestamp);
-
-        Ok(evm_env.with_limits(evm_limits))
+        )
+        .with_limits(self.chain_spec().evm_limit_params_at_timestamp(attributes.timestamp)))
     }
 
     fn context_for_block<'a>(
@@ -253,8 +247,6 @@ where
             cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
         }
 
-        let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(timestamp);
-
         // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
         // blobparams
         let blob_excess_gas_and_price =
@@ -278,7 +270,8 @@ where
             blob_excess_gas_and_price,
         };
 
-        Ok(EvmEnv { cfg_env, block_env }.with_limits(evm_limits))
+        Ok(EvmEnv { cfg_env, block_env }
+            .with_limits(self.chain_spec().evm_limit_params_at_timestamp(timestamp)))
     }
 
     fn context_for_payload<'a>(
