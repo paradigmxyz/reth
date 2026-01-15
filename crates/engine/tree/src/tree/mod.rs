@@ -1377,19 +1377,6 @@ where
         debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
 
-        // Evict changesets for blocks below the persistence watermark
-        // Keep a 64-block retention window for reorg support
-        let eviction_threshold = last_persisted_block_number.saturating_sub(64);
-
-        debug!(
-            target: "engine::tree",
-            last_persisted = last_persisted_block_number,
-            eviction_threshold,
-            "Evicting changesets below threshold"
-        );
-
-        self.changeset_cache.evict(eviction_threshold);
-
         self.on_new_persisted_block()?;
         Ok(())
     }

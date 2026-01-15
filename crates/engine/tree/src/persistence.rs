@@ -6,11 +6,12 @@ use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
-    DBProvider, DatabaseProviderFactory, ProviderFactory,
+    providers::ProviderNodeTypes, BlockHashReader, ChainStateBlockWriter, DBProvider,
+    DatabaseProviderFactory, ProviderFactory,
 };
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
+use reth_trie_db::changesets::ChangesetCacheHandle;
 use std::{
     sync::mpsc::{Receiver, SendError, Sender},
     time::Instant,
@@ -36,6 +37,8 @@ where
     incoming: Receiver<PersistenceAction<N::Primitives>>,
     /// The pruner
     pruner: PrunerWithFactory<ProviderFactory<N>>,
+    /// Changeset cache for trie reverts
+    changesets_cache: ChangesetCacheHandle,
     /// metrics
     metrics: PersistenceMetrics,
     /// Sender for sync metrics - we only submit sync metrics for persisted blocks
@@ -51,9 +54,17 @@ where
         provider: ProviderFactory<N>,
         incoming: Receiver<PersistenceAction<N::Primitives>>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
+        changesets_cache: ChangesetCacheHandle,
         sync_metrics_tx: MetricEventsSender,
     ) -> Self {
-        Self { provider, incoming, pruner, metrics: PersistenceMetrics::default(), sync_metrics_tx }
+        Self {
+            provider,
+            incoming,
+            pruner,
+            changesets_cache,
+            metrics: PersistenceMetrics::default(),
+            sync_metrics_tx,
+        }
     }
 
     /// Prunes block data before the given block number according to the configured prune
@@ -129,7 +140,8 @@ where
         let provider_rw = self.provider.database_provider_rw()?;
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
-        provider_rw.remove_block_and_execution_above(new_tip_num)?;
+        provider_rw
+            .remove_block_and_execution_above_with_cache(&self.changesets_cache, new_tip_num)?;
         provider_rw.commit()?;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
@@ -159,6 +171,20 @@ where
 
         self.metrics.save_blocks_block_count.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
+
+        // Evict changesets for blocks below the persistence watermark
+        // Keep a 64-block retention window for reorg support
+        if let Some(BlockNumHash { number: last_persisted_block_number, .. }) = last_block {
+            let eviction_threshold = last_persisted_block_number.saturating_sub(64);
+            debug!(
+                target: "engine::persistence",
+                last_persisted = last_persisted_block_number,
+                eviction_threshold,
+                "Evicting changesets below threshold"
+            );
+            self.changesets_cache.evict(eviction_threshold);
+        }
+
         Ok(last_block)
     }
 }
@@ -215,6 +241,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn spawn_service<N>(
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
+        changesets_cache: ChangesetCacheHandle,
         sync_metrics_tx: MetricEventsSender,
     ) -> PersistenceHandle<N::Primitives>
     where
@@ -227,8 +254,13 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         let persistence_handle = PersistenceHandle::new(db_service_tx);
 
         // spawn the persistence service
-        let db_service =
-            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
+        let db_service = PersistenceService::new(
+            provider_factory,
+            db_service_rx,
+            pruner,
+            changesets_cache,
+            sync_metrics_tx,
+        );
         std::thread::Builder::new()
             .name("Persistence Service".to_string())
             .spawn(|| {
@@ -316,7 +348,13 @@ mod tests {
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
+        let changesets_cache = ChangesetCacheHandle::new();
+        PersistenceHandle::<EthPrimitives>::spawn_service(
+            provider,
+            pruner,
+            changesets_cache,
+            sync_metrics_tx,
+        )
     }
 
     #[test]

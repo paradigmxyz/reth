@@ -74,7 +74,8 @@ use reth_trie::{
     HashedPostStateSorted, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
 };
 use reth_trie_db::{
-    DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
+    changesets::ChangesetCacheHandle, DatabaseAccountTrieCursor, DatabaseStorageTrieCursor,
+    DatabaseTrieCursorFactory,
 };
 use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
@@ -456,7 +457,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ///
     /// This includes calculating the resulted state root and comparing it with the parent block
     /// state root.
-    pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
+    pub fn unwind_trie_state_from(
+        &self,
+        changesets_cache: &ChangesetCacheHandle,
+        from: BlockNumber,
+    ) -> ProviderResult<()> {
         let changed_accounts = self
             .tx
             .cursor_read::<tables::AccountChangeSets>()?
@@ -483,7 +488,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         self.unwind_storage_history_indices(changed_storages.iter().copied())?;
 
         // Unwind accounts/storages trie tables using the revert.
-        let trie_revert = self.trie_reverts(from)?;
+        // Get the database tip block number
+        let db_tip_block = self
+            .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
+            .as_ref()
+            .map(|chk| chk.block_number)
+            .ok_or_else(|| ProviderError::InsufficientChangesets {
+                requested: from,
+                available: 0..=0,
+            })?;
+
+        let trie_revert = changesets_cache.get_or_compute_range(self, from..=db_tip_block)?;
         self.write_trie_updates_sorted(&trie_revert)?;
 
         // Clear trie changesets which have been unwound.
@@ -2921,6 +2936,60 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     }
 }
 
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> DatabaseProvider<TX, N> {
+    /// Take all of the blocks above the provided number and their execution result, using the
+    /// provided changesets cache for trie unwinding.
+    ///
+    /// The passed block number will stay in the database.
+    pub fn take_block_and_execution_above_with_cache(
+        &self,
+        changesets_cache: &ChangesetCacheHandle,
+        block: BlockNumber,
+    ) -> ProviderResult<Chain<N::Primitives>> {
+        let range = block + 1..=self.last_block_number()?;
+
+        self.unwind_trie_state_from(changesets_cache, block + 1)?;
+
+        // get execution res
+        let execution_state = self.take_state_above(block)?;
+
+        let blocks = self.recovered_block_range(range)?;
+
+        // remove block bodies it is needed for both get block range and get block execution results
+        // that is why it is deleted afterwards.
+        self.remove_blocks_above(block)?;
+
+        // Update pipeline progress
+        self.update_pipeline_stages(block, true)?;
+
+        Ok(Chain::new(blocks, execution_state, BTreeMap::new(), BTreeMap::new()))
+    }
+
+    /// Remove all of the blocks above the provided number and their execution result, using the
+    /// provided changesets cache for trie unwinding.
+    ///
+    /// The passed block number will stay in the database.
+    pub fn remove_block_and_execution_above_with_cache(
+        &self,
+        changesets_cache: &ChangesetCacheHandle,
+        block: BlockNumber,
+    ) -> ProviderResult<()> {
+        self.unwind_trie_state_from(changesets_cache, block + 1)?;
+
+        // remove execution res
+        self.remove_state_above(block)?;
+
+        // remove block bodies it is needed for both get block range and get block execution results
+        // that is why it is deleted afterwards.
+        self.remove_blocks_above(block)?;
+
+        // Update pipeline progress
+        self.update_pipeline_stages(block, true)?;
+
+        Ok(())
+    }
+}
+
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecutionWriter
     for DatabaseProvider<TX, N>
 {
@@ -2928,9 +2997,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
         &self,
         block: BlockNumber,
     ) -> ProviderResult<Chain<Self::Primitives>> {
+        // Note: This method doesn't unwind trie state - use
+        // take_block_and_execution_above_with_cache if you need trie unwinding
         let range = block + 1..=self.last_block_number()?;
-
-        self.unwind_trie_state_from(block + 1)?;
 
         // get execution res
         let execution_state = self.take_state_above(block)?;
@@ -2948,7 +3017,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
     }
 
     fn remove_block_and_execution_above(&self, block: BlockNumber) -> ProviderResult<()> {
-        self.unwind_trie_state_from(block + 1)?;
+        // Note: This method doesn't unwind trie state - use
+        // remove_block_and_execution_above_with_cache if you need trie unwinding
 
         // remove execution res
         self.remove_state_above(block)?;
