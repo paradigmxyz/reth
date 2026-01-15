@@ -497,9 +497,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
-            // Collect hashed state references for batched k-way merge write
+            // Collect state for batched k-way merge writes
             let mut hashed_states: Vec<Arc<HashedPostStateSorted>> =
                 Vec::with_capacity(blocks.len());
+            let mut plain_state_changesets: Vec<StateChangeset> = Vec::with_capacity(blocks.len());
 
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
@@ -512,19 +513,29 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     let execution_output = block.execution_outcome();
                     let block_number = recovered_block.number();
 
-                    // Write state and changesets to the database.
-                    // Must be written after blocks because of the receipt lookup.
-                    // Skip receipts/account changesets if they're being written to static files.
+                    let state_config = StateWriteConfig {
+                        write_receipts: !sf_ctx.write_receipts,
+                        write_account_changesets: !sf_ctx.write_account_changesets,
+                    };
+
+                    // Extract plain state and reverts from execution outcome
+                    let (plain_state, reverts) =
+                        execution_output.bundle.to_plain_state_and_reverts(OriginalValuesKnown::No);
+
+                    // Write reverts per-block (keyed by block number)
                     let start = Instant::now();
-                    self.write_state(
-                        execution_output,
-                        OriginalValuesKnown::No,
-                        StateWriteConfig {
-                            write_receipts: !sf_ctx.write_receipts,
-                            write_account_changesets: !sf_ctx.write_account_changesets,
-                        },
+                    self.write_state_reverts(
+                        reverts,
+                        execution_output.first_block(),
+                        state_config,
                     )?;
+
+                    // Write receipts per-block
+                    self.write_receipts(execution_output, state_config)?;
                     timings.write_state += start.elapsed();
+
+                    // Collect plain state for batched write
+                    plain_state_changesets.push(plain_state);
 
                     let trie_data = block.trie_data();
 
@@ -541,6 +552,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     // Collect hashed state reference for batched write (no clone)
                     hashed_states.push(Arc::clone(&trie_data.hashed_state));
                 }
+            }
+
+            // Write batched plain state using k-way merge (sorted keys, deduped, sequential I/O)
+            if !plain_state_changesets.is_empty() {
+                let start = Instant::now();
+                self.write_state_changes_merged(plain_state_changesets)?;
+                timings.write_state += start.elapsed();
             }
 
             // Write batched hashed state using k-way merge (sorted keys, deduped, sequential I/O)
@@ -967,6 +985,234 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                         hashed_storage_cursor.upsert(current_addr, &storage_entry)?;
                     }
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Writes plain state changes from multiple blocks using sorted merge for sequential I/O.
+    ///
+    /// This batches writes across blocks to improve I/O locality by:
+    /// 1. Flattening all account/storage/bytecode updates with block indices
+    /// 2. Sorting by key (address/hash/slot)
+    /// 3. Deduplicating, keeping only the latest block's value
+    /// 4. Writing in sorted order for sequential I/O
+    pub fn write_state_changes_merged(
+        &self,
+        changesets: Vec<StateChangeset>,
+    ) -> ProviderResult<()> {
+        if changesets.is_empty() {
+            return Ok(());
+        }
+
+        // === Write accounts ===
+        // Flatten all accounts with block index, sort, dedupe (latest wins)
+        {
+            let mut all_accounts: Vec<(Address, usize, Option<Account>)> = Vec::new();
+            for (block_idx, cs) in changesets.iter().enumerate() {
+                for (addr, info) in &cs.accounts {
+                    all_accounts.push((*addr, block_idx, info.clone().map(Into::into)));
+                }
+            }
+            // Sort by address, then by block_idx descending (so latest block comes first)
+            all_accounts.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+
+            let mut accounts_cursor = self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
+            let mut last_addr: Option<Address> = None;
+
+            for (addr, _block_idx, account) in all_accounts {
+                // Skip duplicates (we already processed this address from a later block)
+                if last_addr == Some(addr) {
+                    continue;
+                }
+                last_addr = Some(addr);
+
+                if let Some(account) = account {
+                    accounts_cursor.upsert(addr, &account)?;
+                } else if accounts_cursor.seek_exact(addr)?.is_some() {
+                    accounts_cursor.delete_current()?;
+                }
+            }
+        }
+
+        // === Write bytecodes ===
+        {
+            let mut all_contracts: Vec<(B256, usize, _)> = Vec::new();
+            for (block_idx, cs) in changesets.iter().enumerate() {
+                for (hash, bytecode) in &cs.contracts {
+                    all_contracts.push((*hash, block_idx, bytecode.clone()));
+                }
+            }
+            all_contracts.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+
+            let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
+            let mut last_hash: Option<B256> = None;
+
+            for (hash, _block_idx, bytecode) in all_contracts {
+                if last_hash == Some(hash) {
+                    continue;
+                }
+                last_hash = Some(hash);
+                bytecodes_cursor.upsert(hash, &Bytecode(bytecode))?;
+            }
+        }
+
+        // === Write storage ===
+        // Track wipe operations per address (address -> latest block that wiped)
+        // Then flatten all slots, filter by wipe, sort, dedupe, write
+        {
+            // First pass: find the latest wipe block for each address
+            let mut wipe_blocks: HashMap<Address, usize> = HashMap::default();
+            for (block_idx, cs) in changesets.iter().enumerate() {
+                for psc in &cs.storage {
+                    if psc.wipe_storage {
+                        wipe_blocks
+                            .entry(psc.address)
+                            .and_modify(|idx| *idx = (*idx).max(block_idx))
+                            .or_insert(block_idx);
+                    }
+                }
+            }
+
+            // Flatten all storage slots with (address, slot, block_idx, value)
+            let mut all_slots: Vec<(Address, B256, usize, U256)> = Vec::new();
+            for (block_idx, cs) in changesets.iter().enumerate() {
+                for psc in &cs.storage {
+                    // Skip slots from blocks before the wipe
+                    if let Some(&wipe_idx) = wipe_blocks.get(&psc.address) {
+                        if block_idx < wipe_idx {
+                            continue;
+                        }
+                    }
+                    for (slot, value) in &psc.storage {
+                        all_slots.push((psc.address, B256::from(*slot), block_idx, *value));
+                    }
+                }
+            }
+
+            // Sort by (address, slot), then block_idx descending
+            all_slots.sort_unstable_by(|a, b| {
+                a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)).then_with(|| b.2.cmp(&a.2))
+            });
+
+            let mut storages_cursor =
+                self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
+
+            // Process wipes first (grouped by address)
+            let mut wiped_addresses: Vec<Address> = wipe_blocks.keys().copied().collect();
+            wiped_addresses.sort_unstable();
+            for addr in wiped_addresses {
+                if storages_cursor.seek_exact(addr)?.is_some() {
+                    storages_cursor.delete_current_duplicates()?;
+                }
+            }
+
+            // Write slots, skipping duplicates
+            let mut last_key: Option<(Address, B256)> = None;
+            for (addr, slot, _block_idx, value) in all_slots {
+                let key = (addr, slot);
+                if last_key == Some(key) {
+                    continue;
+                }
+                last_key = Some(key);
+
+                let storage_entry = StorageEntry { key: slot, value };
+
+                if let Some(db_entry) = storages_cursor.seek_by_key_subkey(addr, slot)? {
+                    if db_entry.key == slot {
+                        storages_cursor.delete_current()?;
+                    }
+                }
+
+                if !value.is_zero() {
+                    storages_cursor.upsert(addr, &storage_entry)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Write receipts for a single block's execution outcome.
+    ///
+    /// This is used by `save_blocks` to write receipts per-block while batching other state writes.
+    pub fn write_receipts(
+        &self,
+        execution_outcome: &ExecutionOutcome<ReceiptTy<N>>,
+        config: StateWriteConfig,
+    ) -> ProviderResult<()> {
+        if !config.write_receipts {
+            return Ok(());
+        }
+
+        let first_block = execution_outcome.first_block();
+        let block_count = execution_outcome.len() as u64;
+        let last_block = execution_outcome.last_block();
+        let block_range = first_block..=last_block;
+
+        let tip = self.last_block_number()?.max(last_block);
+
+        // Fetch the first transaction number for each block in the range
+        let block_indices: Vec<_> = self
+            .block_body_indices_range(block_range)?
+            .into_iter()
+            .map(|b| b.first_tx_num)
+            .collect();
+
+        // Ensure all expected blocks are present.
+        if block_indices.len() < block_count as usize {
+            let missing_blocks = block_count - block_indices.len() as u64;
+            return Err(ProviderError::BlockBodyIndicesNotFound(
+                last_block.saturating_sub(missing_blocks - 1),
+            ));
+        }
+
+        let mut receipts_writer = EitherWriter::new_receipts(self, first_block)?;
+
+        let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
+        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
+
+        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database() ||
+            self.static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_none()) &&
+            PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
+
+        let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
+        for (_, addresses) in contract_log_pruner.range(..first_block) {
+            allowed_addresses.extend(addresses.iter().copied());
+        }
+
+        for (idx, (receipts, first_tx_index)) in
+            execution_outcome.receipts.iter().zip(block_indices).enumerate()
+        {
+            let block_number = first_block + idx as u64;
+
+            receipts_writer.increment_block(block_number)?;
+
+            if prunable_receipts &&
+                self.prune_modes
+                    .receipts
+                    .is_some_and(|mode| mode.should_prune(block_number, tip))
+            {
+                continue;
+            }
+
+            if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
+                allowed_addresses.extend(new_addresses.iter().copied());
+            }
+
+            for (idx, receipt) in receipts.iter().enumerate() {
+                let receipt_idx = first_tx_index + idx as u64;
+                if prunable_receipts &&
+                    has_contract_log_filter &&
+                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                {
+                    continue;
+                }
+
+                receipts_writer.append_receipt(receipt_idx, receipt)?;
             }
         }
 
