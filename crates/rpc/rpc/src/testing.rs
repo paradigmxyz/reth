@@ -1,6 +1,18 @@
 //! Implementation of the `testing` namespace.
 //!
 //! This exposes `testing_buildBlockV1`, intended for non-production/debug use.
+//!
+//! # Enabling the testing namespace
+//!
+//! The `testing_` namespace is disabled by default for security reasons.
+//! To enable it, add `testing` to the `--http.api` flag when starting the node:
+//!
+//! ```sh
+//! reth node --http --http.api eth,testing
+//! ```
+//!
+//! **Warning:** This namespace allows building arbitrary blocks. Never expose it
+//! on public-facing RPC endpoints without proper authentication.
 
 use alloy_consensus::{Header, Transaction};
 use alloy_evm::Evm;
@@ -94,8 +106,8 @@ where
 
                 let mut invalid_senders: HashSet<Address, DefaultHashBuilder> = HashSet::default();
 
-                for tx in request.transactions {
-                    let tx: Recovered<TxTy<Evm::Primitives>> = recover_raw_transaction(&tx)?;
+                for (idx, tx) in request.transactions.iter().enumerate() {
+                    let tx: Recovered<TxTy<Evm::Primitives>> = recover_raw_transaction(tx)?;
                     let sender = tx.signer();
 
                     if skip_invalid_transactions && invalid_senders.contains(&sender) {
@@ -109,6 +121,7 @@ where
                             if skip_invalid_transactions {
                                 debug!(
                                     target: "rpc::testing",
+                                    tx_idx = idx,
                                     ?sender,
                                     error = ?err,
                                     "Skipping invalid transaction"
@@ -116,6 +129,13 @@ where
                                 invalid_senders.insert(sender);
                                 continue;
                             }
+                            debug!(
+                                target: "rpc::testing",
+                                tx_idx = idx,
+                                ?sender,
+                                error = ?err,
+                                "Transaction execution failed"
+                            );
                             return Err(Eth::Error::from_eth_err(err));
                         }
                     };
