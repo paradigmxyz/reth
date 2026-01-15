@@ -10,9 +10,7 @@ use std::{
 #[cfg(all(unix, feature = "rocksdb"))]
 use crate::providers::rocksdb::RocksDBBatch;
 use crate::{
-    providers::{
-        needs_prev_shard_check, HistoryInfo, StaticFileProvider, StaticFileProviderRWRefMut,
-    },
+    providers::{history_info, HistoryInfo, StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
 };
 use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber};
@@ -27,7 +25,6 @@ use reth_db::{
 use reth_db_api::{
     cursor::DbCursorRW,
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
-    table::Table,
     tables,
     tables::BlockNumberList,
 };
@@ -38,58 +35,6 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
-
-/// Generic history lookup for sharded MDBX history tables.
-///
-/// Seeks to the shard containing `block_number`, verifies the key via `key_matches`,
-/// and uses `prev_key_matches` to detect if a previous shard exists for the same key.
-fn history_info_mdbx<T, C, Matches, PrevMatches>(
-    cursor: &mut C,
-    seek_key: T::Key,
-    block_number: BlockNumber,
-    lowest_available_block_number: Option<BlockNumber>,
-    key_matches: Matches,
-    prev_key_matches: PrevMatches,
-) -> ProviderResult<HistoryInfo>
-where
-    T: Table<Value = BlockNumberList>,
-    C: DbCursorRO<T>,
-    Matches: FnOnce(&T::Key) -> bool,
-    PrevMatches: Fn(&T::Key) -> bool,
-{
-    // Seek to the smallest key >= seek_key.
-    if let Some(chunk) = cursor.seek(seek_key)?.filter(|(k, _)| key_matches(k)).map(|x| x.1) {
-        // Get the rank of the first entry before or equal to our block.
-        let mut rank = chunk.rank(block_number);
-
-        // Adjust the rank, so that we have the rank of the first entry strictly before our
-        // block (not equal to it).
-        if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
-            rank -= 1;
-        }
-
-        let found_block = chunk.select(rank);
-
-        // Lazy check for previous shard - only called when needed.
-        // If we can step to a previous shard for this same key, history already exists,
-        // so the target block is not before the first write.
-        let is_before_first_write = needs_prev_shard_check(rank, found_block, block_number) &&
-            cursor.prev()?.is_none_or(|(k, _)| !prev_key_matches(&k));
-
-        Ok(HistoryInfo::from_lookup(
-            found_block,
-            is_before_first_write,
-            lowest_available_block_number,
-        ))
-    } else if lowest_available_block_number.is_some() {
-        // The key may have been written, but due to pruning we may not have changesets
-        // and history, so we need to make a plain state lookup.
-        Ok(HistoryInfo::MaybeInPlainState)
-    } else {
-        // The key has not been written to at all.
-        Ok(HistoryInfo::NotYetWritten)
-    }
-}
 
 /// Type alias for [`EitherReader`] constructors.
 type EitherReaderTy<'a, P, T> =
@@ -787,13 +732,12 @@ where
         match self {
             Self::Database(cursor, _) => {
                 let key = StorageShardedKey::new(address, storage_key, block_number);
-                history_info_mdbx::<tables::StoragesHistory, _, _, _>(
+                history_info::<tables::StoragesHistory, _, _>(
                     cursor,
                     key,
                     block_number,
+                    |k| k.address == address && k.sharded_key.key == storage_key,
                     lowest_available_block_number,
-                    |k| k.address == address && k.sharded_key.key == storage_key,
-                    |k| k.address == address && k.sharded_key.key == storage_key,
                 )
             }
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
@@ -835,13 +779,12 @@ where
         match self {
             Self::Database(cursor, _) => {
                 let key = ShardedKey::new(address, block_number);
-                history_info_mdbx::<tables::AccountsHistory, _, _, _>(
+                history_info::<tables::AccountsHistory, _, _>(
                     cursor,
                     key,
                     block_number,
+                    |k| k.key == address,
                     lowest_available_block_number,
-                    |k| k.key == address,
-                    |k| k.key == address,
                 )
             }
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
