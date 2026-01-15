@@ -94,6 +94,39 @@ pub type RocksTxRefArg<'a> = &'a crate::providers::rocksdb::RocksTx<'a>;
 #[cfg(not(all(unix, feature = "rocksdb")))]
 pub type RocksTxRefArg<'a> = ();
 
+// ==================== Stage Helper Functions ====================
+//
+// These helpers provide a unified API for stages to work with RocksDB,
+// abstracting away feature gate differences.
+
+/// Registers a raw `RocksDB` batch with the provider for deferred commit.
+///
+/// This should be called after using [`EitherWriter::into_raw_rocksdb_batch`] to ensure
+/// the batch is committed atomically with MDBX and static file commits.
+///
+/// On non-`RocksDB` builds, this is a no-op.
+///
+/// # Example
+///
+/// ```ignore
+/// let raw_batch = writer.into_raw_rocksdb_batch();
+/// register_rocksdb_batch(&provider, raw_batch);
+/// provider.commit()?;
+/// ```
+#[cfg(all(unix, feature = "rocksdb"))]
+pub fn register_rocksdb_batch<P: crate::RocksDBProviderFactory>(
+    provider: &P,
+    batch: Option<RawRocksDBBatch>,
+) {
+    if let Some(b) = batch {
+        provider.set_pending_rocksdb_batch(b);
+    }
+}
+
+/// Stub for non-`RocksDB` builds.
+#[cfg(not(all(unix, feature = "rocksdb")))]
+pub fn register_rocksdb_batch<P>(_provider: &P, _batch: Option<RawRocksDBBatch>) {}
+
 /// Represents a destination for writing data, either to database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
 pub enum EitherWriter<'a, CURSOR, N> {
@@ -1035,10 +1068,8 @@ mod rocksdb_tests {
         writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();
         writer.put_transaction_hash_number(hash2, tx_num2, false).unwrap();
 
-        // Extract the batch and register with provider for commit
-        if let Some(batch) = writer.into_raw_rocksdb_batch() {
-            provider.set_pending_rocksdb_batch(batch);
-        }
+        // Extract the batch and register with provider for commit using the helper
+        register_rocksdb_batch(&provider, writer.into_raw_rocksdb_batch());
 
         // Commit via provider - this commits RocksDB batch too
         provider.commit().unwrap();
@@ -1073,10 +1104,8 @@ mod rocksdb_tests {
         let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
         writer.delete_transaction_hash_number(hash).unwrap();
 
-        // Extract the batch and commit via provider
-        if let Some(batch) = writer.into_raw_rocksdb_batch() {
-            provider.set_pending_rocksdb_batch(batch);
-        }
+        // Extract the batch and commit via provider using the helper
+        register_rocksdb_batch(&provider, writer.into_raw_rocksdb_batch());
         provider.commit().unwrap();
 
         // Verify deletion
@@ -1631,10 +1660,7 @@ mod rocksdb_tests {
         writer.put_transaction_hash_number(hash2, tx_num2, false).unwrap();
 
         // Extract the raw batch from the writer and register it with the provider
-        let raw_batch = writer.into_raw_rocksdb_batch();
-        if let Some(batch) = raw_batch {
-            provider.set_pending_rocksdb_batch(batch);
-        }
+        register_rocksdb_batch(&provider, writer.into_raw_rocksdb_batch());
 
         // Data should NOT be visible yet (batch not committed)
         let rocksdb = factory.rocksdb_provider();
