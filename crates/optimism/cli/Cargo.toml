@@ -75,6 +75,7 @@ reth-optimism-chainspec = { workspace = true, features = ["std", "superchain-con
 
 [features]
 default = []
+triedb = ["reth-cli-commands/triedb"]
 
 # Opentelemetry feature to activate tracing and logs export
 otlp = ["reth-tracing/otlp", "reth-node-core/otlp"]

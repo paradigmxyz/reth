@@ -20,7 +20,7 @@ ENV BUILD_PROFILE=$BUILD_PROFILE
 ARG RUSTFLAGS=""
 ENV RUSTFLAGS="$RUSTFLAGS"
 
-ARG FEATURES=""
+ARG FEATURES="triedb,metrics"
 ENV FEATURES=$FEATURES
 
 RUN cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --recipe-path recipe.json --manifest-path /app/crates/optimism/bin/Cargo.toml

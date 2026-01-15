@@ -6,6 +6,9 @@ use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+
+#[cfg(feature = "triedb")]
+use crate::providers::TrieDBProvider;
 use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
@@ -22,16 +25,33 @@ use reth_trie_db::{
 ///
 /// Wraps a [`DBProvider`] to get access to database.
 #[derive(Debug)]
-pub struct LatestStateProviderRef<'b, Provider>(&'b Provider);
+pub struct LatestStateProviderRef<'b, Provider> {
+    provider: &'b Provider,
+    #[cfg(feature = "triedb")]
+    triedb_provider: Option<&'b TrieDBProvider>,
+}
 
 impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
     /// Create new state provider
     pub const fn new(provider: &'b Provider) -> Self {
-        Self(provider)
+        Self {
+            provider,
+            #[cfg(feature = "triedb")]
+            triedb_provider: None,
+        }
+    }
+
+    /// Create new state provider with TrieDB support
+    #[cfg(feature = "triedb")]
+    pub const fn new_with_triedb(
+        provider: &'b Provider,
+        triedb_provider: &'b TrieDBProvider,
+    ) -> Self {
+        Self { provider, triedb_provider: Some(triedb_provider) }
     }
 
     fn tx(&self) -> &Provider::Tx {
-        self.0.tx_ref()
+        self.provider.tx_ref()
     }
 }
 
@@ -45,7 +65,7 @@ impl<Provider: DBProvider> AccountReader for LatestStateProviderRef<'_, Provider
 impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, Provider> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.0.block_hash(number)
+        self.provider.block_hash(number)
     }
 
     fn canonical_hashes_range(
@@ -53,7 +73,7 @@ impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, P
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.0.canonical_hashes_range(start, end)
+        self.provider.canonical_hashes_range(start, end)
     }
 }
 
@@ -81,6 +101,21 @@ impl<Provider: DBProvider> StateRootProvider for LatestStateProviderRef<'_, Prov
             self.tx(),
             TrieInputSorted::from_unsorted(input),
         )?)
+    }
+
+    #[cfg(feature = "triedb")]
+    fn state_root_with_updates_plain(
+        &self,
+        plain_state: reth_storage_api::PlainPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        // Use TrieDB if available, otherwise return error
+        if let Some(triedb_provider) = self.triedb_provider {
+            tracing::debug!(target: "reth_provider", "Using TrieDB for state root computation");
+            crate::providers::state_root_with_updates_triedb(triedb_provider, plain_state)
+        } else {
+            tracing::error!(target: "reth_provider", "TrieDB provider not available, returning UnsupportedProvider error");
+            Err(ProviderError::UnsupportedProvider)
+        }
     }
 }
 
@@ -178,18 +213,38 @@ impl<Provider: DBProvider + BlockHashReader> BytecodeReader
 
 /// State provider for the latest state.
 #[derive(Debug)]
-pub struct LatestStateProvider<Provider>(Provider);
+pub struct LatestStateProvider<Provider> {
+    provider: Provider,
+    #[cfg(feature = "triedb")]
+    triedb_provider: Option<TrieDBProvider>,
+}
 
 impl<Provider: DBProvider> LatestStateProvider<Provider> {
     /// Create new state provider
-    pub const fn new(db: Provider) -> Self {
-        Self(db)
+    pub const fn new(provider: Provider) -> Self {
+        Self {
+            provider,
+            #[cfg(feature = "triedb")]
+            triedb_provider: None,
+        }
+    }
+
+    /// Create new state provider with TrieDB support
+    #[cfg(feature = "triedb")]
+    pub fn new_with_triedb(provider: Provider, triedb_provider: TrieDBProvider) -> Self {
+        tracing::debug!(target: "reth_provider", "Creating LatestStateProvider with TrieDB support");
+        Self { provider, triedb_provider: Some(triedb_provider) }
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
-    const fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
-        LatestStateProviderRef::new(&self.0)
+    fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
+        #[cfg(feature = "triedb")]
+        if let Some(ref triedb) = self.triedb_provider {
+            return LatestStateProviderRef::new_with_triedb(&self.provider, triedb);
+        }
+
+        LatestStateProviderRef::new(&self.provider)
     }
 }
 

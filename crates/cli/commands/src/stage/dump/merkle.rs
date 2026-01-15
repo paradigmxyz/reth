@@ -12,7 +12,7 @@ use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
-    providers::{ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
+    providers::{ProviderNodeTypes, RocksDBProvider, StaticFileProvider, TrieDBProvider},
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{
@@ -63,6 +63,7 @@ where
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+                TrieDBProvider::builder(output_datadir.triedb()).build()?,
             )?,
             to,
             from,

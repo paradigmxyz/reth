@@ -32,3 +32,4 @@ std = [
     "alloy-consensus/std",
     "reth-optimism-primitives/std",
 ]
+triedb = ["reth-storage-api/triedb"]

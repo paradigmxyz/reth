@@ -42,6 +42,9 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
+
+    /// The Histogram for time taken to compute state root (seconds).
+    pub state_root_histogram: Histogram,
 }
 
 impl ExecutorMetrics {
