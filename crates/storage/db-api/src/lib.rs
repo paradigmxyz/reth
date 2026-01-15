@@ -75,6 +75,7 @@ pub mod mock;
 
 /// Table traits
 pub mod table;
+pub use table::{DeserError, KeySer, ValSer, MAX_KEY_SIZE};
 
 pub mod tables;
 pub use tables::*;

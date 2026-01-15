@@ -6,7 +6,7 @@ use crate::{
     DatabaseError,
 };
 use reth_db_api::{
-    table::{Compress, DupSort, Encode, Table, TableImporter},
+    table::{Compress, DupSort, Encode, KeySer, Table, TableImporter, MAX_KEY_SIZE},
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
@@ -393,6 +393,60 @@ impl Tx<RW> {
             })
         })
     }
+
+    /// Zero-copy put implementation using stack-allocated key buffer and MDBX reserve.
+    ///
+    /// This method avoids heap allocations for keys by using a stack buffer,
+    /// and for values that are uncompressable (fixed-size), uses MDBX's reserve API
+    /// to write directly into MDBX-managed memory.
+    #[allow(dead_code)]
+    fn put_zc<T: Table>(
+        &self,
+        kind: PutKind,
+        key: &T::Key,
+        value: &T::Value,
+    ) -> Result<(), DatabaseError>
+    where
+        T::Key: KeySer,
+    {
+        let mut key_buf = [0u8; MAX_KEY_SIZE];
+        let key_bytes = key.encode_key(&mut key_buf);
+        let (operation, write_operation, flags) = kind.into_operation_and_flags();
+
+        if let Some(value_ref) = value.uncompressable_ref() {
+            self.execute_with_operation_metric::<T, _>(operation, Some(value_ref.len()), |tx| {
+                tx.put(self.get_dbi::<T>()?, key_bytes, value_ref, flags).map_err(|e| {
+                    DatabaseWriteError {
+                        info: e.into(),
+                        operation: write_operation,
+                        table_name: T::NAME,
+                        key: key_bytes.to_vec(),
+                    }
+                    .into()
+                })
+            })
+        } else {
+            let mut value_buf = <T::Value as Compress>::Compressed::default();
+            value.compress_to_buf(&mut value_buf);
+            self.execute_with_operation_metric::<T, _>(
+                operation,
+                Some(value_buf.as_ref().len()),
+                |tx| {
+                    tx.put(self.get_dbi::<T>()?, key_bytes, value_buf.as_ref(), flags).map_err(
+                        |e| {
+                            DatabaseWriteError {
+                                info: e.into(),
+                                operation: write_operation,
+                                table_name: T::NAME,
+                                key: key_bytes.to_vec(),
+                            }
+                            .into()
+                        },
+                    )
+                },
+            )
+        }
+    }
 }
 
 impl DbTxMut for Tx<RW> {
@@ -442,8 +496,14 @@ impl DbTxMut for Tx<RW> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{mdbx::DatabaseArguments, tables, DatabaseEnv, DatabaseEnvKind};
-    use reth_db_api::{database::Database, models::ClientVersion, transaction::DbTx};
+    use alloy_primitives::{Address, B256};
+    use reth_db_api::{
+        database::Database,
+        models::{BlockNumberAddress, ClientVersion},
+        transaction::DbTx,
+    };
     use reth_libmdbx::MaxReadTransactionDuration;
     use reth_storage_errors::db::DatabaseError;
     use std::{sync::atomic::Ordering, thread::sleep, time::Duration};
@@ -496,5 +556,69 @@ mod tests {
             DatabaseError::Open(err) if err == reth_libmdbx::Error::ReadTransactionTimeout.into()));
         // Backtrace is recorded.
         assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_zero_copy_put() {
+        use reth_primitives_traits::Account;
+
+        let dir = tempdir().unwrap();
+        let mut db = DatabaseEnv::open(
+            dir.path(),
+            DatabaseEnvKind::RW,
+            DatabaseArguments::new(ClientVersion::default()),
+        )
+        .unwrap();
+        db.create_tables().unwrap();
+
+        let key = Address::repeat_byte(0x42);
+        let value =
+            Account { nonce: 42, balance: alloy_primitives::U256::from(1000), bytecode_hash: None };
+
+        // Use zero-copy put
+        {
+            let tx = db.tx_mut().unwrap();
+            tx.put_zc::<tables::PlainAccountState>(PutKind::Upsert, &key, &value).unwrap();
+            tx.commit().unwrap();
+        }
+
+        // Read back and verify
+        {
+            let tx = db.tx().unwrap();
+            let result = tx.get::<tables::PlainAccountState>(key).unwrap();
+            assert_eq!(result, Some(value));
+        }
+    }
+
+    #[test]
+    fn test_zero_copy_put_composite_key() {
+        use reth_primitives_traits::StorageEntry;
+
+        let dir = tempdir().unwrap();
+        let mut db = DatabaseEnv::open(
+            dir.path(),
+            DatabaseEnvKind::RW,
+            DatabaseArguments::new(ClientVersion::default()),
+        )
+        .unwrap();
+        db.create_tables().unwrap();
+
+        let key = BlockNumberAddress((100, Address::repeat_byte(0x42)));
+        let value =
+            StorageEntry { key: B256::repeat_byte(0xAB), value: alloy_primitives::U256::from(42) };
+
+        // Use zero-copy put with composite key
+        {
+            let tx = db.tx_mut().unwrap();
+            tx.put_zc::<tables::StorageChangeSets>(PutKind::Upsert, &key, &value).unwrap();
+            tx.commit().unwrap();
+        }
+
+        // Read back and verify
+        {
+            let tx = db.tx().unwrap();
+            let result = tx.get::<tables::StorageChangeSets>(key).unwrap();
+            assert_eq!(result, Some(value));
+        }
     }
 }

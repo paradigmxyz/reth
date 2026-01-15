@@ -1,7 +1,7 @@
 //! Implements data structures specific to the database
 
 use crate::{
-    table::{Compress, Decode, Decompress, Encode},
+    table::{Compress, Decode, Decompress, DeserError, Encode, KeySer, MAX_KEY_SIZE},
     DatabaseError,
 };
 use alloy_consensus::Header;
@@ -61,6 +61,30 @@ macro_rules! impl_uints {
 
 impl_uints!(u64, u32, u16, u8);
 
+/// Macro that implements [`KeySer`] for uint types.
+macro_rules! impl_key_ser_uints {
+    ($($name:tt),+) => {
+        $(
+            impl KeySer for $name {
+                const SIZE: usize = std::mem::size_of::<$name>();
+
+                #[allow(path_statements)]
+                fn encode_key<'a: 'c, 'b: 'c, 'c>(&'a self, buf: &'b mut [u8; MAX_KEY_SIZE]) -> &'c [u8] {
+                    Self::ASSERT;
+                    buf[..Self::SIZE].copy_from_slice(&self.to_be_bytes());
+                    &buf[..Self::SIZE]
+                }
+
+                fn decode_key(data: &[u8]) -> Result<Self, DeserError> {
+                    Ok($name::from_be_bytes(data.try_into().map_err(|_| DeserError)?))
+                }
+            }
+        )+
+    };
+}
+
+impl_key_ser_uints!(u64, u32, u16, u8);
+
 impl Encode for Vec<u8> {
     type Encoded = Self;
 
@@ -93,6 +117,23 @@ impl Decode for Address {
     }
 }
 
+impl KeySer for Address {
+    const SIZE: usize = 20;
+
+    #[allow(path_statements)]
+    fn encode_key<'a: 'c, 'b: 'c, 'c>(&'a self, _buf: &'b mut [u8; MAX_KEY_SIZE]) -> &'c [u8] {
+        Self::ASSERT;
+        self.as_slice()
+    }
+
+    fn decode_key(data: &[u8]) -> Result<Self, DeserError> {
+        if data.len() != Self::SIZE {
+            return Err(DeserError);
+        }
+        Ok(Self::from_slice(data))
+    }
+}
+
 impl Encode for B256 {
     type Encoded = [u8; 32];
 
@@ -104,6 +145,20 @@ impl Encode for B256 {
 impl Decode for B256 {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
         Ok(Self::new(value.try_into().map_err(|_| DatabaseError::Decode)?))
+    }
+}
+
+impl KeySer for B256 {
+    const SIZE: usize = 32;
+
+    #[allow(path_statements)]
+    fn encode_key<'a: 'c, 'b: 'c, 'c>(&'a self, _buf: &'b mut [u8; MAX_KEY_SIZE]) -> &'c [u8] {
+        Self::ASSERT;
+        self.as_slice()
+    }
+
+    fn decode_key(data: &[u8]) -> Result<Self, DeserError> {
+        Ok(Self::new(data.try_into().map_err(|_| DeserError)?))
     }
 }
 

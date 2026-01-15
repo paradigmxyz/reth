@@ -7,6 +7,59 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
+/// Maximum size of a key buffer for stack-based serialization.
+/// This accommodates the largest keys used in reth tables (e.g., `ShardedKey<B256>` = 32 + 8 = 40
+/// bytes, `AddressStorageKey` = 52 bytes).
+pub const MAX_KEY_SIZE: usize = 64;
+
+/// Error type for deserialization failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeserError;
+
+/// Trait for zero-copy key serialization.
+///
+/// Keys are serialized directly to a stack buffer to avoid heap allocations.
+/// All implementors must have a fixed, known size at compile time.
+pub trait KeySer: Ord + Sized + Send + Sync + Debug {
+    /// The exact size in bytes of the encoded key.
+    const SIZE: usize;
+
+    /// Compile-time assertion that SIZE is valid.
+    const ASSERT: () = {
+        assert!(Self::SIZE <= MAX_KEY_SIZE, "Key size exceeds MAX_KEY_SIZE");
+        assert!(Self::SIZE > 0, "Key size must be non-zero");
+    };
+
+    /// Encodes the key into the provided buffer, returning a slice of the encoded bytes.
+    ///
+    /// The returned slice borrows from either `self` or `buf`, depending on the implementation.
+    fn encode_key<'a: 'c, 'b: 'c, 'c>(&'a self, buf: &'b mut [u8; MAX_KEY_SIZE]) -> &'c [u8];
+
+    /// Decodes a key from the given byte slice.
+    fn decode_key(data: &[u8]) -> Result<Self, DeserError>;
+}
+
+/// Trait for zero-copy value serialization.
+///
+/// Values report their encoded size upfront, allowing the caller to reserve exactly
+/// the right amount of space in MDBX before serializing directly into that buffer.
+pub trait ValSer: Send + Sync + Debug {
+    /// Returns the exact size in bytes that will be written by `encode_value_to`.
+    fn encoded_size(&self) -> usize;
+
+    /// Encodes the value into the provided buffer.
+    ///
+    /// The buffer must have at least `encoded_size()` bytes available.
+    fn encode_value_to<B>(&self, buf: &mut B)
+    where
+        B: bytes::BufMut + AsMut<[u8]>;
+
+    /// Decodes a value from the given byte slice.
+    fn decode_value(data: &[u8]) -> Result<Self, DeserError>
+    where
+        Self: Sized;
+}
+
 /// Trait that will transform the data to be saved in the DB in a (ideally) compressed format
 pub trait Compress: Send + Sync + Sized + Debug {
     /// Compressed type.

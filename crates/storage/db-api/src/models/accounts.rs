@@ -2,7 +2,7 @@
 
 use crate::{
     impl_fixed_arbitrary,
-    table::{Decode, Encode},
+    table::{Decode, DeserError, Encode, KeySer, MAX_KEY_SIZE},
     DatabaseError,
 };
 use alloy_primitives::{Address, BlockNumber, StorageKey, B256};
@@ -67,6 +67,27 @@ impl Decode for BlockNumberAddress {
         let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::Decode)?);
         let hash = Address::from_slice(&value[8..]);
         Ok(Self((num, hash)))
+    }
+}
+
+impl KeySer for BlockNumberAddress {
+    const SIZE: usize = 28;
+
+    #[allow(path_statements)]
+    fn encode_key<'a: 'c, 'b: 'c, 'c>(&'a self, buf: &'b mut [u8; MAX_KEY_SIZE]) -> &'c [u8] {
+        Self::ASSERT;
+        buf[..8].copy_from_slice(&self.0 .0.to_be_bytes());
+        buf[8..28].copy_from_slice(self.0 .1.as_slice());
+        &buf[..Self::SIZE]
+    }
+
+    fn decode_key(data: &[u8]) -> Result<Self, DeserError> {
+        if data.len() != Self::SIZE {
+            return Err(DeserError);
+        }
+        let num = u64::from_be_bytes(data[..8].try_into().map_err(|_| DeserError)?);
+        let addr = Address::from_slice(&data[8..]);
+        Ok(Self((num, addr)))
     }
 }
 
@@ -145,6 +166,27 @@ impl Decode for BlockNumberHashedAddress {
     }
 }
 
+impl KeySer for BlockNumberHashedAddress {
+    const SIZE: usize = 40;
+
+    #[allow(path_statements)]
+    fn encode_key<'a: 'c, 'b: 'c, 'c>(&'a self, buf: &'b mut [u8; MAX_KEY_SIZE]) -> &'c [u8] {
+        Self::ASSERT;
+        buf[..8].copy_from_slice(&self.0 .0.to_be_bytes());
+        buf[8..40].copy_from_slice(self.0 .1.as_slice());
+        &buf[..Self::SIZE]
+    }
+
+    fn decode_key(data: &[u8]) -> Result<Self, DeserError> {
+        if data.len() != Self::SIZE {
+            return Err(DeserError);
+        }
+        let num = u64::from_be_bytes(data[..8].try_into().map_err(|_| DeserError)?);
+        let hash = B256::from_slice(&data[8..]);
+        Ok(Self((num, hash)))
+    }
+}
+
 /// [`Address`] concatenated with [`StorageKey`]. Used by `reth_etl` and history stages.
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
@@ -172,6 +214,27 @@ impl Decode for AddressStorageKey {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
         let address = Address::from_slice(&value[..20]);
         let storage_key = StorageKey::from_slice(&value[20..]);
+        Ok(Self((address, storage_key)))
+    }
+}
+
+impl KeySer for AddressStorageKey {
+    const SIZE: usize = 52;
+
+    #[allow(path_statements)]
+    fn encode_key<'a: 'c, 'b: 'c, 'c>(&'a self, buf: &'b mut [u8; MAX_KEY_SIZE]) -> &'c [u8] {
+        Self::ASSERT;
+        buf[..20].copy_from_slice(self.0 .0.as_slice());
+        buf[20..52].copy_from_slice(self.0 .1.as_slice());
+        &buf[..Self::SIZE]
+    }
+
+    fn decode_key(data: &[u8]) -> Result<Self, DeserError> {
+        if data.len() != Self::SIZE {
+            return Err(DeserError);
+        }
+        let address = Address::from_slice(&data[..20]);
+        let storage_key = StorageKey::from_slice(&data[20..]);
         Ok(Self((address, storage_key)))
     }
 }
