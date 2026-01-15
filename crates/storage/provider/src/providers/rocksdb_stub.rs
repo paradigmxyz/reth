@@ -12,11 +12,12 @@ use reth_storage_errors::provider::ProviderResult;
 use std::{path::Path, sync::Arc};
 
 /// Pending RocksDB batches type alias (stub - uses unit type).
-pub type PendingRocksDBBatches = Arc<Mutex<Vec<()>>>;
+pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<()>>>;
 
 /// Context for RocksDB block writes (stub).
 #[derive(Debug, Clone)]
-pub struct RocksDBWriteCtx {
+#[allow(dead_code)]
+pub(crate) struct RocksDBWriteCtx {
     /// The first block number being written.
     pub first_block_number: BlockNumber,
     /// The prune mode for transaction lookup, if any.

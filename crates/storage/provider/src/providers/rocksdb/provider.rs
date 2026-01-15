@@ -31,11 +31,11 @@ use std::{
 use tracing::instrument;
 
 /// Pending RocksDB batches type alias.
-pub type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
+pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
 
 /// Context for RocksDB block writes.
 #[derive(Clone)]
-pub struct RocksDBWriteCtx {
+pub(crate) struct RocksDBWriteCtx {
     /// The first block number being written.
     pub first_block_number: BlockNumber,
     /// The prune mode for transaction lookup, if any.
@@ -516,7 +516,7 @@ impl RocksDBProvider {
     /// the provided storage settings. Each operation runs in parallel with its own batch,
     /// pushing to `ctx.pending_batches` for later commit.
     #[instrument(level = "debug", target = "providers::db", skip_all)]
-    pub fn write_blocks_data<N: reth_node_types::NodePrimitives>(
+    pub(crate) fn write_blocks_data<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],

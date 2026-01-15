@@ -188,6 +188,7 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
     /// Pending `RocksDB` batches to be committed at provider commit time.
+    #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
     pending_rocksdb_batches: PendingRocksDBBatches,
     /// Minimum distance from tip required for pruning
     minimum_pruning_distance: u64,
@@ -402,6 +403,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     }
 
     /// Creates the context for RocksDB writes.
+    #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
     fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
         RocksDBWriteCtx {
             first_block_number: first_block,
