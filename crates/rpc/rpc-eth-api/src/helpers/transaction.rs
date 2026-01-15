@@ -491,7 +491,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     let header =
                         self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
                     let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
-                    request.as_mut().set_max_fee_per_gas(base_fee as u128 + tip);
+                    // Set the max fee to be 2 times larger than the previous block's base fee.
+                    // The additional slack allows the tx to not become invalidated if the base
+                    // fee is rising. This matches geth's behavior for compatibility.
+                    request.as_mut().set_max_fee_per_gas(tip + base_fee as u128 * 2);
                 }
             }
 
