@@ -799,6 +799,8 @@ pub fn sepolia_baked_genesis_from_header(
 pub trait ArbitrumChainSpec {
     fn chain_id(&self) -> u64;
     fn spec_id_by_timestamp(&self, _timestamp: u64) -> SpecId;
+    /// Returns the correct SpecId for a given ArbOS version.
+    fn spec_id_by_arbos_version(&self, arbos_version: u64) -> SpecId;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -826,12 +828,41 @@ fn arbitrum_sepolia_spec_id_by_timestamp(timestamp: u64) -> SpecId {
     }
 }
 
+/// These define when specific Ethereum hardforks become active on Arbitrum.
+pub mod arbos_version {
+    /// ArbOS version 11 - Shanghai EVM rules (PUSH0, etc.)
+    pub const ARBOS_VERSION_11: u64 = 11;
+    /// ArbOS version 20 - Cancun EVM rules (transient storage, blob base fee)
+    pub const ARBOS_VERSION_20: u64 = 20;
+    /// ArbOS version 40 - Prague EVM rules
+    pub const ARBOS_VERSION_40: u64 = 40;
+    /// ArbOS version 50 - Osaka EVM rules (future)
+    pub const ARBOS_VERSION_50: u64 = 50;
+}
+
+/// Returns the correct SpecId for a given ArbOS version.
+pub fn spec_id_by_arbos_version(arbos_version: u64) -> SpecId {
+    if arbos_version >= arbos_version::ARBOS_VERSION_40 {
+        SpecId::PRAGUE
+    } else if arbos_version >= arbos_version::ARBOS_VERSION_20 {
+        SpecId::CANCUN
+    } else if arbos_version >= arbos_version::ARBOS_VERSION_11 {
+        SpecId::SHANGHAI
+    } else {
+        // ArbOS < 11: pre-Shanghai, use MERGE (post-merge but pre-Shanghai)
+        SpecId::MERGE
+    }
+}
+
 impl ArbitrumChainSpec for ArbChainSpec {
     fn chain_id(&self) -> u64 {
         self.chain_id
     }
     fn spec_id_by_timestamp(&self, timestamp: u64) -> SpecId {
         arbitrum_sepolia_spec_id_by_timestamp(timestamp)
+    }
+    fn spec_id_by_arbos_version(&self, arbos_version: u64) -> SpecId {
+        spec_id_by_arbos_version(arbos_version)
     }
 }
 
@@ -841,6 +872,9 @@ impl ArbitrumChainSpec for reth_chainspec::ChainSpec {
     }
     fn spec_id_by_timestamp(&self, timestamp: u64) -> SpecId {
         arbitrum_sepolia_spec_id_by_timestamp(timestamp)
+    }
+    fn spec_id_by_arbos_version(&self, arbos_version: u64) -> SpecId {
+        spec_id_by_arbos_version(arbos_version)
     }
 }
 

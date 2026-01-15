@@ -16,7 +16,14 @@ pub fn extract_send_root_from_header_extra(extra: &[u8]) -> B256 {
         B256::ZERO
     }
 }
- 
+
+/// Extract ArbOS version from header mix_hash (bytes 16-23).
+pub fn extract_arbos_version_from_mix_hash(mix_hash: B256) -> u64 {
+    let mut buf = [0u8; 8];
+    buf.copy_from_slice(&mix_hash.0[16..24]);
+    u64::from_be_bytes(buf)
+}
+
 use reth_storage_api::StateProvider;
 
 #[derive(Clone, Debug, Default)]

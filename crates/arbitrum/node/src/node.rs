@@ -1351,6 +1351,71 @@ where
             Ok((new_block_hash, new_send_root))
         })
     }
+
+    fn canonical_head(&self) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<
+                    Output = eyre::Result<Option<(u64, alloy_primitives::B256)>>,
+                > + Send + '_,
+        >,
+    > {
+        use reth_provider::{BlockNumReader, BlockHashReader};
+        let provider = self.provider.clone();
+        Box::pin(async move {
+            // Get the best (canonical) block number from reth's database
+            let block_number = match provider.best_block_number() {
+                Ok(n) => n,
+                Err(_) => return Ok(None),
+            };
+
+            // Get the block hash for that block number
+            let block_hash = match provider.block_hash(block_number) {
+                Ok(Some(hash)) => hash,
+                Ok(None) => return Ok(None),
+                Err(_) => return Ok(None),
+            };
+
+            Ok(Some((block_number, block_hash)))
+        })
+    }
+
+    fn genesis_block_number(&self) -> u64 {
+        // Genesis block number from ArbitrumChainParams.GenesisBlockNum
+        // For Arbitrum Sepolia and most chains this is 0
+        // For Arbitrum One mainnet this would be 22207817
+        // TODO: Make this configurable via chain spec
+        0
+    }
+
+    fn block_result_at(&self, block_number: u64) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<
+                    Output = eyre::Result<Option<(alloy_primitives::B256, alloy_primitives::B256)>>,
+                > + Send + '_,
+        >,
+    > {
+        use reth_provider::BlockHashReader;
+        let provider = self.provider.clone();
+        Box::pin(async move {
+            // Get block hash
+            let block_hash = match provider.block_hash(block_number) {
+                Ok(Some(hash)) => hash,
+                Ok(None) => return Ok(None),
+                Err(_) => return Ok(None),
+            };
+
+            // Get header to extract send_root from extra_data
+            let header = match provider.header_by_number(block_number) {
+                Ok(Some(h)) => h,
+                Ok(None) => return Ok(None),
+                Err(_) => return Ok(None),
+            };
+
+            let send_root = reth_arbitrum_evm::header::extract_send_root_from_header_extra(header.extra_data.as_ref());
+
+            Ok(Some((block_hash, send_root)))
+        })
+    }
 }
 #[derive(Debug)]
 pub struct ArbAddOns<

@@ -1,5 +1,6 @@
 #![cfg_attr(test, allow(dead_code))]
 pub mod header;
+pub use header::extract_arbos_version_from_mix_hash;
 
 
 #[cfg_attr(not(feature = "std"), no_std)]
@@ -144,7 +145,10 @@ where
 
     fn evm_env(&self, header: &<N as NodePrimitives>::BlockHeader) -> Result<EvmEnv<SpecId>, Infallible> {
         let chain_id = self.chain_spec().chain_id() as u64;
-        let spec = self.chain_spec().spec_id_by_timestamp(header.timestamp());
+        // Extract ArbOS version from header mix_hash
+        // This determines EVM rules based on ArbOS version
+        let arbos_version = extract_arbos_version_from_mix_hash(header.mix_hash().unwrap_or_default());
+        let spec = self.chain_spec().spec_id_by_arbos_version(arbos_version);
         let mut cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(spec);
         let block_env = BlockEnv {
             number: U256::from(header.number()),
@@ -165,7 +169,9 @@ where
         attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnv<SpecId>, Self::Error> {
         let chain_id = self.chain_spec().chain_id() as u64;
-        let spec = self.chain_spec().spec_id_by_timestamp(attributes.timestamp);
+        // Extract ArbOS version from prev_randao (which is mix_hash for new block)
+        let arbos_version = extract_arbos_version_from_mix_hash(attributes.prev_randao);
+        let spec = self.chain_spec().spec_id_by_arbos_version(arbos_version);
         let mut cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(spec);
         let next_number = parent.number().saturating_add(1);
         let block_env = BlockEnv {
@@ -238,7 +244,9 @@ where
         payload: &ArbExecutionData,
     ) -> Result<EvmEnvFor<Self>, Infallible> {
         let chain_id = self.chain_spec().chain_id() as u64;
-        let spec = self.chain_spec().spec_id_by_timestamp(payload.payload.timestamp());
+        // Extract ArbOS version from prev_randao (which is mix_hash for this block)
+        let arbos_version = extract_arbos_version_from_mix_hash(payload.payload.as_v1().prev_randao);
+        let spec = self.chain_spec().spec_id_by_arbos_version(arbos_version);
         let mut cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(spec);
         let block_env = BlockEnv {
             number: U256::from(payload.payload.block_number()),
@@ -378,6 +386,9 @@ pub(crate) mod test_helpers {
 
         fn chain_id(&self) -> u64 { 42161 }
         fn spec_id_by_timestamp(&self, _ts: u64) -> SpecId { SpecId::CANCUN }
+        fn spec_id_by_arbos_version(&self, arbos_version: u64) -> SpecId {
+            reth_arbitrum_chainspec::spec_id_by_arbos_version(arbos_version)
+        }
     }
     #[derive(Clone, Debug, Default, PartialEq, Eq)]
     pub struct TestPrims;
