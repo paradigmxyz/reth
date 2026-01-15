@@ -65,16 +65,12 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     changesets::storage_trie_wiped_changeset_iter,
-    trie_cursor::{
-        InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
-        TrieCursorIter, TrieStorageCursor,
-    },
+    trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorIter, TrieStorageCursor},
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
 };
 use reth_trie_db::{
     changesets::ChangesetCacheHandle, DatabaseAccountTrieCursor, DatabaseStorageTrieCursor,
-    DatabaseTrieCursorFactory,
 };
 use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,

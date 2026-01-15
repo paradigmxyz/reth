@@ -9,7 +9,6 @@ use crate::{
     invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConsensusEngineEvent,
     ConsensusEngineHandle,
 };
-use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::middleware::layer::Either, RpcModule};

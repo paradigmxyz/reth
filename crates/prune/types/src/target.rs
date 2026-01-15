@@ -37,7 +37,7 @@ pub enum HistoryType {
 }
 
 /// Pruning configuration for every segment of the data that can be pruned.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "serde"), serde(default))]
 pub struct PruneModes {
@@ -82,20 +82,6 @@ pub struct PruneModes {
         serde(skip_serializing_if = "ReceiptsLogPruneConfig::is_empty")
     )]
     pub receipts_log_filter: ReceiptsLogPruneConfig,
-}
-
-impl Default for PruneModes {
-    fn default() -> Self {
-        Self {
-            sender_recovery: None,
-            transaction_lookup: None,
-            receipts: None,
-            account_history: None,
-            storage_history: None,
-            bodies_history: None,
-            receipts_log_filter: ReceiptsLogPruneConfig::default(),
-        }
-    }
 }
 
 impl PruneModes {

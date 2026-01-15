@@ -148,7 +148,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::merge::EPOCH_SLOTS;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_engine_primitives::{BeaconEngineMessage, NoopInvalidBlockHook};
     use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::BasicEngineValidator};

@@ -9,7 +9,7 @@ use crate::{
 };
 use reth_trie_db::changesets::ChangesetCacheHandle;
 
-use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS};
+use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Bytes, B256,

@@ -214,8 +214,8 @@ where
     // Iterate over the account nodes from the changesets
     for (nibbles, _old_node) in changesets.account_nodes_ref() {
         // Look up the current value of this trie node using the overlay cursor
-        let node_value = account_cursor.seek_exact(nibbles.clone())?.map(|(_, node)| node);
-        account_nodes.push((nibbles.clone(), node_value));
+        let node_value = account_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
+        account_nodes.push((*nibbles, node_value));
     }
 
     // Step 6: Collect all storage trie nodes that changed in the target block
@@ -229,8 +229,8 @@ where
         // Iterate over the storage nodes for this account
         for (nibbles, _old_node) in storage_changeset.storage_nodes_ref() {
             // Look up the current value of this storage trie node
-            let node_value = storage_cursor.seek_exact(nibbles.clone())?.map(|(_, node)| node);
-            storage_nodes.push((nibbles.clone(), node_value));
+            let node_value = storage_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
+            storage_nodes.push((*nibbles, node_value));
         }
 
         storage_tries.insert(
@@ -249,6 +249,12 @@ where
 #[derive(Debug, Clone)]
 pub struct ChangesetCacheHandle {
     inner: Arc<RwLock<ChangesetCache>>,
+}
+
+impl Default for ChangesetCacheHandle {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ChangesetCacheHandle {
@@ -537,6 +543,12 @@ struct ChangesetCacheMetrics {
 
     /// Current cache size (number of entries)
     size: Gauge,
+}
+
+impl Default for ChangesetCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ChangesetCache {
