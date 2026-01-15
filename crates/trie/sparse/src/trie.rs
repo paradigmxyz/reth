@@ -315,6 +315,12 @@ pub struct SerialSparseTrie {
     updates: Option<SparseTrieUpdates>,
     /// Reusable buffer for RLP encoding of nodes.
     rlp_buf: Vec<u8>,
+    /// When enabled, store extension node hashes in parent branch nodes.
+    ///
+    /// This reduces database lookups during proof generation by storing extension node
+    /// hashes alongside branch node hashes, avoiding the need to traverse through
+    /// extension nodes to find the underlying branch hash.
+    store_extension_node_hashes: bool,
 }
 
 impl fmt::Debug for SerialSparseTrie {
@@ -411,7 +417,20 @@ impl Default for SerialSparseTrie {
             prefix_set: PrefixSetMut::default(),
             updates: None,
             rlp_buf: Vec::new(),
+            store_extension_node_hashes: false,
         }
+    }
+}
+
+impl SerialSparseTrie {
+    /// Enable storing extension node hashes in parent branch nodes.
+    ///
+    /// When enabled, extension node hashes are stored in the parent branch node's
+    /// `hash_mask`, reducing the number of database lookups required during proof
+    /// generation.
+    pub const fn with_store_extension_node_hashes(mut self, enabled: bool) -> Self {
+        self.store_extension_node_hashes = enabled;
+        self
     }
 }
 
@@ -1655,11 +1674,20 @@ impl SerialSparseTrie {
                                     tree_mask.set_bit(last_child_nibble);
                                 }
 
-                                // Set the hash mask. If a child node is a revealed branch node OR
-                                // is a blinded node that has its hash mask bit set according to the
-                                // database, set the hash mask bit and save the hash.
+                                // Set the hash mask. If a child node is:
+                                // - A revealed branch node, OR
+                                // - A revealed extension node that should be stored in db (only
+                                //   when `store_extension_node_hashes` is enabled), OR
+                                // - A blinded node that has its hash mask bit set according to the
+                                //   database
+                                // then set the hash mask bit and save the hash.
                                 let hash = child.as_hash().filter(|_| {
                                     child_node_type.is_branch() ||
+                                        (self.store_extension_node_hashes &&
+                                            child_node_type.is_extension() &&
+                                            child_node_type
+                                                .store_in_db_trie()
+                                                .unwrap_or(false)) ||
                                         (child_node_type.is_hash() &&
                                             path_masks().is_some_and(|masks| {
                                                 masks.hash_mask.is_bit_set(last_child_nibble)
@@ -1801,6 +1829,11 @@ impl SparseNodeType {
     /// Returns true if the node is a branch node.
     pub const fn is_branch(&self) -> bool {
         matches!(self, Self::Branch { .. })
+    }
+
+    /// Returns true if the node is an extension node.
+    pub const fn is_extension(&self) -> bool {
+        matches!(self, Self::Extension { .. })
     }
 
     /// Returns true if the node should be stored in the database.
@@ -2213,6 +2246,7 @@ mod find_leaf_tests {
             prefix_set: Default::default(),
             updates: None,
             rlp_buf: Vec::new(),
+            store_extension_node_hashes: false,
         };
 
         let result = sparse.find_leaf(&leaf_path, None);
@@ -2254,6 +2288,7 @@ mod find_leaf_tests {
             prefix_set: Default::default(),
             updates: None,
             rlp_buf: Vec::new(),
+            store_extension_node_hashes: false,
         };
 
         let result = sparse.find_leaf(&search_path, None);
@@ -2678,6 +2713,69 @@ mod tests {
         assert_eq!(sparse_root, hash_builder_root);
         assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+    }
+
+    #[test]
+    fn sparse_trie_store_extension_node_hashes() {
+        reth_tracing::init_test_tracing();
+
+        let provider = DefaultTrieNodeProvider;
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        // Create paths that will result in an extension node with a branch child
+        // Path structure: 0x00... and 0x01... will create:
+        // - Root: Branch with children at nibbles 0
+        // - 0x0: Extension node pointing to a branch
+        // - 0x00..., 0x01...: Leaf nodes
+        let paths = vec![
+            Nibbles::unpack(B256::repeat_byte(0x00)),
+            Nibbles::unpack(B256::repeat_byte(0x01)),
+        ];
+
+        // Test WITHOUT extension node hash storage
+        let mut sparse_without =
+            SerialSparseTrie::default().with_updates(true).with_store_extension_node_hashes(false);
+        for path in &paths {
+            sparse_without.update_leaf(*path, value_encoded(), &provider).unwrap();
+        }
+        let root_without = sparse_without.root();
+        let updates_without = sparse_without.take_updates();
+
+        // Test WITH extension node hash storage
+        let mut sparse_with =
+            SerialSparseTrie::default().with_updates(true).with_store_extension_node_hashes(true);
+        for path in &paths {
+            sparse_with.update_leaf(*path, value_encoded(), &provider).unwrap();
+        }
+        let root_with = sparse_with.root();
+        let updates_with = sparse_with.take_updates();
+
+        // Root hashes should be identical
+        assert_eq!(root_without, root_with);
+
+        // When store_extension_node_hashes is enabled, the parent branch node
+        // should have hash_mask set for the extension node child
+        for (path, node_with) in &updates_with.updated_nodes {
+            if let Some(node_without) = updates_without.updated_nodes.get(path) {
+                // state_mask and tree_mask should be the same
+                assert_eq!(node_without.state_mask, node_with.state_mask);
+
+                // hash_mask without extension hashes should be a subset of with extension hashes
+                // (it includes all the same bits plus potentially extension node bits)
+                assert!(
+                    node_without.hash_mask.is_subset_of(node_with.hash_mask),
+                    "path {:?}: without_ext_hashes hash_mask {:?} should be subset of with {:?}",
+                    path,
+                    node_without.hash_mask,
+                    node_with.hash_mask
+                );
+            }
+        }
     }
 
     #[test]
