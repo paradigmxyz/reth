@@ -530,6 +530,11 @@ Gas Price Oracle:
 
           [default: 30s]
 
+      --testing.skip-invalid-transactions
+          Skip invalid transactions in `testing_buildBlockV1` instead of failing.
+
+          When enabled, transactions that fail execution will be skipped, and all subsequent transactions from the same sender will also be skipped.
+
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
           Max number of transaction in the pending sub-pool
