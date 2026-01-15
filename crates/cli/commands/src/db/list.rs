@@ -100,7 +100,7 @@ impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
             tx.disable_long_read_transaction_safety();
 
             let table_db = tx.inner.open_db(Some(self.args.table.name())).wrap_err("Could not open db.")?;
-            let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", self.args.table.name()))?;
+            let stats = tx.inner.db_stat(table_db.dbi()).wrap_err(format!("Could not find table: {}", self.args.table.name()))?;
             let total_entries = stats.entries();
             let final_entry_idx = total_entries.saturating_sub(1);
             if self.args.skip > final_entry_idx {

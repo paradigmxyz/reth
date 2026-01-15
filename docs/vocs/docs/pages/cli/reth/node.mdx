@@ -530,6 +530,11 @@ Gas Price Oracle:
 
           [default: 30s]
 
+      --testing.skip-invalid-transactions
+          Skip invalid transactions in `testing_buildBlockV1` instead of failing.
+
+          When enabled, transactions that fail execution will be skipped, and all subsequent transactions from the same sender will also be skipped.
+
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
           Max number of transaction in the pending sub-pool
@@ -1112,6 +1117,24 @@ Logging:
 
           [default: always]
 
+      --logs-otlp[=<URL>]
+          Enable `Opentelemetry` logs export to an OTLP endpoint.
+
+          If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/logs` - gRPC: `http://localhost:4317`
+
+          Example: --logs-otlp=http://collector:4318/v1/logs
+
+          [env: OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=]
+
+      --logs-otlp.filter <FILTER>
+          Set a filter directive for the OTLP logs exporter. This controls the verbosity of logs sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
+
+          Example: --logs-otlp.filter=info,reth=debug
+
+          Defaults to INFO if not specified.
+
+          [default: info]
+
 Display:
   -v, --verbosity...
           Set the minimum log level.
@@ -1136,9 +1159,9 @@ Tracing:
           [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
 
       --tracing-otlp-protocol <PROTOCOL>
-          OTLP transport protocol to use for exporting traces.
+          OTLP transport protocol to use for exporting traces and logs.
 
-          - `http`: expects endpoint path to end with `/v1/traces` - `grpc`: expects endpoint without a path
+          - `http`: expects endpoint path to end with `/v1/traces` or `/v1/logs` - `grpc`: expects endpoint without a path
 
           Defaults to HTTP if not specified.
 
