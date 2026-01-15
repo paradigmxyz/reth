@@ -3499,6 +3499,7 @@ mod tests {
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
         BlockWriter,
     };
+    use alloy_primitives::map::B256Map;
     use reth_ethereum_primitives::Receipt;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::Nibbles;
