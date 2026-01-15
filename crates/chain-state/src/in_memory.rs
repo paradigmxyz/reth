@@ -942,37 +942,43 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     pub fn to_chain_notification(&self) -> CanonStateNotification<N> {
         match self {
             Self::Commit { new } => {
-                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
-                    chain.append_block(
-                        exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
-                        exec.trie_updates(),
-                        exec.hashed_state(),
-                    );
-                    chain
-                }));
-                CanonStateNotification::Commit { new }
+                CanonStateNotification::Commit { new: Arc::new(Self::blocks_to_chain(new)) }
             }
-            Self::Reorg { new, old } => {
-                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
+            Self::Reorg { new, old } => CanonStateNotification::Reorg {
+                new: Arc::new(Self::blocks_to_chain(new)),
+                old: Arc::new(Self::blocks_to_chain(old)),
+            },
+        }
+    }
+
+    /// Converts a slice of executed blocks into a [`Chain`].
+    ///
+    /// Optimized for the single-block case to avoid unnecessary folding.
+    fn blocks_to_chain(blocks: &[ExecutedBlock<N>]) -> Chain<N> {
+        match blocks {
+            [] => Chain::default(),
+            [single] => Chain::from_block(
+                single.recovered_block().clone(),
+                single.execution_outcome().clone(),
+                single.trie_updates(),
+                single.hashed_state(),
+            ),
+            [first, rest @ ..] => {
+                let mut chain = Chain::from_block(
+                    first.recovered_block().clone(),
+                    first.execution_outcome().clone(),
+                    first.trie_updates(),
+                    first.hashed_state(),
+                );
+                for exec in rest {
                     chain.append_block(
                         exec.recovered_block().clone(),
                         exec.execution_outcome().clone(),
                         exec.trie_updates(),
                         exec.hashed_state(),
                     );
-                    chain
-                }));
-                let old = Arc::new(old.iter().fold(Chain::default(), |mut chain, exec| {
-                    chain.append_block(
-                        exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
-                        exec.trie_updates(),
-                        exec.hashed_state(),
-                    );
-                    chain
-                }));
-                CanonStateNotification::Reorg { new, old }
+                }
+                chain
             }
         }
     }
