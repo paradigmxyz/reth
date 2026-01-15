@@ -2,9 +2,8 @@
 
 /// Threshold for switching from `extend_ref` loop to `merge_batch` in `merge_overlay_trie_input`.
 ///
-/// Benchmarked crossover: `extend_ref` wins up to ~64 blocks, `merge_batch` wins beyond.
-/// Using 64 as threshold since they're roughly equal there.
-const MERGE_BATCH_THRESHOLD: usize = 64;
+/// Benchmarked crossover: `extend_ref` wins up to ~30 blocks, `merge_batch` wins beyond.
+const MERGE_BATCH_THRESHOLD: usize = 30;
 
 use crate::tree::{
     cached_state::CachedStateProvider,
