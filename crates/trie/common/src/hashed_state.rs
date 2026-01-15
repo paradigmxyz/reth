@@ -646,8 +646,11 @@ impl HashedPostStateSorted {
         let accounts = kway_merge_sorted(states.iter().map(|s| s.accounts.as_slice()));
 
         struct StorageAcc<'a> {
+            /// Account storage was cleared (e.g., SELFDESTRUCT).
             wiped: bool,
+            /// Stop collecting older slices after seeing a wipe.
             sealed: bool,
+            /// Storage slot slices to merge, ordered newest to oldest.
             slices: Vec<&'a [(B256, U256)]>,
         }
 

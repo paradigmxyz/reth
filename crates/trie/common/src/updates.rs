@@ -641,8 +641,11 @@ impl TrieUpdatesSorted {
         // We process updates newest-to-oldest and stop collecting for an address
         // once we hit a "deleted" storage (sealed=true), since older data is irrelevant.
         struct StorageAcc<'a> {
+            /// Storage trie was deleted (account removed or cleared).
             is_deleted: bool,
+            /// Stop collecting older slices after seeing a deletion.
             sealed: bool,
+            /// Storage trie node slices to merge, ordered newest to oldest.
             slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
         }
 
