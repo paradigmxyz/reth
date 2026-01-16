@@ -596,7 +596,7 @@ impl<H: BlockHeader> ChainSpec<H> {
                         return *params
                     }
                 }
-                // No timestamp-based fork matched, return default limits
+                // No timestamp-based fork matched, return default pre-Osaka limits
                 EvmLimitParams::default()
             }
         }
