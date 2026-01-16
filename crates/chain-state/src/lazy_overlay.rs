@@ -10,11 +10,6 @@ use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSort
 use std::sync::{Arc, OnceLock};
 use tracing::{debug, trace};
 
-/// Threshold for switching from `extend_ref` loop to `merge_batch`.
-///
-/// Benchmarked crossover: `extend_ref` wins up to ~64 blocks, `merge_batch` wins beyond.
-const MERGE_BATCH_THRESHOLD: usize = 64;
-
 /// Inputs captured for lazy overlay computation.
 #[derive(Clone)]
 struct LazyOverlayInputs {
@@ -128,57 +123,28 @@ impl LazyOverlay {
 
     /// Merge all blocks' trie data into a single [`TrieInputSorted`].
     ///
-    /// Blocks are ordered newest to oldest. We iterate oldest to newest so that
-    /// newer values override older ones.
+    /// Blocks are ordered newest to oldest. Uses hybrid merge algorithm that
+    /// switches between `extend_ref` (small batches) and k-way merge (large batches).
     fn merge_blocks(blocks: &[DeferredTrieData]) -> TrieInputSorted {
         if blocks.is_empty() {
             return TrieInputSorted::default();
         }
 
-        // Single block: use its data directly
-        if blocks.len() == 1 {
-            let data = blocks[0].wait_cloned();
-            return TrieInputSorted {
-                state: Arc::clone(&data.hashed_state),
-                nodes: Arc::clone(&data.trie_updates),
-                prefix_sets: Default::default(),
-            };
-        }
+        // Collect all trie data first (blocks are newest-to-oldest)
+        let trie_data: Vec<_> = blocks.iter().map(|b| b.wait_cloned()).collect();
 
-        if blocks.len() < MERGE_BATCH_THRESHOLD {
-            // Small k: extend_ref loop is faster
-            // Iterate oldest->newest so newer values override older ones
-            let mut blocks_iter = blocks.iter().rev();
-            let first = blocks_iter.next().expect("blocks is non-empty");
-            let data = first.wait_cloned();
+        // Use hybrid merge which handles the threshold internally
+        let merged_state = HashedPostStateSorted::merge_batch_hybrid(
+            trie_data.iter().map(|d| d.hashed_state.as_ref()),
+        );
+        let merged_nodes = TrieUpdatesSorted::merge_batch_hybrid(
+            trie_data.iter().map(|d| d.trie_updates.as_ref()),
+        );
 
-            let mut state = Arc::clone(&data.hashed_state);
-            let mut nodes = Arc::clone(&data.trie_updates);
-            let state_mut = Arc::make_mut(&mut state);
-            let nodes_mut = Arc::make_mut(&mut nodes);
-
-            for block in blocks_iter {
-                let data = block.wait_cloned();
-                state_mut.extend_ref(data.hashed_state.as_ref());
-                nodes_mut.extend_ref(data.trie_updates.as_ref());
-            }
-
-            TrieInputSorted { state, nodes, prefix_sets: Default::default() }
-        } else {
-            // Large k: merge_batch is faster (O(n log k) via k-way merge)
-            let trie_data: Vec<_> = blocks.iter().map(|b| b.wait_cloned()).collect();
-
-            let merged_state = HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|d| d.hashed_state.as_ref()),
-            );
-            let merged_nodes =
-                TrieUpdatesSorted::merge_batch(trie_data.iter().map(|d| d.trie_updates.as_ref()));
-
-            TrieInputSorted {
-                state: Arc::new(merged_state),
-                nodes: Arc::new(merged_nodes),
-                prefix_sets: Default::default(),
-            }
+        TrieInputSorted {
+            state: Arc::new(merged_state),
+            nodes: Arc::new(merged_nodes),
+            prefix_sets: Default::default(),
         }
     }
 }

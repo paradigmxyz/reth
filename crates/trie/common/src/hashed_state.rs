@@ -690,6 +690,47 @@ impl HashedPostStateSorted {
         Self { accounts, storages }
     }
 
+    /// Hybrid batch-merge sorted hashed post states. Iterator yields **newest to oldest**.
+    ///
+    /// Uses a hybrid algorithm that switches between `extend_ref` (for small batches)
+    /// and k-way `merge_batch` (for large batches) based on benchmarked crossover point.
+    ///
+    /// - Small k (< threshold): O(n * k) via `extend_ref` loop, but with low constant factors
+    /// - Large k (≥ threshold): O(n log k) via k-way merge
+    ///
+    /// The threshold is tuned based on benchmarks where `extend_ref` wins up to ~64 items.
+    pub fn merge_batch_hybrid<'a>(states: impl IntoIterator<Item = &'a Self>) -> Self {
+        const MERGE_BATCH_THRESHOLD: usize = 64;
+
+        let states: Vec<_> = states.into_iter().collect();
+
+        if states.is_empty() {
+            return Self::default();
+        }
+
+        if states.len() == 1 {
+            return states[0].clone();
+        }
+
+        if states.len() < MERGE_BATCH_THRESHOLD {
+            // Small k: extend_ref loop is faster.
+            // States are newest-to-oldest, so iterate in reverse (oldest-to-newest)
+            // to let newer values override older ones.
+            let mut iter = states.iter().rev();
+            let first = iter.next().expect("states is non-empty");
+            let mut result = (*first).clone();
+
+            for state in iter {
+                result.extend_ref(state);
+            }
+
+            result
+        } else {
+            // Large k: merge_batch is faster (O(n log k) via k-way merge)
+            Self::merge_batch(states)
+        }
+    }
+
     /// Clears all accounts and storage data.
     pub fn clear(&mut self) {
         self.accounts.clear();

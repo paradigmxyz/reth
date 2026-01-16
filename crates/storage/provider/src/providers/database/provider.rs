@@ -558,15 +558,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 }
             }
 
-            // Write all trie updates in a single batch using k-way merge.
-            // This reduces cursor open/close overhead from N calls to 1 and uses
-            // O(n log k) merge instead of O(n*k) from repeated extend_ref.
+            // Write all trie updates in a single batch.
+            // This reduces cursor open/close overhead from N calls to 1.
+            // Uses hybrid algorithm: extend_ref for small batches, k-way merge for large.
             if save_mode.with_state() {
                 let start = Instant::now();
                 // Collect Arc refs first to extend their lifetime
                 let trie_updates: Vec<_> = blocks.iter().map(|b| b.trie_updates()).collect();
-                // merge_batch expects newest-to-oldest, so reverse the iterator
-                let merged = TrieUpdatesSorted::merge_batch(
+                // merge_batch_hybrid expects newest-to-oldest, so reverse the iterator
+                let merged = TrieUpdatesSorted::merge_batch_hybrid(
                     trie_updates.iter().rev().map(|arc| arc.as_ref()),
                 );
                 if !merged.is_empty() {
