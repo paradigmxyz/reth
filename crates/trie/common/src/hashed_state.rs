@@ -22,6 +22,36 @@ use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterato
 
 use revm_database::{AccountStatus, BundleAccount};
 
+/// Holds the counts needed for worker scaling calculations.
+///
+/// Used by parallel trie computation to determine how many workers to spawn
+/// based on the previous block's overlay state size.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct WorkloadHint {
+    /// Number of accounts in the state.
+    pub accounts: usize,
+    /// Number of storage slots in the state.
+    pub storage_slots: usize,
+}
+
+impl WorkloadHint {
+    /// Creates a new workload hint with the given counts.
+    pub const fn new(accounts: usize, storage_slots: usize) -> Self {
+        Self { accounts, storage_slots }
+    }
+
+    /// Returns true if the workload is empty (no accounts or storage).
+    pub const fn is_empty(&self) -> bool {
+        self.accounts == 0 && self.storage_slots == 0
+    }
+
+    /// Returns the total count (accounts + storage slots).
+    pub const fn total(&self) -> usize {
+        self.accounts + self.storage_slots
+    }
+}
+
 /// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
 /// hash maps.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -276,6 +306,14 @@ impl HashedPostState {
                 .values()
                 .map(|storage| if storage.wiped { 1 } else { 0 } + storage.storage.len())
                 .sum::<usize>()
+    }
+
+    /// Returns a [`WorkloadHint`] for worker scaling based on accounts and storage slot counts.
+    pub fn workload_hint(&self) -> WorkloadHint {
+        WorkloadHint {
+            accounts: self.accounts.len(),
+            storage_slots: self.storages.values().map(|s| s.storage.len()).sum(),
+        }
     }
 
     /// Extend this hashed post state with contents of another.
@@ -577,6 +615,14 @@ impl HashedPostStateSorted {
     /// Returns the total number of updates including all accounts and storage updates.
     pub fn total_len(&self) -> usize {
         self.accounts.len() + self.storages.values().map(|s| s.len()).sum::<usize>()
+    }
+
+    /// Returns a [`WorkloadHint`] for worker scaling based on accounts and storage slot counts.
+    pub fn workload_hint(&self) -> WorkloadHint {
+        WorkloadHint {
+            accounts: self.accounts.len(),
+            storage_slots: self.storages.values().map(|s| s.len()).sum(),
+        }
     }
 
     /// Construct [`TriePrefixSetsMut`] from hashed post state.

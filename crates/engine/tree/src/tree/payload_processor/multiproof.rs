@@ -556,6 +556,8 @@ pub(super) struct MultiProofTask {
     /// there are any active workers and force chunking across workers. This is to prevent tasks
     /// which are very long from hitting a single worker.
     max_targets_for_chunking: usize,
+    /// Workload hint from previous block's overlay state for worker scaling.
+    workload_hint: Option<reth_trie_parallel::WorkloadHint>,
 }
 
 impl MultiProofTask {
@@ -567,6 +569,7 @@ impl MultiProofTask {
         chunk_size: Option<usize>,
         tx: CrossbeamSender<MultiProofMessage>,
         rx: CrossbeamReceiver<MultiProofMessage>,
+        workload_hint: Option<reth_trie_parallel::WorkloadHint>,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = unbounded();
         let metrics = MultiProofTaskMetrics::default();
@@ -587,6 +590,7 @@ impl MultiProofTask {
             ),
             metrics,
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+            workload_hint,
         }
     }
 
@@ -1060,8 +1064,8 @@ impl MultiProofTask {
     where
         P: AccountReader,
     {
-        // Pre-scale workers based on predicted workload from previous blocks
-        self.multiproof_manager.proof_worker_handle.prepare_for_block();
+        // Pre-scale workers based on previous block's overlay state size.
+        self.multiproof_manager.proof_worker_handle.prepare_for_block(self.workload_hint);
 
         let mut ctx = MultiproofBatchCtx::new(Instant::now());
         let mut batch_metrics = MultiproofBatchMetrics::default();
@@ -1172,14 +1176,6 @@ impl MultiProofTask {
                 .last_proof_wait_time_histogram
                 .record(updates_finished_time.elapsed().as_secs_f64());
         }
-
-        // Record actual workload for next block's prediction
-        let actual_storage: usize =
-            self.fetched_proof_targets.values().map(|slots| slots.len()).sum();
-        let actual_accounts = self.fetched_proof_targets.len();
-        self.multiproof_manager
-            .proof_worker_handle
-            .record_block_workload(actual_storage, actual_accounts);
     }
 }
 

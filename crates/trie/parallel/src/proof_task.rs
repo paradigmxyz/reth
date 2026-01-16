@@ -120,8 +120,6 @@ struct ProofWorkerInner {
     account_spawn: SpawnFn,
     /// Whether V2 storage proofs are enabled
     v2_proofs_enabled: bool,
-    /// Workload predictor for dynamic scaling
-    predictor: crate::workload_predictor::WorkloadPredictor,
 }
 
 impl std::fmt::Debug for ProofWorkerInner {
@@ -161,12 +159,6 @@ fn max_workers_by_cpu() -> usize {
     std::thread::available_parallelism()
         .map_or(MAX_WORKERS_CAP, |n| n.get().saturating_mul(2).min(MAX_WORKERS_CAP))
 }
-
-/// Number of storage slots processed per worker for scaling calculations.
-const SLOTS_PER_WORKER: usize = 50;
-
-/// Number of accounts processed per worker for scaling calculations.
-const ACCOUNTS_PER_WORKER: usize = 20;
 
 /// Maximum number of workers to spawn in a single scale-up operation.
 const SCALE_UP_STEP: usize = 4;
@@ -337,7 +329,6 @@ impl ProofWorkerHandle {
             storage_spawn,
             account_spawn,
             v2_proofs_enabled,
-            predictor: crate::workload_predictor::WorkloadPredictor::new(),
         };
 
         Self { inner: Arc::new(inner) }
@@ -392,103 +383,91 @@ impl ProofWorkerHandle {
         self.total_account_workers().saturating_sub(self.available_account_workers())
     }
 
-    /// Records block workload for prediction after block processing completes.
-    pub fn record_block_workload(&self, storage_targets: usize, account_targets: usize) {
-        self.inner.predictor.record(storage_targets, account_targets);
-    }
-
-    /// Returns predicted workload for the next block.
-    pub fn predict_workload(&self) -> (usize, usize) {
-        self.inner.predictor.predict()
-    }
-
-    /// Pre-scales workers based on predicted workload before block processing.
-    pub fn prepare_for_block(&self) {
-        let (predicted_storage, predicted_accounts) = self.predict_workload();
-
-        let desired_storage = predicted_storage
-            .div_ceil(SLOTS_PER_WORKER)
-            .clamp(self.inner.min_storage_workers, self.inner.max_storage_workers);
-        let desired_account = predicted_accounts
-            .div_ceil(ACCOUNTS_PER_WORKER)
-            .clamp(self.inner.min_account_workers, self.inner.max_account_workers);
+    /// Pre-scales workers based on the previous block's workload.
+    ///
+    /// Pass `None` for the first block or when there's no overlay state.
+    /// This only scales up, never down, to avoid thrashing.
+    pub fn prepare_for_block(&self, hint: Option<crate::WorkloadHint>) {
+        let (desired_storage, desired_account) = crate::workload_predictor::desired_workers(
+            hint,
+            self.inner.min_storage_workers,
+            self.inner.max_storage_workers,
+            self.inner.min_account_workers,
+            self.inner.max_account_workers,
+        );
 
         self.scale_storage_workers_to(desired_storage);
         self.scale_account_workers_to(desired_account);
     }
 
-    /// Attempts to reserve and spawn additional storage workers up to the desired count.
+    /// Scales storage workers up to the desired count using fetch_update.
     fn scale_storage_workers_to(&self, desired: usize) {
-        let current = self.inner.current_storage_workers.load(Ordering::Relaxed);
-        if current >= desired {
-            return;
-        }
-
-        let to_spawn = self.try_reserve_workers(
-            &self.inner.current_storage_workers,
-            self.inner.max_storage_workers,
-            (desired - current).min(SCALE_UP_STEP),
+        let max = self.inner.max_storage_workers;
+        let result = self.inner.current_storage_workers.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |cur| {
+                if cur >= desired {
+                    return None;
+                }
+                let inc = (desired - cur).min(SCALE_UP_STEP).min(max.saturating_sub(cur));
+                if inc == 0 {
+                    None
+                } else {
+                    Some(cur + inc)
+                }
+            },
         );
 
-        for _ in 0..to_spawn {
-            let worker_id = self.inner.next_storage_worker_id.fetch_add(1, Ordering::Relaxed);
-            (self.inner.storage_spawn)(worker_id);
-        }
-
-        if to_spawn > 0 {
-            debug!(
-                target: "trie::proof_task",
-                to_spawn,
-                new_total = self.inner.current_storage_workers.load(Ordering::Relaxed),
-                "Scaled up storage workers"
-            );
+        if let Ok(old) = result {
+            let to_spawn = self.inner.current_storage_workers.load(Ordering::Relaxed) - old;
+            for _ in 0..to_spawn {
+                let worker_id = self.inner.next_storage_worker_id.fetch_add(1, Ordering::Relaxed);
+                (self.inner.storage_spawn)(worker_id);
+            }
+            if to_spawn > 0 {
+                debug!(
+                    target: "trie::proof_task",
+                    to_spawn,
+                    new_total = old + to_spawn,
+                    "Scaled up storage workers"
+                );
+            }
         }
     }
 
-    /// Attempts to reserve and spawn additional account workers up to the desired count.
+    /// Scales account workers up to the desired count using fetch_update.
     fn scale_account_workers_to(&self, desired: usize) {
-        let current = self.inner.current_account_workers.load(Ordering::Relaxed);
-        if current >= desired {
-            return;
-        }
-
-        let to_spawn = self.try_reserve_workers(
-            &self.inner.current_account_workers,
-            self.inner.max_account_workers,
-            (desired - current).min(SCALE_UP_STEP),
+        let max = self.inner.max_account_workers;
+        let result = self.inner.current_account_workers.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |cur| {
+                if cur >= desired {
+                    return None;
+                }
+                let inc = (desired - cur).min(SCALE_UP_STEP).min(max.saturating_sub(cur));
+                if inc == 0 {
+                    None
+                } else {
+                    Some(cur + inc)
+                }
+            },
         );
 
-        for _ in 0..to_spawn {
-            let worker_id = self.inner.next_account_worker_id.fetch_add(1, Ordering::Relaxed);
-            (self.inner.account_spawn)(worker_id);
-        }
-
-        if to_spawn > 0 {
-            debug!(
-                target: "trie::proof_task",
-                to_spawn,
-                new_total = self.inner.current_account_workers.load(Ordering::Relaxed),
-                "Scaled up account workers"
-            );
-        }
-    }
-
-    /// Atomically reserves workers using CAS, returns how many were reserved.
-    fn try_reserve_workers(&self, current: &AtomicUsize, max: usize, n: usize) -> usize {
-        loop {
-            let cur = current.load(Ordering::Relaxed);
-            if cur >= max {
-                return 0;
+        if let Ok(old) = result {
+            let to_spawn = self.inner.current_account_workers.load(Ordering::Relaxed) - old;
+            for _ in 0..to_spawn {
+                let worker_id = self.inner.next_account_worker_id.fetch_add(1, Ordering::Relaxed);
+                (self.inner.account_spawn)(worker_id);
             }
-            let can_add = (max - cur).min(n);
-            if can_add == 0 {
-                return 0;
-            }
-            if current
-                .compare_exchange(cur, cur + can_add, Ordering::AcqRel, Ordering::Relaxed)
-                .is_ok()
-            {
-                return can_add;
+            if to_spawn > 0 {
+                debug!(
+                    target: "trie::proof_task",
+                    to_spawn,
+                    new_total = old + to_spawn,
+                    "Scaled up account workers"
+                );
             }
         }
     }

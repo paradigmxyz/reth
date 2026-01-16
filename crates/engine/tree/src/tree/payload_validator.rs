@@ -444,12 +444,19 @@ where
 
         // Create overlay factory for payload processor (StateRootTask path needs it for
         // multiproofs)
-        let overlay_factory = {
+        let (overlay_factory, workload_hint) = {
             let TrieInputSorted { nodes, state, .. } = &trie_input;
-            OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
-                .with_block_hash(Some(block_hash_for_overlay))
-                .with_trie_overlay(Some(Arc::clone(nodes)))
-                .with_hashed_state_overlay(Some(Arc::clone(state)))
+            let overlay = OverlayStateProviderFactory::new(
+                self.provider.clone(),
+                self.changeset_cache.clone(),
+            )
+            .with_block_hash(Some(block_hash_for_overlay))
+            .with_trie_overlay(Some(Arc::clone(nodes)))
+            .with_hashed_state_overlay(Some(Arc::clone(state)));
+
+            // Compute workload hint from overlay state for worker scaling
+            let hint = state.workload_hint();
+            (overlay, hint)
         };
 
         // Spawn the appropriate processor based on strategy
@@ -460,6 +467,7 @@ where
             overlay_factory.clone(),
             strategy,
             block_access_list,
+            workload_hint,
         ));
 
         // Use cached state provider before executing, used in execution after prewarming threads
@@ -843,6 +851,7 @@ where
         overlay_factory: OverlayStateProviderFactory<P>,
         strategy: StateRootStrategy,
         block_access_list: Option<Arc<BlockAccessList>>,
+        workload_hint: reth_trie_common::WorkloadHint,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -863,6 +872,7 @@ where
                     overlay_factory,
                     &self.config,
                     block_access_list,
+                    Some(workload_hint),
                 );
 
                 // record prewarming initialization duration

@@ -1,101 +1,45 @@
-//! Workload predictor for parallel trie computation.
+//! Worker scaling utilities for parallel trie computation.
 //!
-//! Uses exponential moving average (EMA) to predict the next block's workload,
-//! enabling better resource allocation for parallel state root computation.
+//! Provides functions to compute desired worker counts based on
+//! the previous block's state size (accounts + storage slots).
 
-use std::sync::atomic::{AtomicU64, Ordering};
+pub use reth_trie_common::WorkloadHint;
 
-/// Smoothing factor for exponential moving average.
-/// Lower values give more weight to historical data.
-const ALPHA: f64 = 0.3;
+/// Number of storage slots per worker for scaling calculations.
+pub const SLOTS_PER_WORKER: usize = 50;
 
-/// Headroom multiplier applied to predictions.
-/// Ensures we slightly over-provision to handle workload variance.
-const HEADROOM: f64 = 1.25;
+/// Number of accounts per worker for scaling calculations.
+pub const ACCOUNTS_PER_WORKER: usize = 20;
 
-/// Lock-free workload predictor using exponential moving average (stores f64 bits as u64).
+/// Computes desired worker counts based on previous block's workload.
 ///
-/// This predictor tracks historical workload patterns and predicts future
-/// resource requirements for parallel trie computation. It uses atomic
-/// operations for thread-safe, lock-free updates.
-#[derive(Debug, Default)]
-pub struct WorkloadEma(AtomicU64);
-
-impl WorkloadEma {
-    /// Creates a new workload EMA with zero initial estimate.
-    pub const fn new() -> Self {
-        Self(AtomicU64::new(0))
-    }
-
-    /// Records observed workload and updates the EMA.
-    pub fn record(&self, value: usize) {
-        let value = value as f64;
-        loop {
-            let current_bits = self.0.load(Ordering::Relaxed);
-            let current = f64::from_bits(current_bits);
-
-            // EMA formula: new_ema = alpha * value + (1 - alpha) * current_ema
-            // For first observation (current == 0), use the value directly
-            let new_ema =
-                if current == 0.0 { value } else { ALPHA.mul_add(value, (1.0 - ALPHA) * current) };
-
-            if self
-                .0
-                .compare_exchange_weak(
-                    current_bits,
-                    new_ema.to_bits(),
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                )
-                .is_ok()
-            {
-                break;
-            }
-        }
-    }
-
-    /// Predicts the next workload with headroom applied.
-    pub fn predict(&self) -> usize {
-        let ema = f64::from_bits(self.0.load(Ordering::Relaxed));
-        (ema * HEADROOM).ceil() as usize
-    }
-}
-
-/// Lock-free workload predictor using exponential moving average.
+/// Returns `(storage_workers, account_workers)`.
 ///
-/// This predictor tracks historical workload patterns and predicts future
-/// resource requirements for parallel trie computation. It uses atomic
-/// operations for thread-safe, lock-free updates.
-///
-/// The struct is cache-line aligned (64 bytes) to prevent false sharing
-/// when accessed from multiple threads.
-#[repr(align(64))]
-#[derive(Debug, Default)]
-pub struct WorkloadPredictor {
-    /// EMA of storage slot count.
-    storage_ema: WorkloadEma,
-    /// EMA of account count.
-    account_ema: WorkloadEma,
-}
+/// If `hint` is `None` or empty, returns `(min, min)`.
+pub fn desired_workers(
+    hint: Option<WorkloadHint>,
+    min_storage: usize,
+    max_storage: usize,
+    min_account: usize,
+    max_account: usize,
+) -> (usize, usize) {
+    let Some(hint) = hint else {
+        return (min_storage, min_account);
+    };
 
-impl WorkloadPredictor {
-    /// Creates a new workload predictor with zero initial estimates.
-    pub const fn new() -> Self {
-        Self { storage_ema: WorkloadEma::new(), account_ema: WorkloadEma::new() }
-    }
+    let desired_storage = if hint.storage_slots == 0 {
+        min_storage
+    } else {
+        hint.storage_slots.div_ceil(SLOTS_PER_WORKER).clamp(min_storage, max_storage)
+    };
 
-    /// Records observed workload after processing a block.
-    pub fn record(&self, storage_targets: usize, account_targets: usize) {
-        self.storage_ema.record(storage_targets);
-        self.account_ema.record(account_targets);
-    }
+    let desired_account = if hint.accounts == 0 {
+        min_account
+    } else {
+        hint.accounts.div_ceil(ACCOUNTS_PER_WORKER).clamp(min_account, max_account)
+    };
 
-    /// Predicts the next block's workload with headroom.
-    ///
-    /// Returns `(storage_count, account_count)` predictions.
-    pub fn predict(&self) -> (usize, usize) {
-        (self.storage_ema.predict(), self.account_ema.predict())
-    }
+    (desired_storage, desired_account)
 }
 
 #[cfg(test)]
@@ -103,38 +47,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_new_ema() {
-        let ema = WorkloadEma::new();
-        assert_eq!(ema.predict(), 0);
+    fn test_no_hint_returns_min() {
+        let (storage, account) = desired_workers(None, 4, 64, 2, 32);
+        assert_eq!(storage, 4);
+        assert_eq!(account, 2);
     }
 
     #[test]
-    fn test_first_record() {
-        let ema = WorkloadEma::new();
-        ema.record(100);
-        assert_eq!(ema.predict(), (100.0 * HEADROOM).ceil() as usize);
+    fn test_empty_hint_returns_min() {
+        let hint = WorkloadHint::default();
+        let (storage, account) = desired_workers(Some(hint), 4, 64, 2, 32);
+        assert_eq!(storage, 4); // storage slots == 0 → min_storage
+        assert_eq!(account, 2); // accounts == 0 → min_account
     }
 
     #[test]
-    fn test_ema_convergence() {
-        let ema = WorkloadEma::new();
-        for _ in 0..10 {
-            ema.record(1000);
-        }
-        assert!((ema.predict() as f64 - 1000.0 * HEADROOM).abs() < 10.0);
+    fn test_scaling_formula() {
+        // 100 accounts, 500 storage slots
+        let hint = WorkloadHint::new(100, 500);
+        let (storage_workers, account_workers) = desired_workers(Some(hint), 4, 64, 2, 32);
+
+        // 500 slots / 50 = 10 storage workers
+        assert_eq!(storage_workers, 10);
+        // 100 accounts / 20 = 5 account workers
+        assert_eq!(account_workers, 5);
     }
 
     #[test]
-    fn test_predictor() {
-        let predictor = WorkloadPredictor::new();
-        predictor.record(100, 50);
-        let (storage, accounts) = predictor.predict();
-        assert_eq!(storage, (100.0 * HEADROOM).ceil() as usize);
-        assert_eq!(accounts, (50.0 * HEADROOM).ceil() as usize);
+    fn test_clamp_to_max() {
+        // 10000 accounts (would need 500 workers unclamped)
+        let hint = WorkloadHint::new(10000, 0);
+        let (_, account_workers) = desired_workers(Some(hint), 2, 32, 2, 32);
+        assert_eq!(account_workers, 32); // Clamped to max
     }
 
-    #[test]
-    fn test_cache_alignment() {
-        assert_eq!(std::mem::align_of::<WorkloadPredictor>(), 64);
-    }
 }

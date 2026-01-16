@@ -225,6 +225,7 @@ where
         multiproof_provider_factory: F,
         config: &TreeConfig,
         bal: Option<Arc<BlockAccessList>>,
+        workload_hint: Option<reth_trie_common::WorkloadHint>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -290,6 +291,7 @@ where
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
             to_multi_proof.clone(),
             from_multi_proof,
+            workload_hint,
         );
 
         // spawn multi-proof task

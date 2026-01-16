@@ -12,7 +12,7 @@ mod storage_root_targets;
 pub use storage_root_targets::StorageRootTargets;
 
 pub mod workload_predictor;
-pub use workload_predictor::WorkloadPredictor;
+pub use workload_predictor::{desired_workers, WorkloadHint, ACCOUNTS_PER_WORKER, SLOTS_PER_WORKER};
 
 /// Parallel trie calculation stats.
 pub mod stats;
