@@ -50,7 +50,7 @@ fn test_put_get_del_multi() {
     txn.commit().unwrap();
 
     let txn = env.begin_rw_txn().unwrap();
-    let dbi = txn.open_db(None).unwrap().dbi();
+    let dbi = txn.create_db(None, DatabaseFlags::DUP_SORT).unwrap().dbi();
     {
         let mut cur = txn.cursor(dbi).unwrap();
         let iter = cur.iter_dup_of::<(), [u8; 4]>(b"key1");
@@ -60,13 +60,13 @@ fn test_put_get_del_multi() {
     txn.commit().unwrap();
 
     let txn = env.begin_rw_txn().unwrap();
-    let db = txn.open_db(None).unwrap();
+    let db = txn.create_db(None, DatabaseFlags::DUP_SORT).unwrap();
     txn.del(db.dbi(), b"key1", Some(b"val2")).unwrap();
     txn.del(db.dbi(), b"key2", None).unwrap();
     txn.commit().unwrap();
 
     let txn = env.begin_rw_txn().unwrap();
-    let dbi = txn.open_db(None).unwrap().dbi();
+    let dbi = txn.create_db(None, DatabaseFlags::DUP_SORT).unwrap().dbi();
     {
         let mut cur = txn.cursor(dbi).unwrap();
         let iter = cur.iter_dup_of::<(), [u8; 4]>(b"key1");
@@ -345,26 +345,26 @@ fn test_stat_dupsort() {
 
     {
         let txn = env.begin_ro_txn().unwrap();
-        let dbi = txn.open_db(None).unwrap().dbi();
+        let dbi = txn.open_db_with_flags(None, DatabaseFlags::DUP_SORT).unwrap().dbi();
         let stat = txn.db_stat(dbi).unwrap();
         assert_eq!(stat.entries(), 9);
     }
 
     let txn = env.begin_rw_txn().unwrap();
-    let db = txn.open_db(None).unwrap();
+    let db = txn.create_db(None, DatabaseFlags::DUP_SORT).unwrap();
     txn.del(db.dbi(), b"key1", Some(b"val2")).unwrap();
     txn.del(db.dbi(), b"key2", None).unwrap();
     txn.commit().unwrap();
 
     {
         let txn = env.begin_ro_txn().unwrap();
-        let dbi = txn.open_db(None).unwrap().dbi();
+        let dbi = txn.open_db_with_flags(None, DatabaseFlags::DUP_SORT).unwrap().dbi();
         let stat = txn.db_stat(dbi).unwrap();
         assert_eq!(stat.entries(), 5);
     }
 
     let txn = env.begin_rw_txn().unwrap();
-    let db = txn.open_db(None).unwrap();
+    let db = txn.create_db(None, DatabaseFlags::DUP_SORT).unwrap();
     txn.put(db.dbi(), b"key4", b"val1", WriteFlags::empty()).unwrap();
     txn.put(db.dbi(), b"key4", b"val2", WriteFlags::empty()).unwrap();
     txn.put(db.dbi(), b"key4", b"val3", WriteFlags::empty()).unwrap();
@@ -372,7 +372,7 @@ fn test_stat_dupsort() {
 
     {
         let txn = env.begin_ro_txn().unwrap();
-        let dbi = txn.open_db(None).unwrap().dbi();
+        let dbi = txn.open_db_with_flags(None, DatabaseFlags::DUP_SORT).unwrap().dbi();
         let stat = txn.db_stat(dbi).unwrap();
         assert_eq!(stat.entries(), 8);
     }

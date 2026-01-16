@@ -218,6 +218,17 @@ where
         Database::new(self, name, 0)
     }
 
+    /// Opens a handle to an MDBX database with the given flags.
+    ///
+    /// This is similar to [`open_db`](Self::open_db), but allows specifying database flags.
+    /// The flags should match those used when the database was created.
+    ///
+    /// Note: This cannot be used to create a database. Use
+    /// [`Transaction::<RW>::create_db`] for that.
+    pub fn open_db_with_flags(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
+        Database::new(self, name, flags.bits())
+    }
+
     /// Gets the option flags for the given database in the transaction.
     pub fn db_flags(&self, dbi: ffi::MDBX_dbi) -> Result<DatabaseFlags> {
         let mut flags: c_uint = 0;
@@ -359,10 +370,6 @@ where
 }
 
 impl Transaction<RW> {
-    fn open_db_with_flags(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
-        Database::new(self, name, flags.bits())
-    }
-
     /// Opens a handle to an MDBX database, creating the database if necessary.
     ///
     /// If the database is already created, the given option flags will be added to it.

@@ -174,7 +174,7 @@ fn test_iter_empty_dup_database() {
     txn.commit().unwrap();
 
     let txn = env.begin_ro_txn().unwrap();
-    let dbi = txn.open_db(None).unwrap().dbi();
+    let dbi = txn.open_db_with_flags(None, DatabaseFlags::DUP_SORT).unwrap().dbi();
     let mut cursor = txn.cursor(dbi).unwrap();
 
     assert!(cursor.iter::<(), ()>().next().is_none());
@@ -217,14 +217,14 @@ fn test_iter_dup() {
     {
         let txn = env.begin_rw_txn().unwrap();
         for (key, data) in items.clone() {
-            let db = txn.open_db(None).unwrap();
+            let db = txn.create_db(None, DatabaseFlags::DUP_SORT).unwrap();
             txn.put(db.dbi(), key, data, WriteFlags::empty()).unwrap();
         }
         txn.commit().unwrap();
     }
 
     let txn = env.begin_ro_txn().unwrap();
-    let dbi = txn.open_db(None).unwrap().dbi();
+    let dbi = txn.open_db_with_flags(None, DatabaseFlags::DUP_SORT).unwrap().dbi();
     let mut cursor = txn.cursor(dbi).unwrap();
     assert_eq!(items, cursor.iter_dup().flatten().collect::<Result<Vec<_>>>().unwrap());
 
@@ -287,7 +287,7 @@ fn test_iter_del_get() {
 
     {
         let txn = env.begin_rw_txn().unwrap();
-        let db = txn.open_db(None).unwrap();
+        let db = txn.create_db(None, DatabaseFlags::DUP_SORT).unwrap();
         for (key, data) in &items {
             txn.put(db.dbi(), key, data, WriteFlags::empty()).unwrap();
         }
@@ -295,7 +295,7 @@ fn test_iter_del_get() {
     }
 
     let txn = env.begin_rw_txn().unwrap();
-    let dbi = txn.open_db(None).unwrap().dbi();
+    let dbi = txn.create_db(None, DatabaseFlags::DUP_SORT).unwrap().dbi();
     let mut cursor = txn.cursor(dbi).unwrap();
     assert_eq!(items, cursor.iter_dup().flatten().collect::<Result<Vec<_>>>().unwrap());
 
