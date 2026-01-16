@@ -659,7 +659,7 @@ pub struct RocksDBBatch<'a> {
     /// Tracks addresses that have had account history appended (debug only).
     #[cfg(debug_assertions)]
     touched_account_history: std::collections::HashSet<Address>,
-    /// Tracks (address, storage_key) pairs that have had storage history appended (debug only).
+    /// Tracks (address, `storage_key`) pairs that have had storage history appended (debug only).
     #[cfg(debug_assertions)]
     touched_storage_history: std::collections::HashSet<(Address, B256)>,
 }
