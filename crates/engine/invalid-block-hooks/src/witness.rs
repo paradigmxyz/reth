@@ -408,11 +408,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip7685::Requests;
     use alloy_primitives::{map::HashMap, Address, Bytes, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_provider::{test_utils::MockEthProvider, BlockExecutionResult};
+    use reth_provider::test_utils::MockEthProvider;
     use reth_revm::db::{BundleAccount, BundleState};
     use revm_database::states::reverts::AccountRevert;
     use tempfile::TempDir;
@@ -831,12 +832,12 @@ mod tests {
         .try_recover()
         .unwrap();
 
-        // Create mock ExecutionOutcome
+        // Create mock BlockExecutionOutput
         let output = BlockExecutionOutput {
             state: bundle_state,
-            result: BlockExecutionResult {
-                receipts: Default::default(),
-                requests: Default::default(),
+            result: reth_provider::BlockExecutionResult {
+                receipts: vec![],
+                requests: Requests::default(),
                 gas_used: 0,
                 blob_gas_used: 0,
             },

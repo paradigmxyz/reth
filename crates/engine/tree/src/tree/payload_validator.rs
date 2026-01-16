@@ -756,7 +756,7 @@ where
         &self,
         block: &RecoveredBlock<N::Block>,
         parent_block: &SealedHeader<N::BlockHeader>,
-        outcome: &BlockExecutionOutput<N::Receipt>,
+        output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
     ) -> Result<HashedPostState, InsertBlockErrorKind>
     where
@@ -783,16 +783,16 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        if let Err(err) = self.consensus.validate_block_post_execution(block, &outcome.result) {
+        if let Err(err) = self.consensus.validate_block_post_execution(block, output) {
             // call post-block hook
-            self.on_invalid_block(parent_block, block, outcome, None, ctx.state_mut());
+            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())
         }
         drop(_enter);
 
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "hashed_post_state").entered();
-        let hashed_state = self.provider.hashed_post_state(&outcome.state);
+        let hashed_state = self.provider.hashed_post_state(&output.state);
         drop(_enter);
 
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
@@ -800,7 +800,7 @@ where
             self.validator.validate_block_post_execution_with_hashed_state(&hashed_state, block)
         {
             // call post-block hook
-            self.on_invalid_block(parent_block, block, outcome, None, ctx.state_mut());
+            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())
         }
 
