@@ -1,8 +1,9 @@
 use alloc::vec::Vec;
+use alloy_consensus::transaction::Either;
 use alloy_primitives::BlockNumber;
 use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie_common::{iter::Either, HashedPostStateSorted};
+use reth_trie_common::HashedPostStateSorted;
 use revm_database::{
     states::{PlainStateReverts, StateChangeset},
     BundleState, OriginalValuesKnown,
