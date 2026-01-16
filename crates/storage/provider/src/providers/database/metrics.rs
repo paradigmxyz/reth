@@ -45,7 +45,7 @@ pub(crate) enum Action {
 }
 
 /// Database provider metrics
-#[derive(Metrics)]
+#[derive(Clone, Metrics)]
 #[metrics(scope = "storage.providers.database")]
 pub(crate) struct DatabaseProviderMetrics {
     /// Duration of insert block

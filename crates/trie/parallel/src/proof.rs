@@ -253,7 +253,9 @@ mod tests {
     };
     use rand::Rng;
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
+    use reth_provider::{
+        test_utils::create_test_provider_factory, DatabaseProviderROFactory, HashingWriter,
+    };
     use reth_trie::proof::Proof;
     use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
     use tokio::runtime::Runtime;
@@ -323,9 +325,10 @@ mod tests {
         let rt = Runtime::new().unwrap();
 
         let changeset_cache = reth_trie_db::ChangesetCache::new();
-        let factory =
+        let overlay_factory =
             reth_provider::providers::OverlayStateProviderFactory::new(factory, changeset_cache);
-        let task_ctx = ProofTaskCtx::new(factory);
+        let overlay_provider = overlay_factory.database_provider_ro().unwrap();
+        let task_ctx = ProofTaskCtx::new(overlay_provider);
         let proof_worker_handle =
             ProofWorkerHandle::new(rt.handle().clone(), task_ctx, 1, 1, false);
 

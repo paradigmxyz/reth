@@ -1353,7 +1353,8 @@ mod tests {
         let rt_handle = get_test_runtime_handle();
         let changeset_cache = ChangesetCache::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
-        let task_ctx = ProofTaskCtx::new(overlay_factory);
+        let overlay_provider = overlay_factory.database_provider_ro().unwrap();
+        let task_ctx = ProofTaskCtx::new(overlay_provider);
         let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();

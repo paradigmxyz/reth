@@ -17,7 +17,11 @@ use std::fmt::Debug;
 pub trait FullProvider<N: NodeTypesWithDB>:
     DatabaseProviderFactory<
         DB = N::DB,
-        Provider: BlockReader + StageCheckpointReader + PruneCheckpointReader + ChangeSetReader,
+        Provider: BlockReader
+                      + StageCheckpointReader
+                      + PruneCheckpointReader
+                      + ChangeSetReader
+                      + Clone,
     > + NodePrimitivesProvider<Primitives = N::Primitives>
     + StaticFileProviderFactory<Primitives = N::Primitives>
     + RocksDBProviderFactory
@@ -46,7 +50,11 @@ pub trait FullProvider<N: NodeTypesWithDB>:
 impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
     T: DatabaseProviderFactory<
             DB = N::DB,
-            Provider: BlockReader + StageCheckpointReader + PruneCheckpointReader + ChangeSetReader,
+            Provider: BlockReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + Clone,
         > + NodePrimitivesProvider<Primitives = N::Primitives>
         + StaticFileProviderFactory<Primitives = N::Primitives>
         + RocksDBProviderFactory

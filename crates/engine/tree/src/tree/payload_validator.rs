@@ -151,7 +151,8 @@ where
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
-                          + BlockNumReader,
+                          + BlockNumReader
+                          + Clone,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
         + BlockNumReader
@@ -855,12 +856,15 @@ where
             StateRootStrategy::StateRootTask => {
                 let spawn_start = Instant::now();
 
-                // Use the pre-computed overlay factory for multiproofs
+                // Create the overlay provider from the factory
+                let overlay_provider = overlay_factory.database_provider_ro()?;
+
+                // Use the pre-computed overlay provider for multiproofs
                 let handle = self.payload_processor.spawn(
                     env,
                     txs,
                     provider_builder,
-                    overlay_factory,
+                    overlay_provider,
                     &self.config,
                     block_access_list,
                 );
@@ -1295,7 +1299,8 @@ where
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
-                          + BlockNumReader,
+                          + BlockNumReader
+                          + Clone,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
