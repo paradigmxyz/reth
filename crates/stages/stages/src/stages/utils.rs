@@ -360,37 +360,6 @@ where
     })
 }
 
-/// Helper function that shards a list of block numbers and writes them to the writer.
-///
-/// Splits the list into fixed-size shards (except the last), and writes each with appropriate key.
-#[allow(dead_code)]
-fn shard_and_write<F>(list: &[BlockNumber], mut write_fn: F) -> ProviderResult<()>
-where
-    F: FnMut(u64, BlockNumberList) -> ProviderResult<()>,
-{
-    if list.is_empty() {
-        return Ok(());
-    }
-
-    let chunks: Vec<Vec<u64>> =
-        list.chunks(NUM_OF_INDICES_IN_SHARD).map(|chunk| chunk.to_vec()).collect();
-
-    let mut iter = chunks.into_iter().peekable();
-    while let Some(chunk) = iter.next() {
-        let highest = if iter.peek().is_none() {
-            // Last chunk gets u64::MAX as highest block number (sentinel)
-            u64::MAX
-        } else {
-            *chunk.last().expect("chunk is non-empty")
-        };
-
-        let value = BlockNumberList::new_pre_sorted(chunk);
-        write_fn(highest, value)?;
-    }
-
-    Ok(())
-}
-
 /// Loads account history indices from a collector into the provider using [`EitherWriter`].
 ///
 /// This function handles both MDBX and `RocksDB` storage backends transparently.
@@ -434,15 +403,17 @@ where
         let partial_key = get_partial(sharded_key);
 
         if current_partial != partial_key {
-            // Flush the last shard for the previous key
-            load_accounts_history_shard(
-                &mut writer,
-                current_partial,
-                &mut current_list,
-                &sharded_key_factory,
-                append_only,
-                LoadMode::Flush,
-            )?;
+            // Flush the last shard for the previous key (skip if empty, e.g. first iteration)
+            if !current_list.is_empty() {
+                load_accounts_history_shard(
+                    &mut writer,
+                    current_partial,
+                    &mut current_list,
+                    &sharded_key_factory,
+                    append_only,
+                    LoadMode::Flush,
+                )?;
+            }
 
             current_partial = partial_key;
             current_list.clear();
