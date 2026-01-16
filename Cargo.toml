@@ -481,14 +481,14 @@ revm-primitives = { version = "22.0.0", default-features = false }
 revm-interpreter = { version = "32.0.0", default-features = false }
 revm-database-interface = { version = "9.0.0", default-features = false }
 op-revm = { version = "15.0.0", default-features = false }
-revm-inspectors = "0.33.2"
+revm-inspectors = "0.34.0"
 
 # eth
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-dyn-abi = "1.4.3"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.3.0", default-features = false }
-alloy-evm = { version = "0.25.1", default-features = false }
+alloy-evm = { version = "0.26.0", default-features = false }
 alloy-primitives = { version = "1.5.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.5.0"
@@ -526,7 +526,7 @@ alloy-transport-ipc = { version = "1.4.3", default-features = false }
 alloy-transport-ws = { version = "1.4.3", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.25.0", default-features = false }
+alloy-op-evm = { version = "0.26.0", default-features = false }
 alloy-op-hardforks = "0.4.4"
 op-alloy-rpc-types = { version = "0.23.1", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.23.1", default-features = false }
@@ -793,7 +793,7 @@ ipnet = "2.11"
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "a69f0b45a6b0286e16072cb8399e02ce6ceca353" }
 # alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "a69f0b45a6b0286e16072cb8399e02ce6ceca353" }
 
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "3020ea8" }
+#revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "3020ea8" }
 
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
+#alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
+#alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
