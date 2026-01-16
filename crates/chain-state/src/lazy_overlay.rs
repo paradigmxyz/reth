@@ -12,8 +12,9 @@ use tracing::{debug, trace};
 
 /// Threshold for switching from `extend_ref` loop to `merge_batch`.
 ///
-/// Benchmarked crossover: `extend_ref` wins up to ~64 blocks, `merge_batch` wins beyond.
-const MERGE_BATCH_THRESHOLD: usize = 64;
+/// Benchmarked crossover: `extend_ref` wins up to ~30 blocks, `merge_batch` wins beyond.
+/// See: https://github.com/paradigmxyz/reth/pull/21098
+const MERGE_BATCH_THRESHOLD: usize = 30;
 
 /// Inputs captured for lazy overlay computation.
 #[derive(Clone)]
