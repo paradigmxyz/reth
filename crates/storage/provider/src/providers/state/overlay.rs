@@ -26,6 +26,21 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument};
 
+/// Helper to extend an `Option<Arc<HashedPostStateSorted>>` with additional state.
+///
+/// If `existing` is `Some`, extends it in place (using `Arc::make_mut` for COW semantics).
+/// If `existing` is `None`, wraps `other` in a new `Arc`.
+fn extend_hashed_state_overlay(
+    existing: &mut Option<Arc<HashedPostStateSorted>>,
+    other: HashedPostStateSorted,
+) {
+    if let Some(overlay) = existing.as_mut() {
+        Arc::make_mut(overlay).extend_ref(&other);
+    } else {
+        *existing = Some(Arc::new(other));
+    }
+}
+
 /// Metrics for overlay state provider operations.
 #[derive(Clone, Metrics)]
 #[metrics(scope = "storage.providers.overlay")]
@@ -118,11 +133,7 @@ impl<F> OverlayStateProviderFactory<F> {
 
     /// Extends the existing hashed state overlay with the given [`HashedPostStateSorted`].
     pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
-        if let Some(overlay) = self.hashed_state_overlay.as_mut() {
-            Arc::make_mut(overlay).extend_ref(&other);
-        } else {
-            self.hashed_state_overlay = Some(Arc::new(other))
-        }
+        extend_hashed_state_overlay(&mut self.hashed_state_overlay, other);
         self
     }
 }
@@ -431,6 +442,16 @@ where
         hashed_post_state: Arc<HashedPostStateSorted>,
     ) -> Self {
         Self { provider, trie_updates, hashed_post_state }
+    }
+
+    /// Extends the existing hashed state overlay with the given [`HashedPostStateSorted`].
+    ///
+    /// Returns a new `OverlayStateProvider` with the extended hashed post state.
+    pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
+        let mut overlay = Some(self.hashed_post_state);
+        extend_hashed_state_overlay(&mut overlay, other);
+        self.hashed_post_state = overlay.expect("extend always produces Some");
+        self
     }
 }
 

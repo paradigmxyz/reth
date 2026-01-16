@@ -876,7 +876,7 @@ mod tests {
     use reth_provider::{
         providers::{BlockchainProvider, OverlayStateProviderFactory},
         test_utils::create_test_provider_factory_with_chain_spec,
-        ChainSpecProvider, HashingWriter,
+        ChainSpecProvider, DatabaseProviderROFactory, HashingWriter,
     };
     use reth_revm::db::BundleState;
     use reth_testing_utils::generators;

@@ -40,10 +40,10 @@ use reth_primitives_traits::{
     SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, ExecutionOutcome,
-    HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
-    StateProvider, StateProviderFactory, StateReader,
+    providers::{OverlayStateProvider, OverlayStateProviderFactory},
+    BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
 };
 use reth_revm::db::State;
 use reth_trie::{
@@ -493,6 +493,14 @@ where
         let root_time = Instant::now();
         let mut maybe_state_root = None;
 
+        // Create overlay provider once for state root computation (parallel/serial paths).
+        // The StateRootTask path doesn't need this since it uses the provider passed to spawn.
+        let overlay_provider_for_root = if !matches!(strategy, StateRootStrategy::StateRootTask) {
+            Some(ensure_ok_post_block!(overlay_factory.database_provider_ro(), block))
+        } else {
+            None
+        };
+
         match strategy {
             StateRootStrategy::StateRootTask => {
                 debug!(target: "engine::tree::payload_validator", "Using sparse trie state root algorithm");
@@ -519,7 +527,10 @@ where
             }
             StateRootStrategy::Parallel => {
                 debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
-                match self.compute_state_root_parallel(overlay_factory.clone(), &hashed_state) {
+                let overlay_provider = overlay_provider_for_root
+                    .clone()
+                    .expect("overlay_provider_for_root is Some for Parallel strategy");
+                match self.compute_state_root_parallel(overlay_provider, &hashed_state) {
                     Ok(result) => {
                         let elapsed = root_time.elapsed();
                         info!(
@@ -554,8 +565,15 @@ where
                 self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
             }
 
+            // For fallback, we need a provider. If we already created one (Parallel strategy that
+            // failed), reuse it. Otherwise create one now.
+            let overlay_provider = match overlay_provider_for_root {
+                Some(p) => p,
+                None => ensure_ok_post_block!(overlay_factory.database_provider_ro(), block),
+            };
+
             let (root, updates) = ensure_ok_post_block!(
-                self.compute_state_root_serial(overlay_factory.clone(), &hashed_state),
+                self.compute_state_root_serial(overlay_provider, &hashed_state),
                 block
             );
             (root, updates, root_time.elapsed())
@@ -698,7 +716,7 @@ where
 
     /// Compute state root for the given hashed post state in parallel.
     ///
-    /// Uses an overlay factory which provides the state of the parent block, along with the
+    /// Uses an overlay provider which provides the state of the parent block, along with the
     /// [`HashedPostState`] containing the changes of this block, to compute the state root and
     /// trie updates for this block.
     ///
@@ -709,38 +727,36 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn compute_state_root_parallel(
         &self,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        overlay_provider: OverlayStateProvider<P::Provider>,
         hashed_state: &HashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         // The `hashed_state` argument will be taken into account as part of the overlay, but we
         // need to use the prefix sets which were generated from it to indicate to the
         // ParallelStateRoot which parts of the trie need to be recomputed.
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
-        let overlay_factory =
-            overlay_factory.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
-        ParallelStateRoot::new(overlay_factory, prefix_sets).incremental_root_with_updates()
+        let overlay_provider =
+            overlay_provider.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
+        ParallelStateRoot::new(overlay_provider, prefix_sets).incremental_root_with_updates()
     }
 
     /// Compute state root for the given hashed post state in serial.
     ///
-    /// Uses an overlay factory which provides the state of the parent block, along with the
+    /// Uses an overlay provider which provides the state of the parent block, along with the
     /// [`HashedPostState`] containing the changes of this block, to compute the state root and
     /// trie updates for this block.
     fn compute_state_root_serial(
         &self,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        overlay_provider: OverlayStateProvider<P::Provider>,
         hashed_state: &HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         // The `hashed_state` argument will be taken into account as part of the overlay, but we
         // need to use the prefix sets which were generated from it to indicate to the
         // StateRoot which parts of the trie need to be recomputed.
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
-        let overlay_factory =
-            overlay_factory.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
+        let overlay_provider =
+            overlay_provider.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
 
-        let provider = overlay_factory.database_provider_ro()?;
-
-        Ok(StateRoot::new(&provider, &provider)
+        Ok(StateRoot::new(&overlay_provider, &overlay_provider)
             .with_prefix_sets(prefix_sets)
             .root_with_updates()?)
     }

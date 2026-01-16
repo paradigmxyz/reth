@@ -1317,8 +1317,9 @@ mod tests {
     use alloy_primitives::Address;
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
-        BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
-        PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
+        BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+        DatabaseProviderROFactory, LatestStateProvider, PruneCheckpointReader,
+        StageCheckpointReader, StateProviderBox,
     };
     use reth_trie::MultiProof;
     use reth_trie_db::ChangesetCache;
@@ -1345,7 +1346,8 @@ mod tests {
                               + StageCheckpointReader
                               + PruneCheckpointReader
                               + ChangeSetReader
-                              + BlockNumReader,
+                              + BlockNumReader
+                              + Clone,
             > + Clone
             + Send
             + 'static,
