@@ -249,13 +249,13 @@ where
     }
 
     /// Open a new cursor on the given database.
-    pub fn cursor(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<K>> {
-        Cursor::new(self.clone(), dbi)
+    pub fn cursor(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<'_, K>> {
+        Cursor::new(self, dbi)
     }
 
     /// Open a new cursor on the given dbi.
-    pub fn cursor_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<K>> {
-        Cursor::new(self.clone(), dbi)
+    pub fn cursor_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<'_, K>> {
+        Cursor::new(self, dbi)
     }
 
     /// Disables a timeout for this read transaction.

@@ -14,26 +14,28 @@ use ffi::{
 use std::{borrow::Cow, ffi::c_void, fmt, marker::PhantomData, mem, ptr};
 
 /// A cursor for navigating the items within a database.
-pub struct Cursor<K>
+pub struct Cursor<'tx, K>
 where
     K: TransactionKind,
 {
-    txn: Transaction<K>,
+    txn: &'tx Transaction<K>,
     cursor: *mut ffi::MDBX_cursor,
+    /// Marker to make this type `!Send` and `!Sync`.
+    _marker: PhantomData<*const ()>,
 }
 
-impl<K> Cursor<K>
+impl<'tx, K> Cursor<'tx, K>
 where
     K: TransactionKind,
 {
-    pub(crate) fn new(txn: Transaction<K>, dbi: ffi::MDBX_dbi) -> Result<Self> {
+    pub(crate) fn new(txn: &'tx Transaction<K>, dbi: ffi::MDBX_dbi) -> Result<Self> {
         let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
         unsafe {
             txn.txn_execute(|txn_ptr| {
                 mdbx_result(ffi::mdbx_cursor_open(txn_ptr, dbi, &mut cursor))
             })??;
         }
-        Ok(Self { txn, cursor })
+        Ok(Self { txn, cursor, _marker: PhantomData })
     }
 
     fn new_at_position(other: &Self) -> Result<Self> {
@@ -42,7 +44,7 @@ where
 
             let res = ffi::mdbx_cursor_copy(other.cursor(), cursor);
 
-            let s = Self { txn: other.txn.clone(), cursor };
+            let s = Self { txn: other.txn, cursor, _marker: PhantomData };
 
             mdbx_result(res)?;
 
@@ -59,13 +61,13 @@ where
     }
 
     /// Returns an iterator over the raw key value slices.
-    pub fn iter_slices<'a>(self) -> IntoIter<K, Cow<'a, [u8]>, Cow<'a, [u8]>> {
+    pub fn iter_slices<'a>(self) -> IntoIter<'tx, K, Cow<'a, [u8]>, Cow<'a, [u8]>> {
         self.into_iter()
     }
 
     /// Returns an iterator over database items.
     #[expect(clippy::should_implement_trait)]
-    pub fn into_iter<Key, Value>(self) -> IntoIter<K, Key, Value>
+    pub fn into_iter<Key, Value>(self) -> IntoIter<'tx, K, Key, Value>
     where
         Key: TableObject,
         Value: TableObject,
@@ -338,7 +340,7 @@ where
     /// For databases with duplicate data items ([`DatabaseFlags::DUP_SORT`]), the
     /// duplicate data items of each key will be returned before moving on to
     /// the next key.
-    pub fn iter<Key, Value>(&mut self) -> Iter<'_, K, Key, Value>
+    pub fn iter<Key, Value>(&mut self) -> Iter<'_, 'tx, K, Key, Value>
     where
         Key: TableObject,
         Value: TableObject,
@@ -351,7 +353,7 @@ where
     /// For databases with duplicate data items ([`DatabaseFlags::DUP_SORT`]), the
     /// duplicate data items of each key will be returned before moving on to
     /// the next key.
-    pub fn iter_start<Key, Value>(&mut self) -> Iter<'_, K, Key, Value>
+    pub fn iter_start<Key, Value>(&mut self) -> Iter<'_, 'tx, K, Key, Value>
     where
         Key: TableObject,
         Value: TableObject,
@@ -364,7 +366,7 @@ where
     /// For databases with duplicate data items ([`DatabaseFlags::DUP_SORT`]), the
     /// duplicate data items of each key will be returned before moving on to
     /// the next key.
-    pub fn iter_from<Key, Value>(&mut self, key: &[u8]) -> Iter<'_, K, Key, Value>
+    pub fn iter_from<Key, Value>(&mut self, key: &[u8]) -> Iter<'_, 'tx, K, Key, Value>
     where
         Key: TableObject,
         Value: TableObject,
@@ -379,7 +381,7 @@ where
     /// Iterate over duplicate database items. The iterator will begin with the
     /// item next after the cursor, and continue until the end of the database.
     /// Each item will be returned as an iterator of its duplicates.
-    pub fn iter_dup<Key, Value>(&mut self) -> IterDup<'_, K, Key, Value>
+    pub fn iter_dup<Key, Value>(&mut self) -> IterDup<'_, 'tx, K, Key, Value>
     where
         Key: TableObject,
         Value: TableObject,
@@ -389,7 +391,7 @@ where
 
     /// Iterate over duplicate database items starting from the beginning of the
     /// database. Each item will be returned as an iterator of its duplicates.
-    pub fn iter_dup_start<Key, Value>(&mut self) -> IterDup<'_, K, Key, Value>
+    pub fn iter_dup_start<Key, Value>(&mut self) -> IterDup<'_, 'tx, K, Key, Value>
     where
         Key: TableObject,
         Value: TableObject,
@@ -399,7 +401,7 @@ where
 
     /// Iterate over duplicate items in the database starting from the given
     /// key. Each item will be returned as an iterator of its duplicates.
-    pub fn iter_dup_from<Key, Value>(&mut self, key: &[u8]) -> IterDup<'_, K, Key, Value>
+    pub fn iter_dup_from<Key, Value>(&mut self, key: &[u8]) -> IterDup<'_, 'tx, K, Key, Value>
     where
         Key: TableObject,
         Value: TableObject,
@@ -412,7 +414,7 @@ where
     }
 
     /// Iterate over the duplicates of the item in the database with the given key.
-    pub fn iter_dup_of<Key, Value>(&mut self, key: &[u8]) -> Iter<'_, K, Key, Value>
+    pub fn iter_dup_of<Key, Value>(&mut self, key: &[u8]) -> Iter<'_, 'tx, K, Key, Value>
     where
         Key: TableObject,
         Value: TableObject,
@@ -430,7 +432,7 @@ where
     }
 }
 
-impl Cursor<RW> {
+impl Cursor<'_, RW> {
     /// Puts a key/data pair into the database. The cursor will be positioned at
     /// the new data item, or on failure usually near it.
     pub fn put(&mut self, key: &[u8], data: &[u8], flags: WriteFlags) -> Result<()> {
@@ -462,7 +464,7 @@ impl Cursor<RW> {
     }
 }
 
-impl<K> Clone for Cursor<K>
+impl<K> Clone for Cursor<'_, K>
 where
     K: TransactionKind,
 {
@@ -471,7 +473,7 @@ where
     }
 }
 
-impl<K> fmt::Debug for Cursor<K>
+impl<K> fmt::Debug for Cursor<'_, K>
 where
     K: TransactionKind,
 {
@@ -480,7 +482,7 @@ where
     }
 }
 
-impl<K> Drop for Cursor<K>
+impl<K> Drop for Cursor<'_, K>
 where
     K: TransactionKind,
 {
@@ -502,12 +504,9 @@ const unsafe fn slice_to_val(slice: Option<&[u8]>) -> ffi::MDBX_val {
     }
 }
 
-unsafe impl<K> Send for Cursor<K> where K: TransactionKind {}
-unsafe impl<K> Sync for Cursor<K> where K: TransactionKind {}
-
 /// An iterator over the key/value pairs in an MDBX database.
 #[derive(Debug)]
-pub enum IntoIter<K, Key, Value>
+pub enum IntoIter<'tx, K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
@@ -526,7 +525,7 @@ where
     /// fails for some reason.
     Ok {
         /// The MDBX cursor with which to iterate.
-        cursor: Cursor<K>,
+        cursor: Cursor<'tx, K>,
 
         /// The first operation to perform when the consumer calls [`Iter::next()`].
         op: ffi::MDBX_cursor_op,
@@ -538,19 +537,19 @@ where
     },
 }
 
-impl<K, Key, Value> IntoIter<K, Key, Value>
+impl<'tx, K, Key, Value> IntoIter<'tx, K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
     Value: TableObject,
 {
     /// Creates a new iterator backed by the given cursor.
-    fn new(cursor: Cursor<K>, op: ffi::MDBX_cursor_op, next_op: ffi::MDBX_cursor_op) -> Self {
+    fn new(cursor: Cursor<'tx, K>, op: ffi::MDBX_cursor_op, next_op: ffi::MDBX_cursor_op) -> Self {
         Self::Ok { cursor, op, next_op, _marker: Default::default() }
     }
 }
 
-impl<K, Key, Value> Iterator for IntoIter<K, Key, Value>
+impl<K, Key, Value> Iterator for IntoIter<'_, K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
@@ -598,7 +597,7 @@ where
 
 /// An iterator over the key/value pairs in an MDBX database.
 #[derive(Debug)]
-pub enum Iter<'cur, K, Key, Value>
+pub enum Iter<'cur, 'tx, K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
@@ -617,7 +616,7 @@ where
     /// fails for some reason.
     Ok {
         /// The MDBX cursor with which to iterate.
-        cursor: &'cur mut Cursor<K>,
+        cursor: &'cur mut Cursor<'tx, K>,
 
         /// The first operation to perform when the consumer calls [`Iter::next()`].
         op: ffi::MDBX_cursor_op,
@@ -629,7 +628,7 @@ where
     },
 }
 
-impl<'cur, K, Key, Value> Iter<'cur, K, Key, Value>
+impl<'cur, 'tx, K, Key, Value> Iter<'cur, 'tx, K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
@@ -637,7 +636,7 @@ where
 {
     /// Creates a new iterator backed by the given cursor.
     fn new(
-        cursor: &'cur mut Cursor<K>,
+        cursor: &'cur mut Cursor<'tx, K>,
         op: ffi::MDBX_cursor_op,
         next_op: ffi::MDBX_cursor_op,
     ) -> Self {
@@ -645,7 +644,7 @@ where
     }
 }
 
-impl<K, Key, Value> Iterator for Iter<'_, K, Key, Value>
+impl<K, Key, Value> Iterator for Iter<'_, '_, K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
@@ -695,7 +694,7 @@ where
 ///
 /// The yielded items of the iterator are themselves iterators over the duplicate values for a
 /// specific key.
-pub enum IterDup<'cur, K, Key, Value>
+pub enum IterDup<'cur, 'tx, K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
@@ -714,7 +713,7 @@ where
     /// fails for some reason.
     Ok {
         /// The MDBX cursor with which to iterate.
-        cursor: &'cur mut Cursor<K>,
+        cursor: &'cur mut Cursor<'tx, K>,
 
         /// The first operation to perform when the consumer calls `Iter.next()`.
         op: MDBX_cursor_op,
@@ -723,19 +722,19 @@ where
     },
 }
 
-impl<'cur, K, Key, Value> IterDup<'cur, K, Key, Value>
+impl<'cur, 'tx, K, Key, Value> IterDup<'cur, 'tx, K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
     Value: TableObject,
 {
     /// Creates a new iterator backed by the given cursor.
-    fn new(cursor: &'cur mut Cursor<K>, op: MDBX_cursor_op) -> Self {
+    fn new(cursor: &'cur mut Cursor<'tx, K>, op: MDBX_cursor_op) -> Self {
         IterDup::Ok { cursor, op, _marker: Default::default() }
     }
 }
 
-impl<K, Key, Value> fmt::Debug for IterDup<'_, K, Key, Value>
+impl<K, Key, Value> fmt::Debug for IterDup<'_, '_, K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
@@ -746,13 +745,13 @@ where
     }
 }
 
-impl<K, Key, Value> Iterator for IterDup<'_, K, Key, Value>
+impl<'tx, K, Key, Value> Iterator for IterDup<'_, 'tx, K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
     Value: TableObject,
 {
-    type Item = IntoIter<K, Key, Value>;
+    type Item = IntoIter<'tx, K, Key, Value>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
@@ -767,7 +766,7 @@ where
 
                     (err_code == ffi::MDBX_SUCCESS).then(|| {
                         IntoIter::new(
-                            Cursor::new_at_position(&**cursor).unwrap(),
+                            Cursor::new_at_position(cursor).unwrap(),
                             ffi::MDBX_GET_CURRENT,
                             ffi::MDBX_NEXT_DUP,
                         )

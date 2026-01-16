@@ -567,14 +567,22 @@ impl DatabaseEnv {
         }
 
         let tx = self.tx_mut()?;
-        let mut version_cursor = tx.cursor_write::<tables::VersionHistory>()?;
+        let should_commit = {
+            let mut version_cursor = tx.cursor_write::<tables::VersionHistory>()?;
 
-        let last_version = version_cursor.last()?.map(|(_, v)| v);
-        if Some(&version) != last_version.as_ref() {
-            version_cursor.upsert(
-                SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
-                &version,
-            )?;
+            let last_version = version_cursor.last()?.map(|(_, v)| v);
+            if Some(&version) != last_version.as_ref() {
+                version_cursor.upsert(
+                    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+                    &version,
+                )?;
+                true
+            } else {
+                false
+            }
+        };
+
+        if should_commit {
             tx.commit()?;
         }
 

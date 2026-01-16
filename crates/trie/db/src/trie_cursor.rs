@@ -27,12 +27,12 @@ where
     TX: DbTx,
 {
     type AccountTrieCursor<'a>
-        = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>
+        = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<'a, tables::AccountsTrie>>
     where
         Self: 'a;
 
     type StorageTrieCursor<'a>
-        = DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>
+        = DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<'a, tables::StoragesTrie>>
     where
         Self: 'a;
 
@@ -64,7 +64,7 @@ impl<C> DatabaseAccountTrieCursor<C> {
 
 impl<C> TrieCursor for DatabaseAccountTrieCursor<C>
 where
-    C: DbCursorRO<tables::AccountsTrie> + Send + Sync,
+    C: DbCursorRO<tables::AccountsTrie>,
 {
     /// Seeks an exact match for the provided key in the account trie.
     fn seek_exact(
@@ -160,7 +160,7 @@ where
 
 impl<C> TrieCursor for DatabaseStorageTrieCursor<C>
 where
-    C: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send + Sync,
+    C: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie>,
 {
     /// Seeks an exact match for the given key in the storage trie.
     fn seek_exact(
@@ -202,7 +202,7 @@ where
 
 impl<C> TrieStorageCursor for DatabaseStorageTrieCursor<C>
 where
-    C: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send + Sync,
+    C: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie>,
 {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.hashed_address = hashed_address;

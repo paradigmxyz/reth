@@ -18,15 +18,15 @@ use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWri
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds, sync::Arc};
 
 /// Read only Cursor.
-pub type CursorRO<T> = Cursor<RO, T>;
+pub type CursorRO<'tx, T> = Cursor<'tx, RO, T>;
 /// Read write cursor.
-pub type CursorRW<T> = Cursor<RW, T>;
+pub type CursorRW<'tx, T> = Cursor<'tx, RW, T>;
 
 /// Cursor wrapper to access KV items.
 #[derive(Debug)]
-pub struct Cursor<K: TransactionKind, T: Table> {
+pub struct Cursor<'tx, K: TransactionKind, T: Table> {
     /// Inner `libmdbx` cursor.
-    pub(crate) inner: reth_libmdbx::Cursor<K>,
+    pub(crate) inner: reth_libmdbx::Cursor<'tx, K>,
     /// Cache buffer that receives compressed values.
     buf: Vec<u8>,
     /// Reference to metric handles in the DB environment. If `None`, metrics are not recorded.
@@ -35,9 +35,9 @@ pub struct Cursor<K: TransactionKind, T: Table> {
     _dbi: PhantomData<T>,
 }
 
-impl<K: TransactionKind, T: Table> Cursor<K, T> {
+impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
     pub(crate) const fn new_with_metrics(
-        inner: reth_libmdbx::Cursor<K>,
+        inner: reth_libmdbx::Cursor<'tx, K>,
         metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> Self {
         Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData }
@@ -88,7 +88,7 @@ macro_rules! compress_to_buf_or_ref {
     };
 }
 
-impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
+impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<'_, K, T> {
     fn first(&mut self) -> PairResult<T> {
         decode::<T>(self.inner.first())
     }
@@ -157,7 +157,7 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
     }
 }
 
-impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
+impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<'_, K, T> {
     /// Returns the previous `(key, value)` pair of a DUPSORT table.
     fn prev_dup(&mut self) -> PairResult<T> {
         decode::<T>(self.inner.prev_dup())
@@ -247,7 +247,7 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
     }
 }
 
-impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
+impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
     /// Database operation that will update an existing row if a specified value already
     /// exists in a table, and insert a new row if the specified value doesn't already exist
     ///
@@ -330,7 +330,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     }
 }
 
-impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
+impl<T: DupSort> DbDupCursorRW<T> for Cursor<'_, RW, T> {
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
         self.execute_with_operation_metric(Operation::CursorDeleteCurrentDuplicates, None, |this| {
             this.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))
