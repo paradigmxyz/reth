@@ -91,11 +91,6 @@ impl SparseTrieUpdate {
 
     /// Extend update with multiple others, reserving capacity upfront for efficiency.
     pub(super) fn extend_batch(&mut self, others: impl IntoIterator<Item = Self>) {
-        let others: Vec<_> = others.into_iter().collect();
-        if others.is_empty() {
-            return;
-        }
-
         let (states, multiproofs): (Vec<_>, Vec<_>) =
             others.into_iter().map(|o| (o.state, o.multiproof)).unzip();
 
