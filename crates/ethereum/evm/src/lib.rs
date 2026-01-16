@@ -408,7 +408,7 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let evm_env = EvmEnv {
-            cfg_env: CfgEnv::new().with_spec(SpecId::CONSTANTINOPLE),
+            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::CONSTANTINOPLE),
             ..Default::default()
         };
 
@@ -475,7 +475,7 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let evm_env = EvmEnv {
-            cfg_env: CfgEnv::new().with_spec(SpecId::CONSTANTINOPLE),
+            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::CONSTANTINOPLE),
             ..Default::default()
         };
 

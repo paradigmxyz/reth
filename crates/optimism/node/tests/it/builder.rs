@@ -19,7 +19,7 @@ use reth_optimism_node::{args::RollupArgs, OpEvmConfig, OpExecutorBuilder, OpNod
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::BlockchainProvider;
 use revm::{
-    context::{BlockEnv, Cfg, ContextTr, TxEnv},
+    context::{BlockEnv, ContextTr, TxEnv},
     context_interface::result::EVMError,
     inspector::NoOpInspector,
     interpreter::interpreter::EthInterpreter,
