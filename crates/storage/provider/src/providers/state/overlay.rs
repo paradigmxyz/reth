@@ -2,7 +2,7 @@ use alloy_primitives::{BlockNumber, B256};
 use metrics::{Counter, Histogram};
 use parking_lot::RwLock;
 use reth_chain_state::LazyOverlay;
-use reth_db_api::DatabaseError;
+use reth_db_api::{tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
 use reth_prune_types::PruneSegment;
@@ -12,13 +12,15 @@ use reth_storage_api::{
     DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
 };
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
-    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
+    hashed_cursor::{HashedCursorFactory, HashedPostStateCursor, HashedPostStateCursorFactory},
+    trie_cursor::{InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     HashedPostStateSorted, KeccakKeyHasher,
 };
 use reth_trie_db::{
-    ChangesetCache, DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
+    ChangesetCache, DatabaseAccountTrieCursor, DatabaseHashedAccountCursor,
+    DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseHashedStorageCursor,
+    DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
 };
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -513,20 +515,21 @@ where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        let db_trie_cursor_factory = DatabaseTrieCursorFactory::new(self.provider.tx_ref());
-        let trie_cursor_factory =
-            InMemoryTrieCursorFactory::new(db_trie_cursor_factory, self.trie_updates.as_ref());
-        trie_cursor_factory.account_trie_cursor()
+        let db_cursor = DatabaseAccountTrieCursor::new(
+            self.provider.tx_ref().cursor_read::<tables::AccountsTrie>()?,
+        );
+        Ok(InMemoryTrieCursor::new_account(db_cursor, self.trie_updates.as_ref()))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        let db_trie_cursor_factory = DatabaseTrieCursorFactory::new(self.provider.tx_ref());
-        let trie_cursor_factory =
-            InMemoryTrieCursorFactory::new(db_trie_cursor_factory, self.trie_updates.as_ref());
-        trie_cursor_factory.storage_trie_cursor(hashed_address)
+        let db_cursor = DatabaseStorageTrieCursor::new(
+            self.provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?,
+            hashed_address,
+        );
+        Ok(InMemoryTrieCursor::new_storage(db_cursor, self.trie_updates.as_ref(), hashed_address))
     }
 }
 
@@ -551,19 +554,24 @@ where
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
-        let hashed_cursor_factory =
-            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
-        hashed_cursor_factory.hashed_account_cursor()
+        let db_cursor = DatabaseHashedAccountCursor::new(
+            self.provider.tx_ref().cursor_read::<tables::HashedAccounts>()?,
+        );
+        Ok(HashedPostStateCursor::new_account(db_cursor, self.hashed_post_state.as_ref()))
     }
 
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
-        let hashed_cursor_factory =
-            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
-        hashed_cursor_factory.hashed_storage_cursor(hashed_address)
+        let db_cursor = DatabaseHashedStorageCursor::new(
+            self.provider.tx_ref().cursor_dup_read::<tables::HashedStorages>()?,
+            hashed_address,
+        );
+        Ok(HashedPostStateCursor::new_storage(
+            db_cursor,
+            self.hashed_post_state.as_ref(),
+            hashed_address,
+        ))
     }
 }
