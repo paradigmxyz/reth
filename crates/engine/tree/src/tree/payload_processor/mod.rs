@@ -969,14 +969,16 @@ mod tests {
     }
 
     #[test]
-    fn execution_cache_mismatch_parent_returns_none() {
+    fn execution_cache_mismatch_parent_clears_and_returns() {
         let execution_cache = ExecutionCache::default();
         let hash = B256::from([3u8; 32]);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
-        let miss = execution_cache.get_cache_for(B256::from([4u8; 32]));
-        assert!(miss.is_none(), "checkout should fail for different parent hash");
+        // When the parent hash doesn't match, the cache is cleared and returned for reuse
+        let different_hash = B256::from([4u8; 32]);
+        let cache = execution_cache.get_cache_for(different_hash);
+        assert!(cache.is_some(), "cache should be returned for reuse after clearing");
     }
 
     #[test]

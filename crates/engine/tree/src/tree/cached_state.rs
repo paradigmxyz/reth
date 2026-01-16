@@ -655,11 +655,18 @@ impl ExecutionCache {
                 continue
             }
 
-            // If the account was destroyed, invalidate from the account / storage caches
+            // If the account was destroyed (SELFDESTRUCT), we must clear the entire cache.
+            // The flat storage cache uses (Address, StorageKey) as key, so we cannot efficiently
+            // invalidate all storage slots for a single address. Rather than risk stale storage
+            // reads, we clear everything and let it repopulate.
+            //
+            // Note: Since EIP-6780, SELFDESTRUCT only works within the same transaction where the
+            // contract was created. This means the destroyed account/storage won't be in the cache
+            // anyway (created and destroyed in the same tx), so this path is neveer hit in
+            // practice.
             if account.was_destroyed() {
-                // Invalidate the account cache entry if destroyed
-                self.account_cache.insert(*addr, None);
-                continue
+                self.clear();
+                return Ok(())
             }
 
             // If we have an account that was modified, but it has a `None` account info, some wild
