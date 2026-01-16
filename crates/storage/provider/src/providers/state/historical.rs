@@ -99,6 +99,7 @@ impl HistoryInfo {
 /// - [`tables::StoragesHistory`]
 /// - [`tables::AccountChangeSets`]
 /// - [`tables::StorageChangeSets`]
+#[derive(Debug)]
 pub struct HistoricalStateProviderRef<'b, Provider> {
     /// Database provider
     provider: &'b Provider,
@@ -106,15 +107,6 @@ pub struct HistoricalStateProviderRef<'b, Provider> {
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
-}
-
-impl<Provider> Debug for HistoricalStateProviderRef<'_, Provider> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HistoricalStateProviderRef")
-            .field("block_number", &self.block_number)
-            .field("lowest_available_blocks", &self.lowest_available_blocks)
-            .finish_non_exhaustive()
-    }
 }
 
 impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
