@@ -12,10 +12,10 @@ fn bench_get_seq_iter(c: &mut Criterion) {
     let (_dir, env) = setup_bench_db(n);
     let txn = env.begin_ro_txn().unwrap();
     let db = txn.open_db(None).unwrap();
-
+    let dbi = db.dbi();
     c.bench_function("bench_get_seq_iter", |b| {
         b.iter(|| {
-            let mut cursor = txn.cursor(&db).unwrap();
+            let mut cursor = txn.cursor(dbi).unwrap();
             let mut i = 0;
             let mut count = 0u32;
 
@@ -54,11 +54,11 @@ fn bench_get_seq_cursor(c: &mut Criterion) {
     let (_dir, env) = setup_bench_db(n);
     let txn = env.begin_ro_txn().unwrap();
     let db = txn.open_db(None).unwrap();
-
+    let dbi = db.dbi();
     c.bench_function("bench_get_seq_cursor", |b| {
         b.iter(|| {
             let (i, count) = txn
-                .cursor(&db)
+                .cursor(dbi)
                 .unwrap()
                 .iter::<ObjectLength, ObjectLength>()
                 .map(Result::unwrap)

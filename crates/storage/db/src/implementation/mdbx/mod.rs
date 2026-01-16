@@ -278,7 +278,7 @@ impl DatabaseMetrics for DatabaseEnv {
 
                     let stats = tx
                         .inner
-                        .db_stat(&table_db)
+                        .db_stat(table_db.dbi())
                         .wrap_err(format!("Could not find table: {table}"))?;
 
                     let page_size = stats.page_size() as usize;

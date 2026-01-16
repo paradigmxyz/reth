@@ -127,6 +127,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
     /// Prune a DUPSORT table for the specified key range.
     ///
     /// Returns number of rows pruned.
+    #[expect(unused)]
     fn prune_dupsort_table_with_range<T: DupSort>(
         &self,
         keys: impl RangeBounds<T::Key> + Clone + Debug,

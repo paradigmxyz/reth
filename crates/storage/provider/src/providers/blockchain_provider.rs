@@ -9,7 +9,7 @@ use crate::{
     HashedPostStateProvider, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
     StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider, TrieReader,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -29,7 +29,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, KeccakKeyHasher};
+use reth_trie::{HashedPostState, KeccakKeyHasher};
 use revm_database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -768,19 +768,6 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> TrieReader for BlockchainProvider<N> {
-    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
-        self.consistent_provider()?.trie_reverts(from)
-    }
-
-    fn get_block_trie_updates(
-        &self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<TrieUpdatesSorted> {
-        self.consistent_provider()?.get_block_trie_updates(block_number)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -789,7 +776,7 @@ mod tests {
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        BlockWriter, CanonChainTracker, ProviderFactory,
+        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
@@ -808,8 +795,8 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory, StateWriter,
-        TransactionVariant, TransactionsProvider,
+        HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory,
+        StateWriteConfig, StateWriter, TransactionVariant, TransactionsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -907,6 +894,7 @@ mod tests {
                     ..Default::default()
                 },
                 OriginalValuesKnown::No,
+                StateWriteConfig::default(),
             )?;
         }
 
@@ -997,7 +985,7 @@ mod tests {
 
                 // Push to disk
                 let provider_rw = hook_provider.database_provider_rw().unwrap();
-                provider_rw.save_blocks(vec![lowest_memory_block]).unwrap();
+                provider_rw.save_blocks(vec![lowest_memory_block], SaveBlocksMode::Full).unwrap();
                 provider_rw.commit().unwrap();
 
                 // Remove from memory

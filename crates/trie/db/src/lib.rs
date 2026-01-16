@@ -2,6 +2,8 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod changesets;
+pub use changesets::*;
 mod hashed_cursor;
 mod prefix_set;
 mod proof;
