@@ -41,7 +41,6 @@ impl<V, I> Eq for KMergeEntry<'_, V, I> {}
 /// For duplicate keys, the value from the highest block index wins.
 pub(crate) struct KMergeIter<'a, V, I> {
     heap: BinaryHeap<KMergeEntry<'a, V, I>>,
-    last_key: Option<&'a B256>,
 }
 
 impl<'a, V, I: Iterator<Item = (&'a B256, &'a V)>> KMergeIter<'a, V, I> {
@@ -52,7 +51,7 @@ impl<'a, V, I: Iterator<Item = (&'a B256, &'a V)>> KMergeIter<'a, V, I> {
                 heap.push(KMergeEntry { key, value, block_idx, iter: source });
             }
         }
-        Self { heap, last_key: None }
+        Self { heap }
     }
 }
 
@@ -60,47 +59,34 @@ impl<'a, V, I: Iterator<Item = (&'a B256, &'a V)>> Iterator for KMergeIter<'a, V
     type Item = (&'a B256, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let mut entry = self.heap.pop()?;
-            let entry_key = entry.key;
+        let mut entry = self.heap.pop()?;
+        let key = entry.key;
+        let value = entry.value;
 
-            if let Some((key, value)) = entry.iter.next() {
+        // Advance this source's iterator
+        if let Some((next_key, next_value)) = entry.iter.next() {
+            self.heap.push(KMergeEntry {
+                key: next_key,
+                value: next_value,
+                block_idx: entry.block_idx,
+                iter: entry.iter,
+            });
+        }
+
+        // Drain duplicate keys (heap ordering guarantees first pop is the winner)
+        while self.heap.peek().is_some_and(|e| e.key == key) {
+            let mut next = self.heap.pop().unwrap();
+            if let Some((next_key, next_value)) = next.iter.next() {
                 self.heap.push(KMergeEntry {
-                    key,
-                    value,
-                    block_idx: entry.block_idx,
-                    iter: entry.iter,
+                    key: next_key,
+                    value: next_value,
+                    block_idx: next.block_idx,
+                    iter: next.iter,
                 });
             }
-
-            if self.last_key == Some(entry_key) {
-                continue;
-            }
-
-            // Drain duplicates, keeping latest block's value
-            let mut final_value = entry.value;
-            let mut final_block_idx = entry.block_idx;
-
-            while self.heap.peek().is_some_and(|e| e.key == entry_key) {
-                let mut next = self.heap.pop().unwrap();
-                if let Some((key, value)) = next.iter.next() {
-                    self.heap.push(KMergeEntry {
-                        key,
-                        value,
-                        block_idx: next.block_idx,
-                        iter: next.iter,
-                    });
-                }
-                // Take value from later block
-                if next.block_idx > final_block_idx {
-                    final_value = next.value;
-                    final_block_idx = next.block_idx;
-                }
-            }
-
-            self.last_key = Some(entry_key);
-            return Some((entry_key, final_value));
         }
+
+        Some((key, value))
     }
 }
 
@@ -344,9 +330,8 @@ mod tests {
     #[test]
     fn single_entry_per_block_many_blocks() {
         // Each block has exactly one unique key
-        let blocks: Vec<Vec<(B256, U256)>> = (0..10)
-            .map(|i| vec![(b256(i), U256::from(i as u64 * 100))])
-            .collect();
+        let blocks: Vec<Vec<(B256, U256)>> =
+            (0..10).map(|i| vec![(b256(i), U256::from(i as u64 * 100))]).collect();
 
         let merged = kmerge_apply(&blocks);
         assert_eq!(sequential_apply(&blocks), merged);
@@ -368,8 +353,91 @@ mod tests {
 
         let merged = kmerge_apply(&blocks);
         assert_eq!(sequential_apply(&blocks), merged);
-        assert_eq!(merged[0], (b256(1), None));            // deleted in block 3
-        assert_eq!(merged[1], (b256(2), None));            // deleted in block 2
+        assert_eq!(merged[0], (b256(1), None)); // deleted in block 3
+        assert_eq!(merged[1], (b256(2), None)); // deleted in block 2
         assert_eq!(merged[2], (b256(3), account(1, 300))); // only in block 1
+    }
+
+    #[test]
+    fn first_pop_is_always_highest_block_idx() {
+        // This test validates heap ordering: for same key, highest block_idx pops first.
+        // Values encode their block_idx, so we can verify the winner.
+        let blocks: Vec<Vec<(B256, U256)>> = (0..10)
+            .map(|block_idx| {
+                // Every block writes to key 1 with value = block_idx
+                vec![(b256(1), U256::from(block_idx))]
+            })
+            .collect();
+
+        let merged = kmerge_apply(&blocks);
+        assert_eq!(merged.len(), 1);
+        // Block 9 (highest) must win
+        assert_eq!(merged[0], (b256(1), U256::from(9)));
+    }
+
+    #[test]
+    fn heap_ordering_with_gaps_in_block_indices() {
+        // Non-contiguous block indices: 0, 5, 3, 9, 2
+        // Block 9 should win despite not being last in input order
+        let blocks = vec![
+            (0usize, vec![(b256(1), U256::from(100))]),
+            (5, vec![(b256(1), U256::from(500))]),
+            (3, vec![(b256(1), U256::from(300))]),
+            (9, vec![(b256(1), U256::from(900))]),
+            (2, vec![(b256(1), U256::from(200))]),
+        ];
+
+        let mut sorted_blocks: Vec<Vec<(B256, U256)>> =
+            blocks.iter().map(|(_, b)| b.clone()).collect();
+        for block in &mut sorted_blocks {
+            block.sort_by_key(|(k, _)| *k);
+        }
+
+        // Use actual block indices, not enumerate
+        let sources = blocks.iter().map(|(block_idx, block)| {
+            let sorted: Vec<_> = {
+                let mut b = block.clone();
+                b.sort_by_key(|(k, _)| *k);
+                b
+            };
+            (*block_idx, sorted)
+        });
+
+        let sources_with_iters: Vec<_> = sources
+            .map(|(idx, block)| (idx, block.into_iter().collect::<Vec<_>>()))
+            .collect();
+
+        let merged: Vec<_> = KMergeIter::new(
+            sources_with_iters
+                .iter()
+                .map(|(idx, block)| (*idx, block.iter().map(|(k, v)| (k, v)))),
+        )
+        .map(|(k, v)| (*k, *v))
+        .collect();
+
+        assert_eq!(merged.len(), 1);
+        // Block 9 must win (highest block_idx)
+        assert_eq!(merged[0], (b256(1), U256::from(900)));
+    }
+
+    #[test]
+    fn value_from_first_pop_is_kept() {
+        // 5 blocks all write to same key. Values are 1000 + block_idx.
+        // If first pop wasn't the winner, we'd get wrong value.
+        let blocks: Vec<Vec<(B256, U256)>> = vec![
+            vec![(b256(1), U256::from(1000))], // block 0
+            vec![(b256(1), U256::from(1001))], // block 1
+            vec![(b256(1), U256::from(1002))], // block 2
+            vec![(b256(1), U256::from(1003))], // block 3
+            vec![(b256(1), U256::from(1004))], // block 4
+        ];
+
+        let merged = kmerge_apply(&blocks);
+
+        // Must be 1004 (from block 4, highest index)
+        assert_eq!(merged[0].1, U256::from(1004));
+
+        // Also verify via sequential for sanity
+        assert_eq!(sequential_apply(&blocks), merged);
     }
 }
