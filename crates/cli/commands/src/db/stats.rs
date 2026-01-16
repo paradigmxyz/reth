@@ -88,7 +88,7 @@ impl Command {
 
                 let stats = tx
                     .inner
-                    .db_stat(&table_db)
+                    .db_stat(table_db.dbi())
                     .wrap_err(format!("Could not find table: {db_table}"))?;
 
                 // Defaults to 16KB right now but we should
@@ -129,7 +129,8 @@ impl Command {
             table.add_row(row);
 
             let freelist = tx.inner.env().freelist()?;
-            let pagesize = tx.inner.db_stat(&mdbx::Database::freelist_db())?.page_size() as usize;
+            let pagesize =
+                tx.inner.db_stat(mdbx::Database::freelist_db().dbi())?.page_size() as usize;
             let freelist_size = freelist * pagesize;
 
             let mut row = Row::new();

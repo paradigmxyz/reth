@@ -460,6 +460,18 @@ impl ChainSpec {
     pub fn builder() -> ChainSpecBuilder {
         ChainSpecBuilder::default()
     }
+
+    /// Map a chain ID to a known chain spec, if available.
+    pub fn from_chain_id(chain_id: u64) -> Option<Arc<Self>> {
+        match NamedChain::try_from(chain_id).ok()? {
+            NamedChain::Mainnet => Some(MAINNET.clone()),
+            NamedChain::Sepolia => Some(SEPOLIA.clone()),
+            NamedChain::Holesky => Some(HOLESKY.clone()),
+            NamedChain::Hoodi => Some(HOODI.clone()),
+            NamedChain::Dev => Some(DEV.clone()),
+            _ => None,
+        }
+    }
 }
 
 impl<H: BlockHeader> ChainSpec<H> {
