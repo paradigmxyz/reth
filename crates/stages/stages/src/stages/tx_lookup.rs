@@ -162,7 +162,7 @@ where
                 #[cfg(all(unix, feature = "rocksdb"))]
                 let rocksdb = provider.rocksdb_provider();
                 #[cfg(all(unix, feature = "rocksdb"))]
-                let rocksdb_batch = Some(rocksdb.batch());
+                let rocksdb_batch = rocksdb.batch();
                 #[cfg(not(all(unix, feature = "rocksdb")))]
                 let rocksdb_batch = ();
 
@@ -221,7 +221,7 @@ where
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb = provider.rocksdb_provider();
         #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_batch = Some(rocksdb.batch());
+        let rocksdb_batch = rocksdb.batch();
         #[cfg(not(all(unix, feature = "rocksdb")))]
         let rocksdb_batch = ();
 

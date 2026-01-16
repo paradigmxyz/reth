@@ -63,13 +63,13 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
 
 /// Helper type for `RocksDB` batch argument in writer constructors.
 ///
-/// When `rocksdb` feature is enabled, this is an optional `RocksDB` batch.
+/// When `rocksdb` feature is enabled, this is a `RocksDB` batch.
 /// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
 #[cfg(all(unix, feature = "rocksdb"))]
-pub type RocksBatchArg<'a> = Option<crate::providers::rocksdb::RocksDBBatch<'a>>;
+pub type RocksBatchArg<'a> = crate::providers::rocksdb::RocksDBBatch<'a>;
 /// Helper type for `RocksDB` batch argument in writer constructors.
 ///
-/// When `rocksdb` feature is enabled, this is an optional `RocksDB` batch.
+/// When `rocksdb` feature is enabled, this is a `RocksDB` batch.
 /// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
 #[cfg(not(all(unix, feature = "rocksdb")))]
 pub type RocksBatchArg<'a> = ();
@@ -219,10 +219,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().storages_history_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(
-                _rocksdb_batch
-                    .expect("RocksDB batch required when storages_history_in_rocksdb is enabled"),
-            ));
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
 
         Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::StoragesHistory>()?))
@@ -239,9 +236,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(_rocksdb_batch.expect(
-                "RocksDB batch required when transaction_hash_numbers_in_rocksdb is enabled",
-            )));
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
 
         Ok(EitherWriter::Database(
@@ -260,10 +255,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().account_history_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(
-                _rocksdb_batch
-                    .expect("RocksDB batch required when account_history_in_rocksdb is enabled"),
-            ));
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
 
         Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::AccountsHistory>()?))
@@ -1220,7 +1212,7 @@ mod rocksdb_tests {
         // Create EitherWriter with RocksDB
         let provider = factory.database_provider_rw().unwrap();
         let mut writer =
-            EitherWriter::new_transaction_hash_numbers(&provider, Some(batch)).unwrap();
+            EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
 
         // Verify we got a RocksDB writer
         assert!(matches!(writer, EitherWriter::RocksDB(_)));
@@ -1265,7 +1257,7 @@ mod rocksdb_tests {
         let batch = rocksdb.batch();
         let provider = factory.database_provider_rw().unwrap();
         let mut writer =
-            EitherWriter::new_transaction_hash_numbers(&provider, Some(batch)).unwrap();
+            EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
         writer.delete_transaction_hash_number(hash).unwrap();
 
         // Extract the batch and commit via provider
@@ -1820,7 +1812,7 @@ mod rocksdb_tests {
         // Create provider and EitherWriter
         let provider = factory.database_provider_rw().unwrap();
         let mut writer =
-            EitherWriter::new_transaction_hash_numbers(&provider, Some(batch)).unwrap();
+            EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
 
         // Write transaction hash numbers (append_only=false since we're using RocksDB)
         writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();

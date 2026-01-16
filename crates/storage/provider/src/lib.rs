@@ -96,19 +96,19 @@ macro_rules! make_rocksdb_provider {
 
 /// Creates a `RocksDB` batch argument from a `RocksDB` provider.
 ///
-/// When the `rocksdb` feature is enabled, this returns an `Option<RocksDBBatch>`.
+/// When the `rocksdb` feature is enabled, this returns a `RocksDBBatch`.
 /// When the feature is disabled, this returns `()`.
 #[macro_export]
 #[cfg(all(unix, feature = "rocksdb"))]
 macro_rules! make_rocksdb_batch_arg {
     ($rocksdb:expr) => {
-        Some($rocksdb.batch())
+        $rocksdb.batch()
     };
 }
 
 /// Creates a `RocksDB` batch argument from a `RocksDB` provider.
 ///
-/// When the `rocksdb` feature is enabled, this returns an `Option<RocksDBBatch>`.
+/// When the `rocksdb` feature is enabled, this returns a `RocksDBBatch`.
 /// When the feature is disabled, this returns `()`.
 #[macro_export]
 #[cfg(not(all(unix, feature = "rocksdb")))]
