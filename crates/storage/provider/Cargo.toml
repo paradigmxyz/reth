@@ -89,6 +89,11 @@ tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 name = "state_merge"
 harness = false
 
+[[bench]]
+name = "save_blocks"
+harness = false
+required-features = ["test-utils", "rocksdb"]
+
 [features]
 rocksdb = ["dep:rocksdb"]
 test-utils = [

@@ -521,10 +521,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
-            // Collect state for batched k-way merge writes
+            // Collect hashed state for batched k-way merge writes
             let mut hashed_states: Vec<Arc<HashedPostStateSorted>> =
                 Vec::with_capacity(blocks.len());
-            let mut plain_state_changesets: Vec<StateChangeset> = Vec::with_capacity(blocks.len());
 
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
@@ -536,29 +535,19 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 if save_mode.with_state() {
                     let execution_output = block.execution_outcome();
 
-                    let state_config = StateWriteConfig {
-                        write_receipts: !sf_ctx.write_receipts,
-                        write_account_changesets: !sf_ctx.write_account_changesets,
-                    };
-
-                    // Extract plain state and reverts from execution outcome
-                    let (plain_state, reverts) =
-                        execution_output.bundle.to_plain_state_and_reverts(OriginalValuesKnown::No);
-
-                    // Write reverts per-block (keyed by block number)
+                    // Write state and changesets to the database.
+                    // Must be written after blocks because of the receipt lookup.
+                    // Skip receipts/account changesets if they're being written to static files.
                     let start = Instant::now();
-                    self.write_state_reverts(
-                        reverts,
-                        execution_output.first_block(),
-                        state_config,
+                    self.write_state(
+                        execution_output,
+                        OriginalValuesKnown::No,
+                        StateWriteConfig {
+                            write_receipts: !sf_ctx.write_receipts,
+                            write_account_changesets: !sf_ctx.write_account_changesets,
+                        },
                     )?;
-
-                    // Write receipts per-block
-                    self.write_receipts(execution_output, state_config)?;
                     timings.write_state += start.elapsed();
-
-                    // Collect plain state for batched write
-                    plain_state_changesets.push(plain_state);
 
                     let trie_data = block.trie_data();
 
@@ -572,17 +561,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 }
             }
 
-            // Write batched plain state using k-way merge (sorted keys, deduped, sequential I/O)
-            if !plain_state_changesets.is_empty() {
-                let start = Instant::now();
-                self.write_state_changes_merged(plain_state_changesets)?;
-                timings.write_state += start.elapsed();
-            }
-
-            // Write batched hashed state using k-way merge (sorted keys, deduped, sequential I/O)
+            // Write hashed state - use k-way merge only for multiple blocks
             if !hashed_states.is_empty() {
                 let start = Instant::now();
-                self.write_hashed_state_merged(&hashed_states)?;
+                if hashed_states.len() == 1 {
+                    // Single block: use sequential write (no merge overhead)
+                    self.write_hashed_state(&hashed_states[0])?;
+                } else {
+                    // Multiple blocks: use k-way merge for sorted, deduped, sequential I/O
+                    self.write_hashed_state_merged(&hashed_states)?;
+                }
                 timings.write_hashed_state = start.elapsed();
             }
 
@@ -1018,152 +1006,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     if !storage_entry.value.is_zero() {
                         hashed_storage_cursor.upsert(current_addr, &storage_entry)?;
                     }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Writes plain state changes from multiple blocks using parallel sort + merge for sequential
-    /// I/O.
-    ///
-    /// This batches writes across blocks to improve I/O locality by:
-    /// 1. Flattening all updates with block indices into a single Vec
-    /// 2. Parallel sorting using rayon for better CPU utilization
-    /// 3. Deduplicating (keeping latest block's value) and writing in sorted order
-    ///
-    /// Benchmarks show flatten+parallel-sort outperforms k-way merge for typical block counts
-    /// (10-100 blocks) due to lower overhead and better cache locality.
-    pub fn write_state_changes_merged(
-        &self,
-        changesets: Vec<StateChangeset>,
-    ) -> ProviderResult<()> {
-        if changesets.is_empty() {
-            return Ok(());
-        }
-
-        // === Write accounts ===
-        // Flatten all accounts with block index, parallel sort, dedupe (latest wins)
-        {
-            let mut all_accounts: Vec<(Address, usize, Option<Account>)> = Vec::new();
-            for (block_idx, cs) in changesets.iter().enumerate() {
-                for (addr, info) in &cs.accounts {
-                    all_accounts.push((*addr, block_idx, info.clone().map(Into::into)));
-                }
-            }
-            // Parallel sort by address, then by block_idx descending (latest block first)
-            all_accounts.par_sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
-
-            let mut accounts_cursor = self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
-            let mut last_addr: Option<Address> = None;
-
-            for (addr, _block_idx, account) in all_accounts {
-                // Skip duplicates (we already processed this address from a later block)
-                if last_addr == Some(addr) {
-                    continue;
-                }
-                last_addr = Some(addr);
-
-                if let Some(account) = account {
-                    accounts_cursor.upsert(addr, &account)?;
-                } else if accounts_cursor.seek_exact(addr)?.is_some() {
-                    accounts_cursor.delete_current()?;
-                }
-            }
-        }
-
-        // === Write bytecodes ===
-        {
-            let mut all_contracts: Vec<(B256, usize, _)> = Vec::new();
-            for (block_idx, cs) in changesets.iter().enumerate() {
-                for (hash, bytecode) in &cs.contracts {
-                    all_contracts.push((*hash, block_idx, bytecode.clone()));
-                }
-            }
-            all_contracts.par_sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
-
-            let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
-            let mut last_hash: Option<B256> = None;
-
-            for (hash, _block_idx, bytecode) in all_contracts {
-                if last_hash == Some(hash) {
-                    continue;
-                }
-                last_hash = Some(hash);
-                bytecodes_cursor.upsert(hash, &Bytecode(bytecode))?;
-            }
-        }
-
-        // === Write storage ===
-        // Track wipe operations per address (address -> latest block that wiped)
-        // Then flatten all slots, filter by wipe, parallel sort, dedupe, write
-        {
-            // First pass: find the latest wipe block for each address
-            let mut wipe_blocks: HashMap<Address, usize> = HashMap::default();
-            for (block_idx, cs) in changesets.iter().enumerate() {
-                for psc in &cs.storage {
-                    if psc.wipe_storage {
-                        wipe_blocks
-                            .entry(psc.address)
-                            .and_modify(|idx| *idx = (*idx).max(block_idx))
-                            .or_insert(block_idx);
-                    }
-                }
-            }
-
-            // Flatten all storage slots with (address, slot, block_idx, value)
-            let mut all_slots: Vec<(Address, B256, usize, U256)> = Vec::new();
-            for (block_idx, cs) in changesets.iter().enumerate() {
-                for psc in &cs.storage {
-                    // Skip slots from blocks before the wipe
-                    if let Some(&wipe_idx) = wipe_blocks.get(&psc.address) {
-                        if block_idx < wipe_idx {
-                            continue;
-                        }
-                    }
-                    for (slot, value) in &psc.storage {
-                        all_slots.push((psc.address, B256::from(*slot), block_idx, *value));
-                    }
-                }
-            }
-
-            // Parallel sort by (address, slot), then block_idx descending
-            all_slots.par_sort_unstable_by(|a, b| {
-                a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)).then_with(|| b.2.cmp(&a.2))
-            });
-
-            let mut storages_cursor =
-                self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
-
-            // Process wipes first (grouped by address)
-            let mut wiped_addresses: Vec<Address> = wipe_blocks.keys().copied().collect();
-            wiped_addresses.sort_unstable();
-            for addr in wiped_addresses {
-                if storages_cursor.seek_exact(addr)?.is_some() {
-                    storages_cursor.delete_current_duplicates()?;
-                }
-            }
-
-            // Write slots, skipping duplicates
-            let mut last_key: Option<(Address, B256)> = None;
-            for (addr, slot, _block_idx, value) in all_slots {
-                let key = (addr, slot);
-                if last_key == Some(key) {
-                    continue;
-                }
-                last_key = Some(key);
-
-                let storage_entry = StorageEntry { key: slot, value };
-
-                if let Some(db_entry) = storages_cursor.seek_by_key_subkey(addr, slot)? {
-                    if db_entry.key == slot {
-                        storages_cursor.delete_current()?;
-                    }
-                }
-
-                if !value.is_zero() {
-                    storages_cursor.upsert(addr, &storage_entry)?;
                 }
             }
         }
