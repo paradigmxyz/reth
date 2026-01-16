@@ -1365,7 +1365,7 @@ mod tests {
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();
 
-        MultiProofTask::new(proof_handle, to_sparse_trie, Some(1), tx, rx)
+        MultiProofTask::new(proof_handle, to_sparse_trie, Some(1), tx, rx, None)
     }
 
     fn create_cached_provider<F>(factory: F) -> CachedStateProvider<StateProviderBox>
