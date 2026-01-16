@@ -1761,7 +1761,7 @@ where
         }
 
         let min_block = self.persistence_state.last_persisted_block.number;
-        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
+        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >=
             self.config.persistence_threshold()
     }
 
