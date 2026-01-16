@@ -164,17 +164,7 @@ impl RocksDBProvider {
                 self.prune_transaction_hash_numbers_in_range(provider, 0..=highest_tx)?;
             }
             (None, None) => {
-                // Both MDBX and static files are empty - this is expected on first run.
-                // Log a warning but don't require unwind to 0, as the pipeline will
-                // naturally populate the data during sync.
-                if checkpoint > 0 {
-                    tracing::warn!(
-                        target: "reth::providers::rocksdb",
-                        checkpoint,
-                        "TransactionHashNumbers: no transaction data exists but checkpoint is set. \
-                         This is expected on first run with RocksDB enabled."
-                    );
-                }
+                // Both MDBX and static files are empty, nothing to check.
             }
         }
 
@@ -282,14 +272,6 @@ impl RocksDBProvider {
                 // This means no completed shards exist (only sentinel shards with
                 // highest_block_number=u64::MAX), so no actual history has been indexed.
                 if !found_non_sentinel {
-                    if checkpoint > 0 {
-                        tracing::warn!(
-                            target: "reth::providers::rocksdb",
-                            checkpoint,
-                            "StoragesHistory has only sentinel entries but checkpoint is set. \
-                             This is expected on first run with RocksDB enabled."
-                        );
-                    }
                     return Ok(None);
                 }
 
@@ -316,17 +298,7 @@ impl RocksDBProvider {
                 Ok(None)
             }
             None => {
-                // Empty RocksDB table - this is expected on first run / migration.
-                // Log a warning but don't require unwind to 0, as the pipeline will
-                // naturally populate the table during sync.
-                if checkpoint > 0 {
-                    tracing::warn!(
-                        target: "reth::providers::rocksdb",
-                        checkpoint,
-                        "StoragesHistory is empty but checkpoint is set. \
-                         This is expected on first run with RocksDB enabled."
-                    );
-                }
+                // Empty RocksDB table, nothing to check.
                 Ok(None)
             }
         }
@@ -421,14 +393,6 @@ impl RocksDBProvider {
                 // This means no completed shards exist (only sentinel shards with
                 // highest_block_number=u64::MAX), so no actual history has been indexed.
                 if !found_non_sentinel {
-                    if checkpoint > 0 {
-                        tracing::warn!(
-                            target: "reth::providers::rocksdb",
-                            checkpoint,
-                            "AccountsHistory has only sentinel entries but checkpoint is set. \
-                             This is expected on first run with RocksDB enabled."
-                        );
-                    }
                     return Ok(None);
                 }
 
@@ -458,17 +422,7 @@ impl RocksDBProvider {
                 Ok(None)
             }
             None => {
-                // Empty RocksDB table - this is expected on first run / migration.
-                // Log a warning but don't require unwind to 0, as the pipeline will
-                // naturally populate the table during sync.
-                if checkpoint > 0 {
-                    tracing::warn!(
-                        target: "reth::providers::rocksdb",
-                        checkpoint,
-                        "AccountsHistory is empty but checkpoint is set. \
-                         This is expected on first run with RocksDB enabled."
-                    );
-                }
+                // Empty RocksDB table, nothing to check.
                 Ok(None)
             }
         }
