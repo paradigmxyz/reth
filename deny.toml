@@ -90,10 +90,10 @@ allow-git = [
     "https://github.com/foundry-rs/block-explorers",
     "https://github.com/bluealloy/revm",
     "https://github.com/paradigmxyz/revm-inspectors",
+    # TODO: switch to crates.io release once alloy-evm merges staging-revm branch
     "https://github.com/alloy-rs/evm",
     "https://github.com/alloy-rs/hardforks",
     "https://github.com/paradigmxyz/jsonrpsee",
-    # BAL devnet-1 patches
+    # TODO: remove once EIP-7928 (BAL) support is merged into alloy-rs/alloy
     "https://github.com/Soubhik-10/alloy",
-    "https://github.com/Rimeeeeee/evm",
 ]

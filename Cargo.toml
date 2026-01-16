@@ -789,8 +789,8 @@ alloy-transport-ws = { git = "https://github.com/Soubhik-10/alloy", branch = "ba
 # op-alloy-rpc-jsonrpsee = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 #
 # alloy-evm with BAL support for revm v34/v103
-alloy-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "bal-devnet-1" }
-alloy-op-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "bal-devnet-1" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "staging-revm" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", branch = "staging-revm" }
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", branch = "staging-revm" }
 #
 # jsonrpsee = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
