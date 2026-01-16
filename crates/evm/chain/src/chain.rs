@@ -103,11 +103,24 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Get all deferred trie data for this chain.
+    ///
+    /// Returns handles to lazily-computed sorted trie updates and hashed state.
+    /// [`DeferredTrieData`] allows `Chain` to be constructed without blocking on
+    /// expensive trie computations - the data is only materialized when actually needed
+    /// via [`DeferredTrieData::wait_cloned`] or similar methods.
+    ///
+    /// This method does **not** block. To access the computed trie data, call
+    /// [`DeferredTrieData::wait_cloned`] on individual entries, which will block
+    /// if the background computation has not yet completed.
     pub const fn trie_data(&self) -> &BTreeMap<BlockNumber, DeferredTrieData> {
         &self.trie_data
     }
 
     /// Get deferred trie data for a specific block number.
+    ///
+    /// Returns a handle to the lazily-computed trie data. This method does **not** block.
+    /// Call [`DeferredTrieData::wait_cloned`] on the result to wait for and retrieve
+    /// the computed data, which will block if computation is still in progress.
     pub fn trie_data_at(&self, block_number: BlockNumber) -> Option<&DeferredTrieData> {
         self.trie_data.get(&block_number)
     }

@@ -1481,12 +1481,7 @@ mod tests {
         let mut make_notif = |id: u64| {
             let block = random_block(&mut rng, id, BlockParams::default()).try_recover().unwrap();
             ExExNotification::ChainCommitted {
-                new: Arc::new(Chain::new(
-                    vec![block],
-                    Default::default(),
-                    Default::default(),
-                    Default::default(),
-                )),
+                new: Arc::new(Chain::new(vec![block], Default::default(), Default::default())),
             }
         };
 
