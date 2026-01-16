@@ -562,7 +562,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // This reduces cursor open/close overhead from N calls to 1.
             // Uses hybrid algorithm: extend_ref for small batches, k-way merge for large.
             if save_mode.with_state() {
-                const MERGE_BATCH_THRESHOLD: usize = 64;
+                const MERGE_BATCH_THRESHOLD: usize = 30;
 
                 let start = Instant::now();
                 let num_blocks = blocks.len();
