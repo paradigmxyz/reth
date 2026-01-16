@@ -161,9 +161,9 @@ where
 
         // Create EitherWriter for unwinding
         #[allow(clippy::let_unit_value)]
-        let rocksdb = reth_provider::make_rocksdb_provider!(provider);
+        let _rocksdb = reth_provider::make_rocksdb_provider!(provider);
         #[allow(clippy::let_unit_value)]
-        let rocksdb_batch = reth_provider::make_rocksdb_batch_arg!(rocksdb);
+        let rocksdb_batch = reth_provider::make_rocksdb_batch_arg!(_rocksdb);
         let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
 
         // Unwind shards for each changed address
