@@ -3,8 +3,8 @@
 //! This module provides a streaming receipt root builder that computes the receipt trie root
 //! in a background thread. Receipts are sent via a channel with their index, and for each
 //! receipt received, the builder incrementally flushes leaves to the underlying
-//! [`OrderedTrieRootEncodedBuilder`](reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder)
-//! when possible. When the channel closes, the task returns the computed root.
+//! [`OrderedTrieRootEncodedBuilder`] when possible. When the channel closes, the task returns the
+//! computed root.
 
 use alloy_eips::Encodable2718;
 use alloy_primitives::{Bloom, B256};
