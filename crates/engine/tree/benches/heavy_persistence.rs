@@ -19,8 +19,8 @@ use reth_chainspec::ChainSpec;
 use reth_db_common::init::init_genesis;
 use reth_primitives_traits::Account as RethAccount;
 use reth_provider::{
-    test_utils::create_test_provider_factory_with_chain_spec,
-    HistoryWriter, StateWriter, TrieWriter,
+    test_utils::create_test_provider_factory_with_chain_spec, HistoryWriter, StateWriter,
+    TrieWriter,
 };
 use reth_trie::{HashedPostState, HashedStorage, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
@@ -69,7 +69,8 @@ fn generate_state_changes(params: &PersistenceParams) -> Vec<(HashedPostState, V
                 bytecode_hash: if rng.random_bool(0.1) { Some(B256::random()) } else { None },
             };
 
-            hashed_state = hashed_state.with_accounts(std::iter::once((hashed_address, Some(account))));
+            hashed_state =
+                hashed_state.with_accounts(std::iter::once((hashed_address, Some(account))));
 
             let storage: HashMap<B256, U256> = (0..params.storage_slots_per_account)
                 .map(|_| (B256::random_with(&mut rng), U256::from(rng.random::<u64>())))
@@ -98,9 +99,21 @@ fn bench_write_hashed_state(c: &mut Criterion) {
     // - Heavy DeFi block: ~2000 accounts, ~50 slots each
     // - Megablock (1.5 GGas): ~5000 accounts, ~100 slots each
     let scenarios = vec![
-        PersistenceParams { accounts_per_block: 500, storage_slots_per_account: 10, blocks_accumulated: 1 },
-        PersistenceParams { accounts_per_block: 2000, storage_slots_per_account: 50, blocks_accumulated: 1 },
-        PersistenceParams { accounts_per_block: 5000, storage_slots_per_account: 100, blocks_accumulated: 1 },
+        PersistenceParams {
+            accounts_per_block: 500,
+            storage_slots_per_account: 10,
+            blocks_accumulated: 1,
+        },
+        PersistenceParams {
+            accounts_per_block: 2000,
+            storage_slots_per_account: 50,
+            blocks_accumulated: 1,
+        },
+        PersistenceParams {
+            accounts_per_block: 5000,
+            storage_slots_per_account: 100,
+            blocks_accumulated: 1,
+        },
     ];
 
     for params in scenarios {
@@ -113,7 +126,9 @@ fn bench_write_hashed_state(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("single_block", &id), |b| {
             b.iter_with_setup(
                 || {
-                    let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+                    let factory = create_test_provider_factory_with_chain_spec(Arc::new(
+                        ChainSpec::default(),
+                    ));
                     let _ = init_genesis(&factory).unwrap();
                     let blocks = generate_state_changes(&params);
                     (factory, blocks)
@@ -142,19 +157,30 @@ fn bench_accumulated_persistence(c: &mut Criterion) {
     // Higher throughput → more blocks accumulate → longer persist time
     let scenarios = vec![
         // Normal: ~75 blocks accumulated (from Slack discussion)
-        PersistenceParams { accounts_per_block: 200, storage_slots_per_account: 20, blocks_accumulated: 75 },
+        PersistenceParams {
+            accounts_per_block: 200,
+            storage_slots_per_account: 20,
+            blocks_accumulated: 75,
+        },
         // Heavy backpressure: ~250 blocks accumulated
-        PersistenceParams { accounts_per_block: 200, storage_slots_per_account: 20, blocks_accumulated: 250 },
+        PersistenceParams {
+            accounts_per_block: 200,
+            storage_slots_per_account: 20,
+            blocks_accumulated: 250,
+        },
     ];
 
     for params in scenarios {
-        let id = format!("blocks_{}_accounts_{}", params.blocks_accumulated, params.accounts_per_block);
+        let id =
+            format!("blocks_{}_accounts_{}", params.blocks_accumulated, params.accounts_per_block);
         group.throughput(Throughput::Elements(params.blocks_accumulated as u64));
 
         group.bench_function(BenchmarkId::new("overlay_merge", &id), |b| {
             b.iter_with_setup(
                 || {
-                    let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+                    let factory = create_test_provider_factory_with_chain_spec(Arc::new(
+                        ChainSpec::default(),
+                    ));
                     let _ = init_genesis(&factory).unwrap();
                     let blocks = generate_state_changes(&params);
                     (factory, blocks)
@@ -185,17 +211,30 @@ fn bench_state_root_after_persist(c: &mut Criterion) {
     group.sample_size(10);
 
     let scenarios = vec![
-        PersistenceParams { accounts_per_block: 1000, storage_slots_per_account: 20, blocks_accumulated: 1 },
-        PersistenceParams { accounts_per_block: 5000, storage_slots_per_account: 50, blocks_accumulated: 1 },
+        PersistenceParams {
+            accounts_per_block: 1000,
+            storage_slots_per_account: 20,
+            blocks_accumulated: 1,
+        },
+        PersistenceParams {
+            accounts_per_block: 5000,
+            storage_slots_per_account: 50,
+            blocks_accumulated: 1,
+        },
     ];
 
     for params in scenarios {
-        let id = format!("accounts_{}_slots_{}", params.accounts_per_block, params.storage_slots_per_account);
+        let id = format!(
+            "accounts_{}_slots_{}",
+            params.accounts_per_block, params.storage_slots_per_account
+        );
 
         group.bench_function(BenchmarkId::new("full_root_calculation", &id), |b| {
             b.iter_with_setup(
                 || {
-                    let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+                    let factory = create_test_provider_factory_with_chain_spec(Arc::new(
+                        ChainSpec::default(),
+                    ));
                     let _ = init_genesis(&factory).unwrap();
                     let blocks = generate_state_changes(&params);
 
@@ -203,7 +242,9 @@ fn bench_state_root_after_persist(c: &mut Criterion) {
                     {
                         let provider_rw = factory.provider_rw().unwrap();
                         for (hashed_state, _) in &blocks {
-                            provider_rw.write_hashed_state(&hashed_state.clone().into_sorted()).unwrap();
+                            provider_rw
+                                .write_hashed_state(&hashed_state.clone().into_sorted())
+                                .unwrap();
                         }
                         provider_rw.commit().unwrap();
                     }
@@ -212,9 +253,8 @@ fn bench_state_root_after_persist(c: &mut Criterion) {
                 },
                 |(factory, _blocks)| {
                     let provider = factory.provider().unwrap();
-                    let (root, updates) = StateRoot::from_tx(provider.tx_ref())
-                        .root_with_updates()
-                        .unwrap();
+                    let (root, updates) =
+                        StateRoot::from_tx(provider.tx_ref()).root_with_updates().unwrap();
 
                     // Write trie updates - this is where 25.4% of time goes
                     let provider_rw = factory.provider_rw().unwrap();
@@ -239,8 +279,16 @@ fn bench_history_indices(c: &mut Criterion) {
     // From Slack: The fix is to derive transitions from in-memory ExecutionOutcome
     // instead of scanning AccountChangeSets/StorageChangeSets tables
     let scenarios = vec![
-        PersistenceParams { accounts_per_block: 500, storage_slots_per_account: 10, blocks_accumulated: 10 },
-        PersistenceParams { accounts_per_block: 1000, storage_slots_per_account: 20, blocks_accumulated: 50 },
+        PersistenceParams {
+            accounts_per_block: 500,
+            storage_slots_per_account: 10,
+            blocks_accumulated: 10,
+        },
+        PersistenceParams {
+            accounts_per_block: 1000,
+            storage_slots_per_account: 20,
+            blocks_accumulated: 50,
+        },
     ];
 
     for params in scenarios {
@@ -253,15 +301,19 @@ fn bench_history_indices(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("insert_indices", &id), |b| {
             b.iter_with_setup(
                 || {
-                    let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+                    let factory = create_test_provider_factory_with_chain_spec(Arc::new(
+                        ChainSpec::default(),
+                    ));
                     let _ = init_genesis(&factory).unwrap();
 
                     // Build history index data structure (simulating in-memory derivation)
                     // Use Address type for account transitions as required by HistoryWriter
                     let mut account_transitions: std::collections::BTreeMap<Address, Vec<u64>> =
                         std::collections::BTreeMap::new();
-                    let mut storage_transitions: std::collections::BTreeMap<(Address, B256), Vec<u64>> =
-                        std::collections::BTreeMap::new();
+                    let mut storage_transitions: std::collections::BTreeMap<
+                        (Address, B256),
+                        Vec<u64>,
+                    > = std::collections::BTreeMap::new();
 
                     let mut rng = rand::rng();
                     for block_idx in 0..params.blocks_accumulated {
@@ -272,7 +324,10 @@ fn bench_history_indices(c: &mut Criterion) {
                             // Add some storage transitions
                             for i in 0..params.storage_slots_per_account {
                                 let slot = B256::from(U256::from(i));
-                                storage_transitions.entry((address, slot)).or_default().push(block_number);
+                                storage_transitions
+                                    .entry((address, slot))
+                                    .or_default()
+                                    .push(block_number);
                             }
                         }
                     }

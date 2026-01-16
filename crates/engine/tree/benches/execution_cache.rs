@@ -10,11 +10,11 @@
 
 #![allow(missing_docs)]
 
-use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_primitives::{Bytes, B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use mini_moka::sync::CacheBuilder;
 use rand::Rng;
-use reth_primitives_traits::{Account, Bytecode};
+use reth_primitives_traits::Account;
 use revm_primitives::map::DefaultHashBuilder;
 use std::{sync::Arc, thread, time::Duration};
 
@@ -37,7 +37,9 @@ impl Default for CacheConfig {
     }
 }
 
-fn create_caches(config: &CacheConfig) -> (Cache<B256, Option<Account>>, Cache<(B256, B256), U256>, Cache<B256, Arc<Bytes>>) {
+fn create_caches(
+    config: &CacheConfig,
+) -> (Cache<B256, Option<Account>>, Cache<(B256, B256), U256>, Cache<B256, Arc<Bytes>>) {
     let account_cache = CacheBuilder::new(config.account_cache_size)
         .time_to_idle(Duration::from_secs(300))
         .build_with_hasher(DefaultHashBuilder::default());
@@ -72,9 +74,8 @@ fn bench_cache_hit_rates(c: &mut Criterion) {
                     let mut rng = rand::rng();
 
                     // Pre-populate cache with some entries
-                    let cached_keys: Vec<(B256, B256)> = (0..10000)
-                        .map(|_| (B256::random(), B256::random()))
-                        .collect();
+                    let cached_keys: Vec<(B256, B256)> =
+                        (0..10000).map(|_| (B256::random(), B256::random())).collect();
 
                     for (addr, slot) in &cached_keys {
                         storage_cache.insert((*addr, *slot), U256::from(rng.random::<u64>()));
@@ -83,7 +84,9 @@ fn bench_cache_hit_rates(c: &mut Criterion) {
                     // Create lookup keys - mix of cached and uncached
                     let num_cached = (10000.0 * hit_rate) as usize;
                     let mut lookup_keys: Vec<(B256, B256)> = cached_keys[..num_cached].to_vec();
-                    lookup_keys.extend((0..(10000 - num_cached)).map(|_| (B256::random(), B256::random())));
+                    lookup_keys.extend(
+                        (0..(10000 - num_cached)).map(|_| (B256::random(), B256::random())),
+                    );
 
                     // Shuffle
                     use rand::seq::SliceRandom;
@@ -235,7 +238,7 @@ fn bench_tip20_cache_pattern(c: &mut Criterion) {
 
                     // TIP-20: Each transfer accesses sender, recipient, fee token contract
                     // Most are unique addresses → cache misses
-                    let mut rng = rand::rng();
+                    let _rng = rand::rng();
                     let transfer_accounts: Vec<(B256, B256, B256)> = (0..num_transfers)
                         .map(|_| (B256::random(), B256::random(), B256::random()))
                         .collect();
@@ -294,7 +297,7 @@ fn bench_prewarm_effectiveness(c: &mut Criterion) {
                     let config = CacheConfig::default();
                     let (account_cache, storage_cache, _) = create_caches(&config);
 
-                    let mut rng = rand::rng();
+                    let _rng = rand::rng();
                     let accounts: Vec<B256> = (0..num_accounts).map(|_| B256::random()).collect();
 
                     (account_cache, storage_cache, accounts)
@@ -327,7 +330,7 @@ fn bench_prewarm_effectiveness(c: &mut Criterion) {
                     let config = CacheConfig::default();
                     let (account_cache, storage_cache, _) = create_caches(&config);
 
-                    let mut rng = rand::rng();
+                    let _rng = rand::rng();
                     let accounts: Vec<B256> = (0..num_accounts).map(|_| B256::random()).collect();
 
                     // Pre-warm the cache
