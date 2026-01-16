@@ -8,10 +8,8 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm,
 };
-use reth_execution_types::{BlockExecutionOutput};
-use reth_primitives_traits::{
-    BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered,
-};
+use reth_execution_types::BlockExecutionOutput;
+use reth_primitives_traits::{BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered};
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, StateProviderFactory};
@@ -112,10 +110,8 @@ where
                 builder.finish(NoopProvider::default())?
             };
 
-        let execution_outcome = BlockExecutionOutput {
-            bundle: state.take_bundle(),
-            result: execution_result,
-        };
+        let execution_outcome =
+            BlockExecutionOutput { state: state.take_bundle(), result: execution_result };
 
         let pending_block = PendingBlock::with_executed_block(
             Instant::now() + Duration::from_secs(1),

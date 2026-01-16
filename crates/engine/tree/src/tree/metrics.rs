@@ -129,13 +129,13 @@ impl EngineApiMetrics {
         debug_span!(target: "engine::tree", "merge transitions")
             .entered()
             .in_scope(|| db.borrow_mut().merge_transitions(BundleRetention::Reverts));
-        let output = BlockExecutionOutput { result, bundle: db.borrow_mut().take_bundle() };
+        let output = BlockExecutionOutput { result, state: db.borrow_mut().take_bundle() };
 
         // Update the metrics for the number of accounts, storage slots and bytecodes updated
-        let accounts = output.bundle.state.len();
+        let accounts = output.state.state.len();
         let storage_slots =
-            output.bundle.state.values().map(|account| account.storage.len()).sum::<usize>();
-        let bytecodes = output.bundle.contracts.len();
+            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
+        let bytecodes = output.state.contracts.len();
 
         self.executor.accounts_updated_histogram.record(accounts as f64);
         self.executor.storage_slots_updated_histogram.record(storage_slots as f64);

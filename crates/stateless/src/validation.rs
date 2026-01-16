@@ -235,7 +235,7 @@ where
         .map_err(StatelessValidationError::ConsensusValidationFailed)?;
 
     // Compute and check the post state root
-    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.bundle.state);
+    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);
     let state_root = trie.calculate_state_root(hashed_state)?;
     if state_root != current_block.state_root {
         return Err(StatelessValidationError::PostStateRootMismatch {

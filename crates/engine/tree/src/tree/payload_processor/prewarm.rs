@@ -279,7 +279,7 @@ where
 
                 // Insert state into cache while holding the lock
                 // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(&execution_outcome.bundle).is_err() {
+                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
                     // Clear the cache on error to prevent having a polluted cache
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on update error");

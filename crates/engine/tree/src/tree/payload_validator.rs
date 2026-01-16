@@ -791,7 +791,7 @@ where
 
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "hashed_post_state").entered();
-        let hashed_state = self.provider.hashed_post_state(&output.bundle);
+        let hashed_state = self.provider.hashed_post_state(&output.state);
         drop(_enter);
 
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
@@ -1343,7 +1343,7 @@ where
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>) {
         self.payload_processor.on_inserted_executed_block(
             block.recovered_block.block_with_parent(),
-            &block.execution_output.bundle,
+            &block.execution_output.state,
         );
     }
 }

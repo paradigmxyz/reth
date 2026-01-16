@@ -609,7 +609,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().bundle.reverts.to_plain_state_reverts();
+            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
             for account_block_reverts in reverts.accounts {
                 let changeset = account_block_reverts

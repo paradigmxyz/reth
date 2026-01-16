@@ -918,7 +918,7 @@ mod tests {
                             gas_used: 0,
                             blob_gas_used: 0,
                         },
-                        bundle: BundleState::default(),
+                        state: BundleState::default(),
                     };
 
                     ExecutedBlock {
@@ -1717,7 +1717,7 @@ mod tests {
                             senders,
                         )),
                         execution_output: Arc::new(BlockExecutionOutput {
-                            bundle: BundleState::new(
+                            state: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
                                     (address, None, Some(account.into()), Default::default())
                                 }),

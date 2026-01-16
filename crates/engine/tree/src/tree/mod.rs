@@ -1881,7 +1881,7 @@ where
             ComputedTrieData::without_trie_input(sorted_hashed_state, sorted_trie_updates);
 
         let execution_output = Arc::new(BlockExecutionOutput {
-            bundle: execution_output.bundle,
+            state: execution_output.bundle,
             result: BlockExecutionResult {
                 receipts: execution_output.receipts.pop().unwrap_or_default(),
                 requests: execution_output.requests.pop().unwrap_or_default(),

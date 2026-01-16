@@ -3141,7 +3141,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                     gas_used: 0,
                     blob_gas_used: 0,
                 },
-                bundle: Default::default(),
+                state: Default::default(),
             }),
             ComputedTrieData::default(),
         );

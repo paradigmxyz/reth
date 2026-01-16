@@ -58,7 +58,7 @@ impl<'a, R> WriteStateInput<'a, R> {
     /// Returns a reference to the [`BundleState`].
     pub const fn state(&self) -> &BundleState {
         match self {
-            Self::Single { outcome, .. } => &outcome.bundle,
+            Self::Single { outcome, .. } => &outcome.state,
             Self::Multiple(outcome) => &outcome.bundle,
         }
     }

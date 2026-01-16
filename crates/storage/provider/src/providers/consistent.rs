@@ -1307,7 +1307,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
             let changesets = state
                 .block()
                 .execution_output
-                .bundle
+                .state
                 .reverts
                 .clone()
                 .to_plain_state_reverts()
@@ -1360,7 +1360,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             let changesets = state
                 .block_ref()
                 .execution_output
-                .bundle
+                .state
                 .reverts
                 .clone()
                 .to_plain_state_reverts()
@@ -1406,7 +1406,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             let changeset = state
                 .block_ref()
                 .execution_output
-                .bundle
+                .state
                 .reverts
                 .clone()
                 .to_plain_state_reverts()
@@ -1460,7 +1460,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 let block_changesets = state
                     .block_ref()
                     .execution_output
-                    .bundle
+                    .state
                     .reverts
                     .clone()
                     .to_plain_state_reverts()
@@ -1508,7 +1508,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 count += state
                     .block_ref()
                     .execution_output
-                    .bundle
+                    .state
                     .reverts
                     .clone()
                     .to_plain_state_reverts()
@@ -1884,7 +1884,7 @@ mod tests {
                             senders,
                         )),
                         execution_output: Arc::new(BlockExecutionOutput {
-                            bundle: BundleState::new(
+                            state: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
                                     (address, None, Some(account.into()), Default::default())
                                 }),

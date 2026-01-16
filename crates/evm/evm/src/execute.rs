@@ -64,7 +64,7 @@ pub trait Executor<DB: Database>: Sized {
     {
         let result = self.execute_one(block)?;
         let mut state = self.into_state();
-        Ok(BlockExecutionOutput { bundle: state.take_bundle(), result })
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
     /// Executes multiple inputs in the batch, and returns an aggregated [`ExecutionOutcome`].
@@ -104,7 +104,7 @@ pub trait Executor<DB: Database>: Sized {
         let result = self.execute_one(block)?;
         let mut state = self.into_state();
         f(&state);
-        Ok(BlockExecutionOutput { bundle: state.take_bundle(), result })
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
     /// Executes the EVM with the given input and accepts a state closure that is always invoked
@@ -121,7 +121,7 @@ pub trait Executor<DB: Database>: Sized {
         let mut state = self.into_state();
         f(&state);
 
-        Ok(BlockExecutionOutput { bundle: state.take_bundle(), result: result? })
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result: result? })
     }
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
@@ -136,7 +136,7 @@ pub trait Executor<DB: Database>: Sized {
     {
         let result = self.execute_one_with_state_hook(block, state_hook)?;
         let mut state = self.into_state();
-        Ok(BlockExecutionOutput { bundle: state.take_bundle(), result })
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
     /// Consumes the executor and returns the [`State`] containing all state changes.
