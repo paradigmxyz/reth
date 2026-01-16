@@ -488,7 +488,7 @@ where
 
         // Terminate caching task early since execution is complete and caching is no longer
         // needed. This frees up resources while state root computation continues.
-        handle.terminate_caching(Some(output.clone()));
+        let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
         let block = self.convert_to_block(input)?.with_senders(senders);
 
@@ -590,6 +590,10 @@ where
                 .into(),
             )
             .into())
+        }
+
+        if let Some(valid_block_tx) = valid_block_tx {
+            let _ = valid_block_tx.send(());
         }
 
         Ok(self.spawn_deferred_trie_task(
