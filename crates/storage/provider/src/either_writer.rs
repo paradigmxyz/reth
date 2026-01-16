@@ -63,13 +63,13 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
 
 /// Helper type for `RocksDB` batch argument in writer constructors.
 ///
-/// When `rocksdb` feature is enabled, this is a `RocksDB` batch.
+/// When `rocksdb` feature is enabled, this is a real `RocksDB` batch.
 /// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
 #[cfg(all(unix, feature = "rocksdb"))]
 pub type RocksBatchArg<'a> = crate::providers::rocksdb::RocksDBBatch<'a>;
 /// Helper type for `RocksDB` batch argument in writer constructors.
 ///
-/// When `rocksdb` feature is enabled, this is a `RocksDB` batch.
+/// When `rocksdb` feature is enabled, this is a real `RocksDB` batch.
 /// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
 #[cfg(not(all(unix, feature = "rocksdb")))]
 pub type RocksBatchArg<'a> = ();
@@ -1211,8 +1211,7 @@ mod rocksdb_tests {
 
         // Create EitherWriter with RocksDB
         let provider = factory.database_provider_rw().unwrap();
-        let mut writer =
-            EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
 
         // Verify we got a RocksDB writer
         assert!(matches!(writer, EitherWriter::RocksDB(_)));
@@ -1256,8 +1255,7 @@ mod rocksdb_tests {
         // Now delete using EitherWriter
         let batch = rocksdb.batch();
         let provider = factory.database_provider_rw().unwrap();
-        let mut writer =
-            EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
         writer.delete_transaction_hash_number(hash).unwrap();
 
         // Extract the batch and commit via provider
@@ -1811,8 +1809,7 @@ mod rocksdb_tests {
 
         // Create provider and EitherWriter
         let provider = factory.database_provider_rw().unwrap();
-        let mut writer =
-            EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
 
         // Write transaction hash numbers (append_only=false since we're using RocksDB)
         writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();
