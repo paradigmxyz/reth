@@ -379,7 +379,7 @@ mod tests {
     fn heap_ordering_with_gaps_in_block_indices() {
         // Non-contiguous block indices: 0, 5, 3, 9, 2
         // Block 9 should win despite not being last in input order
-        let blocks = vec![
+        let blocks = [
             (0usize, vec![(b256(1), U256::from(100))]),
             (5, vec![(b256(1), U256::from(500))]),
             (3, vec![(b256(1), U256::from(300))]),

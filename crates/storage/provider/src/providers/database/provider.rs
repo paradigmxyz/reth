@@ -523,7 +523,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
-            // Collect hashed state for batched k-way merge writes
             let mut hashed_states: Vec<Arc<HashedPostStateSorted>> =
                 Vec::with_capacity(blocks.len());
 
@@ -556,28 +555,23 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                     let trie_data = block.trie_data();
 
-                    // Trie changesets must be written per-block (keyed by block number)
+                    // collect hashed state reference for batched write later
+                    hashed_states.push(Arc::clone(&trie_data.hashed_state));
+
                     let start = Instant::now();
                     self.write_trie_updates_sorted(&trie_data.trie_updates)?;
                     timings.write_trie_updates += start.elapsed();
 
-                    // Collect hashed state reference for batched write (no clone)
-                    hashed_states.push(Arc::clone(&trie_data.hashed_state));
                 }
             }
 
-            // Write hashed state - use k-way merge only for multiple blocks
-            if !hashed_states.is_empty() {
-                let start = Instant::now();
-                if hashed_states.len() == 1 {
-                    // Single block: use sequential write (no merge overhead)
-                    self.write_hashed_state(&hashed_states[0])?;
-                } else {
-                    // Multiple blocks: use k-way merge for sorted, deduped, sequential I/O
-                    self.write_hashed_state_merged(&hashed_states)?;
-                }
-                timings.write_hashed_state = start.elapsed();
+            let start = Instant::now();
+            if hashed_states.len() < 2 {
+                self.write_hashed_state(&hashed_states[0])?;
+            } else {
+                self.write_hashed_state_merged(&hashed_states)?;
             }
+            timings.write_hashed_state = start.elapsed();
 
             // Full mode: update history indices
             if save_mode.with_state() {
