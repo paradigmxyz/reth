@@ -780,6 +780,7 @@ where
         }
         drop(_enter);
 
+        // Validate block post-execution rules
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
