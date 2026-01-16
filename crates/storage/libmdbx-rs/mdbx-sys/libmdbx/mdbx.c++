@@ -1,8 +1,8 @@
 /// \copyright SPDX-License-Identifier: Apache-2.0
-/// \author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2025
+/// \author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2026
 /* clang-format off */
 
-#define MDBX_BUILD_SOURCERY 6b5df6869d2bf5419e3a8189d9cc849cc9911b9c8a951b9750ed0a261ce43724_v0_13_7_0_g566b0f93
+#define MDBX_BUILD_SOURCERY 504a6ecaae8fc599ed314a60e624c8d15df1d8bed9a4f417271a7c3e05b56467_v0_14_1_291_g8fcc05f8
 
 #define LIBMDBX_INTERNALS
 #define MDBX_DEPRECATED
@@ -51,7 +51,7 @@
 #if defined(_WIN32) || defined(_WIN64) || defined(_WINDOWS)
 
 #ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0601 /* Windows 7 */
+#define _WIN32_WINNT 0x0A00 /* Windows 10 */
 #endif                      /* _WIN32_WINNT */
 
 #if !defined(_CRT_SECURE_NO_WARNINGS)
@@ -434,6 +434,10 @@ __extern_C key_t ftok(const char *, int);
 #include <sys/time.h>
 #include <sys/uio.h>
 
+#if __GLIBC_PREREQ(2, 16) || __has_include(<sys/auxv.h>)
+#include <sys/auxv.h>
+#endif /* glibc >= 2.16 */
+
 #endif /*---------------------------------------------------------------------*/
 
 #if defined(__ANDROID_API__) || defined(ANDROID)
@@ -527,8 +531,10 @@ __extern_C key_t ftok(const char *, int);
 
 #if UINTPTR_MAX > 0xffffFFFFul || ULONG_MAX > 0xffffFFFFul || defined(_WIN64)
 #define MDBX_WORDBITS 64
+#define MDBX_WORDBITS_LN2 6
 #else
 #define MDBX_WORDBITS 32
+#define MDBX_WORDBITS_LN2 5
 #endif /* MDBX_WORDBITS */
 
 /*----------------------------------------------------------------------------*/
@@ -1133,6 +1139,14 @@ static inline void osal_free(void *ptr) { HeapFree(GetProcessHeap(), 0, ptr); }
 #define vsnprintf _vsnprintf /* ntdll */
 #endif
 
+#ifndef strcasecmp
+#define strcasecmp _stricmp /* ntdll */
+#endif
+
+#ifndef strncasecmp
+#define strncasecmp _strnicmp /* ntdll */
+#endif
+
 #else /*----------------------------------------------------------------------*/
 
 typedef pthread_t osal_thread_t;
@@ -1171,6 +1185,14 @@ typedef char pathchar_t;
 #define MDBX_PRIsPATH "s"
 #endif
 
+MDBX_MAYBE_UNUSED static inline bool osal_yield(void) {
+#if defined(_WIN32) || defined(_WIN64)
+  return SleepEx(0, true) == WAIT_IO_COMPLETION;
+#else
+  return sched_yield() != 0;
+#endif
+}
+
 typedef struct osal_mmap {
   union {
     void *base;
@@ -1189,6 +1211,8 @@ typedef struct osal_mmap {
 #if defined(_WIN32) || defined(_WIN64)
 
 #define MDBX_HAVE_PWRITEV 0
+
+MDBX_INTERNAL int osal_waitstatus2errcode(DWORD result);
 
 #elif defined(__ANDROID_API__)
 
@@ -1433,7 +1457,7 @@ enum osal_syncmode_bits {
 };
 
 MDBX_INTERNAL int osal_fsync(mdbx_filehandle_t fd, const enum osal_syncmode_bits mode_bits);
-MDBX_INTERNAL int osal_ftruncate(mdbx_filehandle_t fd, uint64_t length);
+MDBX_INTERNAL int osal_fsetsize(mdbx_filehandle_t fd, const uint64_t length);
 MDBX_INTERNAL int osal_fseek(mdbx_filehandle_t fd, uint64_t pos);
 MDBX_INTERNAL int osal_filesize(mdbx_filehandle_t fd, uint64_t *length);
 
@@ -1446,8 +1470,9 @@ enum osal_openfile_purpose {
   MDBX_OPEN_DXB_OVERLAPPED_DIRECT,
 #endif /* Windows */
   MDBX_OPEN_LCK,
-  MDBX_OPEN_COPY,
-  MDBX_OPEN_DELETE
+  MDBX_OPEN_DELETE,
+  MDBX_OPEN_COPY_EXCL,
+  MDBX_OPEN_COPY_OVERWRITE,
 };
 
 MDBX_MAYBE_UNUSED static inline bool osal_isdirsep(pathchar_t c) {
@@ -1458,6 +1483,7 @@ MDBX_MAYBE_UNUSED static inline bool osal_isdirsep(pathchar_t c) {
       c == '/';
 }
 
+MDBX_INTERNAL const char *osal_getenv(const char *name, bool secure);
 MDBX_INTERNAL bool osal_pathequal(const pathchar_t *l, const pathchar_t *r, size_t len);
 MDBX_INTERNAL pathchar_t *osal_fileext(const pathchar_t *pathname, size_t len);
 MDBX_INTERNAL int osal_fileexists(const pathchar_t *pathname);
@@ -1469,7 +1495,7 @@ MDBX_INTERNAL int osal_removedirectory(const pathchar_t *pathname);
 MDBX_INTERNAL int osal_is_pipe(mdbx_filehandle_t fd);
 MDBX_INTERNAL int osal_lockfile(mdbx_filehandle_t fd, bool wait);
 
-#define MMAP_OPTION_TRUNCATE 1
+#define MMAP_OPTION_SETLENGTH 1
 #define MMAP_OPTION_SEMAPHORE 2
 MDBX_INTERNAL int osal_mmap(const int flags, osal_mmap_t *map, size_t size, const size_t limit, const unsigned options,
                             const pathchar_t *pathname4logging);
@@ -1485,7 +1511,7 @@ typedef struct {
 MDBX_INTERNAL int osal_suspend_threads_before_remap(MDBX_env *env, mdbx_handle_array_t **array);
 MDBX_INTERNAL int osal_resume_threads_after_remap(mdbx_handle_array_t *array);
 #endif /* Windows */
-MDBX_INTERNAL int osal_msync(const osal_mmap_t *map, size_t offset, size_t length, enum osal_syncmode_bits mode_bits);
+MDBX_INTERNAL int osal_msync(const osal_mmap_t *map, size_t length, enum osal_syncmode_bits mode_bits);
 MDBX_INTERNAL int osal_check_fs_rdonly(mdbx_filehandle_t handle, const pathchar_t *pathname, int err);
 MDBX_INTERNAL int osal_check_fs_incore(mdbx_filehandle_t handle);
 MDBX_INTERNAL int osal_check_fs_local(mdbx_filehandle_t handle, int flags);
@@ -1770,7 +1796,7 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
 
 /** Avoid dependence from MSVC CRT and use ntdll.dll instead. */
 #ifndef MDBX_WITHOUT_MSVC_CRT
-#if defined(MDBX_BUILD_CXX) && !MDBX_BUILD_CXX
+#if defined(MDBX_BUILD_CXX) && !MDBX_BUILD_CXX && (defined(_WIN32) || defined(_WIN64))
 #define MDBX_WITHOUT_MSVC_CRT 1
 #else
 #define MDBX_WITHOUT_MSVC_CRT 0
@@ -1838,6 +1864,14 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
 #error MDBX_HAVE_BUILTIN_CPU_SUPPORTS must be defined as 0 or 1
 #endif /* MDBX_HAVE_BUILTIN_CPU_SUPPORTS */
 
+/** if enabled then treats the commit of pure (nothing changes) transactions as special
+ * cases and return \ref MDBX_RESULT_TRUE instead of \ref MDBX_SUCCESS. */
+#ifndef MDBX_NOSUCCESS_PURE_COMMIT
+#define MDBX_NOSUCCESS_PURE_COMMIT 0
+#elif !(MDBX_NOSUCCESS_PURE_COMMIT == 0 || MDBX_NOSUCCESS_PURE_COMMIT == 1)
+#error MDBX_NOSUCCESS_PURE_COMMIT must be defined as 0 or 1
+#endif /* MDBX_NOSUCCESS_PURE_COMMIT */
+
 /** if enabled then instead of the returned error `MDBX_REMOTE`, only a warning is issued, when
  * the database being opened in non-read-only mode is located in a file system exported via NFS. */
 #ifndef MDBX_ENABLE_NON_READONLY_EXPORT
@@ -1876,7 +1910,8 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
     ((defined(_POSIX_THREAD_ROBUST_PRIO_INHERIT) && _POSIX_THREAD_ROBUST_PRIO_INHERIT > 0) ||                          \
      (defined(_POSIX_THREAD_ROBUST_PRIO_PROTECT) && _POSIX_THREAD_ROBUST_PRIO_PROTECT > 0) ||                          \
      defined(PTHREAD_MUTEX_ROBUST) || defined(PTHREAD_MUTEX_ROBUST_NP)) &&                                             \
-    (!defined(__GLIBC__) || __GLIBC_PREREQ(2, 10) /* troubles with Robust mutexes before 2.10 */)
+    (!defined(__GLIBC__) || __GLIBC_PREREQ(2, 10) /* troubles with Robust mutexes before 2.10 */) &&                   \
+    !defined(__OHOS__) /* Harmony OS doesn't support robust mutexes at the end of 2025 */
 #define MDBX_LOCKING MDBX_LOCKING_POSIX2008
 #else
 #define MDBX_LOCKING MDBX_LOCKING_POSIX2001
@@ -1930,6 +1965,22 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
 #elif !(MDBX_USE_COPYFILERANGE == 0 || MDBX_USE_COPYFILERANGE == 1)
 #error MDBX_USE_COPYFILERANGE must be defined as 0 or 1
 #endif /* MDBX_USE_COPYFILERANGE */
+
+/** Advanced: Using posix_fallocate() or fcntl(F_PREALLOCATE) on OSX (autodetection by default). */
+#ifndef MDBX_USE_FALLOCATE
+#if defined(__APPLE__)
+#define MDBX_USE_FALLOCATE 0 /* Too slow and unclean, but not required to prevent SIGBUS */
+#elif (defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 200112L) || (__GLIBC_PREREQ(2, 10) && defined(_GNU_SOURCE))
+#define MDBX_USE_FALLOCATE 1
+#else
+#define MDBX_USE_FALLOCATE 0
+#endif
+#define MDBX_USE_FALLOCATE_CONFIG "AUTO=" MDBX_STRINGIFY(MDBX_USE_FALLOCATE)
+#elif !(MDBX_USE_FALLOCATE == 0 || MDBX_USE_FALLOCATE == 1)
+#error MDBX_USE_FALLOCATE must be defined as 0 or 1
+#else
+#define MDBX_USE_FALLOCATE_CONFIG MDBX_STRINGIFY(MDBX_USE_FALLOCATE)
+#endif /* MDBX_USE_FALLOCATE */
 
 //------------------------------------------------------------------------------
 
@@ -2364,6 +2415,8 @@ typedef enum page_type {
   P_SPILLED = 0x2000u /* spilled in parent txn */,
   P_LOOSE = 0x4000u /* page was dirtied then freed, can be reused */,
   P_FROZEN = 0x8000u /* used for retire page with known status */,
+  P_TYPE = (P_BRANCH | P_LEAF | P_LARGE | P_META | P_DUPFIX | P_SUBP),
+  P_FLAGS = (P_BAD | P_SPILLED | P_LOOSE | P_FROZEN),
   P_ILL_BITS = (uint16_t)~(P_BRANCH | P_LEAF | P_DUPFIX | P_LARGE | P_SPILLED),
 
   page_broken = 0,
@@ -2664,7 +2717,7 @@ typedef struct reader_slot {
 /* The header for the reader table (a memory-mapped lock file). */
 typedef struct shared_lck {
   /* Stamp identifying this as an MDBX file.
-   * It must be set to MDBX_MAGIC with with MDBX_LOCK_VERSION. */
+   * It must be set to MDBX_MAGIC with MDBX_LOCK_VERSION. */
   uint64_t magic_and_version;
 
   /* Format of this lock file. Must be set to MDBX_LOCK_FORMAT. */
@@ -2796,6 +2849,9 @@ union logger_union {
 struct libmdbx_globals {
   bin128_t bootid;
   unsigned sys_pagesize, sys_allocation_granularity;
+#ifdef AT_UCACHEBSIZE
+  unsigned sys_unified_cache_block;
+#endif /* AT_UCACHEBSIZE */
   uint8_t sys_pagesize_ln2;
   uint8_t runtime_flags;
   uint8_t loglevel;
@@ -2901,7 +2957,10 @@ MDBX_INTERNAL void debug_log_va(int level, const char *function, int line, const
 #if MDBX_DEBUG
 #define ASSERT_FAIL(env, msg, func, line) mdbx_assert_fail(env, msg, func, line)
 #else /* MDBX_DEBUG */
-MDBX_NORETURN __cold void assert_fail(const char *msg, const char *func, unsigned line);
+#if !((defined(_WIN32) || defined(_WIN64)) && defined(_DEBUG) && !MDBX_WITHOUT_MSVC_CRT)
+MDBX_NORETURN
+#endif
+__cold void assert_fail(const char *msg, const char *func, unsigned line);
 #define ASSERT_FAIL(env, msg, func, line)                                                                              \
   do {                                                                                                                 \
     (void)(env);                                                                                                       \
@@ -3028,6 +3087,8 @@ MDBX_NOTHROW_CONST_FUNCTION MDBX_MAYBE_UNUSED static inline size_t ceil_powerof2
 
 MDBX_NOTHROW_CONST_FUNCTION MDBX_MAYBE_UNUSED MDBX_INTERNAL unsigned log2n_powerof2(size_t value_uintptr);
 
+MDBX_NOTHROW_CONST_FUNCTION MDBX_MAYBE_UNUSED MDBX_INTERNAL unsigned ceil_log2n(size_t value_uintptr);
+
 MDBX_NOTHROW_CONST_FUNCTION MDBX_INTERNAL uint64_t rrxmrrxmsx_0(uint64_t v);
 
 struct monotime_cache {
@@ -3044,6 +3105,13 @@ MDBX_MAYBE_UNUSED static inline uint64_t monotime_since_cached(uint64_t begin_ti
   }
   return cache->value - begin_timestamp;
 }
+
+typedef struct ratio2digits_buffer {
+  char string[1 + 20 + 1 + 19 + 1];
+} ratio2digits_buffer_t;
+
+char *ratio2digits(const uint64_t v, const uint64_t d, ratio2digits_buffer_t *const buffer, int precision);
+char *ratio2percent(const uint64_t v, const uint64_t d, ratio2digits_buffer_t *const buffer);
 
 /* An PNL is an Page Number List, a sorted array of IDs.
  *
@@ -3066,48 +3134,36 @@ typedef const pgno_t *const_pnl_t;
 #define MDBX_PNL_GRANULATE (1 << MDBX_PNL_GRANULATE_LOG2)
 #define MDBX_PNL_INITIAL (MDBX_PNL_GRANULATE - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(pgno_t))
 
-#define MDBX_PNL_ALLOCLEN(pl) ((pl)[-1])
-#define MDBX_PNL_GETSIZE(pl) ((size_t)((pl)[0]))
-#define MDBX_PNL_SETSIZE(pl, size)                                                                                     \
-  do {                                                                                                                 \
-    const size_t __size = size;                                                                                        \
-    assert(__size < INT_MAX);                                                                                          \
-    (pl)[0] = (pgno_t)__size;                                                                                          \
-  } while (0)
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline size_t pnl_alloclen(const_pnl_t pnl) { return pnl[-1]; }
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline size_t pnl_size(const_pnl_t pnl) { return pnl[0]; }
+
+MDBX_MAYBE_UNUSED static inline void pnl_setsize(pnl_t pnl, size_t len) {
+  assert(len < INT_MAX);
+  pnl[0] = (pgno_t)len;
+}
+
 #define MDBX_PNL_FIRST(pl) ((pl)[1])
-#define MDBX_PNL_LAST(pl) ((pl)[MDBX_PNL_GETSIZE(pl)])
+#define MDBX_PNL_LAST(pl) ((pl)[pnl_size(pl)])
 #define MDBX_PNL_BEGIN(pl) (&(pl)[1])
-#define MDBX_PNL_END(pl) (&(pl)[MDBX_PNL_GETSIZE(pl) + 1])
+#define MDBX_PNL_END(pl) (&(pl)[pnl_size(pl) + 1])
 
 #if MDBX_PNL_ASCENDING
 #define MDBX_PNL_EDGE(pl) ((pl) + 1)
 #define MDBX_PNL_LEAST(pl) MDBX_PNL_FIRST(pl)
 #define MDBX_PNL_MOST(pl) MDBX_PNL_LAST(pl)
+#define MDBX_PNL_CONTIGUOUS(prev, next, span) ((next) - (prev)) == (span))
 #else
-#define MDBX_PNL_EDGE(pl) ((pl) + MDBX_PNL_GETSIZE(pl))
+#define MDBX_PNL_EDGE(pl) ((pl) + pnl_size(pl))
 #define MDBX_PNL_LEAST(pl) MDBX_PNL_LAST(pl)
 #define MDBX_PNL_MOST(pl) MDBX_PNL_FIRST(pl)
+#define MDBX_PNL_CONTIGUOUS(prev, next, span) (((prev) - (next)) == (span))
 #endif
 
-#define MDBX_PNL_SIZEOF(pl) ((MDBX_PNL_GETSIZE(pl) + 1) * sizeof(pgno_t))
-#define MDBX_PNL_IS_EMPTY(pl) (MDBX_PNL_GETSIZE(pl) == 0)
+#define MDBX_PNL_SIZEOF(pl) ((pnl_size(pl) + 1) * sizeof(pgno_t))
+#define MDBX_PNL_IS_EMPTY(pl) (pnl_size(pl) == 0)
 
-MDBX_MAYBE_UNUSED static inline size_t pnl_size2bytes(size_t size) {
-  assert(size > 0 && size <= PAGELIST_LIMIT);
-#if MDBX_PNL_PREALLOC_FOR_RADIXSORT
-
-  size += size;
-#endif /* MDBX_PNL_PREALLOC_FOR_RADIXSORT */
-  STATIC_ASSERT(MDBX_ASSUME_MALLOC_OVERHEAD +
-                    (PAGELIST_LIMIT * (MDBX_PNL_PREALLOC_FOR_RADIXSORT + 1) + MDBX_PNL_GRANULATE + 3) * sizeof(pgno_t) <
-                SIZE_MAX / 4 * 3);
-  size_t bytes =
-      ceil_powerof2(MDBX_ASSUME_MALLOC_OVERHEAD + sizeof(pgno_t) * (size + 3), MDBX_PNL_GRANULATE * sizeof(pgno_t)) -
-      MDBX_ASSUME_MALLOC_OVERHEAD;
-  return bytes;
-}
-
-MDBX_MAYBE_UNUSED static inline pgno_t pnl_bytes2size(const size_t bytes) {
+MDBX_NOTHROW_PURE_FUNCTION MDBX_MAYBE_UNUSED static inline pgno_t pnl_bytes2size(const size_t bytes) {
   size_t size = bytes / sizeof(pgno_t);
   assert(size > 3 && size <= PAGELIST_LIMIT + /* alignment gap */ 65536);
   size -= 3;
@@ -3117,27 +3173,52 @@ MDBX_MAYBE_UNUSED static inline pgno_t pnl_bytes2size(const size_t bytes) {
   return (pgno_t)size;
 }
 
+MDBX_NOTHROW_PURE_FUNCTION MDBX_MAYBE_UNUSED static inline size_t pnl_size2bytes(size_t wanna_size) {
+  size_t size = wanna_size;
+  assert(size > 0 && size <= PAGELIST_LIMIT);
+#if MDBX_PNL_PREALLOC_FOR_RADIXSORT
+  size += size;
+#endif /* MDBX_PNL_PREALLOC_FOR_RADIXSORT */
+  STATIC_ASSERT(MDBX_ASSUME_MALLOC_OVERHEAD +
+                    (PAGELIST_LIMIT * (MDBX_PNL_PREALLOC_FOR_RADIXSORT + 1) + MDBX_PNL_GRANULATE + 3) * sizeof(pgno_t) <
+                SIZE_MAX / 4 * 3);
+  size_t bytes =
+      ceil_powerof2(MDBX_ASSUME_MALLOC_OVERHEAD + sizeof(pgno_t) * (size + 3), MDBX_PNL_GRANULATE * sizeof(pgno_t)) -
+      MDBX_ASSUME_MALLOC_OVERHEAD;
+  assert(pnl_bytes2size(bytes) >= wanna_size);
+  return bytes;
+}
+
 MDBX_INTERNAL pnl_t pnl_alloc(size_t size);
 
 MDBX_INTERNAL void pnl_free(pnl_t pnl);
 
+MDBX_MAYBE_UNUSED MDBX_INTERNAL pnl_t pnl_clone(const pnl_t src);
+
 MDBX_INTERNAL int pnl_reserve(pnl_t __restrict *__restrict ppnl, const size_t wanna);
 
 MDBX_MAYBE_UNUSED static inline int __must_check_result pnl_need(pnl_t __restrict *__restrict ppnl, size_t num) {
-  assert(MDBX_PNL_GETSIZE(*ppnl) <= PAGELIST_LIMIT && MDBX_PNL_ALLOCLEN(*ppnl) >= MDBX_PNL_GETSIZE(*ppnl));
+  assert(pnl_size(*ppnl) <= PAGELIST_LIMIT && pnl_alloclen(*ppnl) >= pnl_size(*ppnl));
   assert(num <= PAGELIST_LIMIT);
-  const size_t wanna = MDBX_PNL_GETSIZE(*ppnl) + num;
-  return likely(MDBX_PNL_ALLOCLEN(*ppnl) >= wanna) ? MDBX_SUCCESS : pnl_reserve(ppnl, wanna);
+  const size_t wanna = pnl_size(*ppnl) + num;
+  return likely(pnl_alloclen(*ppnl) >= wanna) ? MDBX_SUCCESS : pnl_reserve(ppnl, wanna);
 }
 
 MDBX_MAYBE_UNUSED static inline void pnl_append_prereserved(__restrict pnl_t pnl, pgno_t pgno) {
-  assert(MDBX_PNL_GETSIZE(pnl) < MDBX_PNL_ALLOCLEN(pnl));
+  assert(pnl_size(pnl) < pnl_alloclen(pnl));
   if (AUDIT_ENABLED()) {
-    for (size_t i = MDBX_PNL_GETSIZE(pnl); i > 0; --i)
+    for (size_t i = pnl_size(pnl); i > 0; --i)
       assert(pgno != pnl[i]);
   }
   *pnl += 1;
   MDBX_PNL_LAST(pnl) = pgno;
+}
+
+MDBX_MAYBE_UNUSED static inline int __must_check_result pnl_append(__restrict pnl_t *ppnl, pgno_t pgno) {
+  int rc = pnl_need(ppnl, 1);
+  if (likely(rc == MDBX_SUCCESS))
+    pnl_append_prereserved(*ppnl, pgno);
+  return rc;
 }
 
 MDBX_INTERNAL void pnl_shrink(pnl_t __restrict *__restrict ppnl);
@@ -3148,14 +3229,14 @@ MDBX_INTERNAL int __must_check_result pnl_append_span(__restrict pnl_t *ppnl, pg
 
 MDBX_INTERNAL int __must_check_result pnl_insert_span(__restrict pnl_t *ppnl, pgno_t pgno, size_t n);
 
-MDBX_INTERNAL size_t pnl_search_nochk(const pnl_t pnl, pgno_t pgno);
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL size_t pnl_search_nochk(const pnl_t pnl, pgno_t pgno);
 
 MDBX_INTERNAL void pnl_sort_nochk(pnl_t pnl);
 
 MDBX_INTERNAL bool pnl_check(const const_pnl_t pnl, const size_t limit);
 
 MDBX_MAYBE_UNUSED static inline bool pnl_check_allocated(const const_pnl_t pnl, const size_t limit) {
-  return pnl == nullptr || (MDBX_PNL_ALLOCLEN(pnl) >= MDBX_PNL_GETSIZE(pnl) && pnl_check(pnl, limit));
+  return pnl == nullptr || (pnl_alloclen(pnl) >= pnl_size(pnl) && pnl_check(pnl, limit));
 }
 
 MDBX_MAYBE_UNUSED static inline void pnl_sort(pnl_t pnl, size_t limit4check) {
@@ -3164,7 +3245,8 @@ MDBX_MAYBE_UNUSED static inline void pnl_sort(pnl_t pnl, size_t limit4check) {
   (void)limit4check;
 }
 
-MDBX_MAYBE_UNUSED static inline size_t pnl_search(const pnl_t pnl, pgno_t pgno, size_t limit) {
+MDBX_NOTHROW_PURE_FUNCTION MDBX_MAYBE_UNUSED static inline size_t pnl_search(const pnl_t pnl, pgno_t pgno,
+                                                                             size_t limit) {
   assert(pnl_check_allocated(pnl, limit));
   if (MDBX_HAVE_CMOV) {
     /* cmov-ускоренный бинарный поиск может читать (но не использовать) один
@@ -3182,6 +3264,8 @@ MDBX_MAYBE_UNUSED static inline size_t pnl_search(const pnl_t pnl, pgno_t pgno, 
 }
 
 MDBX_INTERNAL size_t pnl_merge(pnl_t dst, const pnl_t src);
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL size_t pnl_maxspan(const pnl_t pnl);
 
 #ifdef __cplusplus
 }
@@ -3211,8 +3295,3832 @@ MDBX_NOTHROW_CONST_FUNCTION MDBX_MAYBE_UNUSED static inline pgno_t pgno_sub(size
   assert(base >= MIN_PAGENO && base <= MAX_PAGENO + 1 && subtrahend < MAX_PAGENO);
   return int64pgno((int64_t)base - (int64_t)subtrahend);
 }
+
+/*----------------------------------------------------------------------------*/
+
+#ifdef _MSC_VER
+#pragma warning(push, 1)
+#if _MSC_VER > 1913
+#pragma warning(disable : 5054) /* deprecated between enumerations of different types */
+#endif
+#endif /* MSVC */
+
+typedef struct dp dp_t;
+typedef struct dpl dpl_t;
+typedef struct kvx kvx_t;
+typedef struct meta_ptr meta_ptr_t;
+typedef struct inner_cursor subcur_t;
+typedef struct cursor_couple cursor_couple_t;
+typedef struct defer_free_item defer_free_item_t;
+
+typedef struct troika {
+  uint8_t fsm, recent, prefer_steady, tail_and_flags;
+#if MDBX_WORDBITS > 32 /* Workaround for false-positives from Valgrind */
+  uint32_t unused_pad;
+#endif
+#define TROIKA_HAVE_STEADY(troika) ((troika)->fsm & 7u)
+#define TROIKA_STRICT_VALID(troika) ((troika)->tail_and_flags & 64u)
+#define TROIKA_VALID(troika) ((troika)->tail_and_flags & 128u)
+#define TROIKA_TAIL(troika) ((troika)->tail_and_flags & 3u)
+  txnid_t txnid[NUM_METAS];
+} troika_t;
+
+typedef struct page_get_result {
+  page_t *page;
+  int err;
+} pgr_t;
+
+typedef struct node_search_result {
+  node_t *node;
+  bool exact;
+} nsr_t;
+
+typedef struct bind_reader_slot_result {
+  int err;
+  reader_slot_t *slot;
+} bsr_t;
+
+#ifndef __cplusplus
+
+MDBX_MAYBE_UNUSED static __always_inline void atomic_yield(void) {
+#if defined(_WIN32) || defined(_WIN64)
+  YieldProcessor();
+#elif defined(__ia32__) || defined(__e2k__)
+  __builtin_ia32_pause();
+#elif defined(__ia64__)
+#if defined(__HP_cc__) || defined(__HP_aCC__)
+  _Asm_hint(_HINT_PAUSE);
+#else
+  __asm__ __volatile__("hint @pause");
+#endif
+#elif defined(__aarch64__) || (defined(__ARM_ARCH) && __ARM_ARCH > 6) || defined(__ARM_ARCH_6K__)
+#ifdef __CC_ARM
+  __yield();
+#else
+  __asm__ __volatile__("yield");
+#endif
+#elif (defined(__mips64) || defined(__mips64__)) && defined(__mips_isa_rev) && __mips_isa_rev >= 2
+  __asm__ __volatile__("pause");
+#elif defined(__mips) || defined(__mips__) || defined(__mips64) || defined(__mips64__) || defined(_M_MRX000) ||        \
+    defined(_MIPS_) || defined(__MWERKS__) || defined(__sgi)
+  __asm__ __volatile__(".word 0x00000140");
+#else
+  osal_yield();
+#endif
+}
+
+#ifdef MDBX_HAVE_C11ATOMICS
+#define osal_memory_fence(order, write) atomic_thread_fence((write) ? mo_c11_store(order) : mo_c11_load(order))
+#else /* MDBX_HAVE_C11ATOMICS */
+#define osal_memory_fence(order, write)                                                                                \
+  do {                                                                                                                 \
+    osal_compiler_barrier();                                                                                           \
+    if (write && order > (MDBX_CPU_WRITEBACK_INCOHERENT ? mo_Relaxed : mo_AcquireRelease))                             \
+      osal_memory_barrier();                                                                                           \
+  } while (0)
+#endif /* MDBX_HAVE_C11ATOMICS */
+
+#if defined(MDBX_HAVE_C11ATOMICS) && defined(__LCC__)
+#define atomic_store32(p, value, order)                                                                                \
+  ({                                                                                                                   \
+    const uint32_t value_to_store = (value);                                                                           \
+    atomic_store_explicit(MDBX_c11a_rw(uint32_t, p), value_to_store, mo_c11_store(order));                             \
+    value_to_store;                                                                                                    \
+  })
+#define atomic_load32(p, order) atomic_load_explicit(MDBX_c11a_ro(uint32_t, p), mo_c11_load(order))
+#define atomic_store64(p, value, order)                                                                                \
+  ({                                                                                                                   \
+    const uint64_t value_to_store = (value);                                                                           \
+    atomic_store_explicit(MDBX_c11a_rw(uint64_t, p), value_to_store, mo_c11_store(order));                             \
+    value_to_store;                                                                                                    \
+  })
+#define atomic_load64(p, order) atomic_load_explicit(MDBX_c11a_ro(uint64_t, p), mo_c11_load(order))
+#endif /* LCC && MDBX_HAVE_C11ATOMICS */
+
+#ifndef atomic_store32
+MDBX_MAYBE_UNUSED static __always_inline uint32_t atomic_store32(mdbx_atomic_uint32_t *p, const uint32_t value,
+                                                                 enum mdbx_memory_order order) {
+  STATIC_ASSERT(sizeof(mdbx_atomic_uint32_t) == 4);
+#ifdef MDBX_HAVE_C11ATOMICS
+  assert(atomic_is_lock_free(MDBX_c11a_rw(uint32_t, p)));
+  atomic_store_explicit(MDBX_c11a_rw(uint32_t, p), value, mo_c11_store(order));
+#else  /* MDBX_HAVE_C11ATOMICS */
+  if (order != mo_Relaxed)
+    osal_compiler_barrier();
+  p->weak = value;
+  osal_memory_fence(order, true);
+#endif /* MDBX_HAVE_C11ATOMICS */
+  return value;
+}
+#endif /* atomic_store32 */
+
+#ifndef atomic_load32
+MDBX_MAYBE_UNUSED static __always_inline uint32_t atomic_load32(const volatile mdbx_atomic_uint32_t *p,
+                                                                enum mdbx_memory_order order) {
+  STATIC_ASSERT(sizeof(mdbx_atomic_uint32_t) == 4);
+#ifdef MDBX_HAVE_C11ATOMICS
+  assert(atomic_is_lock_free(MDBX_c11a_ro(uint32_t, p)));
+  return atomic_load_explicit(MDBX_c11a_ro(uint32_t, p), mo_c11_load(order));
+#else  /* MDBX_HAVE_C11ATOMICS */
+  osal_memory_fence(order, false);
+  const uint32_t value = p->weak;
+  if (order != mo_Relaxed)
+    osal_compiler_barrier();
+  return value;
+#endif /* MDBX_HAVE_C11ATOMICS */
+}
+#endif /* atomic_load32 */
+
+/*------------------------------------------------------------------------------
+ * safe read/write volatile 64-bit fields on 32-bit architectures. */
+
+/* LY: for testing non-atomic 64-bit txnid on 32-bit arches.
+ * #define xMDBX_TXNID_STEP (UINT32_MAX / 3) */
+#ifndef xMDBX_TXNID_STEP
+#if MDBX_64BIT_CAS
+#define xMDBX_TXNID_STEP 1u
+#else
+#define xMDBX_TXNID_STEP 2u
+#endif
+#endif /* xMDBX_TXNID_STEP */
+
+#ifndef atomic_store64
+MDBX_MAYBE_UNUSED static __always_inline uint64_t atomic_store64(mdbx_atomic_uint64_t *p, const uint64_t value,
+                                                                 enum mdbx_memory_order order) {
+  STATIC_ASSERT(sizeof(mdbx_atomic_uint64_t) == 8);
+#if MDBX_64BIT_ATOMIC
+#if __GNUC_PREREQ(11, 0)
+  STATIC_ASSERT(__alignof__(mdbx_atomic_uint64_t) >= sizeof(uint64_t));
+#endif /* GNU C >= 11 */
+#ifdef MDBX_HAVE_C11ATOMICS
+  assert(atomic_is_lock_free(MDBX_c11a_rw(uint64_t, p)));
+  atomic_store_explicit(MDBX_c11a_rw(uint64_t, p), value, mo_c11_store(order));
+#else  /* MDBX_HAVE_C11ATOMICS */
+  if (order != mo_Relaxed)
+    osal_compiler_barrier();
+  p->weak = value;
+  osal_memory_fence(order, true);
+#endif /* MDBX_HAVE_C11ATOMICS */
+#else  /* !MDBX_64BIT_ATOMIC */
+  osal_compiler_barrier();
+  atomic_store32(&p->low, (uint32_t)value, mo_Relaxed);
+  jitter4testing(true);
+  atomic_store32(&p->high, (uint32_t)(value >> 32), order);
+  jitter4testing(true);
+#endif /* !MDBX_64BIT_ATOMIC */
+  return value;
+}
+#endif /* atomic_store64 */
+
+#ifndef atomic_load64
+MDBX_MAYBE_UNUSED static
+#if MDBX_64BIT_ATOMIC
+    __always_inline
+#endif /* MDBX_64BIT_ATOMIC */
+        uint64_t atomic_load64(const volatile mdbx_atomic_uint64_t *p, enum mdbx_memory_order order) {
+  STATIC_ASSERT(sizeof(mdbx_atomic_uint64_t) == 8);
+#if MDBX_64BIT_ATOMIC
+#ifdef MDBX_HAVE_C11ATOMICS
+  assert(atomic_is_lock_free(MDBX_c11a_ro(uint64_t, p)));
+  return atomic_load_explicit(MDBX_c11a_ro(uint64_t, p), mo_c11_load(order));
+#else  /* MDBX_HAVE_C11ATOMICS */
+  osal_memory_fence(order, false);
+  const uint64_t value = p->weak;
+  if (order != mo_Relaxed)
+    osal_compiler_barrier();
+  return value;
+#endif /* MDBX_HAVE_C11ATOMICS */
+#else  /* !MDBX_64BIT_ATOMIC */
+  osal_compiler_barrier();
+  uint64_t value = (uint64_t)atomic_load32(&p->high, order) << 32;
+  jitter4testing(true);
+  value |= atomic_load32(&p->low, (order == mo_Relaxed) ? mo_Relaxed : mo_AcquireRelease);
+  jitter4testing(true);
+  for (;;) {
+    osal_compiler_barrier();
+    uint64_t again = (uint64_t)atomic_load32(&p->high, order) << 32;
+    jitter4testing(true);
+    again |= atomic_load32(&p->low, (order == mo_Relaxed) ? mo_Relaxed : mo_AcquireRelease);
+    jitter4testing(true);
+    if (likely(value == again))
+      return value;
+    value = again;
+    atomic_yield();
+  }
+#endif /* !MDBX_64BIT_ATOMIC */
+}
+#endif /* atomic_load64 */
+
+#if MDBX_64BIT_CAS
+MDBX_MAYBE_UNUSED static __always_inline bool atomic_cas64(mdbx_atomic_uint64_t *p, uint64_t c, uint64_t v) {
+#ifdef MDBX_HAVE_C11ATOMICS
+  STATIC_ASSERT(sizeof(long long) >= sizeof(uint64_t));
+  assert(atomic_is_lock_free(MDBX_c11a_rw(uint64_t, p)));
+  return atomic_compare_exchange_strong(MDBX_c11a_rw(uint64_t, p), &c, v);
+#elif defined(__GNUC__) || defined(__clang__)
+  return __sync_bool_compare_and_swap(&p->weak, c, v);
+#elif defined(_MSC_VER)
+  return c == (uint64_t)_InterlockedCompareExchange64((volatile __int64 *)&p->weak, v, c);
+#elif defined(__APPLE__)
+  return OSAtomicCompareAndSwap64Barrier(c, v, &p->weak);
+#else
+#error FIXME: Unsupported compiler
+#endif
+}
+#endif /* MDBX_64BIT_CAS */
+
+MDBX_MAYBE_UNUSED static __always_inline bool atomic_cas32(mdbx_atomic_uint32_t *p, uint32_t c, uint32_t v) {
+#ifdef MDBX_HAVE_C11ATOMICS
+  STATIC_ASSERT(sizeof(int) >= sizeof(uint32_t));
+  assert(atomic_is_lock_free(MDBX_c11a_rw(uint32_t, p)));
+  return atomic_compare_exchange_strong(MDBX_c11a_rw(uint32_t, p), &c, v);
+#elif defined(__GNUC__) || defined(__clang__)
+  return __sync_bool_compare_and_swap(&p->weak, c, v);
+#elif defined(_MSC_VER)
+  STATIC_ASSERT(sizeof(volatile long) == sizeof(volatile uint32_t));
+  return c == (uint32_t)_InterlockedCompareExchange((volatile long *)&p->weak, v, c);
+#elif defined(__APPLE__)
+  return OSAtomicCompareAndSwap32Barrier(c, v, &p->weak);
+#else
+#error FIXME: Unsupported compiler
+#endif
+}
+
+MDBX_MAYBE_UNUSED static __always_inline uint32_t atomic_add32(mdbx_atomic_uint32_t *p, uint32_t v) {
+#ifdef MDBX_HAVE_C11ATOMICS
+  STATIC_ASSERT(sizeof(int) >= sizeof(uint32_t));
+  assert(atomic_is_lock_free(MDBX_c11a_rw(uint32_t, p)));
+  return atomic_fetch_add(MDBX_c11a_rw(uint32_t, p), v);
+#elif defined(__GNUC__) || defined(__clang__)
+  return __sync_fetch_and_add(&p->weak, v);
+#elif defined(_MSC_VER)
+  STATIC_ASSERT(sizeof(volatile long) == sizeof(volatile uint32_t));
+  return (uint32_t)_InterlockedExchangeAdd((volatile long *)&p->weak, v);
+#elif defined(__APPLE__)
+  return OSAtomicAdd32Barrier(v, &p->weak);
+#else
+#error FIXME: Unsupported compiler
+#endif
+}
+
+#define atomic_sub32(p, v) atomic_add32(p, 0 - (v))
+
+MDBX_MAYBE_UNUSED static __always_inline uint64_t safe64_txnid_next(uint64_t txnid) {
+  txnid += xMDBX_TXNID_STEP;
+#if !MDBX_64BIT_CAS
+  /* avoid overflow of low-part in safe64_reset() */
+  txnid += (UINT32_MAX == (uint32_t)txnid);
+#endif
+  return txnid;
+}
+
+/* Atomically make target value >= SAFE64_INVALID_THRESHOLD */
+MDBX_MAYBE_UNUSED static __always_inline void safe64_reset(mdbx_atomic_uint64_t *p, bool single_writer) {
+  if (single_writer) {
+#if MDBX_64BIT_ATOMIC && MDBX_WORDBITS >= 64
+    atomic_store64(p, UINT64_MAX, mo_AcquireRelease);
+#else
+    atomic_store32(&p->high, UINT32_MAX, mo_AcquireRelease);
+#endif /* MDBX_64BIT_ATOMIC && MDBX_WORDBITS >= 64 */
+  } else {
+#if MDBX_64BIT_CAS && MDBX_64BIT_ATOMIC
+    /* atomically make value >= SAFE64_INVALID_THRESHOLD by 64-bit operation */
+    atomic_store64(p, UINT64_MAX, mo_AcquireRelease);
+#elif MDBX_64BIT_CAS
+    /* atomically make value >= SAFE64_INVALID_THRESHOLD by 32-bit operation */
+    atomic_store32(&p->high, UINT32_MAX, mo_AcquireRelease);
+#else
+    /* it is safe to increment low-part to avoid ABA, since xMDBX_TXNID_STEP > 1
+     * and overflow was preserved in safe64_txnid_next() */
+    STATIC_ASSERT(xMDBX_TXNID_STEP > 1);
+    atomic_add32(&p->low, 1) /* avoid ABA in safe64_reset_compare() */;
+    atomic_store32(&p->high, UINT32_MAX, mo_AcquireRelease);
+    atomic_add32(&p->low, 1) /* avoid ABA in safe64_reset_compare() */;
+#endif /* MDBX_64BIT_CAS && MDBX_64BIT_ATOMIC */
+  }
+  assert(p->weak >= SAFE64_INVALID_THRESHOLD);
+  jitter4testing(true);
+}
+
+MDBX_MAYBE_UNUSED static __always_inline bool safe64_reset_compare(mdbx_atomic_uint64_t *p, uint64_t compare) {
+  /* LY: This function is used to reset `txnid` from hsr-handler in case
+   *     the asynchronously cancellation of read transaction. Therefore,
+   *     there may be a collision between the cleanup performed here and
+   *     asynchronous termination and restarting of the read transaction
+   *     in another process/thread. In general we MUST NOT reset the `txnid`
+   *     if a new transaction was started (i.e. if `txnid` was changed). */
+#if MDBX_64BIT_CAS
+  bool rc = atomic_cas64(p, compare, UINT64_MAX);
+#else
+  /* LY: There is no gold ratio here since shared mutex is too costly,
+   *     in such way we must acquire/release it for every update of txnid,
+   *     i.e. twice for each read transaction). */
+  bool rc = false;
+  if (likely(atomic_load32(&p->low, mo_AcquireRelease) == (uint32_t)compare &&
+             atomic_cas32(&p->high, (uint32_t)(compare >> 32), UINT32_MAX))) {
+    if (unlikely(atomic_load32(&p->low, mo_AcquireRelease) != (uint32_t)compare))
+      atomic_cas32(&p->high, UINT32_MAX, (uint32_t)(compare >> 32));
+    else
+      rc = true;
+  }
+#endif /* MDBX_64BIT_CAS */
+  jitter4testing(true);
+  return rc;
+}
+
+MDBX_MAYBE_UNUSED static __always_inline void safe64_write(mdbx_atomic_uint64_t *p, const uint64_t v) {
+  assert(p->weak >= SAFE64_INVALID_THRESHOLD);
+#if MDBX_64BIT_ATOMIC && MDBX_64BIT_CAS
+  atomic_store64(p, v, mo_AcquireRelease);
+#else  /* MDBX_64BIT_ATOMIC */
+  osal_compiler_barrier();
+  /* update low-part but still value >= SAFE64_INVALID_THRESHOLD */
+  atomic_store32(&p->low, (uint32_t)v, mo_Relaxed);
+  assert(p->weak >= SAFE64_INVALID_THRESHOLD);
+  jitter4testing(true);
+  /* update high-part from SAFE64_INVALID_THRESHOLD to actual value */
+  atomic_store32(&p->high, (uint32_t)(v >> 32), mo_AcquireRelease);
+#endif /* MDBX_64BIT_ATOMIC */
+  assert(p->weak == v);
+  jitter4testing(true);
+}
+
+MDBX_MAYBE_UNUSED static __always_inline uint64_t safe64_read(const mdbx_atomic_uint64_t *p) {
+  jitter4testing(true);
+  uint64_t v = atomic_load64(p, mo_AcquireRelease);
+  while (!MDBX_64BIT_ATOMIC && unlikely(v != p->weak)) {
+    atomic_yield();
+    v = atomic_load64(p, mo_AcquireRelease);
+  }
+  return v;
+}
+
+#if 0 /* unused for now */
+MDBX_MAYBE_UNUSED static __always_inline bool safe64_is_valid(uint64_t v) {
+#if MDBX_WORDBITS >= 64
+  return v < SAFE64_INVALID_THRESHOLD;
+#else
+  return (v >> 32) != UINT32_MAX;
+#endif /* MDBX_WORDBITS */
+}
+
+MDBX_MAYBE_UNUSED static __always_inline bool
+ safe64_is_valid_ptr(const mdbx_atomic_uint64_t *p) {
+#if MDBX_64BIT_ATOMIC
+  return atomic_load64(p, mo_AcquireRelease) < SAFE64_INVALID_THRESHOLD;
+#else
+  return atomic_load32(&p->high, mo_AcquireRelease) != UINT32_MAX;
+#endif /* MDBX_64BIT_ATOMIC */
+}
+#endif /* unused for now */
+
+/* non-atomic write with safety for reading a half-updated value */
+MDBX_MAYBE_UNUSED static __always_inline void safe64_update(mdbx_atomic_uint64_t *p, const uint64_t v) {
+#if MDBX_64BIT_ATOMIC
+  atomic_store64(p, v, mo_Relaxed);
+#else
+  safe64_reset(p, true);
+  safe64_write(p, v);
+#endif /* MDBX_64BIT_ATOMIC */
+}
+
+/* non-atomic increment with safety for reading a half-updated value */
+MDBX_MAYBE_UNUSED static
+#if MDBX_64BIT_ATOMIC
+    __always_inline
+#endif /* MDBX_64BIT_ATOMIC */
+    void safe64_inc(mdbx_atomic_uint64_t *p, const uint64_t v) {
+  assert(v > 0);
+  safe64_update(p, safe64_read(p) + v);
+}
+
+#endif /* !__cplusplus */
+
+/* Internal prototypes */
+
+/* audit.c */
+MDBX_INTERNAL int audit_ex(MDBX_txn *txn, size_t retired_stored, bool dont_filter_gc);
+
+/* mvcc-readers.c */
+MDBX_INTERNAL bsr_t mvcc_bind_slot(MDBX_env *env);
+MDBX_MAYBE_UNUSED MDBX_INTERNAL pgno_t mvcc_largest_this(MDBX_env *env, pgno_t largest);
+MDBX_INTERNAL txnid_t mvcc_shapshot_oldest(MDBX_env *const env, const txnid_t steady);
+MDBX_INTERNAL pgno_t mvcc_snapshot_largest(const MDBX_env *env, pgno_t last_used_page);
+MDBX_INTERNAL int mvcc_cleanup_dead(MDBX_env *env, int rlocked, int *dead);
+MDBX_INTERNAL bool mvcc_kick_laggards(MDBX_env *env, const txnid_t laggard);
+
+/* dxb.c */
+MDBX_INTERNAL int dxb_setup(MDBX_env *env, const int lck_rc, const mdbx_mode_t mode_bits);
+MDBX_INTERNAL int __must_check_result dxb_read_header(MDBX_env *env, meta_t *meta, const int lck_exclusive,
+                                                      const mdbx_mode_t mode_bits);
+enum resize_mode { implicit_grow, impilict_shrink, explicit_resize };
+MDBX_INTERNAL int __must_check_result dxb_resize(MDBX_env *const env, const pgno_t used_pgno, const pgno_t size_pgno,
+                                                 pgno_t limit_pgno, const enum resize_mode mode);
+MDBX_INTERNAL int dxb_set_readahead(const MDBX_env *env, const pgno_t edge, const bool enable, const bool force_whole);
+MDBX_INTERNAL int dxb_msync(const MDBX_env *env, size_t length_pages, enum osal_syncmode_bits mode_bits);
+MDBX_INTERNAL int dxb_fsync(const MDBX_env *env, enum osal_syncmode_bits mode_bits);
+MDBX_INTERNAL int __must_check_result dxb_sync_locked(MDBX_env *env, unsigned flags, meta_t *const pending,
+                                                      troika_t *const troika);
+#if defined(ENABLE_MEMCHECK) || defined(__SANITIZE_ADDRESS__)
+MDBX_INTERNAL void dxb_sanitize_tail(MDBX_env *env, MDBX_txn *txn);
+#else
+MDBX_MAYBE_UNUSED static inline void dxb_sanitize_tail(MDBX_env *env, MDBX_txn *txn) {
+  (void)env;
+  (void)txn;
+}
+#endif /* ENABLE_MEMCHECK || __SANITIZE_ADDRESS__ */
+
+/* txn.c */
+#define TXN_END_NAMES                                                                                                  \
+  {"committed", "pure-commit", "abort", "reset", "fail-begin", "fail-begin-nested", "ousted", nullptr}
+enum {
+  /* txn_end operation number, for logging */
+  TXN_END_COMMITTED /* 0 */,
+  TXN_END_PURE_COMMIT /* 1 */,
+  TXN_END_ABORT /* 2 */,
+  TXN_END_RESET /* 3 */,
+  TXN_END_FAIL_BEGIN /* 4 */,
+  TXN_END_FAIL_BEGIN_NESTED /* 5 */,
+  TXN_END_OUSTED /* 6 */,
+
+  TXN_END_OPMASK = 0x07 /* mask for txn_end() operation number */,
+  TXN_END_UPDATE = 0x10 /* update env state (DBIs) */,
+  TXN_END_FREE = 0x20 /* free txn unless it is env.basal_txn */,
+  TXN_END_SLOT = 0x40 /* release any reader slot if NOSTICKYTHREADS */
+};
+
+struct commit_timestamp {
+  uint64_t start, prep, gc, audit, write, sync, gc_cpu;
+};
+
+MDBX_INTERNAL bool txn_refund(MDBX_txn *txn);
+MDBX_INTERNAL bool txn_gc_detent(const MDBX_txn *const txn);
+MDBX_INTERNAL int txn_check_badbits_parked(const MDBX_txn *txn, int bad_bits);
+MDBX_INTERNAL void txn_done_cursors(MDBX_txn *txn);
+MDBX_INTERNAL int txn_shadow_cursors(const MDBX_txn *parent, const size_t dbi);
+
+MDBX_INTERNAL MDBX_txn *txn_alloc(const MDBX_txn_flags_t flags, MDBX_env *env);
+MDBX_INTERNAL int txn_abort(MDBX_txn *txn);
+MDBX_INTERNAL int txn_renew(MDBX_txn *txn, unsigned flags);
+MDBX_INTERNAL int txn_end(MDBX_txn *txn, unsigned mode);
+
+MDBX_INTERNAL int txn_nested_create(MDBX_txn *parent, const MDBX_txn_flags_t flags);
+MDBX_INTERNAL void txn_nested_abort(MDBX_txn *nested);
+MDBX_INTERNAL int txn_nested_join(MDBX_txn *txn, struct commit_timestamp *ts);
+
+MDBX_INTERNAL MDBX_txn *txn_basal_create(const size_t max_dbi);
+MDBX_INTERNAL void txn_basal_destroy(MDBX_txn *txn);
+MDBX_INTERNAL int txn_basal_start(MDBX_txn *txn, unsigned flags);
+MDBX_INTERNAL int txn_basal_commit(MDBX_txn *txn, struct commit_timestamp *ts);
+MDBX_INTERNAL int txn_basal_end(MDBX_txn *txn, unsigned mode);
+
+MDBX_INTERNAL int txn_ro_park(MDBX_txn *txn, bool autounpark);
+MDBX_INTERNAL int txn_ro_unpark(MDBX_txn *txn);
+MDBX_INTERNAL int txn_ro_start(MDBX_txn *txn, unsigned flags);
+MDBX_INTERNAL int txn_ro_end(MDBX_txn *txn, unsigned mode);
+MDBX_INTERNAL int txn_ro_clone(const MDBX_txn *const source, MDBX_txn *const clone);
+MDBX_INTERNAL int txn_ro_reset(MDBX_txn *txn);
+
+/* env.c */
+MDBX_INTERNAL int env_open(MDBX_env *env, mdbx_mode_t mode);
+MDBX_INTERNAL int env_info(const MDBX_env *env, const MDBX_txn *txn, MDBX_envinfo *out, troika_t *troika);
+MDBX_INTERNAL int env_sync(MDBX_env *env, bool force, bool nonblock);
+MDBX_INTERNAL int env_close(MDBX_env *env, bool resurrect_after_fork);
+MDBX_INTERNAL MDBX_txn *env_owned_wrtxn(const MDBX_env *env);
+MDBX_INTERNAL int __must_check_result env_page_auxbuffer(MDBX_env *env);
+MDBX_INTERNAL unsigned env_setup_pagesize(MDBX_env *env, const size_t pagesize);
+
+/* api-opt.c */
+MDBX_INTERNAL void env_options_init(MDBX_env *env);
+MDBX_INTERNAL void env_options_adjust_defaults(MDBX_env *env);
+MDBX_INTERNAL void env_options_adjust_dp_limit(MDBX_env *env);
+MDBX_INTERNAL pgno_t default_dp_limit(const MDBX_env *env);
+
+/* tree.c */
+MDBX_INTERNAL int tree_drop(MDBX_cursor *mc, const bool may_have_tables);
+MDBX_INTERNAL int __must_check_result tree_rebalance(MDBX_cursor *mc);
+MDBX_INTERNAL int __must_check_result tree_propagate_key(MDBX_cursor *mc, const MDBX_val *key);
+MDBX_INTERNAL void recalculate_merge_thresholds(MDBX_env *env);
+MDBX_INTERNAL void recalculate_subpage_thresholds(MDBX_env *env);
+
+/* table.c */
+MDBX_INTERNAL int __must_check_result tbl_fetch(MDBX_txn *txn, MDBX_cursor *mc, size_t dbi, const MDBX_val *name,
+                                                unsigned wanna_flags);
+MDBX_INTERNAL int __must_check_result tbl_create(MDBX_txn *txn, MDBX_cursor *mc, size_t slot, const MDBX_val *name,
+                                                 unsigned db_flags);
+MDBX_INTERNAL int __must_check_result tbl_setup(const MDBX_env *env, volatile kvx_t *const kvx, const tree_t *const db);
+MDBX_INTERNAL int __must_check_result tbl_refresh(MDBX_txn *txn, size_t dbi);
+MDBX_INTERNAL int __must_check_result tbl_purge(MDBX_cursor *mc);
+
+/* coherency.c */
+MDBX_INTERNAL bool coherency_check_meta(const MDBX_env *env, const volatile meta_t *meta, bool report);
+MDBX_INTERNAL int coherency_fetch_head(MDBX_txn *txn, const meta_ptr_t head, uint64_t *timestamp);
+MDBX_INTERNAL int coherency_check_written(const MDBX_env *env, const txnid_t txnid, const volatile meta_t *meta,
+                                          const intptr_t pgno, uint64_t *timestamp);
+MDBX_INTERNAL int coherency_timeout(uint64_t *timestamp, intptr_t pgno, const MDBX_env *env);
+
+/* Сортированный набор txnid, использующий внутри комбинацию непрерывного интервала и списка.
+ * Обеспечивает хранение id записей при переработке, очистку и обновлении GC, включая возврат остатков переработанных
+ * страниц.
+ *
+ * При переработке GC записи преимущественно выбираются последовательно, но это не гарантируется. В LIFO-режиме
+ * переработка и добавление записей в rkl происходит преимущественно в обратном порядке, но из-за завершения читающих
+ * транзакций могут быть «скачки» в прямом направлении. В FIFO-режиме записи GC перерабатываются в прямом порядке и при
+ * этом линейно, но не обязательно строго последовательно, при этом гарантируется что между добавляемыми в rkl
+ * идентификаторами в GC нет записей, т.е. между первой (минимальный id) и последней (максимальный id) в GC нет записей
+ * и весь интервал может быть использован для возврата остатков страниц в GC.
+ *
+ * Таким образом, комбинация линейного интервала и списка (отсортированного в порядке возрастания элементов) является
+ * рациональным решением, близким к теоретически оптимальному пределу.
+ *
+ * Реализация rkl достаточно проста/прозрачная, если не считать неочевидную «магию» обмена непрерывного интервала и
+ * образующихся в списке последовательностей. Однако, именно этот автоматически выполняемый без лишних операций обмен
+ * оправдывает все накладные расходы. */
+typedef struct MDBX_rkl {
+  txnid_t solid_begin, solid_end; /* начало и конец непрерывной последовательности solid_begin ... solid_end-1. */
+  unsigned list_length;           /* текущая длина списка. */
+  unsigned list_limit;    /* размер буфера выделенного под список, равен ARRAY_LENGTH(inplace) когда list == inplace. */
+  txnid_t *list;          /* список отдельных элементов в порядке возрастания (наименьший в начале). */
+  txnid_t inplace[4 + 8]; /* статический массив для коротких списков, чтобы избавиться от выделения/освобождения памяти
+                           * в большинстве случаев. */
+} rkl_t;
+
+MDBX_MAYBE_UNUSED MDBX_INTERNAL void rkl_init(rkl_t *rkl);
+MDBX_MAYBE_UNUSED MDBX_INTERNAL void rkl_clear(rkl_t *rkl);
+MDBX_MAYBE_UNUSED static inline void rkl_clear_and_shrink(rkl_t *rkl) { rkl_clear(rkl); /* TODO */ }
+MDBX_MAYBE_UNUSED MDBX_INTERNAL void rkl_destroy(rkl_t *rkl);
+MDBX_MAYBE_UNUSED MDBX_INTERNAL void rkl_destructive_move(rkl_t *src, rkl_t *dst);
+MDBX_MAYBE_UNUSED MDBX_INTERNAL __must_check_result int rkl_copy(const rkl_t *src, rkl_t *dst);
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool rkl_empty(const rkl_t *rkl) {
+  return rkl->solid_begin > rkl->solid_end;
+}
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL bool rkl_check(const rkl_t *rkl);
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL size_t rkl_len(const rkl_t *rkl);
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL txnid_t rkl_lowest(const rkl_t *rkl);
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL txnid_t rkl_highest(const rkl_t *rkl);
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline txnid_t rkl_edge(const rkl_t *rkl,
+                                                                            const bool highest_not_lowest) {
+  return highest_not_lowest ? rkl_highest(rkl) : rkl_lowest(rkl);
+}
+MDBX_MAYBE_UNUSED MDBX_INTERNAL __must_check_result int rkl_push(rkl_t *rkl, const txnid_t id);
+MDBX_MAYBE_UNUSED MDBX_INTERNAL txnid_t rkl_pop(rkl_t *rkl, const bool highest_not_lowest);
+MDBX_MAYBE_UNUSED MDBX_INTERNAL __must_check_result int rkl_merge(const rkl_t *src, rkl_t *dst, bool ignore_duplicates);
+MDBX_MAYBE_UNUSED MDBX_INTERNAL int rkl_destructive_merge(rkl_t *src, rkl_t *dst, bool ignore_duplicates);
+
+/* Итератор для rkl.
+ * Обеспечивает изоляцию внутреннего устройства rkl от остального кода, чем существенно его упрощает.
+ * Фактически именно использованием rkl с итераторами ликвидируется "ребус" исторически образовавшийся в gc-update. */
+typedef struct MDBX_rkl_iter {
+  const rkl_t *rkl;
+  unsigned pos;
+  unsigned solid_offset;
+} rkl_iter_t;
+
+MDBX_MAYBE_UNUSED MDBX_INTERNAL __must_check_result rkl_iter_t rkl_iterator(const rkl_t *rkl, const bool reverse);
+MDBX_MAYBE_UNUSED MDBX_INTERNAL __must_check_result txnid_t rkl_turn(rkl_iter_t *iter, const bool reverse);
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL size_t rkl_left(rkl_iter_t *iter, const bool reverse);
+MDBX_MAYBE_UNUSED MDBX_INTERNAL bool rkl_find(const rkl_t *rkl, const txnid_t id, rkl_iter_t *iter);
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION __must_check_result MDBX_INTERNAL bool rkl_contain(const rkl_t *rkl,
+                                                                                                txnid_t id);
+
+typedef struct MDBX_rkl_hole {
+  txnid_t begin;
+  txnid_t end;
+} rkl_hole_t;
+MDBX_MAYBE_UNUSED MDBX_INTERNAL __must_check_result rkl_hole_t rkl_hole(rkl_iter_t *iter, const bool reverse);
+
+/* List of txnid */
+typedef txnid_t *txl_t;
+typedef const txnid_t *const_txl_t;
+
+enum txl_rules {
+  txl_granulate = 32,
+  txl_initial = txl_granulate - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(txnid_t),
+  txl_max = (1u << 26) - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(txnid_t)
+};
+
+MDBX_MAYBE_UNUSED MDBX_INTERNAL txl_t txl_alloc(void);
+
+MDBX_MAYBE_UNUSED MDBX_INTERNAL void txl_free(txl_t txl);
+
+MDBX_MAYBE_UNUSED MDBX_INTERNAL int __must_check_result txl_append(txl_t __restrict *ptxl, txnid_t id);
+
+MDBX_MAYBE_UNUSED MDBX_INTERNAL void txl_sort(txl_t txl);
+
+MDBX_MAYBE_UNUSED MDBX_INTERNAL bool txl_contain(const txl_t txl, txnid_t id);
+
+MDBX_MAYBE_UNUSED static inline size_t txl_alloclen(const_txl_t txl) { return txl[-1]; }
+
+MDBX_MAYBE_UNUSED static inline size_t txl_size(const_txl_t txl) { return txl[0]; }
+
+/*------------------------------------------------------------------------------
+ * Unaligned access */
+
+MDBX_NOTHROW_CONST_FUNCTION MDBX_MAYBE_UNUSED static inline size_t field_alignment(size_t alignment_baseline,
+                                                                                   size_t field_offset) {
+  size_t merge = alignment_baseline | (size_t)field_offset;
+  return merge & -(int)merge;
+}
+
+/* read-thunk for UB-sanitizer */
+MDBX_NOTHROW_PURE_FUNCTION MDBX_MAYBE_UNUSED static inline uint8_t peek_u8(const uint8_t *__restrict ptr) {
+  return *ptr;
+}
+
+/* write-thunk for UB-sanitizer */
+MDBX_MAYBE_UNUSED static inline void poke_u8(uint8_t *__restrict ptr, const uint8_t v) { *ptr = v; }
+
+MDBX_MAYBE_UNUSED static inline void *bcopy_2(void *__restrict dst, const void *__restrict src) {
+  uint8_t *__restrict d = (uint8_t *)dst;
+  const uint8_t *__restrict s = (uint8_t *)src;
+  d[0] = s[0];
+  d[1] = s[1];
+  return d;
+}
+
+MDBX_MAYBE_UNUSED static inline void *bcopy_4(void *const __restrict dst, const void *const __restrict src) {
+  uint8_t *__restrict d = (uint8_t *)dst;
+  const uint8_t *__restrict s = (uint8_t *)src;
+  d[0] = s[0];
+  d[1] = s[1];
+  d[2] = s[2];
+  d[3] = s[3];
+  return d;
+}
+
+MDBX_MAYBE_UNUSED static inline void *bcopy_8(void *const __restrict dst, const void *const __restrict src) {
+  uint8_t *__restrict d = (uint8_t *)dst;
+  const uint8_t *__restrict s = (uint8_t *)src;
+  d[0] = s[0];
+  d[1] = s[1];
+  d[2] = s[2];
+  d[3] = s[3];
+  d[4] = s[4];
+  d[5] = s[5];
+  d[6] = s[6];
+  d[7] = s[7];
+  return d;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION MDBX_MAYBE_UNUSED static inline uint16_t unaligned_peek_u16(const size_t expected_alignment,
+                                                                                       const void *const ptr) {
+  assert((uintptr_t)ptr % expected_alignment == 0);
+  if (MDBX_UNALIGNED_OK >= 2 || (expected_alignment % sizeof(uint16_t)) == 0)
+    return *(const uint16_t *)ptr;
+  else {
+#if defined(__unaligned) || defined(_M_ARM) || defined(_M_ARM64) || defined(_M_X64) || defined(_M_IA64)
+    return *(const __unaligned uint16_t *)ptr;
+#else
+    uint16_t v;
+    bcopy_2((uint8_t *)&v, (const uint8_t *)ptr);
+    return v;
+#endif /* _MSC_VER || __unaligned */
+  }
+}
+
+MDBX_MAYBE_UNUSED static inline void unaligned_poke_u16(const size_t expected_alignment, void *const __restrict ptr,
+                                                        const uint16_t v) {
+  assert((uintptr_t)ptr % expected_alignment == 0);
+  if (MDBX_UNALIGNED_OK >= 2 || (expected_alignment % sizeof(v)) == 0)
+    *(uint16_t *)ptr = v;
+  else {
+#if defined(__unaligned) || defined(_M_ARM) || defined(_M_ARM64) || defined(_M_X64) || defined(_M_IA64)
+    *((uint16_t __unaligned *)ptr) = v;
+#else
+    bcopy_2((uint8_t *)ptr, (const uint8_t *)&v);
+#endif /* _MSC_VER || __unaligned */
+  }
+}
+
+MDBX_NOTHROW_PURE_FUNCTION MDBX_MAYBE_UNUSED static inline uint32_t
+unaligned_peek_u32(const size_t expected_alignment, const void *const __restrict ptr) {
+  assert((uintptr_t)ptr % expected_alignment == 0);
+  if (MDBX_UNALIGNED_OK >= 4 || (expected_alignment % sizeof(uint32_t)) == 0)
+    return *(const uint32_t *)ptr;
+  else if ((expected_alignment % sizeof(uint16_t)) == 0) {
+    const uint16_t lo = ((const uint16_t *)ptr)[__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__];
+    const uint16_t hi = ((const uint16_t *)ptr)[__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__];
+    return lo | (uint32_t)hi << 16;
+  } else {
+#if defined(__unaligned) || defined(_M_ARM) || defined(_M_ARM64) || defined(_M_X64) || defined(_M_IA64)
+    return *(const __unaligned uint32_t *)ptr;
+#else
+    uint32_t v;
+    bcopy_4((uint8_t *)&v, (const uint8_t *)ptr);
+    return v;
+#endif /* _MSC_VER || __unaligned */
+  }
+}
+
+MDBX_MAYBE_UNUSED static inline void unaligned_poke_u32(const size_t expected_alignment, void *const __restrict ptr,
+                                                        const uint32_t v) {
+  assert((uintptr_t)ptr % expected_alignment == 0);
+  if (MDBX_UNALIGNED_OK >= 4 || (expected_alignment % sizeof(v)) == 0)
+    *(uint32_t *)ptr = v;
+  else if ((expected_alignment % sizeof(uint16_t)) == 0) {
+    ((uint16_t *)ptr)[__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__] = (uint16_t)v;
+    ((uint16_t *)ptr)[__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__] = (uint16_t)(v >> 16);
+  } else {
+#if defined(__unaligned) || defined(_M_ARM) || defined(_M_ARM64) || defined(_M_X64) || defined(_M_IA64)
+    *((uint32_t __unaligned *)ptr) = v;
+#else
+    bcopy_4((uint8_t *)ptr, (const uint8_t *)&v);
+#endif /* _MSC_VER || __unaligned */
+  }
+}
+
+MDBX_NOTHROW_PURE_FUNCTION MDBX_MAYBE_UNUSED static inline uint64_t
+unaligned_peek_u64(const size_t expected_alignment, const void *const __restrict ptr) {
+  assert((uintptr_t)ptr % expected_alignment == 0);
+  if (MDBX_UNALIGNED_OK >= 8 || (expected_alignment % sizeof(uint64_t)) == 0)
+    return *(const uint64_t *)ptr;
+  else if ((expected_alignment % sizeof(uint32_t)) == 0) {
+    const uint32_t lo = ((const uint32_t *)ptr)[__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__];
+    const uint32_t hi = ((const uint32_t *)ptr)[__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__];
+    return lo | (uint64_t)hi << 32;
+  } else {
+#if defined(__unaligned) || defined(_M_ARM) || defined(_M_ARM64) || defined(_M_X64) || defined(_M_IA64)
+    return *(const __unaligned uint64_t *)ptr;
+#else
+    uint64_t v;
+    bcopy_8((uint8_t *)&v, (const uint8_t *)ptr);
+    return v;
+#endif /* _MSC_VER || __unaligned */
+  }
+}
+
+MDBX_MAYBE_UNUSED static inline uint64_t unaligned_peek_u64_volatile(const size_t expected_alignment,
+                                                                     const volatile void *const __restrict ptr) {
+  assert((uintptr_t)ptr % expected_alignment == 0);
+  assert(expected_alignment % sizeof(uint32_t) == 0);
+  if (MDBX_UNALIGNED_OK >= 8 || (expected_alignment % sizeof(uint64_t)) == 0)
+    return *(const volatile uint64_t *)ptr;
+  else {
+#if defined(__unaligned) || defined(_M_ARM) || defined(_M_ARM64) || defined(_M_X64) || defined(_M_IA64)
+    return *(const volatile __unaligned uint64_t *)ptr;
+#else
+    const uint32_t lo = ((const volatile uint32_t *)ptr)[__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__];
+    const uint32_t hi = ((const volatile uint32_t *)ptr)[__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__];
+    return lo | (uint64_t)hi << 32;
+#endif /* _MSC_VER || __unaligned */
+  }
+}
+
+MDBX_MAYBE_UNUSED static inline void unaligned_poke_u64(const size_t expected_alignment, void *const __restrict ptr,
+                                                        const uint64_t v) {
+  assert((uintptr_t)ptr % expected_alignment == 0);
+  if (MDBX_UNALIGNED_OK >= 8 || (expected_alignment % sizeof(v)) == 0)
+    *(uint64_t *)ptr = v;
+  else if ((expected_alignment % sizeof(uint32_t)) == 0) {
+    ((uint32_t *)ptr)[__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__] = (uint32_t)v;
+    ((uint32_t *)ptr)[__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__] = (uint32_t)(v >> 32);
+  } else {
+#if defined(__unaligned) || defined(_M_ARM) || defined(_M_ARM64) || defined(_M_X64) || defined(_M_IA64)
+    *((uint64_t __unaligned *)ptr) = v;
+#else
+    bcopy_8((uint8_t *)ptr, (const uint8_t *)&v);
+#endif /* _MSC_VER || __unaligned */
+  }
+}
+
+#define UNALIGNED_PEEK_8(ptr, struct, field) peek_u8(ptr_disp(ptr, offsetof(struct, field)))
+#define UNALIGNED_POKE_8(ptr, struct, field, value) poke_u8(ptr_disp(ptr, offsetof(struct, field)), value)
+
+#define UNALIGNED_PEEK_16(ptr, struct, field) unaligned_peek_u16(1, ptr_disp(ptr, offsetof(struct, field)))
+#define UNALIGNED_POKE_16(ptr, struct, field, value)                                                                   \
+  unaligned_poke_u16(1, ptr_disp(ptr, offsetof(struct, field)), value)
+
+#define UNALIGNED_PEEK_32(ptr, struct, field) unaligned_peek_u32(1, ptr_disp(ptr, offsetof(struct, field)))
+#define UNALIGNED_POKE_32(ptr, struct, field, value)                                                                   \
+  unaligned_poke_u32(1, ptr_disp(ptr, offsetof(struct, field)), value)
+
+#define UNALIGNED_PEEK_64(ptr, struct, field) unaligned_peek_u64(1, ptr_disp(ptr, offsetof(struct, field)))
+#define UNALIGNED_POKE_64(ptr, struct, field, value)                                                                   \
+  unaligned_poke_u64(1, ptr_disp(ptr, offsetof(struct, field)), value)
+
+MDBX_NOTHROW_PURE_FUNCTION MDBX_MAYBE_UNUSED static inline pgno_t peek_pgno(const void *const __restrict ptr) {
+  if (sizeof(pgno_t) == sizeof(uint32_t))
+    return (pgno_t)unaligned_peek_u32(1, ptr);
+  else if (sizeof(pgno_t) == sizeof(uint64_t))
+    return (pgno_t)unaligned_peek_u64(1, ptr);
+  else {
+    pgno_t pgno;
+    memcpy(&pgno, ptr, sizeof(pgno));
+    return pgno;
+  }
+}
+
+MDBX_MAYBE_UNUSED static inline void poke_pgno(void *const __restrict ptr, const pgno_t pgno) {
+  if (sizeof(pgno) == sizeof(uint32_t))
+    unaligned_poke_u32(1, ptr, pgno);
+  else if (sizeof(pgno) == sizeof(uint64_t))
+    unaligned_poke_u64(1, ptr, pgno);
+  else
+    memcpy(ptr, &pgno, sizeof(pgno));
+}
+#if defined(_WIN32) || defined(_WIN64)
+
+typedef union osal_srwlock {
+  __anonymous_struct_extension__ struct {
+    long volatile readerCount;
+    long volatile writerCount;
+  };
+  RTL_SRWLOCK native;
+} osal_srwlock_t;
+
+typedef void(WINAPI *osal_srwlock_t_function)(osal_srwlock_t *);
+
+#if _WIN32_WINNT < 0x0600 /* prior to Windows Vista */
+typedef enum _FILE_INFO_BY_HANDLE_CLASS {
+  FileBasicInfo,
+  FileStandardInfo,
+  FileNameInfo,
+  FileRenameInfo,
+  FileDispositionInfo,
+  FileAllocationInfo,
+  FileEndOfFileInfo,
+  FileStreamInfo,
+  FileCompressionInfo,
+  FileAttributeTagInfo,
+  FileIdBothDirectoryInfo,
+  FileIdBothDirectoryRestartInfo,
+  FileIoPriorityHintInfo,
+  FileRemoteProtocolInfo,
+  MaximumFileInfoByHandleClass
+} FILE_INFO_BY_HANDLE_CLASS,
+    *PFILE_INFO_BY_HANDLE_CLASS;
+
+typedef struct _FILE_END_OF_FILE_INFO {
+  LARGE_INTEGER EndOfFile;
+} FILE_END_OF_FILE_INFO, *PFILE_END_OF_FILE_INFO;
+
+#define REMOTE_PROTOCOL_INFO_FLAG_LOOPBACK 0x00000001
+#define REMOTE_PROTOCOL_INFO_FLAG_OFFLINE 0x00000002
+
+typedef struct _FILE_REMOTE_PROTOCOL_INFO {
+  USHORT StructureVersion;
+  USHORT StructureSize;
+  DWORD Protocol;
+  USHORT ProtocolMajorVersion;
+  USHORT ProtocolMinorVersion;
+  USHORT ProtocolRevision;
+  USHORT Reserved;
+  DWORD Flags;
+  struct {
+    DWORD Reserved[8];
+  } GenericReserved;
+  struct {
+    DWORD Reserved[16];
+  } ProtocolSpecificReserved;
+} FILE_REMOTE_PROTOCOL_INFO, *PFILE_REMOTE_PROTOCOL_INFO;
+
+#endif /* _WIN32_WINNT < 0x0600 (prior to Windows Vista) */
+
+typedef BOOL(WINAPI *MDBX_GetFileInformationByHandleEx)(_In_ HANDLE hFile,
+                                                        _In_ FILE_INFO_BY_HANDLE_CLASS FileInformationClass,
+                                                        _Out_ LPVOID lpFileInformation, _In_ DWORD dwBufferSize);
+
+typedef BOOL(WINAPI *MDBX_GetVolumeInformationByHandleW)(
+    _In_ HANDLE hFile, _Out_opt_ LPWSTR lpVolumeNameBuffer, _In_ DWORD nVolumeNameSize,
+    _Out_opt_ LPDWORD lpVolumeSerialNumber, _Out_opt_ LPDWORD lpMaximumComponentLength,
+    _Out_opt_ LPDWORD lpFileSystemFlags, _Out_opt_ LPWSTR lpFileSystemNameBuffer, _In_ DWORD nFileSystemNameSize);
+
+typedef DWORD(WINAPI *MDBX_GetFinalPathNameByHandleW)(_In_ HANDLE hFile, _Out_ LPWSTR lpszFilePath,
+                                                      _In_ DWORD cchFilePath, _In_ DWORD dwFlags);
+
+typedef BOOL(WINAPI *MDBX_SetFileInformationByHandle)(_In_ HANDLE hFile,
+                                                      _In_ FILE_INFO_BY_HANDLE_CLASS FileInformationClass,
+                                                      _Out_ LPVOID lpFileInformation, _In_ DWORD dwBufferSize);
+
+typedef NTSTATUS(NTAPI *MDBX_NtFsControlFile)(IN HANDLE FileHandle, IN OUT HANDLE Event,
+                                              IN OUT PVOID /* PIO_APC_ROUTINE */ ApcRoutine, IN OUT PVOID ApcContext,
+                                              OUT PIO_STATUS_BLOCK IoStatusBlock, IN ULONG FsControlCode,
+                                              IN OUT PVOID InputBuffer, IN ULONG InputBufferLength,
+                                              OUT OPTIONAL PVOID OutputBuffer, IN ULONG OutputBufferLength);
+
+typedef uint64_t(WINAPI *MDBX_GetTickCount64)(void);
+
+#if !defined(_WIN32_WINNT_WIN8) || _WIN32_WINNT < _WIN32_WINNT_WIN8
+typedef struct _WIN32_MEMORY_RANGE_ENTRY {
+  PVOID VirtualAddress;
+  SIZE_T NumberOfBytes;
+} WIN32_MEMORY_RANGE_ENTRY, *PWIN32_MEMORY_RANGE_ENTRY;
+#endif /* Windows 8.x */
+
+typedef BOOL(WINAPI *MDBX_PrefetchVirtualMemory)(HANDLE hProcess, ULONG_PTR NumberOfEntries,
+                                                 PWIN32_MEMORY_RANGE_ENTRY VirtualAddresses, ULONG Flags);
+
+typedef enum _SECTION_INHERIT { ViewShare = 1, ViewUnmap = 2 } SECTION_INHERIT;
+
+typedef NTSTATUS(NTAPI *MDBX_NtExtendSection)(IN HANDLE SectionHandle, IN PLARGE_INTEGER NewSectionSize);
+
+typedef LSTATUS(WINAPI *MDBX_RegGetValueA)(HKEY hkey, LPCSTR lpSubKey, LPCSTR lpValue, DWORD dwFlags, LPDWORD pdwType,
+                                           PVOID pvData, LPDWORD pcbData);
+
+typedef long(WINAPI *MDBX_CoCreateGuid)(bin128_t *guid);
+
+NTSYSAPI ULONG RtlRandomEx(PULONG Seed);
+
+typedef BOOL(WINAPI *MDBX_SetFileIoOverlappedRange)(HANDLE FileHandle, PUCHAR OverlappedRangeStart, ULONG Length);
+
+struct libmdbx_imports {
+  osal_srwlock_t_function srwl_Init;
+  osal_srwlock_t_function srwl_AcquireShared;
+  osal_srwlock_t_function srwl_ReleaseShared;
+  osal_srwlock_t_function srwl_AcquireExclusive;
+  osal_srwlock_t_function srwl_ReleaseExclusive;
+  MDBX_NtExtendSection NtExtendSection;
+  MDBX_GetFileInformationByHandleEx GetFileInformationByHandleEx;
+  MDBX_GetVolumeInformationByHandleW GetVolumeInformationByHandleW;
+  MDBX_GetFinalPathNameByHandleW GetFinalPathNameByHandleW;
+  MDBX_SetFileInformationByHandle SetFileInformationByHandle;
+  MDBX_NtFsControlFile NtFsControlFile;
+  MDBX_PrefetchVirtualMemory PrefetchVirtualMemory;
+  MDBX_GetTickCount64 GetTickCount64;
+  MDBX_RegGetValueA RegGetValueA;
+  MDBX_SetFileIoOverlappedRange SetFileIoOverlappedRange;
+  MDBX_CoCreateGuid CoCreateGuid;
+};
+
+MDBX_INTERNAL void windows_import(void);
+#endif /* Windows */
+
+enum signatures {
+  env_signature = INT32_C(0x1A899641),
+  txn_signature = INT32_C(0x13D53A31),
+  cur_signature_live = INT32_C(0x7E05D5B1),
+  cur_signature_ready4dispose = INT32_C(0x2817A047),
+  cur_signature_wait4eot = INT32_C(0x10E297A7)
+};
+
+/*----------------------------------------------------------------------------*/
+
+/* An dirty-page list item is an pgno/pointer pair. */
+struct dp {
+  page_t *ptr;
+  pgno_t pgno, npages;
+};
+
+enum dpl_rules {
+  dpl_gap_edging = 2,
+  dpl_gap_mergesort = 16,
+  dpl_reserve_gap = dpl_gap_mergesort + dpl_gap_edging,
+  dpl_insertion_threshold = 42
+};
+
+/* An DPL (dirty-page list) is a lazy-sorted array of MDBX_DPs. */
+struct dpl {
+  size_t sorted;
+  size_t length;
+  /* number of pages, but not an entries. */
+  size_t pages_including_loose;
+  /* allocated size excluding the dpl_reserve_gap */
+  size_t detent;
+  /* dynamic size with holes at zero and after the last */
+  dp_t items[dpl_reserve_gap];
+};
+
+/*----------------------------------------------------------------------------*/
+/* Internal structures */
+
+/* Comparing/ordering and length constraints */
+typedef struct clc {
+  MDBX_cmp_func *cmp; /* comparator */
+  size_t lmin, lmax;  /* min/max length constraints */
+} clc_t;
+
+/* Вспомогательная информация о table.
+ *
+ * Совокупность потребностей:
+ * 1. Для транзакций и основного курсора нужны все поля.
+ * 2. Для вложенного dupsort-курсора нужен компаратор значений, который изнутри
+ *    курсора будет выглядеть как компаратор ключей. Плюс заглушка компаратора
+ *    значений, которая не должна использоваться в штатных ситуациях, но
+ *    требуется хотя-бы для отслеживания таких обращений.
+ * 3. Использование компараторов для курсора и вложенного dupsort-курсора
+ *    должно выглядеть одинаково.
+ * 4. Желательно минимизировать объём данных размещаемых внутри вложенного
+ *    dupsort-курсора.
+ * 5. Желательно чтобы объем всей структуры был степенью двойки.
+ *
+ * Решение:
+ *  - не храним в dupsort-курсоре ничего лишнего, а только tree;
+ *  - в курсоры помещаем только указатель на clc_t, который будет указывать
+ *    на соответствующее clc-поле в общей kvx-таблице привязанной к env;
+ *  - компаратор размещаем в начале clc_t, в kvx_t сначала размещаем clc
+ *    для ключей, потом для значений, а имя БД в конце kvx_t.
+ *  - тогда в курсоре clc[0] будет содержать информацию для ключей,
+ *    а clc[1] для значений, причем компаратор значений для dupsort-курсора
+ *    будет попадать на MDBX_val с именем, что приведет к SIGSEGV при попытке
+ *    использования такого компаратора.
+ *  - размер kvx_t становится равным 8 словам.
+ *
+ * Трюки и прочая экономия на спичках:
+ *  - не храним dbi внутри курсора, вместо этого вычисляем его как разницу между
+ *    dbi_state курсора и началом таблицы dbi_state в транзакции. Смысл тут в
+ *    экономии кол-ва полей при инициализации курсора. Затрат это не создает,
+ *    так как dbi требуется для последующего доступа к массивам в транзакции,
+ *    т.е. при вычислении dbi разыменовывается тот-же указатель на txn
+ *    и читается та же кэш-линия с указателями. */
+typedef struct clc2 {
+  clc_t k; /* для ключей */
+  clc_t v; /* для значений */
+} clc2_t;
+
+struct kvx {
+  clc2_t clc;
+  MDBX_val name; /* имя table */
+};
+
+/* Non-shared DBI state flags inside transaction */
+enum dbi_state {
+  DBI_DIRTY = 0x01 /* table was written in this txn */,
+  DBI_STALE = 0x02 /* cached table record is outdated and should be reloaded/refreshed */,
+  DBI_FRESH = 0x04 /* table handle opened in this txn */,
+  DBI_CREAT = 0x08 /* table handle created in this txn */,
+  DBI_VALID = 0x10 /* Handle is valid, see also DB_VALID */,
+  DBI_OLDEN = 0x40 /* Handle was closed/reopened outside txn */,
+  DBI_LINDO = 0x80 /* Lazy initialization done for DBI-slot */,
+};
+
+enum txn_flags {
+  txn_ro_begin_flags = MDBX_TXN_RDONLY | MDBX_TXN_RDONLY_PREPARE,
+  txn_rw_begin_flags = MDBX_TXN_NOMETASYNC | MDBX_TXN_NOSYNC | MDBX_TXN_TRY,
+  txn_shrink_allowed = UINT32_C(0x40000000),
+  txn_parked = MDBX_TXN_PARKED,
+  txn_gc_drained = 0x80 /* GC was depleted up to oldest reader */,
+  txn_may_have_cursors = 0x400,
+  txn_state_flags = MDBX_TXN_FINISHED | MDBX_TXN_ERROR | MDBX_TXN_DIRTY | MDBX_TXN_SPILLS | MDBX_TXN_HAS_CHILD |
+                    MDBX_TXN_INVALID | txn_gc_drained
+};
+
+/* A database transaction.
+ * Every operation requires a transaction handle. */
+struct MDBX_txn {
+  int32_t signature;
+  uint32_t flags; /* Transaction Flags */
+  size_t n_dbi;
+  size_t owner; /* thread ID that owns this transaction */
+
+  MDBX_txn *parent; /* parent of a nested txn */
+  MDBX_txn *nested; /* nested txn under this txn,
+                       set together with MDBX_TXN_HAS_CHILD */
+  geo_t geo;
+
+  /* The ID of this transaction. IDs are integers incrementing from
+   * INITIAL_TXNID. Only committed write transactions increment the ID. If a
+   * transaction aborts, the ID may be re-used by the next writer. */
+  txnid_t txnid, front_txnid;
+
+  MDBX_env *env; /* the DB environment */
+  tree_t *dbs;   /* Array of tree_t records for each known DB */
+
+#if MDBX_ENABLE_DBI_SPARSE
+  unsigned *__restrict dbi_sparse;
+#endif /* MDBX_ENABLE_DBI_SPARSE */
+
+  /* Array of non-shared txn's flags of DBI.
+   * Модификатор __restrict тут полезен и безопасен в текущем понимании,
+   * так как пересечение возможно только с dbi_state курсоров,
+   * и происходит по-чтению до последующего изменения/записи. */
+  uint8_t *__restrict dbi_state;
+
+  /* Array of sequence numbers for each DB handle. */
+  uint32_t *__restrict dbi_seqs;
+
+  /* Массив с головами односвязных списков отслеживания курсоров. */
+  MDBX_cursor **cursors;
+
+  /* "Канареечные" маркеры/счетчики */
+  MDBX_canary canary;
+
+  /* User-settable context */
+  void *userctx;
+
+  union {
+    struct {
+      /* For read txns: This thread/txn's slot table slot, or nullptr. */
+      reader_slot_t *slot;
+    } ro;
+    struct {
+      troika_t troika;
+      pnl_t __restrict repnl; /* Reclaimed GC pages */
+      struct {
+        rkl_t reclaimed;   /* The list of reclaimed txn-ids from GC, but not cleared/deleted */
+        rkl_t ready4reuse; /* The list of reclaimed txn-ids from GC, and cleared/deleted */
+        uint64_t spent;    /* Time spent reading and searching GC */
+        rkl_t comeback;    /* The list of ids of records returned into GC during commit, etc */
+      } gc;
+      bool prefault_write_activated;
+#if MDBX_ENABLE_REFUND
+      pgno_t loose_refund_wl /* FIXME: describe */;
+#endif /* MDBX_ENABLE_REFUND */
+      /* a sequence to spilling dirty page with LRU policy */
+      unsigned dirtylru;
+      /* dirtylist room: Dirty array size - dirty pages visible to this txn.
+       * Includes ancestor txns' dirty pages not hidden by other txns'
+       * dirty/spilled pages. Thus commit(nested txn) has room to merge
+       * dirtylist into parent after freeing hidden parent pages. */
+      size_t dirtyroom;
+      /* For write txns: Modified pages. Sorted when not MDBX_WRITEMAP. */
+      dpl_t *__restrict dirtylist;
+      /* The list of pages that became unused during this transaction. */
+      pnl_t __restrict retired_pages;
+      /* The list of loose pages that became unused and may be reused
+       * in this transaction, linked through `page_next()`. */
+      page_t *__restrict loose_pages;
+      /* Number of loose pages (wr.loose_pages) */
+      size_t loose_count;
+      union {
+        struct {
+          size_t least_removed;
+          /* The sorted list of dirty pages we temporarily wrote to disk
+           * because the dirty list was full. page numbers in here are
+           * shifted left by 1, deleted slots have the LSB set. */
+          pnl_t __restrict list;
+        } spilled;
+        size_t writemap_dirty_npages;
+        size_t writemap_spilled_npages;
+      };
+      /* In write txns, next is located the array of cursors for each DB */
+    } wr;
+  };
+};
+
+#define CURSOR_STACK_SIZE (16 + MDBX_WORDBITS / 4)
+
+struct MDBX_cursor {
+  int32_t signature;
+  union {
+    /* Тут некоторые трюки/заморочки с тем чтобы во всех основных сценариях
+     * проверять состояние курсора одной простой операцией сравнения,
+     * и при этом ни на каплю не усложнять код итерации стека курсора.
+     *
+     * Поэтому решение такое:
+     *  - поля flags и top сделаны знаковыми, а их отрицательные значения
+     *    используются для обозначения не-установленного/не-инициализированного
+     *    состояния курсора;
+     *  - для инвалидации/сброса курсора достаточно записать отрицательное
+     *    значение в объединенное поле top_and_flags;
+     *  - все проверки состояния сводятся к сравнению одного из полей
+     *    flags/snum/snum_and_flags, которые в зависимости от сценария,
+     *    трактуются либо как знаковые, либо как безнаковые. */
+    __anonymous_struct_extension__ struct {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+      int8_t flags;
+      /* индекс вершины стека, меньше нуля для не-инициализированного курсора */
+      int8_t top;
+#else
+      int8_t top;
+      int8_t flags;
+#endif
+    };
+    int16_t top_and_flags;
+  };
+  /* флаги проверки, в том числе биты для проверки типа листовых страниц. */
+  uint8_t checking;
+  uint8_t pad;
+
+  /* Указывает на txn->dbi_state[] для DBI этого курсора.
+   * Модификатор __restrict тут полезен и безопасен в текущем понимании,
+   * так как пересечение возможно только с dbi_state транзакции,
+   * и происходит по-чтению до последующего изменения/записи. */
+  uint8_t *__restrict dbi_state;
+  /* Связь списка отслеживания курсоров в транзакции. */
+  MDBX_txn *txn;
+  /* Указывает на tree->dbs[] для DBI этого курсора. */
+  tree_t *tree;
+  /* Указывает на env->kvs[] для DBI этого курсора. */
+  clc2_t *clc;
+  subcur_t *__restrict subcur;
+  page_t *pg[CURSOR_STACK_SIZE]; /* stack of pushed pages */
+  indx_t ki[CURSOR_STACK_SIZE];  /* stack of page indices */
+  MDBX_cursor *next;
+  /* Состояние на момент старта вложенной транзакции */
+  MDBX_cursor *backup;
+};
+
+struct inner_cursor {
+  MDBX_cursor cursor;
+  tree_t nested_tree;
+};
+
+struct cursor_couple {
+  MDBX_cursor outer;
+  void *userctx; /* User-settable context */
+  subcur_t inner;
+};
+
+enum env_flags {
+  /* Failed to update the meta page. Probably an I/O error. */
+  ENV_FATAL_ERROR = INT32_MIN /* 0x80000000 */,
+  /* Some fields are initialized. */
+  ENV_ACTIVE = UINT32_C(0x20000000),
+  /* me_txkey is set */
+  ENV_TXKEY = UINT32_C(0x10000000),
+  /* Legacy MDBX_MAPASYNC (prior v0.9) */
+  DEPRECATED_MAPASYNC = UINT32_C(0x100000),
+  /* Legacy MDBX_COALESCE (prior v0.12) */
+  DEPRECATED_COALESCE = UINT32_C(0x2000000),
+  ENV_INTERNAL_FLAGS = ENV_FATAL_ERROR | ENV_ACTIVE | ENV_TXKEY,
+  /* Only a subset of the mdbx_env flags can be changed
+   * at runtime. Changing other flags requires closing the
+   * environment and re-opening it with the new flags. */
+  ENV_CHANGEABLE_FLAGS = MDBX_SAFE_NOSYNC | MDBX_NOMETASYNC | DEPRECATED_MAPASYNC | MDBX_NOMEMINIT |
+                         DEPRECATED_COALESCE | MDBX_PAGEPERTURB | MDBX_ACCEDE | MDBX_VALIDATION,
+  ENV_CHANGELESS_FLAGS = MDBX_NOSUBDIR | MDBX_RDONLY | MDBX_WRITEMAP | MDBX_NOSTICKYTHREADS | MDBX_NORDAHEAD |
+                         MDBX_LIFORECLAIM | MDBX_EXCLUSIVE,
+  ENV_USABLE_FLAGS = ENV_CHANGEABLE_FLAGS | ENV_CHANGELESS_FLAGS
+};
+
+/* The database environment. */
+struct MDBX_env {
+  /* ----------------------------------------------------- mostly static part */
+  mdbx_atomic_uint32_t signature;
+  uint32_t flags;
+  unsigned ps;          /* DB page size, initialized from me_os_psize */
+  osal_mmap_t dxb_mmap; /* The main data file */
+#define lazy_fd dxb_mmap.fd
+  mdbx_filehandle_t dsync_fd, fd4meta;
+#if defined(_WIN32) || defined(_WIN64)
+  HANDLE dxb_lock_event;
+  HANDLE lck_lock_event;
+#endif                  /* Windows */
+  osal_mmap_t lck_mmap; /* The lock file */
+  lck_t *lck;
+
+  uint16_t leaf_nodemax;   /* max size of a leaf-node */
+  uint16_t branch_nodemax; /* max size of a branch-node */
+  uint16_t subpage_limit;
+  uint16_t subpage_room_threshold;
+  uint16_t subpage_reserve_prereq;
+  uint16_t subpage_reserve_limit;
+  atomic_pgno_t mlocked_pgno;
+  uint8_t ps2ln;              /* log2 of DB page size */
+  int8_t stuck_meta;          /* recovery-only: target meta page or less that zero */
+  uint16_t merge_threshold;   /* pages emptier than this are candidates for merging */
+  unsigned max_readers;       /* size of the reader table */
+  MDBX_dbi max_dbi;           /* size of the DB table */
+  uint32_t pid;               /* process ID of this env */
+  osal_thread_key_t me_txkey; /* thread-key for readers */
+  struct {                    /* path to the DB files */
+    pathchar_t *lck, *dxb, *specified;
+    void *buffer;
+  } pathname;
+  void *page_auxbuf;              /* scratch area for DUPSORT put() */
+  MDBX_txn *basal_txn;            /* preallocated write transaction */
+  kvx_t *kvs;                     /* array of auxiliary key-value properties */
+  uint8_t *__restrict dbs_flags;  /* array of flags from tree_t.flags */
+  mdbx_atomic_uint32_t *dbi_seqs; /* array of dbi sequence numbers */
+  unsigned maxgc_large1page;      /* Number of pgno_t fit in a single large page */
+  unsigned maxgc_per_branch;
+  uint32_t registered_reader_pid; /* have liveness lock in reader table */
+  void *userctx;                  /* User-settable context */
+  MDBX_hsr_func *hsr_callback;    /* Callback for kicking laggard readers */
+  size_t madv_threshold;
+
+  struct {
+    unsigned dp_reserve_limit;
+    unsigned rp_augment_limit;
+    unsigned dp_limit;
+    unsigned dp_initial;
+    uint64_t gc_time_limit;
+    uint8_t dp_loose_limit;
+    uint8_t spill_max_denominator;
+    uint8_t spill_min_denominator;
+    uint8_t spill_parent4child_denominator;
+    unsigned merge_threshold_16dot16_percent;
+#if !(defined(_WIN32) || defined(_WIN64))
+    unsigned writethrough_threshold;
+#endif /* Windows */
+    bool prefault_write;
+    bool prefer_waf_insteadof_balance; /* Strive to minimize WAF instead of
+                                          balancing pages fullment */
+    bool need_dp_limit_adjust;
+    struct {
+      uint16_t limit;
+      uint16_t room_threshold;
+      uint16_t reserve_prereq;
+      uint16_t reserve_limit;
+    } subpage;
+
+    union {
+      unsigned all;
+      /* tracks options with non-auto values but tuned by user */
+      struct {
+        unsigned dp_limit : 1;
+        unsigned rp_augment_limit : 1;
+        unsigned prefault_write : 1;
+      } non_auto;
+    } flags;
+  } options;
+
+  /* struct geo_in_bytes used for accepting db-geo params from user for the new
+   * database creation, i.e. when mdbx_env_set_geometry() was called before
+   * mdbx_env_open(). */
+  struct {
+    size_t lower;  /* minimal size of datafile */
+    size_t upper;  /* maximal size of datafile */
+    size_t now;    /* current size of datafile */
+    size_t grow;   /* step to grow datafile */
+    size_t shrink; /* threshold to shrink datafile */
+  } geo_in_bytes;
+
+#if MDBX_LOCKING == MDBX_LOCKING_SYSV
+  union {
+    key_t key;
+    int semid;
+  } me_sysv_ipc;
+#endif /* MDBX_LOCKING == MDBX_LOCKING_SYSV */
+  bool incore;
+
+#if MDBX_ENABLE_DBI_LOCKFREE
+  defer_free_item_t *defer_free;
+#endif /* MDBX_ENABLE_DBI_LOCKFREE */
+
+  /* -------------------------------------------------------------- debugging */
+
+#if MDBX_DEBUG
+  MDBX_assert_func *assert_func; /*  Callback for assertion failures */
+#endif
+#ifdef ENABLE_MEMCHECK
+  int valgrind_handle;
+#endif
+#if defined(ENABLE_MEMCHECK) || defined(__SANITIZE_ADDRESS__)
+  pgno_t poison_edge;
+#endif /* ENABLE_MEMCHECK || __SANITIZE_ADDRESS__ */
+
+#ifndef xMDBX_DEBUG_SPILLING
+#define xMDBX_DEBUG_SPILLING 0
+#endif
+#if xMDBX_DEBUG_SPILLING == 2
+  size_t debug_dirtied_est, debug_dirtied_act;
+#endif /* xMDBX_DEBUG_SPILLING */
+
+  /* --------------------------------------------------- mostly volatile part */
+
+  MDBX_txn *txn; /* current write transaction */
+  struct {
+    txnid_t detent;
+  } gc;
+  osal_fastmutex_t dbi_lock;
+  unsigned n_dbi; /* number of DBs opened */
+
+  unsigned shadow_reserve_len;
+  page_t *__restrict shadow_reserve; /* list of malloc'ed blocks for re-use */
+
+  osal_ioring_t ioring;
+
+#if defined(_WIN32) || defined(_WIN64)
+  osal_srwlock_t remap_guard;
+  /* Workaround for LockFileEx and WriteFile multithread bug */
+  CRITICAL_SECTION lck_event_cs;
+  CRITICAL_SECTION dxb_event_cs;
+  char *pathname_char; /* cache of multi-byte representation of pathname
+                             to the DB files */
+#else
+  osal_fastmutex_t remap_guard;
+#endif
+
+  /* ------------------------------------------------- stub for lck-less mode */
+  mdbx_atomic_uint64_t lckless_placeholder[(sizeof(lck_t) + MDBX_CACHELINE_SIZE - 1) / sizeof(mdbx_atomic_uint64_t)];
+};
+
+/*----------------------------------------------------------------------------*/
+
+/* pseudo-error code, not exposed outside libmdbx */
+#define MDBX_NO_ROOT (MDBX_LAST_ADDED_ERRCODE + 33)
+
+/* Number of slots in the reader table.
+ * This value was chosen somewhat arbitrarily. The 61 is a prime number,
+ * and such readers plus a couple mutexes fit into single 4KB page.
+ * Applications should set the table size using mdbx_env_set_maxreaders(). */
+#define DEFAULT_READERS 61
+
+enum db_flags {
+  DB_PERSISTENT_FLAGS =
+      MDBX_REVERSEKEY | MDBX_DUPSORT | MDBX_INTEGERKEY | MDBX_DUPFIXED | MDBX_INTEGERDUP | MDBX_REVERSEDUP,
+
+  /* mdbx_dbi_open() flags */
+  DB_USABLE_FLAGS = DB_PERSISTENT_FLAGS | MDBX_CREATE | MDBX_DB_ACCEDE,
+
+  DB_VALID = 0x80u /* DB handle is valid, for dbs_flags */,
+  DB_POISON = 0x7fu /* update pending */,
+  DB_INTERNAL_FLAGS = DB_VALID
+};
+
+#if !defined(__cplusplus) || CONSTEXPR_ENUM_FLAGS_OPERATIONS
+MDBX_MAYBE_UNUSED static void static_checks(void) {
+  STATIC_ASSERT(MDBX_WORDBITS == sizeof(void *) * CHAR_BIT);
+  STATIC_ASSERT(UINT64_C(0x80000000) == (uint32_t)ENV_FATAL_ERROR);
+  STATIC_ASSERT_MSG(INT16_MAX - CORE_DBS == MDBX_MAX_DBI, "Oops, MDBX_MAX_DBI or CORE_DBS?");
+  STATIC_ASSERT_MSG((unsigned)(MDBX_DB_ACCEDE | MDBX_CREATE) ==
+                        ((DB_USABLE_FLAGS | DB_INTERNAL_FLAGS) & (ENV_USABLE_FLAGS | ENV_INTERNAL_FLAGS)),
+                    "Oops, some flags overlapped or wrong");
+  STATIC_ASSERT_MSG((DB_INTERNAL_FLAGS & DB_USABLE_FLAGS) == 0, "Oops, some flags overlapped or wrong");
+  STATIC_ASSERT_MSG((DB_PERSISTENT_FLAGS & ~DB_USABLE_FLAGS) == 0, "Oops, some flags overlapped or wrong");
+  STATIC_ASSERT(DB_PERSISTENT_FLAGS <= UINT8_MAX);
+  STATIC_ASSERT_MSG((ENV_INTERNAL_FLAGS & ENV_USABLE_FLAGS) == 0, "Oops, some flags overlapped or wrong");
+
+  STATIC_ASSERT_MSG((txn_state_flags & (txn_rw_begin_flags | txn_ro_begin_flags)) == 0,
+                    "Oops, some txn flags overlapped or wrong");
+  STATIC_ASSERT_MSG(((txn_rw_begin_flags | txn_ro_begin_flags | txn_state_flags) & txn_shrink_allowed) == 0,
+                    "Oops, some txn flags overlapped or wrong");
+
+  STATIC_ASSERT(sizeof(reader_slot_t) == 32);
+#if MDBX_LOCKING > 0
+  STATIC_ASSERT(offsetof(lck_t, wrt_lock) % MDBX_CACHELINE_SIZE == 0);
+  STATIC_ASSERT(offsetof(lck_t, rdt_lock) % MDBX_CACHELINE_SIZE == 0);
+#else
+  STATIC_ASSERT(offsetof(lck_t, cached_oldest) % MDBX_CACHELINE_SIZE == 0);
+  STATIC_ASSERT(offsetof(lck_t, rdt_length) % MDBX_CACHELINE_SIZE == 0);
+#endif /* MDBX_LOCKING */
+#if FLEXIBLE_ARRAY_MEMBERS
+  STATIC_ASSERT(offsetof(lck_t, rdt) % MDBX_CACHELINE_SIZE == 0);
+#endif /* FLEXIBLE_ARRAY_MEMBERS */
+
+#if FLEXIBLE_ARRAY_MEMBERS
+  STATIC_ASSERT(NODESIZE == offsetof(node_t, payload));
+  STATIC_ASSERT(PAGEHDRSZ == offsetof(page_t, entries));
+#endif /* FLEXIBLE_ARRAY_MEMBERS */
+  STATIC_ASSERT(sizeof(clc_t) == 3 * sizeof(void *));
+  STATIC_ASSERT(sizeof(kvx_t) == 8 * sizeof(void *));
+
+#define KVX_SIZE_LN2 MDBX_WORDBITS_LN2
+  STATIC_ASSERT(sizeof(kvx_t) == (1u << KVX_SIZE_LN2));
+}
+#endif /* Disabled for MSVC 19.0 (VisualStudio 2015) */
+
+/******************************************************************************/
+
+#ifndef __cplusplus
+
+/* valid flags for mdbx_node_add() */
+#define NODE_ADD_FLAGS (N_DUP | N_TREE | MDBX_RESERVE | MDBX_APPEND)
+
+/* Get the page number pointed to by a branch node */
+MDBX_NOTHROW_PURE_FUNCTION static inline pgno_t node_pgno(const node_t *const __restrict node) {
+  pgno_t pgno = UNALIGNED_PEEK_32(node, node_t, child_pgno);
+  return pgno;
+}
+
+/* Set the page number in a branch node */
+static inline void node_set_pgno(node_t *const __restrict node, pgno_t pgno) {
+  assert(pgno >= MIN_PAGENO && pgno <= MAX_PAGENO);
+  UNALIGNED_POKE_32(node, node_t, child_pgno, (uint32_t)pgno);
+}
+
+/* Get the size of the data in a leaf node */
+MDBX_NOTHROW_PURE_FUNCTION static inline size_t node_ds(const node_t *const __restrict node) {
+  return UNALIGNED_PEEK_32(node, node_t, dsize);
+}
+
+/* Set the size of the data for a leaf node */
+static inline void node_set_ds(node_t *const __restrict node, size_t size) {
+  assert(size < INT_MAX);
+  UNALIGNED_POKE_32(node, node_t, dsize, (uint32_t)size);
+}
+
+/* The size of a key in a node */
+MDBX_NOTHROW_PURE_FUNCTION static inline size_t node_ks(const node_t *const __restrict node) {
+  return UNALIGNED_PEEK_16(node, node_t, ksize);
+}
+
+/* Set the size of the key for a leaf node */
+static inline void node_set_ks(node_t *const __restrict node, size_t size) {
+  assert(size < INT16_MAX);
+  UNALIGNED_POKE_16(node, node_t, ksize, (uint16_t)size);
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline uint8_t node_flags(const node_t *const __restrict node) {
+  return UNALIGNED_PEEK_8(node, node_t, flags);
+}
+
+static inline void node_set_flags(node_t *const __restrict node, uint8_t flags) {
+  UNALIGNED_POKE_8(node, node_t, flags, flags);
+}
+
+/* Address of the key for the node */
+MDBX_NOTHROW_PURE_FUNCTION static inline void *node_key(const node_t *const __restrict node) {
+  return ptr_disp(node, NODESIZE);
+}
+
+/* Address of the data for a node */
+MDBX_NOTHROW_PURE_FUNCTION static inline void *node_data(const node_t *const __restrict node) {
+  return ptr_disp(node_key(node), node_ks(node));
+}
+
+/* Size of a node in a leaf page with a given key and data.
+ * This is node header plus key plus data size. */
+MDBX_NOTHROW_CONST_FUNCTION static inline size_t node_size_len(const size_t key_len, const size_t value_len) {
+  return NODESIZE + EVEN_CEIL(key_len + value_len);
+}
+MDBX_NOTHROW_PURE_FUNCTION static inline size_t node_size(const MDBX_val *key, const MDBX_val *value) {
+  return node_size_len(key ? key->iov_len : 0, value ? value->iov_len : 0);
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline pgno_t node_largedata_pgno(const node_t *const __restrict node) {
+  assert(node_flags(node) & N_BIG);
+  return peek_pgno(node_data(node));
+}
+
+MDBX_INTERNAL int __must_check_result node_read_bigdata(MDBX_cursor *mc, const node_t *node, MDBX_val *data,
+                                                        const page_t *mp);
+
+static inline int __must_check_result node_read(MDBX_cursor *mc, const node_t *node, MDBX_val *data, const page_t *mp) {
+  data->iov_len = node_ds(node);
+  data->iov_base = node_data(node);
+  if (likely(node_flags(node) != N_BIG))
+    return MDBX_SUCCESS;
+  return node_read_bigdata(mc, node, data, mp);
+}
+
+/*----------------------------------------------------------------------------*/
+
+MDBX_INTERNAL nsr_t node_search(MDBX_cursor *mc, const MDBX_val *key);
+
+MDBX_INTERNAL int __must_check_result node_add_branch(MDBX_cursor *mc, size_t indx, const MDBX_val *key, pgno_t pgno);
+
+MDBX_INTERNAL int __must_check_result node_add_leaf(MDBX_cursor *mc, size_t indx, const MDBX_val *key, MDBX_val *data,
+                                                    unsigned flags);
+
+MDBX_INTERNAL int __must_check_result node_add_dupfix(MDBX_cursor *mc, size_t indx, const MDBX_val *key);
+
+MDBX_INTERNAL void node_del(MDBX_cursor *mc, size_t ksize);
+
+MDBX_INTERNAL node_t *node_shrink(page_t *mp, size_t indx, node_t *node);
+
+#if MDBX_ENABLE_DBI_SPARSE
+
+MDBX_NOTHROW_CONST_FUNCTION MDBX_MAYBE_UNUSED MDBX_INTERNAL size_t dbi_bitmap_ctz_fallback(const MDBX_txn *txn,
+                                                                                           intptr_t bmi);
+
+static inline size_t dbi_bitmap_ctz(const MDBX_txn *txn, intptr_t bmi) {
+  tASSERT(txn, bmi != 0);
+  STATIC_ASSERT(sizeof(bmi) >= sizeof(txn->dbi_sparse[0]));
+#if __GNUC_PREREQ(4, 1) || __has_builtin(__builtin_ctzl)
+  if (sizeof(txn->dbi_sparse[0]) <= sizeof(int))
+    return __builtin_ctz((int)bmi);
+  if (sizeof(txn->dbi_sparse[0]) == sizeof(long))
+    return __builtin_ctzl((long)bmi);
+#if (defined(__SIZEOF_LONG_LONG__) && __SIZEOF_LONG_LONG__ == 8) || __has_builtin(__builtin_ctzll)
+  return __builtin_ctzll(bmi);
+#endif /* have(long long) && long long == uint64_t */
+#endif /* GNU C */
+
+#if defined(_MSC_VER)
+  unsigned long index;
+  if (sizeof(txn->dbi_sparse[0]) > 4) {
+#if defined(_M_AMD64) || defined(_M_ARM64) || defined(_M_X64)
+    _BitScanForward64(&index, bmi);
+    return index;
+#else
+    if (bmi > UINT32_MAX) {
+      _BitScanForward(&index, (uint32_t)((uint64_t)bmi >> 32));
+      return index;
+    }
+#endif
+  }
+  _BitScanForward(&index, (uint32_t)bmi);
+  return index;
+#endif /* MSVC */
+
+  return dbi_bitmap_ctz_fallback(txn, bmi);
+}
+
+static inline bool dbi_foreach_step(const MDBX_txn *const txn, size_t *bitmap_item, size_t *dbi) {
+  const size_t bitmap_chunk = CHAR_BIT * sizeof(txn->dbi_sparse[0]);
+  if (*bitmap_item & 1) {
+    *bitmap_item >>= 1;
+    return txn->dbi_state[*dbi] != 0;
+  }
+  if (*bitmap_item) {
+    size_t bitmap_skip = dbi_bitmap_ctz(txn, *bitmap_item);
+    *bitmap_item >>= bitmap_skip;
+    *dbi += bitmap_skip - 1;
+  } else {
+    *dbi = (*dbi - 1) | (bitmap_chunk - 1);
+    *bitmap_item = txn->dbi_sparse[(1 + *dbi) / bitmap_chunk];
+    if (*bitmap_item == 0)
+      *dbi += bitmap_chunk;
+  }
+  return false;
+}
+
+/* LY: Макрос целенаправленно сделан с одним циклом, чтобы сохранить возможность
+ * использования оператора break */
+#define TXN_FOREACH_DBI_FROM(TXN, I, FROM)                                                                             \
+  for (size_t bitmap_item = TXN->dbi_sparse[0] >> FROM, I = FROM; I < TXN->n_dbi; ++I)                                 \
+    if (dbi_foreach_step(TXN, &bitmap_item, &I))
+
+#else
+
+#define TXN_FOREACH_DBI_FROM(TXN, I, FROM)                                                                             \
+  for (size_t I = FROM; I < TXN->n_dbi; ++I)                                                                           \
+    if (TXN->dbi_state[I])
+
+#endif /* MDBX_ENABLE_DBI_SPARSE */
+
+#define TXN_FOREACH_DBI_ALL(TXN, I) TXN_FOREACH_DBI_FROM(TXN, I, 0)
+#define TXN_FOREACH_DBI_USER(TXN, I) TXN_FOREACH_DBI_FROM(TXN, I, CORE_DBS)
+
+MDBX_INTERNAL int dbi_import(MDBX_txn *txn, const size_t dbi);
+MDBX_INTERNAL int dbi_gone(MDBX_txn *txn, const size_t dbi, const int rc);
+
+struct dbi_snap_result {
+  uint32_t sequence;
+  unsigned flags;
+};
+MDBX_INTERNAL struct dbi_snap_result dbi_snap(const MDBX_env *env, const size_t dbi);
+
+MDBX_INTERNAL int dbi_update(MDBX_txn *txn, bool keep);
+
+static inline uint8_t dbi_state(const MDBX_txn *txn, const size_t dbi) {
+  STATIC_ASSERT((int)DBI_DIRTY == MDBX_DBI_DIRTY && (int)DBI_STALE == MDBX_DBI_STALE &&
+                (int)DBI_FRESH == MDBX_DBI_FRESH && (int)DBI_CREAT == MDBX_DBI_CREAT);
+
+#if MDBX_ENABLE_DBI_SPARSE
+  const size_t bitmap_chunk = CHAR_BIT * sizeof(txn->dbi_sparse[0]);
+  const size_t bitmap_indx = dbi / bitmap_chunk;
+  const size_t bitmap_mask = (size_t)1 << dbi % bitmap_chunk;
+  return likely(dbi < txn->n_dbi && (txn->dbi_sparse[bitmap_indx] & bitmap_mask) != 0) ? txn->dbi_state[dbi] : 0;
+#else
+  return likely(dbi < txn->n_dbi) ? txn->dbi_state[dbi] : 0;
+#endif /* MDBX_ENABLE_DBI_SPARSE */
+}
+
+static inline bool dbi_changed(const MDBX_txn *txn, const size_t dbi) {
+  const MDBX_env *const env = txn->env;
+  eASSERT(env, dbi_state(txn, dbi) & DBI_LINDO);
+  const uint32_t snap_seq = atomic_load32(&env->dbi_seqs[dbi], mo_AcquireRelease);
+  return unlikely(snap_seq != txn->dbi_seqs[dbi]);
+}
+
+static inline int dbi_check(const MDBX_txn *txn, const size_t dbi) {
+  const uint8_t state = dbi_state(txn, dbi);
+  if (likely((state & DBI_LINDO) != 0 && !dbi_changed(txn, dbi)))
+    return (state & DBI_VALID) ? MDBX_SUCCESS : MDBX_BAD_DBI;
+
+  /* Медленный путь: ленивая до-инициализацяи и импорт */
+  return dbi_import((MDBX_txn *)txn, dbi);
+}
+
+static inline uint32_t dbi_seq_next(const MDBX_env *const env, size_t dbi) {
+  uint32_t v = atomic_load32(&env->dbi_seqs[dbi], mo_AcquireRelease) + 1;
+  return v ? v : 1;
+}
+
+MDBX_INTERNAL int dbi_open(MDBX_txn *txn, const MDBX_val *const name, unsigned user_flags, MDBX_dbi *dbi,
+                           MDBX_cmp_func *keycmp, MDBX_cmp_func *datacmp);
+
+MDBX_INTERNAL int dbi_bind(MDBX_txn *txn, const size_t dbi, unsigned user_flags, MDBX_cmp_func *keycmp,
+                           MDBX_cmp_func *datacmp);
+
+typedef struct defer_free_item {
+  struct defer_free_item *next;
+  uint64_t timestamp;
+} defer_free_item_t;
+
+MDBX_INTERNAL int dbi_defer_release(MDBX_env *const env, defer_free_item_t *const chain);
+MDBX_INTERNAL int dbi_close_release(MDBX_env *env, MDBX_dbi dbi);
+MDBX_INTERNAL const tree_t *dbi_dig(const MDBX_txn *txn, const size_t dbi, tree_t *fallback);
+
+struct dbi_rename_result {
+  defer_free_item_t *defer;
+  int err;
+};
+
+MDBX_INTERNAL struct dbi_rename_result dbi_rename_locked(MDBX_txn *txn, MDBX_dbi dbi, MDBX_val new_name);
+
+MDBX_NOTHROW_CONST_FUNCTION MDBX_INTERNAL pgno_t pv2pages(uint16_t pv);
+
+MDBX_NOTHROW_CONST_FUNCTION MDBX_INTERNAL uint16_t pages2pv(size_t pages);
+
+MDBX_MAYBE_UNUSED MDBX_INTERNAL bool pv2pages_verify(void);
+
+/*------------------------------------------------------------------------------
+ * Nodes, Keys & Values length limitation factors:
+ *
+ * BRANCH_NODE_MAX
+ *   Branch-page must contain at least two nodes, within each a key and a child
+ *   page number. But page can't be split if it contains less that 4 keys,
+ *   i.e. a page should not overflow before adding the fourth key. Therefore,
+ *   at least 3 branch-node should fit in the single branch-page. Further, the
+ *   first node of a branch-page doesn't contain a key, i.e. the first node
+ *   is always require space just for itself. Thus:
+ *       PAGESPACE = pagesize - page_hdr_len;
+ *       BRANCH_NODE_MAX = even_floor(
+ *         (PAGESPACE - sizeof(indx_t) - NODESIZE) / (3 - 1) - sizeof(indx_t));
+ *       KEYLEN_MAX = BRANCH_NODE_MAX - node_hdr_len;
+ *
+ * LEAF_NODE_MAX
+ *   Leaf-node must fit into single leaf-page, where a value could be placed on
+ *   a large/overflow page. However, may require to insert a nearly page-sized
+ *   node between two large nodes are already fill-up a page. In this case the
+ *   page must be split to two if some pair of nodes fits on one page, or
+ *   otherwise the page should be split to the THREE with a single node
+ *   per each of ones. Such 1-into-3 page splitting is costly and complex since
+ *   requires TWO insertion into the parent page, that could lead to split it
+ *   and so on up to the root. Therefore double-splitting is avoided here and
+ *   the maximum node size is half of a leaf page space:
+ *       LEAF_NODE_MAX = even_floor(PAGESPACE / 2 - sizeof(indx_t));
+ *       DATALEN_NO_OVERFLOW = LEAF_NODE_MAX - NODESIZE - KEYLEN_MAX;
+ *
+ *  - Table-node must fit into one leaf-page:
+ *       TABLE_NAME_MAX = LEAF_NODE_MAX - node_hdr_len - sizeof(tree_t);
+ *
+ *  - Dupsort values itself are a keys in a dupsort-table and couldn't be longer
+ *    than the KEYLEN_MAX. But dupsort node must not great than LEAF_NODE_MAX,
+ *    since dupsort value couldn't be placed on a large/overflow page:
+ *       DUPSORT_DATALEN_MAX = min(KEYLEN_MAX,
+ *                                 max(DATALEN_NO_OVERFLOW, sizeof(tree_t));
+ */
+
+#define PAGESPACE(pagesize) ((pagesize) - PAGEHDRSZ)
+
+#define BRANCH_NODE_MAX(pagesize)                                                                                      \
+  (EVEN_FLOOR((PAGESPACE(pagesize) - sizeof(indx_t) - NODESIZE) / (3 - 1) - sizeof(indx_t)))
+
+#define LEAF_NODE_MAX(pagesize) (EVEN_FLOOR(PAGESPACE(pagesize) / 2) - sizeof(indx_t))
+
+#define MAX_GC1OVPAGE(pagesize) (PAGESPACE(pagesize) / sizeof(pgno_t) - 1)
+
+MDBX_NOTHROW_CONST_FUNCTION static inline size_t keysize_max(size_t pagesize, MDBX_db_flags_t flags) {
+  assert(pagesize >= MDBX_MIN_PAGESIZE && pagesize <= MDBX_MAX_PAGESIZE && is_powerof2(pagesize));
+  STATIC_ASSERT(BRANCH_NODE_MAX(MDBX_MIN_PAGESIZE) - NODESIZE >= 8);
+  if (flags & MDBX_INTEGERKEY)
+    return 8 /* sizeof(uint64_t) */;
+
+  const intptr_t max_branch_key = BRANCH_NODE_MAX(pagesize) - NODESIZE;
+  STATIC_ASSERT(LEAF_NODE_MAX(MDBX_MIN_PAGESIZE) - NODESIZE -
+                    /* sizeof(uint64) as a key */ 8 >
+                sizeof(tree_t));
+  if (flags & (MDBX_DUPSORT | MDBX_DUPFIXED | MDBX_REVERSEDUP | MDBX_INTEGERDUP)) {
+    const intptr_t max_dupsort_leaf_key = LEAF_NODE_MAX(pagesize) - NODESIZE - sizeof(tree_t);
+    return (max_branch_key < max_dupsort_leaf_key) ? max_branch_key : max_dupsort_leaf_key;
+  }
+  return max_branch_key;
+}
+
+MDBX_NOTHROW_CONST_FUNCTION static inline size_t env_keysize_max(const MDBX_env *env, MDBX_db_flags_t flags) {
+  size_t size_max;
+  if (flags & MDBX_INTEGERKEY)
+    size_max = 8 /* sizeof(uint64_t) */;
+  else {
+    const intptr_t max_branch_key = env->branch_nodemax - NODESIZE;
+    STATIC_ASSERT(LEAF_NODE_MAX(MDBX_MIN_PAGESIZE) - NODESIZE -
+                      /* sizeof(uint64) as a key */ 8 >
+                  sizeof(tree_t));
+    if (flags & (MDBX_DUPSORT | MDBX_DUPFIXED | MDBX_REVERSEDUP | MDBX_INTEGERDUP)) {
+      const intptr_t max_dupsort_leaf_key = env->leaf_nodemax - NODESIZE - sizeof(tree_t);
+      size_max = (max_branch_key < max_dupsort_leaf_key) ? max_branch_key : max_dupsort_leaf_key;
+    } else
+      size_max = max_branch_key;
+  }
+  eASSERT(env, size_max == keysize_max(env->ps, flags));
+  return size_max;
+}
+
+MDBX_NOTHROW_CONST_FUNCTION static inline size_t keysize_min(MDBX_db_flags_t flags) {
+  return (flags & MDBX_INTEGERKEY) ? 4 /* sizeof(uint32_t) */ : 0;
+}
+
+MDBX_NOTHROW_CONST_FUNCTION static inline size_t valsize_min(MDBX_db_flags_t flags) {
+  if (flags & MDBX_INTEGERDUP)
+    return 4 /* sizeof(uint32_t) */;
+  else if (flags & MDBX_DUPFIXED)
+    return sizeof(indx_t);
+  else
+    return 0;
+}
+
+MDBX_NOTHROW_CONST_FUNCTION static inline size_t valsize_max(size_t pagesize, MDBX_db_flags_t flags) {
+  assert(pagesize >= MDBX_MIN_PAGESIZE && pagesize <= MDBX_MAX_PAGESIZE && is_powerof2(pagesize));
+
+  if (flags & MDBX_INTEGERDUP)
+    return 8 /* sizeof(uint64_t) */;
+
+  if (flags & (MDBX_DUPSORT | MDBX_DUPFIXED | MDBX_REVERSEDUP))
+    return keysize_max(pagesize, 0);
+
+  const unsigned page_ln2 = log2n_powerof2(pagesize);
+  const size_t hard = 0x7FF00000ul;
+  const size_t hard_pages = hard >> page_ln2;
+  STATIC_ASSERT(PAGELIST_LIMIT <= MAX_PAGENO);
+  const size_t pages_limit = PAGELIST_LIMIT / 4;
+  const size_t limit = (hard_pages < pages_limit) ? hard : (pages_limit << page_ln2);
+  return (limit < MAX_MAPSIZE / 2) ? limit : MAX_MAPSIZE / 2;
+}
+
+MDBX_NOTHROW_CONST_FUNCTION static inline size_t env_valsize_max(const MDBX_env *env, MDBX_db_flags_t flags) {
+  size_t size_max;
+  if (flags & MDBX_INTEGERDUP)
+    size_max = 8 /* sizeof(uint64_t) */;
+  else if (flags & (MDBX_DUPSORT | MDBX_DUPFIXED | MDBX_REVERSEDUP))
+    size_max = env_keysize_max(env, 0);
+  else {
+    const size_t hard = 0x7FF00000ul;
+    const size_t hard_pages = hard >> env->ps2ln;
+    STATIC_ASSERT(PAGELIST_LIMIT <= MAX_PAGENO);
+    const size_t pages_limit = PAGELIST_LIMIT / 4;
+    const size_t limit = (hard_pages < pages_limit) ? hard : (pages_limit << env->ps2ln);
+    size_max = (limit < MAX_MAPSIZE / 2) ? limit : MAX_MAPSIZE / 2;
+  }
+  eASSERT(env, size_max == valsize_max(env->ps, flags));
+  return size_max;
+}
+
+/*----------------------------------------------------------------------------*/
+
+MDBX_NOTHROW_PURE_FUNCTION static inline size_t leaf_size(const MDBX_env *env, const MDBX_val *key,
+                                                          const MDBX_val *data) {
+  size_t node_bytes = node_size(key, data);
+  if (node_bytes > env->leaf_nodemax)
+    /* put on large/overflow page */
+    node_bytes = node_size_len(key->iov_len, 0) + sizeof(pgno_t);
+
+  return node_bytes + sizeof(indx_t);
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline size_t branch_size(const MDBX_env *env, const MDBX_val *key) {
+  /* Size of a node in a branch page with a given key.
+   * This is just the node header plus the key, there is no data. */
+  size_t node_bytes = node_size(key, nullptr);
+  if (unlikely(node_bytes > env->branch_nodemax)) {
+    /* put on large/overflow page, not implemented */
+    mdbx_panic("node_size(key) %zu > %u branch_nodemax", node_bytes, env->branch_nodemax);
+    node_bytes = node_size(key, nullptr) + sizeof(pgno_t);
+  }
+
+  return node_bytes + sizeof(indx_t);
+}
+
+MDBX_NOTHROW_CONST_FUNCTION static inline uint16_t flags_db2sub(uint16_t db_flags) {
+  uint16_t sub_flags = db_flags & MDBX_DUPFIXED;
+
+  /* MDBX_INTEGERDUP => MDBX_INTEGERKEY */
+#define SHIFT_INTEGERDUP_TO_INTEGERKEY 2
+  STATIC_ASSERT((MDBX_INTEGERDUP >> SHIFT_INTEGERDUP_TO_INTEGERKEY) == MDBX_INTEGERKEY);
+  sub_flags |= (db_flags & MDBX_INTEGERDUP) >> SHIFT_INTEGERDUP_TO_INTEGERKEY;
+
+  /* MDBX_REVERSEDUP => MDBX_REVERSEKEY */
+#define SHIFT_REVERSEDUP_TO_REVERSEKEY 5
+  STATIC_ASSERT((MDBX_REVERSEDUP >> SHIFT_REVERSEDUP_TO_REVERSEKEY) == MDBX_REVERSEKEY);
+  sub_flags |= (db_flags & MDBX_REVERSEDUP) >> SHIFT_REVERSEDUP_TO_REVERSEKEY;
+
+  return sub_flags;
+}
+
+static inline bool check_table_flags(unsigned flags) {
+  switch (flags & ~(MDBX_REVERSEKEY | MDBX_INTEGERKEY)) {
+  default:
+    NOTICE("invalid db-flags 0x%x", flags);
+    return false;
+  case MDBX_DUPSORT:
+  case MDBX_DUPSORT | MDBX_REVERSEDUP:
+  case MDBX_DUPSORT | MDBX_DUPFIXED:
+  case MDBX_DUPSORT | MDBX_DUPFIXED | MDBX_REVERSEDUP:
+  case MDBX_DUPSORT | MDBX_DUPFIXED | MDBX_INTEGERDUP:
+  case MDBX_DUPSORT | MDBX_DUPFIXED | MDBX_INTEGERDUP | MDBX_REVERSEDUP:
+  case MDBX_DB_DEFAULTS:
+    return (flags & (MDBX_REVERSEKEY | MDBX_INTEGERKEY)) != (MDBX_REVERSEKEY | MDBX_INTEGERKEY);
+  }
+}
+
+MDBX_MAYBE_UNUSED static inline int tbl_setup_ifneed(const MDBX_env *env, volatile kvx_t *const kvx,
+                                                     const tree_t *const db) {
+  return likely(kvx->clc.v.lmax) ? MDBX_SUCCESS : tbl_setup(env, kvx, db);
+}
+
+MDBX_MAYBE_UNUSED static inline int tbl_refresh_absent2baddbi(MDBX_txn *txn, size_t dbi) {
+  int rc = tbl_refresh(txn, dbi);
+  return likely(rc != MDBX_NOTFOUND) ? rc : MDBX_BAD_DBI;
+}
+
+/*----------------------------------------------------------------------------*/
+
+MDBX_NOTHROW_PURE_FUNCTION static inline size_t pgno2bytes(const MDBX_env *env, size_t pgno) {
+  eASSERT(env, (1u << env->ps2ln) == env->ps);
+  return pgno << env->ps2ln;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline page_t *pgno2page(const MDBX_env *env, size_t pgno) {
+  return ptr_disp(env->dxb_mmap.base, pgno2bytes(env, pgno));
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline pgno_t bytes2pgno(const MDBX_env *env, size_t bytes) {
+  eASSERT(env, (env->ps >> env->ps2ln) == 1);
+  return (pgno_t)(bytes >> env->ps2ln);
+}
+
+/* align to system page size */
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL size_t bytes_ceil2sp_bytes(const MDBX_env *env, size_t bytes);
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL size_t bytes_ceil2sp_pgno(const MDBX_env *env, size_t bytes);
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL size_t pgno_ceil2sp_bytes(const MDBX_env *env, size_t pgno);
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL pgno_t pgno_ceil2sp_pgno(const MDBX_env *env, size_t pgno);
+
+/* align to system allocation granularity */
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL size_t bytes_ceil2ag_bytes(const MDBX_env *env, size_t bytes);
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL size_t bytes_ceil2ag_pgno(const MDBX_env *env, size_t bytes);
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL size_t pgno_ceil2ag_bytes(const MDBX_env *env, size_t pgno);
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL pgno_t pgno_ceil2ag_pgno(const MDBX_env *env, size_t pgno);
+
+MDBX_NOTHROW_PURE_FUNCTION static inline pgno_t largechunk_npages(const MDBX_env *env, size_t bytes) {
+  return bytes2pgno(env, PAGEHDRSZ - 1 + bytes) + 1;
+}
+
+typedef struct alignkey {
+  MDBX_val key;
+  uint64_t intbuf;
+} alignkey_t;
+
+static inline int check_key(const MDBX_cursor *mc, const MDBX_val *key, alignkey_t *alignkey) {
+  /* coverity[logical_vs_bitwise] */
+  if (unlikely(key->iov_len < mc->clc->k.lmin ||
+               (key->iov_len > mc->clc->k.lmax &&
+                (mc->clc->k.lmin == mc->clc->k.lmax || MDBX_DEBUG || MDBX_FORCE_ASSERTIONS)))) {
+    cASSERT(mc, !"Invalid key-size");
+    return MDBX_BAD_VALSIZE;
+  }
+
+  alignkey->key = *key;
+  if (mc->tree->flags & MDBX_INTEGERKEY) {
+    if (alignkey->key.iov_len == 8) {
+      if (unlikely(7 & (uintptr_t)alignkey->key.iov_base))
+        /* copy instead of return error to avoid break compatibility */
+        alignkey->key.iov_base = bcopy_8(&alignkey->intbuf, alignkey->key.iov_base);
+    } else if (alignkey->key.iov_len == 4) {
+      if (unlikely(3 & (uintptr_t)alignkey->key.iov_base))
+        /* copy instead of return error to avoid break compatibility */
+        alignkey->key.iov_base = bcopy_4(&alignkey->intbuf, alignkey->key.iov_base);
+    } else {
+      cASSERT(mc, !"key-size is invalid for MDBX_INTEGERKEY");
+      return MDBX_BAD_VALSIZE;
+    }
+  }
+  return MDBX_SUCCESS;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline MDBX_val get_key(const node_t *node) {
+  MDBX_val key;
+  key.iov_len = node_ks(node);
+  key.iov_base = node_key(node);
+  return key;
+}
+
+static inline void get_key_optional(const node_t *node, MDBX_val *keyptr /* __may_null */) {
+  if (keyptr)
+    *keyptr = get_key(node);
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline void *page2payload(const page_t *mp) { return ptr_disp(mp, PAGEHDRSZ); }
+
+MDBX_NOTHROW_PURE_FUNCTION static inline const page_t *payload2page(const void *data) {
+  return container_of(data, page_t, entries);
+}
+
+MDBX_NOTHROW_PURE_FUNCTION MDBX_MAYBE_UNUSED static inline const page_t *ptr2page(const MDBX_env *env,
+                                                                                  const void *ptr) {
+  eASSERT(env,
+          ptr_dist(ptr, env->dxb_mmap.base) >= 0 && (size_t)ptr_dist(ptr, env->dxb_mmap.base) < env->dxb_mmap.limit);
+  const uintptr_t mask = env->ps - 1;
+  return (page_t *)((uintptr_t)ptr & ~mask);
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline meta_t *page_meta(page_t *mp) { return (meta_t *)page2payload(mp); }
+
+MDBX_NOTHROW_PURE_FUNCTION static inline size_t page_numkeys(const page_t *mp) {
+  assert(mp->lower <= mp->upper);
+  return mp->lower >> 1;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline size_t page_room(const page_t *mp) {
+  assert(mp->lower <= mp->upper);
+  return mp->upper - mp->lower;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline size_t page_space(const MDBX_env *env) {
+  STATIC_ASSERT(PAGEHDRSZ % 2 == 0);
+  return env->ps - PAGEHDRSZ;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline size_t page_used(const MDBX_env *env, const page_t *mp) {
+  return page_space(env) - page_room(mp);
+}
+
+/* The percentage of space used in the page, in a percents. */
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline unsigned page_fill_percentum_x10(const MDBX_env *env,
+                                                                                            const page_t *mp) {
+  const size_t space = page_space(env);
+  return (unsigned)((page_used(env, mp) * 1000 + space / 2) / space);
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline node_t *page_node(const page_t *mp, size_t i) {
+  assert(page_type_compat(mp) == P_LEAF || page_type(mp) == P_BRANCH);
+  assert(page_numkeys(mp) > i);
+  assert(mp->entries[i] % 2 == 0);
+  return ptr_disp(mp, mp->entries[i] + PAGEHDRSZ);
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline void *page_dupfix_ptr(const page_t *mp, size_t i, size_t keysize) {
+  assert(page_type_compat(mp) == (P_LEAF | P_DUPFIX) && i == (indx_t)i && mp->dupfix_ksize == keysize);
+  (void)keysize;
+  return ptr_disp(mp, PAGEHDRSZ + mp->dupfix_ksize * (indx_t)i);
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline MDBX_val page_dupfix_key(const page_t *mp, size_t i, size_t keysize) {
+  MDBX_val r;
+  r.iov_base = page_dupfix_ptr(mp, i, keysize);
+  r.iov_len = mp->dupfix_ksize;
+  return r;
+}
+
+/*----------------------------------------------------------------------------*/
+
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL int cmp_int_unaligned(const MDBX_val *a, const MDBX_val *b);
+
+#if MDBX_UNALIGNED_OK < 2 || (MDBX_DEBUG || MDBX_FORCE_ASSERTIONS || !defined(NDEBUG))
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL int
+/* Compare two items pointing at 2-byte aligned unsigned int's. */
+cmp_int_align2(const MDBX_val *a, const MDBX_val *b);
+#else
+#define cmp_int_align2 cmp_int_unaligned
+#endif /* !MDBX_UNALIGNED_OK || debug */
+
+#if MDBX_UNALIGNED_OK < 4 || (MDBX_DEBUG || MDBX_FORCE_ASSERTIONS || !defined(NDEBUG))
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL int
+/* Compare two items pointing at 4-byte aligned unsigned int's. */
+cmp_int_align4(const MDBX_val *a, const MDBX_val *b);
+#else
+#define cmp_int_align4 cmp_int_unaligned
+#endif /* !MDBX_UNALIGNED_OK || debug */
+
+/* Compare two items lexically */
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL int cmp_lexical(const MDBX_val *a, const MDBX_val *b);
+
+/* Compare two items in reverse byte order */
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL int cmp_reverse(const MDBX_val *a, const MDBX_val *b);
+
+/* Fast non-lexically comparator */
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL int cmp_lenfast(const MDBX_val *a, const MDBX_val *b);
+
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL bool eq_fast_slowpath(const uint8_t *a, const uint8_t *b, size_t l);
+
+MDBX_NOTHROW_PURE_FUNCTION static inline bool eq_fast(const MDBX_val *a, const MDBX_val *b) {
+  return unlikely(a->iov_len == b->iov_len) && eq_fast_slowpath(a->iov_base, b->iov_base, a->iov_len);
+}
+
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL int cmp_equal_or_greater(const MDBX_val *a, const MDBX_val *b);
+
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL int cmp_equal_or_wrong(const MDBX_val *a, const MDBX_val *b);
+
+static inline MDBX_cmp_func *builtin_keycmp(MDBX_db_flags_t flags) {
+  return (flags & MDBX_REVERSEKEY) ? cmp_reverse : (flags & MDBX_INTEGERKEY) ? cmp_int_align2 : cmp_lexical;
+}
+
+static inline MDBX_cmp_func *builtin_datacmp(MDBX_db_flags_t flags) {
+  return !(flags & MDBX_DUPSORT)
+             ? cmp_lenfast
+             : ((flags & MDBX_INTEGERDUP) ? cmp_int_unaligned
+                                          : ((flags & MDBX_REVERSEDUP) ? cmp_reverse : cmp_lexical));
+}
+
+/*----------------------------------------------------------------------------*/
+
+MDBX_INTERNAL uint32_t combine_durability_flags(const uint32_t a, const uint32_t b);
+
+MDBX_CONST_FUNCTION static inline lck_t *lckless_stub(const MDBX_env *env) {
+  uintptr_t stub = (uintptr_t)&env->lckless_placeholder;
+  /* align to avoid false-positive alarm from UndefinedBehaviorSanitizer */
+  stub = (stub + MDBX_CACHELINE_SIZE - 1) & ~(MDBX_CACHELINE_SIZE - 1);
+  return (lck_t *)stub;
+}
+
+#if !(defined(_WIN32) || defined(_WIN64))
+MDBX_CONST_FUNCTION static inline int ignore_enosys(int err) {
+#ifdef ENOSYS
+  if (err == ENOSYS)
+    return MDBX_RESULT_TRUE;
+#endif /* ENOSYS */
+#ifdef ENOIMPL
+  if (err == ENOIMPL)
+    return MDBX_RESULT_TRUE;
+#endif /* ENOIMPL */
+#ifdef ENOTSUP
+  if (err == ENOTSUP)
+    return MDBX_RESULT_TRUE;
+#endif /* ENOTSUP */
+#ifdef ENOSUPP
+  if (err == ENOSUPP)
+    return MDBX_RESULT_TRUE;
+#endif /* ENOSUPP */
+#ifdef EOPNOTSUPP
+  if (err == EOPNOTSUPP)
+    return MDBX_RESULT_TRUE;
+#endif /* EOPNOTSUPP */
+  return err;
+}
+
+MDBX_MAYBE_UNUSED MDBX_CONST_FUNCTION static inline int ignore_enosys_and_eagain(int err) {
+  return (err == EAGAIN) ? MDBX_RESULT_TRUE : ignore_enosys(err);
+}
+
+MDBX_MAYBE_UNUSED MDBX_CONST_FUNCTION static inline int ignore_enosys_and_einval(int err) {
+  return (err == EINVAL) ? MDBX_RESULT_TRUE : ignore_enosys(err);
+}
+
+MDBX_MAYBE_UNUSED MDBX_CONST_FUNCTION static inline int ignore_enosys_and_eremote(int err) {
+  return (err == MDBX_EREMOTE) ? MDBX_RESULT_TRUE : ignore_enosys(err);
+}
+
+#endif /* defined(_WIN32) || defined(_WIN64) */
+
+static inline int check_env(const MDBX_env *env, const bool wanna_active) {
+  if (unlikely(!env))
+    return MDBX_EINVAL;
+
+  if (unlikely(env->signature.weak != env_signature))
+    return MDBX_EBADSIGN;
+
+  if (unlikely(env->flags & ENV_FATAL_ERROR))
+    return MDBX_PANIC;
+
+  if (wanna_active) {
+#if MDBX_ENV_CHECKPID
+    if (unlikely(env->pid != osal_getpid()) && env->pid) {
+      ((MDBX_env *)env)->flags |= ENV_FATAL_ERROR;
+      return MDBX_PANIC;
+    }
+#endif /* MDBX_ENV_CHECKPID */
+    if (unlikely((env->flags & ENV_ACTIVE) == 0))
+      return MDBX_EPERM;
+    eASSERT(env, env->dxb_mmap.base != nullptr);
+  }
+
+  return MDBX_SUCCESS;
+}
+
+static __always_inline int check_txn_anythread(const MDBX_txn *txn, int bad_bits) {
+  if (unlikely(!txn))
+    return MDBX_EINVAL;
+
+  if (unlikely(txn->signature != txn_signature))
+    return MDBX_EBADSIGN;
+
+  if (bad_bits) {
+    if (unlikely(!txn->env->dxb_mmap.base))
+      return MDBX_EPERM;
+
+    if (unlikely(txn->flags & bad_bits)) {
+      if ((bad_bits & MDBX_TXN_RDONLY) && unlikely(txn->flags & MDBX_TXN_RDONLY))
+        return MDBX_EACCESS;
+      if ((bad_bits & MDBX_TXN_PARKED) == 0)
+        return MDBX_BAD_TXN;
+      return txn_check_badbits_parked(txn, bad_bits);
+    }
+  }
+
+  tASSERT(txn, (txn->flags & MDBX_TXN_FINISHED) ||
+                   (txn->flags & MDBX_NOSTICKYTHREADS) == (txn->env->flags & MDBX_NOSTICKYTHREADS));
+  return MDBX_SUCCESS;
+}
+
+static __always_inline int check_txn(const MDBX_txn *txn, int bad_bits) {
+  int err = check_txn_anythread(txn, bad_bits);
+#if MDBX_TXN_CHECKOWNER
+  if (err == MDBX_SUCCESS && (txn->flags & (MDBX_NOSTICKYTHREADS | MDBX_TXN_FINISHED)) != MDBX_NOSTICKYTHREADS &&
+      !(bad_bits /* abort/reset/txn-break */ == 0 &&
+        ((txn->flags & (MDBX_TXN_RDONLY | MDBX_TXN_FINISHED)) == (MDBX_TXN_RDONLY | MDBX_TXN_FINISHED))) &&
+      unlikely(txn->owner != osal_thread_self()))
+    err = txn->owner ? MDBX_THREAD_MISMATCH : MDBX_BAD_TXN;
+#endif /* MDBX_TXN_CHECKOWNER */
+
+  return err;
+}
+
+static inline int check_txn_rw(const MDBX_txn *txn, int bad_bits) {
+  return check_txn(txn, (bad_bits | MDBX_TXN_RDONLY) & ~MDBX_TXN_PARKED);
+}
+
+MDBX_NOTHROW_CONST_FUNCTION static inline txnid_t txn_basis_snapshot(const MDBX_txn *txn) {
+  STATIC_ASSERT(((MDBX_TXN_RDONLY >> ((xMDBX_TXNID_STEP == 2) ? 16 : 17)) & xMDBX_TXNID_STEP) == xMDBX_TXNID_STEP);
+  const txnid_t committed_txnid =
+      txn->txnid - xMDBX_TXNID_STEP + ((txn->flags >> ((xMDBX_TXNID_STEP == 2) ? 16 : 17)) & xMDBX_TXNID_STEP);
+  tASSERT(txn, committed_txnid == ((txn->flags & MDBX_TXN_RDONLY) ? txn->txnid : txn->txnid - xMDBX_TXNID_STEP));
+  return committed_txnid;
+}
+
+/*----------------------------------------------------------------------------*/
+
+MDBX_INTERNAL void mincore_clean_cache(const MDBX_env *const env);
+
+MDBX_INTERNAL void update_mlcnt(const MDBX_env *env, const pgno_t new_aligned_mlocked_pgno,
+                                const bool lock_not_release);
+
+MDBX_INTERNAL void munlock_after(const MDBX_env *env, const pgno_t aligned_pgno, const size_t end_bytes);
+
+MDBX_INTERNAL void munlock_all(const MDBX_env *env);
+
+/*----------------------------------------------------------------------------*/
+/* Cache coherence and mmap invalidation */
+#ifndef MDBX_CPU_WRITEBACK_INCOHERENT
+#error "The MDBX_CPU_WRITEBACK_INCOHERENT must be defined before"
+#elif MDBX_CPU_WRITEBACK_INCOHERENT
+#define osal_flush_incoherent_cpu_writeback() osal_memory_barrier()
+#else
+#define osal_flush_incoherent_cpu_writeback() osal_compiler_barrier()
+#endif /* MDBX_CPU_WRITEBACK_INCOHERENT */
+
+MDBX_MAYBE_UNUSED static inline void osal_flush_incoherent_mmap(const void *addr, size_t nbytes,
+                                                                const intptr_t pagesize) {
+#ifndef MDBX_MMAP_INCOHERENT_FILE_WRITE
+#error "The MDBX_MMAP_INCOHERENT_FILE_WRITE must be defined before"
+#elif MDBX_MMAP_INCOHERENT_FILE_WRITE
+  char *const begin = (char *)(-pagesize & (intptr_t)addr);
+  char *const end = (char *)(-pagesize & (intptr_t)((char *)addr + nbytes + pagesize - 1));
+  int err = msync(begin, end - begin, MS_SYNC | MS_INVALIDATE) ? errno : 0;
+  eASSERT(nullptr, err == 0);
+  (void)err;
+#else
+  (void)pagesize;
+#endif /* MDBX_MMAP_INCOHERENT_FILE_WRITE */
+
+#ifndef MDBX_MMAP_INCOHERENT_CPU_CACHE
+#error "The MDBX_MMAP_INCOHERENT_CPU_CACHE must be defined before"
+#elif MDBX_MMAP_INCOHERENT_CPU_CACHE
+#ifdef DCACHE
+  /* MIPS has cache coherency issues.
+   * Note: for any nbytes >= on-chip cache size, entire is flushed. */
+  cacheflush((void *)addr, nbytes, DCACHE);
+#else
+#error "Oops, cacheflush() not available"
+#endif /* DCACHE */
+#endif /* MDBX_MMAP_INCOHERENT_CPU_CACHE */
+
+#if !MDBX_MMAP_INCOHERENT_FILE_WRITE && !MDBX_MMAP_INCOHERENT_CPU_CACHE
+  (void)addr;
+  (void)nbytes;
+#endif
+}
+
+/* Состояние курсора.
+ *
+ * плохой/poor:
+ *  - неустановленный курсор с незаполненым стеком;
+ *  - следует пропускать во всех циклах отслеживания/корректировки
+ *    позиций курсоров;
+ *  - допускаются только операции предполагающие установку абсолютной позиции;
+ *  - в остальных случаях возвращается ENODATA.
+ *
+ *    У таких курсоров top = -1 и flags < 0, что позволяет дешево проверять и
+ *    пропускать такие курсоры в циклах отслеживания/корректировки по условию
+ *    probe_cursor->top < this_cursor->top.
+ *
+ * пустой/hollow:
+ *  - частично инициализированный курсор, но без доступной пользователю позиции,
+ *    поэтому нельзя выполнить какую-либо операцию без абсолютного (не
+ *    относительного) позиционирования;
+ *  - ki[top] может быть некорректным, в том числе >= page_numkeys(pg[top]).
+ *
+ *    У таких курсоров top >= 0, но flags < 0 (есть флажок z_hollow).
+ *
+ * установленный/pointed:
+ *  - полностью инициализированный курсор с конкретной позицией с данными;
+ *  - можно прочитать текущую строку, удалить её, либо выполнить
+ *    относительное перемещение;
+ *  - может иметь флажки z_after_delete, z_eof_hard и z_eof_soft;
+ *  - наличие z_eof_soft означает что курсор перемещен за пределы данных,
+ *    поэтому нелья прочитать текущие данные, либо удалить их.
+ *
+ *    У таких курсоров top >= 0 и flags >= 0 (нет флажка z_hollow).
+ *
+ * наполненный данными/filled:
+ *  - это установленный/pointed курсор без флагов z_eof_soft;
+ *  - за курсором есть даные, возможны CRUD операции в текущей позиции.
+ *
+ *    У таких курсоров top >= 0 и (unsigned)flags < z_eof_soft.
+ *
+ * Изменения состояния.
+ *
+ *  - Сбрасывается состояние курсора посредством top_and_flags |= z_poor_mark,
+ *    что равносильно top = -1 вместе с flags |= z_poor_mark;
+ *  - При позиционировании курсора сначала устанавливается top, а flags
+ *    только в самом конце при отсутстви ошибок.
+ *  - Повторное позиционирование first/last может начинаться
+ *    с установки/обнуления только top без сброса flags, что позволяет работать
+ *    быстрому пути внутри tree_search_finalize().
+ *
+ *  - Заморочки с концом данных:
+ *     - mdbx_cursor_get(NEXT) выполняет две операции (перемещение и чтение),
+ *       поэтому перемещение на последнюю строку строку всегда успешно,
+ *       а ошибка возвращается только при последующем next().
+ *       Однако, из-за этой двойственности семантика ситуации возврата ошибки
+ *       из mdbx_cursor_get(NEXT) допускает разночтение/неопределенность, ибо
+ *       не понятно к чему относится ошибка:
+ *        - Если к чтению данных, то курсор перемещен и стоит после последней
+ *          строки. Соответственно, чтение в текущей позиции запрещено,
+ *          а при выполнении prev() курсор вернется на последнюю строку;
+ *        - Если же ошибка относится к перемещению, то курсор не перемещен и
+ *          остается на последней строке. Соответственно, чтение в текущей
+ *          позиции допустимо, а при выполнении prev() курсор встанет
+ *          на пред-последнюю строку.
+ *        - Пикантность в том, что пользователи (так или иначе) полагаются
+ *          на оба варианта поведения, при этом конечно ожидают что после
+ *          ошибки MDBX_NEXT функция mdbx_cursor_eof() будет возвращать true.
+ *     - далее добавляется схожая ситуация с MDBX_GET_RANGE, MDBX_LOWERBOUND,
+ *       MDBX_GET_BOTH_RANGE и MDBX_UPPERBOUND. Тут при неуспехе поиска курсор
+ *       может/должен стоять после последней строки.
+ *     - далее добавляется MDBX_LAST. Тут курсор должен стоять на последней
+ *       строке и допускать чтение в текузщей позиции,
+ *       но mdbx_cursor_eof() должен возвращать true.
+ *
+ *    Решение = делаем два флажка z_eof_soft и z_eof_hard:
+ *     - Когда установлен только z_eof_soft,
+ *       функция mdbx_cursor_eof() возвращает true, но допускается
+ *       чтение данных в текущей позиции, а prev() передвигает курсор
+ *       на пред-последнюю строку.
+ *     - Когда установлен z_eof_hard, чтение данных в текущей позиции
+ *       не допускается, и mdbx_cursor_eof() также возвращает true,
+ *       а prev() устанавливает курсора на последюю строку. */
+enum cursor_state {
+  /* Это вложенный курсор для вложенного дерева/страницы и является
+     inner-элементом struct cursor_couple. */
+  z_inner = 0x01,
+
+  /* Происходит подготовка к обновлению GC,
+     поэтому можно брать страницы из GC даже для FREE_DBI. */
+  z_gcu_preparation = 0x02,
+
+  /* Курсор только-что создан, поэтому допускается авто-установка
+     в начало/конец, вместо возврата ошибки. */
+  z_fresh = 0x04,
+
+  /* Предыдущей операцией было удаление, поэтому курсор уже физически указывает
+     на следующий элемент и соответствующая операция перемещения должна
+     игнорироваться. */
+  z_after_delete = 0x08,
+
+  /* */
+  z_disable_tree_search_fastpath = 0x10,
+
+  /* Курсор логически в конце данных, но физически на последней строке,
+   * ki[top] == page_numkeys(pg[top]) - 1 и читать данные в текущей позиции. */
+  z_eof_soft = 0x20,
+
+  /* Курсор логически за концом данных, поэтому следующий переход "назад"
+     должен игнорироваться и/или приводить к установке на последнюю строку.
+     В текущем же состоянии нельзя делать CRUD операции. */
+  z_eof_hard = 0x40,
+
+  /* За курсором нет данных, логически его позиция не определена,
+     нельзя делать CRUD операции в текущей позиции.
+     Относительное перемещение запрещено. */
+  z_hollow = -128 /* 0x80 */,
+
+  /* Маски для сброса/установки состояния. */
+  z_clear_mask = z_inner | z_gcu_preparation,
+  z_poor_mark = z_eof_hard | z_hollow | z_disable_tree_search_fastpath,
+  z_fresh_mark = z_poor_mark | z_fresh
+};
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool is_inner(const MDBX_cursor *mc) {
+  return (mc->flags & z_inner) != 0;
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool is_poor(const MDBX_cursor *mc) {
+  const bool r = mc->top < 0;
+  cASSERT(mc, r == (mc->top_and_flags < 0));
+  if (r && mc->subcur)
+    cASSERT(mc, mc->subcur->cursor.flags < 0 && mc->subcur->cursor.top < 0);
+  return r;
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool is_pointed(const MDBX_cursor *mc) {
+  const bool r = mc->top >= 0;
+  cASSERT(mc, r == (mc->top_and_flags >= 0));
+  if (!r && mc->subcur)
+    cASSERT(mc, is_poor(&mc->subcur->cursor));
+  return r;
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool is_hollow(const MDBX_cursor *mc) {
+  const bool r = mc->flags < 0;
+  if (!r) {
+    cASSERT(mc, mc->top >= 0);
+    cASSERT(mc, (mc->flags & z_eof_hard) || mc->ki[mc->top] < page_numkeys(mc->pg[mc->top]));
+  } else if (mc->subcur)
+    cASSERT(mc, is_poor(&mc->subcur->cursor) || (is_pointed(mc) && mc->subcur->cursor.flags < 0));
+  return r;
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool is_eof(const MDBX_cursor *mc) {
+  const bool r = z_eof_soft <= (uint8_t)mc->flags;
+  return r;
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool is_filled(const MDBX_cursor *mc) {
+  const bool r = z_eof_hard > (uint8_t)mc->flags;
+  return r;
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool inner_filled(const MDBX_cursor *mc) {
+  return mc->subcur && is_filled(&mc->subcur->cursor);
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool inner_pointed(const MDBX_cursor *mc) {
+  return mc->subcur && is_pointed(&mc->subcur->cursor);
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool inner_hollow(const MDBX_cursor *mc) {
+  const bool r = !mc->subcur || is_hollow(&mc->subcur->cursor);
+#if MDBX_DEBUG || MDBX_FORCE_ASSERTIONS
+  if (!r) {
+    cASSERT(mc, is_filled(mc));
+    const page_t *mp = mc->pg[mc->top];
+    const node_t *node = page_node(mp, mc->ki[mc->top]);
+    cASSERT(mc, node_flags(node) & N_DUP);
+  }
+#endif /* MDBX_DEBUG || MDBX_FORCE_ASSERTIONS */
+  return r;
+}
+
+MDBX_MAYBE_UNUSED static inline void inner_gone(MDBX_cursor *mc) {
+  if (mc->subcur) {
+    TRACE("reset inner cursor %p", __Wpedantic_format_voidptr(&mc->subcur->cursor));
+    mc->subcur->nested_tree.root = 0;
+    mc->subcur->cursor.top_and_flags = z_inner | z_poor_mark;
+  }
+}
+
+MDBX_MAYBE_UNUSED static inline void be_poor(MDBX_cursor *mc) {
+  const bool inner = is_inner(mc);
+  if (inner) {
+    mc->tree->root = 0;
+    mc->top_and_flags = z_inner | z_poor_mark;
+  } else {
+    mc->top_and_flags |= z_poor_mark;
+    inner_gone(mc);
+  }
+  cASSERT(mc, is_poor(mc) && !is_pointed(mc) && !is_filled(mc));
+  cASSERT(mc, inner == is_inner(mc));
+}
+
+MDBX_MAYBE_UNUSED static inline void be_filled(MDBX_cursor *mc) {
+  cASSERT(mc, mc->top >= 0);
+  cASSERT(mc, mc->ki[mc->top] < page_numkeys(mc->pg[mc->top]));
+  const bool inner = is_inner(mc);
+  mc->flags &= z_clear_mask;
+  cASSERT(mc, is_filled(mc));
+  cASSERT(mc, inner == is_inner(mc));
+}
+
+MDBX_MAYBE_UNUSED static inline bool is_related(const MDBX_cursor *base, const MDBX_cursor *scan) {
+  cASSERT(base, base->top >= 0);
+  return base->top <= scan->top && base != scan;
+}
+
+/* Флаги контроля/проверки курсора. */
+enum cursor_checking {
+  z_branch = 0x01 /* same as P_BRANCH for check_leaf_type() */,
+  z_leaf = 0x02 /* same as P_LEAF for check_leaf_type() */,
+  z_largepage = 0x04 /* same as P_LARGE for check_leaf_type() */,
+  z_updating = 0x08 /* update/rebalance pending */,
+  z_ignord = 0x10 /* don't check keys ordering */,
+  z_dupfix = 0x20 /* same as P_DUPFIX for check_leaf_type() */,
+  z_retiring = 0x40 /* refs to child pages may be invalid */,
+  z_pagecheck = 0x80 /* perform page checking, see MDBX_VALIDATION */
+};
+
+MDBX_INTERNAL int __must_check_result cursor_validate(const MDBX_cursor *mc);
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline size_t cursor_dbi(const MDBX_cursor *mc) {
+  cASSERT(mc, mc->txn->signature == txn_signature);
+  size_t dbi = mc->dbi_state - mc->txn->dbi_state;
+  cASSERT(mc, dbi < mc->txn->env->n_dbi);
+  return dbi;
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool cursor_dbi_changed(const MDBX_cursor *mc) {
+  return dbi_changed(mc->txn, cursor_dbi(mc));
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint8_t *cursor_dbi_state(const MDBX_cursor *mc) {
+  return mc->dbi_state;
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool cursor_is_gc(const MDBX_cursor *mc) {
+  return mc->dbi_state == mc->txn->dbi_state + FREE_DBI;
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool cursor_is_main(const MDBX_cursor *mc) {
+  return mc->dbi_state == mc->txn->dbi_state + MAIN_DBI;
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool cursor_is_core(const MDBX_cursor *mc) {
+  return mc->dbi_state < mc->txn->dbi_state + CORE_DBS;
+}
+
+MDBX_MAYBE_UNUSED static inline int cursor_dbi_dbg(const MDBX_cursor *mc) {
+  /* Debugging output value of a cursor's DBI: Negative for a sub-cursor. */
+  const int dbi = cursor_dbi(mc);
+  return (mc->flags & z_inner) ? -dbi : dbi;
+}
+
+MDBX_MAYBE_UNUSED static inline int __must_check_result cursor_push(MDBX_cursor *mc, page_t *mp, indx_t ki) {
+  TRACE("pushing page %" PRIaPGNO " on db %d cursor %p", mp->pgno, cursor_dbi_dbg(mc), __Wpedantic_format_voidptr(mc));
+  if (unlikely(mc->top >= CURSOR_STACK_SIZE - 1)) {
+    be_poor(mc);
+    mc->txn->flags |= MDBX_TXN_ERROR;
+    return MDBX_CURSOR_FULL;
+  }
+  mc->top += 1;
+  mc->pg[mc->top] = mp;
+  mc->ki[mc->top] = ki;
+  return MDBX_SUCCESS;
+}
+
+MDBX_MAYBE_UNUSED static inline void cursor_pop(MDBX_cursor *mc) {
+  TRACE("popped page %" PRIaPGNO " off db %d cursor %p", mc->pg[mc->top]->pgno, cursor_dbi_dbg(mc),
+        __Wpedantic_format_voidptr(mc));
+  cASSERT(mc, mc->top >= 0);
+  mc->top -= 1;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline bool check_leaf_type(const MDBX_cursor *mc, const page_t *mp) {
+  return (((page_type(mp) ^ mc->checking) & (z_branch | z_leaf | z_largepage | z_dupfix)) == 0);
+}
+
+MDBX_INTERNAL int cursor_check(const MDBX_cursor *mc, int txn_bad_bits);
+
+/* без необходимости доступа к данным, без активации припаркованных транзакций. */
+static inline int cursor_check_pure(const MDBX_cursor *mc) {
+  return cursor_check(mc, MDBX_TXN_BLOCKED - MDBX_TXN_PARKED);
+}
+
+/* для чтения данных, с активацией припаркованных транзакций. */
+static inline int cursor_check_ro(const MDBX_cursor *mc) { return cursor_check(mc, MDBX_TXN_BLOCKED); }
+
+/* для записи данных. */
+static inline int cursor_check_rw(const MDBX_cursor *mc) {
+  return cursor_check(mc, (MDBX_TXN_BLOCKED - MDBX_TXN_PARKED) | MDBX_TXN_RDONLY);
+}
+
+MDBX_INTERNAL MDBX_cursor *cursor_eot(MDBX_cursor *cursor, MDBX_txn *txn);
+MDBX_INTERNAL int cursor_shadow(MDBX_cursor *cursor, MDBX_txn *nested, const size_t dbi);
+
+MDBX_INTERNAL MDBX_cursor *cursor_cpstk(const MDBX_cursor *csrc, MDBX_cursor *cdst);
+
+MDBX_INTERNAL int __must_check_result cursor_ops(MDBX_cursor *mc, MDBX_val *key, MDBX_val *data,
+                                                 const MDBX_cursor_op op);
+
+MDBX_INTERNAL int __must_check_result cursor_check_multiple(MDBX_cursor *mc, const MDBX_val *key, MDBX_val *data,
+                                                            unsigned flags);
+
+MDBX_INTERNAL int __must_check_result cursor_put_checklen(MDBX_cursor *mc, const MDBX_val *key, MDBX_val *data,
+                                                          unsigned flags);
+
+MDBX_INTERNAL int __must_check_result cursor_put(MDBX_cursor *mc, const MDBX_val *key, MDBX_val *data, unsigned flags);
+
+MDBX_INTERNAL int __must_check_result cursor_validate_updating(MDBX_cursor *mc);
+
+MDBX_INTERNAL int __must_check_result cursor_del(MDBX_cursor *mc, unsigned flags);
+
+MDBX_INTERNAL int __must_check_result cursor_sibling_left(MDBX_cursor *mc);
+MDBX_INTERNAL int __must_check_result cursor_sibling_right(MDBX_cursor *mc);
+
+typedef struct cursor_set_result {
+  int err;
+  bool exact;
+} csr_t;
+
+MDBX_INTERNAL csr_t cursor_seek(MDBX_cursor *mc, MDBX_val *key, MDBX_val *data, MDBX_cursor_op op);
+
+MDBX_INTERNAL int __must_check_result inner_first(MDBX_cursor *__restrict mc, MDBX_val *__restrict data);
+MDBX_INTERNAL int __must_check_result inner_last(MDBX_cursor *__restrict mc, MDBX_val *__restrict data);
+MDBX_INTERNAL int __must_check_result outer_first(MDBX_cursor *__restrict mc, MDBX_val *__restrict key,
+                                                  MDBX_val *__restrict data);
+MDBX_INTERNAL int __must_check_result outer_last(MDBX_cursor *__restrict mc, MDBX_val *__restrict key,
+                                                 MDBX_val *__restrict data);
+
+MDBX_INTERNAL int __must_check_result inner_next(MDBX_cursor *__restrict mc, MDBX_val *__restrict data);
+MDBX_INTERNAL int __must_check_result inner_prev(MDBX_cursor *__restrict mc, MDBX_val *__restrict data);
+MDBX_INTERNAL int __must_check_result outer_next(MDBX_cursor *__restrict mc, MDBX_val *__restrict key,
+                                                 MDBX_val *__restrict data, MDBX_cursor_op op);
+MDBX_INTERNAL int __must_check_result outer_prev(MDBX_cursor *__restrict mc, MDBX_val *__restrict key,
+                                                 MDBX_val *__restrict data, MDBX_cursor_op op);
+
+MDBX_INTERNAL int cursor_init4walk(cursor_couple_t *couple, const MDBX_txn *const txn, tree_t *const tree,
+                                   kvx_t *const kvx);
+
+MDBX_INTERNAL int __must_check_result cursor_init(MDBX_cursor *mc, const MDBX_txn *txn, size_t dbi);
+
+MDBX_INTERNAL int __must_check_result cursor_dupsort_setup(MDBX_cursor *mc, const node_t *node, const page_t *mp);
+
+MDBX_INTERNAL int __must_check_result cursor_touch(MDBX_cursor *const mc, const MDBX_val *key, const MDBX_val *data);
+
+/*----------------------------------------------------------------------------*/
+
+/* Update sub-page pointer, if any, in mc->subcur.
+ * Needed when the node which contains the sub-page may have moved.
+ * Called with mp = mc->pg[mc->top], ki = mc->ki[mc->top]. */
+MDBX_MAYBE_UNUSED static inline void cursor_inner_refresh(const MDBX_cursor *mc, const page_t *mp, unsigned ki) {
+  cASSERT(mc, is_leaf(mp));
+  const node_t *node = page_node(mp, ki);
+  if ((node_flags(node) & (N_DUP | N_TREE)) == N_DUP)
+    mc->subcur->cursor.pg[0] = node_data(node);
+}
+
+MDBX_MAYBE_UNUSED MDBX_INTERNAL bool cursor_is_tracked(const MDBX_cursor *mc);
+
+static inline void cursor_reset(cursor_couple_t *couple) {
+  couple->outer.top_and_flags = z_fresh_mark;
+  couple->inner.cursor.top_and_flags = z_fresh_mark | z_inner;
+}
+
+static inline void cursor_drown(cursor_couple_t *couple) {
+  couple->outer.top_and_flags = z_poor_mark;
+  couple->inner.cursor.top_and_flags = z_poor_mark | z_inner;
+  couple->outer.txn = nullptr;
+  couple->inner.cursor.txn = nullptr;
+  couple->outer.tree = nullptr;
+  /* сохраняем clc-указатель, так он используется для вычисления dbi в mdbx_cursor_renew(). */
+  couple->outer.dbi_state = nullptr;
+  couple->inner.cursor.dbi_state = nullptr;
+}
+
+static inline size_t dpl_setlen(dpl_t *dl, size_t len) {
+  static const page_t dpl_stub_pageE = {INVALID_TXNID,
+                                        0,
+                                        P_BAD,
+                                        {0},
+                                        /* pgno */ ~(pgno_t)0};
+  assert(dpl_stub_pageE.flags == P_BAD && dpl_stub_pageE.pgno == P_INVALID);
+  dl->length = len;
+  dl->items[len + 1].ptr = (page_t *)&dpl_stub_pageE;
+  dl->items[len + 1].pgno = P_INVALID;
+  dl->items[len + 1].npages = 1;
+  return len;
+}
+
+static inline void dpl_clear(dpl_t *dl) {
+  static const page_t dpl_stub_pageB = {INVALID_TXNID,
+                                        0,
+                                        P_BAD,
+                                        {0},
+                                        /* pgno */ 0};
+  assert(dpl_stub_pageB.flags == P_BAD && dpl_stub_pageB.pgno == 0);
+  dl->sorted = dpl_setlen(dl, 0);
+  dl->pages_including_loose = 0;
+  dl->items[0].ptr = (page_t *)&dpl_stub_pageB;
+  dl->items[0].pgno = 0;
+  dl->items[0].npages = 1;
+  assert(dl->items[0].pgno == 0 && dl->items[dl->length + 1].pgno == P_INVALID);
+}
+
+MDBX_INTERNAL int __must_check_result dpl_alloc(MDBX_txn *txn);
+
+MDBX_INTERNAL void dpl_free(MDBX_txn *txn);
+
+MDBX_INTERNAL dpl_t *dpl_reserve(MDBX_txn *txn, size_t size);
+
+MDBX_INTERNAL __noinline dpl_t *dpl_sort_slowpath(const MDBX_txn *txn);
+
+static inline dpl_t *dpl_sort(const MDBX_txn *txn) {
+  tASSERT(txn, (txn->flags & MDBX_TXN_RDONLY) == 0);
+  tASSERT(txn, (txn->flags & MDBX_WRITEMAP) == 0 || MDBX_AVOID_MSYNC);
+
+  dpl_t *dl = txn->wr.dirtylist;
+  tASSERT(txn, dl->length <= PAGELIST_LIMIT);
+  tASSERT(txn, dl->sorted <= dl->length);
+  tASSERT(txn, dl->items[0].pgno == 0 && dl->items[dl->length + 1].pgno == P_INVALID);
+  return likely(dl->sorted == dl->length) ? dl : dpl_sort_slowpath(txn);
+}
+
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL __noinline size_t dpl_search(const MDBX_txn *txn, pgno_t pgno);
+
+MDBX_MAYBE_UNUSED MDBX_INTERNAL const page_t *debug_dpl_find(const MDBX_txn *txn, const pgno_t pgno);
+
+MDBX_NOTHROW_PURE_FUNCTION static inline unsigned dpl_npages(const dpl_t *dl, size_t i) {
+  assert(0 <= (intptr_t)i && i <= dl->length);
+  unsigned n = dl->items[i].npages;
+  assert(n == (is_largepage(dl->items[i].ptr) ? dl->items[i].ptr->pages : 1));
+  return n;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline pgno_t dpl_endpgno(const dpl_t *dl, size_t i) {
+  return dpl_npages(dl, i) + dl->items[i].pgno;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline bool dpl_intersect(const MDBX_txn *txn, pgno_t pgno, size_t npages) {
+  tASSERT(txn, (txn->flags & MDBX_TXN_RDONLY) == 0);
+  tASSERT(txn, (txn->flags & MDBX_WRITEMAP) == 0 || MDBX_AVOID_MSYNC);
+
+  dpl_t *dl = txn->wr.dirtylist;
+  tASSERT(txn, dl->sorted == dl->length);
+  tASSERT(txn, dl->items[0].pgno == 0 && dl->items[dl->length + 1].pgno == P_INVALID);
+  size_t const n = dpl_search(txn, pgno);
+  tASSERT(txn, n >= 1 && n <= dl->length + 1);
+  tASSERT(txn, pgno <= dl->items[n].pgno);
+  tASSERT(txn, pgno > dl->items[n - 1].pgno);
+  const bool rc =
+      /* intersection with founded */ pgno + npages > dl->items[n].pgno ||
+      /* intersection with prev */ dpl_endpgno(dl, n - 1) > pgno;
+  if (ASSERT_ENABLED()) {
+    bool check = false;
+    for (size_t i = 1; i <= dl->length; ++i) {
+      const page_t *const dp = dl->items[i].ptr;
+      if (!(dp->pgno /* begin */ >= /* end */ pgno + npages || dpl_endpgno(dl, i) /* end */ <= /* begin */ pgno))
+        check |= true;
+    }
+    tASSERT(txn, check == rc);
+  }
+  return rc;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline size_t dpl_exist(const MDBX_txn *txn, pgno_t pgno) {
+  tASSERT(txn, (txn->flags & MDBX_WRITEMAP) == 0 || MDBX_AVOID_MSYNC);
+  dpl_t *dl = txn->wr.dirtylist;
+  size_t i = dpl_search(txn, pgno);
+  tASSERT(txn, (int)i > 0);
+  return (dl->items[i].pgno == pgno) ? i : 0;
+}
+
+MDBX_INTERNAL void dpl_remove_ex(const MDBX_txn *txn, size_t i, size_t npages);
+
+static inline void dpl_remove(const MDBX_txn *txn, size_t i) {
+  dpl_remove_ex(txn, i, dpl_npages(txn->wr.dirtylist, i));
+}
+
+MDBX_INTERNAL int __must_check_result dpl_append(MDBX_txn *txn, pgno_t pgno, page_t *page, size_t npages);
+
+MDBX_MAYBE_UNUSED MDBX_INTERNAL bool dpl_check(MDBX_txn *txn);
+
+MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t dpl_age(const MDBX_txn *txn, size_t i) {
+  tASSERT(txn, (txn->flags & (MDBX_TXN_RDONLY | MDBX_WRITEMAP)) == 0);
+  const dpl_t *dl = txn->wr.dirtylist;
+  assert((intptr_t)i > 0 && i <= dl->length);
+  size_t *const ptr = ptr_disp(dl->items[i].ptr, -(ptrdiff_t)sizeof(size_t));
+  return txn->wr.dirtylru - (uint32_t)*ptr;
+}
+
+MDBX_INTERNAL void dpl_lru_reduce(MDBX_txn *txn);
+
+static inline uint32_t dpl_lru_turn(MDBX_txn *txn) {
+  txn->wr.dirtylru += 1;
+  if (unlikely(txn->wr.dirtylru > UINT32_MAX / 3) && (txn->flags & MDBX_WRITEMAP) == 0)
+    dpl_lru_reduce(txn);
+  return txn->wr.dirtylru;
+}
+
+MDBX_INTERNAL void dpl_sift(MDBX_txn *const txn, pnl_t pl, const bool spilled);
+
+MDBX_INTERNAL void dpl_release_shadows(MDBX_txn *txn);
+
+/* Гистограмма решения нарезки фрагментов для ситуации нехватки идентификаторов/слотов. */
+typedef struct gc_dense_histogram {
+  /* Размер массива одновременно задаёт максимальный размер последовательностей,
+   * с которыми решается задача распределения.
+   *
+   * Использование длинных последовательностей контрпродуктивно, так как такие последовательности будут
+   * создавать/воспроизводить/повторять аналогичные затруднения при последующей переработке. Однако,
+   * в редких ситуациях это может быть единственным выходом. */
+  unsigned end;
+  pgno_t array[31];
+} gc_dense_histogram_t;
+
+typedef struct gc_update_context {
+  unsigned loop;
+  unsigned goodchunk;
+  bool dense;
+  pgno_t prev_first_unallocated;
+  size_t retired_stored;
+  size_t return_reserved_lo, return_reserved_hi;
+  txnid_t gc_first;
+  intptr_t return_left;
+#ifndef MDBX_DEBUG_GCU
+#define MDBX_DEBUG_GCU 0
+#endif
+#if MDBX_DEBUG_GCU
+  struct {
+    txnid_t prev;
+    unsigned n;
+  } dbg;
+#endif /* MDBX_DEBUG_GCU */
+  rkl_t sequel;
+#if MDBX_ENABLE_BIGFOOT
+  txnid_t bigfoot;
+#endif /* MDBX_ENABLE_BIGFOOT */
+  union {
+    MDBX_cursor cursor;
+    cursor_couple_t couple;
+  };
+  gc_dense_histogram_t dense_histogram;
+} gcu_t;
+
+MDBX_INTERNAL int gc_put_init(MDBX_txn *txn, gcu_t *ctx);
+MDBX_INTERNAL void gc_put_destroy(gcu_t *ctx);
+
+#define ALLOC_DEFAULT 0     /* штатное/обычное выделение страниц */
+#define ALLOC_UNIMPORTANT 1 /* запрос неважен, невозможность выделения не приведет к ошибке транзакции */
+#define ALLOC_RESERVE 2     /* подготовка резерва для обновления GC, без аллокации */
+#define ALLOC_COALESCE 4    /* внутреннее состояние/флажок */
+#define ALLOC_SHOULD_SCAN 8 /* внутреннее состояние/флажок */
+#define ALLOC_LIFO 16       /* внутреннее состояние/флажок */
+
+MDBX_INTERNAL pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags);
+
+MDBX_INTERNAL pgr_t gc_alloc_single(const MDBX_cursor *const mc);
+MDBX_INTERNAL int gc_update(MDBX_txn *txn, gcu_t *ctx);
+
+MDBX_NOTHROW_PURE_FUNCTION static inline size_t gc_stockpile(const MDBX_txn *txn) {
+  return pnl_size(txn->wr.repnl) + txn->wr.loose_count;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline size_t gc_chunk_bytes(const size_t chunk) {
+  return (chunk + 1) * sizeof(pgno_t);
+}
+
+MDBX_INTERNAL bool gc_repnl_has_span(const MDBX_txn *txn, const size_t num);
+
+static inline bool gc_is_reclaimed(const MDBX_txn *txn, const txnid_t id) {
+  return rkl_contain(&txn->wr.gc.reclaimed, id) || rkl_contain(&txn->wr.gc.comeback, id);
+}
+
+static inline txnid_t txnid_min(txnid_t a, txnid_t b) { return (a < b) ? a : b; }
+
+static inline txnid_t txnid_max(txnid_t a, txnid_t b) { return (a > b) ? a : b; }
+
+static inline MDBX_cursor *gc_cursor(MDBX_env *env) { return ptr_disp(env->basal_txn, sizeof(MDBX_txn)); }
+
+MDBX_INTERNAL int lck_setup(MDBX_env *env, mdbx_mode_t mode);
+#if MDBX_LOCKING > MDBX_LOCKING_SYSV
+MDBX_INTERNAL int lck_ipclock_stubinit(osal_ipclock_t *ipc);
+MDBX_INTERNAL int lck_ipclock_destroy(osal_ipclock_t *ipc);
+#endif /* MDBX_LOCKING > MDBX_LOCKING_SYSV */
+
+MDBX_INTERNAL int lck_init(MDBX_env *env, MDBX_env *inprocess_neighbor, int global_uniqueness_flag);
+
+MDBX_INTERNAL int lck_destroy(MDBX_env *env, MDBX_env *inprocess_neighbor, const uint32_t current_pid);
+
+MDBX_INTERNAL int lck_seize(MDBX_env *env);
+
+MDBX_INTERNAL int lck_downgrade(MDBX_env *env);
+
+MDBX_MAYBE_UNUSED MDBX_INTERNAL int lck_upgrade(MDBX_env *env, bool dont_wait);
+
+MDBX_INTERNAL int lck_rdt_lock(MDBX_env *env);
+
+MDBX_INTERNAL void lck_rdt_unlock(MDBX_env *env);
+
+MDBX_INTERNAL int lck_txn_lock(MDBX_env *env, bool dont_wait);
+
+MDBX_INTERNAL void lck_txn_unlock(MDBX_env *env);
+
+MDBX_INTERNAL int lck_rpid_set(MDBX_env *env);
+
+MDBX_INTERNAL int lck_rpid_clear(MDBX_env *env);
+
+MDBX_INTERNAL int lck_rpid_check(MDBX_env *env, uint32_t pid);
+
+static inline uint64_t meta_sign_calculate(const meta_t *meta) {
+  uint64_t sign = DATASIGN_NONE;
+#if 0 /* TODO */
+  sign = hippeus_hash64(...);
+#else
+  (void)meta;
+#endif
+  /* LY: newer returns DATASIGN_NONE or DATASIGN_WEAK */
+  return (sign > DATASIGN_WEAK) ? sign : ~sign;
+}
+
+static inline uint64_t meta_sign_get(const volatile meta_t *meta) { return unaligned_peek_u64_volatile(4, meta->sign); }
+
+static inline void meta_sign_as_steady(meta_t *meta) { unaligned_poke_u64(4, meta->sign, meta_sign_calculate(meta)); }
+
+static inline bool meta_is_steady(const volatile meta_t *meta) { return SIGN_IS_STEADY(meta_sign_get(meta)); }
+
+MDBX_INTERNAL troika_t meta_tap(const MDBX_env *env);
+MDBX_INTERNAL unsigned meta_eq_mask(const troika_t *troika);
+MDBX_INTERNAL bool meta_should_retry(const MDBX_env *env, troika_t *troika);
+MDBX_MAYBE_UNUSED MDBX_INTERNAL bool troika_verify_fsm(void);
+
+struct meta_ptr {
+  txnid_t txnid;
+  union {
+    const volatile meta_t *ptr_v;
+    const meta_t *ptr_c;
+  };
+  size_t is_steady;
+};
+
+MDBX_INTERNAL meta_ptr_t meta_ptr(const MDBX_env *env, unsigned n);
+MDBX_INTERNAL txnid_t meta_txnid(const volatile meta_t *meta);
+MDBX_INTERNAL txnid_t recent_committed_txnid(const MDBX_env *env);
+MDBX_INTERNAL int meta_sync(const MDBX_env *env, const meta_ptr_t head);
+
+MDBX_INTERNAL const char *durable_caption(const meta_t *const meta);
+MDBX_INTERNAL void meta_troika_dump(const MDBX_env *env, const troika_t *troika);
+
+#define METAPAGE(env, n) page_meta(pgno2page(env, n))
+#define METAPAGE_END(env) METAPAGE(env, NUM_METAS)
+
+static inline meta_ptr_t meta_recent(const MDBX_env *env, const troika_t *troika) {
+  meta_ptr_t r;
+  r.txnid = troika->txnid[troika->recent];
+  r.ptr_v = METAPAGE(env, troika->recent);
+  r.is_steady = (troika->fsm >> troika->recent) & 1;
+  return r;
+}
+
+static inline meta_ptr_t meta_prefer_steady(const MDBX_env *env, const troika_t *troika) {
+  meta_ptr_t r;
+  r.txnid = troika->txnid[troika->prefer_steady];
+  r.ptr_v = METAPAGE(env, troika->prefer_steady);
+  r.is_steady = (troika->fsm >> troika->prefer_steady) & 1;
+  return r;
+}
+
+static inline meta_ptr_t meta_tail(const MDBX_env *env, const troika_t *troika) {
+  const uint8_t tail = troika->tail_and_flags & 3;
+  MDBX_ANALYSIS_ASSUME(tail < NUM_METAS);
+  meta_ptr_t r;
+  r.txnid = troika->txnid[tail];
+  r.ptr_v = METAPAGE(env, tail);
+  r.is_steady = (troika->fsm >> tail) & 1;
+  return r;
+}
+
+static inline bool meta_is_used(const troika_t *troika, unsigned n) {
+  return n == troika->recent || n == troika->prefer_steady;
+}
+
+static inline bool meta_bootid_match(const meta_t *meta) {
+
+  return memcmp(&meta->bootid, &globals.bootid, 16) == 0 && (globals.bootid.x | globals.bootid.y) != 0;
+}
+
+static inline bool meta_weak_acceptable(const MDBX_env *env, const meta_t *meta, const int lck_exclusive) {
+  return lck_exclusive
+             ? /* exclusive lock */ meta_bootid_match(meta)
+             : /* db already opened */ env->lck_mmap.lck && (env->lck_mmap.lck->envmode.weak & MDBX_RDONLY) == 0;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline txnid_t constmeta_txnid(const meta_t *meta) {
+  const txnid_t a = unaligned_peek_u64(4, &meta->txnid_a);
+  const txnid_t b = unaligned_peek_u64(4, &meta->txnid_b);
+  return likely(a == b) ? a : 0;
+}
+
+static inline void meta_update_begin(const MDBX_env *env, meta_t *meta, txnid_t txnid) {
+  eASSERT(env, meta >= METAPAGE(env, 0) && meta < METAPAGE_END(env));
+  eASSERT(env, unaligned_peek_u64(4, meta->txnid_a) < txnid && unaligned_peek_u64(4, meta->txnid_b) < txnid);
+  (void)env;
+#if (defined(__amd64__) || defined(__e2k__)) && !defined(ENABLE_UBSAN) && MDBX_UNALIGNED_OK >= 8
+  atomic_store64((mdbx_atomic_uint64_t *)&meta->txnid_b, 0, mo_AcquireRelease);
+  atomic_store64((mdbx_atomic_uint64_t *)&meta->txnid_a, txnid, mo_AcquireRelease);
+#else
+  atomic_store32(&meta->txnid_b[__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__], 0, mo_AcquireRelease);
+  atomic_store32(&meta->txnid_b[__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__], 0, mo_AcquireRelease);
+  atomic_store32(&meta->txnid_a[__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__], (uint32_t)txnid, mo_AcquireRelease);
+  atomic_store32(&meta->txnid_a[__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__], (uint32_t)(txnid >> 32), mo_AcquireRelease);
+#endif
+}
+
+static inline void meta_update_end(const MDBX_env *env, meta_t *meta, txnid_t txnid) {
+  eASSERT(env, meta >= METAPAGE(env, 0) && meta < METAPAGE_END(env));
+  eASSERT(env, unaligned_peek_u64(4, meta->txnid_a) == txnid);
+  eASSERT(env, unaligned_peek_u64(4, meta->txnid_b) < txnid);
+  (void)env;
+  jitter4testing(true);
+  memcpy(&meta->bootid, &globals.bootid, 16);
+#if (defined(__amd64__) || defined(__e2k__)) && !defined(ENABLE_UBSAN) && MDBX_UNALIGNED_OK >= 8
+  atomic_store64((mdbx_atomic_uint64_t *)&meta->txnid_b, txnid, mo_AcquireRelease);
+#else
+  atomic_store32(&meta->txnid_b[__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__], (uint32_t)txnid, mo_AcquireRelease);
+  atomic_store32(&meta->txnid_b[__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__], (uint32_t)(txnid >> 32), mo_AcquireRelease);
+#endif
+}
+
+static inline void meta_set_txnid(const MDBX_env *env, meta_t *meta, const txnid_t txnid) {
+  eASSERT(env, !env->dxb_mmap.base || meta < METAPAGE(env, 0) || meta >= METAPAGE_END(env));
+  (void)env;
+  /* update inconsistently since this function used ONLY for filling meta-image
+   * for writing, but not the actual meta-page */
+  memcpy(&meta->bootid, &globals.bootid, 16);
+  unaligned_poke_u64(4, meta->txnid_a, txnid);
+  unaligned_poke_u64(4, meta->txnid_b, txnid);
+}
+
+static inline uint8_t meta_cmp2int(txnid_t a, txnid_t b, uint8_t s) {
+  return unlikely(a == b) ? 1 * s : (a > b) ? 2 * s : 0 * s;
+}
+
+static inline uint8_t meta_cmp2recent(uint8_t ab_cmp2int, bool a_steady, bool b_steady) {
+  assert(ab_cmp2int < 3 /* && a_steady< 2 && b_steady < 2 */);
+  return ab_cmp2int > 1 || (ab_cmp2int == 1 && a_steady > b_steady);
+}
+
+static inline uint8_t meta_cmp2steady(uint8_t ab_cmp2int, bool a_steady, bool b_steady) {
+  assert(ab_cmp2int < 3 /* && a_steady< 2 && b_steady < 2 */);
+  return a_steady > b_steady || (a_steady == b_steady && ab_cmp2int > 1);
+}
+
+static inline bool meta_choice_recent(txnid_t a_txnid, bool a_steady, txnid_t b_txnid, bool b_steady) {
+  return meta_cmp2recent(meta_cmp2int(a_txnid, b_txnid, 1), a_steady, b_steady);
+}
+
+static inline bool meta_choice_steady(txnid_t a_txnid, bool a_steady, txnid_t b_txnid, bool b_steady) {
+  return meta_cmp2steady(meta_cmp2int(a_txnid, b_txnid, 1), a_steady, b_steady);
+}
+
+MDBX_INTERNAL meta_t *meta_init_triplet(const MDBX_env *env, void *buffer);
+
+MDBX_INTERNAL int meta_validate(MDBX_env *env, meta_t *const meta, const page_t *const page, const unsigned meta_number,
+                                unsigned *guess_pagesize);
+
+MDBX_INTERNAL int __must_check_result meta_validate_copy(MDBX_env *env, const meta_t *meta, meta_t *dest);
+
+MDBX_INTERNAL int __must_check_result meta_override(MDBX_env *env, size_t target, txnid_t txnid, const meta_t *shape);
+
+MDBX_INTERNAL int meta_wipe_steady(MDBX_env *env, txnid_t inclusive_upto);
+
+#if !(defined(_WIN32) || defined(_WIN64))
+#define MDBX_WRITETHROUGH_THRESHOLD_DEFAULT 2
+#endif
+
+struct iov_ctx {
+  MDBX_env *env;
+  osal_ioring_t *ior;
+  mdbx_filehandle_t fd;
+  int err;
+#ifndef MDBX_NEED_WRITTEN_RANGE
+#define MDBX_NEED_WRITTEN_RANGE 1
+#endif /* MDBX_NEED_WRITTEN_RANGE */
+#if MDBX_NEED_WRITTEN_RANGE
+  pgno_t flush_begin;
+  pgno_t flush_end;
+#endif /* MDBX_NEED_WRITTEN_RANGE */
+  uint64_t coherency_timestamp;
+};
+
+MDBX_INTERNAL __must_check_result int iov_init(MDBX_txn *const txn, iov_ctx_t *ctx, size_t items, size_t npages,
+                                               mdbx_filehandle_t fd, bool check_coherence);
+
+static inline bool iov_empty(const iov_ctx_t *ctx) { return osal_ioring_used(ctx->ior) == 0; }
+
+MDBX_INTERNAL __must_check_result int iov_page(MDBX_txn *txn, iov_ctx_t *ctx, page_t *dp, size_t npages);
+
+MDBX_INTERNAL __must_check_result int iov_write(iov_ctx_t *ctx);
+
+MDBX_INTERNAL void spill_remove(MDBX_txn *txn, size_t idx, size_t npages);
+MDBX_INTERNAL pnl_t spill_purge(MDBX_txn *txn);
+MDBX_INTERNAL int spill_slowpath(MDBX_txn *const txn, MDBX_cursor *const m0, const intptr_t wanna_spill_entries,
+                                 const intptr_t wanna_spill_npages, const size_t need);
+/*----------------------------------------------------------------------------*/
+
+static inline size_t spill_search(const MDBX_txn *txn, pgno_t pgno) {
+  tASSERT(txn, (txn->flags & MDBX_WRITEMAP) == 0 || MDBX_AVOID_MSYNC);
+  const pnl_t pnl = txn->wr.spilled.list;
+  if (likely(!pnl))
+    return 0;
+  pgno <<= 1;
+  size_t n = pnl_search(pnl, pgno, (size_t)MAX_PAGENO + MAX_PAGENO + 1);
+  return (n <= pnl_size(pnl) && pnl[n] == pgno) ? n : 0;
+}
+
+static inline bool spill_intersect(const MDBX_txn *txn, pgno_t pgno, size_t npages) {
+  const pnl_t pnl = txn->wr.spilled.list;
+  if (likely(!pnl))
+    return false;
+  const size_t len = pnl_size(pnl);
+  if (LOG_ENABLED(MDBX_LOG_EXTRA)) {
+    DEBUG_EXTRA("PNL len %zu [", len);
+    for (size_t i = 1; i <= len; ++i)
+      DEBUG_EXTRA_PRINT(" %li", (pnl[i] & 1) ? -(long)(pnl[i] >> 1) : (long)(pnl[i] >> 1));
+    DEBUG_EXTRA_PRINT("%s\n", "]");
+  }
+  const pgno_t spilled_range_begin = pgno << 1;
+  const pgno_t spilled_range_last = ((pgno + (pgno_t)npages) << 1) - 1;
+#if MDBX_PNL_ASCENDING
+  const size_t n = pnl_search(pnl, spilled_range_begin, (size_t)(MAX_PAGENO + 1) << 1);
+  tASSERT(txn, n && (n == pnl_size(pnl) + 1 || spilled_range_begin <= pnl[n]));
+  const bool rc = n <= pnl_size(pnl) && pnl[n] <= spilled_range_last;
+#else
+  const size_t n = pnl_search(pnl, spilled_range_last, (size_t)MAX_PAGENO + MAX_PAGENO + 1);
+  tASSERT(txn, n && (n == pnl_size(pnl) + 1 || spilled_range_last >= pnl[n]));
+  const bool rc = n <= pnl_size(pnl) && pnl[n] >= spilled_range_begin;
+#endif
+  if (ASSERT_ENABLED()) {
+    bool check = false;
+    for (size_t i = 0; i < npages; ++i)
+      check |= spill_search(txn, (pgno_t)(pgno + i)) != 0;
+    tASSERT(txn, check == rc);
+  }
+  return rc;
+}
+
+static inline int txn_spill(MDBX_txn *const txn, MDBX_cursor *const m0, const size_t need) {
+  tASSERT(txn, (txn->flags & MDBX_TXN_RDONLY) == 0);
+  tASSERT(txn, !m0 || cursor_is_tracked(m0));
+
+  const intptr_t wanna_spill_entries = txn->wr.dirtylist ? (need - txn->wr.dirtyroom - txn->wr.loose_count) : 0;
+  const intptr_t wanna_spill_npages =
+      need + (txn->wr.dirtylist ? txn->wr.dirtylist->pages_including_loose : txn->wr.writemap_dirty_npages) -
+      txn->wr.loose_count - txn->env->options.dp_limit;
+
+  /* production mode */
+  if (likely(wanna_spill_npages < 1 && wanna_spill_entries < 1)
+#if xMDBX_DEBUG_SPILLING == 1
+      /* debug mode: always try to spill if xMDBX_DEBUG_SPILLING == 1 */
+      && txn->txnid % 23 > 11
+#endif
+  )
+    return MDBX_SUCCESS;
+
+  return spill_slowpath(txn, m0, wanna_spill_entries, wanna_spill_npages, need);
+}
+
+MDBX_INTERNAL int __must_check_result tree_search_finalize(MDBX_cursor *mc, const MDBX_val *key, int flags);
+MDBX_INTERNAL int tree_search_lowest(MDBX_cursor *mc);
+MDBX_INTERNAL size_t tree_search_branch(MDBX_cursor *mc, const MDBX_val *key);
+
+enum page_search_flags {
+  Z_MODIFY = 1,
+  Z_ROOTONLY = 2,
+  Z_FIRST = 4,
+  Z_LAST = 8,
+};
+MDBX_INTERNAL int __must_check_result tree_search(MDBX_cursor *mc, const MDBX_val *key, int flags);
+
+#define MDBX_SPLIT_REPLACE MDBX_APPENDDUP /* newkey is not new */
+MDBX_INTERNAL int __must_check_result page_split(MDBX_cursor *mc, const MDBX_val *const newkey, MDBX_val *const newdata,
+                                                 pgno_t newpgno, const unsigned naf);
+
+/*----------------------------------------------------------------------------*/
+
+MDBX_INTERNAL int MDBX_PRINTF_ARGS(2, 3) bad_page(const page_t *mp, const char *fmt, ...);
+
+MDBX_INTERNAL void MDBX_PRINTF_ARGS(2, 3) poor_page(const page_t *mp, const char *fmt, ...);
+
+MDBX_NOTHROW_PURE_FUNCTION static inline bool is_frozen(const MDBX_txn *txn, const page_t *mp) {
+  return mp->txnid < txn->txnid;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline bool is_spilled(const MDBX_txn *txn, const page_t *mp) {
+  return mp->txnid == txn->txnid;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline bool is_shadowed(const MDBX_txn *txn, const page_t *mp) {
+  return mp->txnid > txn->txnid;
+}
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline bool is_correct(const MDBX_txn *txn, const page_t *mp) {
+  return mp->txnid <= txn->front_txnid;
+}
+
+MDBX_NOTHROW_PURE_FUNCTION static inline bool is_modifable(const MDBX_txn *txn, const page_t *mp) {
+  return mp->txnid == txn->front_txnid;
+}
+
+MDBX_INTERNAL int __must_check_result page_check(const MDBX_cursor *const mc, const page_t *const mp);
+
+MDBX_INTERNAL pgr_t page_get_any(const MDBX_cursor *const mc, const pgno_t pgno, const txnid_t front);
+
+MDBX_INTERNAL pgr_t page_get_three(const MDBX_cursor *const mc, const pgno_t pgno, const txnid_t front);
+
+MDBX_INTERNAL pgr_t page_get_large(const MDBX_cursor *const mc, const pgno_t pgno, const txnid_t front);
+
+static inline int __must_check_result page_get(const MDBX_cursor *mc, const pgno_t pgno, page_t **mp,
+                                               const txnid_t front) {
+  pgr_t ret = page_get_three(mc, pgno, front);
+  *mp = ret.page;
+  return ret.err;
+}
+
+/*----------------------------------------------------------------------------*/
+
+MDBX_INTERNAL int __must_check_result page_dirty(MDBX_txn *txn, page_t *mp, size_t npages);
+MDBX_INTERNAL pgr_t page_new(MDBX_cursor *mc, const unsigned flags);
+MDBX_INTERNAL pgr_t page_new_large(MDBX_cursor *mc, const size_t npages);
+MDBX_INTERNAL int page_touch_modifable(MDBX_txn *txn, const page_t *const mp);
+MDBX_INTERNAL int page_touch_unmodifable(MDBX_txn *txn, MDBX_cursor *mc, const page_t *const mp);
+
+static inline int page_touch(MDBX_cursor *mc) {
+  page_t *const mp = mc->pg[mc->top];
+  MDBX_txn *txn = mc->txn;
+
+  tASSERT(txn, mc->txn->flags & MDBX_TXN_DIRTY);
+  tASSERT(txn, F_ISSET(*cursor_dbi_state(mc), DBI_LINDO | DBI_VALID | DBI_DIRTY));
+  tASSERT(txn, !is_largepage(mp));
+  if (ASSERT_ENABLED()) {
+    if (mc->flags & z_inner) {
+      subcur_t *mx = container_of(mc->tree, subcur_t, nested_tree);
+      cursor_couple_t *couple = container_of(mx, cursor_couple_t, inner);
+      tASSERT(txn, mc->tree == &couple->outer.subcur->nested_tree);
+      tASSERT(txn, &mc->clc->k == &couple->outer.clc->v);
+      tASSERT(txn, *couple->outer.dbi_state & DBI_DIRTY);
+    }
+    tASSERT(txn, dpl_check(txn));
+  }
+
+  if (is_modifable(txn, mp)) {
+    if (!txn->wr.dirtylist) {
+      tASSERT(txn, (txn->flags & MDBX_WRITEMAP) && !MDBX_AVOID_MSYNC);
+      return MDBX_SUCCESS;
+    }
+    return is_subpage(mp) ? MDBX_SUCCESS : page_touch_modifable(txn, mp);
+  }
+  return page_touch_unmodifable(txn, mc, mp);
+}
+
+MDBX_INTERNAL void page_copy(page_t *const dst, const page_t *const src, const size_t size);
+MDBX_INTERNAL pgr_t __must_check_result page_unspill(MDBX_txn *const txn, const page_t *const mp);
+
+MDBX_INTERNAL page_t *page_shadow_alloc(MDBX_txn *txn, size_t num);
+
+MDBX_INTERNAL void page_shadow_release(MDBX_env *env, page_t *dp, size_t npages);
+
+MDBX_INTERNAL int page_retire_ex(MDBX_cursor *mc, const pgno_t pgno, page_t *mp /* maybe null */,
+                                 unsigned pageflags /* maybe unknown/zero */);
+
+static inline int page_retire(MDBX_cursor *mc, page_t *mp) { return page_retire_ex(mc, mp->pgno, mp, mp->flags); }
+
+static inline void page_wash(MDBX_txn *txn, size_t di, page_t *const mp, const size_t npages) {
+  tASSERT(txn, (txn->flags & MDBX_TXN_RDONLY) == 0);
+  mp->txnid = INVALID_TXNID;
+  mp->flags = P_BAD;
+
+  if (txn->wr.dirtylist) {
+    tASSERT(txn, (txn->flags & MDBX_WRITEMAP) == 0 || MDBX_AVOID_MSYNC);
+    tASSERT(txn, MDBX_AVOID_MSYNC || (di && txn->wr.dirtylist->items[di].ptr == mp));
+    if (!MDBX_AVOID_MSYNC || di) {
+      dpl_remove_ex(txn, di, npages);
+      txn->wr.dirtyroom++;
+      tASSERT(txn, txn->wr.dirtyroom + txn->wr.dirtylist->length ==
+                       (txn->parent ? txn->parent->wr.dirtyroom : txn->env->options.dp_limit));
+      if (!MDBX_AVOID_MSYNC || !(txn->flags & MDBX_WRITEMAP)) {
+        page_shadow_release(txn->env, mp, npages);
+        return;
+      }
+    }
+  } else {
+    tASSERT(txn, (txn->flags & MDBX_WRITEMAP) && !MDBX_AVOID_MSYNC && !di);
+    txn->wr.writemap_dirty_npages -= (txn->wr.writemap_dirty_npages > npages) ? npages : txn->wr.writemap_dirty_npages;
+  }
+  VALGRIND_MAKE_MEM_UNDEFINED(mp, PAGEHDRSZ);
+  VALGRIND_MAKE_MEM_NOACCESS(page2payload(mp), pgno2bytes(txn->env, npages) - PAGEHDRSZ);
+  MDBX_ASAN_POISON_MEMORY_REGION(page2payload(mp), pgno2bytes(txn->env, npages) - PAGEHDRSZ);
+}
+
+MDBX_INTERNAL size_t page_subleaf2_reserve(const MDBX_env *env, size_t host_page_room, size_t subpage_len,
+                                           size_t item_len);
+
+#define page_next(mp) (*(page_t **)ptr_disp((mp)->entries, sizeof(void *) - sizeof(uint32_t)))
+
+MDBX_INTERNAL void rthc_ctor(void);
+MDBX_INTERNAL void rthc_dtor(const uint32_t current_pid);
+MDBX_INTERNAL void rthc_lock(void);
+MDBX_INTERNAL void rthc_unlock(void);
+
+MDBX_INTERNAL int rthc_register(MDBX_env *const env);
+MDBX_INTERNAL int rthc_remove(MDBX_env *const env);
+MDBX_INTERNAL int rthc_uniq_check(const osal_mmap_t *pending, MDBX_env **found);
+
+/* dtor called for thread, i.e. for all mdbx's environment objects */
+MDBX_INTERNAL void rthc_thread_dtor(void *rthc);
+
+static inline void *thread_rthc_get(osal_thread_key_t key) {
+#if defined(_WIN32) || defined(_WIN64)
+  return TlsGetValue(key);
+#else
+  return pthread_getspecific(key);
+#endif
+}
+
+MDBX_INTERNAL void thread_rthc_set(osal_thread_key_t key, const void *value);
+
+#if !defined(_WIN32) && !defined(_WIN64)
+MDBX_INTERNAL void rthc_afterfork(void);
+MDBX_INTERNAL void workaround_glibc_bug21031(void);
+#endif /* !Windows */
+
+static inline void thread_key_delete(osal_thread_key_t key) {
+  TRACE("key = %" PRIuPTR, (uintptr_t)key);
+#if defined(_WIN32) || defined(_WIN64)
+  ENSURE(nullptr, TlsFree(key));
+#else
+  ENSURE(nullptr, pthread_key_delete(key) == 0);
+  workaround_glibc_bug21031();
+#endif
+}
+
+typedef struct walk_tbl {
+  MDBX_val name;
+  tree_t *internal, *nested;
+} walk_tbl_t;
+
+typedef int walk_func(const size_t pgno, const unsigned number, void *const ctx, const int deep,
+                      const walk_tbl_t *table, const size_t page_size, const page_type_t page_type,
+                      const MDBX_error_t err, const size_t nentries, const size_t payload_bytes,
+                      const size_t header_bytes, const size_t unused_bytes, const size_t parent_pgno);
+
+typedef enum walk_options { dont_check_keys_ordering = 1 } walk_options_t;
+
+MDBX_INTERNAL int walk_pages(MDBX_txn *txn, walk_func *visitor, void *user, walk_options_t options);
+
+typedef struct walk_ctx {
+  void *userctx;
+  walk_options_t options;
+  int deep;
+  walk_func *visitor;
+  MDBX_txn *txn;
+  MDBX_cursor *cursor;
+} walk_ctx_t;
+
+MDBX_INTERNAL int walk_tbl(walk_ctx_t *ctx, walk_tbl_t *tbl);
+
+///
+
+#define MDBX_RADIXSORT_THRESHOLD 142
+
+/* ---------------------------------------------------------------------------
+ * LY: State of the art quicksort-based sorting, with internal stack
+ * and network-sort for small chunks.
+ * Thanks to John M. Gamble for the http://pages.ripco.net/~jgamble/nw.html */
+
+#if MDBX_HAVE_CMOV
+#define SORT_CMP_SWAP(TYPE, CMP, a, b)                                                                                 \
+  do {                                                                                                                 \
+    const TYPE swap_tmp = (a);                                                                                         \
+    const bool swap_cmp = expect_with_probability(CMP(swap_tmp, b), 0, .5);                                            \
+    (a) = swap_cmp ? swap_tmp : b;                                                                                     \
+    (b) = swap_cmp ? b : swap_tmp;                                                                                     \
+  } while (0)
+#else
+#define SORT_CMP_SWAP(TYPE, CMP, a, b)                                                                                 \
+  do                                                                                                                   \
+    if (expect_with_probability(!CMP(a, b), 0, .5)) {                                                                  \
+      const TYPE swap_tmp = (a);                                                                                       \
+      (a) = (b);                                                                                                       \
+      (b) = swap_tmp;                                                                                                  \
+    }                                                                                                                  \
+  while (0)
+#endif
+
+//  3 comparators, 3 parallel operations
+//  o-----^--^--o
+//        |  |
+//  o--^--|--v--o
+//     |  |
+//  o--v--v-----o
+//
+//  [[1,2]]
+//  [[0,2]]
+//  [[0,1]]
+#define SORT_NETWORK_3(TYPE, CMP, begin)                                                                               \
+  do {                                                                                                                 \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[2]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[2]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[1]);                                                                      \
+  } while (0)
+
+//  5 comparators, 3 parallel operations
+//  o--^--^--------o
+//     |  |
+//  o--v--|--^--^--o
+//        |  |  |
+//  o--^--v--|--v--o
+//     |     |
+//  o--v-----v-----o
+//
+//  [[0,1],[2,3]]
+//  [[0,2],[1,3]]
+//  [[1,2]]
+#define SORT_NETWORK_4(TYPE, CMP, begin)                                                                               \
+  do {                                                                                                                 \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[1]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[2], begin[3]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[2]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[3]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[2]);                                                                      \
+  } while (0)
+
+//  9 comparators, 5 parallel operations
+//  o--^--^-----^-----------o
+//     |  |     |
+//  o--|--|--^--v-----^--^--o
+//     |  |  |        |  |
+//  o--|--v--|--^--^--|--v--o
+//     |     |  |  |  |
+//  o--|-----v--|--v--|--^--o
+//     |        |     |  |
+//  o--v--------v-----v--v--o
+//
+//  [[0,4],[1,3]]
+//  [[0,2]]
+//  [[2,4],[0,1]]
+//  [[2,3],[1,4]]
+//  [[1,2],[3,4]]
+#define SORT_NETWORK_5(TYPE, CMP, begin)                                                                               \
+  do {                                                                                                                 \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[3]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[2]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[2], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[1]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[2], begin[3]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[2]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[3], begin[4]);                                                                      \
+  } while (0)
+
+//  12 comparators, 6 parallel operations
+//  o-----^--^--^-----------------o
+//        |  |  |
+//  o--^--|--v--|--^--------^-----o
+//     |  |     |  |        |
+//  o--v--v-----|--|--^--^--|--^--o
+//              |  |  |  |  |  |
+//  o-----^--^--v--|--|--|--v--v--o
+//        |  |     |  |  |
+//  o--^--|--v-----v--|--v--------o
+//     |  |           |
+//  o--v--v-----------v-----------o
+//
+//  [[1,2],[4,5]]
+//  [[0,2],[3,5]]
+//  [[0,1],[3,4],[2,5]]
+//  [[0,3],[1,4]]
+//  [[2,4],[1,3]]
+//  [[2,3]]
+#define SORT_NETWORK_6(TYPE, CMP, begin)                                                                               \
+  do {                                                                                                                 \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[2]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[4], begin[5]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[2]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[3], begin[5]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[1]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[3], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[2], begin[5]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[3]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[2], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[3]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[2], begin[3]);                                                                      \
+  } while (0)
+
+//  16 comparators, 6 parallel operations
+//  o--^--------^-----^-----------------o
+//     |        |     |
+//  o--|--^-----|--^--v--------^--^-----o
+//     |  |     |  |           |  |
+//  o--|--|--^--v--|--^-----^--|--v-----o
+//     |  |  |     |  |     |  |
+//  o--|--|--|-----v--|--^--v--|--^--^--o
+//     |  |  |        |  |     |  |  |
+//  o--v--|--|--^-----v--|--^--v--|--v--o
+//        |  |  |        |  |     |
+//  o-----v--|--|--------v--v-----|--^--o
+//           |  |                 |  |
+//  o--------v--v-----------------v--v--o
+//
+//  [[0,4],[1,5],[2,6]]
+//  [[0,2],[1,3],[4,6]]
+//  [[2,4],[3,5],[0,1]]
+//  [[2,3],[4,5]]
+//  [[1,4],[3,6]]
+//  [[1,2],[3,4],[5,6]]
+#define SORT_NETWORK_7(TYPE, CMP, begin)                                                                               \
+  do {                                                                                                                 \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[5]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[2], begin[6]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[2]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[3]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[4], begin[6]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[2], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[3], begin[5]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[1]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[2], begin[3]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[4], begin[5]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[3], begin[6]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[2]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[3], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[5], begin[6]);                                                                      \
+  } while (0)
+
+//  19 comparators, 6 parallel operations
+//  o--^--------^-----^-----------------o
+//     |        |     |
+//  o--|--^-----|--^--v--------^--^-----o
+//     |  |     |  |           |  |
+//  o--|--|--^--v--|--^-----^--|--v-----o
+//     |  |  |     |  |     |  |
+//  o--|--|--|--^--v--|--^--v--|--^--^--o
+//     |  |  |  |     |  |     |  |  |
+//  o--v--|--|--|--^--v--|--^--v--|--v--o
+//        |  |  |  |     |  |     |
+//  o-----v--|--|--|--^--v--v-----|--^--o
+//           |  |  |  |           |  |
+//  o--------v--|--v--|--^--------v--v--o
+//              |     |  |
+//  o-----------v-----v--v--------------o
+//
+//  [[0,4],[1,5],[2,6],[3,7]]
+//  [[0,2],[1,3],[4,6],[5,7]]
+//  [[2,4],[3,5],[0,1],[6,7]]
+//  [[2,3],[4,5]]
+//  [[1,4],[3,6]]
+//  [[1,2],[3,4],[5,6]]
+#define SORT_NETWORK_8(TYPE, CMP, begin)                                                                               \
+  do {                                                                                                                 \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[5]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[2], begin[6]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[3], begin[7]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[2]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[3]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[4], begin[6]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[5], begin[7]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[2], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[3], begin[5]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[1]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[6], begin[7]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[2], begin[3]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[4], begin[5]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[3], begin[6]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[1], begin[2]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[3], begin[4]);                                                                      \
+    SORT_CMP_SWAP(TYPE, CMP, begin[5], begin[6]);                                                                      \
+  } while (0)
+
+#define SORT_INNER(TYPE, CMP, begin, end, len)                                                                         \
+  switch (len) {                                                                                                       \
+  default:                                                                                                             \
+    assert(false);                                                                                                     \
+    __unreachable();                                                                                                   \
+  case 0:                                                                                                              \
+  case 1:                                                                                                              \
+    break;                                                                                                             \
+  case 2:                                                                                                              \
+    SORT_CMP_SWAP(TYPE, CMP, begin[0], begin[1]);                                                                      \
+    break;                                                                                                             \
+  case 3:                                                                                                              \
+    SORT_NETWORK_3(TYPE, CMP, begin);                                                                                  \
+    break;                                                                                                             \
+  case 4:                                                                                                              \
+    SORT_NETWORK_4(TYPE, CMP, begin);                                                                                  \
+    break;                                                                                                             \
+  case 5:                                                                                                              \
+    SORT_NETWORK_5(TYPE, CMP, begin);                                                                                  \
+    break;                                                                                                             \
+  case 6:                                                                                                              \
+    SORT_NETWORK_6(TYPE, CMP, begin);                                                                                  \
+    break;                                                                                                             \
+  case 7:                                                                                                              \
+    SORT_NETWORK_7(TYPE, CMP, begin);                                                                                  \
+    break;                                                                                                             \
+  case 8:                                                                                                              \
+    SORT_NETWORK_8(TYPE, CMP, begin);                                                                                  \
+    break;                                                                                                             \
+  }
+
+#define SORT_SWAP(TYPE, a, b)                                                                                          \
+  do {                                                                                                                 \
+    const TYPE swap_tmp = (a);                                                                                         \
+    (a) = (b);                                                                                                         \
+    (b) = swap_tmp;                                                                                                    \
+  } while (0)
+
+#define SORT_PUSH(low, high)                                                                                           \
+  do {                                                                                                                 \
+    top->lo = (low);                                                                                                   \
+    top->hi = (high);                                                                                                  \
+    ++top;                                                                                                             \
+  } while (0)
+
+#define SORT_POP(low, high)                                                                                            \
+  do {                                                                                                                 \
+    --top;                                                                                                             \
+    low = top->lo;                                                                                                     \
+    high = top->hi;                                                                                                    \
+  } while (0)
+
+#define SORT_IMPL(NAME, EXPECT_LOW_CARDINALITY_OR_PRESORTED, TYPE, CMP)                                                \
+                                                                                                                       \
+  static inline bool NAME##_is_sorted(const TYPE *first, const TYPE *last) {                                           \
+    while (++first <= last)                                                                                            \
+      if (expect_with_probability(CMP(first[0], first[-1]), 1, .1))                                                    \
+        return false;                                                                                                  \
+    return true;                                                                                                       \
+  }                                                                                                                    \
+                                                                                                                       \
+  typedef struct {                                                                                                     \
+    TYPE *lo, *hi;                                                                                                     \
+  } NAME##_stack;                                                                                                      \
+                                                                                                                       \
+  __hot static void NAME(TYPE *const __restrict begin, TYPE *const __restrict end) {                                   \
+    NAME##_stack stack[sizeof(size_t) * CHAR_BIT], *__restrict top = stack;                                            \
+                                                                                                                       \
+    TYPE *__restrict hi = end - 1;                                                                                     \
+    TYPE *__restrict lo = begin;                                                                                       \
+    while (true) {                                                                                                     \
+      const ptrdiff_t len = hi - lo;                                                                                   \
+      if (len < 8) {                                                                                                   \
+        SORT_INNER(TYPE, CMP, lo, hi + 1, len + 1);                                                                    \
+        if (unlikely(top == stack))                                                                                    \
+          break;                                                                                                       \
+        SORT_POP(lo, hi);                                                                                              \
+        continue;                                                                                                      \
+      }                                                                                                                \
+                                                                                                                       \
+      TYPE *__restrict mid = lo + (len >> 1);                                                                          \
+      SORT_CMP_SWAP(TYPE, CMP, *lo, *mid);                                                                             \
+      SORT_CMP_SWAP(TYPE, CMP, *mid, *hi);                                                                             \
+      SORT_CMP_SWAP(TYPE, CMP, *lo, *mid);                                                                             \
+                                                                                                                       \
+      TYPE *right = hi - 1;                                                                                            \
+      TYPE *left = lo + 1;                                                                                             \
+      while (1) {                                                                                                      \
+        while (expect_with_probability(CMP(*left, *mid), 0, .5))                                                       \
+          ++left;                                                                                                      \
+        while (expect_with_probability(CMP(*mid, *right), 0, .5))                                                      \
+          --right;                                                                                                     \
+        if (unlikely(left > right)) {                                                                                  \
+          if (EXPECT_LOW_CARDINALITY_OR_PRESORTED) {                                                                   \
+            if (NAME##_is_sorted(lo, right))                                                                           \
+              lo = right + 1;                                                                                          \
+            if (NAME##_is_sorted(left, hi))                                                                            \
+              hi = left;                                                                                               \
+          }                                                                                                            \
+          break;                                                                                                       \
+        }                                                                                                              \
+        SORT_SWAP(TYPE, *left, *right);                                                                                \
+        mid = (mid == left) ? right : (mid == right) ? left : mid;                                                     \
+        ++left;                                                                                                        \
+        --right;                                                                                                       \
+      }                                                                                                                \
+                                                                                                                       \
+      if (right - lo > hi - left) {                                                                                    \
+        SORT_PUSH(lo, right);                                                                                          \
+        lo = left;                                                                                                     \
+      } else {                                                                                                         \
+        SORT_PUSH(left, hi);                                                                                           \
+        hi = right;                                                                                                    \
+      }                                                                                                                \
+    }                                                                                                                  \
+                                                                                                                       \
+    if (AUDIT_ENABLED()) {                                                                                             \
+      for (TYPE *scan = begin + 1; scan < end; ++scan)                                                                 \
+        assert(CMP(scan[-1], scan[0]));                                                                                \
+    }                                                                                                                  \
+  }
+
+/*------------------------------------------------------------------------------
+ * LY: radix sort for large chunks */
+
+#define RADIXSORT_IMPL(NAME, TYPE, EXTRACT_KEY, BUFFER_PREALLOCATED, END_GAP)                                          \
+                                                                                                                       \
+  __hot static bool NAME##_radixsort(TYPE *const begin, const size_t length) {                                         \
+    TYPE *tmp;                                                                                                         \
+    if (BUFFER_PREALLOCATED) {                                                                                         \
+      tmp = begin + length + END_GAP;                                                                                  \
+      /* memset(tmp, 0xDeadBeef, sizeof(TYPE) * length); */                                                            \
+    } else {                                                                                                           \
+      tmp = osal_malloc(sizeof(TYPE) * length);                                                                        \
+      if (unlikely(!tmp))                                                                                              \
+        return false;                                                                                                  \
+    }                                                                                                                  \
+                                                                                                                       \
+    size_t key_shift = 0, key_diff_mask;                                                                               \
+    do {                                                                                                               \
+      struct {                                                                                                         \
+        pgno_t a[256], b[256];                                                                                         \
+      } counters;                                                                                                      \
+      memset(&counters, 0, sizeof(counters));                                                                          \
+                                                                                                                       \
+      key_diff_mask = 0;                                                                                               \
+      size_t prev_key = EXTRACT_KEY(begin) >> key_shift;                                                               \
+      TYPE *r = begin, *end = begin + length;                                                                          \
+      do {                                                                                                             \
+        const size_t key = EXTRACT_KEY(r) >> key_shift;                                                                \
+        counters.a[key & 255]++;                                                                                       \
+        counters.b[(key >> 8) & 255]++;                                                                                \
+        key_diff_mask |= prev_key ^ key;                                                                               \
+        prev_key = key;                                                                                                \
+      } while (++r != end);                                                                                            \
+                                                                                                                       \
+      pgno_t ta = 0, tb = 0;                                                                                           \
+      for (size_t i = 0; i < 256; ++i) {                                                                               \
+        const pgno_t ia = counters.a[i];                                                                               \
+        counters.a[i] = ta;                                                                                            \
+        ta += ia;                                                                                                      \
+        const pgno_t ib = counters.b[i];                                                                               \
+        counters.b[i] = tb;                                                                                            \
+        tb += ib;                                                                                                      \
+      }                                                                                                                \
+                                                                                                                       \
+      r = begin;                                                                                                       \
+      do {                                                                                                             \
+        const size_t key = EXTRACT_KEY(r) >> key_shift;                                                                \
+        tmp[counters.a[key & 255]++] = *r;                                                                             \
+      } while (++r != end);                                                                                            \
+                                                                                                                       \
+      if (unlikely(key_diff_mask < 256)) {                                                                             \
+        memcpy(begin, tmp, ptr_dist(end, begin));                                                                      \
+        break;                                                                                                         \
+      }                                                                                                                \
+      end = (r = tmp) + length;                                                                                        \
+      do {                                                                                                             \
+        const size_t key = EXTRACT_KEY(r) >> key_shift;                                                                \
+        begin[counters.b[(key >> 8) & 255]++] = *r;                                                                    \
+      } while (++r != end);                                                                                            \
+                                                                                                                       \
+      key_shift += 16;                                                                                                 \
+    } while (key_diff_mask >> 16);                                                                                     \
+                                                                                                                       \
+    if (!(BUFFER_PREALLOCATED))                                                                                        \
+      osal_free(tmp);                                                                                                  \
+    return true;                                                                                                       \
+  }
+
+/*------------------------------------------------------------------------------
+ * LY: Binary search */
+
+#if defined(__clang__) && __clang_major__ > 4 && defined(__ia32__)
+#define WORKAROUND_FOR_CLANG_OPTIMIZER_BUG(size, flag)                                                                 \
+  do                                                                                                                   \
+    __asm __volatile(""                                                                                                \
+                     : "+r"(size)                                                                                      \
+                     : "r" /* the `b` constraint is more suitable here, but                                            \
+                              cause CLANG to allocate and push/pop an one more                                         \
+                              register, so using the `r` which avoids this. */                                         \
+                     (flag));                                                                                          \
+  while (0)
+#else
+#define WORKAROUND_FOR_CLANG_OPTIMIZER_BUG(size, flag)                                                                 \
+  do {                                                                                                                 \
+    /* nope for non-clang or non-x86 */;                                                                               \
+  } while (0)
+#endif /* Workaround for CLANG */
+
+#define SEARCH_IMPL(NAME, TYPE_LIST, TYPE_ARG, CMP)                            \
+  static __always_inline const TYPE_LIST *NAME(                                \
+      const TYPE_LIST *it, size_t length, const TYPE_ARG item) {               \
+    const TYPE_LIST *const begin = it, *const end = begin + length;            \
+                                                                               \
+    if (MDBX_HAVE_CMOV)                                                        \
+      do {                                                                     \
+        /* Адаптивно-упрощенный шаг двоичного поиска:                          \
+         *  - без переходов при наличии cmov или аналога;                      \
+         *  - допускает лишние итерации;                                       \
+         *  - но ищет пока size > 2, что требует дозавершения поиска           \
+         *    среди остающихся 0-1-2 элементов. */                             \
+        const TYPE_LIST *const middle = it + (length >> 1);                    \
+        length = (length + 1) >> 1;                                            \
+        const bool flag = expect_with_probability(CMP(*middle, item), 0, .5);  \
+        WORKAROUND_FOR_CLANG_OPTIMIZER_BUG(length, flag);                      \
+        it = flag ? middle : it;                                               \
+      } while (length > 2);                                                    \
+    else                                                                       \
+      while (length > 2) {                                                     \
+        /* Вариант с использованием условного перехода. Основное отличие в     \
+         * том, что при "не равно" (true от компаратора) переход делается на 1 \
+         * ближе к концу массива. Алгоритмически это верно и обеспечивает      \
+         * чуть-чуть более быструю сходимость, но зато требует больше          \
+         * вычислений при true от компаратора. Также ВАЖНО(!) не допускается   \
+         * спекулятивное выполнение при size == 0. */                          \
+        const TYPE_LIST *const middle = it + (length >> 1);                    \
+        length = (length + 1) >> 1;                                            \
+        const bool flag = expect_with_probability(CMP(*middle, item), 0, .5);  \
+        if (flag) {                                                            \
+          it = middle + 1;                                                     \
+          length -= 1;                                                         \
+        }                                                                      \
+      }                                                                        \
+    it += length > 1 && expect_with_probability(CMP(*it, item), 0, .5);        \
+    it += length > 0 && expect_with_probability(CMP(*it, item), 0, .5);        \
+                                                                               \
+    if (AUDIT_ENABLED()) {                                                     \
+      for (const TYPE_LIST *scan = begin; scan < it; ++scan)                   \
+        assert(CMP(*scan, item));                                              \
+      for (const TYPE_LIST *scan = it; scan < end; ++scan)                     \
+        assert(!CMP(*scan, item));                                             \
+      (void)begin, (void)end;                                                  \
+    }                                                                          \
+                                                                               \
+    return it;                                                                 \
+  }
+
+#endif /* __cplusplus */
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif /* MSVC */
 /// \copyright SPDX-License-Identifier: Apache-2.0
-/// \author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2020-2025
+/// \author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2020-2026
 ///
 /// \brief Non-inline part of the libmdbx C++ API
 ///
@@ -3643,6 +7551,7 @@ bool slice::is_printable(bool disable_utf8) const noexcept {
   enum : byte {
     LS = 4,                     // shift for UTF8 sequence length
     P_ = 1 << LS,               // printable ASCII flag
+    X_ = 1 << (LS - 1),         // printable extended ASCII flag
     N_ = 0,                     // non-printable ASCII
     second_range_mask = P_ - 1, // mask for range flag
     r80_BF = 0,                 // flag for UTF8 2nd byte range
@@ -3679,14 +7588,14 @@ bool slice::is_printable(bool disable_utf8) const noexcept {
       P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, // 50
       P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, // 60
       P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, N_, // 70
-      N_, N_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, N_, P_, N_, // 80
-      N_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, N_, P_, P_, // 90
-      P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, // a0
-      P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, // b0
-      P_, P_, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, // c0
+      N_, N_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, N_, X_, N_, // 80
+      N_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, N_, X_, X_, // 90
+      X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, // a0
+      X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, // b0
+      X_, X_, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, // c0
       C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, C2, // df
       E0, E1, E1, E1, E1, E1, E1, E1, E1, E1, E1, E1, E1, ED, EE, EE, // e0
-      F0, F1, F1, F1, F4, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_, P_  // f0
+      F0, F1, F1, F1, F4, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_, X_  // f0
   };
 
   if (MDBX_UNLIKELY(length() < 1))
@@ -3696,7 +7605,7 @@ bool slice::is_printable(bool disable_utf8) const noexcept {
   const auto end = src + length();
   if (MDBX_UNLIKELY(disable_utf8)) {
     do
-      if (MDBX_UNLIKELY((P_ & map[*src]) == 0))
+      if (MDBX_UNLIKELY(((P_ | X_) & map[*src]) == 0))
         MDBX_CXX20_UNLIKELY return false;
     while (++src < end);
     return true;
@@ -4387,11 +8296,11 @@ bool from_base64::is_erroneous() const noexcept {
 #pragma warning(disable : 4251)
 #endif /* MSVC */
 
-MDBX_INSTALL_API_TEMPLATE(LIBMDBX_API_TYPE, buffer<legacy_allocator>);
+MDBX_INSTALL_API_TEMPLATE(LIBMDBX_API_TYPE, buffer<legacy_allocator, default_capacity_policy>);
 
-#if defined(__cpp_lib_memory_resource) && __cpp_lib_memory_resource >= 201603L && _GLIBCXX_USE_CXX11_ABI
-MDBX_INSTALL_API_TEMPLATE(LIBMDBX_API_TYPE, buffer<polymorphic_allocator>);
-#endif /* __cpp_lib_memory_resource >= 201603L */
+#if MDBX_CXX_HAS_POLYMORPHIC_ALLOCATOR
+MDBX_INSTALL_API_TEMPLATE(LIBMDBX_API_TYPE, buffer<polymorphic_allocator, default_capacity_policy>);
+#endif /* MDBX_CXX_HAS_POLYMORPHIC_ALLOCATOR */
 
 #if defined(_MSC_VER)
 #pragma warning(pop)
@@ -4524,12 +8433,12 @@ __cold env &env::copy(const MDBX_STD_FILESYSTEM_PATH &destination, bool compacti
 
 __cold path env::get_path() const {
 #if defined(_WIN32) || defined(_WIN64)
-  const wchar_t *c_wstr;
+  const wchar_t *c_wstr = nullptr;
   error::success_or_throw(::mdbx_env_get_pathW(handle_, &c_wstr));
   static_assert(sizeof(path::value_type) == sizeof(wchar_t), "Oops");
   return path(c_wstr);
 #else
-  const char *c_str;
+  const char *c_str = nullptr;
   error::success_or_throw(::mdbx_env_get_path(handle_, &c_str));
   static_assert(sizeof(path::value_type) == sizeof(char), "Oops");
   return path(c_str);
@@ -4701,7 +8610,7 @@ void txn_managed::commit(commit_latency *latency) {
 }
 
 void txn_managed::commit_embark_read() {
-  auto env = this->env();
+  auto env = handle_->env;
   commit();
   error::success_or_throw(::mdbx_txn_begin(env, nullptr, MDBX_TXN_RDONLY, &handle_));
 }
@@ -4816,6 +8725,26 @@ __cold bool txn::rename_map(const ::std::string &old_name, const ::std::string &
 
 //------------------------------------------------------------------------------
 
+void cursor::update_current(const slice &value) {
+  default_buffer holder;
+  auto key = current().key;
+  if (error::boolean_or_throw(mdbx_is_dirty(handle_->txn, key.iov_base)))
+    key = holder.assign(key);
+
+  update(key, value);
+}
+
+slice cursor::reverse_current(size_t value_length) {
+  default_buffer holder;
+  auto key = current().key;
+  if (error::boolean_or_throw(mdbx_is_dirty(handle_->txn, key.iov_base)))
+    key = holder.assign(key);
+
+  return update_reserve(key, value_length);
+}
+
+//------------------------------------------------------------------------------
+
 __cold ::std::ostream &operator<<(::std::ostream &out, const slice &it) {
   out << "{";
   if (!it.is_valid())
@@ -4825,13 +8754,13 @@ __cold ::std::ostream &operator<<(::std::ostream &out, const slice &it) {
   else if (it.empty())
     out << "EMPTY->" << it.data();
   else {
-    const slice root(it.head(std::min(it.length(), size_t(64))));
+    const slice head(it.head(std::min(it.length(), size_t(64))));
     out << it.length() << ".";
-    if (root.is_printable())
-      (out << "\"").write(root.char_ptr(), root.length()) << "\"";
+    if (head.is_printable())
+      (out << "\"").write(head.char_ptr(), head.length()) << "\"";
     else
-      out << root.encode_base58();
-    if (root.length() < it.length())
+      out << to_hex(head);
+    if (head.length() < it.length())
       out << "...";
   }
   return out << "}";

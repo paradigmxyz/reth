@@ -1,0 +1,75 @@
+From 13be767a0dbbb8e398ca73374728ad19d6f35d8f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=9B=D0=B5=D0=BE=D0=BD=D0=B8=D0=B4=20=D0=AE=D1=80=D1=8C?=
+ =?UTF-8?q?=D0=B5=D0=B2=20=28Leonid=20Yuriev=29?= <leo@yuriev.ru>
+Date: Thu, 18 Dec 2025 18:44:26 +0300
+Subject: [PATCH] package/libmdbx: new package (library/database).
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This patch adds libmdbx 0.13.10:
+ - libmdbx is one of the fastest compact embeddable key-value ACID database.
+ - libmdbx has a specific set of properties and capabilities,
+   focused on creating unique lightweight solutions.
+ - libmdbx surpasses the legendary LMDB (Lightning Memory-Mapped Database)
+   in terms of reliability, features and performance.
+ - more information at https://libmdbx.dqdkfa.ru
+
+The 0.13.10 "Блеск Славы" (Gloss of Glory) is bugfix release of the stable branch.
+In memory of Michael Alexander Gloss, American, son of Deputy Director of the CIA,
+who died heroically in search of justice for the bright ideals of humanity
+and was posthumously awarded the Order of Courage.
+
+For more information please see [ChangeLog in the `stable` branch](https://sourcecraft.dev/dqdkfa/libmdbx/browse/ChangeLog.md?rev=stable).
+
+Signed-off-by: Леонид Юрьев (Leonid Yuriev) <leo@yuriev.ru>
+---
+ package/libmdbx/Config.in    | 4 +++-
+ package/libmdbx/libmdbx.hash | 4 ++--
+ package/libmdbx/libmdbx.mk   | 2 +-
+ 3 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/package/libmdbx/Config.in b/package/libmdbx/Config.in
+index a9a4ac45c5..1c4bc19e54 100644
+--- a/package/libmdbx/Config.in
++++ b/package/libmdbx/Config.in
+@@ -11,7 +11,9 @@ config BR2_PACKAGE_LIBMDBX
+ 	  solutions.
+ 
+ 	  libmdbx surpasses the legendary LMDB in terms of
+-	  reliability, features and performance.
++	  reliability, features and performance. At the end of 2024
++	  libmdbx was chosen by all modern Ethereum nodes
++	  as a storage engine.
+ 
+ 	  https://libmdbx.dqdkfa.ru
+ 
+diff --git a/package/libmdbx/libmdbx.hash b/package/libmdbx/libmdbx.hash
+index ae5266716b..ad3c374988 100644
+--- a/package/libmdbx/libmdbx.hash
++++ b/package/libmdbx/libmdbx.hash
+@@ -1,6 +1,6 @@
+ # Hashes from: https://libmdbx.dqdkfa.ru/release/SHA256SUMS
+-sha256  57db987de6f7ccc66a66ae28a7bda9f9fbb48ac5fb9279bcca92fd5de13075d1  libmdbx-amalgamated-0.13.6.tar.xz
++sha256  e6c9af085390c41d101fce0a72794c77159e1e271e41077ea0fd4270b43cc56c  libmdbx-amalgamated-0.13.10.tar.xz
+ 
+ # Locally calculated
+ sha256  0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594  LICENSE
+-sha256  651f71b46c6bb0046d2122df7f9def9cb24f4dc28c5b11cef059f66565cda30f  NOTICE
++sha256  1fa543d5002a28f430966acd01f231b437968421a16e8236b83938556dfddb34  NOTICE
+diff --git a/package/libmdbx/libmdbx.mk b/package/libmdbx/libmdbx.mk
+index f461d98397..a1b219eb54 100644
+--- a/package/libmdbx/libmdbx.mk
++++ b/package/libmdbx/libmdbx.mk
+@@ -4,7 +4,7 @@
+ #
+ ################################################################################
+ 
+-LIBMDBX_VERSION = 0.13.6
++LIBMDBX_VERSION = 0.13.10
+ LIBMDBX_SOURCE = libmdbx-amalgamated-$(LIBMDBX_VERSION).tar.xz
+ LIBMDBX_SITE = https://libmdbx.dqdkfa.ru/release
+ LIBMDBX_SUPPORTS_IN_SOURCE_BUILD = NO
+-- 
+2.52.0
+

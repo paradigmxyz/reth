@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2025 Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> ###############################################
+# Copyright (c) 2012-2026 Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> ###############################################
 # SPDX-License-Identifier: Apache-2.0
 
 if(CMAKE_VERSION VERSION_LESS 3.8.2)
@@ -121,11 +121,15 @@ macro(semver_parse str)
       set(_semver_ok TRUE)
     else()
       set(_semver_err
-          "Поля prerelease и/или buildmetadata (строка `-foo+bar` в составе `0.0.0[.0][-foo][+bar]`) не соответствуют SemVer-спецификации"
+          # "Поля prerelease и/или buildmetadata (подстрока `-foo+bar` в составе `0.0.0[.0][-foo][+bar]`) не соответствуют SemVer-спецификации"
+          "The prerelease and/or buildmetadata fields (substring `-foo+bar` as part of `0.0.0[.0][-foo][+bar]`) do not comply with the SemVer specification"
       )
     endif()
   else()
-    set(_semver_err "Версионная отметка в целом не соответствует шаблону `0.0.0[.0][-foo][+bar]` SemVer-спецификации")
+    set(_semver_err
+      # "Версионная отметка в целом не соответствует шаблону `0.0.0[.0][-foo][+bar]` SemVer-спецификации"
+      "The version mark as a whole does not match the pattern `0.0.0[.0][-foo][+bar]` of the SemVer specification"
+    )
   endif()
 endmacro(semver_parse)
 
@@ -215,138 +219,6 @@ function(semver_parse_selfcheck)
     FALSE)
 endfunction()
 
-macro(git_get_versioninfo source_root_directory)
-  set(_git_describe "")
-  set(_git_timestamp "")
-  set(_git_tree "")
-  set(_git_commit "")
-  set(_git_last_vtag "")
-  set(_git_trailing_commits 0)
-  set(_git_is_dirty FALSE)
-
-  execute_process(
-    COMMAND ${GIT} show --no-patch --format=%cI HEAD
-    OUTPUT_VARIABLE _git_timestamp
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    WORKING_DIRECTORY ${source_root_directory}
-    RESULT_VARIABLE _rc)
-  if(_rc OR "${_git_timestamp}" STREQUAL "%cI")
-    execute_process(
-      COMMAND ${GIT} show --no-patch --format=%ci HEAD
-      OUTPUT_VARIABLE _git_timestamp
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      WORKING_DIRECTORY ${source_root_directory}
-      RESULT_VARIABLE _rc)
-    if(_rc OR "${_git_timestamp}" STREQUAL "%ci")
-      message(FATAL_ERROR "Please install latest version of git (`show --no-patch --format=%cI HEAD` failed)")
-    endif()
-  endif()
-
-  execute_process(
-    COMMAND ${GIT} show --no-patch --format=%T HEAD
-    OUTPUT_VARIABLE _git_tree
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    WORKING_DIRECTORY ${source_root_directory}
-    RESULT_VARIABLE _rc)
-  if(_rc OR "${_git_tree}" STREQUAL "")
-    message(FATAL_ERROR "Please install latest version of git (`show --no-patch --format=%T HEAD` failed)")
-  endif()
-
-  execute_process(
-    COMMAND ${GIT} show --no-patch --format=%H HEAD
-    OUTPUT_VARIABLE _git_commit
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    WORKING_DIRECTORY ${source_root_directory}
-    RESULT_VARIABLE _rc)
-  if(_rc OR "${_git_commit}" STREQUAL "")
-    message(FATAL_ERROR "Please install latest version of git (`show --no-patch --format=%H HEAD` failed)")
-  endif()
-
-  execute_process(
-    COMMAND ${GIT} status --untracked-files=no --porcelain
-    OUTPUT_VARIABLE _git_status
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    WORKING_DIRECTORY ${source_root_directory}
-    RESULT_VARIABLE _rc)
-  if(_rc)
-    message(FATAL_ERROR "Please install latest version of git (`status --untracked-files=no --porcelain` failed)")
-  endif()
-  if(NOT "${_git_status}" STREQUAL "")
-    set(_git_commit "DIRTY-${_git_commit}")
-    set(_git_is_dirty TRUE)
-  endif()
-  unset(_git_status)
-
-  execute_process(
-    COMMAND ${GIT} describe --tags --abbrev=0 "--match=v[0-9]*"
-    OUTPUT_VARIABLE _git_last_vtag
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    WORKING_DIRECTORY ${source_root_directory}
-    RESULT_VARIABLE _rc)
-  if(_rc OR "${_git_last_vtag}" STREQUAL "")
-    execute_process(
-      COMMAND ${GIT} tag
-      OUTPUT_VARIABLE _git_tags_dump
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      WORKING_DIRECTORY ${source_root_directory}
-      RESULT_VARIABLE _rc)
-    execute_process(
-      COMMAND ${GIT} rev-list --count --no-merges --remove-empty HEAD
-      OUTPUT_VARIABLE _git_whole_count
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      WORKING_DIRECTORY ${source_root_directory}
-      RESULT_VARIABLE _rc)
-    if(_rc)
-      message(
-        FATAL_ERROR
-          "Please install latest version of git (`git rev-list --count --no-merges --remove-empty HEAD` failed)")
-    endif()
-    if(_git_whole_count GREATER 42 AND "${_git_tags_dump}" STREQUAL "")
-      message(FATAL_ERROR "Please fetch tags (`describe --tags --abbrev=0 --match=v[0-9]*` failed)")
-    else()
-      message(NOTICE "Falling back to version `0.0.0` (have you made an initial release?")
-    endif()
-    set(_git_last_vtag "0.0.0")
-    set(_git_trailing_commits ${_git_whole_count})
-    execute_process(
-      COMMAND ${GIT} describe --tags --dirty --long --always
-      OUTPUT_VARIABLE _git_describe
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      WORKING_DIRECTORY ${source_root_directory}
-      RESULT_VARIABLE _rc)
-    if(_rc OR "${_git_describe}" STREQUAL "")
-      execute_process(
-        COMMAND ${GIT} describe --tags --all --dirty --long --always
-        OUTPUT_VARIABLE _git_describe
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        WORKING_DIRECTORY ${source_root_directory}
-        RESULT_VARIABLE _rc)
-      if(_rc OR "${_git_describe}" STREQUAL "")
-        message(FATAL_ERROR "Please install latest version of git (`describe --tags --all --long` failed)")
-      endif()
-    endif()
-  else()
-    execute_process(
-      COMMAND ${GIT} describe --tags --dirty --long "--match=v[0-9]*"
-      OUTPUT_VARIABLE _git_describe
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      WORKING_DIRECTORY ${source_root_directory}
-      RESULT_VARIABLE _rc)
-    if(_rc OR "${_git_describe}" STREQUAL "")
-      message(FATAL_ERROR "Please install latest version of git (`describe --tags --long --match=v[0-9]*`)")
-    endif()
-    execute_process(
-      COMMAND ${GIT} rev-list --count "${_git_last_vtag}..HEAD"
-      OUTPUT_VARIABLE _git_trailing_commits
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      WORKING_DIRECTORY ${source_root_directory}
-      RESULT_VARIABLE _rc)
-    if(_rc OR "${_git_trailing_commits}" STREQUAL "")
-      message(FATAL_ERROR "Please install latest version of git (`rev-list --count ${_git_last_vtag}..HEAD` failed)")
-    endif()
-  endif()
-endmacro(git_get_versioninfo)
-
 macro(semver_provide name source_root_directory build_directory_for_json_output build_metadata parent_scope)
   set(_semver "")
   set(_git_describe "")
@@ -354,43 +226,15 @@ macro(semver_provide name source_root_directory build_directory_for_json_output 
   set(_git_tree "")
   set(_git_commit "")
   set(_version_from "")
-  set(_git_root FALSE)
-
-  find_program(GIT git)
-  if(GIT)
-    execute_process(
-      COMMAND ${GIT} rev-parse --show-toplevel
-      OUTPUT_VARIABLE _git_root
-      ERROR_VARIABLE _git_root_error
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      WORKING_DIRECTORY ${source_root_directory}
-      RESULT_VARIABLE _rc)
-    if(_rc OR "${_git_root}" STREQUAL "")
-      if(EXISTS "${source_root_directory}/.git")
-        message(ERROR "`git rev-parse --show-toplevel` failed '${_git_root_error}'")
-      else()
-        message(VERBOSE "`git rev-parse --show-toplevel` failed '${_git_root_error}'")
-      endif()
-    else()
-      set(_source_root "${source_root_directory}")
-      if(NOT CMAKE_VERSION VERSION_LESS 3.19)
-        file(REAL_PATH "${_git_root}" _git_root)
-        file(REAL_PATH "${_source_root}" _source_root)
-      endif()
-      if(_source_root STREQUAL _git_root AND EXISTS "${_git_root}/VERSION.json")
-        message(
-          FATAL_ERROR
-            "Несколько источников информации о версии, допустим только один из: репозиторий git, либо файл VERSION.json"
-        )
-      endif()
-    endif()
-  endif()
 
   if(EXISTS "${source_root_directory}/VERSION.json")
     set(_version_from "${source_root_directory}/VERSION.json")
 
     if(CMAKE_VERSION VERSION_LESS 3.19)
-      message(FATAL_ERROR "Требуется CMake версии >= 3.19 для чтения VERSION.json")
+      message(FATAL_ERROR
+        # "Требуется CMake версии >= 3.19 для чтения VERSION.json"
+        "Requires CMake version >= 3.19 to parse VERSION.json"
+      )
     endif()
     file(
       STRINGS "${_version_from}" _versioninfo_json NEWLINE_CONSUME
@@ -410,24 +254,11 @@ macro(semver_provide name source_root_directory build_directory_for_json_output 
     if(NOT _semver_ok)
       message(FATAL_ERROR "SemVer `${_semver}` from ${_version_from}: ${_semver_err}")
     endif()
-  elseif(_git_root AND _source_root STREQUAL _git_root)
-    set(_version_from git)
-    git_get_versioninfo(${source_root_directory})
-    semver_parse(${_git_last_vtag})
-    if(NOT _semver_ok)
-      message(FATAL_ERROR "Git tag `${_git_last_vtag}`: ${_semver_err}")
-    endif()
-    if(_git_trailing_commits GREATER 0 AND "${_semver_tweak}" STREQUAL "")
-      set(_semver_tweak ${_git_trailing_commits})
-    endif()
-
-  elseif(GIT)
-    message(
-      FATAL_ERROR
-        "Нет источника информации о версии (${source_root_directory}), требуется один из: репозиторий git, либо VERSION.json"
-    )
   else()
-    message(FATAL_ERROR "Требуется git для получения информации о версии")
+    message(FATAL_ERROR
+      # "Отсутствует `VERSION.json` с информацией о версии"
+      "The `VERSION.json` with version information is missing"
+    )
   endif()
 
   if(NOT _git_describe
@@ -506,19 +337,6 @@ macro(semver_provide name source_root_directory build_directory_for_json_output 
         PARENT_SCOPE)
   endif()
 
-  if(_version_from STREQUAL "git")
-    string(
-      CONFIGURE
-        "{
-      \"git_describe\" : \"@_git_describe@\",
-      \"git_timestamp\" : \"@_git_timestamp@\",
-      \"git_tree\" : \"@_git_tree@\",
-      \"git_commit\" : \"@_git_commit@\",
-      \"semver\" : \"@_semver@\"\n}"
-        _versioninfo_json
-      @ONLY ESCAPE_QUOTES)
-    file(WRITE "${build_directory_for_json_output}/VERSION.json" "${_versioninfo_json}")
-  endif()
 endmacro(semver_provide)
 
 cmake_policy(POP)
