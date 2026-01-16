@@ -522,6 +522,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
+            // Accumulate trie updates across blocks to batch the write at the end.
+            // This reduces cursor open/close overhead from N calls to 1.
+            let mut accumulated_trie_updates: Option<TrieUpdatesSorted> = None;
+
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
@@ -556,10 +560,21 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     self.write_hashed_state(&trie_data.hashed_state)?;
                     timings.write_hashed_state += start.elapsed();
 
+                    // Accumulate trie updates instead of writing per-block
                     let start = Instant::now();
-                    self.write_trie_updates_sorted(&trie_data.trie_updates)?;
+                    match &mut accumulated_trie_updates {
+                        Some(acc) => acc.extend_ref(&trie_data.trie_updates),
+                        None => accumulated_trie_updates = Some((*trie_data.trie_updates).clone()),
+                    }
                     timings.write_trie_updates += start.elapsed();
                 }
+            }
+
+            // Write all accumulated trie updates in a single batch
+            if let Some(trie_updates) = &accumulated_trie_updates {
+                let start = Instant::now();
+                self.write_trie_updates_sorted(trie_updates)?;
+                timings.write_trie_updates += start.elapsed();
             }
 
             // Full mode: update history indices
