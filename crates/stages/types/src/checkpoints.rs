@@ -289,6 +289,20 @@ pub struct IndexHistoryCheckpoint {
     pub progress: EntitiesCheckpoint,
 }
 
+/// Saves the progress of `MerkleChangeSets` stage.
+///
+/// Note: This type is only kept for backward compatibility with the Compact codec.
+/// The `MerkleChangeSets` stage has been removed.
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct MerkleChangeSetsCheckpoint {
+    /// Block range which this checkpoint is valid for.
+    pub block_range: CheckpointBlockRange,
+}
+
 /// Saves the progress of abstract stage iterating over or downloading entities.
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
@@ -415,6 +429,7 @@ impl StageCheckpoint {
                 progress: entities,
                 ..
             }) => Some(entities),
+            StageUnitCheckpoint::MerkleChangeSets(_) => None,
         }
     }
 }
@@ -440,6 +455,11 @@ pub enum StageUnitCheckpoint {
     Headers(HeadersCheckpoint),
     /// Saves the progress of Index History stage.
     IndexHistory(IndexHistoryCheckpoint),
+    /// Saves the progress of `MerkleChangeSets` stage.
+    ///
+    /// Note: This variant is only kept for backward compatibility with the Compact codec.
+    /// The `MerkleChangeSets` stage has been removed.
+    MerkleChangeSets(MerkleChangeSetsCheckpoint),
 }
 
 impl StageUnitCheckpoint {
@@ -474,7 +494,7 @@ macro_rules! stage_unit_checkpoints {
         impl StageCheckpoint {
             $(
                 #[doc = $fn_get_doc]
-pub const fn $fn_get_name(&self) -> Option<$checkpoint_ty> {
+                pub const fn $fn_get_name(&self) -> Option<$checkpoint_ty> {
                     match self.stage_checkpoint {
                         Some(StageUnitCheckpoint::$enum_variant(checkpoint)) => Some(checkpoint),
                         _ => None,
@@ -482,7 +502,7 @@ pub const fn $fn_get_name(&self) -> Option<$checkpoint_ty> {
                 }
 
                 #[doc = $fn_build_doc]
-pub const fn $fn_build_name(
+                pub const fn $fn_build_name(
                     mut self,
                     checkpoint: $checkpoint_ty,
                 ) -> Self {
