@@ -80,6 +80,8 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         .then_some(EMPTY_REQUESTS_HASH);
 
     Header {
+        number: genesis.number.unwrap_or_default(),
+        parent_hash: genesis.parent_hash.unwrap_or_default(),
         gas_limit: genesis.gas_limit,
         difficulty: genesis.difficulty,
         nonce: genesis.nonce.into(),
@@ -457,6 +459,18 @@ impl ChainSpec {
     /// Build a chainspec using [`ChainSpecBuilder`]
     pub fn builder() -> ChainSpecBuilder {
         ChainSpecBuilder::default()
+    }
+
+    /// Map a chain ID to a known chain spec, if available.
+    pub fn from_chain_id(chain_id: u64) -> Option<Arc<Self>> {
+        match NamedChain::try_from(chain_id).ok()? {
+            NamedChain::Mainnet => Some(MAINNET.clone()),
+            NamedChain::Sepolia => Some(SEPOLIA.clone()),
+            NamedChain::Holesky => Some(HOLESKY.clone()),
+            NamedChain::Hoodi => Some(HOODI.clone()),
+            NamedChain::Dev => Some(DEV.clone()),
+            _ => None,
+        }
     }
 }
 
@@ -968,7 +982,7 @@ impl<H: BlockHeader> EthereumHardforks for ChainSpec<H> {
 
 /// A trait for reading the current chainspec.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ChainSpecProvider: Debug + Send + Sync {
+pub trait ChainSpecProvider: Debug + Send {
     /// The chain spec type.
     type ChainSpec: EthChainSpec + 'static;
 

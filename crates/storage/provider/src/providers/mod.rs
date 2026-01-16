@@ -10,12 +10,15 @@ pub use database::*;
 mod static_file;
 pub use static_file::{
     StaticFileAccess, StaticFileJarProvider, StaticFileProvider, StaticFileProviderBuilder,
-    StaticFileProviderRW, StaticFileProviderRWRefMut, StaticFileWriter,
+    StaticFileProviderRW, StaticFileProviderRWRefMut, StaticFileWriteCtx, StaticFileWriter,
 };
 
 mod state;
 pub use state::{
-    historical::{HistoricalStateProvider, HistoricalStateProviderRef, LowestAvailableBlocks},
+    historical::{
+        compute_history_rank, history_info, needs_prev_shard_check, HistoricalStateProvider,
+        HistoricalStateProviderRef, HistoryInfo, LowestAvailableBlocks,
+    },
     latest::{LatestStateProvider, LatestStateProviderRef},
     overlay::{OverlayStateProvider, OverlayStateProviderFactory},
 };
@@ -31,10 +34,11 @@ pub use consistent::ConsistentProvider;
 
 // RocksDB currently only supported on Unix platforms
 // Windows support is planned for future releases
-#[cfg(all(unix, feature = "rocksdb"))]
+#[cfg_attr(all(unix, feature = "rocksdb"), path = "rocksdb/mod.rs")]
+#[cfg_attr(not(all(unix, feature = "rocksdb")), path = "rocksdb_stub.rs")]
 pub(crate) mod rocksdb;
-#[cfg(all(unix, feature = "rocksdb"))]
-pub use rocksdb::{RocksDBBuilder, RocksDBProvider, RocksTx};
+
+pub use rocksdb::{RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksTx};
 
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy
 /// [`ProviderNodeTypes`].

@@ -1,23 +1,65 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
+use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
+use alloy_consensus::transaction::TxHashRef;
+use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
+use itertools::Itertools;
+use parking_lot::Mutex;
+use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
-    table::{Compress, Decompress, Encode, Table},
-    DatabaseError,
+    models::{
+        sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
+        StorageSettings,
+    },
+    table::{Compress, Decode, Decompress, Encode, Table},
+    tables, BlockNumberList, DatabaseError,
 };
+use reth_primitives_traits::BlockBody as _;
+use reth_prune_types::PruneMode;
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
     provider::{ProviderError, ProviderResult},
 };
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
-    IteratorMode, Options, Transaction, TransactionDB, TransactionDBOptions, TransactionOptions,
-    WriteBatchWithTransaction, WriteOptions,
+    DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
+    OptimisticTransactionOptions, Options, Transaction, WriteBatchWithTransaction, WriteOptions,
 };
 use std::{
+    collections::BTreeMap,
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
+    thread,
     time::Instant,
 };
+use tracing::instrument;
+
+/// Pending `RocksDB` batches type alias.
+pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
+
+/// Context for `RocksDB` block writes.
+#[derive(Clone)]
+pub(crate) struct RocksDBWriteCtx {
+    /// The first block number being written.
+    pub first_block_number: BlockNumber,
+    /// The prune mode for transaction lookup, if any.
+    pub prune_tx_lookup: Option<PruneMode>,
+    /// Storage settings determining what goes to `RocksDB`.
+    pub storage_settings: StorageSettings,
+    /// Pending batches to push to after writing.
+    pub pending_batches: PendingRocksDBBatches,
+}
+
+impl fmt::Debug for RocksDBWriteCtx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBWriteCtx")
+            .field("first_block_number", &self.first_block_number)
+            .field("prune_tx_lookup", &self.prune_tx_lookup)
+            .field("storage_settings", &self.storage_settings)
+            .field("pending_batches", &"<pending batches>")
+            .finish()
+    }
+}
 
 /// Default cache size for `RocksDB` block cache (128 MB).
 const DEFAULT_CACHE_SIZE: usize = 128 << 20;
@@ -33,6 +75,11 @@ const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 
 /// Default bloom filter bits per key (~1% false positive rate).
 const DEFAULT_BLOOM_FILTER_BITS: f64 = 10.0;
+
+/// Default buffer capacity for compression in batches.
+/// 4 KiB matches common block/page sizes and comfortably holds typical history values,
+/// reducing the first few reallocations without over-allocating.
+const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
@@ -138,6 +185,18 @@ impl RocksDBBuilder {
         self
     }
 
+    /// Registers the default tables used by reth for `RocksDB` storage.
+    ///
+    /// This registers:
+    /// - [`tables::TransactionHashNumbers`] - Transaction hash to number mapping
+    /// - [`tables::AccountsHistory`] - Account history index
+    /// - [`tables::StoragesHistory`] - Storage history index
+    pub fn with_default_tables(self) -> Self {
+        self.with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::StoragesHistory>()
+    }
+
     /// Enables metrics.
     pub const fn with_metrics(mut self) -> Self {
         self.enable_metrics = true;
@@ -151,8 +210,10 @@ impl RocksDBBuilder {
     }
 
     /// Sets the log level from `DatabaseArgs` configuration.
-    pub const fn with_database_log_level(mut self, log_level: LogLevel) -> Self {
-        self.log_level = convert_log_level(log_level);
+    pub const fn with_database_log_level(mut self, log_level: Option<LogLevel>) -> Self {
+        if let Some(level) = log_level {
+            self.log_level = convert_log_level(level);
+        }
         self
     }
 
@@ -178,20 +239,17 @@ impl RocksDBBuilder {
             })
             .collect();
 
-        // Use TransactionDB for MDBX-like transaction semantics (read-your-writes, rollback)
-        let txn_db_options = TransactionDBOptions::default();
-        let db = TransactionDB::open_cf_descriptors(
-            &options,
-            &txn_db_options,
-            &self.path,
-            cf_descriptors,
-        )
-        .map_err(|e| {
-            ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })?;
+        // Use OptimisticTransactionDB for MDBX-like transaction semantics (read-your-writes,
+        // rollback) OptimisticTransactionDB uses optimistic concurrency control (conflict
+        // detection at commit) and is backed by DBCommon, giving us access to
+        // cancel_all_background_work for clean shutdown.
+        let db = OptimisticTransactionDB::open_cf_descriptors(&options, &self.path, cf_descriptors)
+            .map_err(|e| {
+                ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
 
         let metrics = self.enable_metrics.then(RocksDBMetrics::default);
 
@@ -219,8 +277,8 @@ pub struct RocksDBProvider(Arc<RocksDBProviderInner>);
 
 /// Inner state for `RocksDB` provider.
 struct RocksDBProviderInner {
-    /// `RocksDB` database instance with transaction support.
-    db: TransactionDB,
+    /// `RocksDB` database instance with optimistic transaction support.
+    db: OptimisticTransactionDB,
     /// Metrics latency & operations.
     metrics: Option<RocksDBMetrics>,
 }
@@ -228,9 +286,17 @@ struct RocksDBProviderInner {
 impl fmt::Debug for RocksDBProviderInner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RocksDBProviderInner")
-            .field("db", &"<TransactionDB>")
+            .field("db", &"<OptimisticTransactionDB>")
             .field("metrics", &self.metrics)
             .finish()
+    }
+}
+
+impl Drop for RocksDBProviderInner {
+    fn drop(&mut self) {
+        // Cancel all background work (compaction, flush) before dropping.
+        // This prevents pthread lock errors during shutdown.
+        self.db.cancel_all_background_work(true);
     }
 }
 
@@ -252,11 +318,26 @@ impl RocksDBProvider {
     }
 
     /// Creates a new transaction with MDBX-like semantics (read-your-writes, rollback).
+    ///
+    /// Note: With `OptimisticTransactionDB`, commits may fail if there are conflicts.
+    /// Conflict detection happens at commit time, not at write time.
     pub fn tx(&self) -> RocksTx<'_> {
         let write_options = WriteOptions::default();
-        let txn_options = TransactionOptions::default();
+        let txn_options = OptimisticTransactionOptions::default();
         let inner = self.0.db.transaction_opt(&write_options, &txn_options);
         RocksTx { inner, provider: self }
+    }
+
+    /// Creates a new batch for atomic writes.
+    ///
+    /// Use [`Self::write_batch`] for closure-based atomic writes.
+    /// Use this method when the batch needs to be held by [`crate::EitherWriter`].
+    pub fn batch(&self) -> RocksDBBatch<'_> {
+        RocksDBBatch {
+            provider: self,
+            inner: WriteBatchWithTransaction::<true>::default(),
+            buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+        }
     }
 
     /// Gets the column family handle for a table.
@@ -349,34 +430,217 @@ impl RocksDBProvider {
         })
     }
 
+    /// Gets the first (smallest key) entry from the specified table.
+    pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
+            let cf = this.get_cf_handle::<T>()?;
+            let mut iter = this.0.db.iterator_cf(cf, IteratorMode::Start);
+
+            match iter.next() {
+                Some(Ok((key_bytes, value_bytes))) => {
+                    let key = <T::Key as reth_db_api::table::Decode>::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    let value = T::Value::decompress(&value_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    Ok(Some((key, value)))
+                }
+                Some(Err(e)) => {
+                    Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })))
+                }
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// Gets the last (largest key) entry from the specified table.
+    pub fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
+            let cf = this.get_cf_handle::<T>()?;
+            let mut iter = this.0.db.iterator_cf(cf, IteratorMode::End);
+
+            match iter.next() {
+                Some(Ok((key_bytes, value_bytes))) => {
+                    let key = <T::Key as reth_db_api::table::Decode>::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    let value = T::Value::decompress(&value_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    Ok(Some((key, value)))
+                }
+                Some(Err(e)) => {
+                    Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })))
+                }
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// Creates an iterator over all entries in the specified table.
+    ///
+    /// Returns decoded `(Key, Value)` pairs in key order.
+    pub fn iter<T: Table>(&self) -> ProviderResult<RocksDBIter<'_, T>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let iter = self.0.db.iterator_cf(cf, IteratorMode::Start);
+        Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
     /// Writes a batch of operations atomically.
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
         F: FnOnce(&mut RocksDBBatch<'_>) -> ProviderResult<()>,
     {
-        // Note: Using "Batch" as table name for batch operations across multiple tables
         self.execute_with_operation_metric(RocksDBOperation::BatchWrite, "Batch", |this| {
-            let mut batch_handle = RocksDBBatch {
-                provider: this,
-                inner: WriteBatchWithTransaction::<true>::default(),
-                buf: Vec::new(),
-            };
-
+            let mut batch_handle = this.batch();
             f(&mut batch_handle)?;
-
-            this.0.db.write(batch_handle.inner).map_err(|e| {
-                ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })
+            batch_handle.commit()
         })
+    }
+
+    /// Commits a raw `WriteBatchWithTransaction` to `RocksDB`.
+    ///
+    /// This is used when the batch was extracted via [`RocksDBBatch::into_inner`]
+    /// and needs to be committed at a later point (e.g., at provider commit time).
+    pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
+        self.0.db.write_opt(batch, &WriteOptions::default()).map_err(|e| {
+            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
+    }
+
+    /// Writes all `RocksDB` data for multiple blocks in parallel.
+    ///
+    /// This handles transaction hash numbers, account history, and storage history based on
+    /// the provided storage settings. Each operation runs in parallel with its own batch,
+    /// pushing to `ctx.pending_batches` for later commit.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    pub(crate) fn write_blocks_data<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+        ctx: RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        if !ctx.storage_settings.any_in_rocksdb() {
+            return Ok(());
+        }
+
+        thread::scope(|s| {
+            let handles: Vec<_> = [
+                (ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
+                    ctx.prune_tx_lookup.is_none_or(|m| !m.is_full()))
+                .then(|| s.spawn(|| self.write_tx_hash_numbers(blocks, tx_nums, &ctx))),
+                ctx.storage_settings
+                    .account_history_in_rocksdb
+                    .then(|| s.spawn(|| self.write_account_history(blocks, &ctx))),
+                ctx.storage_settings
+                    .storages_history_in_rocksdb
+                    .then(|| s.spawn(|| self.write_storage_history(blocks, &ctx))),
+            ]
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, h)| h.map(|h| (i, h)))
+            .collect();
+
+            for (i, handle) in handles {
+                handle.join().map_err(|_| {
+                    ProviderError::Database(DatabaseError::Other(format!(
+                        "rocksdb write thread {i} panicked"
+                    )))
+                })??;
+            }
+
+            Ok(())
+        })
+    }
+
+    /// Writes transaction hash to number mappings for the given blocks.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_tx_hash_numbers<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+        for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
+            let body = block.recovered_block().body();
+            let mut tx_num = first_tx_num;
+            for transaction in body.transactions_iter() {
+                batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
+                tx_num += 1;
+            }
+        }
+        ctx.pending_batches.lock().push(batch.into_inner());
+        Ok(())
+    }
+
+    /// Writes account history indices for the given blocks.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_account_history<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+        let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+        for (block_idx, block) in blocks.iter().enumerate() {
+            let block_number = ctx.first_block_number + block_idx as u64;
+            let bundle = &block.execution_outcome().state;
+            for &address in bundle.state().keys() {
+                account_history.entry(address).or_default().push(block_number);
+            }
+        }
+
+        // Write account history using proper shard append logic
+        for (address, indices) in account_history {
+            batch.append_account_history_shard(address, indices)?;
+        }
+        ctx.pending_batches.lock().push(batch.into_inner());
+        Ok(())
+    }
+
+    /// Writes storage history indices for the given blocks.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_storage_history<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+        let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+        for (block_idx, block) in blocks.iter().enumerate() {
+            let block_number = ctx.first_block_number + block_idx as u64;
+            let bundle = &block.execution_outcome().state;
+            for (&address, account) in bundle.state() {
+                for &slot in account.storage.keys() {
+                    let key = B256::new(slot.to_be_bytes());
+                    storage_history.entry((address, key)).or_default().push(block_number);
+                }
+            }
+        }
+
+        // Write storage history using proper shard append logic
+        for ((address, slot), indices) in storage_history {
+            batch.append_storage_history_shard(address, slot, indices)?;
+        }
+        ctx.pending_batches.lock().push(batch.into_inner());
+        Ok(())
     }
 }
 
 /// Handle for building a batch of operations atomically.
 ///
-/// Uses `WriteBatchWithTransaction<true>` for compatibility with `TransactionDB`.
+/// Uses `WriteBatchWithTransaction` for atomic writes without full transaction overhead.
+/// Unlike [`RocksTx`], this does NOT support read-your-writes. Use for write-only flows
+/// where you don't need to read back uncommitted data within the same operation
+/// (e.g., history index writes).
+#[must_use = "batch must be committed"]
 pub struct RocksDBBatch<'a> {
     provider: &'a RocksDBProvider,
     inner: WriteBatchWithTransaction<true>,
@@ -420,6 +684,163 @@ impl<'a> RocksDBBatch<'a> {
         self.inner.delete_cf(self.provider.get_cf_handle::<T>()?, key.encode().as_ref());
         Ok(())
     }
+
+    /// Commits the batch to the database.
+    ///
+    /// This consumes the batch and writes all operations atomically to `RocksDB`.
+    pub fn commit(self) -> ProviderResult<()> {
+        self.provider.0.db.write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
+            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
+    }
+
+    /// Returns the number of write operations (puts + deletes) queued in this batch.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Returns `true` if the batch contains no operations.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Returns a reference to the underlying `RocksDB` provider.
+    pub const fn provider(&self) -> &RocksDBProvider {
+        self.provider
+    }
+
+    /// Consumes the batch and returns the underlying `WriteBatchWithTransaction`.
+    ///
+    /// This is used to defer commits to the provider level.
+    pub fn into_inner(self) -> WriteBatchWithTransaction<true> {
+        self.inner
+    }
+
+    /// Appends indices to an account history shard with proper shard management.
+    ///
+    /// Loads the existing shard (if any), appends new indices, and rechunks into
+    /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    ///
+    /// # Requirements
+    ///
+    /// - The `indices` MUST be strictly increasing and contain no duplicates.
+    /// - This method MUST only be called once per address per batch. The batch reads existing
+    ///   shards from committed DB state, not from pending writes. Calling twice for the same
+    ///   address will cause the second call to overwrite the first.
+    pub fn append_account_history_shard(
+        &mut self,
+        address: Address,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        let indices: Vec<u64> = indices.into_iter().collect();
+
+        if indices.is_empty() {
+            return Ok(());
+        }
+
+        debug_assert!(
+            indices.windows(2).all(|w| w[0] < w[1]),
+            "indices must be strictly increasing: {:?}",
+            indices
+        );
+
+        let last_key = ShardedKey::new(address, u64::MAX);
+        let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
+        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+        last_shard.append(indices).map_err(ProviderError::other)?;
+
+        // Fast path: all indices fit in one shard
+        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            self.put::<tables::AccountsHistory>(last_key, &last_shard)?;
+            return Ok(());
+        }
+
+        // Slow path: rechunk into multiple shards
+        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+
+            self.put::<tables::AccountsHistory>(
+                ShardedKey::new(address, highest_block_number),
+                &shard,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Appends indices to a storage history shard with proper shard management.
+    ///
+    /// Loads the existing shard (if any), appends new indices, and rechunks into
+    /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    ///
+    /// # Requirements
+    ///
+    /// - The `indices` MUST be strictly increasing and contain no duplicates.
+    /// - This method MUST only be called once per (address, `storage_key`) pair per batch. The
+    ///   batch reads existing shards from committed DB state, not from pending writes. Calling
+    ///   twice for the same key will cause the second call to overwrite the first.
+    pub fn append_storage_history_shard(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        let indices: Vec<u64> = indices.into_iter().collect();
+
+        if indices.is_empty() {
+            return Ok(());
+        }
+
+        debug_assert!(
+            indices.windows(2).all(|w| w[0] < w[1]),
+            "indices must be strictly increasing: {:?}",
+            indices
+        );
+
+        let last_key = StorageShardedKey::last(address, storage_key);
+        let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
+        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+        last_shard.append(indices).map_err(ProviderError::other)?;
+
+        // Fast path: all indices fit in one shard
+        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            self.put::<tables::StoragesHistory>(last_key, &last_shard)?;
+            return Ok(());
+        }
+
+        // Slow path: rechunk into multiple shards
+        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+
+            self.put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, highest_block_number),
+                &shard,
+            )?;
+        }
+
+        Ok(())
+    }
 }
 
 /// `RocksDB` transaction wrapper providing MDBX-like semantics.
@@ -432,7 +853,7 @@ impl<'a> RocksDBBatch<'a> {
 /// Note: `Transaction` is `Send` but NOT `Sync`. This wrapper does not implement
 /// `DbTx`/`DbTxMut` traits directly; use RocksDB-specific methods instead.
 pub struct RocksTx<'db> {
-    inner: Transaction<'db, TransactionDB>,
+    inner: Transaction<'db, OptimisticTransactionDB>,
     provider: &'db RocksDBProvider,
 }
 
@@ -537,13 +958,207 @@ impl<'db> RocksTx<'db> {
             ProviderError::Database(DatabaseError::Other(format!("rollback failed: {e}")))
         })
     }
+
+    /// Lookup account history and return [`HistoryInfo`] directly.
+    ///
+    /// This is a thin wrapper around `history_info` that:
+    /// - Builds the `ShardedKey` for the address + target block.
+    /// - Validates that the found shard belongs to the same address.
+    pub fn account_history_info(
+        &self,
+        address: Address,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        let key = ShardedKey::new(address, block_number);
+        self.history_info::<tables::AccountsHistory>(
+            key.encode().as_ref(),
+            block_number,
+            lowest_available_block_number,
+            |key_bytes| Ok(<ShardedKey<Address> as Decode>::decode(key_bytes)?.key == address),
+            |prev_bytes| {
+                <ShardedKey<Address> as Decode>::decode(prev_bytes)
+                    .map(|k| k.key == address)
+                    .unwrap_or(false)
+            },
+        )
+    }
+
+    /// Lookup storage history and return [`HistoryInfo`] directly.
+    ///
+    /// This is a thin wrapper around `history_info` that:
+    /// - Builds the `StorageShardedKey` for address + storage key + target block.
+    /// - Validates that the found shard belongs to the same address and storage slot.
+    pub fn storage_history_info(
+        &self,
+        address: Address,
+        storage_key: B256,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        let key = StorageShardedKey::new(address, storage_key, block_number);
+        self.history_info::<tables::StoragesHistory>(
+            key.encode().as_ref(),
+            block_number,
+            lowest_available_block_number,
+            |key_bytes| {
+                let k = <StorageShardedKey as Decode>::decode(key_bytes)?;
+                Ok(k.address == address && k.sharded_key.key == storage_key)
+            },
+            |prev_bytes| {
+                <StorageShardedKey as Decode>::decode(prev_bytes)
+                    .map(|k| k.address == address && k.sharded_key.key == storage_key)
+                    .unwrap_or(false)
+            },
+        )
+    }
+
+    /// Generic history lookup for sharded history tables.
+    ///
+    /// Seeks to the shard containing `block_number`, checks if the key matches via `key_matches`,
+    /// and uses `prev_key_matches` to detect if a previous shard exists for the same key.
+    fn history_info<T>(
+        &self,
+        encoded_key: &[u8],
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+        key_matches: impl FnOnce(&[u8]) -> Result<bool, reth_db_api::DatabaseError>,
+        prev_key_matches: impl Fn(&[u8]) -> bool,
+    ) -> ProviderResult<HistoryInfo>
+    where
+        T: Table<Value = BlockNumberList>,
+    {
+        // History may be pruned if a lowest available block is set.
+        let is_maybe_pruned = lowest_available_block_number.is_some();
+        let fallback = || {
+            Ok(if is_maybe_pruned {
+                HistoryInfo::MaybeInPlainState
+            } else {
+                HistoryInfo::NotYetWritten
+            })
+        };
+
+        let cf = self.provider.0.db.cf_handle(T::NAME).ok_or_else(|| {
+            ProviderError::Database(DatabaseError::Other(format!(
+                "column family not found: {}",
+                T::NAME
+            )))
+        })?;
+
+        // Create a raw iterator to access key bytes directly.
+        let mut iter: DBRawIteratorWithThreadMode<'_, Transaction<'_, OptimisticTransactionDB>> =
+            self.inner.raw_iterator_cf(&cf);
+
+        // Seek to the smallest key >= encoded_key.
+        iter.seek(encoded_key);
+        Self::raw_iter_status_ok(&iter)?;
+
+        if !iter.valid() {
+            // No shard found at or after target block.
+            //
+            // (MaybeInPlainState) The key may have been written, but due to pruning we may not have
+            // changesets and history, so we need to make a plain state lookup.
+            // (HistoryInfo::NotYetWritten) The key has not been written to at all.
+            return fallback();
+        }
+
+        // Check if the found key matches our target entity.
+        let Some(key_bytes) = iter.key() else {
+            return fallback();
+        };
+        if !key_matches(key_bytes)? {
+            // The found key is for a different entity.
+            return fallback();
+        }
+
+        // Decompress the block list for this shard.
+        let Some(value_bytes) = iter.value() else {
+            return fallback();
+        };
+        let chunk = BlockNumberList::decompress(value_bytes)?;
+        let (rank, found_block) = compute_history_rank(&chunk, block_number);
+
+        // Lazy check for previous shard - only called when needed.
+        // If we can step to a previous shard for this same key, history already exists,
+        // so the target block is not before the first write.
+        let is_before_first_write = if needs_prev_shard_check(rank, found_block, block_number) {
+            iter.prev();
+            Self::raw_iter_status_ok(&iter)?;
+            let has_prev = iter.valid() && iter.key().is_some_and(&prev_key_matches);
+            !has_prev
+        } else {
+            false
+        };
+
+        Ok(HistoryInfo::from_lookup(
+            found_block,
+            is_before_first_write,
+            lowest_available_block_number,
+        ))
+    }
+
+    /// Returns an error if the raw iterator is in an invalid state due to an I/O error.
+    fn raw_iter_status_ok(
+        iter: &DBRawIteratorWithThreadMode<'_, Transaction<'_, OptimisticTransactionDB>>,
+    ) -> ProviderResult<()> {
+        iter.status().map_err(|e| {
+            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
+    }
+}
+
+/// Iterator over a `RocksDB` table (non-transactional).
+///
+/// Yields decoded `(Key, Value)` pairs in key order.
+pub struct RocksDBIter<'db, T: Table> {
+    inner: rocksdb::DBIteratorWithThreadMode<'db, OptimisticTransactionDB>,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: Table> fmt::Debug for RocksDBIter<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBIter").field("table", &T::NAME).finish_non_exhaustive()
+    }
+}
+
+impl<T: Table> Iterator for RocksDBIter<'_, T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (key_bytes, value_bytes) = match self.inner.next()? {
+            Ok(kv) => kv,
+            Err(e) => {
+                return Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))))
+            }
+        };
+
+        // Decode key
+        let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
+            Ok(k) => k,
+            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+        };
+
+        // Decompress value
+        let value = match T::Value::decompress(&value_bytes) {
+            Ok(v) => v,
+            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+        };
+
+        Some(Ok((key, value)))
+    }
 }
 
 /// Iterator over a `RocksDB` table within a transaction.
 ///
 /// Yields decoded `(Key, Value)` pairs. Sees uncommitted writes.
 pub struct RocksTxIter<'tx, T: Table> {
-    inner: rocksdb::DBIteratorWithThreadMode<'tx, Transaction<'tx, TransactionDB>>,
+    inner: rocksdb::DBIteratorWithThreadMode<'tx, Transaction<'tx, OptimisticTransactionDB>>,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -597,9 +1212,42 @@ const fn convert_log_level(level: LogLevel) -> rocksdb::LogLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{TxHash, B256};
-    use reth_db_api::{table::Table, tables};
+    use crate::providers::HistoryInfo;
+    use alloy_primitives::{Address, TxHash, B256};
+    use reth_db_api::{
+        models::{
+            sharded_key::{ShardedKey, NUM_OF_INDICES_IN_SHARD},
+            storage_sharded_key::StorageShardedKey,
+            IntegerList,
+        },
+        table::Table,
+        tables,
+    };
     use tempfile::TempDir;
+
+    #[test]
+    fn test_with_default_tables_registers_required_column_families() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Build with default tables
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        // Should be able to write/read TransactionHashNumbers
+        let tx_hash = TxHash::from(B256::from([1u8; 32]));
+        provider.put::<tables::TransactionHashNumbers>(tx_hash, &100).unwrap();
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(tx_hash).unwrap(), Some(100));
+
+        // Should be able to write/read AccountsHistory
+        let key = ShardedKey::new(Address::ZERO, 100);
+        let value = IntegerList::default();
+        provider.put::<tables::AccountsHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::AccountsHistory>(key).unwrap().is_some());
+
+        // Should be able to write/read StoragesHistory
+        let key = StorageShardedKey::new(Address::ZERO, B256::ZERO, 100);
+        provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
+    }
 
     #[derive(Debug)]
     struct TestTable;
@@ -722,7 +1370,7 @@ mod tests {
             .build()
             .unwrap();
 
-        // Do operations - data should be immediately readable with TransactionDB
+        // Do operations - data should be immediately readable with OptimisticTransactionDB
         for i in 0..10 {
             let value = vec![i as u8];
             provider.put::<TestTable>(i, &value).unwrap();
@@ -737,7 +1385,7 @@ mod tests {
         let provider =
             RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
 
-        // Insert data - TransactionDB writes are immediately visible
+        // Insert data - OptimisticTransactionDB writes are immediately visible
         let value = vec![42u8; 1000];
         for i in 0..100 {
             provider.put::<TestTable>(i, &value).unwrap();
@@ -836,5 +1484,240 @@ mod tests {
 
         // Commit
         tx.commit().unwrap();
+    }
+
+    #[test]
+    fn test_batch_manual_commit() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Create a batch via provider.batch()
+        let mut batch = provider.batch();
+
+        // Add entries
+        for i in 0..10u64 {
+            let value = format!("batch_value_{i}").into_bytes();
+            batch.put::<TestTable>(i, &value).unwrap();
+        }
+
+        // Verify len/is_empty
+        assert_eq!(batch.len(), 10);
+        assert!(!batch.is_empty());
+
+        // Data should NOT be visible before commit
+        assert_eq!(provider.get::<TestTable>(0).unwrap(), None);
+
+        // Commit the batch
+        batch.commit().unwrap();
+
+        // Now data should be visible
+        for i in 0..10u64 {
+            let value = format!("batch_value_{i}").into_bytes();
+            assert_eq!(provider.get::<TestTable>(i).unwrap(), Some(value));
+        }
+    }
+
+    #[test]
+    fn test_first_and_last_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Empty table should return None for both
+        assert_eq!(provider.first::<TestTable>().unwrap(), None);
+        assert_eq!(provider.last::<TestTable>().unwrap(), None);
+
+        // Insert some entries
+        provider.put::<TestTable>(10, &b"value_10".to_vec()).unwrap();
+        provider.put::<TestTable>(20, &b"value_20".to_vec()).unwrap();
+        provider.put::<TestTable>(5, &b"value_5".to_vec()).unwrap();
+
+        // First should return the smallest key
+        let first = provider.first::<TestTable>().unwrap();
+        assert_eq!(first, Some((5, b"value_5".to_vec())));
+
+        // Last should return the largest key
+        let last = provider.last::<TestTable>().unwrap();
+        assert_eq!(last, Some((20, b"value_20".to_vec())));
+    }
+
+    /// Tests the edge case where block < `lowest_available_block_number`.
+    /// This case cannot be tested via `HistoricalStateProviderRef` (which errors before lookup),
+    /// so we keep this RocksDB-specific test to verify the low-level behavior.
+    #[test]
+    fn test_account_history_info_pruned_before_first_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        // Create a single shard starting at block 100
+        let chunk = IntegerList::new([100, 200, 300]).unwrap();
+        let shard_key = ShardedKey::new(address, u64::MAX);
+        provider.put::<tables::AccountsHistory>(shard_key, &chunk).unwrap();
+
+        let tx = provider.tx();
+
+        // Query for block 50 with lowest_available_block_number = 100
+        // This simulates a pruned state where data before block 100 is not available.
+        // Since we're before the first write AND pruning boundary is set, we need to
+        // check the changeset at the first write block.
+        let result = tx.account_history_info(address, 50, Some(100)).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(100));
+
+        tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn test_account_history_shard_split_at_boundary() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let limit = NUM_OF_INDICES_IN_SHARD;
+
+        // Add exactly NUM_OF_INDICES_IN_SHARD + 1 indices to trigger a split
+        let indices: Vec<u64> = (0..=(limit as u64)).collect();
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, indices).unwrap();
+        batch.commit().unwrap();
+
+        // Should have 2 shards: one completed shard and one sentinel shard
+        let completed_key = ShardedKey::new(address, (limit - 1) as u64);
+        let sentinel_key = ShardedKey::new(address, u64::MAX);
+
+        let completed_shard = provider.get::<tables::AccountsHistory>(completed_key).unwrap();
+        let sentinel_shard = provider.get::<tables::AccountsHistory>(sentinel_key).unwrap();
+
+        assert!(completed_shard.is_some(), "completed shard should exist");
+        assert!(sentinel_shard.is_some(), "sentinel shard should exist");
+
+        let completed_shard = completed_shard.unwrap();
+        let sentinel_shard = sentinel_shard.unwrap();
+
+        assert_eq!(completed_shard.len(), limit as u64, "completed shard should be full");
+        assert_eq!(sentinel_shard.len(), 1, "sentinel shard should have 1 element");
+    }
+
+    #[test]
+    fn test_account_history_multiple_shard_splits() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x43; 20]);
+        let limit = NUM_OF_INDICES_IN_SHARD;
+
+        // First batch: add NUM_OF_INDICES_IN_SHARD indices
+        let first_batch_indices: Vec<u64> = (0..limit as u64).collect();
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, first_batch_indices).unwrap();
+        batch.commit().unwrap();
+
+        // Should have just a sentinel shard (exactly at limit, not over)
+        let sentinel_key = ShardedKey::new(address, u64::MAX);
+        let shard = provider.get::<tables::AccountsHistory>(sentinel_key.clone()).unwrap();
+        assert!(shard.is_some());
+        assert_eq!(shard.unwrap().len(), limit as u64);
+
+        // Second batch: add another NUM_OF_INDICES_IN_SHARD + 1 indices (causing 2 more shards)
+        let second_batch_indices: Vec<u64> = (limit as u64..=(2 * limit) as u64).collect();
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, second_batch_indices).unwrap();
+        batch.commit().unwrap();
+
+        // Now we should have: 2 completed shards + 1 sentinel shard
+        let first_completed = ShardedKey::new(address, (limit - 1) as u64);
+        let second_completed = ShardedKey::new(address, (2 * limit - 1) as u64);
+
+        assert!(
+            provider.get::<tables::AccountsHistory>(first_completed).unwrap().is_some(),
+            "first completed shard should exist"
+        );
+        assert!(
+            provider.get::<tables::AccountsHistory>(second_completed).unwrap().is_some(),
+            "second completed shard should exist"
+        );
+        assert!(
+            provider.get::<tables::AccountsHistory>(sentinel_key).unwrap().is_some(),
+            "sentinel shard should exist"
+        );
+    }
+
+    #[test]
+    fn test_storage_history_shard_split_at_boundary() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x44; 20]);
+        let slot = B256::from([0x55; 32]);
+        let limit = NUM_OF_INDICES_IN_SHARD;
+
+        // Add exactly NUM_OF_INDICES_IN_SHARD + 1 indices to trigger a split
+        let indices: Vec<u64> = (0..=(limit as u64)).collect();
+        let mut batch = provider.batch();
+        batch.append_storage_history_shard(address, slot, indices).unwrap();
+        batch.commit().unwrap();
+
+        // Should have 2 shards: one completed shard and one sentinel shard
+        let completed_key = StorageShardedKey::new(address, slot, (limit - 1) as u64);
+        let sentinel_key = StorageShardedKey::new(address, slot, u64::MAX);
+
+        let completed_shard = provider.get::<tables::StoragesHistory>(completed_key).unwrap();
+        let sentinel_shard = provider.get::<tables::StoragesHistory>(sentinel_key).unwrap();
+
+        assert!(completed_shard.is_some(), "completed shard should exist");
+        assert!(sentinel_shard.is_some(), "sentinel shard should exist");
+
+        let completed_shard = completed_shard.unwrap();
+        let sentinel_shard = sentinel_shard.unwrap();
+
+        assert_eq!(completed_shard.len(), limit as u64, "completed shard should be full");
+        assert_eq!(sentinel_shard.len(), 1, "sentinel shard should have 1 element");
+    }
+
+    #[test]
+    fn test_storage_history_multiple_shard_splits() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x46; 20]);
+        let slot = B256::from([0x57; 32]);
+        let limit = NUM_OF_INDICES_IN_SHARD;
+
+        // First batch: add NUM_OF_INDICES_IN_SHARD indices
+        let first_batch_indices: Vec<u64> = (0..limit as u64).collect();
+        let mut batch = provider.batch();
+        batch.append_storage_history_shard(address, slot, first_batch_indices).unwrap();
+        batch.commit().unwrap();
+
+        // Should have just a sentinel shard (exactly at limit, not over)
+        let sentinel_key = StorageShardedKey::new(address, slot, u64::MAX);
+        let shard = provider.get::<tables::StoragesHistory>(sentinel_key.clone()).unwrap();
+        assert!(shard.is_some());
+        assert_eq!(shard.unwrap().len(), limit as u64);
+
+        // Second batch: add another NUM_OF_INDICES_IN_SHARD + 1 indices (causing 2 more shards)
+        let second_batch_indices: Vec<u64> = (limit as u64..=(2 * limit) as u64).collect();
+        let mut batch = provider.batch();
+        batch.append_storage_history_shard(address, slot, second_batch_indices).unwrap();
+        batch.commit().unwrap();
+
+        // Now we should have: 2 completed shards + 1 sentinel shard
+        let first_completed = StorageShardedKey::new(address, slot, (limit - 1) as u64);
+        let second_completed = StorageShardedKey::new(address, slot, (2 * limit - 1) as u64);
+
+        assert!(
+            provider.get::<tables::StoragesHistory>(first_completed).unwrap().is_some(),
+            "first completed shard should exist"
+        );
+        assert!(
+            provider.get::<tables::StoragesHistory>(second_completed).unwrap().is_some(),
+            "second completed shard should exist"
+        );
+        assert!(
+            provider.get::<tables::StoragesHistory>(sentinel_key).unwrap().is_some(),
+            "sentinel shard should exist"
+        );
     }
 }

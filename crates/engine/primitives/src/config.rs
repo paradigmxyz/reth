@@ -101,7 +101,7 @@ pub struct TreeConfig {
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
-    /// Whether the host has enough parallelism to run state root in parallel.
+    /// Whether the host has enough parallelism to run state root task.
     has_enough_parallelism: bool,
     /// Whether multiproof task should chunk proof targets.
     multiproof_chunking_enabled: bool,
@@ -135,6 +135,8 @@ pub struct TreeConfig {
     storage_worker_count: usize,
     /// Number of account proof worker threads.
     account_worker_count: usize,
+    /// Whether to enable V2 storage proofs.
+    enable_proof_v2: bool,
 }
 
 impl Default for TreeConfig {
@@ -163,6 +165,7 @@ impl Default for TreeConfig {
             allow_unwind_canonical_header: false,
             storage_worker_count: default_storage_worker_count(),
             account_worker_count: default_account_worker_count(),
+            enable_proof_v2: false,
         }
     }
 }
@@ -194,6 +197,7 @@ impl TreeConfig {
         allow_unwind_canonical_header: bool,
         storage_worker_count: usize,
         account_worker_count: usize,
+        enable_proof_v2: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -219,6 +223,7 @@ impl TreeConfig {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
+            enable_proof_v2,
         }
     }
 
@@ -403,15 +408,10 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for whether or not the host has enough parallelism to run state root in parallel.
+    /// Setter for has enough parallelism.
     pub const fn with_has_enough_parallelism(mut self, has_enough_parallelism: bool) -> Self {
         self.has_enough_parallelism = has_enough_parallelism;
         self
-    }
-
-    /// Whether or not the host has enough parallelism to run state root in parallel.
-    pub const fn has_enough_parallelism(&self) -> bool {
-        self.has_enough_parallelism
     }
 
     /// Setter for state provider metrics.
@@ -503,6 +503,17 @@ impl TreeConfig {
     /// Setter for the number of account proof worker threads.
     pub fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
         self.account_worker_count = account_worker_count.max(MIN_WORKER_COUNT);
+        self
+    }
+
+    /// Return whether V2 storage proofs are enabled.
+    pub const fn enable_proof_v2(&self) -> bool {
+        self.enable_proof_v2
+    }
+
+    /// Setter for whether to enable V2 storage proofs.
+    pub const fn with_enable_proof_v2(mut self, enable_proof_v2: bool) -> Self {
+        self.enable_proof_v2 = enable_proof_v2;
         self
     }
 }

@@ -21,6 +21,11 @@ on:
         required: false
         type: string
         description: "Optional cargo package path"
+      artifact_name:
+        required: false
+        type: string
+        default: "artifacts"
+        description: "Name for the uploaded artifact"
 
 jobs:
   prepare-reth:
@@ -50,7 +55,7 @@ jobs:
 
       - name: Upload reth image
         id: upload
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
-          name: artifacts
+          name: ${{ inputs.artifact_name }}
           path: ./artifacts

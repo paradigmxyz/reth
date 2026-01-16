@@ -24,6 +24,13 @@ sequenceDiagram
     ExEx->>ExEx: Rollback & Re-process
     ExEx->>Reth: New FinishedHeight Event
     deactivate ExEx
+
+    Note over Reth,ExEx: Revert Flow
+    Reth->>ExEx: ChainRevert Notification
+    activate ExEx
+    ExEx->>ExEx: Rollback & Re-process
+    ExEx->>Reth: New FinishedHeight Event
+    deactivate ExEx
 ```
 
 ExExes are just [Futures](https://doc.rust-lang.org/std/future/trait.Future.html) that run indefinitely alongside Reth
