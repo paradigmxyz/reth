@@ -522,10 +522,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
-            // Accumulate trie updates across blocks to batch the write at the end.
-            // This reduces cursor open/close overhead from N calls to 1.
-            let mut accumulated_trie_updates: Option<TrieUpdatesSorted> = None;
-
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
@@ -559,21 +555,23 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     let start = Instant::now();
                     self.write_hashed_state(&trie_data.hashed_state)?;
                     timings.write_hashed_state += start.elapsed();
-
-                    // Accumulate trie updates instead of writing per-block
-                    let start = Instant::now();
-                    match &mut accumulated_trie_updates {
-                        Some(acc) => acc.extend_ref(&trie_data.trie_updates),
-                        None => accumulated_trie_updates = Some((*trie_data.trie_updates).clone()),
-                    }
-                    timings.write_trie_updates += start.elapsed();
                 }
             }
 
-            // Write all accumulated trie updates in a single batch
-            if let Some(trie_updates) = &accumulated_trie_updates {
+            // Write all trie updates in a single batch using k-way merge.
+            // This reduces cursor open/close overhead from N calls to 1 and uses
+            // O(n log k) merge instead of O(n*k) from repeated extend_ref.
+            if save_mode.with_state() {
                 let start = Instant::now();
-                self.write_trie_updates_sorted(trie_updates)?;
+                // Collect Arc refs first to extend their lifetime
+                let trie_updates: Vec<_> = blocks.iter().map(|b| b.trie_updates()).collect();
+                // merge_batch expects newest-to-oldest, so reverse the iterator
+                let merged = TrieUpdatesSorted::merge_batch(
+                    trie_updates.iter().rev().map(|arc| arc.as_ref()),
+                );
+                if !merged.is_empty() {
+                    self.write_trie_updates_sorted(&merged)?;
+                }
                 timings.write_trie_updates += start.elapsed();
             }
 
