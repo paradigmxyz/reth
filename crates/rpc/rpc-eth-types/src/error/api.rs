@@ -56,6 +56,26 @@ pub trait AsEthApiError {
     /// functionality.
     fn as_err(&self) -> Option<&EthApiError>;
 
+    /// Returns `true` if error is
+    /// [`RpcInvalidTransactionError::GasTooHigh`].
+    fn is_gas_too_high(&self) -> bool {
+        if let Some(err) = self.as_err() {
+            return err.is_gas_too_high()
+        }
+
+        false
+    }
+
+    /// Returns `true` if error is
+    /// [`RpcInvalidTransactionError::GasTooLow`].
+    fn is_gas_too_low(&self) -> bool {
+        if let Some(err) = self.as_err() {
+            return err.is_gas_too_low()
+        }
+
+        false
+    }
+
     /// Returns [`EthSimulateError`] if this error maps to a simulate-specific error code.
     fn as_simulate_error(&self) -> Option<EthSimulateError> {
         let err = self.as_err()?;
