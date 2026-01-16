@@ -31,11 +31,6 @@ use reth_primitives_traits::{
 mod validation;
 pub use validation::validate_block_post_execution;
 
-#[cfg(feature = "std")]
-mod receipt_root_task;
-#[cfg(feature = "std")]
-pub use receipt_root_task::*;
-
 /// Ethereum beacon consensus
 ///
 /// This consensus engine does basic checks as outlined in the execution specs.

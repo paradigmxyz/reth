@@ -8482,6 +8482,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-tracing",
  "reth-trie",
+ "reth-trie-common",
  "reth-trie-db",
  "reth-trie-parallel",
  "reth-trie-sparse",
@@ -8732,14 +8733,12 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
- "crossbeam-channel",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
  "reth-ethereum-primitives",
  "reth-execution-types",
  "reth-primitives-traits",
- "reth-trie-common",
  "tracing",
 ]
 

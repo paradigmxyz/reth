@@ -75,7 +75,7 @@ impl EngineApiMetrics {
     where
         DB: alloy_evm::Database,
         E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>, Transaction: SignedTransaction>,
-        F: FnMut(usize, &[E::Receipt]),
+        F: FnMut(&[E::Receipt]),
     {
         // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
         // they are globally registered so that the data recorded in the hook will
@@ -93,7 +93,6 @@ impl EngineApiMetrics {
             self.executor.pre_execution_histogram.record(start.elapsed());
 
             let exec_span = debug_span!(target: "engine::tree", "execution").entered();
-            let mut tx_index = 0usize;
             loop {
                 let start = Instant::now();
                 let Some(tx) = transactions.next() else { break };
@@ -111,8 +110,7 @@ impl EngineApiMetrics {
                 self.executor.transaction_execution_histogram.record(start.elapsed());
 
                 // Invoke callback with the latest receipt
-                on_receipt(tx_index, executor.receipts());
-                tx_index += 1;
+                on_receipt(executor.receipts());
 
                 // record the tx gas used
                 enter.record("gas_used", gas_used);
@@ -556,7 +554,7 @@ mod tests {
             input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
             input.transaction_count(),
             state_hook,
-            |_, _| {},
+            |_| {},
         );
 
         // Check if hook was called (it might not be if finish() fails early)
@@ -616,7 +614,7 @@ mod tests {
             input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
             input.transaction_count(),
             state_hook,
-            |_, _| {},
+            |_| {},
         );
 
         let snapshot = snapshotter.snapshot().into_vec();

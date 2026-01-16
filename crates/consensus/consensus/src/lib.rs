@@ -14,13 +14,13 @@ extern crate alloc;
 use alloc::{boxed::Box, fmt::Debug, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
+use core::error::Error;
 
 /// Pre-computed receipt root and logs bloom.
 ///
 /// When provided to [`FullConsensus::validate_block_post_execution`], this allows skipping
 /// the receipt root computation and using the pre-computed values instead.
 pub type ReceiptRootBloom = (B256, Bloom);
-use core::error::Error;
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},

@@ -17,7 +17,6 @@ reth-chainspec.workspace = true
 reth-consensus-common.workspace = true
 reth-primitives-traits.workspace = true
 reth-consensus.workspace = true
-reth-trie-common.workspace = true
 
 # alloy
 alloy-eips.workspace = true
@@ -25,9 +24,6 @@ alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 
 tracing.workspace = true
-
-# std-only dependencies for receipt root task
-crossbeam-channel = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
@@ -41,9 +37,7 @@ std = [
     "reth-ethereum-primitives/std",
     "reth-execution-types/std",
     "reth-primitives-traits/std",
-    "reth-trie-common/std",
     "tracing/std",
-    "dep:crossbeam-channel",
 ]
 
 [dev-dependencies]
