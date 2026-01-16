@@ -561,16 +561,18 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     let start = Instant::now();
                     self.write_trie_updates_sorted(&trie_data.trie_updates)?;
                     timings.write_trie_updates += start.elapsed();
-
                 }
             }
 
             let start = Instant::now();
-            if hashed_states.len() < 2 {
-                self.write_hashed_state(&hashed_states[0])?;
-            } else {
-                self.write_hashed_state_merged(&hashed_states)?;
+            if !hashed_states.is_empty() {
+                if hashed_states.len() == 1 {
+                    self.write_hashed_state(&hashed_states[0])?;
+                } else {
+                    self.write_hashed_state_merged(&hashed_states)?;
+                }
             }
+
             timings.write_hashed_state = start.elapsed();
 
             // Full mode: update history indices
