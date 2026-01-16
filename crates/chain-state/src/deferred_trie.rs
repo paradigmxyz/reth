@@ -287,6 +287,11 @@ impl DeferredTrieData {
                     &inputs.ancestors,
                 );
                 *state = DeferredState::Ready(computed.clone());
+
+                // Release lock before inputs (and its ancestors) drop to avoid holding it
+                // while their potential last Arc refs drop (which could trigger recursive locking)
+                drop(state);
+
                 computed
             }
         }
