@@ -747,7 +747,6 @@ vergen-git2 = "1.0.5"
 # networking
 ipnet = "2.11"
 
-
 # TODO: Remove this patch once alloy-evm PR is merged and released
 [patch.crates-io]
 alloy-evm = { git = "https://github.com/rezzmah/evm.git", branch = "configurable-evm-execution-limits" }
