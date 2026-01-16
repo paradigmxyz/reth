@@ -81,11 +81,15 @@ backon.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["jemalloc", "otlp", "reth-revm/portable", "js-tracer", "keccak-cache-global", "asm-keccak"]
+default = ["jemalloc", "otlp", "otlp-logs", "reth-revm/portable", "js-tracer", "keccak-cache-global", "asm-keccak"]
 
 otlp = [
     "reth-ethereum-cli/otlp",
     "reth-node-core/otlp",
+]
+otlp-logs = [
+    "reth-ethereum-cli/otlp-logs",
+    "reth-node-core/otlp-logs",
 ]
 js-tracer = [
     "reth-node-builder/js-tracer",
@@ -103,6 +107,7 @@ asm-keccak = [
     "reth-node-ethereum/asm-keccak",
 ]
 keccak-cache-global = [
+    "reth-node-core/keccak-cache-global",
     "reth-node-ethereum/keccak-cache-global",
 ]
 jemalloc = [
@@ -115,6 +120,11 @@ jemalloc-prof = [
     "reth-cli-util/jemalloc",
     "reth-cli-util/jemalloc-prof",
     "reth-ethereum-cli/jemalloc-prof",
+    "reth-node-metrics/jemalloc-prof",
+]
+jemalloc-symbols = [
+    "jemalloc-prof",
+    "reth-ethereum-cli/jemalloc-symbols",
 ]
 jemalloc-unprefixed = [
     "reth-cli-util/jemalloc-unprefixed",
@@ -125,6 +135,11 @@ jemalloc-unprefixed = [
 tracy-allocator = [
     "reth-cli-util/tracy-allocator",
     "reth-ethereum-cli/tracy-allocator",
+    "tracy",
+]
+tracy = [
+    "reth-ethereum-cli/tracy",
+    "reth-node-core/tracy",
 ]
 
 # Because jemalloc is default and preferred over snmalloc when both features are
@@ -164,6 +179,8 @@ min-trace-logs = [
     "reth-ethereum-cli/min-trace-logs",
     "reth-node-core/min-trace-logs",
 ]
+
+edge = ["reth-ethereum-cli/edge", "reth-node-core/edge"]
 
 [[bin]]
 name = "reth"

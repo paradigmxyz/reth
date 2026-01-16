@@ -69,9 +69,7 @@ pub async fn import_blocks_from_file<N>(
     provider_factory: ProviderFactory<N>,
     config: &Config,
     executor: impl ConfigureEvm<Primitives = N::Primitives> + 'static,
-    consensus: Arc<
-        impl FullConsensus<N::Primitives, Error = reth_consensus::ConsensusError> + 'static,
-    >,
+    consensus: Arc<impl FullConsensus<N::Primitives> + 'static>,
 ) -> eyre::Result<ImportResult>
 where
     N: ProviderNodeTypes,
@@ -198,7 +196,7 @@ pub fn build_import_pipeline_impl<N, C, E>(
 ) -> eyre::Result<(Pipeline<N>, impl futures::Stream<Item = NodeEvent<N::Primitives>> + use<N, C, E>)>
 where
     N: ProviderNodeTypes,
-    C: FullConsensus<N::Primitives, Error = reth_consensus::ConsensusError> + 'static,
+    C: FullConsensus<N::Primitives> + 'static,
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
     if !file_client.has_canonical_blocks() {

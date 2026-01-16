@@ -238,7 +238,7 @@ pub struct UnwindOutput {
 ///
 /// Stages receive [`DBProvider`](reth_provider::DBProvider).
 #[auto_impl::auto_impl(Box)]
-pub trait Stage<Provider>: Send + Sync {
+pub trait Stage<Provider>: Send {
     /// Get the ID of the stage.
     ///
     /// Stage IDs must be unique.
@@ -344,7 +344,6 @@ mod tests {
             create_test_rw_db(),
             MAINNET.clone(),
             StaticFileProviderBuilder::read_write(create_test_static_files_dir().0.keep())
-                .unwrap()
                 .with_blocks_per_file(1)
                 .build()
                 .unwrap(),

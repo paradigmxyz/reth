@@ -81,6 +81,7 @@ arbitrary = [
 ]
 keccak-cache-global = [
     "reth-node-ethereum?/keccak-cache-global",
+    "reth-node-core?/keccak-cache-global",
 ]
 test-utils = [
     "reth-chainspec/test-utils",
@@ -150,6 +151,15 @@ jemalloc = [
     "reth-cli-util?/jemalloc",
     "reth-ethereum-cli?/jemalloc",
     "reth-node-core?/jemalloc",
+]
+jemalloc-prof = [
+    "jemalloc",
+    "reth-cli-util?/jemalloc-prof",
+    "reth-ethereum-cli?/jemalloc-prof",
+]
+jemalloc-symbols = [
+    "jemalloc-prof",
+    "reth-ethereum-cli?/jemalloc-symbols",
 ]
 js-tracer = [
     "rpc",

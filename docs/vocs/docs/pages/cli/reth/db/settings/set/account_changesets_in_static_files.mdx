@@ -1,20 +1,30 @@
-# reth recover
+# reth db settings set account_changesets_in_static_files
 
-Scripts for node recovery
+Store account changesets in static files instead of the database
 
 ```bash
-$ reth recover --help
+$ reth db settings set account_changesets_in_static_files --help
 ```
 ```txt
-Usage: reth recover [OPTIONS] <COMMAND>
+Usage: reth db settings set account_changesets_in_static_files [OPTIONS] <VALUE>
 
-Commands:
-  storage-tries  Recover the node by deleting dangling storage tries
-  help           Print this message or the help of the given subcommand(s)
+Arguments:
+  <VALUE>
+          [possible values: true, false]
 
 Options:
   -h, --help
           Print help (see a summary with '-h')
+
+Datadir:
+      --chain <CHAIN_OR_PATH>
+          The chain this node is running.
+          Possible values are either a built-in chain or the path to a chain specification file.
+
+          Built-in chains:
+              mainnet, sepolia, holesky, hoodi, dev
+
+          [default: mainnet]
 
 Logging:
       --log.stdout.format <FORMAT>
@@ -97,4 +107,46 @@ Display:
 
   -q, --quiet
           Silence all log output
+
+Tracing:
+      --tracing-otlp[=<URL>]
+          Enable `Opentelemetry` tracing export to an OTLP endpoint.
+
+          If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/traces` - gRPC: `http://localhost:4317`
+
+          Example: --tracing-otlp=http://collector:4318/v1/traces
+
+          [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
+
+      --tracing-otlp-protocol <PROTOCOL>
+          OTLP transport protocol to use for exporting traces.
+
+          - `http`: expects endpoint path to end with `/v1/traces` - `grpc`: expects endpoint without a path
+
+          Defaults to HTTP if not specified.
+
+          Possible values:
+          - http: HTTP/Protobuf transport, port 4318, requires `/v1/traces` path
+          - grpc: gRPC transport, port 4317
+
+          [env: OTEL_EXPORTER_OTLP_PROTOCOL=]
+          [default: http]
+
+      --tracing-otlp.filter <FILTER>
+          Set a filter directive for the OTLP tracer. This controls the verbosity of spans and events sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
+
+          Example: --tracing-otlp.filter=info,reth=debug,hyper_util=off
+
+          Defaults to TRACE if not specified.
+
+          [default: debug]
+
+      --tracing-otlp.sample-ratio <RATIO>
+          Trace sampling ratio to control the percentage of traces to export.
+
+          Valid range: 0.0 to 1.0 - 1.0, default: Sample all traces - 0.01: Sample 1% of traces - 0.0: Disable sampling
+
+          Example: --tracing-otlp.sample-ratio=0.0.
+
+          [env: OTEL_TRACES_SAMPLER_ARG=]
 ```

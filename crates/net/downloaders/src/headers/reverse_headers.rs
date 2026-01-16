@@ -1464,7 +1464,7 @@ mod tests {
             .await;
 
         let headers = downloader.next().await.unwrap();
-        assert_eq!(headers, Ok(vec![p0, p1, p2,]));
+        assert_eq!(headers.unwrap(), vec![p0, p1, p2,]);
         assert!(downloader.buffered_responses.is_empty());
         assert!(downloader.next().await.is_none());
         assert!(downloader.next().await.is_none());
@@ -1496,18 +1496,18 @@ mod tests {
             .await;
 
         let headers = downloader.next().await.unwrap();
-        assert_eq!(headers, Ok(vec![p0]));
         let headers = headers.unwrap();
+        assert_eq!(headers, vec![p0]);
         assert_eq!(headers.capacity(), headers.len());
 
         let headers = downloader.next().await.unwrap();
-        assert_eq!(headers, Ok(vec![p1]));
         let headers = headers.unwrap();
+        assert_eq!(headers, vec![p1]);
         assert_eq!(headers.capacity(), headers.len());
 
         let headers = downloader.next().await.unwrap();
-        assert_eq!(headers, Ok(vec![p2]));
         let headers = headers.unwrap();
+        assert_eq!(headers, vec![p2]);
         assert_eq!(headers.capacity(), headers.len());
 
         assert!(downloader.next().await.is_none());
@@ -1539,18 +1539,18 @@ mod tests {
             .await;
 
         let headers = downloader.next().await.unwrap();
-        assert_eq!(headers, Ok(vec![p0]));
         let headers = headers.unwrap();
+        assert_eq!(headers, vec![p0]);
         assert_eq!(headers.capacity(), headers.len());
 
         let headers = downloader.next().await.unwrap();
-        assert_eq!(headers, Ok(vec![p1]));
         let headers = headers.unwrap();
+        assert_eq!(headers, vec![p1]);
         assert_eq!(headers.capacity(), headers.len());
 
         let headers = downloader.next().await.unwrap();
-        assert_eq!(headers, Ok(vec![p2]));
         let headers = headers.unwrap();
+        assert_eq!(headers, vec![p2]);
         assert_eq!(headers.capacity(), headers.len());
 
         assert!(downloader.next().await.is_none());

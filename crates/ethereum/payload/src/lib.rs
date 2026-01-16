@@ -215,6 +215,8 @@ where
 
     let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp);
 
+    let withdrawals_rlp_length = attributes.withdrawals().length();
+
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
@@ -236,10 +238,10 @@ where
         // convert tx to a signed transaction
         let tx = pool_tx.to_consensus();
 
-        let estimated_block_size_with_tx = block_transactions_rlp_length +
-            tx.inner().length() +
-            attributes.withdrawals().length() +
-            1024; // 1Kb of overhead for the block header
+        let tx_rlp_len = tx.inner().length();
+
+        let estimated_block_size_with_tx =
+            block_transactions_rlp_length + tx_rlp_len + withdrawals_rlp_length + 1024; // 1Kb of overhead for the block header
 
         if is_osaka && estimated_block_size_with_tx > MAX_RLP_BLOCK_SIZE {
             best_txs.mark_invalid(
@@ -340,7 +342,7 @@ where
             }
         }
 
-        block_transactions_rlp_length += tx.inner().length();
+        block_transactions_rlp_length += tx_rlp_len;
 
         // update and add to total fees
         let miner_fee =
@@ -362,7 +364,8 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, .. } = builder.finish(&state_provider)?;
+    let BlockBuilderOutcome { execution_result, block, .. } =
+        builder.finish(state_provider.as_ref())?;
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)

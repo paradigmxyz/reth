@@ -34,13 +34,13 @@ use reth_primitives_traits::{
     SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
-    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
-    StateRootProvider, TrieReader,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
+    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, ExecutionOutcome,
+    HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
+    StateProvider, StateProviderFactory, StateReader, TrieReader,
 };
 use reth_revm::db::State;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInputSorted};
+use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
 use std::{
@@ -111,7 +111,7 @@ where
     /// Provider for database access.
     provider: P,
     /// Consensus implementation for validation.
-    consensus: Arc<dyn FullConsensus<Evm::Primitives, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<Evm::Primitives>>,
     /// EVM configuration.
     evm_config: Evm,
     /// Configuration for the tree.
@@ -135,8 +135,15 @@ impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
-            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            Provider: BlockReader
+                          + TrieReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
+        + ChangeSetReader
+        + BlockNumReader
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
@@ -148,7 +155,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
-        consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<N>>,
         evm_config: Evm,
         validator: V,
         config: TreeConfig,
@@ -434,8 +441,7 @@ where
         }
 
         // Execute the block and handle any execution errors
-        let (output, senders) = match self.execute_block(&state_provider, env, &input, &mut handle)
-        {
+        let (output, senders) = match self.execute_block(state_provider, env, &input, &mut handle) {
             Ok(output) => output,
             Err(err) => return self.handle_execution_error(input, err, &parent_block),
         };
@@ -519,7 +525,7 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                state_provider.state_root_with_updates(hashed_state.clone()),
+                self.compute_state_root_serial(block.parent_hash(), &hashed_state, ctx.state()),
                 block
             );
             (root, updates, root_time.elapsed())
@@ -549,17 +555,14 @@ where
             .into())
         }
 
-        // terminate prewarming task with good state output
-        handle.terminate_caching(Some(&output.state));
+        // Create ExecutionOutcome and wrap in Arc for sharing with both the caching task
+        // and the deferred trie task. This avoids cloning the expensive BundleState.
+        let execution_outcome = Arc::new(ExecutionOutcome::from((output, block_num_hash.number)));
 
-        Ok(self.spawn_deferred_trie_task(
-            block,
-            output,
-            block_num_hash.number,
-            &ctx,
-            hashed_state,
-            trie_output,
-        ))
+        // Terminate prewarming task with the shared execution outcome
+        handle.terminate_caching(Some(Arc::clone(&execution_outcome)));
+
+        Ok(self.spawn_deferred_trie_task(block, execution_outcome, &ctx, hashed_state, trie_output))
     }
 
     /// Return sealed block header from database or in-memory state by hash.
@@ -602,10 +605,10 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err>,
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<(BlockExecutionOutput<N::Receipt>, Vec<Address>), InsertBlockErrorKind>
     where
-        S: StateProvider,
+        S: StateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
@@ -621,7 +624,8 @@ where
         db.bal_state.bal_index = 0;
         db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
-        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
+        let spec_id = *env.evm_env.spec_id();
+        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
         let mut executor = self.evm_config.create_executor(evm, ctx);
@@ -637,7 +641,7 @@ where
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
-                    *env.evm_env.spec_id(),
+                    spec_id,
                     Some(metrics),
                 )
             });
@@ -648,6 +652,7 @@ where
         let (output, senders) = self.metrics.execute_metered(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
+            input.transaction_count(),
             state_hook,
         )?;
         let execution_finish = Instant::now();
@@ -662,8 +667,6 @@ where
     ///
     /// Returns `Ok(_)` if computed successfully.
     /// Returns `Err(_)` if error was encountered during computation.
-    /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
-    /// should be used instead.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn compute_state_root_parallel(
         &self,
@@ -691,6 +694,35 @@ where
         let prefix_sets = prefix_sets_mut.freeze();
 
         ParallelStateRoot::new(factory, prefix_sets).incremental_root_with_updates()
+    }
+
+    /// Compute state root for the given hashed post state in serial.
+    fn compute_state_root_serial(
+        &self,
+        parent_hash: B256,
+        hashed_state: &HashedPostState,
+        state: &EngineApiTreeState<N>,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let (mut input, block_hash) = self.compute_trie_input(parent_hash, state)?;
+
+        // Extend state overlay with current block's sorted state.
+        input.prefix_sets.extend(hashed_state.construct_prefix_sets());
+        let sorted_hashed_state = hashed_state.clone_into_sorted();
+        Arc::make_mut(&mut input.state).extend_ref(&sorted_hashed_state);
+
+        let TrieInputSorted { nodes, state, .. } = input;
+        let prefix_sets = hashed_state.construct_prefix_sets();
+
+        let factory = OverlayStateProviderFactory::new(self.provider.clone())
+            .with_block_hash(Some(block_hash))
+            .with_trie_overlay(Some(nodes))
+            .with_hashed_state_overlay(Some(state));
+
+        let provider = factory.database_provider_ro()?;
+
+        Ok(StateRoot::new(&provider, &provider)
+            .with_prefix_sets(prefix_sets.freeze())
+            .root_with_updates()?)
     }
 
     /// Validates the block after execution.
@@ -792,6 +824,7 @@ where
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
             impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
+            N::Receipt,
         >,
         InsertBlockErrorKind,
     > {
@@ -837,8 +870,12 @@ where
             }
             StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
                 let start = Instant::now();
-                let handle =
-                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
+                let handle = self.payload_processor.spawn_cache_exclusive(
+                    env,
+                    txs,
+                    provider_builder,
+                    block_access_list,
+                );
 
                 // Record prewarming initialization duration
                 self.metrics
@@ -1026,8 +1063,7 @@ where
     fn spawn_deferred_trie_task(
         &self,
         block: RecoveredBlock<N::Block>,
-        output: BlockExecutionOutput<N::Receipt>,
-        block_number: u64,
+        execution_outcome: Arc<ExecutionOutcome<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
         hashed_state: HashedPostState,
         trie_output: TrieUpdates,
@@ -1052,16 +1088,33 @@ where
             ancestors,
         );
         let deferred_handle_task = deferred_trie_data.clone();
-        let deferred_compute_duration =
-            self.metrics.block_validation.deferred_trie_compute_duration.clone();
+        let block_validation_metrics = self.metrics.block_validation.clone();
 
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
         let compute_trie_input_task = move || {
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
-                let _ = deferred_handle_task.wait_cloned();
-                deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
+                let computed = deferred_handle_task.wait_cloned();
+                block_validation_metrics
+                    .deferred_trie_compute_duration
+                    .record(compute_start.elapsed().as_secs_f64());
+
+                // Record sizes of the computed trie data
+                block_validation_metrics
+                    .hashed_post_state_size
+                    .record(computed.hashed_state.total_len() as f64);
+                block_validation_metrics
+                    .trie_updates_sorted_size
+                    .record(computed.trie_updates.total_len() as f64);
+                if let Some(anchored) = &computed.anchored_trie_input {
+                    block_validation_metrics
+                        .anchored_overlay_trie_updates_size
+                        .record(anchored.trie_input.nodes.total_len() as f64);
+                    block_validation_metrics
+                        .anchored_overlay_hashed_state_size
+                        .record(anchored.trie_input.state.total_len() as f64);
+                }
             }));
 
             if result.is_err() {
@@ -1077,7 +1130,7 @@ where
 
         ExecutedBlock::with_deferred_trie_data(
             Arc::new(block),
-            Arc::new(ExecutionOutcome::from((output, block_number))),
+            execution_outcome,
             deferred_trie_data,
         )
     }
@@ -1157,10 +1210,17 @@ pub trait EngineValidator<
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
     P: DatabaseProviderFactory<
-            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            Provider: BlockReader
+                          + TrieReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
+        + ChangeSetReader
+        + BlockNumReader
         + HashedPostStateProvider
         + Clone
         + 'static,
@@ -1263,5 +1323,16 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     pub const fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
         // TODO decode and return `BlockAccessList`
         None
+    }
+
+    /// Returns the number of transactions in the payload or block.
+    pub fn transaction_count(&self) -> usize
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.transaction_count(),
+            Self::Block(block) => block.transaction_count(),
+        }
     }
 }

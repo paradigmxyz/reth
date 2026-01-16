@@ -1,5 +1,5 @@
 use super::setup;
-use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
+use reth_consensus::{noop::NoopConsensus, FullConsensus};
 use reth_db::DatabaseEnv;
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
@@ -28,7 +28,7 @@ pub(crate) async fn dump_execution_stage<N, E, C>(
 where
     N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
-    C: FullConsensus<E::Primitives, Error = ConsensusError> + 'static,
+    C: FullConsensus<E::Primitives> + 'static,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
@@ -169,7 +169,7 @@ fn dry_run<N, E, C>(
 where
     N: ProviderNodeTypes,
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
-    C: FullConsensus<E::Primitives, Error = ConsensusError> + 'static,
+    C: FullConsensus<E::Primitives> + 'static,
 {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 

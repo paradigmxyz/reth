@@ -2,17 +2,123 @@
 
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eip7928::BlockAccessList;
-use alloy_primitives::{keccak256, U256};
+use alloy_primitives::{keccak256, Address, StorageKey, U256};
 use reth_primitives_traits::Account;
 use reth_provider::{AccountReader, ProviderError};
 use reth_trie::{HashedPostState, HashedStorage};
 use revm_primitives::B256;
+use std::ops::Range;
+
+/// Returns the total number of storage slots (both changed and read-only) across all accounts in
+/// the BAL.
+pub fn total_slots(bal: &BlockAccessList) -> usize {
+    bal.iter().map(|account| account.storage_changes.len() + account.storage_reads.len()).sum()
+}
+
+/// Iterator over storage slots in a [`BlockAccessList`], with range-based filtering.
+///
+/// Iterates over all `(Address, StorageKey)` pairs representing both changed and read-only
+/// storage slots across all accounts in the BAL. For each account, changed slots are iterated
+/// first, followed by read-only slots. The iterator intelligently skips accounts and slots
+/// outside the specified range for efficient traversal.
+#[derive(Debug)]
+pub(crate) struct BALSlotIter<'a> {
+    bal: &'a BlockAccessList,
+    range: Range<usize>,
+    current_index: usize,
+    account_idx: usize,
+    /// Index within the current account's combined slots (changed + read-only).
+    /// If `slot_idx < storage_changes.len()`, we're in changed slots.
+    /// Otherwise, we're in read-only slots at index `slot_idx - storage_changes.len()`.
+    slot_idx: usize,
+}
+
+impl<'a> BALSlotIter<'a> {
+    /// Creates a new iterator over storage slots within the specified range.
+    pub(crate) fn new(bal: &'a BlockAccessList, range: Range<usize>) -> Self {
+        let mut iter = Self { bal, range, current_index: 0, account_idx: 0, slot_idx: 0 };
+        iter.skip_to_range_start();
+        iter
+    }
+
+    /// Skips to the first item within the range.
+    fn skip_to_range_start(&mut self) {
+        while self.account_idx < self.bal.len() {
+            let account = &self.bal[self.account_idx];
+            let slots_in_account = account.storage_changes.len() + account.storage_reads.len();
+
+            // Check if this account contains items in our range
+            let account_end = self.current_index + slots_in_account;
+
+            if account_end <= self.range.start {
+                // Entire account is before range, skip it
+                self.current_index = account_end;
+                self.account_idx += 1;
+                self.slot_idx = 0;
+            } else if self.current_index < self.range.start {
+                // Range starts somewhere in this account
+                let skip_slots = self.range.start - self.current_index;
+                self.slot_idx = skip_slots;
+                self.current_index = self.range.start;
+                break;
+            } else {
+                // We're at or past range start
+                break;
+            }
+        }
+    }
+}
+
+impl<'a> Iterator for BALSlotIter<'a> {
+    type Item = (Address, StorageKey);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Check if we've exceeded the range
+        if self.current_index >= self.range.end {
+            return None;
+        }
+
+        // Find the next valid slot
+        while self.account_idx < self.bal.len() {
+            let account = &self.bal[self.account_idx];
+            let changed_len = account.storage_changes.len();
+            let total_len = changed_len + account.storage_reads.len();
+
+            if self.slot_idx < total_len {
+                let address = account.address;
+                let slot = if self.slot_idx < changed_len {
+                    // We're in changed slots
+                    account.storage_changes[self.slot_idx].slot
+                } else {
+                    // We're in read-only slots
+                    account.storage_reads[self.slot_idx - changed_len]
+                };
+
+                self.slot_idx += 1;
+                self.current_index += 1;
+
+                // Check if we've reached the end of range
+                if self.current_index > self.range.end {
+                    return None;
+                }
+
+                return Some((address, StorageKey::from(U256::from(slot))));
+            }
+
+            // Move to next account
+            self.account_idx += 1;
+            self.slot_idx = 0;
+        }
+
+        None
+    }
+}
 
 /// Converts a Block Access List into a [`HashedPostState`] by extracting the final state
 /// of modified accounts and storage slots.
-pub fn bal_to_hashed_post_state<P>(
+pub(crate) fn bal_to_hashed_post_state<P>(
     bal: &BlockAccessList,
-    provider: &P,
+    provider: P,
 ) -> Result<HashedPostState, ProviderError>
 where
     P: AccountReader,
@@ -21,7 +127,10 @@ where
 
     for account_changes in bal {
         let address = account_changes.address;
-        let hashed_address = keccak256(address);
+
+        // Always fetch the account; even if we don't need the db account to construct the final
+        // `Account`, doing this fills the cache.
+        let existing_account = provider.basic_account(&address)?;
 
         // Get the latest balance (last balance change if any)
         let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
@@ -40,12 +149,14 @@ where
             None
         };
 
-        // Only fetch account from provider if we're missing any field
-        let existing_account = if balance.is_none() || nonce.is_none() || code_hash.is_none() {
-            provider.basic_account(&address)?
-        } else {
-            None
-        };
+        // If the account was only read then don't add it to the HashedPostState
+        if balance.is_none() &&
+            nonce.is_none() &&
+            code_hash.is_none() &&
+            account_changes.storage_changes.is_empty()
+        {
+            continue
+        }
 
         // Build the final account state
         let account = Account {
@@ -59,6 +170,7 @@ where
             }),
         };
 
+        let hashed_address = keccak256(address);
         hashed_state.accounts.insert(hashed_address, Some(account));
 
         // Process storage changes
@@ -74,9 +186,7 @@ where
                 }
             }
 
-            if !storage_map.storage.is_empty() {
-                hashed_state.storages.insert(hashed_address, storage_map);
-            }
+            hashed_state.storages.insert(hashed_address, storage_map);
         }
     }
 
@@ -313,5 +423,118 @@ mod tests {
 
         // Should have the last value
         assert_eq!(*stored_value, U256::from(300));
+    }
+
+    #[test]
+    fn test_bal_slot_iter() {
+        // Create test data with multiple accounts and slots (both changed and read-only)
+        let addr1 = Address::repeat_byte(0x01);
+        let addr2 = Address::repeat_byte(0x02);
+        let addr3 = Address::repeat_byte(0x03);
+
+        // Account 1: 2 changed slots + 1 read-only = 3 total slots (indices 0, 1, 2)
+        let account1 = AccountChanges {
+            address: addr1,
+            storage_changes: vec![
+                SlotChanges {
+                    slot: U256::from(100),
+                    changes: vec![StorageChange::new(0, U256::ZERO)],
+                },
+                SlotChanges {
+                    slot: U256::from(101),
+                    changes: vec![StorageChange::new(0, U256::ZERO)],
+                },
+            ],
+            storage_reads: vec![U256::from(102)],
+            balance_changes: vec![],
+            nonce_changes: vec![],
+            code_changes: vec![],
+        };
+
+        // Account 2: 1 changed slot + 1 read-only = 2 total slots (indices 3, 4)
+        let account2 = AccountChanges {
+            address: addr2,
+            storage_changes: vec![SlotChanges {
+                slot: U256::from(200),
+                changes: vec![StorageChange::new(0, U256::ZERO)],
+            }],
+            storage_reads: vec![U256::from(201)],
+            balance_changes: vec![],
+            nonce_changes: vec![],
+            code_changes: vec![],
+        };
+
+        // Account 3: 2 changed slots + 1 read-only = 3 total slots (indices 5, 6, 7)
+        let account3 = AccountChanges {
+            address: addr3,
+            storage_changes: vec![
+                SlotChanges {
+                    slot: U256::from(300),
+                    changes: vec![StorageChange::new(0, U256::ZERO)],
+                },
+                SlotChanges {
+                    slot: U256::from(301),
+                    changes: vec![StorageChange::new(0, U256::ZERO)],
+                },
+            ],
+            storage_reads: vec![U256::from(302)],
+            balance_changes: vec![],
+            nonce_changes: vec![],
+            code_changes: vec![],
+        };
+
+        let bal = vec![account1, account2, account3];
+
+        // Test 1: Iterate over all slots (range 0..8)
+        let items: Vec<_> = BALSlotIter::new(&bal, 0..8).collect();
+        assert_eq!(items.len(), 8);
+        // Account 1: changed slots first (100, 101), then read-only (102)
+        assert_eq!(items[0], (addr1, StorageKey::from(U256::from(100))));
+        assert_eq!(items[1], (addr1, StorageKey::from(U256::from(101))));
+        assert_eq!(items[2], (addr1, StorageKey::from(U256::from(102))));
+        // Account 2: changed slot (200), then read-only (201)
+        assert_eq!(items[3], (addr2, StorageKey::from(U256::from(200))));
+        assert_eq!(items[4], (addr2, StorageKey::from(U256::from(201))));
+        // Account 3: changed slots (300, 301), then read-only (302)
+        assert_eq!(items[5], (addr3, StorageKey::from(U256::from(300))));
+        assert_eq!(items[6], (addr3, StorageKey::from(U256::from(301))));
+        assert_eq!(items[7], (addr3, StorageKey::from(U256::from(302))));
+
+        // Test 2: Range that skips first account (range 3..6)
+        let items: Vec<_> = BALSlotIter::new(&bal, 3..6).collect();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0], (addr2, StorageKey::from(U256::from(200))));
+        assert_eq!(items[1], (addr2, StorageKey::from(U256::from(201))));
+        assert_eq!(items[2], (addr3, StorageKey::from(U256::from(300))));
+
+        // Test 3: Range within first account (range 1..2)
+        let items: Vec<_> = BALSlotIter::new(&bal, 1..2).collect();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0], (addr1, StorageKey::from(U256::from(101))));
+
+        // Test 4: Range spanning multiple accounts (range 2..5)
+        let items: Vec<_> = BALSlotIter::new(&bal, 2..5).collect();
+        assert_eq!(items.len(), 3);
+        // Last slot from account 1 (read-only)
+        assert_eq!(items[0], (addr1, StorageKey::from(U256::from(102))));
+        // Account 2 (changed + read-only)
+        assert_eq!(items[1], (addr2, StorageKey::from(U256::from(200))));
+        assert_eq!(items[2], (addr2, StorageKey::from(U256::from(201))));
+
+        // Test 5: Empty range
+        let items: Vec<_> = BALSlotIter::new(&bal, 5..5).collect();
+        assert_eq!(items.len(), 0);
+
+        // Test 6: Range beyond end (starts at index 6)
+        let items: Vec<_> = BALSlotIter::new(&bal, 6..100).collect();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0], (addr3, StorageKey::from(U256::from(301))));
+        assert_eq!(items[1], (addr3, StorageKey::from(U256::from(302))));
+
+        // Test 7: Range that starts in read-only slots (index 2 is the read-only slot of account 1)
+        let items: Vec<_> = BALSlotIter::new(&bal, 2..4).collect();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0], (addr1, StorageKey::from(U256::from(102))));
+        assert_eq!(items[1], (addr2, StorageKey::from(U256::from(200))));
     }
 }

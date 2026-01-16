@@ -48,14 +48,23 @@ pub use tracing;
 pub use tracing_appender;
 pub use tracing_subscriber;
 
+#[cfg(feature = "tracy")]
+tracy_client::register_demangler!();
+
 // Re-export our types
 pub use formatter::LogFormat;
 pub use layers::{FileInfo, FileWorkerGuard, Layers};
 pub use test_tracer::TestTracer;
 
+#[doc(hidden)]
+pub mod __private {
+    pub use super::throttle::*;
+}
+
 mod formatter;
 mod layers;
 mod test_tracer;
+mod throttle;
 
 use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
@@ -70,42 +79,65 @@ pub struct RethTracer {
     stdout: LayerInfo,
     journald: Option<String>,
     file: Option<(LayerInfo, FileInfo)>,
+    samply: Option<LayerInfo>,
+    #[cfg(feature = "tracy")]
+    tracy: Option<LayerInfo>,
 }
 
 impl RethTracer {
-    ///  Constructs a new `Tracer` with default settings.
+    /// Constructs a new `Tracer` with default settings.
     ///
-    ///  Initializes with default stdout layer configuration.
-    ///  Journald and file layers are not set by default.
+    /// Initializes with default stdout layer configuration.
+    /// Journald and file layers are not set by default.
     pub fn new() -> Self {
-        Self { stdout: LayerInfo::default(), journald: None, file: None }
+        Self {
+            stdout: LayerInfo::default(),
+            journald: None,
+            file: None,
+            samply: None,
+            #[cfg(feature = "tracy")]
+            tracy: None,
+        }
     }
 
-    ///  Sets a custom configuration for the stdout layer.
+    /// Sets a custom configuration for the stdout layer.
     ///
-    ///  # Arguments
-    ///  * `config` - The `LayerInfo` to use for the stdout layer.
+    /// # Arguments
+    /// * `config` - The `LayerInfo` to use for the stdout layer.
     pub fn with_stdout(mut self, config: LayerInfo) -> Self {
         self.stdout = config;
         self
     }
 
-    ///  Sets the journald layer filter.
+    /// Sets the journald layer filter.
     ///
-    ///  # Arguments
-    ///  * `filter` - The `filter` to use for the journald layer.
+    /// # Arguments
+    /// * `filter` - The `filter` to use for the journald layer.
     pub fn with_journald(mut self, filter: String) -> Self {
         self.journald = Some(filter);
         self
     }
 
-    ///  Sets the file layer configuration and associated file info.
+    /// Sets the file layer configuration and associated file info.
     ///
     ///  # Arguments
-    ///  * `config` - The `LayerInfo` to use for the file layer.
-    ///  * `file_info` - The `FileInfo` containing details about the log file.
+    /// * `config` - The `LayerInfo` to use for the file layer.
+    /// * `file_info` - The `FileInfo` containing details about the log file.
     pub fn with_file(mut self, config: LayerInfo, file_info: FileInfo) -> Self {
         self.file = Some((config, file_info));
+        self
+    }
+
+    /// Sets the samply layer configuration.
+    pub fn with_samply(mut self, config: LayerInfo) -> Self {
+        self.samply = Some(config);
+        self
+    }
+
+    /// Sets the tracy layer configuration.
+    #[cfg(feature = "tracy")]
+    pub fn with_tracy(mut self, config: LayerInfo) -> Self {
+        self.tracy = Some(config);
         self
     }
 }
@@ -223,6 +255,15 @@ impl Tracer for RethTracer {
         } else {
             None
         };
+
+        if let Some(config) = self.samply {
+            layers.samply(config)?;
+        }
+
+        #[cfg(feature = "tracy")]
+        if let Some(config) = self.tracy {
+            layers.tracy(config)?;
+        }
 
         // The error is returned if the global default subscriber is already set,
         // so it's safe to ignore it
