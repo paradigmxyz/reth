@@ -155,7 +155,7 @@ pub struct NodeConfig<ChainSpec> {
     /// All `RocksDB` table routing arguments
     pub rocksdb: RocksDbArgs,
 
-    /// Storage mode configuration (v2 vs v1/legacy)
+    /// All storage related arguments with --storage prefix
     pub storage: StorageArgs,
 }
 
@@ -352,6 +352,12 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     /// Set the pruning args for the node
     pub fn with_pruning(mut self, pruning: PruningArgs) -> Self {
         self.pruning = pruning;
+        self
+    }
+
+    /// Set the storage args for the node
+    pub fn with_storage(mut self, storage: StorageArgs) -> Self {
+        self.storage = storage;
         self
     }
 
