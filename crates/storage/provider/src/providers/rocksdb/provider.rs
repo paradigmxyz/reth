@@ -1,5 +1,5 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
-use crate::providers::{needs_prev_shard_check, HistoryInfo};
+use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
 use parking_lot::Mutex;
@@ -954,17 +954,7 @@ impl<'db> RocksTx<'db> {
             };
         };
         let chunk = BlockNumberList::decompress(value_bytes)?;
-
-        // Get the rank of the first entry before or equal to our block.
-        let mut rank = chunk.rank(block_number);
-
-        // Adjust the rank, so that we have the rank of the first entry strictly before our
-        // block (not equal to it).
-        if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
-            rank -= 1;
-        }
-
-        let found_block = chunk.select(rank);
+        let (rank, found_block) = compute_history_rank(&chunk, block_number);
 
         // Lazy check for previous shard - only called when needed.
         // If we can step to a previous shard for this same key, history already exists,

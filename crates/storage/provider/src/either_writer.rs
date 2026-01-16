@@ -10,7 +10,8 @@ use std::{
 use crate::providers::rocksdb::RocksDBBatch;
 use crate::{
     providers::{
-        needs_prev_shard_check, HistoryInfo, StaticFileProvider, StaticFileProviderRWRefMut,
+        compute_history_rank, needs_prev_shard_check, HistoryInfo, StaticFileProvider,
+        StaticFileProviderRWRefMut,
     },
     StaticFileProviderFactory,
 };
@@ -773,23 +774,11 @@ where
                     .filter(|(k, _)| k.address == address && k.sharded_key.key == storage_key)
                     .map(|x| x.1)
                 {
-                    // Get the rank of the first entry before or equal to our block.
-                    let mut rank = chunk.rank(block_number);
-
-                    // Adjust the rank, so that we have the rank of the first entry strictly before
-                    // our block (not equal to it).
-                    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
-                        rank -= 1;
-                    }
-
-                    let found_block = chunk.select(rank);
+                    let (rank, found_block) = compute_history_rank(&chunk, block_number);
 
                     // If our block is before the first entry in the index chunk and this first
                     // entry doesn't equal to our block, it might be before the first write ever.
                     // To check, we look at the previous entry and check if the key is the same.
-                    // This check is worth it, the `cursor.prev()` check is rarely triggered (the
-                    // if will short-circuit) and when it passes we save a full seek into the
-                    // changeset/plain state table.
                     let is_before_first_write =
                         needs_prev_shard_check(rank, found_block, block_number) &&
                             cursor.prev()?.is_none_or(|(k, _)| {
@@ -858,23 +847,11 @@ where
                 if let Some(chunk) =
                     cursor.seek(key)?.filter(|(k, _)| k.key == address).map(|x| x.1)
                 {
-                    // Get the rank of the first entry before or equal to our block.
-                    let mut rank = chunk.rank(block_number);
-
-                    // Adjust the rank, so that we have the rank of the first entry strictly before
-                    // our block (not equal to it).
-                    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
-                        rank -= 1;
-                    }
-
-                    let found_block = chunk.select(rank);
+                    let (rank, found_block) = compute_history_rank(&chunk, block_number);
 
                     // If our block is before the first entry in the index chunk and this first
                     // entry doesn't equal to our block, it might be before the first write ever.
                     // To check, we look at the previous entry and check if the key is the same.
-                    // This check is worth it, the `cursor.prev()` check is rarely triggered (the
-                    // if will short-circuit) and when it passes we save a full seek into the
-                    // changeset/plain state table.
                     let is_before_first_write =
                         needs_prev_shard_check(rank, found_block, block_number) &&
                             cursor.prev()?.is_none_or(|(k, _)| k.key != address);

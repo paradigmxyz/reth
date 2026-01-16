@@ -528,6 +528,32 @@ impl LowestAvailableBlocks {
     }
 }
 
+/// Computes the rank and finds the next modification block in a history shard.
+///
+/// Given a `block_number`, this function returns:
+/// - `rank`: The number of entries strictly before `block_number` in the shard
+/// - `found_block`: The block number at position `rank` (i.e., the first block >= `block_number`
+///   where a modification occurred), or `None` if `rank` is out of bounds
+///
+/// The rank is adjusted when `block_number` exactly matches an entry in the shard,
+/// so that `found_block` always returns the modification at or after the target.
+///
+/// This logic is shared between MDBX cursor-based lookups and `RocksDB` iterator lookups.
+#[inline]
+pub fn compute_history_rank(
+    chunk: &reth_db_api::BlockNumberList,
+    block_number: BlockNumber,
+) -> (u64, Option<u64>) {
+    let mut rank = chunk.rank(block_number);
+    // `rank(block_number)` returns count of entries <= block_number.
+    // We want the first entry >= block_number, so if block_number is in the shard,
+    // we need to step back one position to point at it (not past it).
+    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
+        rank -= 1;
+    }
+    (rank, chunk.select(rank))
+}
+
 /// Checks if a previous shard lookup is needed to determine if we're before the first write.
 ///
 /// Returns `true` when `rank == 0` (first entry in shard) and the found block doesn't match
