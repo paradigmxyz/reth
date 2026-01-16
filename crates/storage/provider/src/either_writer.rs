@@ -1334,7 +1334,6 @@ mod rocksdb_tests {
             let mut mdbx_reader: EitherReader<'_, AccountsHistoryReadCursor, EthPrimitives> =
                 EitherReader::Database(
                     mdbx_ro.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap(),
-                    PhantomData,
                 );
             let mdbx_result = mdbx_reader
                 .account_history_info(address, query.block_number, query.lowest_available)
@@ -1426,7 +1425,6 @@ mod rocksdb_tests {
             let mut mdbx_reader: EitherReader<'_, StoragesHistoryReadCursor, EthPrimitives> =
                 EitherReader::Database(
                     mdbx_ro.tx_ref().cursor_read::<tables::StoragesHistory>().unwrap(),
-                    PhantomData,
                 );
             let mdbx_result = mdbx_reader
                 .storage_history_info(
