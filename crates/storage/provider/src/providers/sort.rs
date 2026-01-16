@@ -403,14 +403,11 @@ mod tests {
             (*block_idx, sorted)
         });
 
-        let sources_with_iters: Vec<_> = sources
-            .map(|(idx, block)| (idx, block.into_iter().collect::<Vec<_>>()))
-            .collect();
+        let sources_with_iters: Vec<_> =
+            sources.map(|(idx, block)| (idx, block.into_iter().collect::<Vec<_>>())).collect();
 
         let merged: Vec<_> = KMergeIter::new(
-            sources_with_iters
-                .iter()
-                .map(|(idx, block)| (*idx, block.iter().map(|(k, v)| (k, v)))),
+            sources_with_iters.iter().map(|(idx, block)| (*idx, block.iter().map(|(k, v)| (k, v)))),
         )
         .map(|(k, v)| (*k, *v))
         .collect();
