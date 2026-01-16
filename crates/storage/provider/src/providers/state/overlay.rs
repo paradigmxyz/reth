@@ -7,8 +7,9 @@ use reth_metrics::Metrics;
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
+    BlockNumReader, ChangeSetReader, CloneableProvider, CloneableProviderFactory, DBProvider,
+    DatabaseProviderFactory, DatabaseProviderROFactory, PruneCheckpointReader,
+    StageCheckpointReader,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -89,7 +90,6 @@ impl<F> OverlayStateProviderFactory<F> {
             overlay_cache: Default::default(),
         }
     }
-
     /// Set the block hash for collecting reverts. All state will be reverted to the point
     /// _after_ this block has been processed.
     pub const fn with_block_hash(mut self, block_hash: Option<B256>) -> Self {
@@ -407,6 +407,30 @@ where
     }
 }
 
+impl<F> CloneableProviderFactory for OverlayStateProviderFactory<F>
+where
+    F: DatabaseProviderFactory,
+    F::Provider: StageCheckpointReader
+        + PruneCheckpointReader
+        + BlockNumReader
+        + ChangeSetReader
+        + CloneableProvider<ClonedProvider = F::Provider>,
+{
+    fn database_provider_ro_cloned(
+        &self,
+        origin: &Self::Provider,
+    ) -> ProviderResult<Self::Provider> {
+        let overall_start = Instant::now();
+
+        let cloned_provider = origin.provider_ref().clone_with_snapshot()?;
+
+        let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&cloned_provider)?;
+
+        self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
+        Ok(OverlayStateProvider::new(cloned_provider, trie_updates, hashed_post_state))
+    }
+}
+
 /// State provider with in-memory overlay from trie updates and hashed post state.
 ///
 /// This provider uses in-memory trie updates and hashed post state as an overlay
@@ -431,6 +455,21 @@ where
         hashed_post_state: Arc<HashedPostStateSorted>,
     ) -> Self {
         Self { provider, trie_updates, hashed_post_state }
+    }
+
+    /// Returns a reference to the trie updates.
+    pub const fn trie_updates(&self) -> &Arc<TrieUpdatesSorted> {
+        &self.trie_updates
+    }
+
+    /// Returns a reference to the hashed post state.
+    pub const fn hashed_post_state(&self) -> &Arc<HashedPostStateSorted> {
+        &self.hashed_post_state
+    }
+
+    /// Returns a reference to the underlying provider.
+    pub const fn provider_ref(&self) -> &Provider {
+        &self.provider
     }
 }
 

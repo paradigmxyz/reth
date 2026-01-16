@@ -498,6 +498,32 @@ impl Transaction<RO> {
 
         Ok(())
     }
+
+    /// Clones this read-only transaction, creating a new independent transaction that reads
+    /// the same MVCC snapshot of the database.
+    ///
+    /// This is useful when multiple threads need to read from the same database snapshot
+    /// without creating new transactions at the current (potentially different) database tip.
+    ///
+    /// The cloned transaction is independent and can be used, committed, or aborted
+    /// without affecting the original transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The original transaction is invalid or already finished
+    /// - The MVCC snapshot has been recycled (`MDBX_MVCC_RETARDED`)
+    /// - The reader lock table is full (`MDBX_READERS_FULL`)
+    /// - Out of memory
+    pub fn clone_snapshot(&self) -> Result<Self> {
+        self.txn_execute(|origin_txn| {
+            let mut cloned_txn: *mut ffi::MDBX_txn = ptr::null_mut();
+            unsafe {
+                mdbx_result(ffi::mdbx_txn_clone(origin_txn, &mut cloned_txn, ptr::null_mut()))?;
+            }
+            Ok(Self::new_from_ptr(self.env().clone(), cloned_txn))
+        })?
+    }
 }
 
 impl Transaction<RW> {

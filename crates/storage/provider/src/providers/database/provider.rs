@@ -44,7 +44,7 @@ use reth_db_api::{
     },
     table::Table,
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::{CloneableDbTx, DbTx, DbTxMut},
     BlockNumberList, PlainAccountState, PlainStorageState,
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
@@ -58,7 +58,7 @@ use reth_prune_types::{
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
+    BlockBodyIndicesProvider, BlockBodyReader, CloneableProvider, MetadataProvider, MetadataWriter,
     NodePrimitivesProvider, StateProvider, StateWriteConfig, StorageChangeSetReader,
     StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
@@ -270,6 +270,41 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Sets the prune modes for provider.
     pub fn set_prune_modes(&mut self, prune_modes: PruneModes) {
         self.prune_modes = prune_modes;
+    }
+}
+
+impl<TX: CloneableDbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Clones this provider with a cloned MVCC transaction snapshot.
+    ///
+    /// The cloned provider reads from the same database snapshot as the original,
+    /// regardless of any commits that happen after this call. This is useful when
+    /// multiple threads need a consistent view of the database.
+    pub fn clone_with_snapshot(&self) -> ProviderResult<DatabaseProvider<TX::ClonedTx, N>> {
+        let cloned_tx = self.tx.clone_snapshot().map_err(ProviderError::Database)?;
+
+        Ok(DatabaseProvider {
+            tx: cloned_tx,
+            chain_spec: Arc::clone(&self.chain_spec),
+            static_file_provider: self.static_file_provider.clone(),
+            prune_modes: self.prune_modes.clone(),
+            storage: Arc::clone(&self.storage),
+            storage_settings: Arc::clone(&self.storage_settings),
+            rocksdb_provider: self.rocksdb_provider.clone(),
+            changeset_cache: self.changeset_cache.clone(),
+            pending_rocksdb_batches: Default::default(),
+            minimum_pruning_distance: self.minimum_pruning_distance,
+            metrics: Default::default(),
+        })
+    }
+}
+
+impl<TX: CloneableDbTx<ClonedTx = TX> + 'static, N: NodeTypes> CloneableProvider
+    for DatabaseProvider<TX, N>
+{
+    type ClonedProvider = Self;
+
+    fn clone_with_snapshot(&self) -> ProviderResult<Self::ClonedProvider> {
+        Self::clone_with_snapshot(self)
     }
 }
 

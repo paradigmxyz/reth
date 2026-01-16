@@ -1,4 +1,4 @@
-# Copyright (c) 2010-2025 Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> ###############################################
+# Copyright (c) 2010-2026 Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> ###############################################
 # SPDX-License-Identifier: Apache-2.0
 
 if(CMAKE_VERSION VERSION_LESS 3.8.2)
@@ -968,9 +968,6 @@ macro(setup_compile_flags)
 
   if(CMAKE_COMPILER_IS_GNUCC AND LTO_ENABLED)
     add_compile_flags("C;CXX" ${GCC_LTO_CFLAGS})
-    set(EXE_LINKER_FLAGS "${EXE_LINKER_FLAGS} ${GCC_LTO_CFLAGS} -fverbose-asm -fwhole-program")
-    set(SHARED_LINKER_FLAGS "${SHARED_LINKER_FLAGS} ${GCC_LTO_CFLAGS} -fverbose-asm")
-    set(MODULE_LINKER_FLAGS "${MODULE_LINKER_FLAGS} ${GCC_LTO_CFLAGS} -fverbose-asm")
     if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 5)
       # Pass the same optimization flags to the linker
       set(compile_flags "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_${CMAKE_BUILD_TYPE_UPPERCASE}}")
