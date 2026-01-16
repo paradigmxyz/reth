@@ -1054,6 +1054,11 @@ impl<'db> RocksTx<'db> {
         Self::raw_iter_status_ok(&iter)?;
 
         if !iter.valid() {
+                // No shard found at or after target block.
+                //
+                // (MaybeInPlainState) The key may have been written, but due to pruning we may not have changesets
+                // and history, so we need to make a plain state lookup.
+                // (HistoryInfo::NotYetWritten) The key has not been written to at all.
             return fallback();
         }
 
