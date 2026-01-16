@@ -1060,6 +1060,9 @@ impl MultiProofTask {
     where
         P: AccountReader,
     {
+        // Pre-scale workers based on predicted workload from previous blocks
+        self.multiproof_manager.proof_worker_handle.prepare_for_block();
+
         let mut ctx = MultiproofBatchCtx::new(Instant::now());
         let mut batch_metrics = MultiproofBatchMetrics::default();
 
@@ -1169,6 +1172,14 @@ impl MultiProofTask {
                 .last_proof_wait_time_histogram
                 .record(updates_finished_time.elapsed().as_secs_f64());
         }
+
+        // Record actual workload for next block's prediction
+        let actual_storage: usize =
+            self.fetched_proof_targets.values().map(|slots| slots.len()).sum();
+        let actual_accounts = self.fetched_proof_targets.len();
+        self.multiproof_manager
+            .proof_worker_handle
+            .record_block_workload(actual_storage, actual_accounts);
     }
 }
 
