@@ -134,7 +134,7 @@ impl<F> OverlayStateProviderFactory<F> {
 
     /// Set a lazy overlay that will be computed on first access.
     ///
-    /// Convenience method that wraps the lazy overlay in [`OverlaySource::Lazy`].
+    /// Convenience method that wraps the lazy overlay in `OverlaySource::Lazy`.
     pub fn with_lazy_overlay(mut self, lazy_overlay: Option<LazyOverlay>) -> Self {
         self.overlay_source = lazy_overlay.map(OverlaySource::Lazy);
         self
