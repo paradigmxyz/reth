@@ -159,6 +159,7 @@ where
 
         self.metrics.save_blocks_block_count.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
+
         Ok(last_block)
     }
 }
