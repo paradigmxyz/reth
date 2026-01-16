@@ -133,13 +133,13 @@ impl LazyOverlay {
         // Collect all trie data first (blocks are newest-to-oldest)
         let trie_data: Vec<_> = blocks.iter().map(|b| b.wait_cloned()).collect();
 
+        // Build reference slices for hybrid merge
+        let state_refs: Vec<_> = trie_data.iter().map(|d| d.hashed_state.as_ref()).collect();
+        let node_refs: Vec<_> = trie_data.iter().map(|d| d.trie_updates.as_ref()).collect();
+
         // Use hybrid merge which handles the threshold internally
-        let merged_state = HashedPostStateSorted::merge_batch_hybrid(
-            trie_data.iter().map(|d| d.hashed_state.as_ref()),
-        );
-        let merged_nodes = TrieUpdatesSorted::merge_batch_hybrid(
-            trie_data.iter().map(|d| d.trie_updates.as_ref()),
-        );
+        let merged_state = HashedPostStateSorted::merge_batch_hybrid(&state_refs);
+        let merged_nodes = TrieUpdatesSorted::merge_batch_hybrid(&node_refs);
 
         TrieInputSorted {
             state: Arc::new(merged_state),

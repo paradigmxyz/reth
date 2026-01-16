@@ -687,7 +687,7 @@ impl TrieUpdatesSorted {
         Self { account_nodes, storage_tries }
     }
 
-    /// Hybrid batch-merge sorted trie updates. Iterator yields **newest to oldest**.
+    /// Hybrid batch-merge sorted trie updates. Slice is ordered **newest to oldest**.
     ///
     /// Uses a hybrid algorithm that switches between `extend_ref` (for small batches)
     /// and k-way `merge_batch` (for large batches) based on benchmarked crossover point.
@@ -696,17 +696,15 @@ impl TrieUpdatesSorted {
     /// - Large k (≥ threshold): O(n log k) via k-way merge
     ///
     /// The threshold is tuned based on benchmarks where `extend_ref` wins up to ~64 items.
-    pub fn merge_batch_hybrid<'a>(updates: impl IntoIterator<Item = &'a Self>) -> Self {
+    pub fn merge_batch_hybrid(updates: &[&Self]) -> Self {
         const MERGE_BATCH_THRESHOLD: usize = 64;
-
-        let updates: Vec<_> = updates.into_iter().collect();
 
         if updates.is_empty() {
             return Self::default();
         }
 
         if updates.len() == 1 {
-            return updates[0].clone();
+            return (*updates[0]).clone();
         }
 
         if updates.len() < MERGE_BATCH_THRESHOLD {
@@ -724,7 +722,7 @@ impl TrieUpdatesSorted {
             result
         } else {
             // Large k: merge_batch is faster (O(n log k) via k-way merge)
-            Self::merge_batch(updates)
+            Self::merge_batch(updates.iter().copied())
         }
     }
 }

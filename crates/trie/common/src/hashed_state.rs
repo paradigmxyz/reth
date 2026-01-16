@@ -690,7 +690,7 @@ impl HashedPostStateSorted {
         Self { accounts, storages }
     }
 
-    /// Hybrid batch-merge sorted hashed post states. Iterator yields **newest to oldest**.
+    /// Hybrid batch-merge sorted hashed post states. Slice is ordered **newest to oldest**.
     ///
     /// Uses a hybrid algorithm that switches between `extend_ref` (for small batches)
     /// and k-way `merge_batch` (for large batches) based on benchmarked crossover point.
@@ -699,17 +699,15 @@ impl HashedPostStateSorted {
     /// - Large k (≥ threshold): O(n log k) via k-way merge
     ///
     /// The threshold is tuned based on benchmarks where `extend_ref` wins up to ~64 items.
-    pub fn merge_batch_hybrid<'a>(states: impl IntoIterator<Item = &'a Self>) -> Self {
+    pub fn merge_batch_hybrid(states: &[&Self]) -> Self {
         const MERGE_BATCH_THRESHOLD: usize = 64;
-
-        let states: Vec<_> = states.into_iter().collect();
 
         if states.is_empty() {
             return Self::default();
         }
 
         if states.len() == 1 {
-            return states[0].clone();
+            return (*states[0]).clone();
         }
 
         if states.len() < MERGE_BATCH_THRESHOLD {
@@ -727,7 +725,7 @@ impl HashedPostStateSorted {
             result
         } else {
             // Large k: merge_batch is faster (O(n log k) via k-way merge)
-            Self::merge_batch(states)
+            Self::merge_batch(states.iter().copied())
         }
     }
 

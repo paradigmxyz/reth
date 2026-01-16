@@ -565,10 +565,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let start = Instant::now();
                 // Collect Arc refs first to extend their lifetime
                 let trie_updates: Vec<_> = blocks.iter().map(|b| b.trie_updates()).collect();
-                // merge_batch_hybrid expects newest-to-oldest, so reverse the iterator
-                let merged = TrieUpdatesSorted::merge_batch_hybrid(
-                    trie_updates.iter().rev().map(|arc| arc.as_ref()),
-                );
+                // Build reference slice (newest-to-oldest via rev)
+                let update_refs: Vec<_> =
+                    trie_updates.iter().rev().map(|arc| arc.as_ref()).collect();
+                let merged = TrieUpdatesSorted::merge_batch_hybrid(&update_refs);
                 if !merged.is_empty() {
                     self.write_trie_updates_sorted(&merged)?;
                 }
