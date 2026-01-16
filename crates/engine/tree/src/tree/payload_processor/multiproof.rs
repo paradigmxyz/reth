@@ -88,6 +88,22 @@ impl SparseTrieUpdate {
         self.state.extend(other.state);
         self.multiproof.extend(other.multiproof);
     }
+
+    /// Extend update with multiple others, reserving capacity upfront for efficiency.
+    pub(super) fn extend_batch(&mut self, others: impl IntoIterator<Item = Self>) {
+        let others: Vec<_> = others.into_iter().collect();
+        if others.is_empty() {
+            return;
+        }
+
+        let (states, multiproofs): (Vec<_>, Vec<_>) =
+            others.into_iter().map(|o| (o.state, o.multiproof)).unzip();
+
+        for state in states {
+            self.state.extend(state);
+        }
+        self.multiproof.extend_batch(multiproofs);
+    }
 }
 
 /// Messages used internally by the multi proof task.
@@ -799,15 +815,10 @@ impl MultiProofTask {
     ) -> Option<SparseTrieUpdate> {
         let ready_proofs = self.proof_sequencer.add_proof(sequence_number, update);
 
-        ready_proofs
-            .into_iter()
-            // Merge all ready proofs and state updates
-            .reduce(|mut acc_update, update| {
-                acc_update.extend(update);
-                acc_update
-            })
-            // Return None if the resulting proof is empty
-            .filter(|proof| !proof.is_empty())
+        let mut proofs_iter = ready_proofs.into_iter();
+        let mut acc = proofs_iter.next()?;
+        acc.extend_batch(proofs_iter);
+        (!acc.is_empty()).then_some(acc)
     }
 
     /// Processes a multiproof message, batching consecutive prefetch messages.
