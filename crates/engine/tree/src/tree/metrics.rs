@@ -518,10 +518,6 @@ mod tests {
         fn receipts(&self) -> &[Self::Receipt] {
             &self.receipts
         }
-
-        fn receipts(&self) -> &[Self::Receipt] {
-            &[]
-        }
     }
 
     struct ChannelStateHook {

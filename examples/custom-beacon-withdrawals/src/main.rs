@@ -240,10 +240,6 @@ where
     fn evm(&self) -> &Self::Evm {
         self.inner.evm()
     }
-
-    fn receipts(&self) -> &[Self::Receipt] {
-        self.inner.receipts()
-    }
 }
 
 sol!(
