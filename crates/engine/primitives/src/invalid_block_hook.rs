@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, fmt, vec::Vec};
 use alloy_primitives::B256;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_trie_common::updates::TrieUpdates;
 
@@ -11,7 +11,7 @@ pub trait InvalidBlockHook<N: NodePrimitives>: Send + Sync {
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        output: &ExecutionOutcome<N::Receipt>,
+        output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     );
 }
@@ -22,7 +22,7 @@ where
     F: Fn(
             &SealedHeader<N::BlockHeader>,
             &RecoveredBlock<N::Block>,
-            &ExecutionOutcome<N::Receipt>,
+            &BlockExecutionOutput<N::Receipt>,
             Option<(&TrieUpdates, B256)>,
         ) + Send
         + Sync,
@@ -31,7 +31,7 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        output: &ExecutionOutcome<N::Receipt>,
+        output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
         self(parent_header, block, output, trie_updates)
@@ -48,7 +48,7 @@ impl<N: NodePrimitives> InvalidBlockHook<N> for NoopInvalidBlockHook {
         &self,
         _parent_header: &SealedHeader<N::BlockHeader>,
         _block: &RecoveredBlock<N::Block>,
-        _output: &ExecutionOutcome<N::Receipt>,
+        _output: &BlockExecutionOutput<N::Receipt>,
         _trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
     }
@@ -68,7 +68,7 @@ impl<N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockHooks<N> {
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        output: &ExecutionOutcome<N::Receipt>,
+        output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
         for hook in &self.0 {

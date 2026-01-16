@@ -4,9 +4,8 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_provider::{StateProvider, StateProviderBox, StateProviderFactory};
+use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{BundleState, State},
@@ -343,7 +342,7 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        output: &ExecutionOutcome<N::Receipt>,
+        output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
@@ -352,7 +351,7 @@ where
         let block_prefix = format!("{}_{}", block.number(), block.hash());
         self.handle_witness_operations(&witness, &block_prefix, block.number())?;
 
-        self.validate_bundle_state(&bundle_state, &output.bundle, &block_prefix)?;
+        self.validate_bundle_state(&bundle_state, &output.state, &block_prefix)?;
 
         self.validate_state_root_and_trie(
             parent_header,
@@ -397,7 +396,7 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        output: &ExecutionOutcome<N::Receipt>,
+        output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
         if let Err(err) = self.on_invalid_block(parent_header, block, output, trie_updates) {
@@ -409,12 +408,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip7685::Requests;
     use alloy_primitives::{map::HashMap, Address, Bytes, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_provider::test_utils::MockEthProvider;
+    use reth_provider::{test_utils::MockEthProvider, BlockExecutionResult};
     use reth_revm::db::{BundleAccount, BundleState};
     use revm_database::states::reverts::AccountRevert;
     use tempfile::TempDir;
@@ -834,11 +832,14 @@ mod tests {
         .unwrap();
 
         // Create mock ExecutionOutcome
-        let output = ExecutionOutcome {
-            bundle: bundle_state,
-            receipts: vec![vec![]],
-            first_block: 2,
-            requests: vec![Requests::default()],
+        let output = BlockExecutionOutput {
+            state: bundle_state,
+            result: BlockExecutionResult {
+                receipts: Default::default(),
+                requests: Default::default(),
+                gas_used: 0,
+                blob_gas_used: 0,
+            },
         };
 
         // Create test trie updates

@@ -32,7 +32,6 @@ use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     SpecFor,
 };
-use reth_execution_types::BlockExecutionResult;
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
@@ -485,16 +484,16 @@ where
         // Create ExecutionOutcome early so we can terminate caching before validation and state
         // root computation. Using Arc allows sharing with both the caching task and the deferred
         // trie task without cloning the expensive BundleState.
-        let execution_outcome = Arc::new(ExecutionOutcome::from((output, block_num_hash.number)));
+        let output = Arc::new(output);
 
         // Terminate caching task early since execution is complete and caching is no longer
         // needed. This frees up resources while state root computation continues.
-        handle.terminate_caching(Some(Arc::clone(&execution_outcome)));
+        handle.terminate_caching(Some(output.clone()));
 
         let block = self.convert_to_block(input)?.with_senders(senders);
 
         let hashed_state = ensure_ok_post_block!(
-            self.validate_post_execution(&block, &parent_block, &execution_outcome, &mut ctx),
+            self.validate_post_execution(&block, &parent_block, &output, &mut ctx),
             block
         );
 
@@ -578,7 +577,7 @@ where
             self.on_invalid_block(
                 &parent_block,
                 &block,
-                &execution_outcome,
+                &output,
                 Some((&trie_output, state_root)),
                 ctx.state_mut(),
             );
@@ -595,7 +594,7 @@ where
 
         Ok(self.spawn_deferred_trie_task(
             block,
-            execution_outcome,
+            output,
             &ctx,
             hashed_state,
             trie_output,
@@ -757,7 +756,7 @@ where
         &self,
         block: &RecoveredBlock<N::Block>,
         parent_block: &SealedHeader<N::BlockHeader>,
-        outcome: &ExecutionOutcome<N::Receipt>,
+        outcome: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
     ) -> Result<HashedPostState, InsertBlockErrorKind>
     where
@@ -781,19 +780,10 @@ where
         }
         drop(_enter);
 
-        // Validate block post-execution rules
-        // Construct a temporary BlockExecutionResult from the ExecutionOutcome for consensus
-        // validation. The outcome was created from a single block, so we take the first element.
-        let result = BlockExecutionResult {
-            receipts: outcome.receipts.first().cloned().unwrap_or_default(),
-            requests: outcome.requests.first().cloned().unwrap_or_default(),
-            gas_used: 0,      // Not used by validation
-            blob_gas_used: 0, // Not used by validation
-        };
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        if let Err(err) = self.consensus.validate_block_post_execution(block, &result) {
+        if let Err(err) = self.consensus.validate_block_post_execution(block, &outcome.result) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, outcome, None, ctx.state_mut());
             return Err(err.into())
@@ -802,7 +792,7 @@ where
 
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "hashed_post_state").entered();
-        let hashed_state = self.provider.hashed_post_state(&outcome.bundle);
+        let hashed_state = self.provider.hashed_post_state(&outcome.state);
         drop(_enter);
 
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
@@ -953,7 +943,7 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        output: &ExecutionOutcome<N::Receipt>,
+        output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
         state: &mut EngineApiTreeState<N>,
     ) {
