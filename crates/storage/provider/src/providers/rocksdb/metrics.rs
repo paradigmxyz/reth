@@ -6,7 +6,11 @@ use reth_db::Tables;
 use reth_metrics::Metrics;
 use strum::{EnumIter, IntoEnumIterator};
 
-const ROCKSDB_TABLES: &[&str] = &[Tables::TransactionHashNumbers.name()];
+const ROCKSDB_TABLES: &[&str] = &[
+    Tables::TransactionHashNumbers.name(),
+    Tables::AccountsHistory.name(),
+    Tables::StoragesHistory.name(),
+];
 
 /// Metrics for the `RocksDB` provider.
 #[derive(Debug)]
@@ -46,17 +50,19 @@ impl Default for RocksDBMetrics {
 
 impl RocksDBMetrics {
     /// Records operation metrics with the given operation label and table name.
+    ///
+    /// If the table/operation combination is not registered, this is a no-op to avoid
+    /// panicking when new tables are added without updating the metrics registration.
     pub(crate) fn record_operation(
         &self,
         operation: RocksDBOperation,
         table: &'static str,
         duration: Duration,
     ) {
-        let metrics =
-            self.operations.get(&(table, operation)).expect("operation metrics should exist");
-
-        metrics.calls_total.increment(1);
-        metrics.duration_seconds.record(duration.as_secs_f64());
+        if let Some(metrics) = self.operations.get(&(table, operation)) {
+            metrics.calls_total.increment(1);
+            metrics.duration_seconds.record(duration.as_secs_f64());
+        }
     }
 }
 

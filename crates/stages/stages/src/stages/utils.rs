@@ -135,19 +135,25 @@ where
         return Ok(());
     }
 
-    let chunks: Vec<_> = list.chunks(NUM_OF_INDICES_IN_SHARD).map(|c| c.to_vec()).collect();
-    let mut iter = chunks.into_iter().peekable();
+    let total = list.len();
+    let mut start = 0;
 
-    while let Some(chunk) = iter.next() {
+    while start < total {
+        let end = (start + NUM_OF_INDICES_IN_SHARD).min(total);
+        let is_last = end == total;
+        let chunk = list[start..end].to_vec();
+
         let highest = *chunk.last().expect("at least one index");
-        let is_last = iter.peek().is_none();
 
         if !mode.is_flush() && is_last {
             *list = chunk;
-        } else {
-            let highest = if is_last { u64::MAX } else { highest };
-            write_fn(chunk, highest)?;
+            break;
         }
+
+        let highest = if is_last { u64::MAX } else { highest };
+        write_fn(chunk, highest)?;
+
+        start = end;
     }
 
     Ok(())
