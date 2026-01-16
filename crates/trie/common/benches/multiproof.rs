@@ -1,7 +1,10 @@
 #![allow(missing_docs, unreachable_pub)]
 
-use alloy_primitives::{keccak256, map::hash_map, B256};
-use alloy_primitives::map::B256Map;
+use alloy_primitives::{
+    keccak256,
+    map::{hash_map, B256Map},
+    B256,
+};
 use alloy_trie::{nodes::TrieNode, proof::DecodedProofNodes};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use reth_trie_common::{BranchNodeMasksMap, DecodedMultiProof, DecodedStorageMultiProof, Nibbles};
@@ -29,7 +32,10 @@ fn extend_baseline(base: &mut DecodedMultiProof, other: DecodedMultiProof) {
 }
 
 /// Baseline batch implementation without upfront reserve
-fn extend_batch_baseline(base: &mut DecodedMultiProof, others: impl IntoIterator<Item = DecodedMultiProof>) {
+fn extend_batch_baseline(
+    base: &mut DecodedMultiProof,
+    others: impl IntoIterator<Item = DecodedMultiProof>,
+) {
     for other in others {
         extend_baseline(base, other);
     }
@@ -59,8 +65,13 @@ fn create_storage_multiproof(num_entries: usize, seed: u64) -> DecodedStorageMul
     DecodedStorageMultiProof { root: random_b256(seed), subtree, branch_node_masks }
 }
 
-/// Create a mock DecodedMultiProof with the given number of accounts and storage entries per account
-fn create_multiproof(num_accounts: usize, storage_entries_per_account: usize, seed: u64) -> DecodedMultiProof {
+/// Create a mock DecodedMultiProof with the given number of accounts and storage entries per
+/// account
+fn create_multiproof(
+    num_accounts: usize,
+    storage_entries_per_account: usize,
+    seed: u64,
+) -> DecodedMultiProof {
     let mut account_subtree = DecodedProofNodes::default();
     let mut branch_node_masks = BranchNodeMasksMap::default();
     let mut storages = B256Map::default();
@@ -95,34 +106,42 @@ fn bench_extend(c: &mut Criterion) {
             group.throughput(Throughput::Elements((num_accounts * storage_per_account) as u64));
 
             // Baseline (no reserve)
-            group.bench_with_input(BenchmarkId::new("baseline", &id), &(num_accounts, storage_per_account), |b, &(accounts, storage)| {
-                b.iter_with_setup(
-                    || {
-                        let base = create_multiproof(accounts, storage, 1);
-                        let other = create_multiproof(accounts, storage, 100000);
-                        (base, other)
-                    },
-                    |(mut base, other)| {
-                        extend_baseline(&mut base, black_box(other));
-                        base
-                    },
-                );
-            });
+            group.bench_with_input(
+                BenchmarkId::new("baseline", &id),
+                &(num_accounts, storage_per_account),
+                |b, &(accounts, storage)| {
+                    b.iter_with_setup(
+                        || {
+                            let base = create_multiproof(accounts, storage, 1);
+                            let other = create_multiproof(accounts, storage, 100000);
+                            (base, other)
+                        },
+                        |(mut base, other)| {
+                            extend_baseline(&mut base, black_box(other));
+                            base
+                        },
+                    );
+                },
+            );
 
             // Optimized (with reserve)
-            group.bench_with_input(BenchmarkId::new("optimized", &id), &(num_accounts, storage_per_account), |b, &(accounts, storage)| {
-                b.iter_with_setup(
-                    || {
-                        let base = create_multiproof(accounts, storage, 1);
-                        let other = create_multiproof(accounts, storage, 100000);
-                        (base, other)
-                    },
-                    |(mut base, other)| {
-                        base.extend(black_box(other));
-                        base
-                    },
-                );
-            });
+            group.bench_with_input(
+                BenchmarkId::new("optimized", &id),
+                &(num_accounts, storage_per_account),
+                |b, &(accounts, storage)| {
+                    b.iter_with_setup(
+                        || {
+                            let base = create_multiproof(accounts, storage, 1);
+                            let other = create_multiproof(accounts, storage, 100000);
+                            (base, other)
+                        },
+                        |(mut base, other)| {
+                            base.extend(black_box(other));
+                            base
+                        },
+                    );
+                },
+            );
         }
     }
 
@@ -141,34 +160,42 @@ fn bench_extend_swap(c: &mut Criterion) {
         group.throughput(Throughput::Elements(((self_accounts + other_accounts) * storage) as u64));
 
         // Baseline extend
-        group.bench_with_input(BenchmarkId::new("baseline", &id), &(self_accounts, other_accounts, storage), |b, &(self_acc, other_acc, stor)| {
-            b.iter_with_setup(
-                || {
-                    let base = create_multiproof(self_acc, stor, 1);
-                    let other = create_multiproof(other_acc, stor, 100000);
-                    (base, other)
-                },
-                |(mut base, other)| {
-                    base.extend(black_box(other));
-                    base
-                },
-            );
-        });
+        group.bench_with_input(
+            BenchmarkId::new("baseline", &id),
+            &(self_accounts, other_accounts, storage),
+            |b, &(self_acc, other_acc, stor)| {
+                b.iter_with_setup(
+                    || {
+                        let base = create_multiproof(self_acc, stor, 1);
+                        let other = create_multiproof(other_acc, stor, 100000);
+                        (base, other)
+                    },
+                    |(mut base, other)| {
+                        base.extend(black_box(other));
+                        base
+                    },
+                );
+            },
+        );
 
         // Swap-extend
-        group.bench_with_input(BenchmarkId::new("swap_extend", &id), &(self_accounts, other_accounts, storage), |b, &(self_acc, other_acc, stor)| {
-            b.iter_with_setup(
-                || {
-                    let base = create_multiproof(self_acc, stor, 1);
-                    let other = create_multiproof(other_acc, stor, 100000);
-                    (base, other)
-                },
-                |(mut base, other)| {
-                    base.extend_swap(black_box(other));
-                    base
-                },
-            );
-        });
+        group.bench_with_input(
+            BenchmarkId::new("swap_extend", &id),
+            &(self_accounts, other_accounts, storage),
+            |b, &(self_acc, other_acc, stor)| {
+                b.iter_with_setup(
+                    || {
+                        let base = create_multiproof(self_acc, stor, 1);
+                        let other = create_multiproof(other_acc, stor, 100000);
+                        (base, other)
+                    },
+                    |(mut base, other)| {
+                        base.extend_swap(black_box(other));
+                        base
+                    },
+                );
+            },
+        );
     }
 
     group.finish();
@@ -184,32 +211,50 @@ fn bench_extend_batch(c: &mut Criterion) {
         let storage_per_account = 10;
 
         let id = format!("proofs={num_proofs}");
-        group.throughput(Throughput::Elements((num_proofs * accounts_per_proof * storage_per_account) as u64));
+        group.throughput(Throughput::Elements(
+            (num_proofs * accounts_per_proof * storage_per_account) as u64,
+        ));
 
         // Baseline: sequential extend without reserve
-        group.bench_with_input(BenchmarkId::new("baseline_sequential", &id), &num_proofs, |b, &n| {
-            b.iter_with_setup(
-                || {
-                    let proofs: Vec<_> = (0..n)
-                        .map(|i| create_multiproof(accounts_per_proof, storage_per_account, (i * 10000) as u64))
-                        .collect();
-                    proofs
-                },
-                |proofs| {
-                    let mut iter = proofs.into_iter();
-                    let mut acc = iter.next().unwrap();
-                    extend_batch_baseline(&mut acc, black_box(iter));
-                    acc
-                },
-            );
-        });
+        group.bench_with_input(
+            BenchmarkId::new("baseline_sequential", &id),
+            &num_proofs,
+            |b, &n| {
+                b.iter_with_setup(
+                    || {
+                        let proofs: Vec<_> = (0..n)
+                            .map(|i| {
+                                create_multiproof(
+                                    accounts_per_proof,
+                                    storage_per_account,
+                                    (i * 10000) as u64,
+                                )
+                            })
+                            .collect();
+                        proofs
+                    },
+                    |proofs| {
+                        let mut iter = proofs.into_iter();
+                        let mut acc = iter.next().unwrap();
+                        extend_batch_baseline(&mut acc, black_box(iter));
+                        acc
+                    },
+                );
+            },
+        );
 
         // Optimized: extend_batch with upfront reserve
         group.bench_with_input(BenchmarkId::new("optimized_batch", &id), &num_proofs, |b, &n| {
             b.iter_with_setup(
                 || {
                     let proofs: Vec<_> = (0..n)
-                        .map(|i| create_multiproof(accounts_per_proof, storage_per_account, (i * 10000) as u64))
+                        .map(|i| {
+                            create_multiproof(
+                                accounts_per_proof,
+                                storage_per_account,
+                                (i * 10000) as u64,
+                            )
+                        })
                         .collect();
                     proofs
                 },
@@ -226,10 +271,5 @@ fn bench_extend_batch(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(
-    multiproof_benches,
-    bench_extend,
-    bench_extend_swap,
-    bench_extend_batch
-);
+criterion_group!(multiproof_benches, bench_extend, bench_extend_swap, bench_extend_batch);
 criterion_main!(multiproof_benches);
