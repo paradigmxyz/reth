@@ -34,11 +34,13 @@ struct LazyOverlayInputs {
 ///
 /// - **Fast path**: If the tip block's cached `anchored_trie_input` is ready and its `anchor_hash`
 ///   matches our expected anchor, we can reuse it directly (O(1)).
-/// - **Slow path**: Otherwise, we merge all ancestor blocks' trie data into a new overlay.
+/// - **Slow path**: Otherwise, we merge all ancestor blocks' trie data into a new overlay. After
+///   computing, the overlay is published to the tip block's cache so that future calls to
+///   [`DeferredTrieData::sort_and_build_trie_input`] can reuse it.
 #[derive(Clone)]
 pub struct LazyOverlay {
-    /// Computed result, cached after first access.
-    inner: Arc<OnceLock<TrieInputSorted>>,
+    /// Computed result, cached after first access. Wrapped in Arc for cheap sharing.
+    inner: Arc<OnceLock<Arc<TrieInputSorted>>>,
     /// Inputs for lazy computation.
     inputs: LazyOverlayInputs,
 }
@@ -83,7 +85,7 @@ impl LazyOverlay {
     ///
     /// The first call triggers computation (which may block waiting for deferred data).
     /// Subsequent calls return the cached result immediately.
-    pub fn get(&self) -> &TrieInputSorted {
+    pub fn get(&self) -> &Arc<TrieInputSorted> {
         self.inner.get_or_init(|| self.compute())
     }
 
@@ -93,14 +95,22 @@ impl LazyOverlay {
         (Arc::clone(&input.nodes), Arc::clone(&input.state))
     }
 
+    /// Returns the computed trie input as a cloned Arc.
+    ///
+    /// This is useful when you need ownership of the Arc, e.g., for passing to other
+    /// components that will store it.
+    pub fn get_arc(&self) -> Arc<TrieInputSorted> {
+        Arc::clone(self.get())
+    }
+
     /// Compute the trie input overlay.
-    fn compute(&self) -> TrieInputSorted {
+    fn compute(&self) -> Arc<TrieInputSorted> {
         let anchor_hash = self.inputs.anchor_hash;
         let blocks = &self.inputs.blocks;
 
         if blocks.is_empty() {
             debug!(target: "chain_state::lazy_overlay", "No in-memory blocks, returning empty overlay");
-            return TrieInputSorted::default();
+            return Arc::new(TrieInputSorted::default());
         }
 
         // Fast path: Check if tip block's overlay is ready and anchor matches.
@@ -110,7 +120,7 @@ impl LazyOverlay {
             if let Some(anchored) = &data.anchored_trie_input {
                 if anchored.anchor_hash == anchor_hash {
                     trace!(target: "chain_state::lazy_overlay", %anchor_hash, "Reusing tip block's cached overlay (fast path)");
-                    return (*anchored.trie_input).clone();
+                    return Arc::clone(&anchored.trie_input);
                 }
                 debug!(
                     target: "chain_state::lazy_overlay",
@@ -123,7 +133,16 @@ impl LazyOverlay {
 
         // Slow path: Merge all blocks' trie data into a new overlay.
         debug!(target: "chain_state::lazy_overlay", num_blocks = blocks.len(), "Merging blocks (slow path)");
-        Self::merge_blocks(blocks)
+        let merged = Arc::new(Self::merge_blocks(blocks));
+
+        // Publish the computed overlay to the tip block's cache so that future calls
+        // to DeferredTrieData::sort_and_build_trie_input can reuse it via the fast path.
+        if let Some(tip) = blocks.first() {
+            tip.install_anchored_overlay(anchor_hash, Arc::clone(&merged));
+            trace!(target: "chain_state::lazy_overlay", %anchor_hash, "Published merged overlay to tip block");
+        }
+
+        merged
     }
 
     /// Merge all blocks' trie data into a single [`TrieInputSorted`].
@@ -227,5 +246,33 @@ mod tests {
         // Second access uses cache
         let _ = overlay.get();
         assert!(overlay.is_computed());
+    }
+
+    #[test]
+    fn merge_publishes_to_tip_block_on_anchor_mismatch() {
+        let old_anchor = B256::random();
+        let new_anchor = B256::random();
+
+        // Create two blocks with old_anchor
+        let block1 = empty_deferred(old_anchor);
+        let block2 = empty_deferred(old_anchor);
+
+        // Compute block2's data (this sets anchored_trie_input with old_anchor)
+        let tip_data_before = block2.wait_cloned();
+        assert!(tip_data_before.anchored_trie_input.is_some());
+        assert_eq!(tip_data_before.anchored_trie_input.as_ref().unwrap().anchor_hash, old_anchor);
+
+        // Create LazyOverlay with NEW anchor - this simulates post-persist scenario
+        // where the anchor has changed but we still have in-memory blocks
+        let overlay = LazyOverlay::new(new_anchor, vec![block2.clone(), block1]);
+
+        // Trigger computation - should go through slow path due to anchor mismatch
+        let _ = overlay.get();
+
+        // Verify the tip block now has the anchored overlay with NEW anchor installed
+        let tip_data_after = block2.wait_cloned();
+        assert!(tip_data_after.anchored_trie_input.is_some());
+        let anchored = tip_data_after.anchored_trie_input.unwrap();
+        assert_eq!(anchored.anchor_hash, new_anchor);
     }
 }

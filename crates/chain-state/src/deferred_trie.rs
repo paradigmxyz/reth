@@ -137,6 +137,46 @@ impl DeferredTrieData {
         Self { state: Arc::new(Mutex::new(DeferredState::Ready(bundle))) }
     }
 
+    /// Install or update the cached anchored overlay for this block.
+    ///
+    /// This allows [`LazyOverlay`] to share its computed overlay with future callers,
+    /// avoiding duplicate merge work in [`Self::sort_and_build_trie_input`].
+    ///
+    /// If the block is still pending, this will first trigger computation via the
+    /// fallback path before installing the overlay.
+    ///
+    /// Idempotent if an overlay with the same anchor already exists.
+    ///
+    /// [`LazyOverlay`]: crate::LazyOverlay
+    pub fn install_anchored_overlay(&self, anchor_hash: B256, trie_input: Arc<TrieInputSorted>) {
+        let mut guard = self.state.lock();
+
+        // If pending, compute first so we have a Ready state to update
+        if let DeferredState::Pending(ref mut pending_opt) = *guard &&
+            let Some(inputs) = pending_opt.take()
+        {
+            let computed = Self::sort_and_build_trie_input(
+                inputs.hashed_state,
+                inputs.trie_updates,
+                inputs.anchor_hash,
+                &inputs.ancestors,
+            );
+            *guard = DeferredState::Ready(computed);
+        }
+
+        if let DeferredState::Ready(ref mut data) = *guard {
+            // Only update if no existing overlay or anchor mismatch
+            match &data.anchored_trie_input {
+                Some(existing) if existing.anchor_hash == anchor_hash => {
+                    // Already have overlay for this anchor, skip
+                }
+                _ => {
+                    data.anchored_trie_input = Some(AnchoredTrieInput { anchor_hash, trie_input });
+                }
+            }
+        }
+    }
+
     /// Sort block execution outputs and build a [`TrieInputSorted`] overlay.
     ///
     /// The trie input overlay accumulates sorted hashed state (account/storage changes) and
