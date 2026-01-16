@@ -2833,12 +2833,12 @@ mod tests {
 
         /// Assert the root, trie updates, and nodes against the hash builder output.
         ///
-        /// Note: We don't compare updated_nodes directly because sparse trie now stores
-        /// extension node hashes (which HashBuilder doesn't). We verify that:
+        /// Note: We don't compare `updated_nodes` directly because sparse trie now stores
+        /// extension node hashes (which `HashBuilder` doesn't). We verify that:
         /// 1. The roots match
-        /// 2. The sparse updates have the same paths as hash_builder (keys match)
-        /// 3. state_mask and tree_mask match for each node
-        /// 4. hash_mask: sparse trie may have MORE bits set (for extension nodes)
+        /// 2. The sparse updates have the same paths as `hash_builder` (keys match)
+        /// 3. `state_mask` and `tree_mask` match for each node
+        /// 4. `hash_mask`: sparse trie may have MORE bits set (for extension nodes)
         fn assert_with_hash_builder(
             &self,
             trie: &mut ParallelSparseTrie,
