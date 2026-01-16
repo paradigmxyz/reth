@@ -109,7 +109,8 @@ pub struct HistoricalStateProviderRef<'b, Provider> {
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
     /// Cached `RocksDB` provider for reuse across multiple lookups.
-    /// The provider is cheap to clone (Arc-based) but fetching it from the factory has overhead.
+    /// The provider is Arc-based (cheap to clone), but caching avoids repeated factory calls.
+    /// A fresh transaction is created per lookup to avoid lifetime/sharing issues.
     #[cfg(all(unix, feature = "rocksdb"))]
     rocksdb_provider: OnceCell<crate::providers::RocksDBProvider>,
 }
