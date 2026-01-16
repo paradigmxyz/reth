@@ -153,7 +153,7 @@ where
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Get changed accounts for the unwind range
-        let mut addresses = std::collections::BTreeSet::new();
+        let mut addresses = std::collections::HashSet::new();
         for block in *range.start()..=*range.end() {
             let changesets = provider.account_block_changeset(block)?;
             addresses.extend(changesets.into_iter().map(|cs| cs.address));
