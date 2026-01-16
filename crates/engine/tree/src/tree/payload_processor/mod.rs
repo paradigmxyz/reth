@@ -225,7 +225,7 @@ where
         multiproof_provider_factory: F,
         config: &TreeConfig,
         bal: Option<Arc<BlockAccessList>>,
-        workload_hint: Option<reth_trie_common::WorkloadHint>,
+        workload_hint: Option<reth_trie::WorkloadHint>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
