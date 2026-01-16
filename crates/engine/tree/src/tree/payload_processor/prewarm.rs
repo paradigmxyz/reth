@@ -576,9 +576,14 @@ where
                 .entered();
             txs.recv()
         } {
-            let enter =
-                debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm tx", index, tx_hash=%tx.tx().tx_hash())
-                    .entered();
+            let enter = debug_span!(
+                target: "engine::tree::payload_processor::prewarm",
+                "prewarm tx",
+                index,
+                tx_hash = %tx.tx().tx_hash(),
+                is_success = tracing::field::Empty,
+            )
+            .entered();
 
             // create the tx env
             let start = Instant::now();
