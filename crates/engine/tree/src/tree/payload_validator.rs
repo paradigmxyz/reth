@@ -462,6 +462,15 @@ where
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
 
+        // Create ExecutionOutcome early so we can terminate caching before validation and state
+        // root computation. Using Arc allows sharing with both the caching task and the deferred
+        // trie task without cloning the expensive BundleState.
+        let output = Arc::new(output);
+
+        // Terminate caching task early since execution is complete and caching is no longer
+        // needed. This frees up resources while state root computation continues.
+        let valid_block_tx = handle.terminate_caching(Some(output.clone()));
+
         let block = self.convert_to_block(input)?.with_senders(senders);
 
         let hashed_state = ensure_ok_post_block!(
@@ -564,16 +573,13 @@ where
             .into())
         }
 
-        // Create ExecutionOutcome and wrap in Arc for sharing with both the caching task
-        // and the deferred trie task. This avoids cloning the expensive BundleState.
-        let execution_outcome = Arc::new(output);
-
-        // Terminate prewarming task with the shared execution outcome
-        handle.terminate_caching(Some(Arc::clone(&execution_outcome)));
+        if let Some(valid_block_tx) = valid_block_tx {
+            let _ = valid_block_tx.send(());
+        }
 
         Ok(self.spawn_deferred_trie_task(
             block,
-            execution_outcome,
+            output,
             &ctx,
             hashed_state,
             trie_output,
