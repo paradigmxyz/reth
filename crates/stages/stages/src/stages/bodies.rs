@@ -202,10 +202,7 @@ where
 
         // Write bodies to database.
         provider.append_block_bodies(
-            buffer
-                .into_iter()
-                .map(|response| (response.block_number(), response.into_body()))
-                .collect(),
+            buffer.iter().map(|response| (response.block_number(), response.body())).collect(),
         )?;
 
         // The stage is "done" if:

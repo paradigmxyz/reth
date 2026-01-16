@@ -4,11 +4,11 @@ use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
-use futures::{future::Either, stream::FuturesOrdered, Stream, StreamExt};
+use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
-use reth_primitives_traits::{Block, BlockBody, NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
 use reth_storage_api::{BlockReader, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use schnellru::{ByLength, Limiter};
@@ -30,9 +30,6 @@ pub mod metrics;
 pub mod multi_consumer;
 
 /// The type that can send the response to a requested [`RecoveredBlock`]
-type BlockTransactionsResponseSender<T> = oneshot::Sender<ProviderResult<Option<Vec<T>>>>;
-
-/// The type that can send the response to a requested [`RecoveredBlock`]
 type BlockWithSendersResponseSender<B> =
     oneshot::Sender<ProviderResult<Option<Arc<RecoveredBlock<B>>>>>;
 
@@ -50,15 +47,8 @@ type HeaderResponseSender<H> = oneshot::Sender<ProviderResult<H>>;
 /// The type that can send the response with a chain of cached blocks
 type CachedParentBlocksResponseSender<B> = oneshot::Sender<Vec<Arc<RecoveredBlock<B>>>>;
 
-type BlockLruCache<B, L> = MultiConsumerLruCache<
-    B256,
-    Arc<RecoveredBlock<B>>,
-    L,
-    Either<
-        BlockWithSendersResponseSender<B>,
-        BlockTransactionsResponseSender<<<B as Block>::Body as BlockBody>::Transaction>,
-    >,
->;
+type BlockLruCache<B, L> =
+    MultiConsumerLruCache<B256, Arc<RecoveredBlock<B>>, L, BlockWithSendersResponseSender<B>>;
 
 type ReceiptsLruCache<R, L> =
     MultiConsumerLruCache<B256, Arc<Vec<R>>, L, ReceiptsResponseSender<R>>;
@@ -342,16 +332,7 @@ where
         if let Some(queued) = self.full_block_cache.remove(&block_hash) {
             // send the response to queued senders
             for tx in queued {
-                match tx {
-                    Either::Left(block_with_senders) => {
-                        let _ = block_with_senders.send(res.clone());
-                    }
-                    Either::Right(transaction_tx) => {
-                        let _ = transaction_tx.send(res.clone().map(|maybe_block| {
-                            maybe_block.map(|block| block.body().transactions().to_vec())
-                        }));
-                    }
-                }
+                let _ = tx.send(res.clone());
             }
         }
 
@@ -388,16 +369,7 @@ where
         if let Some(queued) = self.full_block_cache.remove(&block_hash) {
             // send the response to queued senders
             for tx in queued {
-                match tx {
-                    Either::Left(block_with_senders) => {
-                        let _ = block_with_senders.send(res.clone());
-                    }
-                    Either::Right(transaction_tx) => {
-                        let _ = transaction_tx.send(res.clone().map(|maybe_block| {
-                            maybe_block.map(|block| block.body().transactions().to_vec())
-                        }));
-                    }
-                }
+                let _ = tx.send(res.clone());
             }
         }
     }
@@ -469,7 +441,7 @@ where
                             }
 
                             // block is not in the cache, request it if this is the first consumer
-                            if this.full_block_cache.queue(block_hash, Either::Left(response_tx)) {
+                            if this.full_block_cache.queue(block_hash, response_tx) {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();

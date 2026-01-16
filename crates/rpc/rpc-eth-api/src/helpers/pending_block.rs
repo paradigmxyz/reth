@@ -12,7 +12,7 @@ use reth_chain_state::{BlockState, ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, ExecutionOutcome},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
@@ -216,12 +216,13 @@ pub trait LoadPendingBlock:
         }
     }
 
-    /// Builds a pending block using the configured provider and pool.
+    /// Builds a locally derived pending block using the configured provider and pool.
     ///
-    /// If the origin is the actual pending block, the block is built with withdrawals.
+    /// This is used when no execution-layer pending block is available and a pending block is
+    /// derived from the latest canonical header, using the provided parent.
     ///
-    /// After Cancun, if the origin is the actual pending block, the block includes the EIP-4788 pre
-    /// block contract call using the parent beacon block root received from the CL.
+    /// Withdrawals and any fork-specific behavior (such as EIP-4788 pre-block contract calls) are
+    /// determined by the EVM environment and chain specification used during construction.
     fn build_block(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
@@ -235,7 +236,7 @@ pub trait LoadPendingBlock:
             .provider()
             .history_by_block_hash(parent.hash())
             .map_err(Self::Error::from_eth_err)?;
-        let state = StateProviderDatabase::new(&state_provider);
+        let state = StateProviderDatabase::new(state_provider);
         let mut db = State::builder().with_database(state).with_bundle_update().build();
 
         let mut builder = self
@@ -362,12 +363,8 @@ pub trait LoadPendingBlock:
         let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates } =
             builder.finish(NoopProvider::default()).map_err(Self::Error::from_eth_err)?;
 
-        let execution_outcome = ExecutionOutcome::new(
-            db.take_bundle(),
-            vec![execution_result.receipts],
-            block.number(),
-            vec![execution_result.requests],
-        );
+        let execution_outcome =
+            BlockExecutionOutput { state: db.take_bundle(), result: execution_result };
 
         Ok(ExecutedBlock::new(
             block.into(),
@@ -420,6 +417,7 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             gas_limit: parent.gas_limit(),
             parent_beacon_block_root: parent.parent_beacon_block_root(),
             withdrawals: parent.withdrawals_root().map(|_| Default::default()),
+            extra_data: parent.extra_data().clone(),
         }
     }
 }

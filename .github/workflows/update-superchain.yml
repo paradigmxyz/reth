@@ -27,7 +27,7 @@ jobs:
           ./fetch_superchain_config.sh
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "chore: update superchain config"
           title: "chore: update superchain config"

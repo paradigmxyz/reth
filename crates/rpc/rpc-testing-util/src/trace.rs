@@ -71,7 +71,7 @@ pub trait TraceApiExt {
 
     /// Returns a new stream that yields the traces the opcodes for the given blocks.
     ///
-    /// See also [`StreamExt::buffered`].
+    /// See also [`StreamExt::buffer_unordered`].
     fn trace_block_opcode_gas_unordered<I, B>(
         &self,
         params: I,
@@ -301,7 +301,7 @@ impl<T: TraceApiClient<TransactionRequest> + Sync> TraceApiExt for T {
                 Err(err) => Err((err, block)),
             }
         }))
-        .buffered(n);
+        .buffer_unordered(n);
         TraceBlockOpcodeGasStream { stream: Box::pin(stream) }
     }
 

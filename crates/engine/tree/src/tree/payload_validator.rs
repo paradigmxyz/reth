@@ -11,11 +11,15 @@ use crate::tree::{
     StateProviderDatabase, TreeConfig,
 };
 use alloy_consensus::transaction::Either;
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
-use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock};
-use reth_consensus::{ConsensusError, FullConsensus};
+
+use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
+use rayon::prelude::*;
+use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
+use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
 };
@@ -28,17 +32,20 @@ use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
+    AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
+    SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
-    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
-    StateRootProvider, TrieReader,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
+    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
+    StateProviderFactory, StateReader,
 };
 use reth_revm::db::State;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInputSorted};
+use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
+use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use revm_primitives::Address;
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
@@ -107,7 +114,7 @@ where
     /// Provider for database access.
     provider: P,
     /// Consensus implementation for validation.
-    consensus: Arc<dyn FullConsensus<Evm::Primitives, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<Evm::Primitives>>,
     /// EVM configuration.
     evm_config: Evm,
     /// Configuration for the tree.
@@ -125,14 +132,22 @@ where
     metrics: EngineApiMetrics,
     /// Validator for the payload.
     validator: V,
+    /// Changeset cache for in-memory trie changesets
+    changeset_cache: ChangesetCache,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
-            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            Provider: BlockReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
+        + ChangeSetReader
+        + BlockNumReader
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
@@ -144,11 +159,12 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
-        consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<N>>,
         evm_config: Evm,
         validator: V,
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
+        changeset_cache: ChangesetCache,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
@@ -168,6 +184,7 @@ where
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
             validator,
+            changeset_cache,
         }
     }
 
@@ -176,12 +193,12 @@ where
     pub fn convert_to_block<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: BlockOrPayload<T>,
-    ) -> Result<RecoveredBlock<N::Block>, NewPayloadError>
+    ) -> Result<SealedBlock<N::Block>, NewPayloadError>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => self.validator.ensure_well_formed_payload(payload),
+            BlockOrPayload::Payload(payload) => self.validator.convert_payload_to_block(payload),
             BlockOrPayload::Block(block) => Ok(block),
         }
     }
@@ -205,21 +222,38 @@ where
     pub fn tx_iterator_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &'a self,
         input: &'a BlockOrPayload<T>,
-    ) -> Result<impl ExecutableTxIterator<Evm> + 'a, NewPayloadError>
+    ) -> Result<impl ExecutableTxIterator<Evm>, NewPayloadError>
     where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => Ok(Either::Left(
-                self.evm_config
+            BlockOrPayload::Payload(payload) => {
+                let (iter, convert) = self
+                    .evm_config
                     .tx_iterator_for_payload(payload)
                     .map_err(NewPayloadError::other)?
-                    .map(|res| res.map(Either::Left)),
-            )),
+                    .into();
+
+                let iter = Either::Left(iter.into_par_iter().map(Either::Left));
+                let convert = move |tx| {
+                    let Either::Left(tx) = tx else { unreachable!() };
+                    convert(tx).map(Either::Left).map_err(Either::Left)
+                };
+
+                // Box the closure to satisfy the `Fn` bound both here and in the branch below
+                Ok((iter, Box::new(convert) as Box<dyn Fn(_) -> _ + Send + Sync + 'static>))
+            }
             BlockOrPayload::Block(block) => {
-                let transactions = block.clone_transactions_recovered().collect::<Vec<_>>();
-                Ok(Either::Right(transactions.into_iter().map(|tx| Ok(Either::Right(tx)))))
+                let iter = Either::Right(
+                    block.body().clone_transactions().into_par_iter().map(Either::Right),
+                );
+                let convert = move |tx: Either<_, N::SignedTx>| {
+                    let Either::Right(tx) = tx else { unreachable!() };
+                    tx.try_into_recovered().map(Either::Right).map_err(Either::Right)
+                };
+
+                Ok((iter, Box::new(convert)))
             }
         }
     }
@@ -266,7 +300,7 @@ where
         // Validate block consensus rules which includes header validation
         if let Err(consensus_err) = self.validate_block_inner(&block) {
             // Header validation error takes precedence over execution error
-            return Err(InsertBlockError::new(block.into_sealed_block(), consensus_err.into()).into())
+            return Err(InsertBlockError::new(block, consensus_err.into()).into())
         }
 
         // Also validate against the parent
@@ -274,11 +308,11 @@ where
             self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
         {
             // Parent validation error takes precedence over execution error
-            return Err(InsertBlockError::new(block.into_sealed_block(), consensus_err.into()).into())
+            return Err(InsertBlockError::new(block, consensus_err.into()).into())
         }
 
         // No header validation errors, return the original execution error
-        Err(InsertBlockError::new(block.into_sealed_block(), execution_err).into())
+        Err(InsertBlockError::new(block, execution_err).into())
     }
 
     /// Validates a block that has already been converted from a payload.
@@ -314,9 +348,7 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = self.convert_to_block(input)?;
-                        return Err(
-                            InsertBlockError::new(block.into_sealed_block(), e.into()).into()
-                        )
+                        return Err(InsertBlockError::new(block, e.into()).into())
                     }
                 }
             };
@@ -337,7 +369,6 @@ where
         }
 
         let parent_hash = input.parent_hash();
-        let block_num_hash = input.num_hash();
 
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
         let _enter =
@@ -347,19 +378,20 @@ where
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
-                self.convert_to_block(input)?.into_sealed_block(),
+                self.convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
         };
-        let state_provider = ensure_ok!(provider_builder.build());
+        let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
 
-        // fetch parent block
+        // Fetch parent block. This goes to memory most of the time unless the parent block is
+        // beyond the in-memory buffer.
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
-                self.convert_to_block(input)?.into_sealed_block(),
+                self.convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -380,47 +412,87 @@ where
             "Decided which state root algorithm to run"
         );
 
-        // use prewarming background task
+        // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
+
+        // Extract the BAL, if valid and available
+        let block_access_list = ensure_ok!(input
+            .block_access_list()
+            .transpose()
+            // Eventually gets converted to a `InsertBlockErrorKind::Other`
+            .map_err(Box::<dyn std::error::Error + Send + Sync>::from))
+        .map(Arc::new);
+
+        // Create lazy overlay from ancestors - this doesn't block, allowing execution to start
+        // before the trie data is ready. The overlay will be computed on first access.
+        let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, ctx.state());
+
+        // Create overlay factory for payload processor (StateRootTask path needs it for
+        // multiproofs)
+        let overlay_factory =
+            OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
+                .with_block_hash(Some(anchor_hash))
+                .with_lazy_overlay(lazy_overlay);
 
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
             provider_builder,
-            parent_hash,
-            ctx.state(),
+            overlay_factory.clone(),
             strategy,
+            block_access_list,
         ));
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
-        let state_provider = CachedStateProvider::new_with_caches(
-            state_provider,
-            handle.caches(),
-            handle.cache_metrics(),
-        );
-
-        // Execute the block and handle any execution errors
-        let output = match if self.config.state_provider_metrics() {
-            let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
-            let result = self.execute_block(&state_provider, env, &input, &mut handle);
-            state_provider.record_total_latency();
-            result
-        } else {
-            self.execute_block(&state_provider, env, &input, &mut handle)
-        } {
-            Ok(output) => output,
-            Err(err) => return self.handle_execution_error(input, err, &parent_block),
+        if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
+            state_provider =
+                Box::new(CachedStateProvider::new(state_provider, caches, cache_metrics));
         };
+
+        if self.config.state_provider_metrics() {
+            state_provider = Box::new(InstrumentedStateProvider::new(state_provider, "engine"));
+        }
+
+        // Execute the block and handle any execution errors.
+        // The receipt root task is spawned before execution and receives receipts incrementally
+        // as transactions complete, allowing parallel computation during execution.
+        let (output, senders, receipt_root_rx) =
+            match self.execute_block(state_provider, env, &input, &mut handle) {
+                Ok(output) => output,
+                Err(err) => return self.handle_execution_error(input, err, &parent_block),
+            };
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
 
-        let block = self.convert_to_block(input)?;
+        // Create ExecutionOutcome early so we can terminate caching before validation and state
+        // root computation. Using Arc allows sharing with both the caching task and the deferred
+        // trie task without cloning the expensive BundleState.
+        let output = Arc::new(output);
+
+        // Terminate caching task early since execution is complete and caching is no longer
+        // needed. This frees up resources while state root computation continues.
+        let valid_block_tx = handle.terminate_caching(Some(output.clone()));
+
+        let block = self.convert_to_block(input)?.with_senders(senders);
+
+        // Wait for the receipt root computation to complete.
+        let receipt_root_bloom = Some(
+            receipt_root_rx
+                .blocking_recv()
+                .expect("receipt root task dropped sender without result"),
+        );
 
         let hashed_state = ensure_ok_post_block!(
-            self.validate_post_execution(&block, &parent_block, &output, &mut ctx),
+            self.validate_post_execution(
+                &block,
+                &parent_block,
+                &output,
+                &mut ctx,
+                receipt_root_bloom
+            ),
             block
         );
 
@@ -453,11 +525,7 @@ where
             }
             StateRootStrategy::Parallel => {
                 debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
-                match self.compute_state_root_parallel(
-                    block.parent_hash(),
-                    &hashed_state,
-                    ctx.state(),
-                ) {
+                match self.compute_state_root_parallel(overlay_factory.clone(), &hashed_state) {
                     Ok(result) => {
                         let elapsed = root_time.elapsed();
                         info!(
@@ -493,7 +561,7 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                state_provider.state_root_with_updates(hashed_state.clone()),
+                self.compute_state_root_serial(overlay_factory.clone(), &hashed_state),
                 block
             );
             (root, updates, root_time.elapsed())
@@ -523,16 +591,17 @@ where
             .into())
         }
 
-        // terminate prewarming task with good state output
-        handle.terminate_caching(Some(&output.state));
+        if let Some(valid_block_tx) = valid_block_tx {
+            let _ = valid_block_tx.send(());
+        }
 
         Ok(self.spawn_deferred_trie_task(
             block,
             output,
-            block_num_hash.number,
             &ctx,
             hashed_state,
             trie_output,
+            overlay_factory,
         ))
     }
 
@@ -555,13 +624,13 @@ where
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    fn validate_block_inner(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
+    fn validate_block_inner(&self, block: &SealedBlock<N::Block>) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_block_pre_execution(block.sealed_block()) {
+        if let Err(e) = self.consensus.validate_block_pre_execution(block) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
@@ -571,15 +640,23 @@ where
 
     /// Executes a block with the given state provider
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
+    #[expect(clippy::type_complexity)]
     fn execute_block<S, Err, T>(
         &mut self,
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err>,
-    ) -> Result<BlockExecutionOutput<N::Receipt>, InsertBlockErrorKind>
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
+    ) -> Result<
+        (
+            BlockExecutionOutput<N::Receipt>,
+            Vec<Address>,
+            tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>,
+        ),
+        InsertBlockErrorKind,
+    >
     where
-        S: StateProvider,
+        S: StateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
@@ -588,12 +665,13 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(&state_provider))
+            .with_database(StateProviderDatabase::new(state_provider))
             .with_bundle_update()
             .without_state_clear()
             .build();
 
-        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
+        let spec_id = *env.evm_env.spec_id();
+        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
         let mut executor = self.evm_config.create_executor(evm, ctx);
@@ -609,60 +687,92 @@ where
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
-                    *env.evm_env.spec_id(),
+                    spec_id,
                     Some(metrics),
                 )
             });
         }
 
+        // Spawn background task to compute receipt root and logs bloom incrementally.
+        // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per block).
+        let receipts_len = input.transaction_count();
+        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
+        self.payload_processor.executor().spawn_blocking(move || task_handle.run(receipts_len));
+
         let execution_start = Instant::now();
         let state_hook = Box::new(handle.state_hook());
-        let output = self.metrics.execute_metered(
+        let (output, senders) = self.metrics.execute_metered(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
+            input.transaction_count(),
             state_hook,
+            |receipts| {
+                // Send the latest receipt to the background task for incremental root computation.
+                // The receipt is cloned here; encoding happens in the background thread.
+                if let Some(receipt) = receipts.last() {
+                    // Infer tx_index from the number of receipts collected so far
+                    let tx_index = receipts.len() - 1;
+                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                }
+            },
         )?;
+        drop(receipt_tx);
+
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_time, "Executed block");
-        Ok(output)
+        Ok((output, senders, result_rx))
     }
 
     /// Compute state root for the given hashed post state in parallel.
+    ///
+    /// Uses an overlay factory which provides the state of the parent block, along with the
+    /// [`HashedPostState`] containing the changes of this block, to compute the state root and
+    /// trie updates for this block.
     ///
     /// # Returns
     ///
     /// Returns `Ok(_)` if computed successfully.
     /// Returns `Err(_)` if error was encountered during computation.
-    /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
-    /// should be used instead.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn compute_state_root_parallel(
         &self,
-        parent_hash: B256,
+        overlay_factory: OverlayStateProviderFactory<P>,
         hashed_state: &HashedPostState,
-        state: &EngineApiTreeState<N>,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        let (mut input, block_hash) = self.compute_trie_input(parent_hash, state)?;
-
-        // Extend state overlay with current block's sorted state.
-        input.prefix_sets.extend(hashed_state.construct_prefix_sets());
-        let sorted_hashed_state = hashed_state.clone().into_sorted();
-        Arc::make_mut(&mut input.state).extend_ref(&sorted_hashed_state);
-
-        let TrieInputSorted { nodes, state, prefix_sets: prefix_sets_mut } = input;
-
-        let factory = OverlayStateProviderFactory::new(self.provider.clone())
-            .with_block_hash(Some(block_hash))
-            .with_trie_overlay(Some(nodes))
-            .with_hashed_state_overlay(Some(state));
-
-        // The `hashed_state` argument is already taken into account as part of the overlay, but we
+        // The `hashed_state` argument will be taken into account as part of the overlay, but we
         // need to use the prefix sets which were generated from it to indicate to the
         // ParallelStateRoot which parts of the trie need to be recomputed.
-        let prefix_sets = prefix_sets_mut.freeze();
+        let prefix_sets = hashed_state.construct_prefix_sets().freeze();
+        let overlay_factory =
+            overlay_factory.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
+        ParallelStateRoot::new(overlay_factory, prefix_sets).incremental_root_with_updates()
+    }
 
-        ParallelStateRoot::new(factory, prefix_sets).incremental_root_with_updates()
+    /// Compute state root for the given hashed post state in serial.
+    ///
+    /// Uses an overlay factory which provides the state of the parent block, along with the
+    /// [`HashedPostState`] containing the changes of this block, to compute the state root and
+    /// trie updates for this block.
+    fn compute_state_root_serial(
+        &self,
+        overlay_factory: OverlayStateProviderFactory<P>,
+        hashed_state: &HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        // The `hashed_state` argument will be taken into account as part of the overlay, but we
+        // need to use the prefix sets which were generated from it to indicate to the
+        // StateRoot which parts of the trie need to be recomputed.
+        let prefix_sets = hashed_state.construct_prefix_sets().freeze();
+        let overlay_factory =
+            overlay_factory.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
+
+        let provider = overlay_factory.database_provider_ro()?;
+
+        Ok(StateRoot::new(&provider, &provider)
+            .with_prefix_sets(prefix_sets)
+            .root_with_updates()?)
     }
 
     /// Validates the block after execution.
@@ -671,6 +781,9 @@ where
     /// - parent header validation
     /// - post-execution consensus validation
     /// - state-root based post-execution validation
+    ///
+    /// If `receipt_root_bloom` is provided, it will be used instead of computing the receipt root
+    /// and logs bloom from the receipts.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
@@ -678,6 +791,7 @@ where
         parent_block: &SealedHeader<N::BlockHeader>,
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
+        receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<HashedPostState, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -704,7 +818,9 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        if let Err(err) = self.consensus.validate_block_post_execution(block, output) {
+        if let Err(err) =
+            self.consensus.validate_block_post_execution(block, output, receipt_root_bloom)
+        {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())
@@ -744,6 +860,11 @@ where
     ///
     /// The method handles strategy fallbacks if the preferred approach fails, ensuring
     /// block execution always completes with a valid state root.
+    ///
+    /// # Arguments
+    ///
+    /// * `overlay_factory` - Pre-computed overlay factory for multiproof generation
+    ///   (`StateRootTask`)
     #[allow(clippy::too_many_arguments)]
     #[instrument(
         level = "debug",
@@ -756,44 +877,29 @@ where
         env: ExecutionEnv<Evm>,
         txs: T,
         provider_builder: StateProviderBuilder<N, P>,
-        parent_hash: B256,
-        state: &EngineApiTreeState<N>,
+        overlay_factory: OverlayStateProviderFactory<P>,
         strategy: StateRootStrategy,
+        block_access_list: Option<Arc<BlockAccessList>>,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
             impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
+            N::Receipt,
         >,
         InsertBlockErrorKind,
     > {
         match strategy {
             StateRootStrategy::StateRootTask => {
-                // Compute trie input
-                let trie_input_start = Instant::now();
-                let (trie_input, block_hash) = self.compute_trie_input(parent_hash, state)?;
-
-                // Create OverlayStateProviderFactory with sorted trie data for multiproofs
-                let TrieInputSorted { nodes, state, .. } = trie_input;
-
-                let multiproof_provider_factory =
-                    OverlayStateProviderFactory::new(self.provider.clone())
-                        .with_block_hash(Some(block_hash))
-                        .with_trie_overlay(Some(nodes))
-                        .with_hashed_state_overlay(Some(state));
-
-                // Record trie input duration including OverlayStateProviderFactory setup
-                self.metrics
-                    .block_validation
-                    .trie_input_duration
-                    .record(trie_input_start.elapsed().as_secs_f64());
-
                 let spawn_start = Instant::now();
+
+                // Use the pre-computed overlay factory for multiproofs
                 let handle = self.payload_processor.spawn(
                     env,
                     txs,
                     provider_builder,
-                    multiproof_provider_factory,
+                    overlay_factory,
                     &self.config,
+                    block_access_list,
                 );
 
                 // record prewarming initialization duration
@@ -806,8 +912,12 @@ where
             }
             StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
                 let start = Instant::now();
-                let handle =
-                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
+                let handle = self.payload_processor.spawn_cache_exclusive(
+                    env,
+                    txs,
+                    provider_builder,
+                    block_access_list,
+                );
 
                 // Record prewarming initialization duration
                 self.metrics
@@ -881,99 +991,36 @@ where
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
 
-    /// Computes [`TrieInputSorted`] for the provided parent hash by combining database state
-    /// with in-memory overlays.
+    /// Creates a [`LazyOverlay`] for the parent block without blocking.
     ///
-    /// The goal of this function is to take in-memory blocks and generate a [`TrieInputSorted`]
-    /// that extends from the highest persisted ancestor up through the parent. This enables state
-    /// root computation and proof generation without requiring all blocks to be persisted
-    /// first.
+    /// Returns a lazy overlay that will compute the trie input on first access, and the anchor
+    /// block hash (the highest persisted ancestor). This allows execution to start immediately
+    /// while the trie input computation is deferred until the overlay is actually needed.
     ///
-    /// It works as follows:
-    /// 1. Collect in-memory overlay blocks using [`crate::tree::TreeState::blocks_by_hash`]. This
-    ///    returns the highest persisted ancestor hash (`block_hash`) and the list of in-memory
-    ///    blocks building on top of it.
-    /// 2. Fast path: If the tip in-memory block's trie input is already anchored to `block_hash`
-    ///    (its `anchor_hash` matches `block_hash`), reuse it directly.
-    /// 3. Slow path: Build a new [`TrieInputSorted`] by aggregating the overlay blocks (from oldest
-    ///    to newest) on top of the database state at `block_hash`.
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_validator",
-        skip_all,
-        fields(parent_hash)
-    )]
-    fn compute_trie_input(
-        &self,
+    /// If parent is on disk (no in-memory blocks), returns `None` for the lazy overlay.
+    fn get_parent_lazy_overlay(
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
-    ) -> ProviderResult<(TrieInputSorted, B256)> {
-        let wait_start = Instant::now();
-        let (block_hash, blocks) =
+    ) -> (Option<LazyOverlay>, B256) {
+        let (anchor_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
-        // Fast path: if the tip block's anchor matches the persisted ancestor hash, reuse its
-        // TrieInput. This means the TrieInputSorted already aggregates all in-memory overlays
-        // from that ancestor, so we can avoid re-aggregation.
-        if let Some(tip_block) = blocks.first() {
-            let data = tip_block.trie_data();
-            if let (Some(anchor_hash), Some(trie_input)) =
-                (data.anchor_hash(), data.trie_input().cloned()) &&
-                anchor_hash == block_hash
-            {
-                trace!(target: "engine::tree::payload_validator", %block_hash,"Reusing trie input with matching anchor hash");
-                self.metrics
-                    .block_validation
-                    .deferred_trie_wait_duration
-                    .record(wait_start.elapsed().as_secs_f64());
-                return Ok(((*trie_input).clone(), block_hash));
-            }
-        }
-
         if blocks.is_empty() {
-            debug!(target: "engine::tree::payload_validator", "Parent found on disk");
-        } else {
-            debug!(target: "engine::tree::payload_validator", historical = ?block_hash, blocks = blocks.len(), "Parent found in memory");
+            debug!(target: "engine::tree::payload_validator", "Parent found on disk, no lazy overlay needed");
+            return (None, anchor_hash);
         }
 
-        // Extend with contents of parent in-memory blocks directly in sorted form.
-        let input = Self::merge_overlay_trie_input(&blocks);
+        debug!(
+            target: "engine::tree::payload_validator",
+            %anchor_hash,
+            num_blocks = blocks.len(),
+            "Creating lazy overlay for in-memory blocks"
+        );
 
-        self.metrics
-            .block_validation
-            .deferred_trie_wait_duration
-            .record(wait_start.elapsed().as_secs_f64());
-        Ok((input, block_hash))
-    }
+        // Extract deferred trie data handles (non-blocking)
+        let handles: Vec<DeferredTrieData> = blocks.iter().map(|b| b.trie_data_handle()).collect();
 
-    /// Aggregates multiple in-memory blocks into a single [`TrieInputSorted`] by combining their
-    /// state changes.
-    ///
-    /// The input `blocks` vector is ordered newest -> oldest (see `TreeState::blocks_by_hash`).
-    /// We iterate it in reverse so we start with the oldest block's trie data and extend forward
-    /// toward the newest, ensuring newer state takes precedence.
-    fn merge_overlay_trie_input(blocks: &[ExecutedBlock<N>]) -> TrieInputSorted {
-        let mut input = TrieInputSorted::default();
-        let mut blocks_iter = blocks.iter().rev().peekable();
-
-        if let Some(first) = blocks_iter.next() {
-            let data = first.trie_data();
-            input.state = data.hashed_state;
-            input.nodes = data.trie_updates;
-
-            // Only clone and mutate if there are more in-memory blocks.
-            if blocks_iter.peek().is_some() {
-                let state_mut = Arc::make_mut(&mut input.state);
-                let nodes_mut = Arc::make_mut(&mut input.nodes);
-                for block in blocks_iter {
-                    let data = block.trie_data();
-                    state_mut.extend_ref(data.hashed_state.as_ref());
-                    nodes_mut.extend_ref(data.trie_updates.as_ref());
-                }
-            }
-        }
-
-        input
+        (Some(LazyOverlay::new(anchor_hash, handles)), anchor_hash)
     }
 
     /// Spawns a background task to compute and sort trie data for the executed block.
@@ -995,11 +1042,11 @@ where
     fn spawn_deferred_trie_task(
         &self,
         block: RecoveredBlock<N::Block>,
-        output: BlockExecutionOutput<N::Receipt>,
-        block_number: u64,
+        execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
         hashed_state: HashedPostState,
         trie_output: TrieUpdates,
+        overlay_factory: OverlayStateProviderFactory<P>,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
         let (anchor_hash, overlay_blocks) = ctx
@@ -1021,16 +1068,79 @@ where
             ancestors,
         );
         let deferred_handle_task = deferred_trie_data.clone();
-        let deferred_compute_duration =
-            self.metrics.block_validation.deferred_trie_compute_duration.clone();
+        let block_validation_metrics = self.metrics.block_validation.clone();
+
+        // Capture block info and cache handle for changeset computation
+        let block_hash = block.hash();
+        let block_number = block.number();
+        let changeset_cache = self.changeset_cache.clone();
 
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
         let compute_trie_input_task = move || {
+            let _span = debug_span!(
+                target: "engine::tree::payload_validator",
+                "compute_trie_input_task",
+                block_number
+            )
+            .entered();
+
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
-                let _ = deferred_handle_task.wait_cloned();
-                deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
+                let computed = deferred_handle_task.wait_cloned();
+                block_validation_metrics
+                    .deferred_trie_compute_duration
+                    .record(compute_start.elapsed().as_secs_f64());
+
+                // Record sizes of the computed trie data
+                block_validation_metrics
+                    .hashed_post_state_size
+                    .record(computed.hashed_state.total_len() as f64);
+                block_validation_metrics
+                    .trie_updates_sorted_size
+                    .record(computed.trie_updates.total_len() as f64);
+                if let Some(anchored) = &computed.anchored_trie_input {
+                    block_validation_metrics
+                        .anchored_overlay_trie_updates_size
+                        .record(anchored.trie_input.nodes.total_len() as f64);
+                    block_validation_metrics
+                        .anchored_overlay_hashed_state_size
+                        .record(anchored.trie_input.state.total_len() as f64);
+                }
+
+                // Compute and cache changesets using the computed trie_updates
+                let changeset_start = Instant::now();
+
+                // Get a provider from the overlay factory for trie cursor access
+                let changeset_result =
+                    overlay_factory.database_provider_ro().and_then(|provider| {
+                        reth_trie::changesets::compute_trie_changesets(
+                            &provider,
+                            &computed.trie_updates,
+                        )
+                        .map_err(ProviderError::Database)
+                    });
+
+                match changeset_result {
+                    Ok(changesets) => {
+                        debug!(
+                            target: "engine::tree::changeset",
+                            ?block_number,
+                            elapsed = ?changeset_start.elapsed(),
+                            "Computed and caching changesets"
+                        );
+
+                        changeset_cache.insert(block_hash, block_number, Arc::new(changesets));
+                    }
+                    Err(e) => {
+                        warn!(
+                            target: "engine::tree::changeset",
+                            ?block_number,
+                            ?e,
+                            "Failed to compute changesets in deferred trie task"
+                        );
+                    }
+                }
             }));
 
             if result.is_err() {
@@ -1046,7 +1156,7 @@ where
 
         ExecutedBlock::with_deferred_trie_data(
             Arc::new(block),
-            Arc::new(ExecutionOutcome::from((output, block_number))),
+            execution_outcome,
             deferred_trie_data,
         )
     }
@@ -1097,10 +1207,10 @@ pub trait EngineValidator<
     ///
     /// Implementers should ensure that the checks are done in the order that conforms with the
     /// engine-API specification.
-    fn ensure_well_formed_payload(
+    fn convert_payload_to_block(
         &self,
         payload: Types::ExecutionData,
-    ) -> Result<RecoveredBlock<N::Block>, NewPayloadError>;
+    ) -> Result<SealedBlock<N::Block>, NewPayloadError>;
 
     /// Validates a payload received from engine API.
     fn validate_payload(
@@ -1112,7 +1222,7 @@ pub trait EngineValidator<
     /// Validates a block downloaded from the network.
     fn validate_block(
         &mut self,
-        block: RecoveredBlock<N::Block>,
+        block: SealedBlock<N::Block>,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N>;
 
@@ -1126,10 +1236,16 @@ pub trait EngineValidator<
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
     P: DatabaseProviderFactory<
-            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            Provider: BlockReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
+        + ChangeSetReader
+        + BlockNumReader
         + HashedPostStateProvider
         + Clone
         + 'static,
@@ -1146,11 +1262,11 @@ where
         self.validator.validate_payload_attributes_against_header(attr, header)
     }
 
-    fn ensure_well_formed_payload(
+    fn convert_payload_to_block(
         &self,
         payload: Types::ExecutionData,
-    ) -> Result<RecoveredBlock<N::Block>, NewPayloadError> {
-        let block = self.validator.ensure_well_formed_payload(payload)?;
+    ) -> Result<SealedBlock<N::Block>, NewPayloadError> {
+        let block = self.validator.convert_payload_to_block(payload)?;
         Ok(block)
     }
 
@@ -1164,7 +1280,7 @@ where
 
     fn validate_block(
         &mut self,
-        block: RecoveredBlock<N::Block>,
+        block: SealedBlock<N::Block>,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N> {
         self.validate_block_with_state(BlockOrPayload::Block(block), ctx)
@@ -1173,7 +1289,7 @@ where
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>) {
         self.payload_processor.on_inserted_executed_block(
             block.recovered_block.block_with_parent(),
-            block.execution_output.state(),
+            &block.execution_output.state,
         );
     }
 }
@@ -1184,7 +1300,7 @@ pub enum BlockOrPayload<T: PayloadTypes> {
     /// Payload.
     Payload(T::ExecutionData),
     /// Block.
-    Block(RecoveredBlock<BlockTy<<T::BuiltPayload as BuiltPayload>::Primitives>>),
+    Block(SealedBlock<BlockTy<<T::BuiltPayload as BuiltPayload>::Primitives>>),
 }
 
 impl<T: PayloadTypes> BlockOrPayload<T> {
@@ -1225,6 +1341,23 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(_) => "payload",
             Self::Block(_) => "block",
+        }
+    }
+
+    /// Returns the block access list if available.
+    pub const fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
+        // TODO decode and return `BlockAccessList`
+        None
+    }
+
+    /// Returns the number of transactions in the payload or block.
+    pub fn transaction_count(&self) -> usize
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.transaction_count(),
+            Self::Block(block) => block.transaction_count(),
         }
     }
 }

@@ -176,9 +176,13 @@ The second parameter is an array of one or more trace types (`vmTrace`, `trace`,
 
 The third and optional parameter is a block number, block hash, or a block tag (`latest`, `finalized`, `safe`, `earliest`, `pending`).
 
-| Client | Method invocation                                              |
-| ------ | -------------------------------------------------------------- |
-| RPC    | `{"method": "trace_call", "params": [tx, trace[], block]}` |
+The fourth and optional parameter is a `stateOverrides` object that temporarily overrides account state used for the trace (balances, nonces, code, storage).
+
+The fifth and optional parameter is a `blockOverrides` object that temporarily overrides block fields used for the trace (for example `timestamp`, `baseFee`, `number`).
+
+| Client | Method invocation                                                                    |
+| ------ | ------------------------------------------------------------------------------------ |
+| RPC    | `{"method": "trace_call", "params": [tx, trace[], block, stateOverrides, blockOverrides]}` |
 
 ### Example
 
@@ -222,7 +226,7 @@ The second and optional parameter is a block number, block hash, or a block tag 
 
 | Client | Method invocation                                          |
 | ------ | ---------------------------------------------------------- |
-| RPC    | `{"method": "trace_callMany", "params": [trace[], block]}` |
+| RPC    | `{"method": "trace_callMany", "params": [[[tx, type[]], ...], block]}` |
 
 ### Example
 
@@ -284,9 +288,9 @@ The second and optional parameter is a block number, block hash, or a block tag 
 
 Traces a call to `eth_sendRawTransaction` without making the call, returning the traces.
 
-| Client | Method invocation                                                     |
-| ------ | --------------------------------------------------------------------- |
-| RPC    | `{"method": "trace_rawTransaction", "params": [raw_tx, type[]]}` |
+| Client | Method invocation                                                                |
+| ------ | -------------------------------------------------------------------------------- |
+| RPC    | `{"method": "trace_rawTransaction", "params": [raw_tx, type[], block]}` |
 
 ### Example
 
@@ -502,7 +506,7 @@ Returns trace at given position.
 
 | Client | Method invocation                                        |
 | ------ | -------------------------------------------------------- |
-| RPC    | `{"method": "trace_get", "params": [tx_hash,indices[]]}` |
+| RPC    | `{"method": "trace_get", "params": [tx_hash, indices[]]}` |
 
 ### Example
 
@@ -521,13 +525,13 @@ Returns trace at given position.
             "value": "0x0"
         },
         "blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
-            "blockNumber": 3068185,
-            "result": {
+        "blockNumber": 3068185,
+        "result": {
             "gasUsed": "0x183",
             "output": "0x0000000000000000000000000000000000000000000000000000000000000001"
         },
         "subtraces": 0,
-            "traceAddress": [
+        "traceAddress": [
             0
         ],
         "transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",

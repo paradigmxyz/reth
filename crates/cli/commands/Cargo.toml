@@ -49,6 +49,7 @@ reth-stages.workspace = true
 reth-stages-types = { workspace = true, optional = true }
 reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
+reth-tasks.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-trie-common.workspace = true
@@ -82,6 +83,8 @@ backon.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 tokio-stream.workspace = true
 reqwest.workspace = true
+url.workspace = true
+metrics.workspace = true
 
 # io
 fdlimit.workspace = true
@@ -127,3 +130,5 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "reth-ethereum-primitives/arbitrary",
 ]
+
+edge = ["reth-db-common/edge", "reth-stages/rocksdb"]

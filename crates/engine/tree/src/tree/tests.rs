@@ -4,9 +4,10 @@ use crate::{
     tree::{
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
         persistence_state::CurrentPersistenceAction,
-        TreeConfig,
+        PersistTarget, TreeConfig,
     },
 };
+use reth_trie_db::ChangesetCache;
 
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
@@ -26,12 +27,12 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
-use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
+use reth_provider::test_utils::MockEthProvider;
 use std::{
     collections::BTreeMap,
     str::FromStr,
     sync::{
-        mpsc::{channel, Receiver, Sender},
+        mpsc::{Receiver, Sender},
         Arc,
     },
 };
@@ -97,6 +98,7 @@ struct TestChannel<T> {
 impl<T: Send + 'static> TestChannel<T> {
     /// Creates a new test channel
     fn spawn_channel() -> (Sender<T>, Receiver<T>, TestChannelHandle) {
+        use std::sync::mpsc::channel;
         let (original_tx, original_rx) = channel();
         let (wrapped_tx, wrapped_rx) = channel();
         let (release_tx, release_rx) = channel();
@@ -143,7 +145,9 @@ struct TestHarness {
         BasicEngineValidator<MockEthProvider, MockEvmConfig, MockEngineValidator>,
         MockEvmConfig,
     >,
-    to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
+    to_tree_tx: crossbeam_channel::Sender<
+        FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>,
+    >,
     from_tree_rx: UnboundedReceiver<EngineApiEvent>,
     blocks: Vec<ExecutedBlock>,
     action_rx: Receiver<PersistenceAction>,
@@ -153,6 +157,7 @@ struct TestHarness {
 
 impl TestHarness {
     fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        use std::sync::mpsc::channel;
         let (action_tx, action_rx) = channel();
         Self::with_persistence_channel(chain_spec, action_tx, action_rx)
     }
@@ -188,6 +193,7 @@ impl TestHarness {
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
         let evm_config = MockEvmConfig::default();
+        let changeset_cache = ChangesetCache::new();
         let engine_validator = BasicEngineValidator::new(
             provider.clone(),
             consensus.clone(),
@@ -195,6 +201,7 @@ impl TestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
+            changeset_cache.clone(),
         );
 
         let tree = EngineApiTreeHandler::new(
@@ -205,12 +212,13 @@ impl TestHarness {
             engine_api_tree_state,
             canonical_in_memory_state,
             persistence_handle,
-            PersistenceState::default(),
+            PersistenceState { last_persisted_block: BlockNumHash::default(), rx: None },
             payload_builder,
             // always assume enough parallelism for tests
             TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
             EngineApiKind::Ethereum,
             evm_config,
+            changeset_cache,
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
@@ -285,7 +293,8 @@ impl TestHarness {
         let fcu_state = self.fcu_state(block_hash);
 
         let (tx, rx) = oneshot::channel();
-        self.tree
+        let _ = self
+            .tree
             .on_engine_message(FromEngine::Request(
                 BeaconEngineMessage::ForkchoiceUpdated {
                     state: fcu_state,
@@ -383,6 +392,7 @@ impl ValidatorTestHarness {
         let provider = harness.provider.clone();
         let payload_validator = MockEngineValidator;
         let evm_config = MockEvmConfig::default();
+        let changeset_cache = ChangesetCache::new();
 
         let validator = BasicEngineValidator::new(
             provider,
@@ -391,6 +401,7 @@ impl ValidatorTestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
+            changeset_cache,
         );
 
         Self { harness, validator, metrics: TestMetrics::default() }
@@ -398,10 +409,8 @@ impl ValidatorTestHarness {
 
     /// Configure `PersistenceState` for specific persistence scenarios
     fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
-        use tokio::sync::oneshot;
-
         // Create a dummy receiver for testing - it will never receive a value
-        let (_tx, rx) = oneshot::channel();
+        let (_tx, rx) = crossbeam_channel::bounded(1);
 
         match action {
             CurrentPersistenceAction::SavingBlocks { highest } => {
@@ -421,7 +430,7 @@ impl ValidatorTestHarness {
     /// Call `validate_block_with_state` directly with block
     fn validate_block_direct(
         &mut self,
-        block: RecoveredBlock<Block>,
+        block: SealedBlock<Block>,
     ) -> ValidationOutcome<EthPrimitives> {
         let ctx = TreeCtx::new(
             &mut self.harness.tree.state,
@@ -449,30 +458,30 @@ impl TestBlockFactory {
     }
 
     /// Create block that triggers consensus violation by corrupting state root
-    fn create_invalid_consensus_block(&mut self, parent_hash: B256) -> RecoveredBlock<Block> {
+    fn create_invalid_consensus_block(&mut self, parent_hash: B256) -> SealedBlock<Block> {
         let mut block = self.builder.generate_random_block(1, parent_hash).into_block();
 
         // Corrupt state root to trigger consensus violation
         block.header.state_root = B256::random();
 
-        block.seal_slow().try_recover().unwrap()
+        block.seal_slow()
     }
 
     /// Create block that triggers execution failure
-    fn create_invalid_execution_block(&mut self, parent_hash: B256) -> RecoveredBlock<Block> {
+    fn create_invalid_execution_block(&mut self, parent_hash: B256) -> SealedBlock<Block> {
         let mut block = self.builder.generate_random_block(1, parent_hash).into_block();
 
         // Create transaction that will fail execution
         // This is simplified - in practice we'd create a transaction with insufficient gas, etc.
         block.header.gas_used = block.header.gas_limit + 1; // Gas used exceeds limit
 
-        block.seal_slow().try_recover().unwrap()
+        block.seal_slow()
     }
 
     /// Create valid block
-    fn create_valid_block(&mut self, parent_hash: B256) -> RecoveredBlock<Block> {
+    fn create_valid_block(&mut self, parent_hash: B256) -> SealedBlock<Block> {
         let block = self.builder.generate_random_block(1, parent_hash).into_block();
-        block.seal_slow().try_recover().unwrap()
+        block.seal_slow()
     }
 }
 
@@ -497,11 +506,17 @@ fn test_tree_persist_block_batch() {
     test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(blocks)).unwrap();
 
     // process the message
-    let msg = test_harness.tree.try_recv_engine_message().unwrap().unwrap();
-    test_harness.tree.on_engine_message(msg).unwrap();
+    let msg = match test_harness.tree.wait_for_event() {
+        super::LoopEvent::EngineMessage(msg) => msg,
+        other => panic!("unexpected event: {other:?}"),
+    };
+    let _ = test_harness.tree.on_engine_message(msg).unwrap();
 
     // we now should receive the other batch
-    let msg = test_harness.tree.try_recv_engine_message().unwrap().unwrap();
+    let msg = match test_harness.tree.wait_for_event() {
+        super::LoopEvent::EngineMessage(msg) => msg,
+        other => panic!("unexpected event: {other:?}"),
+    };
     match msg {
         FromEngine::DownloadedBlocks(blocks) => {
             assert_eq!(blocks.len(), tree_config.max_execute_block_batch_size());
@@ -577,7 +592,7 @@ async fn test_engine_request_during_backfill() {
         .with_backfill_state(BackfillSyncState::Active);
 
     let (tx, rx) = oneshot::channel();
-    test_harness
+    let _ = test_harness
         .tree
         .on_engine_message(FromEngine::Request(
             BeaconEngineMessage::ForkchoiceUpdated {
@@ -622,7 +637,7 @@ fn test_disconnected_payload() {
 
     // ensure block is buffered
     let buffered = test_harness.tree.state.buffer.block(&hash).unwrap();
-    assert_eq!(buffered.clone_sealed_block(), sealed_clone);
+    assert_eq!(*buffered, sealed_clone);
 }
 
 #[test]
@@ -630,7 +645,7 @@ fn test_disconnected_block() {
     let s = include_str!("../../test-data/holesky/2.rlp");
     let data = Bytes::from_str(s).unwrap();
     let block = Block::decode(&mut data.as_ref()).unwrap();
-    let sealed = block.seal_slow().try_recover().unwrap();
+    let sealed = block.seal_slow();
 
     let mut test_harness = TestHarness::new(HOLESKY.clone());
 
@@ -658,7 +673,7 @@ async fn test_holesky_payload() {
         TestHarness::new(HOLESKY.clone()).with_backfill_state(BackfillSyncState::Active);
 
     let (tx, rx) = oneshot::channel();
-    test_harness
+    let _ = test_harness
         .tree
         .on_engine_message(FromEngine::Request(
             BeaconEngineMessage::NewPayload {
@@ -752,8 +767,8 @@ async fn test_tree_state_on_new_head_reorg() {
         })
     );
 
-    // after advancing persistence, we should be at `None` for the next action
-    test_harness.tree.advance_persistence().unwrap();
+    // after polling persistence completion, we should be at `None` for the next action
+    test_harness.tree.try_poll_persistence().unwrap();
     let current_action = test_harness.tree.persistence_state.current_action().cloned();
     assert_eq!(current_action, None);
 
@@ -823,7 +838,7 @@ fn test_tree_state_on_new_head_deep_fork() {
     for block in &chain_a {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
             Arc::new(block.clone()),
-            Arc::new(ExecutionOutcome::default()),
+            Arc::new(BlockExecutionOutput::default()),
             empty_trie_data(),
         ));
     }
@@ -832,7 +847,7 @@ fn test_tree_state_on_new_head_deep_fork() {
     for block in &chain_b {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
             Arc::new(block.clone()),
-            Arc::new(ExecutionOutcome::default()),
+            Arc::new(BlockExecutionOutput::default()),
             empty_trie_data(),
         ));
     }
@@ -883,7 +898,8 @@ async fn test_get_canonical_blocks_to_persist() {
         .with_persistence_threshold(persistence_threshold)
         .with_memory_block_buffer_target(memory_block_buffer_target);
 
-    let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist().unwrap();
+    let blocks_to_persist =
+        test_harness.tree.get_canonical_blocks_to_persist(PersistTarget::Threshold).unwrap();
 
     let expected_blocks_to_persist_length: usize =
         (canonical_head_number - memory_block_buffer_target - last_persisted_block_number)
@@ -902,7 +918,8 @@ async fn test_get_canonical_blocks_to_persist() {
 
     assert!(test_harness.tree.state.tree_state.sealed_header_by_hash(&fork_block_hash).is_some());
 
-    let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist().unwrap();
+    let blocks_to_persist =
+        test_harness.tree.get_canonical_blocks_to_persist(PersistTarget::Threshold).unwrap();
     assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);
 
     // check that the fork block is not included in the blocks to persist
@@ -981,7 +998,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     let backfill_tip_block = main_chain[(backfill_finished_block_number - 1) as usize].clone();
     // add block to mock provider to enable persistence clean up.
     test_harness.provider.add_block(backfill_tip_block.hash(), backfill_tip_block.into_block());
-    test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
+    let _ = test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
@@ -991,9 +1008,12 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
         _ => panic!("Unexpected event: {event:#?}"),
     }
 
-    test_harness
+    let _ = test_harness
         .tree
-        .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain.last().unwrap().clone()]))
+        .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
+            .last()
+            .unwrap()
+            .clone_sealed_block()]))
         .unwrap();
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
@@ -1044,7 +1064,7 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
 
     // Send FCU to the canonical ancestor
     let (tx, rx) = oneshot::channel();
-    test_harness
+    let _ = test_harness
         .tree
         .on_engine_message(FromEngine::Request(
             BeaconEngineMessage::ForkchoiceUpdated {
@@ -1125,7 +1145,7 @@ fn test_on_new_payload_canonical_insertion() {
 
     // Ensure block is buffered (like test_disconnected_payload)
     let buffered = test_harness.tree.state.buffer.block(&hash1).unwrap();
-    assert_eq!(buffered.clone_sealed_block(), sealed1_clone, "Block should be buffered");
+    assert_eq!(buffered.clone(), sealed1_clone, "Block should be buffered");
 }
 
 /// Test that ensures payloads are rejected when linking to a known-invalid ancestor
@@ -1232,11 +1252,7 @@ fn test_on_new_payload_backfill_buffering() {
         .expect("Block should be buffered during backfill sync");
 
     // Verify the buffered block matches what we submitted
-    assert_eq!(
-        buffered_block.clone_sealed_block(),
-        sealed,
-        "Buffered block should match submitted payload"
-    );
+    assert_eq!(*buffered_block, sealed, "Buffered block should match submitted payload");
 }
 
 /// Test that captures the Engine-API rule where malformed payloads report latestValidHash = None
@@ -1509,11 +1525,10 @@ mod check_invalid_ancestors_tests {
         // Create a genesis-like payload with parent_hash = B256::ZERO
         let mut test_block_builder = TestBlockBuilder::eth();
         let genesis_block = test_block_builder.generate_random_block(0, B256::ZERO);
-        let (sealed_genesis, _) = genesis_block.split_sealed();
         let genesis_payload = ExecutionData {
             payload: ExecutionPayloadV1::from_block_unchecked(
-                sealed_genesis.hash(),
-                &sealed_genesis.into_block(),
+                genesis_block.hash(),
+                &genesis_block.into_block(),
             )
             .into(),
             sidecar: ExecutionPayloadSidecar::none(),
@@ -1563,8 +1578,7 @@ mod check_invalid_ancestors_tests {
 
         // Intentionally corrupt the block to make it malformed
         // Modify the block after creation to make validation fail
-        let (sealed_block, _senders) = block.split_sealed();
-        let unsealed_block = sealed_block.unseal();
+        let unsealed_block = block.unseal();
 
         // Create payload with wrong hash (this makes it malformed)
         let wrong_hash = B256::from([0xff; 32]);
@@ -1592,13 +1606,9 @@ mod payload_execution_tests {
         // Create a valid payload
         let mut test_block_builder = TestBlockBuilder::eth();
         let block = test_block_builder.generate_random_block(1, B256::ZERO);
-        let (sealed_block, _) = block.split_sealed();
         let payload = ExecutionData {
-            payload: ExecutionPayloadV1::from_block_unchecked(
-                sealed_block.hash(),
-                &sealed_block.into_block(),
-            )
-            .into(),
+            payload: ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.into_block())
+                .into(),
             sidecar: ExecutionPayloadSidecar::none(),
         };
 
@@ -1638,13 +1648,9 @@ mod payload_execution_tests {
         // Create a valid payload
         let mut test_block_builder = TestBlockBuilder::eth();
         let block = test_block_builder.generate_random_block(1, B256::ZERO);
-        let (sealed_block, _) = block.split_sealed();
         let payload = ExecutionData {
-            payload: ExecutionPayloadV1::from_block_unchecked(
-                sealed_block.hash(),
-                &sealed_block.into_block(),
-            )
-            .into(),
+            payload: ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.into_block())
+                .into(),
             sidecar: ExecutionPayloadSidecar::none(),
         };
 
@@ -1666,8 +1672,7 @@ mod payload_execution_tests {
         let block = test_block_builder.generate_random_block(1, B256::ZERO);
 
         // Modify the block to make it malformed
-        let (sealed_block, _senders) = block.split_sealed();
-        let mut unsealed_block = sealed_block.unseal();
+        let mut unsealed_block = block.unseal();
 
         // Corrupt the block by setting an invalid gas limit
         unsealed_block.header.gas_limit = 0;
@@ -1954,5 +1959,54 @@ mod forkchoice_updated_tests {
             .handle_canonical_head(state, &None, EngineApiMessageVersion::default())
             .unwrap();
         assert!(result.is_some(), "OpStack should handle canonical head");
+    }
+
+    /// Test that engine termination persists all blocks and signals completion.
+    #[test]
+    fn test_engine_termination_with_everything_persisted() {
+        let chain_spec = MAINNET.clone();
+        let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+
+        // Create 10 blocks to persist
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..11).collect();
+        let canonical_tip = blocks.last().unwrap().recovered_block().number;
+        let test_harness = TestHarness::new(chain_spec).with_blocks(blocks);
+
+        // Create termination channel
+        let (terminate_tx, mut terminate_rx) = oneshot::channel();
+
+        let to_tree_tx = test_harness.to_tree_tx.clone();
+        let action_rx = test_harness.action_rx;
+
+        // Spawn tree in background thread
+        std::thread::Builder::new()
+            .name("Engine Task".to_string())
+            .spawn(|| test_harness.tree.run())
+            .unwrap();
+
+        // Send terminate request
+        to_tree_tx
+            .send(FromEngine::Event(FromOrchestrator::Terminate { tx: terminate_tx }))
+            .unwrap();
+
+        // Handle persistence actions until termination completes
+        let mut last_persisted_number = 0;
+        loop {
+            if terminate_rx.try_recv().is_ok() {
+                break;
+            }
+
+            if let Ok(PersistenceAction::SaveBlocks(saved_blocks, sender)) =
+                action_rx.recv_timeout(std::time::Duration::from_millis(100))
+            {
+                if let Some(last) = saved_blocks.last() {
+                    last_persisted_number = last.recovered_block().number;
+                }
+                sender.send(saved_blocks.last().map(|b| b.recovered_block().num_hash())).unwrap();
+            }
+        }
+
+        // Ensure we persisted right to the tip
+        assert_eq!(last_persisted_number, canonical_tip);
     }
 }
