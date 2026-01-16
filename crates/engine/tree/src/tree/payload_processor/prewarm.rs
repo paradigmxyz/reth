@@ -261,7 +261,11 @@ where
     ///
     /// This method is called from `run()` only after all execution tasks are complete.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn save_cache(self, execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>) {
+    fn save_cache(
+        self,
+        execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
+        valid_block_rx: mpsc::Receiver<()>,
+    ) {
         let start = Instant::now();
 
         let Self { execution_cache, ctx: PrewarmContext { env, metrics, saved_cache, .. }, .. } =
@@ -288,9 +292,11 @@ where
 
                 new_cache.update_metrics();
 
-                // Replace the shared cache with the new one; the previous cache (if any) is
-                // dropped.
-                *cached = Some(new_cache);
+                if valid_block_rx.recv().is_ok() {
+                    // Replace the shared cache with the new one; the previous cache (if any) is
+                    // dropped.
+                    *cached = Some(new_cache);
+                }
             });
 
             let elapsed = start.elapsed();
@@ -421,9 +427,10 @@ where
                     // completed executing a set of transactions
                     self.send_multi_proof_targets(proof_targets);
                 }
-                PrewarmTaskEvent::Terminate { execution_outcome } => {
+                PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx } => {
                     trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
-                    final_execution_outcome = Some(execution_outcome);
+                    final_execution_outcome =
+                        Some(execution_outcome.map(|outcome| (outcome, valid_block_rx)));
 
                     if finished_execution {
                         // all tasks are done, we can exit, which will save caches and exit
@@ -448,8 +455,8 @@ where
         debug!(target: "engine::tree::payload_processor::prewarm", "Completed prewarm execution");
 
         // save caches and finish using the shared ExecutionOutcome
-        if let Some(Some(execution_outcome)) = final_execution_outcome {
-            self.save_cache(execution_outcome);
+        if let Some(Some((execution_outcome, valid_block_rx))) = final_execution_outcome {
+            self.save_cache(execution_outcome, valid_block_rx);
         }
     }
 }
@@ -813,6 +820,11 @@ pub(super) enum PrewarmTaskEvent<R> {
         /// The final execution outcome. Using `Arc` allows sharing with the main execution
         /// path without cloning the expensive `BundleState`.
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
+        /// Receiver for the block validation result.
+        ///
+        /// Cache saving is racing the state root validation. We optimistically construct the
+        /// updated cache but only save it once we know the block is valid.
+        valid_block_rx: mpsc::Receiver<()>,
     },
     /// The outcome of a pre-warm task
     Outcome {
