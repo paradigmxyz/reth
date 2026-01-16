@@ -81,18 +81,8 @@ revm-state.workspace = true
 tempfile.workspace = true
 assert_matches.workspace = true
 rand.workspace = true
-criterion.workspace = true
 
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
-
-[[bench]]
-name = "state_merge"
-harness = false
-
-[[bench]]
-name = "save_blocks"
-harness = false
-required-features = ["test-utils", "rocksdb"]
 
 [features]
 rocksdb = ["dep:rocksdb"]
