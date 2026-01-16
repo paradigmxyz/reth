@@ -1,8 +1,8 @@
-use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use derive_more::Deref;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_eth_types::PendingBlock;
+use reth_trie::HashedPostState;
 
 /// Type alias for the Optimism flashblock payload.
 pub type FlashBlock = op_alloy_rpc_types_engine::OpFlashblockPayload;
@@ -18,8 +18,10 @@ pub struct PendingFlashBlock<N: NodePrimitives> {
     pub last_flashblock_index: u64,
     /// The last Flashblock block hash,
     pub last_flashblock_hash: B256,
-    /// Whether the [`PendingBlock`] has a properly computed stateroot.
-    pub has_computed_state_root: bool,
+    /// The computed in-memory hashed state of the account and storage changes.
+    pub hashed_state: HashedPostState,
+    /// Flag if the [`PendingBlock`] will compute stateroot.
+    pub compute_state_root: bool,
 }
 
 impl<N: NodePrimitives> PendingFlashBlock<N> {
@@ -28,14 +30,16 @@ impl<N: NodePrimitives> PendingFlashBlock<N> {
         pending: PendingBlock<N>,
         last_flashblock_index: u64,
         last_flashblock_hash: B256,
-        has_computed_state_root: bool,
+        hashed_state: HashedPostState,
+        compute_state_root: bool,
     ) -> Self {
-        Self { pending, last_flashblock_index, last_flashblock_hash, has_computed_state_root }
-    }
-
-    /// Returns the properly calculated state root for that block if it was computed.
-    pub fn computed_state_root(&self) -> Option<B256> {
-        self.has_computed_state_root.then_some(self.pending.block().state_root())
+        Self {
+            pending,
+            last_flashblock_index,
+            last_flashblock_hash,
+            hashed_state,
+            compute_state_root,
+        }
     }
 }
 

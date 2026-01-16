@@ -11,7 +11,7 @@ use futures::{Stream, StreamExt};
 use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::{BeaconEngineMessage, ConsensusEngineEvent};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_payload_primitives::PayloadTypes;
+use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{Block, NodePrimitives, SealedBlock};
 use std::{
     collections::HashSet,
@@ -260,9 +260,15 @@ impl<T: PayloadTypes, N: NodePrimitives> Display for EngineApiRequest<T, N> {
     }
 }
 
-impl<T: PayloadTypes, N: NodePrimitives> From<BeaconEngineMessage<T>> for EngineApiRequest<T, N> {
+impl<T: PayloadTypes, N: NodePrimitives> From<BeaconEngineMessage<T>> for EngineApiRequest<T, N>
+where
+    T::BuiltPayload: BuiltPayload<Primitives = N>,
+{
     fn from(msg: BeaconEngineMessage<T>) -> Self {
-        Self::Beacon(msg)
+        match msg {
+            BeaconEngineMessage::FlashblocksSequence { block } => Self::InsertExecutedBlock(block),
+            _ => Self::Beacon(msg),
+        }
     }
 }
 

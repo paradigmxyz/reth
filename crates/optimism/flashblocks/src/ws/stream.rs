@@ -73,7 +73,7 @@ impl<Str, S, C> Stream for WsFlashBlockStream<Str, S, C>
 where
     Str: Stream<Item = Result<Message, Error>> + Unpin,
     S: Sink<Message> + Send + Unpin,
-    C: WsConnect<Stream = Str, Sink = S> + Clone + Send + 'static + Unpin,
+    C: WsConnect<Stream = Str, Sink = S> + Clone + Send + Sync + 'static + Unpin,
 {
     type Item = eyre::Result<FlashBlock>;
 
@@ -138,7 +138,7 @@ where
 
 impl<Stream, S, C> WsFlashBlockStream<Stream, S, C>
 where
-    C: WsConnect<Stream = Stream, Sink = S> + Clone + Send + 'static,
+    C: WsConnect<Stream = Stream, Sink = S> + Clone + Send + Sync + 'static,
 {
     fn connect(&mut self) {
         let ws_url = self.ws_url.clone();
@@ -193,7 +193,7 @@ type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsStream = SplitStream<Ws>;
 type WsSink = SplitSink<Ws, Message>;
 type ConnectFuture<Sink, Stream> =
-    Pin<Box<dyn Future<Output = eyre::Result<(Sink, Stream)>> + Send + 'static>>;
+    Pin<Box<dyn Future<Output = eyre::Result<(Sink, Stream)>> + Send + Sync + 'static>>;
 
 /// The `WsConnect` trait allows for connecting to a websocket.
 ///
@@ -217,7 +217,7 @@ pub trait WsConnect {
     fn connect(
         &mut self,
         ws_url: Url,
-    ) -> impl Future<Output = eyre::Result<(Self::Sink, Self::Stream)>> + Send;
+    ) -> impl Future<Output = eyre::Result<(Self::Sink, Self::Stream)>> + Send + Sync;
 }
 
 /// Establishes a secure websocket subscription.
