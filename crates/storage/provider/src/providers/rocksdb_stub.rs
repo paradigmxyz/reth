@@ -24,12 +24,16 @@ pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<()>>>;
 #[derive(Debug, Clone)]
 pub(crate) struct RocksDBWriteCtx {
     /// The first block number being written.
+    #[allow(dead_code)]
     pub first_block_number: BlockNumber,
     /// The prune mode for transaction lookup, if any.
+    #[allow(dead_code)]
     pub prune_tx_lookup: Option<PruneMode>,
     /// Storage settings determining what goes to `RocksDB`.
+    #[allow(dead_code)]
     pub storage_settings: StorageSettings,
     /// Pending batches (stub - unused).
+    #[allow(dead_code)]
     pub pending_batches: PendingRocksDBBatches,
 }
 
@@ -136,7 +140,7 @@ impl RocksDBProvider {
     /// Writes all `RocksDB` data for multiple blocks (stub implementation).
     ///
     /// No-op since `RocksDB` is not available on this platform.
-    pub fn write_blocks_data<N>(
+    pub(crate) fn write_blocks_data<N>(
         &self,
         _blocks: &[reth_chain_state::ExecutedBlock<N>],
         _tx_nums: &[alloy_primitives::TxNumber],
