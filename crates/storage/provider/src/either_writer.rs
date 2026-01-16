@@ -3,19 +3,17 @@
 
 use std::{
     collections::BTreeSet,
+    marker::PhantomData,
     ops::{Range, RangeInclusive},
 };
 
 #[cfg(all(unix, feature = "rocksdb"))]
 use crate::providers::rocksdb::RocksDBBatch;
 use crate::{
-    providers::{
-        compute_history_rank, needs_prev_shard_check, HistoryInfo, StaticFileProvider,
-        StaticFileProviderRWRefMut,
-    },
+    providers::{history_info, HistoryInfo, StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
 };
-use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber};
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
@@ -275,7 +273,7 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
     #[cfg(all(unix, feature = "rocksdb"))]
     pub fn into_raw_rocksdb_batch(self) -> Option<rocksdb::WriteBatchWithTransaction<true>> {
         match self {
-            Self::Database(_) | Self::StaticFile(..) => None,
+            Self::Database(_) | Self::StaticFile(_) => None,
             Self::RocksDB(batch) => Some(batch.into_inner()),
         }
     }
@@ -286,7 +284,7 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
     #[cfg(not(all(unix, feature = "rocksdb")))]
     pub fn into_raw_rocksdb_batch(self) -> Option<RawRocksDBBatch> {
         match self {
-            Self::Database(_) | Self::StaticFile(..) => None,
+            Self::Database(_) | Self::StaticFile(_) => None,
         }
     }
 
@@ -425,7 +423,7 @@ where
                     Ok(cursor.upsert(hash, &tx_num)?)
                 }
             }
-            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::TransactionHashNumbers>(hash, &tx_num),
         }
@@ -475,7 +473,7 @@ where
                 }
                 Ok(())
             }
-            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.delete::<tables::TransactionHashNumbers>(hash),
         }
@@ -494,7 +492,7 @@ where
     ) -> ProviderResult<()> {
         match self {
             Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
-            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
         }
@@ -509,7 +507,7 @@ where
                 }
                 Ok(())
             }
-            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.delete::<tables::StoragesHistory>(key),
         }
@@ -528,7 +526,7 @@ where
     ) -> ProviderResult<()> {
         match self {
             Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
-            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, value),
         }
@@ -543,7 +541,7 @@ where
                 }
                 Ok(())
             }
-            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.delete::<tables::AccountsHistory>(key),
         }
@@ -582,15 +580,12 @@ where
 }
 
 /// Represents a source for reading data, either from database, static files, or `RocksDB`.
-///
-/// Note: The `StaticFile` variant holds `PhantomData<&'a ()>` to ensure the lifetime `'a`
-/// is used even when the `rocksdb` feature is disabled (where `RocksDB` variant is absent).
 #[derive(Debug, Display)]
 pub enum EitherReader<'a, CURSOR, N> {
     /// Read from database table via cursor
-    Database(CURSOR),
+    Database(CURSOR, PhantomData<&'a ()>),
     /// Read from static file
-    StaticFile(StaticFileProvider<N>, std::marker::PhantomData<&'a ()>),
+    StaticFile(StaticFileProvider<N>, PhantomData<&'a ()>),
     /// Read from `RocksDB` transaction
     #[cfg(all(unix, feature = "rocksdb"))]
     RocksDB(&'a crate::providers::rocksdb::RocksTx<'a>),
@@ -606,10 +601,11 @@ impl<'a> EitherReader<'a, (), ()> {
         P::Tx: DbTx,
     {
         if EitherWriterDestination::senders(provider).is_static_file() {
-            Ok(EitherReader::StaticFile(provider.static_file_provider(), std::marker::PhantomData))
+            Ok(EitherReader::StaticFile(provider.static_file_provider(), PhantomData))
         } else {
             Ok(EitherReader::Database(
                 provider.tx_ref().cursor_read::<tables::TransactionSenders>()?,
+                PhantomData,
             ))
         }
     }
@@ -628,7 +624,10 @@ impl<'a> EitherReader<'a, (), ()> {
             return Ok(EitherReader::RocksDB(_rocksdb_tx));
         }
 
-        Ok(EitherReader::Database(provider.tx_ref().cursor_read::<tables::StoragesHistory>()?))
+        Ok(EitherReader::Database(
+            provider.tx_ref().cursor_read::<tables::StoragesHistory>()?,
+            PhantomData,
+        ))
     }
 
     /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
@@ -647,6 +646,7 @@ impl<'a> EitherReader<'a, (), ()> {
 
         Ok(EitherReader::Database(
             provider.tx_ref().cursor_read::<tables::TransactionHashNumbers>()?,
+            PhantomData,
         ))
     }
 
@@ -664,7 +664,10 @@ impl<'a> EitherReader<'a, (), ()> {
             return Ok(EitherReader::RocksDB(_rocksdb_tx));
         }
 
-        Ok(EitherReader::Database(provider.tx_ref().cursor_read::<tables::AccountsHistory>()?))
+        Ok(EitherReader::Database(
+            provider.tx_ref().cursor_read::<tables::AccountsHistory>()?,
+            PhantomData,
+        ))
     }
 
     /// Creates a new [`EitherReader`] for account changesets based on storage settings.
@@ -676,10 +679,11 @@ impl<'a> EitherReader<'a, (), ()> {
         P::Tx: DbTx,
     {
         if EitherWriterDestination::account_changesets(provider).is_static_file() {
-            Ok(EitherReader::StaticFile(provider.static_file_provider(), std::marker::PhantomData))
+            Ok(EitherReader::StaticFile(provider.static_file_provider(), PhantomData))
         } else {
             Ok(EitherReader::Database(
                 provider.tx_ref().cursor_dup_read::<tables::AccountChangeSets>()?,
+                PhantomData,
             ))
         }
     }
@@ -695,7 +699,7 @@ where
         range: Range<TxNumber>,
     ) -> ProviderResult<HashMap<TxNumber, Address>> {
         match self {
-            Self::Database(cursor) => cursor
+            Self::Database(cursor, _) => cursor
                 .walk_range(range)?
                 .map(|result| result.map_err(ProviderError::from))
                 .collect::<ProviderResult<HashMap<_, _>>>(),
@@ -727,8 +731,8 @@ where
         hash: TxHash,
     ) -> ProviderResult<Option<TxNumber>> {
         match self {
-            Self::Database(cursor) => Ok(cursor.seek_exact(hash)?.map(|(_, v)| v)),
-            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(hash)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.get::<tables::TransactionHashNumbers>(hash),
         }
@@ -745,61 +749,33 @@ where
         key: StorageShardedKey,
     ) -> ProviderResult<Option<BlockNumberList>> {
         match self {
-            Self::Database(cursor) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
-            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.get::<tables::StoragesHistory>(key),
         }
     }
 
-    /// Lookup storage history and return [`HistoryInfo`] directly.
-    ///
-    /// Uses the rank/select logic to efficiently find the first block >= target
-    /// where the storage slot was modified.
+    /// Lookup storage history and return [`HistoryInfo`].
     pub fn storage_history_info(
         &mut self,
         address: Address,
-        storage_key: B256,
+        storage_key: alloy_primitives::B256,
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         match self {
-            Self::Database(cursor) => {
-                // Lookup the history chunk in the history index. If the key does not appear in the
-                // index, the first chunk for the next key will be returned so we filter out chunks
-                // that have a different key.
+            Self::Database(cursor, _) => {
                 let key = StorageShardedKey::new(address, storage_key, block_number);
-                if let Some(chunk) = cursor
-                    .seek(key)?
-                    .filter(|(k, _)| k.address == address && k.sharded_key.key == storage_key)
-                    .map(|x| x.1)
-                {
-                    let (rank, found_block) = compute_history_rank(&chunk, block_number);
-
-                    // If our block is before the first entry in the index chunk and this first
-                    // entry doesn't equal to our block, it might be before the first write ever.
-                    // To check, we look at the previous entry and check if the key is the same.
-                    let is_before_first_write =
-                        needs_prev_shard_check(rank, found_block, block_number) &&
-                            cursor.prev()?.is_none_or(|(k, _)| {
-                                k.address != address || k.sharded_key.key != storage_key
-                            });
-
-                    Ok(HistoryInfo::from_lookup(
-                        found_block,
-                        is_before_first_write,
-                        lowest_available_block_number,
-                    ))
-                } else if lowest_available_block_number.is_some() {
-                    // The key may have been written, but due to pruning we may not have changesets
-                    // and history, so we need to make a plain state lookup.
-                    Ok(HistoryInfo::MaybeInPlainState)
-                } else {
-                    // The key has not been written to at all.
-                    Ok(HistoryInfo::NotYetWritten)
-                }
+                history_info::<tables::StoragesHistory, _, _>(
+                    cursor,
+                    key,
+                    block_number,
+                    |k| k.address == address && k.sharded_key.key == storage_key,
+                    lowest_available_block_number,
+                )
             }
-            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.storage_history_info(
                 address,
@@ -821,17 +797,14 @@ where
         key: ShardedKey<Address>,
     ) -> ProviderResult<Option<BlockNumberList>> {
         match self {
-            Self::Database(cursor) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
-            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.get::<tables::AccountsHistory>(key),
         }
     }
 
-    /// Lookup account history and return [`HistoryInfo`] directly.
-    ///
-    /// Uses the rank/select logic to efficiently find the first block >= target
-    /// where the account was modified.
+    /// Lookup account history and return [`HistoryInfo`].
     pub fn account_history_info(
         &mut self,
         address: Address,
@@ -839,38 +812,17 @@ where
         lowest_available_block_number: Option<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         match self {
-            Self::Database(cursor) => {
-                // Lookup the history chunk in the history index. If the key does not appear in the
-                // index, the first chunk for the next key will be returned so we filter out chunks
-                // that have a different key.
+            Self::Database(cursor, _) => {
                 let key = ShardedKey::new(address, block_number);
-                if let Some(chunk) =
-                    cursor.seek(key)?.filter(|(k, _)| k.key == address).map(|x| x.1)
-                {
-                    let (rank, found_block) = compute_history_rank(&chunk, block_number);
-
-                    // If our block is before the first entry in the index chunk and this first
-                    // entry doesn't equal to our block, it might be before the first write ever.
-                    // To check, we look at the previous entry and check if the key is the same.
-                    let is_before_first_write =
-                        needs_prev_shard_check(rank, found_block, block_number) &&
-                            cursor.prev()?.is_none_or(|(k, _)| k.key != address);
-
-                    Ok(HistoryInfo::from_lookup(
-                        found_block,
-                        is_before_first_write,
-                        lowest_available_block_number,
-                    ))
-                } else if lowest_available_block_number.is_some() {
-                    // The key may have been written, but due to pruning we may not have changesets
-                    // and history, so we need to make a plain state lookup.
-                    Ok(HistoryInfo::MaybeInPlainState)
-                } else {
-                    // The key has not been written to at all.
-                    Ok(HistoryInfo::NotYetWritten)
-                }
+                history_info::<tables::AccountsHistory, _, _>(
+                    cursor,
+                    key,
+                    block_number,
+                    |k| k.key == address,
+                    lowest_available_block_number,
+                )
             }
-            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => {
                 tx.account_history_info(address, block_number, lowest_available_block_number)
@@ -914,7 +866,7 @@ where
 
                 Ok(changed_accounts)
             }
-            Self::Database(provider) => provider
+            Self::Database(provider, _) => provider
                 .walk_range(range)?
                 .map(|entry| {
                     entry.map(|(_, account_before)| account_before.address).map_err(Into::into)
@@ -1009,7 +961,7 @@ mod tests {
             if transaction_senders_in_static_files {
                 assert!(matches!(reader, EitherReader::StaticFile(_, _)));
             } else {
-                assert!(matches!(reader, EitherReader::Database(_)));
+                assert!(matches!(reader, EitherReader::Database(_, _)));
             }
 
             assert_eq!(
@@ -1334,6 +1286,7 @@ mod rocksdb_tests {
             let mut mdbx_reader: EitherReader<'_, AccountsHistoryReadCursor, EthPrimitives> =
                 EitherReader::Database(
                     mdbx_ro.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap(),
+                    PhantomData,
                 );
             let mdbx_result = mdbx_reader
                 .account_history_info(address, query.block_number, query.lowest_available)
@@ -1425,6 +1378,7 @@ mod rocksdb_tests {
             let mut mdbx_reader: EitherReader<'_, StoragesHistoryReadCursor, EthPrimitives> =
                 EitherReader::Database(
                     mdbx_ro.tx_ref().cursor_read::<tables::StoragesHistory>().unwrap(),
+                    PhantomData,
                 );
             let mdbx_result = mdbx_reader
                 .storage_history_info(
