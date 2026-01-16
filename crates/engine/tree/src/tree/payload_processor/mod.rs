@@ -665,7 +665,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Terminates the entire caching task.
     ///
-    /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
+    /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` allows sharing with the main execution
     /// path without cloning the expensive `BundleState`.
     pub(super) fn terminate_caching(
@@ -707,7 +707,7 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
 
     /// Terminates the entire pre-warming task.
     ///
-    /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
+    /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive `BundleState`.
     pub(super) fn terminate_caching(
         &mut self,
