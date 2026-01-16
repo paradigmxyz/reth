@@ -649,6 +649,7 @@ where
 
     /// Executes a block with the given state provider
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
+    #[allow(clippy::type_complexity)]
     fn execute_block<S, Err, T>(
         &mut self,
         state_provider: S,

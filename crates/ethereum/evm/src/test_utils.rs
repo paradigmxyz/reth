@@ -95,6 +95,10 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
         Ok(())
     }
 
+    fn receipts(&self) -> &[Self::Receipt] {
+        &self.receipts
+    }
+
     fn execute_transaction_without_commit(
         &mut self,
         _tx: impl ExecutableTx<Self>,
@@ -149,10 +153,6 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
         &mut self.evm
-    }
-
-    fn receipts(&self) -> &[Self::Receipt] {
-        &self.receipts
     }
 }
 
