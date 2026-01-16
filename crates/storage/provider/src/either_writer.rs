@@ -1219,7 +1219,8 @@ mod rocksdb_tests {
 
         // Create EitherWriter with RocksDB
         let provider = factory.database_provider_rw().unwrap();
-        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+        let mut writer =
+            EitherWriter::new_transaction_hash_numbers(&provider, Some(batch)).unwrap();
 
         // Verify we got a RocksDB writer
         assert!(matches!(writer, EitherWriter::RocksDB(_)));
@@ -1263,7 +1264,8 @@ mod rocksdb_tests {
         // Now delete using EitherWriter
         let batch = rocksdb.batch();
         let provider = factory.database_provider_rw().unwrap();
-        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+        let mut writer =
+            EitherWriter::new_transaction_hash_numbers(&provider, Some(batch)).unwrap();
         writer.delete_transaction_hash_number(hash).unwrap();
 
         // Extract the batch and commit via provider
@@ -1817,7 +1819,8 @@ mod rocksdb_tests {
 
         // Create provider and EitherWriter
         let provider = factory.database_provider_rw().unwrap();
-        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+        let mut writer =
+            EitherWriter::new_transaction_hash_numbers(&provider, Some(batch)).unwrap();
 
         // Write transaction hash numbers (append_only=false since we're using RocksDB)
         writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();
