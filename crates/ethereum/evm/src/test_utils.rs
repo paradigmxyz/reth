@@ -65,7 +65,12 @@ impl BlockExecutorFactory for MockEvmConfig {
         DB: Database + 'a,
         I: Inspector<<Self::EvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
     {
-        MockExecutor { result: self.exec_results.lock().pop().unwrap(), evm, hook: None }
+        MockExecutor {
+            result: self.exec_results.lock().pop().unwrap(),
+            evm,
+            hook: None,
+            receipts: Vec::new(),
+        }
     }
 }
 
@@ -76,6 +81,7 @@ pub struct MockExecutor<'a, DB: Database, I> {
     evm: EthEvm<&'a mut State<DB>, I, PrecompilesMap>,
     #[debug(skip)]
     hook: Option<Box<dyn reth_evm::OnStateHook>>,
+    receipts: Vec<Receipt>,
 }
 
 impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExecutor
@@ -87,6 +93,10 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         Ok(())
+    }
+
+    fn receipts(&self) -> &[Self::Receipt] {
+        &self.receipts
     }
 
     fn execute_transaction_without_commit(
