@@ -64,20 +64,19 @@ fn generate_heavy_test_data(params: &StateRootParams) -> (HashedPostState, Hashe
 
     let keys = db_state.keys().copied().collect::<Vec<_>>();
     let num_updates = params.updated_accounts();
-    let keys_to_update = proptest::sample::subsequence(keys, num_updates)
-        .new_tree(&mut runner)
-        .unwrap()
-        .current();
+    let keys_to_update =
+        proptest::sample::subsequence(keys, num_updates).new_tree(&mut runner).unwrap().current();
 
     let updated_storages = keys_to_update
         .into_iter()
         .map(|address| {
             let (_, storage) = db_state.get(&address).unwrap();
             let slots = storage.keys().copied().collect::<Vec<_>>();
-            let slots_to_update = proptest::sample::subsequence(slots, params.storage_per_account / 2)
-                .new_tree(&mut runner)
-                .unwrap()
-                .current();
+            let slots_to_update =
+                proptest::sample::subsequence(slots, params.storage_per_account / 2)
+                    .new_tree(&mut runner)
+                    .unwrap()
+                    .current();
             (
                 address,
                 slots_to_update
@@ -127,16 +126,13 @@ fn bench_sync_vs_parallel(c: &mut Criterion) {
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
             provider_rw.write_hashed_state(&db_state.into_sorted()).unwrap();
-            let (_, updates) = StateRoot::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
+            let (_, updates) =
+                StateRoot::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
             provider_rw.write_trie_updates(updates).unwrap();
             provider_rw.commit().unwrap();
         }
 
-        let id = format!(
-            "db_{}_updated_{}",
-            params.db_accounts,
-            params.updated_accounts()
-        );
+        let id = format!("db_{}_updated_{}", params.db_accounts, params.updated_accounts());
 
         let changeset_cache = ChangesetCache::new();
         let factory = OverlayStateProviderFactory::new(provider_factory.clone(), changeset_cache);
@@ -187,11 +183,8 @@ fn bench_incremental_updates(c: &mut Criterion) {
     let num_updates_sequence = [5, 10, 25, 50];
 
     for num_updates in num_updates_sequence {
-        let params = StateRootParams {
-            db_accounts: 5000,
-            storage_per_account: 50,
-            update_percentage: 0.1,
-        };
+        let params =
+            StateRootParams { db_accounts: 5000, storage_per_account: 50, update_percentage: 0.1 };
 
         let id = format!("sequential_updates_{}", num_updates);
         group.throughput(Throughput::Elements(num_updates as u64));
@@ -227,13 +220,16 @@ fn bench_incremental_updates(c: &mut Criterion) {
                 },
                 |(provider_factory, updates)| {
                     let changeset_cache = ChangesetCache::new();
-                    let factory = OverlayStateProviderFactory::new(provider_factory, changeset_cache);
+                    let factory =
+                        OverlayStateProviderFactory::new(provider_factory, changeset_cache);
 
                     let mut roots = Vec::with_capacity(updates.len());
                     for update in updates {
                         let trie_input = TrieInput::from_state(update);
-                        let calculator =
-                            ParallelStateRoot::new(factory.clone(), trie_input.prefix_sets.freeze());
+                        let calculator = ParallelStateRoot::new(
+                            factory.clone(),
+                            trie_input.prefix_sets.freeze(),
+                        );
                         roots.push(calculator.incremental_root().unwrap());
                     }
                     roots
@@ -273,7 +269,10 @@ fn bench_large_storage_tries(c: &mut Criterion) {
                     .current();
 
                     let db_state = HashedPostState::default()
-                        .with_accounts(std::iter::once((contract_address, Some(Account::default()))))
+                        .with_accounts(std::iter::once((
+                            contract_address,
+                            Some(Account::default()),
+                        )))
                         .with_storages(std::iter::once((
                             contract_address,
                             HashedStorage::from_iter(false, storage.clone()),
@@ -305,7 +304,8 @@ fn bench_large_storage_tries(c: &mut Criterion) {
                 },
                 |(provider_factory, update_state)| {
                     let changeset_cache = ChangesetCache::new();
-                    let factory = OverlayStateProviderFactory::new(provider_factory, changeset_cache);
+                    let factory =
+                        OverlayStateProviderFactory::new(provider_factory, changeset_cache);
 
                     let trie_input = TrieInput::from_state(update_state);
                     let calculator =
