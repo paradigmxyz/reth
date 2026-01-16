@@ -10,7 +10,8 @@ use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, MetricArgs,
-        NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, StaticFilesArgs, TxPoolArgs,
+        NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, StaticFilesArgs, StorageArgs,
+        TxPoolArgs,
     },
     node_config::NodeConfig,
     version,
@@ -114,6 +115,10 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[command(flatten, next_help_heading = "Static Files")]
     pub static_files: StaticFilesArgs,
 
+    /// All storage related arguments with --storage prefix
+    #[command(flatten, next_help_heading = "Storage")]
+    pub storage: StorageArgs,
+
     /// Additional cli arguments
     #[command(flatten, next_help_heading = "Extension")]
     pub ext: Ext,
@@ -169,6 +174,7 @@ where
             engine,
             era,
             static_files,
+            storage,
             ext,
         } = self;
 
@@ -190,6 +196,7 @@ where
             engine,
             era,
             static_files,
+            storage,
         };
 
         let data_dir = node_config.datadir();
