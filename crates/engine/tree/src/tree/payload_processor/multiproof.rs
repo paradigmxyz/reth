@@ -141,22 +141,26 @@ impl ProofSequencer {
     /// Adds a proof with the corresponding state update and returns all sequential proofs and state
     /// updates if we have a continuous sequence
     fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
-        if sequence >= self.next_to_deliver {
+        // Optimization: fast path for in-order delivery
+        if sequence == self.next_to_deliver {
+            let mut consecutive_proofs = Vec::with_capacity(1);
+            consecutive_proofs.push(update);
+            self.next_to_deliver += 1;
+
+            // Check if we have subsequent proofs in the pending buffer
+            while let Some(pending) = self.pending_proofs.remove(&self.next_to_deliver) {
+                consecutive_proofs.push(pending);
+                self.next_to_deliver += 1;
+            }
+
+            return consecutive_proofs;
+        }
+
+        if sequence > self.next_to_deliver {
             self.pending_proofs.insert(sequence, update);
         }
 
-        let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
-        let mut current_sequence = self.next_to_deliver;
-
-        // keep collecting proofs and state updates as long as we have consecutive sequence numbers
-        while let Some(pending) = self.pending_proofs.remove(&current_sequence) {
-            consecutive_proofs.push(pending);
-            current_sequence += 1;
-        }
-
-        self.next_to_deliver += consecutive_proofs.len() as u64;
-
-        consecutive_proofs
+        Vec::new()
     }
 
     /// Returns true if we still have pending proofs
@@ -1087,7 +1091,10 @@ impl MultiProofTask {
                                 .proof_calculation_duration_histogram
                                 .record(proof_result.elapsed);
 
-                            self.multiproof_manager.on_calculation_complete();
+                            // Only record worker stats periodically to reduce overhead in the hot loop
+                            if batch_metrics.proofs_processed % 25 == 0 {
+                                self.multiproof_manager.on_calculation_complete();
+                            }
 
                             // Convert ProofResultMessage to SparseTrieUpdate
                             match proof_result.result {
