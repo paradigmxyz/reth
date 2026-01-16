@@ -95,8 +95,12 @@ impl EngineApiMetrics {
                 let tx = tx?;
                 senders.push(*tx.signer());
 
-                let span =
-                    debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
+                let span = debug_span!(
+                    target: "engine::tree",
+                    "execute tx",
+                    tx_hash = ?tx.tx().tx_hash(),
+                    gas_used = tracing::field::Empty,
+                );
                 let enter = span.entered();
                 trace!(target: "engine::tree", "Executing transaction");
                 let start = Instant::now();
