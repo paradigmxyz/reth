@@ -151,8 +151,16 @@ pub struct ProofWorkerHandle {
     inner: Arc<ProofWorkerInner>,
 }
 
-/// Default multiplier for max workers relative to initial count.
-const DEFAULT_MAX_WORKER_MULTIPLIER: usize = 4;
+/// Maximum workers per pool to prevent memory/allocator contention on large machines.
+const MAX_WORKERS_CAP: usize = 64;
+
+/// Returns the maximum number of workers bounded by available CPU parallelism.
+/// Uses 2x available parallelism as the upper bound to account for I/O-bound work,
+/// capped at 64 to prevent memory bandwidth saturation and allocator contention.
+fn max_workers_by_cpu() -> usize {
+    std::thread::available_parallelism()
+        .map_or(MAX_WORKERS_CAP, |n| n.get().saturating_mul(2).min(MAX_WORKERS_CAP))
+}
 
 /// Number of storage slots processed per worker for scaling calculations.
 const SLOTS_PER_WORKER: usize = 50;
@@ -323,9 +331,9 @@ impl ProofWorkerHandle {
             next_storage_worker_id: AtomicUsize::new(storage_worker_count),
             next_account_worker_id: AtomicUsize::new(account_worker_count),
             min_storage_workers: storage_worker_count,
-            max_storage_workers: storage_worker_count * DEFAULT_MAX_WORKER_MULTIPLIER,
+            max_storage_workers: max_workers_by_cpu(),
             min_account_workers: account_worker_count,
-            max_account_workers: account_worker_count * DEFAULT_MAX_WORKER_MULTIPLIER,
+            max_account_workers: max_workers_by_cpu(),
             storage_spawn,
             account_spawn,
             v2_proofs_enabled,
