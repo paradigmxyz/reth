@@ -640,13 +640,6 @@ impl RocksDBProvider {
 /// Unlike [`RocksTx`], this does NOT support read-your-writes. Use for write-only flows
 /// where you don't need to read back uncommitted data within the same operation
 /// (e.g., history index writes).
-///
-/// # Important: One append per key per batch
-///
-/// The `append_*_history_shard` methods read existing shards from committed DB state,
-/// not from this batch. Calling them multiple times for the same key within one batch
-/// will cause the later calls to overwrite earlier ones, losing data. Always pre-aggregate
-/// indices by key before appending.
 #[must_use = "batch must be committed"]
 pub struct RocksDBBatch<'a> {
     provider: &'a RocksDBProvider,
