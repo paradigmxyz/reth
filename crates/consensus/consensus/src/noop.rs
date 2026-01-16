@@ -18,7 +18,7 @@
 //!
 //! **Not for production use** - provides no security guarantees or consensus validation.
 
-use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
+use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use alloc::sync::Arc;
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
@@ -76,6 +76,7 @@ impl<N: NodePrimitives> FullConsensus<N> for NoopConsensus {
         &self,
         _block: &RecoveredBlock<N::Block>,
         _result: &BlockExecutionResult<N::Receipt>,
+        _receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError> {
         Ok(())
     }

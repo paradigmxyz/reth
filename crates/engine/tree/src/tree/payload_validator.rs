@@ -15,9 +15,11 @@ use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
+
+use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use rayon::prelude::*;
 use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
 };
@@ -453,11 +455,14 @@ where
             state_provider = Box::new(InstrumentedStateProvider::new(state_provider, "engine"));
         }
 
-        // Execute the block and handle any execution errors
-        let (output, senders) = match self.execute_block(state_provider, env, &input, &mut handle) {
-            Ok(output) => output,
-            Err(err) => return self.handle_execution_error(input, err, &parent_block),
-        };
+        // Execute the block and handle any execution errors.
+        // The receipt root task is spawned before execution and receives receipts incrementally
+        // as transactions complete, allowing parallel computation during execution.
+        let (output, senders, receipt_root_rx) =
+            match self.execute_block(state_provider, env, &input, &mut handle) {
+                Ok(output) => output,
+                Err(err) => return self.handle_execution_error(input, err, &parent_block),
+            };
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
@@ -473,8 +478,21 @@ where
 
         let block = self.convert_to_block(input)?.with_senders(senders);
 
+        // Wait for the receipt root computation to complete.
+        let receipt_root_bloom = Some(
+            receipt_root_rx
+                .blocking_recv()
+                .expect("receipt root task dropped sender without result"),
+        );
+
         let hashed_state = ensure_ok_post_block!(
-            self.validate_post_execution(&block, &parent_block, &output, &mut ctx),
+            self.validate_post_execution(
+                &block,
+                &parent_block,
+                &output,
+                &mut ctx,
+                receipt_root_bloom
+            ),
             block
         );
 
@@ -622,13 +640,21 @@ where
 
     /// Executes a block with the given state provider
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
+    #[expect(clippy::type_complexity)]
     fn execute_block<S, Err, T>(
         &mut self,
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
-    ) -> Result<(BlockExecutionOutput<N::Receipt>, Vec<Address>), InsertBlockErrorKind>
+    ) -> Result<
+        (
+            BlockExecutionOutput<N::Receipt>,
+            Vec<Address>,
+            tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>,
+        ),
+        InsertBlockErrorKind,
+    >
     where
         S: StateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
@@ -667,6 +693,14 @@ where
             });
         }
 
+        // Spawn background task to compute receipt root and logs bloom incrementally.
+        // Unbounded channel is used since tx count bounds capacity anyway (max ~30k txs per block).
+        let receipts_len = input.transaction_count();
+        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
+        self.payload_processor.executor().spawn_blocking(move || task_handle.run(receipts_len));
+
         let execution_start = Instant::now();
         let state_hook = Box::new(handle.state_hook());
         let (output, senders) = self.metrics.execute_metered(
@@ -674,11 +708,22 @@ where
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             input.transaction_count(),
             state_hook,
+            |receipts| {
+                // Send the latest receipt to the background task for incremental root computation.
+                // The receipt is cloned here; encoding happens in the background thread.
+                if let Some(receipt) = receipts.last() {
+                    // Infer tx_index from the number of receipts collected so far
+                    let tx_index = receipts.len() - 1;
+                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                }
+            },
         )?;
+        drop(receipt_tx);
+
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_time, "Executed block");
-        Ok((output, senders))
+        Ok((output, senders, result_rx))
     }
 
     /// Compute state root for the given hashed post state in parallel.
@@ -736,6 +781,9 @@ where
     /// - parent header validation
     /// - post-execution consensus validation
     /// - state-root based post-execution validation
+    ///
+    /// If `receipt_root_bloom` is provided, it will be used instead of computing the receipt root
+    /// and logs bloom from the receipts.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
@@ -743,6 +791,7 @@ where
         parent_block: &SealedHeader<N::BlockHeader>,
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
+        receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<HashedPostState, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -769,7 +818,9 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        if let Err(err) = self.consensus.validate_block_post_execution(block, output) {
+        if let Err(err) =
+            self.consensus.validate_block_post_execution(block, output, receipt_root_bloom)
+        {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())
