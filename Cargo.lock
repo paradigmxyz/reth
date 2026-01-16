@@ -4040,9 +4040,9 @@ checksum = "f449e6c6c08c865631d4890cfacf252b3d396c9bcc83adb6623cdb02a8336c41"
 
 [[package]]
 name = "fixed-cache"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c468bde9b2db8d745d7c9fc33964f1923c6222f0211e10ffd818e6f28b4e190"
+checksum = "25d3af83468398d500e9bc19e001812dcb1a11e4d3d6a5956c789aa3c11a8cb5"
 dependencies = [
  "equivalent",
  "typeid",
