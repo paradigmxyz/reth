@@ -106,7 +106,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
     /// timing out.
     fn prune_table_with_range_step<T: Table>(
         &self,
-        walker: &mut RangeWalker<'_, T, Self::CursorMut<T>>,
+        walker: &mut RangeWalker<'_, T, Self::CursorMut<'_, T>>,
         limiter: &mut PruneLimiter,
         skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
         delete_callback: &mut impl FnMut(TableRow<T>),
