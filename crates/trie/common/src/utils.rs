@@ -26,46 +26,56 @@ where
         .collect()
 }
 
-/// Extend a sorted vector with another sorted vector.
-/// Values from `other` take precedence for duplicate keys.
-///
+/// Extend a sorted vector with another sorted vector using 2 pointer merge.
 /// Values from `other` take precedence for duplicate keys.
 pub(crate) fn extend_sorted_vec<K, V>(target: &mut Vec<(K, V)>, other: &[(K, V)])
 where
     K: Clone + Ord,
     V: Clone,
 {
-    let cmp = |a: &(K, V), b: &(K, V)| a.0.cmp(&b.0);
-
     if other.is_empty() {
         return;
     }
-    target.reserve(other.len());
 
-    let mut other_iter = other.iter().peekable();
-    let initial_len = target.len();
-    for i in 0..initial_len {
-        while let Some(other_item) = other_iter.peek() {
-            let target_item = &mut target[i];
-            match cmp(other_item, target_item) {
-                Ordering::Less => {
-                    target.push(other_iter.next().unwrap().clone());
-                }
-                Ordering::Equal => {
-                    target_item.1 = other_iter.next().unwrap().1.clone();
-                    break;
-                }
-                Ordering::Greater => {
-                    break;
-                }
+    if target.is_empty() {
+        target.extend_from_slice(other);
+        return;
+    }
+
+    // Fast path: non-overlapping ranges - just append
+    if target.last().map(|(k, _)| k) < other.first().map(|(k, _)| k) {
+        target.extend_from_slice(other);
+        return;
+    }
+
+    // Move ownership of target to avoid cloning owned elements
+    let left = core::mem::take(target);
+    let mut out = Vec::with_capacity(left.len() + other.len());
+
+    let mut a = left.into_iter().peekable();
+    let mut b = other.iter().peekable();
+
+    while let (Some(aa), Some(bb)) = (a.peek(), b.peek()) {
+        match aa.0.cmp(&bb.0) {
+            Ordering::Less => {
+                out.push(a.next().unwrap());
+            }
+            Ordering::Greater => {
+                out.push(b.next().unwrap().clone());
+            }
+            Ordering::Equal => {
+                // `other` takes precedence for duplicate keys - reuse key from `a`
+                let (k, _) = a.next().unwrap();
+                out.push((k, b.next().unwrap().1.clone()));
             }
         }
     }
 
-    target.extend(other_iter.cloned());
-    if target.len() > initial_len {
-        target.sort_by(cmp);
-    }
+    // Drain remaining: `a` moves, `b` clones
+    out.extend(a);
+    out.extend(b.cloned());
+
+    *target = out;
 }
 
 #[cfg(test)]
@@ -78,6 +88,55 @@ mod tests {
         let other = vec![(2, "b"), (3, "c_new")];
         extend_sorted_vec(&mut target, &other);
         assert_eq!(target, vec![(1, "a"), (2, "b"), (3, "c_new")]);
+    }
+
+    #[test]
+    fn test_extend_sorted_vec_empty_target() {
+        let mut target: Vec<(i32, &str)> = vec![];
+        let other = vec![(1, "a"), (2, "b")];
+        extend_sorted_vec(&mut target, &other);
+        assert_eq!(target, vec![(1, "a"), (2, "b")]);
+    }
+
+    #[test]
+    fn test_extend_sorted_vec_empty_other() {
+        let mut target = vec![(1, "a"), (2, "b")];
+        let other: Vec<(i32, &str)> = vec![];
+        extend_sorted_vec(&mut target, &other);
+        assert_eq!(target, vec![(1, "a"), (2, "b")]);
+    }
+
+    #[test]
+    fn test_extend_sorted_vec_all_duplicates() {
+        let mut target = vec![(1, "old1"), (2, "old2"), (3, "old3")];
+        let other = vec![(1, "new1"), (2, "new2"), (3, "new3")];
+        extend_sorted_vec(&mut target, &other);
+        // other takes precedence
+        assert_eq!(target, vec![(1, "new1"), (2, "new2"), (3, "new3")]);
+    }
+
+    #[test]
+    fn test_extend_sorted_vec_interleaved() {
+        let mut target = vec![(1, "a"), (3, "c"), (5, "e")];
+        let other = vec![(2, "b"), (4, "d"), (6, "f")];
+        extend_sorted_vec(&mut target, &other);
+        assert_eq!(target, vec![(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e"), (6, "f")]);
+    }
+
+    #[test]
+    fn test_extend_sorted_vec_other_all_smaller() {
+        let mut target = vec![(5, "e"), (6, "f")];
+        let other = vec![(1, "a"), (2, "b")];
+        extend_sorted_vec(&mut target, &other);
+        assert_eq!(target, vec![(1, "a"), (2, "b"), (5, "e"), (6, "f")]);
+    }
+
+    #[test]
+    fn test_extend_sorted_vec_other_all_larger() {
+        let mut target = vec![(1, "a"), (2, "b")];
+        let other = vec![(5, "e"), (6, "f")];
+        extend_sorted_vec(&mut target, &other);
+        assert_eq!(target, vec![(1, "a"), (2, "b"), (5, "e"), (6, "f")]);
     }
 
     #[test]
