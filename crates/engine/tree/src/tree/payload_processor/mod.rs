@@ -8,7 +8,7 @@ use crate::tree::{
     },
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
-        sparse_trie::StateRootComputeOutcome,
+        sparse_trie::{SparseTrieMessage, StateRootComputeOutcome},
     },
     sparse_trie::SparseTrieTask,
     StateProviderBuilder, TreeConfig,
@@ -19,7 +19,7 @@ use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
 use crossbeam_channel::Sender as CrossbeamSender;
 use executor::WorkloadExecutor;
-use multiproof::{SparseTrieUpdate, *};
+use multiproof::*;
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
@@ -483,7 +483,7 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task<BPF>(
         &self,
-        sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
+        sparse_trie_rx: mpsc::Receiver<SparseTrieMessage>,
         proof_worker_handle: BPF,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
     ) where
