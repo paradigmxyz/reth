@@ -796,21 +796,20 @@ mod tests {
         block1.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![block1.clone()],
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            )),
+            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
         };
 
         // Push the first notification
-        exex_manager.push_notification(notification1.clone());
+        exex_manager.push_notification(notification1);
 
         // Verify the buffer contains the notification with the correct ID
         assert_eq!(exex_manager.buffer.len(), 1);
         assert_eq!(exex_manager.buffer.front().unwrap().0, 0);
-        assert_eq!(exex_manager.buffer.front().unwrap().1, notification1);
+        // Compare by tip block since ExExNotification doesn't implement PartialEq
+        assert_eq!(
+            *exex_manager.buffer.front().unwrap().1.committed_chain().unwrap().tip(),
+            block1
+        );
         assert_eq!(exex_manager.next_id, 1);
 
         // Push another notification
@@ -819,22 +818,20 @@ mod tests {
         block2.set_block_number(20);
 
         let notification2 = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![block2.clone()],
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            )),
+            new: Arc::new(Chain::new(vec![block2.clone()], Default::default(), Default::default())),
         };
 
-        exex_manager.push_notification(notification2.clone());
+        exex_manager.push_notification(notification2);
 
         // Verify the buffer contains both notifications with correct IDs
         assert_eq!(exex_manager.buffer.len(), 2);
         assert_eq!(exex_manager.buffer.front().unwrap().0, 0);
-        assert_eq!(exex_manager.buffer.front().unwrap().1, notification1);
+        assert_eq!(
+            *exex_manager.buffer.front().unwrap().1.committed_chain().unwrap().tip(),
+            block1
+        );
         assert_eq!(exex_manager.buffer.get(1).unwrap().0, 1);
-        assert_eq!(exex_manager.buffer.get(1).unwrap().1, notification2);
+        assert_eq!(*exex_manager.buffer.get(1).unwrap().1.committed_chain().unwrap().tip(), block2);
         assert_eq!(exex_manager.next_id, 2);
     }
 
@@ -867,12 +864,7 @@ mod tests {
         block1.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![block1.clone()],
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            )),
+            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
         };
 
         exex_manager.push_notification(notification1.clone());
@@ -1100,7 +1092,6 @@ mod tests {
                 vec![Default::default()],
                 Default::default(),
                 Default::default(),
-                Default::default(),
             )),
         };
 
@@ -1166,10 +1157,10 @@ mod tests {
         block2.set_block_number(11);
 
         // Setup a notification
+        let expected_block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![Default::default()],
-                Default::default(),
+                vec![expected_block.clone()],
                 Default::default(),
                 Default::default(),
             )),
@@ -1181,7 +1172,8 @@ mod tests {
         match exex_handle.send(&mut cx, &(22, notification.clone())) {
             Poll::Ready(Ok(())) => {
                 let received_notification = notifications.next().await.unwrap().unwrap();
-                assert_eq!(received_notification, notification);
+                // Compare by tip block since ExExNotification doesn't implement PartialEq
+                assert_eq!(*received_notification.committed_chain().unwrap().tip(), expected_block);
             }
             Poll::Pending => panic!("Notification send is pending"),
             Poll::Ready(Err(e)) => panic!("Failed to send notification: {e:?}"),
@@ -1216,12 +1208,7 @@ mod tests {
         block1.set_block_number(10);
 
         let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![block1.clone()],
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            )),
+            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
         };
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
@@ -1278,7 +1265,9 @@ mod tests {
         match exex_handle.send(&mut cx, &(22, notification.clone())) {
             Poll::Ready(Ok(())) => {
                 let received_notification = notifications.next().await.unwrap().unwrap();
-                assert_eq!(received_notification, notification);
+                // Compare by checking that both are reorgs with empty chains
+                assert!(received_notification.committed_chain().is_some());
+                assert!(received_notification.reverted_chain().is_some());
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
                 panic!("Notification should not be pending or fail")
@@ -1318,7 +1307,9 @@ mod tests {
         match exex_handle.send(&mut cx, &(22, notification.clone())) {
             Poll::Ready(Ok(())) => {
                 let received_notification = notifications.next().await.unwrap().unwrap();
-                assert_eq!(received_notification, notification);
+                // Compare by checking that it's a revert with empty chain
+                assert!(received_notification.reverted_chain().is_some());
+                assert!(received_notification.committed_chain().is_none());
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
                 panic!("Notification should not be pending or fail")
@@ -1371,16 +1362,10 @@ mod tests {
                 vec![genesis_block.clone()],
                 Default::default(),
                 BTreeMap::new(),
-                BTreeMap::new(),
             )),
         };
         let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![block.clone()],
-                Default::default(),
-                BTreeMap::new(),
-                BTreeMap::new(),
-            )),
+            new: Arc::new(Chain::new(vec![block.clone()], Default::default(), BTreeMap::new())),
         };
 
         let (finalized_headers_tx, rx) = watch::channel(None);
@@ -1397,34 +1382,38 @@ mod tests {
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
-        exex_manager
-            .handle()
-            .send(ExExNotificationSource::Pipeline, genesis_notification.clone())?;
-        exex_manager.handle().send(ExExNotificationSource::BlockchainTree, notification.clone())?;
+        exex_manager.handle().send(ExExNotificationSource::Pipeline, genesis_notification)?;
+        exex_manager.handle().send(ExExNotificationSource::BlockchainTree, notification)?;
 
         assert!(exex_manager.as_mut().poll(&mut cx)?.is_pending());
-        assert_eq!(
-            notifications.try_poll_next_unpin(&mut cx)?,
-            Poll::Ready(Some(genesis_notification))
-        );
+        // Check genesis notification received
+        let poll_result = notifications.try_poll_next_unpin(&mut cx)?;
+        if let Poll::Ready(Some(n)) = poll_result {
+            assert_eq!(*n.committed_chain().unwrap().tip(), genesis_block);
+        } else {
+            panic!("Expected genesis notification");
+        }
         assert!(exex_manager.as_mut().poll(&mut cx)?.is_pending());
-        assert_eq!(
-            notifications.try_poll_next_unpin(&mut cx)?,
-            Poll::Ready(Some(notification.clone()))
-        );
+        // Check block notification received
+        let poll_result = notifications.try_poll_next_unpin(&mut cx)?;
+        if let Poll::Ready(Some(n)) = poll_result {
+            assert_eq!(*n.committed_chain().unwrap().tip(), block);
+        } else {
+            panic!("Expected block notification");
+        }
         // WAL shouldn't contain the genesis notification, because it's finalized
-        assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
-            std::slice::from_ref(&notification)
-        );
+        let wal_notifications =
+            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?;
+        assert_eq!(wal_notifications.len(), 1);
+        assert_eq!(*wal_notifications[0].committed_chain().unwrap().tip(), block);
 
         finalized_headers_tx.send(Some(block.clone_sealed_header()))?;
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL isn't finalized because the ExEx didn't emit the `FinishedHeight` event
-        assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
-            std::slice::from_ref(&notification)
-        );
+        let wal_notifications =
+            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?;
+        assert_eq!(wal_notifications.len(), 1);
+        assert_eq!(*wal_notifications[0].committed_chain().unwrap().tip(), block);
 
         // Send a `FinishedHeight` event with a non-canonical block
         events_tx
@@ -1435,10 +1424,10 @@ mod tests {
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL isn't finalized because the ExEx emitted a `FinishedHeight` event with a
         // non-canonical block
-        assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
-            std::slice::from_ref(&notification)
-        );
+        let wal_notifications =
+            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?;
+        assert_eq!(wal_notifications.len(), 1);
+        assert_eq!(*wal_notifications[0].committed_chain().unwrap().tip(), block);
 
         // Send a `FinishedHeight` event with a canonical block
         events_tx.send(ExExEvent::FinishedHeight(block.num_hash())).unwrap();
@@ -1446,7 +1435,7 @@ mod tests {
         finalized_headers_tx.send(Some(block.clone_sealed_header()))?;
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL is finalized
-        assert_eq!(exex_manager.wal.iter_notifications()?.next().transpose()?, None);
+        assert!(exex_manager.wal.iter_notifications()?.next().is_none());
 
         Ok(())
     }

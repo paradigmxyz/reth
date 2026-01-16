@@ -141,12 +141,12 @@ where
         };
         let size = file.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len();
 
-        // Deserialize using the bincode- and msgpack-compatible serde wrapper
-        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_, N> =
-            rmp_serde::decode::from_read(&mut file)
-                .map_err(|err| WalError::Decode(file_id, file_path, err))?;
+        // Deserialize directly. ExExNotification has serde Serialize/Deserialize
+        // implemented with custom Chain serialization that creates ready DeferredTrieData.
+        let notification: ExExNotification<N> = rmp_serde::decode::from_read(&mut file)
+            .map_err(|err| WalError::Decode(file_id, file_path, err))?;
 
-        Ok(Some((notification.into(), size)))
+        Ok(Some((notification, size)))
     }
 
     /// Writes the notification to the file with the given ID.
@@ -163,12 +163,11 @@ where
         let file_path = self.file_path(file_id);
         debug!(target: "exex::wal::storage", ?file_path, "Writing notification to WAL");
 
-        // Serialize using the bincode- and msgpack-compatible serde wrapper
-        let notification =
-            reth_exex_types::serde_bincode_compat::ExExNotification::<N>::from(notification);
-
+        // Serialize the notification directly. ExExNotification has serde Serialize/Deserialize
+        // implemented, and the underlying Chain type has custom serde that properly handles
+        // DeferredTrieData by materializing it during serialization.
         reth_fs_util::atomic_write_file(&file_path, |file| {
-            rmp_serde::encode::write(file, &notification)
+            rmp_serde::encode::write(file, notification)
         })?;
 
         Ok(file_path.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len())
@@ -224,8 +223,10 @@ mod tests {
 
         // Get expected data
         let expected_notification = get_test_notification_data().unwrap();
+        // Compare by tip block since ExExNotification doesn't implement PartialEq
         assert_eq!(
-            &notification, &expected_notification,
+            *notification.committed_chain().unwrap().tip(),
+            *expected_notification.committed_chain().unwrap().tip(),
             "Decoded notification should match expected static data"
         );
     }
@@ -241,28 +242,18 @@ mod tests {
         let new_block = random_block(&mut rng, 0, Default::default()).try_recover()?;
 
         let notification = ExExNotification::ChainReorged {
-            new: Arc::new(Chain::new(
-                vec![new_block],
-                Default::default(),
-                BTreeMap::new(),
-                BTreeMap::new(),
-            )),
-            old: Arc::new(Chain::new(
-                vec![old_block],
-                Default::default(),
-                BTreeMap::new(),
-                BTreeMap::new(),
-            )),
+            new: Arc::new(Chain::new(vec![new_block.clone()], Default::default(), BTreeMap::new())),
+            old: Arc::new(Chain::new(vec![old_block.clone()], Default::default(), BTreeMap::new())),
         };
 
         // Do a round trip serialization and deserialization
         let file_id = 0;
         storage.write_notification(file_id, &notification)?;
         let deserialized_notification = storage.read_notification(file_id)?;
-        assert_eq!(
-            deserialized_notification.map(|(notification, _)| notification),
-            Some(notification)
-        );
+        // Compare by chain tips since ExExNotification doesn't implement PartialEq
+        let deserialized = deserialized_notification.map(|(n, _)| n).unwrap();
+        assert_eq!(*deserialized.committed_chain().unwrap().tip(), new_block);
+        assert_eq!(*deserialized.reverted_chain().unwrap().tip(), old_block);
 
         Ok(())
     }
@@ -280,10 +271,14 @@ mod tests {
 
         let notification = get_test_notification_data()?;
 
-        // Serialize the notification
-        let notification_compat =
-            reth_exex_types::serde_bincode_compat::ExExNotification::from(&notification);
-        let encoded = rmp_serde::encode::to_vec(&notification_compat)?;
+        // Create a temp storage and write the notification using the existing serialization path
+        let temp_dir = tempfile::tempdir()?;
+        let storage = Storage::new(&temp_dir)?;
+        storage.write_notification(0, &notification)?;
+
+        // Read it back as raw bytes
+        let temp_path = temp_dir.path().join("0.wal");
+        let encoded = std::fs::read(&temp_path)?;
 
         // Write to test-data directory
         let test_data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-data");
@@ -346,13 +341,18 @@ mod tests {
             )]),
         };
 
+        let trie_data =
+            reth_chain_state::DeferredTrieData::ready(reth_chain_state::ComputedTrieData {
+                hashed_state: Arc::new(hashed_state.into_sorted()),
+                trie_updates: Arc::new(trie_updates.into_sorted()),
+                anchored_trie_input: None,
+            });
         let notification: ExExNotification<reth_ethereum_primitives::EthPrimitives> =
             ExExNotification::ChainCommitted {
                 new: Arc::new(Chain::new(
                     vec![block],
                     Default::default(),
-                    BTreeMap::from([(block_number, Arc::new(trie_updates.into_sorted()))]),
-                    BTreeMap::from([(block_number, Arc::new(hashed_state.into_sorted()))]),
+                    BTreeMap::from([(block_number, trie_data)]),
                 )),
             };
         Ok(notification)

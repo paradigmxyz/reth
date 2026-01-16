@@ -3,6 +3,7 @@ use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
+#[cfg(feature = "std")]
 use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::{
     database::{states::BundleState, BundleAccount},
@@ -206,6 +207,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Returns [`HashedPostState`] for this execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
+    #[cfg(feature = "std")]
     pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
         HashedPostState::from_bundle_state::<KH>(&self.bundle.state)
     }
@@ -564,8 +566,8 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::TxType;
     use alloy_primitives::{bytes, Address, LogData, B256};
+    use reth_ethereum_primitives::TxType;
 
     #[test]
     fn test_initialization() {

@@ -8,6 +8,7 @@ use reth_trie::{
 use std::{
     fmt,
     sync::{Arc, LazyLock},
+    vec::Vec,
 };
 use tracing::instrument;
 
