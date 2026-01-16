@@ -3,8 +3,12 @@
 use crate::tree::payload_processor::multiproof::{MultiProofTaskMetrics, SparseTrieUpdate};
 use alloy_primitives::B256;
 use rayon::iter::{ParallelBridge, ParallelIterator};
+use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_trie::{updates::TrieUpdates, HashedPostState, Nibbles};
-use reth_trie_parallel::root::ParallelStateRootError;
+use reth_trie_parallel::{
+    proof_task::{ProofResultMessage, ProofWorkerHandle},
+    root::ParallelStateRootError,
+};
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
@@ -109,6 +113,13 @@ where
     /// Proof sequencer for ordering state updates.
     #[allow(dead_code)]
     proof_sequencer: ProofSequencer,
+    /// Handle to the proof worker pools for dispatching proof requests.
+    /// When set, the sparse trie task can generate proof targets and dispatch them to workers.
+    #[allow(dead_code)]
+    proof_worker_handle: Option<ProofWorkerHandle>,
+    /// Receiver for proof results from workers when using direct proof dispatch.
+    #[allow(dead_code)]
+    proof_result_rx: Option<CrossbeamReceiver<ProofResultMessage>>,
 }
 
 impl<BPF, A, S> SparseTrieTask<BPF, A, S>
@@ -132,7 +143,21 @@ where
             trie: sparse_state_trie.into_inner(),
             blinded_provider_factory,
             proof_sequencer: ProofSequencer::default(),
+            proof_worker_handle: None,
+            proof_result_rx: None,
         }
+    }
+
+    /// Sets the proof worker handle for dispatching proof requests to workers.
+    #[allow(dead_code)]
+    pub(super) fn with_proof_worker_handle(
+        mut self,
+        handle: ProofWorkerHandle,
+        proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
+    ) -> Self {
+        self.proof_worker_handle = Some(handle);
+        self.proof_result_rx = Some(proof_result_rx);
+        self
     }
 
     /// Runs the sparse trie task to completion.
