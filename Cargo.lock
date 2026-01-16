@@ -9038,7 +9038,6 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
- "reth-execution-types",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
