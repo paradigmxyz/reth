@@ -413,23 +413,12 @@ impl TestStageDB {
             accounts.into_iter().try_for_each(|(address, (account, storage))| {
                 let hashed_address = keccak256(address);
 
-                // Insert into account tables.
-                tx.put::<tables::PlainAccountState>(address, account)?;
+                // Insert into hashed account table.
                 tx.put::<tables::HashedAccounts>(hashed_address, account)?;
 
-                // Insert into storage tables.
+                // Insert into hashed storage table.
                 storage.into_iter().filter(|e| !e.value.is_zero()).try_for_each(|entry| {
                     let hashed_entry = StorageEntry { key: keccak256(entry.key), ..entry };
-
-                    let mut cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-                    if cursor
-                        .seek_by_key_subkey(address, entry.key)?
-                        .filter(|e| e.key == entry.key)
-                        .is_some()
-                    {
-                        cursor.delete_current()?;
-                    }
-                    cursor.upsert(address, &entry)?;
 
                     let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
                     if cursor

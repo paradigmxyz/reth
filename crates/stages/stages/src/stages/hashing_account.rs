@@ -142,113 +142,25 @@ where
     }
 
     /// Execute the stage.
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
-        if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
-        }
-
-        let (from_block, to_block) = input.next_block_range().into_inner();
-
-        // if there are more blocks then threshold it is faster to go over Plain state and hash all
-        // account otherwise take changesets aggregate the sets and apply hashing to
-        // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
-        // genesis accounts are not in changeset.
-        if to_block - from_block > self.clean_threshold || from_block == 1 {
-            let tx = provider.tx_ref();
-
-            // clear table, load all accounts and hash it
-            tx.clear::<tables::HashedAccounts>()?;
-
-            let mut accounts_cursor = tx.cursor_read::<RawTable<tables::PlainAccountState>>()?;
-            let mut collector =
-                Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
-            let mut channels = Vec::with_capacity(MAXIMUM_CHANNELS);
-
-            // channels used to return result of account hashing
-            for chunk in &accounts_cursor.walk(None)?.chunks(WORKER_CHUNK_SIZE) {
-                // An _unordered_ channel to receive results from a rayon job
-                let (tx, rx) = mpsc::channel();
-                channels.push(rx);
-
-                let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
-                // Spawn the hashing task onto the global rayon pool
-                rayon::spawn(move || {
-                    for (address, account) in chunk {
-                        let address = address.key().unwrap();
-                        let _ = tx.send((RawKey::new(keccak256(address)), account));
-                    }
-                });
-
-                // Flush to ETL when channels length reaches MAXIMUM_CHANNELS
-                if !channels.is_empty() && channels.len().is_multiple_of(MAXIMUM_CHANNELS) {
-                    collect(&mut channels, &mut collector)?;
-                }
-            }
-
-            collect(&mut channels, &mut collector)?;
-
-            let mut hashed_account_cursor =
-                tx.cursor_write::<RawTable<tables::HashedAccounts>>()?;
-
-            let total_hashes = collector.len();
-            let interval = (total_hashes / 10).max(1);
-            for (index, item) in collector.iter()?.enumerate() {
-                if index > 0 && index.is_multiple_of(interval) {
-                    info!(
-                        target: "sync::stages::hashing_account",
-                        progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
-                        "Inserting hashes"
-                    );
-                }
-
-                let (key, value) = item?;
-                hashed_account_cursor
-                    .append(RawKey::<B256>::from_vec(key), &RawValue::<Account>::from_vec(value))?;
-            }
-        } else {
-            // Aggregate all transition changesets and make a list of accounts that have been
-            // changed.
-            let lists = provider.changed_accounts_with_range(from_block..=to_block)?;
-            // Iterate over plain state and get newest value.
-            // Assumption we are okay to make is that plainstate represent
-            // `previous_stage_progress` state.
-            let accounts = provider.basic_accounts(lists)?;
-            // Insert and hash accounts to hashing table
-            provider.insert_account_for_hashing(accounts)?;
-        }
-
-        // We finished the hashing stage, no future iterations is expected for the same block range,
-        // so no checkpoint is needed.
-        let checkpoint = StageCheckpoint::new(input.target())
-            .with_account_hashing_stage_checkpoint(AccountHashingCheckpoint {
-                progress: stage_checkpoint_progress(provider)?,
-                ..Default::default()
-            });
-
-        Ok(ExecOutput { checkpoint, done: true })
+    ///
+    /// NOTE: This stage is now a no-op because the execution stage writes directly to
+    /// HashedAccounts. This stage exists only for backwards compatibility with existing pipelines.
+    fn execute(&mut self, _provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+        // Since execution now writes directly to HashedAccounts, this stage is a no-op.
+        // Just report that we're done up to the target block.
+        Ok(ExecOutput::done(input.checkpoint().with_block_number(input.target())))
     }
 
     /// Unwind the stage.
+    ///
+    /// NOTE: This stage is now a no-op because the execution stage manages HashedAccounts directly.
     fn unwind(
         &mut self,
-        provider: &Provider,
+        _provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_progress, _) =
-            input.unwind_block_range_with_threshold(self.commit_threshold);
-
-        // Aggregate all transition changesets and make a list of accounts that have been changed.
-        provider.unwind_account_hashing_range(range)?;
-
-        let mut stage_checkpoint =
-            input.checkpoint.account_hashing_stage_checkpoint().unwrap_or_default();
-
-        stage_checkpoint.progress = stage_checkpoint_progress(provider)?;
-
-        Ok(UnwindOutput {
-            checkpoint: StageCheckpoint::new(unwind_progress)
-                .with_account_hashing_stage_checkpoint(stage_checkpoint),
-        })
+        // Since execution now manages HashedAccounts directly during unwind, this is a no-op.
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
 

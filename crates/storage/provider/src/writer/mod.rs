@@ -285,23 +285,25 @@ mod tests {
             .write_state(&outcome, OriginalValuesKnown::Yes, StateWriteConfig::default())
             .expect("Could not write bundle state to DB");
 
-        // Check plain storage state
+        // Check hashed storage state
         let mut storage_cursor = provider
             .tx_ref()
-            .cursor_dup_read::<tables::PlainStorageState>()
-            .expect("Could not open plain storage state cursor");
+            .cursor_dup_read::<tables::HashedStorages>()
+            .expect("Could not open hashed storage state cursor");
+
+        let hashed_address_a = alloy_primitives::keccak256(address_a);
+        let hashed_address_b = alloy_primitives::keccak256(address_b);
+        let hashed_slot_0 = alloy_primitives::keccak256(B256::ZERO);
+        let hashed_slot_1 = alloy_primitives::keccak256(B256::from(U256::from(1).to_be_bytes()));
 
         assert_eq!(
-            storage_cursor.seek_exact(address_a).unwrap(),
-            Some((address_a, StorageEntry { key: B256::ZERO, value: U256::from(1) })),
+            storage_cursor.seek_exact(hashed_address_a).unwrap(),
+            Some((hashed_address_a, StorageEntry { key: hashed_slot_0, value: U256::from(1) })),
             "Slot 0 for account A should be 1"
         );
         assert_eq!(
             storage_cursor.next_dup().unwrap(),
-            Some((
-                address_a,
-                StorageEntry { key: B256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
-            )),
+            Some((hashed_address_a, StorageEntry { key: hashed_slot_1, value: U256::from(2) })),
             "Slot 1 for account A should be 2"
         );
         assert_eq!(
@@ -311,11 +313,8 @@ mod tests {
         );
 
         assert_eq!(
-            storage_cursor.seek_exact(address_b).unwrap(),
-            Some((
-                address_b,
-                StorageEntry { key: B256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
-            )),
+            storage_cursor.seek_exact(hashed_address_b).unwrap(),
+            Some((hashed_address_b, StorageEntry { key: hashed_slot_1, value: U256::from(2) })),
             "Slot 1 for account B should be 2"
         );
         assert_eq!(

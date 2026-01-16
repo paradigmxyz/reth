@@ -38,7 +38,8 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
 impl<Provider: DBProvider> AccountReader for LatestStateProviderRef<'_, Provider> {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        self.tx().get_by_encoded_key::<tables::PlainAccountState>(address).map_err(Into::into)
+        let hashed_address = alloy_primitives::keccak256(address);
+        self.tx().get_by_encoded_key::<tables::HashedAccounts>(&hashed_address).map_err(Into::into)
     }
 }
 
@@ -157,9 +158,11 @@ impl<Provider: DBProvider + BlockHashReader> StateProvider
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
-        if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? &&
-            entry.key == storage_key
+        let hashed_address = alloy_primitives::keccak256(account);
+        let hashed_slot = alloy_primitives::keccak256(storage_key);
+        let mut cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
+        if let Some(entry) = cursor.seek_by_key_subkey(hashed_address, hashed_slot)? &&
+            entry.key == hashed_slot
         {
             return Ok(Some(entry.value))
         }
