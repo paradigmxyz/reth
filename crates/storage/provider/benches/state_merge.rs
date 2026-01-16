@@ -100,8 +100,15 @@ fn flatten_and_par_sort_accounts(changesets: &[StateChangeset]) -> Vec<(Address,
 fn bench_account_merge(c: &mut Criterion) {
     let mut group = c.benchmark_group("account_merge");
 
-    // Test with varying number of blocks (k) and accounts per block
-    for (num_blocks, accounts_per_block) in [(10, 100), (50, 100), (100, 100), (50, 500)] {
+    // Test with varying number of blocks and accounts per block
+    // Realistic mainnet: ~100-500 accounts touched per block, batches of 10-100 blocks
+    for (num_blocks, accounts_per_block) in [
+        (10, 500),   // Small batch, moderate activity
+        (50, 500),   // Medium batch, moderate activity
+        (100, 500),  // Large batch, moderate activity
+        (50, 1000),  // Medium batch, heavy activity
+        (100, 1000), // Large batch, heavy activity (stress test)
+    ] {
         let total = num_blocks * accounts_per_block;
         group.throughput(Throughput::Elements(total as u64));
 
@@ -172,9 +179,15 @@ fn flatten_and_par_sort_storage(
 fn bench_storage_merge(c: &mut Criterion) {
     let mut group = c.benchmark_group("storage_merge");
 
-    for (num_blocks, accounts_per_block, slots_per_account) in
-        [(10, 50, 10), (50, 50, 10), (100, 50, 10), (50, 100, 20)]
-    {
+    // Realistic mainnet storage: contracts with many slots (DEXes, lending protocols)
+    // Each block touches ~50-200 contracts, each with 5-50 slot updates
+    for (num_blocks, accounts_per_block, slots_per_account) in [
+        (10, 150, 20),  // Small batch: 10 blocks × 50 contracts × 20 slots = 10k slots
+        (50, 150, 20),  // Medium batch: 50 blocks × 50 contracts × 20 slots = 50k slots
+        (100, 150, 20), // Large batch: 100 blocks × 50 contracts × 20 slots = 100k slots
+        (50, 300, 30),  // Medium batch, heavy: 50 blocks × 100 contracts × 30 slots = 150k slots
+        (100, 300, 30), // Large batch, heavy: 100 blocks × 100 contracts × 30 slots = 300k slots
+    ] {
         let total = num_blocks * (accounts_per_block / 3) * slots_per_account;
         group.throughput(Throughput::Elements(total as u64));
 
