@@ -337,6 +337,10 @@ impl RocksDBProvider {
             provider: self,
             inner: WriteBatchWithTransaction::<true>::default(),
             buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+            #[cfg(debug_assertions)]
+            touched_account_history: std::collections::HashSet::new(),
+            #[cfg(debug_assertions)]
+            touched_storage_history: std::collections::HashSet::new(),
         }
     }
 
@@ -486,6 +490,19 @@ impl RocksDBProvider {
     pub fn iter<T: Table>(&self) -> ProviderResult<RocksDBIter<'_, T>> {
         let cf = self.get_cf_handle::<T>()?;
         let iter = self.0.db.iterator_cf(cf, IteratorMode::Start);
+        Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
+    /// Creates an iterator starting from the given key (inclusive).
+    ///
+    /// Returns decoded `(Key, Value)` pairs in key order, starting from the given key.
+    pub fn iter_from<T: Table>(&self, key: T::Key) -> ProviderResult<RocksDBIter<'_, T>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let encoded_key = key.encode();
+        let iter = self
+            .0
+            .db
+            .iterator_cf(cf, IteratorMode::From(encoded_key.as_ref(), rocksdb::Direction::Forward));
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
     }
 
@@ -866,6 +883,40 @@ impl<'a> RocksDBBatch<'a> {
         }
 
         Ok(())
+    }
+
+    /// Gets a value from the specified table via the underlying provider.
+    ///
+    /// Note: This reads from committed state, not pending batch writes.
+    pub fn get<T: Table>(&self, key: T::Key) -> ProviderResult<Option<T::Value>> {
+        self.provider.get::<T>(key)
+    }
+
+    /// Collects all shards for a given key prefix from committed `RocksDB` state.
+    ///
+    /// This iterates through entries starting from `start_key` and collects all
+    /// entries where `key_matches` returns true.
+    pub fn collect_shards_for_key<T>(
+        &self,
+        start_key: T::Key,
+        key_matches: impl Fn(&T::Key) -> bool,
+    ) -> ProviderResult<Vec<(T::Key, T::Value)>>
+    where
+        T: Table,
+        T::Value: Clone,
+    {
+        let mut result = Vec::new();
+        let iter = self.provider.iter_from::<T>(start_key)?;
+
+        for item in iter {
+            let (key, value) = item?;
+            if !key_matches(&key) {
+                break;
+            }
+            result.push((key, value));
+        }
+
+        Ok(result)
     }
 }
 

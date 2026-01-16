@@ -1,16 +1,20 @@
-use crate::stages::utils::collect_history_indices;
+use crate::stages::utils::{
+    collect_account_history_indices, collect_history_indices, load_accounts_history_indices,
+    unwind_accounts_history_shards,
+};
 
-use super::{collect_account_history_indices, load_history_indices};
 use alloy_primitives::Address;
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{models::ShardedKey, table::Decode, tables, transaction::DbTxMut};
 use reth_provider::{
-    DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter, StorageSettingsCache,
+    DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
+    RocksDBProviderFactory, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
+use reth_storage_api::{ChangeSetReader, NodePrimitivesProvider};
 use std::fmt::Debug;
 use tracing::info;
 
@@ -51,9 +55,11 @@ where
         + HistoryWriter
         + PruneCheckpointReader
         + PruneCheckpointWriter
-        + reth_storage_api::ChangeSetReader
-        + reth_provider::StaticFileProviderFactory
-        + StorageSettingsCache,
+        + ChangeSetReader
+        + StaticFileProviderFactory
+        + StorageSettingsCache
+        + NodePrimitivesProvider
+        + RocksDBProviderFactory,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -125,7 +131,7 @@ where
         };
 
         info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
-        load_history_indices::<_, tables::AccountsHistory, _>(
+        load_accounts_history_indices(
             provider,
             collector,
             first_sync,
@@ -146,9 +152,28 @@ where
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        provider.unwind_account_history_indices_range(range)?;
+        // Get changed accounts for the unwind range
+        let mut addresses = std::collections::BTreeSet::new();
+        for block in *range.start()..=*range.end() {
+            let changesets = provider.account_block_changeset(block)?;
+            addresses.extend(changesets.into_iter().map(|cs| cs.address));
+        }
 
-        // from HistoryIndex higher than that number.
+        // Create EitherWriter for unwinding
+        #[allow(clippy::let_unit_value)]
+        let rocksdb = reth_provider::make_rocksdb_provider!(provider);
+        #[allow(clippy::let_unit_value)]
+        let rocksdb_batch = reth_provider::make_rocksdb_batch_arg!(rocksdb);
+        let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
+
+        // Unwind shards for each changed address
+        for address in addresses {
+            unwind_accounts_history_shards(&mut writer, address, *range.start())?;
+        }
+
+        // Register batch for commit
+        reth_provider::register_rocksdb_batch!(provider, writer);
+
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
     }
 }

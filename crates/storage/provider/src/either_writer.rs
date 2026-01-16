@@ -63,13 +63,13 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
 
 /// Helper type for `RocksDB` batch argument in writer constructors.
 ///
-/// When `rocksdb` feature is enabled, this is a real `RocksDB` batch.
+/// When `rocksdb` feature is enabled, this is an optional `RocksDB` batch.
 /// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
 #[cfg(all(unix, feature = "rocksdb"))]
-pub type RocksBatchArg<'a> = crate::providers::rocksdb::RocksDBBatch<'a>;
+pub type RocksBatchArg<'a> = Option<crate::providers::rocksdb::RocksDBBatch<'a>>;
 /// Helper type for `RocksDB` batch argument in writer constructors.
 ///
-/// When `rocksdb` feature is enabled, this is a real `RocksDB` batch.
+/// When `rocksdb` feature is enabled, this is an optional `RocksDB` batch.
 /// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
 #[cfg(not(all(unix, feature = "rocksdb")))]
 pub type RocksBatchArg<'a> = ();
@@ -219,7 +219,10 @@ impl<'a> EitherWriter<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().storages_history_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
+            return Ok(EitherWriter::RocksDB(
+                _rocksdb_batch
+                    .expect("RocksDB batch required when storages_history_in_rocksdb is enabled"),
+            ));
         }
 
         Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::StoragesHistory>()?))
@@ -236,7 +239,9 @@ impl<'a> EitherWriter<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch.expect(
+                "RocksDB batch required when transaction_hash_numbers_in_rocksdb is enabled",
+            )));
         }
 
         Ok(EitherWriter::Database(
@@ -255,7 +260,10 @@ impl<'a> EitherWriter<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().account_history_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
+            return Ok(EitherWriter::RocksDB(
+                _rocksdb_batch
+                    .expect("RocksDB batch required when account_history_in_rocksdb is enabled"),
+            ));
         }
 
         Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::AccountsHistory>()?))
@@ -546,6 +554,191 @@ where
             Self::RocksDB(batch) => batch.delete::<tables::AccountsHistory>(key),
         }
     }
+
+    /// Appends an account history entry (append-only mode).
+    pub fn append_account_history(
+        &mut self,
+        key: ShardedKey<Address>,
+        value: BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.append(key, &value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, &value),
+        }
+    }
+
+    /// Upserts an account history entry.
+    pub fn upsert_account_history(
+        &mut self,
+        key: ShardedKey<Address>,
+        value: BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(key, &value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, &value),
+        }
+    }
+
+    /// Seeks the last shard for an address (with `u64::MAX` highest block).
+    pub fn seek_last_shard(
+        &mut self,
+        key: ShardedKey<Address>,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.get::<tables::AccountsHistory>(key),
+        }
+    }
+
+    /// Unwinds account history shards for a given address starting from a block number.
+    ///
+    /// This removes all block numbers >= `from_block` from the history shards for the given
+    /// address. Empty shards are deleted, and the last shard is updated to have `u64::MAX`
+    /// as its highest block number (sentinel).
+    pub fn unwind_account_history_shards(
+        &mut self,
+        address: Address,
+        from_block: BlockNumber,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => unwind_account_history_shards_db(cursor, address, from_block),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => {
+                unwind_account_history_shards_rocksdb(batch, address, from_block)
+            }
+        }
+    }
+}
+
+/// Unwinds account history shards in MDBX database.
+///
+/// This follows the same algorithm as `unwind_history_shards`:
+/// 1. Start from the last shard (`u64::MAX`) and walk backwards
+/// 2. Delete each shard
+/// 3. Return blocks < `from_block` for reinsertion at the last key
+fn unwind_account_history_shards_db<CURSOR>(
+    cursor: &mut CURSOR,
+    address: Address,
+    from_block: BlockNumber,
+) -> ProviderResult<()>
+where
+    CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
+{
+    // Start from the last shard for this address
+    let start_key = ShardedKey::new(address, u64::MAX);
+    let mut item = cursor.seek_exact(start_key)?;
+
+    while let Some((sharded_key, list)) = item {
+        // If the shard does not belong to this address, break
+        if sharded_key.key != address {
+            break;
+        }
+
+        // Always delete the current shard first
+        cursor.delete_current()?;
+
+        // Get the first (lowest) block number in this shard
+        let first = list.iter().next().expect("List can't be empty");
+
+        // Case 1: Entire shard is at or above the unwinding point
+        if first >= from_block {
+            item = cursor.prev()?;
+        }
+        // Case 2: Boundary shard (spans across the unwinding point)
+        else if from_block <= sharded_key.highest_block_number {
+            // Return only blocks below the unwinding point for reinsertion
+            let remaining: Vec<_> = list.iter().take_while(|&i| i < from_block).collect();
+            if !remaining.is_empty() {
+                let new_key = ShardedKey::new(address, u64::MAX);
+                let new_list = BlockNumberList::new_pre_sorted(remaining);
+                cursor.insert(new_key, &new_list)?;
+            }
+            return Ok(());
+        }
+        // Case 3: Entire shard is below the unwinding point
+        else {
+            // Reinsert all blocks at the last key
+            let remaining: Vec<_> = list.iter().collect();
+            let new_key = ShardedKey::new(address, u64::MAX);
+            let new_list = BlockNumberList::new_pre_sorted(remaining);
+            cursor.insert(new_key, &new_list)?;
+            return Ok(());
+        }
+    }
+
+    Ok(())
+}
+
+/// Unwinds account history shards in `RocksDB`.
+#[cfg(all(unix, feature = "rocksdb"))]
+fn unwind_account_history_shards_rocksdb(
+    batch: &mut RocksDBBatch<'_>,
+    address: Address,
+    from_block: BlockNumber,
+) -> ProviderResult<()> {
+    use reth_db_api::models::sharded_key::NUM_OF_INDICES_IN_SHARD;
+
+    // Collect all shards for this address
+    let shards = collect_shards_for_unwind::<tables::AccountsHistory>(
+        batch,
+        ShardedKey::new(address, 0),
+        |k| k.key == address,
+    )?;
+
+    // Collect all block numbers < from_block across all shards
+    let mut remaining_blocks: Vec<BlockNumber> = Vec::new();
+    for (key, list) in &shards {
+        remaining_blocks.extend(list.iter().filter(|&bn| bn < from_block));
+        // Delete this shard
+        batch.delete::<tables::AccountsHistory>(key.clone())?;
+    }
+
+    // Write back the remaining blocks in proper shards
+    if !remaining_blocks.is_empty() {
+        remaining_blocks.sort_unstable();
+        remaining_blocks.dedup();
+
+        let chunks: Vec<Vec<BlockNumber>> =
+            remaining_blocks.chunks(NUM_OF_INDICES_IN_SHARD).map(|c| c.to_vec()).collect();
+
+        let mut iter = chunks.into_iter().peekable();
+        while let Some(chunk) = iter.next() {
+            let highest = if iter.peek().is_none() {
+                u64::MAX
+            } else {
+                *chunk.last().expect("chunk is non-empty")
+            };
+            let key = ShardedKey::new(address, highest);
+            let value = BlockNumberList::new_pre_sorted(chunk);
+            batch.put::<tables::AccountsHistory>(key, &value)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Collects all shards for a given key prefix from `RocksDB`.
+///
+/// This is a generic helper that iterates through `RocksDB` entries starting from
+/// `start_key` and collects all entries where `key_matches` returns true.
+#[cfg(all(unix, feature = "rocksdb"))]
+fn collect_shards_for_unwind<T>(
+    batch: &RocksDBBatch<'_>,
+    start_key: T::Key,
+    key_matches: impl Fn(&T::Key) -> bool,
+) -> ProviderResult<Vec<(T::Key, BlockNumberList)>>
+where
+    T: reth_db_api::table::Table<Value = BlockNumberList>,
+    T::Key: Clone,
+{
+    batch.collect_shards_for_key::<T>(start_key, key_matches)
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
