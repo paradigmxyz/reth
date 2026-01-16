@@ -145,7 +145,7 @@ impl<T> Future for BlockingTaskHandle<T> {
 
 /// An error returned when the Tokio channel is dropped while awaiting a result.
 ///
-/// This should only happen
+/// This should only happen if the rayon thread pool is dropped or panics.
 #[derive(Debug, Default, thiserror::Error)]
 #[error("tokio channel dropped while awaiting result")]
 #[non_exhaustive]
