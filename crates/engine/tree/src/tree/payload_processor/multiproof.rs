@@ -20,7 +20,8 @@ use reth_trie_parallel::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
     },
 };
-use std::{collections::BTreeMap, ops::DerefMut, sync::Arc, time::Instant};
+use revm_primitives::map::{hash_map, B256Map};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
 /// Source of state changes, either from EVM execution or from a Block Access List.
@@ -142,11 +143,6 @@ impl ProofSequencer {
     fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
         if sequence >= self.next_to_deliver {
             self.pending_proofs.insert(sequence, update);
-        }
-
-        // return early if we don't have the next expected proof
-        if !self.pending_proofs.contains_key(&self.next_to_deliver) {
-            return Vec::new()
         }
 
         let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
@@ -603,30 +599,43 @@ impl MultiProofTask {
         skip_all,
         fields(accounts = targets.len(), chunks = 0)
     )]
-    fn on_prefetch_proof(&mut self, targets: MultiProofTargets) -> u64 {
-        let proof_targets = self.get_prefetch_proof_targets(targets);
-        self.fetched_proof_targets.extend_ref(&proof_targets);
+    fn on_prefetch_proof(&mut self, mut targets: MultiProofTargets) -> u64 {
+        // Remove already fetched proof targets to avoid redundant work.
+        targets.retain_difference(&self.fetched_proof_targets);
+        self.fetched_proof_targets.extend_ref(&targets);
 
         // Make sure all target accounts have an `AddedRemovedKeySet` in the
         // [`MultiAddedRemovedKeys`]. Even if there are not any known removed keys for the account,
         // we still want to optimistically fetch extension children for the leaf addition case.
-        self.multi_added_removed_keys.touch_accounts(proof_targets.keys().copied());
+        self.multi_added_removed_keys.touch_accounts(targets.keys().copied());
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
+            account: self.multi_added_removed_keys.account.clone(),
+            storages: targets
+                .keys()
+                .filter_map(|account| {
+                    self.multi_added_removed_keys
+                        .storages
+                        .get(account)
+                        .cloned()
+                        .map(|keys| (*account, keys))
+                })
+                .collect(),
+        });
 
-        self.metrics.prefetch_proof_targets_accounts_histogram.record(proof_targets.len() as f64);
+        self.metrics.prefetch_proof_targets_accounts_histogram.record(targets.len() as f64);
         self.metrics
             .prefetch_proof_targets_storages_histogram
-            .record(proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
+            .record(targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
 
-        let chunking_len = proof_targets.chunking_length();
+        let chunking_len = targets.chunking_length();
         let available_account_workers =
             self.multiproof_manager.proof_worker_handle.available_account_workers();
         let available_storage_workers =
             self.multiproof_manager.proof_worker_handle.available_storage_workers();
         let num_chunks = dispatch_with_chunking(
-            proof_targets,
+            targets,
             chunking_len,
             self.chunk_size,
             self.max_targets_for_chunking,
@@ -649,77 +658,21 @@ impl MultiProofTask {
         num_chunks as u64
     }
 
-    // Returns true if all state updates finished and all proofs processed.
-    fn is_done(
-        &self,
-        proofs_processed: u64,
-        state_update_proofs_requested: u64,
-        prefetch_proofs_requested: u64,
-        updates_finished: bool,
-    ) -> bool {
-        let all_proofs_processed =
-            proofs_processed >= state_update_proofs_requested + prefetch_proofs_requested;
+    /// Returns true if all state updates finished and all pending proofs processed.
+    fn is_done(&self, metrics: &MultiproofBatchMetrics, ctx: &MultiproofBatchCtx) -> bool {
+        let all_proofs_processed = metrics.all_proofs_processed();
         let no_pending = !self.proof_sequencer.has_pending();
+        let updates_finished = ctx.updates_finished();
         trace!(
             target: "engine::tree::payload_processor::multiproof",
-            proofs_processed,
-            state_update_proofs_requested,
-            prefetch_proofs_requested,
+            proofs_processed = metrics.proofs_processed,
+            state_update_proofs_requested = metrics.state_update_proofs_requested,
+            prefetch_proofs_requested = metrics.prefetch_proofs_requested,
             no_pending,
             updates_finished,
             "Checking end condition"
         );
         all_proofs_processed && no_pending && updates_finished
-    }
-
-    /// Calls `get_proof_targets` with existing proof targets for prefetching.
-    fn get_prefetch_proof_targets(&self, mut targets: MultiProofTargets) -> MultiProofTargets {
-        // Here we want to filter out any targets that are already fetched
-        //
-        // This means we need to remove any storage slots that have already been fetched
-        let mut duplicates = 0;
-
-        // First remove all storage targets that are subsets of already fetched storage slots
-        targets.retain(|hashed_address, target_storage| {
-            let keep = self
-                .fetched_proof_targets
-                .get(hashed_address)
-                // do NOT remove if None, because that means the account has not been fetched yet
-                .is_none_or(|fetched_storage| {
-                    // remove if a subset
-                    !target_storage.is_subset(fetched_storage)
-                });
-
-            if !keep {
-                duplicates += target_storage.len();
-            }
-
-            keep
-        });
-
-        // For all non-subset remaining targets, we have to calculate the difference
-        for (hashed_address, target_storage) in targets.deref_mut() {
-            let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
-                // this means the account has not been fetched yet, so we must fetch everything
-                // associated with this account
-                continue;
-            };
-
-            let prev_target_storage_len = target_storage.len();
-
-            // keep only the storage slots that have not been fetched yet
-            //
-            // we already removed subsets, so this should only remove duplicates
-            target_storage.retain(|slot| !fetched_storage.contains(slot));
-
-            duplicates += prev_target_storage_len - target_storage.len();
-        }
-
-        if duplicates > 0 {
-            trace!(target: "engine::tree::payload_processor::multiproof", duplicates, "Removed duplicate prefetch proof targets");
-        }
-
-        targets
     }
 
     /// Handles state updates.
@@ -765,7 +718,33 @@ impl MultiProofTask {
         }
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
+            account: self.multi_added_removed_keys.account.clone(),
+            storages: {
+                let mut storages = B256Map::with_capacity_and_hasher(
+                    not_fetched_state_update.storages.len(),
+                    Default::default(),
+                );
+
+                for account in not_fetched_state_update
+                    .storages
+                    .keys()
+                    .chain(not_fetched_state_update.accounts.keys())
+                {
+                    if let hash_map::Entry::Vacant(entry) = storages.entry(*account) {
+                        entry.insert(
+                            self.multi_added_removed_keys
+                                .storages
+                                .get(account)
+                                .cloned()
+                                .unwrap_or_default(),
+                        );
+                    }
+                }
+
+                storages
+            },
+        });
 
         let chunking_len = not_fetched_state_update.chunking_length();
         let mut spawned_proof_targets = MultiProofTargets::default();
@@ -866,6 +845,8 @@ impl MultiProofTask {
                 ctx.accumulated_prefetch_targets.push(targets);
 
                 // Batch consecutive prefetch messages up to limits.
+                // EmptyProof messages are handled inline since they're very fast (~100ns)
+                // and shouldn't interrupt batching.
                 while accumulated_count < PREFETCH_MAX_BATCH_TARGETS &&
                     ctx.accumulated_prefetch_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
                 {
@@ -879,6 +860,16 @@ impl MultiProofTask {
                             }
                             accumulated_count += next_count;
                             ctx.accumulated_prefetch_targets.push(next_targets);
+                        }
+                        Ok(MultiProofMessage::EmptyProof { sequence_number, state }) => {
+                            // Handle inline - very fast, don't break batching
+                            batch_metrics.proofs_processed += 1;
+                            if let Some(combined_update) = self.on_proof(
+                                sequence_number,
+                                SparseTrieUpdate { state, multiproof: Default::default() },
+                            ) {
+                                let _ = self.to_sparse_trie.send(combined_update);
+                            }
                         }
                         Ok(other_msg) => {
                             ctx.pending_msg = Some(other_msg);
@@ -975,12 +966,7 @@ impl MultiProofTask {
                 ctx.updates_finished_time = Some(Instant::now());
 
                 // Check if we're done (might need to wait for proofs to complete)
-                if self.is_done(
-                    batch_metrics.proofs_processed,
-                    batch_metrics.state_update_proofs_requested,
-                    batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished(),
-                ) {
+                if self.is_done(batch_metrics, ctx) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         "BAL processed and all proofs complete, ending calculation"
@@ -995,12 +981,7 @@ impl MultiProofTask {
 
                 ctx.updates_finished_time = Some(Instant::now());
 
-                if self.is_done(
-                    batch_metrics.proofs_processed,
-                    batch_metrics.state_update_proofs_requested,
-                    batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished(),
-                ) {
+                if self.is_done(batch_metrics, ctx) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         "State updates finished and all proofs processed, ending calculation"
@@ -1022,12 +1003,7 @@ impl MultiProofTask {
                     let _ = self.to_sparse_trie.send(combined_update);
                 }
 
-                if self.is_done(
-                    batch_metrics.proofs_processed,
-                    batch_metrics.state_update_proofs_requested,
-                    batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished(),
-                ) {
+                if self.is_done(batch_metrics, ctx) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         "State updates finished and all proofs processed, ending calculation"
@@ -1140,12 +1116,7 @@ impl MultiProofTask {
                                 }
                             }
 
-                            if self.is_done(
-                                batch_metrics.proofs_processed,
-                                batch_metrics.state_update_proofs_requested,
-                                batch_metrics.prefetch_proofs_requested,
-                                ctx.updates_finished(),
-                            ) {
+                            if self.is_done(&batch_metrics, &ctx) {
                                 debug!(
                                     target: "engine::tree::payload_processor::multiproof",
                                     "State updates finished and all proofs processed, ending calculation"
@@ -1252,6 +1223,13 @@ struct MultiproofBatchMetrics {
     prefetch_proofs_requested: u64,
 }
 
+impl MultiproofBatchMetrics {
+    /// Returns `true` if all requested proofs have been processed.
+    const fn all_proofs_processed(&self) -> bool {
+        self.proofs_processed >= self.state_update_proofs_requested + self.prefetch_proofs_requested
+    }
+}
+
 /// Returns accounts only with those storages that were not already fetched, and
 /// if there are no such storages and the account itself was already fetched, the
 /// account shouldn't be included.
@@ -1263,9 +1241,9 @@ fn get_proof_targets(
     let mut targets = MultiProofTargets::default();
 
     // first collect all new accounts (not previously fetched)
-    for &hashed_address in state_update.accounts.keys() {
-        if !fetched_proof_targets.contains_key(&hashed_address) {
-            targets.insert(hashed_address, HashSet::default());
+    for hashed_address in state_update.accounts.keys() {
+        if !fetched_proof_targets.contains_key(hashed_address) {
+            targets.insert(*hashed_address, HashSet::default());
         }
     }
 
@@ -1336,13 +1314,14 @@ mod tests {
     use super::*;
     use crate::tree::cached_state::{CachedStateProvider, ExecutionCacheBuilder};
     use alloy_eip7928::{AccountChanges, BalanceChange};
-    use alloy_primitives::{map::B256Set, Address};
+    use alloy_primitives::Address;
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
-        PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TrieReader,
+        PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
     };
     use reth_trie::MultiProof;
+    use reth_trie_db::ChangesetCache;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
     use std::sync::{Arc, OnceLock};
@@ -1363,7 +1342,6 @@ mod tests {
     where
         F: DatabaseProviderFactory<
                 Provider: BlockReader
-                              + TrieReader
                               + StageCheckpointReader
                               + PruneCheckpointReader
                               + ChangeSetReader
@@ -1373,7 +1351,8 @@ mod tests {
             + 'static,
     {
         let rt_handle = get_test_runtime_handle();
-        let overlay_factory = OverlayStateProviderFactory::new(factory);
+        let changeset_cache = ChangesetCache::new();
+        let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
         let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
@@ -1385,7 +1364,7 @@ mod tests {
     fn create_cached_provider<F>(factory: F) -> CachedStateProvider<StateProviderBox>
     where
         F: DatabaseProviderFactory<
-                Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+                Provider: BlockReader + StageCheckpointReader + PruneCheckpointReader,
             > + Clone
             + Send
             + 'static,
@@ -1639,87 +1618,6 @@ mod tests {
         assert_eq!(target_slots.len(), 2);
         assert!(target_slots.contains(&slot1));
         assert!(target_slots.contains(&slot2));
-    }
-
-    #[test]
-    fn test_get_prefetch_proof_targets_no_duplicates() {
-        let test_provider_factory = create_test_provider_factory();
-        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
-
-        // populate some targets
-        let mut targets = MultiProofTargets::default();
-        let addr1 = B256::random();
-        let addr2 = B256::random();
-        let slot1 = B256::random();
-        let slot2 = B256::random();
-        targets.insert(addr1, std::iter::once(slot1).collect());
-        targets.insert(addr2, std::iter::once(slot2).collect());
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets are the same because there are no fetched proof
-        // targets yet
-        assert_eq!(prefetch_proof_targets, targets);
-
-        // add a different addr and slot to fetched proof targets
-        let addr3 = B256::random();
-        let slot3 = B256::random();
-        test_state_root_task.fetched_proof_targets.insert(addr3, std::iter::once(slot3).collect());
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets are the same because the fetched proof targets
-        // don't overlap with the prefetch targets
-        assert_eq!(prefetch_proof_targets, targets);
-    }
-
-    #[test]
-    fn test_get_prefetch_proof_targets_remove_subset() {
-        let test_provider_factory = create_test_provider_factory();
-        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
-
-        // populate some targe
-        let mut targets = MultiProofTargets::default();
-        let addr1 = B256::random();
-        let addr2 = B256::random();
-        let slot1 = B256::random();
-        let slot2 = B256::random();
-        targets.insert(addr1, std::iter::once(slot1).collect());
-        targets.insert(addr2, std::iter::once(slot2).collect());
-
-        // add a subset of the first target to fetched proof targets
-        test_state_root_task.fetched_proof_targets.insert(addr1, std::iter::once(slot1).collect());
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets do not include the subset
-        assert_eq!(prefetch_proof_targets.len(), 1);
-        assert!(!prefetch_proof_targets.contains_key(&addr1));
-        assert!(prefetch_proof_targets.contains_key(&addr2));
-
-        // now add one more slot to the prefetch targets
-        let slot3 = B256::random();
-        targets.get_mut(&addr1).unwrap().insert(slot3);
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets do not include the subset
-        // but include the new slot
-        assert_eq!(prefetch_proof_targets.len(), 2);
-        assert!(prefetch_proof_targets.contains_key(&addr1));
-        assert_eq!(
-            *prefetch_proof_targets.get(&addr1).unwrap(),
-            std::iter::once(slot3).collect::<B256Set>()
-        );
-        assert!(prefetch_proof_targets.contains_key(&addr2));
-        assert_eq!(
-            *prefetch_proof_targets.get(&addr2).unwrap(),
-            std::iter::once(slot2).collect::<B256Set>()
-        );
     }
 
     #[test]

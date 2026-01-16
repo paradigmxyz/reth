@@ -317,6 +317,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// This will update the links between blocks and remove all blocks that are [..
     /// `persisted_height`].
     pub fn remove_persisted_blocks(&self, persisted_num_hash: BlockNumHash) {
+        self.set_persisted(persisted_num_hash);
         // if the persisted hash is not in the canonical in memory state, do nothing, because it
         // means canonical blocks were not actually persisted.
         //
@@ -444,6 +445,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.chain_info_tracker.set_finalized(header);
     }
 
+    /// Persisted block setter.
+    pub fn set_persisted(&self, num_hash: BlockNumHash) {
+        self.inner.chain_info_tracker.set_persisted(num_hash);
+    }
+
     /// Canonical head getter.
     pub fn get_canonical_head(&self) -> SealedHeader<N::BlockHeader> {
         self.inner.chain_info_tracker.get_canonical_head()
@@ -457,6 +463,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Safe header getter.
     pub fn get_safe_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
         self.inner.chain_info_tracker.get_safe_header()
+    }
+
+    /// Persisted block `BlockNumHash` getter.
+    pub fn get_persisted_num_hash(&self) -> Option<BlockNumHash> {
+        self.inner.chain_info_tracker.get_persisted_num_hash()
     }
 
     /// Returns the `SealedHeader` corresponding to the pending state.
@@ -509,6 +520,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         &self,
     ) -> watch::Receiver<Option<SealedHeader<N::BlockHeader>>> {
         self.inner.chain_info_tracker.subscribe_finalized_block()
+    }
+
+    /// Subscribe to new persisted block events.
+    pub fn subscribe_persisted_block(&self) -> watch::Receiver<Option<BlockNumHash>> {
+        self.inner.chain_info_tracker.subscribe_persisted_block()
     }
 
     /// Attempts to send a new [`CanonStateNotification`] to all active Receiver handles.
@@ -926,31 +942,35 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     pub fn to_chain_notification(&self) -> CanonStateNotification<N> {
         match self {
             Self::Commit { new } => {
-                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
-                    chain.append_block(
-                        exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
-                    );
-                    chain
-                }));
-                CanonStateNotification::Commit { new }
+                CanonStateNotification::Commit { new: Arc::new(Self::blocks_to_chain(new)) }
             }
-            Self::Reorg { new, old } => {
-                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
+            Self::Reorg { new, old } => CanonStateNotification::Reorg {
+                new: Arc::new(Self::blocks_to_chain(new)),
+                old: Arc::new(Self::blocks_to_chain(old)),
+            },
+        }
+    }
+
+    /// Converts a slice of executed blocks into a [`Chain`].
+    fn blocks_to_chain(blocks: &[ExecutedBlock<N>]) -> Chain<N> {
+        match blocks {
+            [] => Chain::default(),
+            [first, rest @ ..] => {
+                let mut chain = Chain::from_block(
+                    first.recovered_block().clone(),
+                    first.execution_outcome().clone(),
+                    first.trie_updates(),
+                    first.hashed_state(),
+                );
+                for exec in rest {
                     chain.append_block(
                         exec.recovered_block().clone(),
                         exec.execution_outcome().clone(),
+                        exec.trie_updates(),
+                        exec.hashed_state(),
                     );
-                    chain
-                }));
-                let old = Arc::new(old.iter().fold(Chain::default(), |mut chain, exec| {
-                    chain.append_block(
-                        exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
-                    );
-                    chain
-                }));
-                CanonStateNotification::Reorg { new, old }
+                }
+                chain
             }
         }
     }
@@ -1521,22 +1541,35 @@ mod tests {
         let block2a =
             test_block_builder.get_executed_block_with_number(2, block1.recovered_block.hash());
 
-        let sample_execution_outcome = ExecutionOutcome {
-            receipts: vec![vec![], vec![]],
-            requests: vec![Requests::default(), Requests::default()],
-            ..Default::default()
-        };
-
         // Test commit notification
         let chain_commit = NewCanonicalChain::Commit { new: vec![block0.clone(), block1.clone()] };
+
+        // Build expected trie updates map
+        let mut expected_trie_updates = BTreeMap::new();
+        expected_trie_updates.insert(0, block0.trie_updates());
+        expected_trie_updates.insert(1, block1.trie_updates());
+
+        // Build expected hashed state map
+        let mut expected_hashed_state = BTreeMap::new();
+        expected_hashed_state.insert(0, block0.hashed_state());
+        expected_hashed_state.insert(1, block1.hashed_state());
+
+        // Build expected execution outcome (first_block matches first block number)
+        let commit_execution_outcome = ExecutionOutcome {
+            receipts: vec![vec![], vec![]],
+            requests: vec![Requests::default(), Requests::default()],
+            first_block: 0,
+            ..Default::default()
+        };
 
         assert_eq!(
             chain_commit.to_chain_notification(),
             CanonStateNotification::Commit {
                 new: Arc::new(Chain::new(
                     vec![block0.recovered_block().clone(), block1.recovered_block().clone()],
-                    sample_execution_outcome.clone(),
-                    None
+                    commit_execution_outcome,
+                    expected_trie_updates,
+                    expected_hashed_state
                 ))
             }
         );
@@ -1547,18 +1580,49 @@ mod tests {
             old: vec![block1.clone(), block2.clone()],
         };
 
+        // Build expected trie updates for old chain
+        let mut old_trie_updates = BTreeMap::new();
+        old_trie_updates.insert(1, block1.trie_updates());
+        old_trie_updates.insert(2, block2.trie_updates());
+
+        // Build expected trie updates for new chain
+        let mut new_trie_updates = BTreeMap::new();
+        new_trie_updates.insert(1, block1a.trie_updates());
+        new_trie_updates.insert(2, block2a.trie_updates());
+
+        // Build expected hashed state for old chain
+        let mut old_hashed_state = BTreeMap::new();
+        old_hashed_state.insert(1, block1.hashed_state());
+        old_hashed_state.insert(2, block2.hashed_state());
+
+        // Build expected hashed state for new chain
+        let mut new_hashed_state = BTreeMap::new();
+        new_hashed_state.insert(1, block1a.hashed_state());
+        new_hashed_state.insert(2, block2a.hashed_state());
+
+        // Build expected execution outcome for reorg chains (first_block matches first block
+        // number)
+        let reorg_execution_outcome = ExecutionOutcome {
+            receipts: vec![vec![], vec![]],
+            requests: vec![Requests::default(), Requests::default()],
+            first_block: 1,
+            ..Default::default()
+        };
+
         assert_eq!(
             chain_reorg.to_chain_notification(),
             CanonStateNotification::Reorg {
                 old: Arc::new(Chain::new(
                     vec![block1.recovered_block().clone(), block2.recovered_block().clone()],
-                    sample_execution_outcome.clone(),
-                    None
+                    reorg_execution_outcome.clone(),
+                    old_trie_updates,
+                    old_hashed_state
                 )),
                 new: Arc::new(Chain::new(
                     vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()],
-                    sample_execution_outcome,
-                    None
+                    reorg_execution_outcome,
+                    new_trie_updates,
+                    new_hashed_state
                 ))
             }
         );

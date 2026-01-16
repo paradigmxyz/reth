@@ -1254,8 +1254,9 @@ where
         let result =
             build_account_multiproof_with_storage_roots(&proof_tx.provider, ctx, &mut tracker);
 
-        let proof_elapsed = proof_start.elapsed();
-        let total_elapsed = start.elapsed();
+        let now = Instant::now();
+        let proof_elapsed = now.duration_since(proof_start);
+        let total_elapsed = now.duration_since(start);
         let proof_cursor_metrics = tracker.cursor_metrics;
         proof_cursor_metrics.record_spans();
 
@@ -1505,17 +1506,6 @@ where
         }
     }
 
-    // Consume remaining storage proof receivers for accounts not encountered during trie walk.
-    for (hashed_address, receiver) in storage_proof_receivers {
-        if let Ok(proof_msg) = receiver.recv() {
-            // Extract storage proof from the result
-            let proof_result = proof_msg.result?;
-            let proof = Into::<Option<DecodedStorageMultiProof>>::into(proof_result)
-                .expect("Partial proofs are not yet supported");
-            collected_decoded_storages.insert(hashed_address, proof);
-        }
-    }
-
     let _ = hash_builder.root();
 
     let account_subtree_raw_nodes = hash_builder.take_proof_nodes();
@@ -1536,6 +1526,17 @@ where
     // Extend tracker with accumulated metrics from account cursors
     tracker.cursor_metrics.account_trie_cursor.extend(&account_trie_cursor_metrics);
     tracker.cursor_metrics.account_hashed_cursor.extend(&account_hashed_cursor_metrics);
+
+    // Consume remaining storage proof receivers for accounts not encountered during trie walk.
+    // Done last to allow storage workers more time to complete while we finalized the account trie.
+    for (hashed_address, receiver) in storage_proof_receivers {
+        if let Ok(proof_msg) = receiver.recv() {
+            let proof_result = proof_msg.result?;
+            let proof = Into::<Option<DecodedStorageMultiProof>>::into(proof_result)
+                .expect("Partial proofs are not yet supported");
+            collected_decoded_storages.insert(hashed_address, proof);
+        }
+    }
 
     Ok(DecodedMultiProof {
         account_subtree: decoded_account_subtree,
@@ -1725,8 +1726,11 @@ mod tests {
         runtime.block_on(async {
             let handle = tokio::runtime::Handle::current();
             let provider_factory = create_test_provider_factory();
-            let factory =
-                reth_provider::providers::OverlayStateProviderFactory::new(provider_factory);
+            let changeset_cache = reth_trie_db::ChangesetCache::new();
+            let factory = reth_provider::providers::OverlayStateProviderFactory::new(
+                provider_factory,
+                changeset_cache,
+            );
             let ctx = test_ctx(factory);
 
             let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, false);

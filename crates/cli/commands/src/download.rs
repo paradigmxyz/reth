@@ -16,6 +16,7 @@ use std::{
 use tar::Archive;
 use tokio::task;
 use tracing::info;
+use url::Url;
 use zstd::stream::read::Decoder as ZstdDecoder;
 
 const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
@@ -85,6 +86,9 @@ impl DownloadDefaults {
             "\nIf no URL is provided, the latest mainnet archive snapshot\nwill be proposed for download from ",
         );
         help.push_str(self.default_base_url.as_ref());
+        help.push_str(
+            ".\n\nLocal file:// URLs are also supported for extracting snapshots from disk.",
+        );
         help
     }
 
@@ -170,12 +174,14 @@ struct DownloadProgress {
     downloaded: u64,
     total_size: u64,
     last_displayed: Instant,
+    started_at: Instant,
 }
 
 impl DownloadProgress {
     /// Creates new progress tracker with given total size
     fn new(total_size: u64) -> Self {
-        Self { downloaded: 0, total_size, last_displayed: Instant::now() }
+        let now = Instant::now();
+        Self { downloaded: 0, total_size, last_displayed: now, started_at: now }
     }
 
     /// Converts bytes to human readable format (B, KB, MB, GB)
@@ -191,6 +197,18 @@ impl DownloadProgress {
         format!("{:.2} {}", size, BYTE_UNITS[unit_index])
     }
 
+    /// Format duration as human readable string
+    fn format_duration(duration: Duration) -> String {
+        let secs = duration.as_secs();
+        if secs < 60 {
+            format!("{secs}s")
+        } else if secs < 3600 {
+            format!("{}m {}s", secs / 60, secs % 60)
+        } else {
+            format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+        }
+    }
+
     /// Updates progress bar
     fn update(&mut self, chunk_size: u64) -> Result<()> {
         self.downloaded += chunk_size;
@@ -201,8 +219,24 @@ impl DownloadProgress {
             let formatted_total = Self::format_size(self.total_size);
             let progress = (self.downloaded as f64 / self.total_size as f64) * 100.0;
 
+            // Calculate ETA based on current speed
+            let elapsed = self.started_at.elapsed();
+            let eta = if self.downloaded > 0 {
+                let remaining = self.total_size.saturating_sub(self.downloaded);
+                let speed = self.downloaded as f64 / elapsed.as_secs_f64();
+                if speed > 0.0 {
+                    Duration::from_secs_f64(remaining as f64 / speed)
+                } else {
+                    Duration::ZERO
+                }
+            } else {
+                Duration::ZERO
+            };
+            let eta_str = Self::format_duration(eta);
+
+            // Pad with spaces to clear any previous longer line
             print!(
-                "\rDownloading and extracting... {progress:.2}% ({formatted_downloaded} / {formatted_total})",
+                "\rDownloading and extracting... {progress:.2}% ({formatted_downloaded} / {formatted_total}) ETA: {eta_str}     ",
             );
             io::stdout().flush()?;
             self.last_displayed = Instant::now();
@@ -246,29 +280,30 @@ enum CompressionFormat {
 impl CompressionFormat {
     /// Detect compression format from file extension
     fn from_url(url: &str) -> Result<Self> {
-        if url.ends_with(EXTENSION_TAR_LZ4) {
+        let path =
+            Url::parse(url).map(|u| u.path().to_string()).unwrap_or_else(|_| url.to_string());
+
+        if path.ends_with(EXTENSION_TAR_LZ4) {
             Ok(Self::Lz4)
-        } else if url.ends_with(EXTENSION_TAR_ZSTD) {
+        } else if path.ends_with(EXTENSION_TAR_ZSTD) {
             Ok(Self::Zstd)
         } else {
-            Err(eyre::eyre!("Unsupported file format. Expected .tar.lz4 or .tar.zst, got: {}", url))
+            Err(eyre::eyre!(
+                "Unsupported file format. Expected .tar.lz4 or .tar.zst, got: {}",
+                path
+            ))
         }
     }
 }
 
-/// Downloads and extracts a snapshot, blocking until finished.
-fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
-    let client = reqwest::blocking::Client::builder().build()?;
-    let response = client.get(url).send()?.error_for_status()?;
-
-    let total_size = response.content_length().ok_or_else(|| {
-        eyre::eyre!(
-            "Server did not provide Content-Length header. This is required for snapshot downloads"
-        )
-    })?;
-
-    let progress_reader = ProgressReader::new(response, total_size);
-    let format = CompressionFormat::from_url(url)?;
+/// Extracts a compressed tar archive to the target directory with progress tracking.
+fn extract_archive<R: Read>(
+    reader: R,
+    total_size: u64,
+    format: CompressionFormat,
+    target_dir: &Path,
+) -> Result<()> {
+    let progress_reader = ProgressReader::new(reader, total_size);
 
     match format {
         CompressionFormat::Lz4 => {
@@ -283,6 +318,45 @@ fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
 
     info!(target: "reth::cli", "Extraction complete.");
     Ok(())
+}
+
+/// Extracts a snapshot from a local file.
+fn extract_from_file(path: &Path, format: CompressionFormat, target_dir: &Path) -> Result<()> {
+    let file = std::fs::File::open(path)?;
+    let total_size = file.metadata()?.len();
+    extract_archive(file, total_size, format, target_dir)
+}
+
+/// Fetches the snapshot from a remote URL, uncompressing it in a streaming fashion.
+fn download_and_extract(url: &str, format: CompressionFormat, target_dir: &Path) -> Result<()> {
+    let client = reqwest::blocking::Client::builder().build()?;
+    let response = client.get(url).send()?.error_for_status()?;
+
+    let total_size = response.content_length().ok_or_else(|| {
+        eyre::eyre!(
+            "Server did not provide Content-Length header. This is required for snapshot downloads"
+        )
+    })?;
+
+    extract_archive(response, total_size, format, target_dir)
+}
+
+/// Downloads and extracts a snapshot, blocking until finished.
+///
+/// Supports both `file://` URLs for local files and HTTP(S) URLs for remote downloads.
+fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
+    let format = CompressionFormat::from_url(url)?;
+
+    if let Ok(parsed_url) = Url::parse(url) &&
+        parsed_url.scheme() == "file"
+    {
+        let file_path = parsed_url
+            .to_file_path()
+            .map_err(|_| eyre::eyre!("Invalid file:// URL path: {}", url))?;
+        extract_from_file(&file_path, format, target_dir)
+    } else {
+        download_and_extract(url, format, target_dir)
+    }
 }
 
 async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
@@ -343,6 +417,7 @@ mod tests {
         assert!(help.contains("Available snapshot sources:"));
         assert!(help.contains("merkle.io"));
         assert!(help.contains("publicnode.com"));
+        assert!(help.contains("file://"));
     }
 
     #[test]
@@ -366,5 +441,26 @@ mod tests {
         assert_eq!(defaults.default_base_url, "https://custom.example.com");
         assert_eq!(defaults.available_snapshots.len(), 4); // 2 defaults + 2 added
         assert_eq!(defaults.long_help, Some("Custom help for snapshots".to_string()));
+    }
+
+    #[test]
+    fn test_compression_format_detection() {
+        assert!(matches!(
+            CompressionFormat::from_url("https://example.com/snapshot.tar.lz4"),
+            Ok(CompressionFormat::Lz4)
+        ));
+        assert!(matches!(
+            CompressionFormat::from_url("https://example.com/snapshot.tar.zst"),
+            Ok(CompressionFormat::Zstd)
+        ));
+        assert!(matches!(
+            CompressionFormat::from_url("file:///path/to/snapshot.tar.lz4"),
+            Ok(CompressionFormat::Lz4)
+        ));
+        assert!(matches!(
+            CompressionFormat::from_url("file:///path/to/snapshot.tar.zst"),
+            Ok(CompressionFormat::Zstd)
+        ));
+        assert!(CompressionFormat::from_url("https://example.com/snapshot.tar.gz").is_err());
     }
 }

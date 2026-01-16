@@ -9,7 +9,7 @@ use crate::{
     HashedPostStateProvider, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
     StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider, TrieReader,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -17,7 +17,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
-    MemoryOverlayStateProvider,
+    MemoryOverlayStateProvider, PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
@@ -29,7 +29,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, KeccakKeyHasher};
+use reth_trie::{HashedPostState, KeccakKeyHasher};
 use revm_database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -697,6 +697,13 @@ impl<N: ProviderNodeTypes> ForkChoiceSubscriptions for BlockchainProvider<N> {
     }
 }
 
+impl<N: ProviderNodeTypes> PersistedBlockSubscriptions for BlockchainProvider<N> {
+    fn subscribe_persisted_block(&self) -> PersistedBlockNotifications {
+        let receiver = self.canonical_in_memory_state.subscribe_persisted_block();
+        PersistedBlockNotifications(receiver)
+    }
+}
+
 impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
     fn storage_changeset(
         &self,
@@ -761,19 +768,6 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> TrieReader for BlockchainProvider<N> {
-    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
-        self.consistent_provider()?.trie_reverts(from)
-    }
-
-    fn get_block_trie_updates(
-        &self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<TrieUpdatesSorted> {
-        self.consistent_provider()?.get_block_trie_updates(block_number)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -782,7 +776,7 @@ mod tests {
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        BlockWriter, CanonChainTracker, ProviderFactory,
+        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
@@ -801,8 +795,8 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory, StateWriter,
-        TransactionVariant, TransactionsProvider,
+        HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory,
+        StateWriteConfig, StateWriter, TransactionVariant, TransactionsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -810,6 +804,7 @@ mod tests {
     };
     use revm_database::{BundleState, OriginalValuesKnown};
     use std::{
+        collections::BTreeMap,
         ops::{Bound, Range, RangeBounds},
         sync::Arc,
     };
@@ -899,6 +894,7 @@ mod tests {
                     ..Default::default()
                 },
                 OriginalValuesKnown::No,
+                StateWriteConfig::default(),
             )?;
         }
 
@@ -989,7 +985,7 @@ mod tests {
 
                 // Push to disk
                 let provider_rw = hook_provider.database_provider_rw().unwrap();
-                provider_rw.save_blocks(vec![lowest_memory_block]).unwrap();
+                provider_rw.save_blocks(vec![lowest_memory_block], SaveBlocksMode::Full).unwrap();
                 provider_rw.commit().unwrap();
 
                 // Remove from memory
@@ -1344,7 +1340,12 @@ mod tests {
 
         // Send and receive commit notifications.
         let block_2 = test_block_builder.generate_random_block(1, block_hash_1).try_recover()?;
-        let chain = Chain::new(vec![block_2], ExecutionOutcome::default(), None);
+        let chain = Chain::new(
+            vec![block_2],
+            ExecutionOutcome::default(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        );
         let commit = CanonStateNotification::Commit { new: Arc::new(chain.clone()) };
         in_memory_state.notify_canon_state(commit.clone());
         let (notification_1, notification_2) = tokio::join!(rx_1.recv(), rx_2.recv());
@@ -1354,7 +1355,12 @@ mod tests {
         // Send and receive re-org notifications.
         let block_3 = test_block_builder.generate_random_block(1, block_hash_1).try_recover()?;
         let block_4 = test_block_builder.generate_random_block(2, block_3.hash()).try_recover()?;
-        let new_chain = Chain::new(vec![block_3, block_4], ExecutionOutcome::default(), None);
+        let new_chain = Chain::new(
+            vec![block_3, block_4],
+            ExecutionOutcome::default(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        );
         let re_org =
             CanonStateNotification::Reorg { old: Arc::new(chain), new: Arc::new(new_chain) };
         in_memory_state.notify_canon_state(re_org.clone());

@@ -45,5 +45,8 @@ tracing.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 
+[features]
+edge = ["reth-db-api/edge", "reth-provider/rocksdb"]
+
 [lints]
 workspace = true

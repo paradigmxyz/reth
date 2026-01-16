@@ -8,7 +8,7 @@ use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader, TrieReader,
+    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -17,7 +17,7 @@ use reth_trie::{
     HashedPostStateSorted, KeccakKeyHasher,
 };
 use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
+    ChangesetCache, DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
 };
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -67,6 +67,8 @@ pub struct OverlayStateProviderFactory<F> {
     trie_overlay: Option<Arc<TrieUpdatesSorted>>,
     /// Optional hashed state overlay
     hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
+    /// Changeset cache handle for retrieving trie changesets
+    changeset_cache: ChangesetCache,
     /// Metrics for tracking provider operations
     metrics: OverlayStateProviderMetrics,
     /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
@@ -76,12 +78,13 @@ pub struct OverlayStateProviderFactory<F> {
 
 impl<F> OverlayStateProviderFactory<F> {
     /// Create a new overlay state provider factory
-    pub fn new(factory: F) -> Self {
+    pub fn new(factory: F, changeset_cache: ChangesetCache) -> Self {
         Self {
             factory,
             block_hash: None,
             trie_overlay: None,
             hashed_state_overlay: None,
+            changeset_cache,
             metrics: OverlayStateProviderMetrics::default(),
             overlay_cache: Default::default(),
         }
@@ -112,13 +115,22 @@ impl<F> OverlayStateProviderFactory<F> {
         self.hashed_state_overlay = hashed_state_overlay;
         self
     }
+
+    /// Extends the existing hashed state overlay with the given [`HashedPostStateSorted`].
+    pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
+        if let Some(overlay) = self.hashed_state_overlay.as_mut() {
+            Arc::make_mut(overlay).extend_ref(&other);
+        } else {
+            self.hashed_state_overlay = Some(Arc::new(other))
+        }
+        self
+    }
 }
 
 impl<F> OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: TrieReader
-        + StageCheckpointReader
+    F::Provider: StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
         + DBProvider
@@ -144,7 +156,7 @@ where
     /// the DB are currently synced to.
     fn get_db_tip_block_number(&self, provider: &F::Provider) -> ProviderResult<BlockNumber> {
         provider
-            .get_stage_checkpoint(StageId::MerkleChangeSets)?
+            .get_stage_checkpoint(StageId::Finish)?
             .as_ref()
             .map(|chk| chk.block_number)
             .ok_or_else(|| ProviderError::InsufficientChangesets { requested: 0, available: 0..=0 })
@@ -153,7 +165,6 @@ where
     /// Returns whether or not it is required to collect reverts, and validates that there are
     /// sufficient changesets to revert to the requested block number if so.
     ///
-    /// Returns an error if the `MerkleChangeSets` checkpoint doesn't cover the requested block.
     /// Takes into account both the stage checkpoint and the prune checkpoint to determine the
     /// available data range.
     fn reverts_required(
@@ -168,18 +179,10 @@ where
             return Ok(false)
         }
 
-        // Get the MerkleChangeSets prune checkpoints, which will be used to determine the lower
-        // bound.
-        let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::MerkleChangeSets)?;
-
-        // Extract the lower bound from prune checkpoint if available.
-        //
-        // If not available we assume pruning has never ran and so there is no lower bound. This
-        // should not generally happen, since MerkleChangeSets always have pruning enabled, but when
-        // starting a new node from scratch (e.g. in a test case or benchmark) it can surface.
-        //
+        // Check account history prune checkpoint to determine the lower bound of available data.
         // The prune checkpoint's block_number is the highest pruned block, so data is available
-        // starting from the next block
+        // starting from the next block.
+        let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::AccountHistory)?;
         let lower_bound = prune_checkpoint
             .and_then(|chk| chk.block_number)
             .map(|block_number| block_number + 1)
@@ -223,16 +226,32 @@ where
             self.get_requested_block_number(provider)? &&
             self.reverts_required(provider, db_tip_block, from_block)?
         {
-            // Collect trie reverts
+            debug!(
+                target: "providers::state::overlay",
+                block_hash = ?self.block_hash,
+                from_block,
+                db_tip_block,
+                range_start = from_block + 1,
+                range_end = db_tip_block,
+                "Collecting trie reverts for overlay state provider"
+            );
+
+            // Collect trie reverts using changeset cache
             let mut trie_reverts = {
                 let _guard =
                     debug_span!(target: "providers::state::overlay", "Retrieving trie reverts")
                         .entered();
 
                 let start = Instant::now();
-                let res = provider.trie_reverts(from_block + 1)?;
+
+                // Use changeset cache to retrieve and accumulate reverts to restore state after
+                // from_block
+                let accumulated_reverts = self
+                    .changeset_cache
+                    .get_or_compute_range(provider, (from_block + 1)..=db_tip_block)?;
+
                 retrieve_trie_reverts_duration = start.elapsed();
-                res
+                accumulated_reverts
             };
 
             // Collect state reverts
@@ -361,11 +380,7 @@ where
 impl<F> DatabaseProviderROFactory for OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: TrieReader
-        + StageCheckpointReader
-        + PruneCheckpointReader
-        + BlockNumReader
-        + ChangeSetReader,
+    F::Provider: StageCheckpointReader + PruneCheckpointReader + BlockNumReader + ChangeSetReader,
 {
     type Provider = OverlayStateProvider<F::Provider>;
 
