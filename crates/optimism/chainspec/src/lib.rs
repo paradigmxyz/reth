@@ -69,8 +69,7 @@ use alloy_hardforks::Hardfork;
 use alloy_primitives::{B256, U256};
 use derive_more::{Constructor, Deref, From, Into};
 use reth_chainspec::{
-    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
-    DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
+    ethereum, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 use reth_mantle_forks::{MantleHardfork, MantleHardforks};
@@ -457,7 +456,7 @@ impl From<Genesis> for OpChainSpec {
                 // We assume no OP network merges, and set the paris block and total difficulty to
                 // zero
                 paris_block_and_final_difficulty: Some((0, U256::ZERO)),
-                base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+                base_fee_params: optimism_genesis_info.base_fee_params,
                 ..Default::default()
             },
         }
@@ -479,44 +478,28 @@ struct OpGenesisInfo {
 
 impl OpGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
-        let mut info = Self {
+        let optimism_chain_info = op_alloy_rpc_types::OpChainInfo::extract_from(
+            &genesis.config.extra_fields,
+        )
+        .unwrap_or_default();
+
+        // op-geth: src/mantle-v2/op-node/rollup/mantle_types.go AlignOpWithMantle() 169-181
+        let base_fee_params = optimism_chain_info
+            .base_fee_info
+            .and_then(|info| {
+                info.eip1559_denominator
+                    .zip(info.eip1559_elasticity)
+                    .map(|(denominator, elasticity)| {
+                        BaseFeeParamsKind::Variable(vec![(MantleHardfork::Arsia.boxed(), BaseFeeParams::new(denominator as u128, elasticity as u128))].into())
+                    })
+            })
+            .unwrap_or_else(|| BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()));
+
+        Self {
             mantle_chain_info: MantleChainInfo::extract_from(&genesis.config.extra_fields),
-            optimism_chain_info: op_alloy_rpc_types::OpChainInfo::extract_from(
-                &genesis.config.extra_fields,
-            )
-            .unwrap_or_default(),
-            ..Default::default()
-        };
-        if let Some(optimism_base_fee_info) = &info.optimism_chain_info.base_fee_info &&
-            let (Some(elasticity), Some(denominator)) = (
-                optimism_base_fee_info.eip1559_elasticity,
-                optimism_base_fee_info.eip1559_denominator,
-            )
-        {
-            let base_fee_params = if let Some(canyon_denominator) =
-                optimism_base_fee_info.eip1559_denominator_canyon
-            {
-                BaseFeeParamsKind::Variable(
-                    vec![
-                        (
-                            EthereumHardfork::London.boxed(),
-                            BaseFeeParams::new(denominator as u128, elasticity as u128),
-                        ),
-                        (
-                            OpHardfork::Canyon.boxed(),
-                            BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
-                        ),
-                    ]
-                    .into(),
-                )
-            } else {
-                BaseFeeParams::new(denominator as u128, elasticity as u128).into()
-            };
-
-            info.base_fee_params = base_fee_params;
+            optimism_chain_info,
+            base_fee_params,
         }
-
-        info
     }
 }
 
