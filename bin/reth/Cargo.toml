@@ -182,6 +182,11 @@ min-trace-logs = [
 
 edge = ["reth-ethereum-cli/edge", "reth-node-core/edge"]
 
+rocksdb = [
+    "reth-node-ethereum/rocksdb",
+    "reth-provider/rocksdb",
+]
+
 [[bin]]
 name = "reth"
 path = "src/main.rs"

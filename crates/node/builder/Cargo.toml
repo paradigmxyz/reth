@@ -128,3 +128,7 @@ op = [
     "reth-evm/op",
     "reth-primitives-traits/op",
 ]
+rocksdb = [
+    "reth-provider/rocksdb",
+    "reth-stages/rocksdb",
+]

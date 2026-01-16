@@ -337,6 +337,10 @@ impl RocksDBProvider {
             provider: self,
             inner: WriteBatchWithTransaction::<true>::default(),
             buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+            #[cfg(debug_assertions)]
+            touched_account_history: std::collections::HashSet::new(),
+            #[cfg(debug_assertions)]
+            touched_storage_history: std::collections::HashSet::new(),
         }
     }
 
