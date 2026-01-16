@@ -1,11 +1,5 @@
 //! Types and traits for validating blocks and payloads.
 
-/// Threshold for switching from `extend_ref` loop to `merge_batch` in `merge_overlay_trie_input`.
-///
-/// Benchmarked crossover: `extend_ref` wins up to ~64 blocks, `merge_batch` wins beyond.
-/// Using 64 as threshold since they're roughly equal there.
-const MERGE_BATCH_THRESHOLD: usize = 64;
-
 use crate::tree::{
     cached_state::CachedStateProvider,
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
@@ -22,7 +16,7 @@ use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
 use rayon::prelude::*;
-use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock};
+use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, LazyOverlay};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -46,10 +40,7 @@ use reth_provider::{
     StateProvider, StateProviderFactory, StateReader,
 };
 use reth_revm::db::State;
-use reth_trie::{
-    updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted, StateRoot, TrieInputSorted,
-};
+use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
@@ -431,26 +422,16 @@ where
             .map_err(Box::<dyn std::error::Error + Send + Sync>::from))
         .map(Arc::new);
 
-        // Compute trie input from ancestors once, before spawning payload processor.
-        // This will be extended with the current block's hashed state after execution.
-        let trie_input_start = Instant::now();
-        let (trie_input, block_hash_for_overlay) =
-            ensure_ok!(self.compute_trie_input(parent_hash, ctx.state()));
-
-        self.metrics
-            .block_validation
-            .trie_input_duration
-            .record(trie_input_start.elapsed().as_secs_f64());
+        // Create lazy overlay from ancestors - this doesn't block, allowing execution to start
+        // before the trie data is ready. The overlay will be computed on first access.
+        let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, ctx.state());
 
         // Create overlay factory for payload processor (StateRootTask path needs it for
         // multiproofs)
-        let overlay_factory = {
-            let TrieInputSorted { nodes, state, .. } = &trie_input;
+        let overlay_factory =
             OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
-                .with_block_hash(Some(block_hash_for_overlay))
-                .with_trie_overlay(Some(Arc::clone(nodes)))
-                .with_hashed_state_overlay(Some(Arc::clone(state)))
-        };
+                .with_block_hash(Some(anchor_hash))
+                .with_lazy_overlay(lazy_overlay);
 
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -954,128 +935,36 @@ where
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
 
-    /// Computes [`TrieInputSorted`] for the provided parent hash by combining database state
-    /// with in-memory overlays.
+    /// Creates a [`LazyOverlay`] for the parent block without blocking.
     ///
-    /// The goal of this function is to take in-memory blocks and generate a [`TrieInputSorted`]
-    /// that extends from the highest persisted ancestor up through the parent. This enables state
-    /// root computation and proof generation without requiring all blocks to be persisted
-    /// first.
+    /// Returns a lazy overlay that will compute the trie input on first access, and the anchor
+    /// block hash (the highest persisted ancestor). This allows execution to start immediately
+    /// while the trie input computation is deferred until the overlay is actually needed.
     ///
-    /// It works as follows:
-    /// 1. Collect in-memory overlay blocks using [`crate::tree::TreeState::blocks_by_hash`]. This
-    ///    returns the highest persisted ancestor hash (`block_hash`) and the list of in-memory
-    ///    blocks building on top of it.
-    /// 2. Fast path: If the tip in-memory block's trie input is already anchored to `block_hash`
-    ///    (its `anchor_hash` matches `block_hash`), reuse it directly.
-    /// 3. Slow path: Build a new [`TrieInputSorted`] by aggregating the overlay blocks (from oldest
-    ///    to newest) on top of the database state at `block_hash`.
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_validator",
-        skip_all,
-        fields(parent_hash)
-    )]
-    fn compute_trie_input(
-        &self,
+    /// If parent is on disk (no in-memory blocks), returns `None` for the lazy overlay.
+    fn get_parent_lazy_overlay(
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
-    ) -> ProviderResult<(TrieInputSorted, B256)> {
-        let wait_start = Instant::now();
-        let (block_hash, blocks) =
+    ) -> (Option<LazyOverlay>, B256) {
+        let (anchor_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
-        // Fast path: if the tip block's anchor matches the persisted ancestor hash, reuse its
-        // TrieInput. This means the TrieInputSorted already aggregates all in-memory overlays
-        // from that ancestor, so we can avoid re-aggregation.
-        if let Some(tip_block) = blocks.first() {
-            let data = tip_block.trie_data();
-            if let (Some(anchor_hash), Some(trie_input)) =
-                (data.anchor_hash(), data.trie_input().cloned()) &&
-                anchor_hash == block_hash
-            {
-                trace!(target: "engine::tree::payload_validator", %block_hash,"Reusing trie input with matching anchor hash");
-                self.metrics
-                    .block_validation
-                    .deferred_trie_wait_duration
-                    .record(wait_start.elapsed().as_secs_f64());
-                return Ok(((*trie_input).clone(), block_hash));
-            }
-        }
-
         if blocks.is_empty() {
-            debug!(target: "engine::tree::payload_validator", "Parent found on disk");
-        } else {
-            debug!(target: "engine::tree::payload_validator", historical = ?block_hash, blocks = blocks.len(), "Parent found in memory");
+            debug!(target: "engine::tree::payload_validator", "Parent found on disk, no lazy overlay needed");
+            return (None, anchor_hash);
         }
 
-        // Extend with contents of parent in-memory blocks directly in sorted form.
-        let input = Self::merge_overlay_trie_input(&blocks);
+        debug!(
+            target: "engine::tree::payload_validator",
+            %anchor_hash,
+            num_blocks = blocks.len(),
+            "Creating lazy overlay for in-memory blocks"
+        );
 
-        self.metrics
-            .block_validation
-            .deferred_trie_wait_duration
-            .record(wait_start.elapsed().as_secs_f64());
-        Ok((input, block_hash))
-    }
+        // Extract deferred trie data handles (non-blocking)
+        let handles: Vec<DeferredTrieData> = blocks.iter().map(|b| b.trie_data_handle()).collect();
 
-    /// Aggregates in-memory blocks into a single [`TrieInputSorted`] by combining their
-    /// state changes.
-    ///
-    /// The input `blocks` vector is ordered newest -> oldest (see `TreeState::blocks_by_hash`).
-    ///
-    /// Uses `extend_ref` loop for small k, k-way `merge_batch` for large k.
-    /// See [`MERGE_BATCH_THRESHOLD`] for crossover point.
-    fn merge_overlay_trie_input(blocks: &[ExecutedBlock<N>]) -> TrieInputSorted {
-        if blocks.is_empty() {
-            return TrieInputSorted::default();
-        }
-
-        // Single block: return Arc directly without cloning
-        if blocks.len() == 1 {
-            let data = blocks[0].trie_data();
-            return TrieInputSorted {
-                state: Arc::clone(&data.hashed_state),
-                nodes: Arc::clone(&data.trie_updates),
-                prefix_sets: Default::default(),
-            };
-        }
-
-        if blocks.len() < MERGE_BATCH_THRESHOLD {
-            // Small k: extend_ref loop is faster
-            // Iterate oldest->newest so newer values override older ones
-            let mut blocks_iter = blocks.iter().rev();
-            let first = blocks_iter.next().expect("blocks is non-empty");
-            let data = first.trie_data();
-
-            let mut state = Arc::clone(&data.hashed_state);
-            let mut nodes = Arc::clone(&data.trie_updates);
-            let state_mut = Arc::make_mut(&mut state);
-            let nodes_mut = Arc::make_mut(&mut nodes);
-
-            for block in blocks_iter {
-                let data = block.trie_data();
-                state_mut.extend_ref(data.hashed_state.as_ref());
-                nodes_mut.extend_ref(data.trie_updates.as_ref());
-            }
-
-            TrieInputSorted { state, nodes, prefix_sets: Default::default() }
-        } else {
-            // Large k: merge_batch is faster (O(n log k) via k-way merge)
-            let trie_data: Vec<_> = blocks.iter().map(|b| b.trie_data()).collect();
-
-            let merged_state = HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|d| d.hashed_state.as_ref()),
-            );
-            let merged_nodes =
-                TrieUpdatesSorted::merge_batch(trie_data.iter().map(|d| d.trie_updates.as_ref()));
-
-            TrieInputSorted {
-                state: Arc::new(merged_state),
-                nodes: Arc::new(merged_nodes),
-                prefix_sets: Default::default(),
-            }
-        }
+        (Some(LazyOverlay::new(anchor_hash, handles)), anchor_hash)
     }
 
     /// Spawns a background task to compute and sort trie data for the executed block.
