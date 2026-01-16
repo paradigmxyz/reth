@@ -61,6 +61,16 @@ pub struct StaticFilesArgs {
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
     #[arg(long = "static-files.account-change-sets")]
     pub account_changesets: bool,
+
+    /// Use `RocksDB` for history indices instead of MDBX.
+    ///
+    /// When enabled, `AccountsHistory`, `StoragesHistory`, and `TransactionHashNumbers`
+    /// tables will be stored in `RocksDB` for better write performance.
+    ///
+    /// Note: This setting can only be configured at genesis initialization. Once
+    /// the node has been initialized, changing this flag requires re-syncing from scratch.
+    #[arg(long = "storage.rocksdb")]
+    pub rocksdb: bool,
 }
 
 impl StaticFilesArgs {
@@ -101,5 +111,8 @@ impl StaticFilesArgs {
             .with_receipts_in_static_files(self.receipts)
             .with_transaction_senders_in_static_files(self.transaction_senders)
             .with_account_changesets_in_static_files(self.account_changesets)
+            .with_account_history_in_rocksdb(self.rocksdb)
+            .with_storages_history_in_rocksdb(self.rocksdb)
+            .with_transaction_hash_numbers_in_rocksdb(self.rocksdb)
     }
 }
