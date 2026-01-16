@@ -10,9 +10,9 @@ use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSort
 use std::sync::{Arc, OnceLock};
 use tracing::{debug, trace};
 
-/// Threshold for switching from extend_ref loop to merge_batch.
+/// Threshold for switching from `extend_ref` loop to `merge_batch`.
 ///
-/// Benchmarked crossover: extend_ref wins up to ~64 blocks, merge_batch wins beyond.
+/// Benchmarked crossover: `extend_ref` wins up to ~64 blocks, `merge_batch` wins beyond.
 const MERGE_BATCH_THRESHOLD: usize = 64;
 
 /// Inputs captured for lazy overlay computation.
@@ -87,7 +87,7 @@ impl LazyOverlay {
         self.inner.get_or_init(|| self.compute())
     }
 
-    /// Returns the overlay as (nodes, state) tuple for use with [`OverlayStateProviderFactory`].
+    /// Returns the overlay as (nodes, state) tuple for use with `OverlayStateProviderFactory`.
     pub fn as_overlay(&self) -> (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>) {
         let input = self.get();
         (Arc::clone(&input.nodes), Arc::clone(&input.state))
