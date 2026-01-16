@@ -266,7 +266,8 @@ impl<Provider: DBProvider + BlockNumReader + ChangeSetReader> AccountReader
                     .map(|account_before| account_before.info)
             }
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
-                Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
+                let hashed_address = alloy_primitives::keccak256(address);
+                Ok(self.tx().get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?)
             }
         }
     }
@@ -427,13 +428,17 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> 
                     })?
                     .value,
             )),
-            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
-                .tx()
-                .cursor_dup_read::<tables::PlainStorageState>()?
-                .seek_by_key_subkey(address, storage_key)?
-                .filter(|entry| entry.key == storage_key)
-                .map(|entry| entry.value)
-                .or(Some(StorageValue::ZERO))),
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                let hashed_address = alloy_primitives::keccak256(address);
+                let hashed_slot = alloy_primitives::keccak256(storage_key);
+                Ok(self
+                    .tx()
+                    .cursor_dup_read::<tables::HashedStorages>()?
+                    .seek_by_key_subkey(hashed_address, hashed_slot)?
+                    .filter(|entry| entry.key == hashed_slot)
+                    .map(|entry| entry.value)
+                    .or(Some(StorageValue::ZERO)))
+            }
         }
     }
 }
