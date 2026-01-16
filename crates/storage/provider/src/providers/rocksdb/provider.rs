@@ -1088,6 +1088,7 @@ impl<'db> RocksTx<'db> {
             return fallback();
         };
         if !key_matches(key_bytes)? {
+            // The found key is for a different entity.
             return fallback();
         }
 
