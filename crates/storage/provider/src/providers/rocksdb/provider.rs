@@ -1016,6 +1016,16 @@ impl<'db> RocksTx<'db> {
     where
         T: Table<Value = BlockNumberList>,
     {
+        // History may be pruned if a lowest available block is set.
+        let is_maybe_pruned = lowest_available_block_number.is_some();
+        let fallback = || {
+            Ok(if is_maybe_pruned {
+                HistoryInfo::MaybeInPlainState
+            } else {
+                HistoryInfo::NotYetWritten
+            })
+        };
+
         let cf = self.provider.0.db.cf_handle(T::NAME).ok_or_else(|| {
             ProviderError::Database(DatabaseError::Other(format!(
                 "column family not found: {}",
@@ -1032,41 +1042,20 @@ impl<'db> RocksTx<'db> {
         Self::raw_iter_status_ok(&iter)?;
 
         if !iter.valid() {
-            // No shard found at or after target block.
-            return if lowest_available_block_number.is_some() {
-                // The key may have been written, but due to pruning we may not have changesets
-                // and history, so we need to make a plain state lookup.
-                Ok(HistoryInfo::MaybeInPlainState)
-            } else {
-                // The key has not been written to at all.
-                Ok(HistoryInfo::NotYetWritten)
-            };
+            return fallback();
         }
 
         // Check if the found key matches our target entity.
         let Some(key_bytes) = iter.key() else {
-            return if lowest_available_block_number.is_some() {
-                Ok(HistoryInfo::MaybeInPlainState)
-            } else {
-                Ok(HistoryInfo::NotYetWritten)
-            };
+            return fallback();
         };
         if !key_matches(key_bytes)? {
-            // The found key is for a different entity.
-            return if lowest_available_block_number.is_some() {
-                Ok(HistoryInfo::MaybeInPlainState)
-            } else {
-                Ok(HistoryInfo::NotYetWritten)
-            };
+            return fallback();
         }
 
         // Decompress the block list for this shard.
         let Some(value_bytes) = iter.value() else {
-            return if lowest_available_block_number.is_some() {
-                Ok(HistoryInfo::MaybeInPlainState)
-            } else {
-                Ok(HistoryInfo::NotYetWritten)
-            };
+            return fallback();
         };
         let chunk = BlockNumberList::decompress(value_bytes)?;
         let (rank, found_block) = compute_history_rank(&chunk, block_number);
