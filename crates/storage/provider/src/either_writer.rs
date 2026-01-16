@@ -190,7 +190,7 @@ pub fn make_rocksdb_batch_arg(
 #[cfg(not(all(unix, feature = "rocksdb")))]
 pub const fn make_rocksdb_batch_arg<T>(_rocksdb: &T) -> RocksBatchArg<'static> {}
 
-/// Gets the `RocksDB` provider from a provider that implements [`RocksDBProviderFactory`].
+/// Gets the `RocksDB` provider from a provider that implements [`crate::RocksDBProviderFactory`].
 ///
 /// On `RocksDB`-enabled builds, returns the real provider.
 /// On other builds, returns `()` to allow the same API without feature gates.
