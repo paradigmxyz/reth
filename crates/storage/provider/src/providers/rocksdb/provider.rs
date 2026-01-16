@@ -337,10 +337,6 @@ impl RocksDBProvider {
             provider: self,
             inner: WriteBatchWithTransaction::<true>::default(),
             buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
-            #[cfg(debug_assertions)]
-            touched_account_history: std::collections::HashSet::new(),
-            #[cfg(debug_assertions)]
-            touched_storage_history: std::collections::HashSet::new(),
         }
     }
 
@@ -656,12 +652,6 @@ pub struct RocksDBBatch<'a> {
     provider: &'a RocksDBProvider,
     inner: WriteBatchWithTransaction<true>,
     buf: Vec<u8>,
-    /// Tracks addresses that have had account history appended (debug only).
-    #[cfg(debug_assertions)]
-    touched_account_history: std::collections::HashSet<Address>,
-    /// Tracks (address, `storage_key`) pairs that have had storage history appended (debug only).
-    #[cfg(debug_assertions)]
-    touched_storage_history: std::collections::HashSet<(Address, B256)>,
 }
 
 impl fmt::Debug for RocksDBBatch<'_> {
@@ -764,12 +754,6 @@ impl<'a> RocksDBBatch<'a> {
             indices
         );
 
-        #[cfg(debug_assertions)]
-        debug_assert!(
-            self.touched_account_history.insert(address),
-            "append_account_history_shard called twice for same address {address} in one batch"
-        );
-
         let last_key = ShardedKey::new(address, u64::MAX);
         let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
@@ -830,13 +814,6 @@ impl<'a> RocksDBBatch<'a> {
             indices.windows(2).all(|w| w[0] < w[1]),
             "indices must be strictly increasing: {:?}",
             indices
-        );
-
-        #[cfg(debug_assertions)]
-        debug_assert!(
-            self.touched_storage_history.insert((address, storage_key)),
-            "append_storage_history_shard called twice for same (address, storage_key) \
-             ({address}, {storage_key}) in one batch"
         );
 
         let last_key = StorageShardedKey::last(address, storage_key);
