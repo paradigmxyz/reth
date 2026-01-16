@@ -279,8 +279,8 @@ impl RocksDBProvider {
                 }
 
                 // If all entries are sentinel entries (u64::MAX), treat as first-run scenario.
-                // Sentinel entries represent "open" shards that haven't been completed yet,
-                // so no actual history has been indexed.
+                // This means no completed shards exist (only sentinel shards with
+                // highest_block_number=u64::MAX), so no actual history has been indexed.
                 if !found_non_sentinel {
                     if checkpoint > 0 {
                         tracing::warn!(
@@ -418,8 +418,8 @@ impl RocksDBProvider {
                 }
 
                 // If all entries are sentinel entries (u64::MAX), treat as first-run scenario.
-                // Sentinel entries represent "open" shards that haven't been completed yet,
-                // so no actual history has been indexed.
+                // This means no completed shards exist (only sentinel shards with
+                // highest_block_number=u64::MAX), so no actual history has been indexed.
                 if !found_non_sentinel {
                     if checkpoint > 0 {
                         tracing::warn!(

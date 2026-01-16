@@ -16,7 +16,7 @@ use crate::{
     HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
     LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
     PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
-    RocksDBProviderFactory, RocksTxRefArg, StageCheckpointReader, StateProviderBox, StateWriter,
+    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
@@ -883,25 +883,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Returns a reference to the chain specification.
     pub fn chain_spec(&self) -> &N::ChainSpec {
         &self.chain_spec
-    }
-
-    /// Executes a closure with a `RocksDB` transaction for reading.
-    ///
-    /// This helper encapsulates all the cfg-gated `RocksDB` transaction handling for reads.
-    fn with_rocksdb_tx<F, R>(&self, f: F) -> ProviderResult<R>
-    where
-        F: FnOnce(RocksTxRefArg<'_>) -> ProviderResult<R>,
-    {
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb = self.rocksdb_provider();
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_tx = rocksdb.tx();
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_tx_ref = &rocksdb_tx;
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let rocksdb_tx_ref = ();
-
-        f(rocksdb_tx_ref)
     }
 }
 

@@ -30,6 +30,8 @@ use reth_trie_db::{
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
 };
 
+#[cfg(all(unix, feature = "rocksdb"))]
+use std::cell::OnceCell;
 use std::fmt::Debug;
 
 /// Result of a history lookup for an account or storage slot.
@@ -99,7 +101,6 @@ impl HistoryInfo {
 /// - [`tables::StoragesHistory`]
 /// - [`tables::AccountChangeSets`]
 /// - [`tables::StorageChangeSets`]
-#[derive(Debug)]
 pub struct HistoricalStateProviderRef<'b, Provider> {
     /// Database provider
     provider: &'b Provider,
@@ -107,6 +108,19 @@ pub struct HistoricalStateProviderRef<'b, Provider> {
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
+    /// Cached `RocksDB` provider for reuse across multiple lookups.
+    /// The provider is cheap to clone (Arc-based) but fetching it from the factory has overhead.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    rocksdb_provider: OnceCell<crate::providers::RocksDBProvider>,
+}
+
+impl<Provider> Debug for HistoricalStateProviderRef<'_, Provider> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HistoricalStateProviderRef")
+            .field("block_number", &self.block_number)
+            .field("lowest_available_blocks", &self.lowest_available_blocks)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
@@ -114,7 +128,13 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
 {
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: &'b Provider, block_number: BlockNumber) -> Self {
-        Self { provider, block_number, lowest_available_blocks: Default::default() }
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks: Default::default(),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            rocksdb_provider: OnceCell::new(),
+        }
     }
 
     /// Create new `StateProvider` for historical block number and lowest block numbers at which
@@ -124,7 +144,38 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
     ) -> Self {
-        Self { provider, block_number, lowest_available_blocks }
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks,
+            #[cfg(all(unix, feature = "rocksdb"))]
+            rocksdb_provider: OnceCell::new(),
+        }
+    }
+
+    /// Executes a closure with a cached `RocksDB` transaction.
+    ///
+    /// This caches the `RocksDBProvider` for reuse across multiple lookups within the same
+    /// `HistoricalStateProviderRef` instance. The transaction is created from the cached
+    /// provider on each call (transaction creation is cheap).
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn with_cached_rocksdb_tx<F, R>(&self, f: F) -> ProviderResult<R>
+    where
+        Provider: RocksDBProviderFactory,
+        F: FnOnce(&crate::providers::RocksTx<'_>) -> ProviderResult<R>,
+    {
+        let rocksdb = self.rocksdb_provider.get_or_init(|| self.provider.rocksdb_provider());
+        let tx = rocksdb.tx();
+        f(&tx)
+    }
+
+    /// Executes a closure with a `RocksDB` transaction (no-op when feature is disabled).
+    #[cfg(not(all(unix, feature = "rocksdb")))]
+    fn with_cached_rocksdb_tx<F, R>(&self, f: F) -> ProviderResult<R>
+    where
+        F: FnOnce(()) -> ProviderResult<R>,
+    {
+        f(())
     }
 
     /// Lookup an account in the `AccountsHistory` table using `EitherReader`.
@@ -136,7 +187,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
+        self.with_cached_rocksdb_tx(|rocks_tx_ref| {
             let mut reader = EitherReader::new_accounts_history(self.provider, rocks_tx_ref)?;
             reader.account_history_info(
                 address,
@@ -159,7 +210,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
+        self.with_cached_rocksdb_tx(|rocks_tx_ref| {
             let mut reader = EitherReader::new_storages_history(self.provider, rocks_tx_ref)?;
             reader.storage_history_info(
                 address,

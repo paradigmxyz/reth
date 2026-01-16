@@ -723,11 +723,24 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// Loads the existing shard (if any), appends new indices, and rechunks into
     /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    ///
+    /// # Requirements
+    ///
+    /// The `indices` MUST be strictly increasing and contain no duplicates. This is a
+    /// precondition for correct shard append behavior - violating it will cause data
+    /// corruption or panics.
     pub fn append_account_history_shard(
         &mut self,
         address: Address,
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
+        let indices: Vec<u64> = indices.into_iter().collect();
+        debug_assert!(
+            indices.windows(2).all(|w| w[0] < w[1]),
+            "indices must be strictly increasing: {:?}",
+            indices
+        );
+
         let last_key = ShardedKey::new(address, u64::MAX);
         let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
@@ -765,12 +778,25 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// Loads the existing shard (if any), appends new indices, and rechunks into
     /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    ///
+    /// # Requirements
+    ///
+    /// The `indices` MUST be strictly increasing and contain no duplicates. This is a
+    /// precondition for correct shard append behavior - violating it will cause data
+    /// corruption or panics.
     pub fn append_storage_history_shard(
         &mut self,
         address: Address,
         storage_key: B256,
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
+        let indices: Vec<u64> = indices.into_iter().collect();
+        debug_assert!(
+            indices.windows(2).all(|w| w[0] < w[1]),
+            "indices must be strictly increasing: {:?}",
+            indices
+        );
+
         let last_key = StorageShardedKey::last(address, storage_key);
         let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
@@ -1182,7 +1208,11 @@ mod tests {
     use crate::providers::HistoryInfo;
     use alloy_primitives::{Address, TxHash, B256};
     use reth_db_api::{
-        models::{sharded_key::ShardedKey, storage_sharded_key::StorageShardedKey, IntegerList},
+        models::{
+            sharded_key::{ShardedKey, NUM_OF_INDICES_IN_SHARD},
+            storage_sharded_key::StorageShardedKey,
+            IntegerList,
+        },
         table::Table,
         tables,
     };
@@ -1530,5 +1560,157 @@ mod tests {
         assert_eq!(result, HistoryInfo::InChangeset(100));
 
         tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn test_account_history_shard_split_at_boundary() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let limit = NUM_OF_INDICES_IN_SHARD;
+
+        // Add exactly NUM_OF_INDICES_IN_SHARD + 1 indices to trigger a split
+        let indices: Vec<u64> = (0..=(limit as u64)).collect();
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, indices).unwrap();
+        batch.commit().unwrap();
+
+        // Should have 2 shards: one completed shard and one sentinel shard
+        let completed_key = ShardedKey::new(address, (limit - 1) as u64);
+        let sentinel_key = ShardedKey::new(address, u64::MAX);
+
+        let completed_shard = provider.get::<tables::AccountsHistory>(completed_key).unwrap();
+        let sentinel_shard = provider.get::<tables::AccountsHistory>(sentinel_key).unwrap();
+
+        assert!(completed_shard.is_some(), "completed shard should exist");
+        assert!(sentinel_shard.is_some(), "sentinel shard should exist");
+
+        let completed_shard = completed_shard.unwrap();
+        let sentinel_shard = sentinel_shard.unwrap();
+
+        assert_eq!(completed_shard.len(), limit as u64, "completed shard should be full");
+        assert_eq!(sentinel_shard.len(), 1, "sentinel shard should have 1 element");
+    }
+
+    #[test]
+    fn test_account_history_multiple_shard_splits() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x43; 20]);
+        let limit = NUM_OF_INDICES_IN_SHARD;
+
+        // First batch: add NUM_OF_INDICES_IN_SHARD indices
+        let first_batch_indices: Vec<u64> = (0..limit as u64).collect();
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, first_batch_indices).unwrap();
+        batch.commit().unwrap();
+
+        // Should have just a sentinel shard (exactly at limit, not over)
+        let sentinel_key = ShardedKey::new(address, u64::MAX);
+        let shard = provider.get::<tables::AccountsHistory>(sentinel_key.clone()).unwrap();
+        assert!(shard.is_some());
+        assert_eq!(shard.unwrap().len(), limit as u64);
+
+        // Second batch: add another NUM_OF_INDICES_IN_SHARD + 1 indices (causing 2 more shards)
+        let second_batch_indices: Vec<u64> = (limit as u64..=(2 * limit) as u64).collect();
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, second_batch_indices).unwrap();
+        batch.commit().unwrap();
+
+        // Now we should have: 2 completed shards + 1 sentinel shard
+        let first_completed = ShardedKey::new(address, (limit - 1) as u64);
+        let second_completed = ShardedKey::new(address, (2 * limit - 1) as u64);
+
+        assert!(
+            provider.get::<tables::AccountsHistory>(first_completed).unwrap().is_some(),
+            "first completed shard should exist"
+        );
+        assert!(
+            provider.get::<tables::AccountsHistory>(second_completed).unwrap().is_some(),
+            "second completed shard should exist"
+        );
+        assert!(
+            provider.get::<tables::AccountsHistory>(sentinel_key).unwrap().is_some(),
+            "sentinel shard should exist"
+        );
+    }
+
+    #[test]
+    fn test_storage_history_shard_split_at_boundary() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x44; 20]);
+        let slot = B256::from([0x55; 32]);
+        let limit = NUM_OF_INDICES_IN_SHARD;
+
+        // Add exactly NUM_OF_INDICES_IN_SHARD + 1 indices to trigger a split
+        let indices: Vec<u64> = (0..=(limit as u64)).collect();
+        let mut batch = provider.batch();
+        batch.append_storage_history_shard(address, slot, indices).unwrap();
+        batch.commit().unwrap();
+
+        // Should have 2 shards: one completed shard and one sentinel shard
+        let completed_key = StorageShardedKey::new(address, slot, (limit - 1) as u64);
+        let sentinel_key = StorageShardedKey::new(address, slot, u64::MAX);
+
+        let completed_shard = provider.get::<tables::StoragesHistory>(completed_key).unwrap();
+        let sentinel_shard = provider.get::<tables::StoragesHistory>(sentinel_key).unwrap();
+
+        assert!(completed_shard.is_some(), "completed shard should exist");
+        assert!(sentinel_shard.is_some(), "sentinel shard should exist");
+
+        let completed_shard = completed_shard.unwrap();
+        let sentinel_shard = sentinel_shard.unwrap();
+
+        assert_eq!(completed_shard.len(), limit as u64, "completed shard should be full");
+        assert_eq!(sentinel_shard.len(), 1, "sentinel shard should have 1 element");
+    }
+
+    #[test]
+    fn test_storage_history_multiple_shard_splits() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x46; 20]);
+        let slot = B256::from([0x57; 32]);
+        let limit = NUM_OF_INDICES_IN_SHARD;
+
+        // First batch: add NUM_OF_INDICES_IN_SHARD indices
+        let first_batch_indices: Vec<u64> = (0..limit as u64).collect();
+        let mut batch = provider.batch();
+        batch.append_storage_history_shard(address, slot, first_batch_indices).unwrap();
+        batch.commit().unwrap();
+
+        // Should have just a sentinel shard (exactly at limit, not over)
+        let sentinel_key = StorageShardedKey::new(address, slot, u64::MAX);
+        let shard = provider.get::<tables::StoragesHistory>(sentinel_key.clone()).unwrap();
+        assert!(shard.is_some());
+        assert_eq!(shard.unwrap().len(), limit as u64);
+
+        // Second batch: add another NUM_OF_INDICES_IN_SHARD + 1 indices (causing 2 more shards)
+        let second_batch_indices: Vec<u64> = (limit as u64..=(2 * limit) as u64).collect();
+        let mut batch = provider.batch();
+        batch.append_storage_history_shard(address, slot, second_batch_indices).unwrap();
+        batch.commit().unwrap();
+
+        // Now we should have: 2 completed shards + 1 sentinel shard
+        let first_completed = StorageShardedKey::new(address, slot, (limit - 1) as u64);
+        let second_completed = StorageShardedKey::new(address, slot, (2 * limit - 1) as u64);
+
+        assert!(
+            provider.get::<tables::StoragesHistory>(first_completed).unwrap().is_some(),
+            "first completed shard should exist"
+        );
+        assert!(
+            provider.get::<tables::StoragesHistory>(second_completed).unwrap().is_some(),
+            "second completed shard should exist"
+        );
+        assert!(
+            provider.get::<tables::StoragesHistory>(sentinel_key).unwrap().is_some(),
+            "sentinel shard should exist"
+        );
     }
 }
