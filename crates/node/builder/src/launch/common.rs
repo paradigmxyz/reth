@@ -84,6 +84,7 @@ use reth_tracing::{
     tracing::{debug, error, info, warn},
 };
 use reth_transaction_pool::TransactionPool;
+use reth_trie_db::ChangesetCache;
 use std::{sync::Arc, thread::available_parallelism, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
@@ -470,7 +471,10 @@ where
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
-    pub async fn create_provider_factory<N, Evm>(&self) -> eyre::Result<ProviderFactory<N>>
+    pub async fn create_provider_factory<N, Evm>(
+        &self,
+        changeset_cache: ChangesetCache,
+    ) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
@@ -500,7 +504,8 @@ where
             static_file_provider,
             rocksdb_provider,
         )?
-        .with_prune_modes(self.prune_modes());
+        .with_prune_modes(self.prune_modes())
+        .with_changeset_cache(changeset_cache);
 
         // Keep MDBX, static files, and RocksDB aligned. If any check fails, unwind to the
         // earliest consistent block.
@@ -593,12 +598,13 @@ where
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
     pub async fn with_provider_factory<N, Evm>(
         self,
+        changeset_cache: ChangesetCache,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let factory = self.create_provider_factory::<N, Evm>().await?;
+        let factory = self.create_provider_factory::<N, Evm>(changeset_cache).await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
             attachment: self.attachment.map_right(|_| factory),

@@ -43,13 +43,14 @@ use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, ExecutionOutcome,
     HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
-    StateProvider, StateProviderFactory, StateReader, TrieReader,
+    StateProvider, StateProviderFactory, StateReader,
 };
 use reth_revm::db::State;
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, StateRoot, TrieInputSorted,
 };
+use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
 use std::{
@@ -138,6 +139,8 @@ where
     metrics: EngineApiMetrics,
     /// Validator for the payload.
     validator: V,
+    /// Changeset cache for in-memory trie changesets
+    changeset_cache: ChangesetCache,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -145,7 +148,6 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + TrieReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
@@ -169,6 +171,7 @@ where
         validator: V,
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
+        changeset_cache: ChangesetCache,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
@@ -188,6 +191,7 @@ where
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
             validator,
+            changeset_cache,
         }
     }
 
@@ -427,13 +431,33 @@ where
             .map_err(Box::<dyn std::error::Error + Send + Sync>::from))
         .map(Arc::new);
 
+        // Compute trie input from ancestors once, before spawning payload processor.
+        // This will be extended with the current block's hashed state after execution.
+        let trie_input_start = Instant::now();
+        let (trie_input, block_hash_for_overlay) =
+            ensure_ok!(self.compute_trie_input(parent_hash, ctx.state()));
+
+        self.metrics
+            .block_validation
+            .trie_input_duration
+            .record(trie_input_start.elapsed().as_secs_f64());
+
+        // Create overlay factory for payload processor (StateRootTask path needs it for
+        // multiproofs)
+        let overlay_factory = {
+            let TrieInputSorted { nodes, state, .. } = &trie_input;
+            OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
+                .with_block_hash(Some(block_hash_for_overlay))
+                .with_trie_overlay(Some(Arc::clone(nodes)))
+                .with_hashed_state_overlay(Some(Arc::clone(state)))
+        };
+
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
             provider_builder,
-            parent_hash,
-            ctx.state(),
+            overlay_factory.clone(),
             strategy,
             block_access_list,
         ));
@@ -494,11 +518,7 @@ where
             }
             StateRootStrategy::Parallel => {
                 debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
-                match self.compute_state_root_parallel(
-                    block.parent_hash(),
-                    &hashed_state,
-                    ctx.state(),
-                ) {
+                match self.compute_state_root_parallel(overlay_factory.clone(), &hashed_state) {
                     Ok(result) => {
                         let elapsed = root_time.elapsed();
                         info!(
@@ -534,7 +554,7 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                self.compute_state_root_serial(block.parent_hash(), &hashed_state, ctx.state()),
+                self.compute_state_root_serial(overlay_factory.clone(), &hashed_state),
                 block
             );
             (root, updates, root_time.elapsed())
@@ -571,7 +591,14 @@ where
         // Terminate prewarming task with the shared execution outcome
         handle.terminate_caching(Some(Arc::clone(&execution_outcome)));
 
-        Ok(self.spawn_deferred_trie_task(block, execution_outcome, &ctx, hashed_state, trie_output))
+        Ok(self.spawn_deferred_trie_task(
+            block,
+            execution_outcome,
+            &ctx,
+            hashed_state,
+            trie_output,
+            overlay_factory,
+        ))
     }
 
     /// Return sealed block header from database or in-memory state by hash.
@@ -670,6 +697,10 @@ where
 
     /// Compute state root for the given hashed post state in parallel.
     ///
+    /// Uses an overlay factory which provides the state of the parent block, along with the
+    /// [`HashedPostState`] containing the changes of this block, to compute the state root and
+    /// trie updates for this block.
+    ///
     /// # Returns
     ///
     /// Returns `Ok(_)` if computed successfully.
@@ -677,58 +708,39 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn compute_state_root_parallel(
         &self,
-        parent_hash: B256,
+        overlay_factory: OverlayStateProviderFactory<P>,
         hashed_state: &HashedPostState,
-        state: &EngineApiTreeState<N>,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        let (mut input, block_hash) = self.compute_trie_input(parent_hash, state)?;
-
-        // Extend state overlay with current block's sorted state.
-        input.prefix_sets.extend(hashed_state.construct_prefix_sets());
-        let sorted_hashed_state = hashed_state.clone_into_sorted();
-        Arc::make_mut(&mut input.state).extend_ref(&sorted_hashed_state);
-
-        let TrieInputSorted { nodes, state, prefix_sets: prefix_sets_mut } = input;
-
-        let factory = OverlayStateProviderFactory::new(self.provider.clone())
-            .with_block_hash(Some(block_hash))
-            .with_trie_overlay(Some(nodes))
-            .with_hashed_state_overlay(Some(state));
-
-        // The `hashed_state` argument is already taken into account as part of the overlay, but we
+        // The `hashed_state` argument will be taken into account as part of the overlay, but we
         // need to use the prefix sets which were generated from it to indicate to the
         // ParallelStateRoot which parts of the trie need to be recomputed.
-        let prefix_sets = prefix_sets_mut.freeze();
-
-        ParallelStateRoot::new(factory, prefix_sets).incremental_root_with_updates()
+        let prefix_sets = hashed_state.construct_prefix_sets().freeze();
+        let overlay_factory =
+            overlay_factory.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
+        ParallelStateRoot::new(overlay_factory, prefix_sets).incremental_root_with_updates()
     }
 
     /// Compute state root for the given hashed post state in serial.
+    ///
+    /// Uses an overlay factory which provides the state of the parent block, along with the
+    /// [`HashedPostState`] containing the changes of this block, to compute the state root and
+    /// trie updates for this block.
     fn compute_state_root_serial(
         &self,
-        parent_hash: B256,
+        overlay_factory: OverlayStateProviderFactory<P>,
         hashed_state: &HashedPostState,
-        state: &EngineApiTreeState<N>,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let (mut input, block_hash) = self.compute_trie_input(parent_hash, state)?;
+        // The `hashed_state` argument will be taken into account as part of the overlay, but we
+        // need to use the prefix sets which were generated from it to indicate to the
+        // StateRoot which parts of the trie need to be recomputed.
+        let prefix_sets = hashed_state.construct_prefix_sets().freeze();
+        let overlay_factory =
+            overlay_factory.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
 
-        // Extend state overlay with current block's sorted state.
-        input.prefix_sets.extend(hashed_state.construct_prefix_sets());
-        let sorted_hashed_state = hashed_state.clone_into_sorted();
-        Arc::make_mut(&mut input.state).extend_ref(&sorted_hashed_state);
-
-        let TrieInputSorted { nodes, state, .. } = input;
-        let prefix_sets = hashed_state.construct_prefix_sets();
-
-        let factory = OverlayStateProviderFactory::new(self.provider.clone())
-            .with_block_hash(Some(block_hash))
-            .with_trie_overlay(Some(nodes))
-            .with_hashed_state_overlay(Some(state));
-
-        let provider = factory.database_provider_ro()?;
+        let provider = overlay_factory.database_provider_ro()?;
 
         Ok(StateRoot::new(&provider, &provider)
-            .with_prefix_sets(prefix_sets.freeze())
+            .with_prefix_sets(prefix_sets)
             .root_with_updates()?)
     }
 
@@ -811,6 +823,11 @@ where
     ///
     /// The method handles strategy fallbacks if the preferred approach fails, ensuring
     /// block execution always completes with a valid state root.
+    ///
+    /// # Arguments
+    ///
+    /// * `overlay_factory` - Pre-computed overlay factory for multiproof generation
+    ///   (`StateRootTask`)
     #[allow(clippy::too_many_arguments)]
     #[instrument(
         level = "debug",
@@ -823,8 +840,7 @@ where
         env: ExecutionEnv<Evm>,
         txs: T,
         provider_builder: StateProviderBuilder<N, P>,
-        parent_hash: B256,
-        state: &EngineApiTreeState<N>,
+        overlay_factory: OverlayStateProviderFactory<P>,
         strategy: StateRootStrategy,
         block_access_list: Option<Arc<BlockAccessList>>,
     ) -> Result<
@@ -837,32 +853,14 @@ where
     > {
         match strategy {
             StateRootStrategy::StateRootTask => {
-                // Compute trie input
-                let trie_input_start = Instant::now();
-                let (trie_input, block_hash) = self.compute_trie_input(parent_hash, state)?;
-
-                // Create OverlayStateProviderFactory with sorted trie data for multiproofs
-                let TrieInputSorted { nodes, state, .. } = trie_input;
-
-                let multiproof_provider_factory =
-                    OverlayStateProviderFactory::new(self.provider.clone())
-                        .with_block_hash(Some(block_hash))
-                        .with_trie_overlay(Some(nodes))
-                        .with_hashed_state_overlay(Some(state));
-
-                // Record trie input duration including OverlayStateProviderFactory setup
-                self.metrics
-                    .block_validation
-                    .trie_input_duration
-                    .record(trie_input_start.elapsed().as_secs_f64());
-
                 let spawn_start = Instant::now();
 
+                // Use the pre-computed overlay factory for multiproofs
                 let handle = self.payload_processor.spawn(
                     env,
                     txs,
                     provider_builder,
-                    multiproof_provider_factory,
+                    overlay_factory,
                     &self.config,
                     block_access_list,
                 );
@@ -1103,6 +1101,7 @@ where
         ctx: &TreeCtx<'_, N>,
         hashed_state: HashedPostState,
         trie_output: TrieUpdates,
+        overlay_factory: OverlayStateProviderFactory<P>,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
         let (anchor_hash, overlay_blocks) = ctx
@@ -1126,9 +1125,21 @@ where
         let deferred_handle_task = deferred_trie_data.clone();
         let block_validation_metrics = self.metrics.block_validation.clone();
 
+        // Capture block info and cache handle for changeset computation
+        let block_hash = block.hash();
+        let block_number = block.number();
+        let changeset_cache = self.changeset_cache.clone();
+
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
         let compute_trie_input_task = move || {
+            let _span = debug_span!(
+                target: "engine::tree::payload_validator",
+                "compute_trie_input_task",
+                block_number
+            )
+            .entered();
+
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
                 let computed = deferred_handle_task.wait_cloned();
@@ -1150,6 +1161,40 @@ where
                     block_validation_metrics
                         .anchored_overlay_hashed_state_size
                         .record(anchored.trie_input.state.total_len() as f64);
+                }
+
+                // Compute and cache changesets using the computed trie_updates
+                let changeset_start = Instant::now();
+
+                // Get a provider from the overlay factory for trie cursor access
+                let changeset_result =
+                    overlay_factory.database_provider_ro().and_then(|provider| {
+                        reth_trie::changesets::compute_trie_changesets(
+                            &provider,
+                            &computed.trie_updates,
+                        )
+                        .map_err(ProviderError::Database)
+                    });
+
+                match changeset_result {
+                    Ok(changesets) => {
+                        debug!(
+                            target: "engine::tree::changeset",
+                            ?block_number,
+                            elapsed = ?changeset_start.elapsed(),
+                            "Computed and caching changesets"
+                        );
+
+                        changeset_cache.insert(block_hash, block_number, Arc::new(changesets));
+                    }
+                    Err(e) => {
+                        warn!(
+                            target: "engine::tree::changeset",
+                            ?block_number,
+                            ?e,
+                            "Failed to compute changesets in deferred trie task"
+                        );
+                    }
                 }
             }));
 
@@ -1247,7 +1292,6 @@ impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm
 where
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + TrieReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
