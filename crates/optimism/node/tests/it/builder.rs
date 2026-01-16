@@ -103,7 +103,7 @@ fn test_setup_custom_precompiles() {
             input: EvmEnv<OpSpecId>,
         ) -> Self::Evm<DB, NoOpInspector> {
             let mut op_evm = OpEvmFactory::default().create_evm(db, input);
-            *op_evm.components_mut().2 = UniPrecompiles::precompiles(op_evm.ctx().cfg().spec());
+            *op_evm.components_mut().2 = UniPrecompiles::precompiles(*op_evm.ctx().cfg().spec());
 
             op_evm
         }
@@ -119,7 +119,7 @@ fn test_setup_custom_precompiles() {
         ) -> Self::Evm<DB, I> {
             let mut op_evm =
                 OpEvmFactory::default().create_evm_with_inspector(db, input, inspector);
-            *op_evm.components_mut().2 = UniPrecompiles::precompiles(op_evm.ctx().cfg().spec());
+            *op_evm.components_mut().2 = UniPrecompiles::precompiles(*op_evm.ctx().cfg().spec());
 
             op_evm
         }
