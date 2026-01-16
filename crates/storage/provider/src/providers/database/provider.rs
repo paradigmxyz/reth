@@ -4,7 +4,7 @@ use crate::{
         database::{chain::ChainStorage, metrics},
         rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
         static_file::{StaticFileWriteCtx, StaticFileWriter},
-        NodeTypesForProvider, StaticFileProvider,
+        KMergeIter, NodeTypesForProvider, StaticFileProvider,
     },
     to_range,
     traits::{
@@ -759,257 +759,92 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         &self,
         hashed_states: &[Arc<HashedPostStateSorted>],
     ) -> ProviderResult<()> {
-        use std::collections::BinaryHeap;
+        self.write_hashed_accounts_merged(hashed_states)?;
+        self.write_hashed_storages_merged(hashed_states)
+    }
 
-        // === Write hashed accounts using k-way merge ===
-        {
-            // Entry for the min-heap: (key, block_index, value)
-            // We use Reverse to make it a min-heap by key, then max by block_index for dedup
-            #[derive(Eq, PartialEq)]
-            struct AccountEntry {
-                key: B256,
-                block_idx: usize,
-                value: Option<Account>,
-                iter_idx: usize, // which iterator this came from
-            }
+    /// Writes hashed accounts using k-way merge for sequential B-tree insertion.
+    fn write_hashed_accounts_merged(
+        &self,
+        hashed_states: &[Arc<HashedPostStateSorted>],
+    ) -> ProviderResult<()> {
+        let sources = hashed_states
+            .iter()
+            .enumerate()
+            .map(|(block_idx, state)| (block_idx, state.accounts().iter().map(|(k, v)| (k, v))));
 
-            impl Ord for AccountEntry {
-                fn cmp(&self, other: &Self) -> Ordering {
-                    // Min-heap by key, then max by block_idx (so latest block wins on ties)
-                    other.key.cmp(&self.key).then_with(|| self.block_idx.cmp(&other.block_idx))
+        let mut cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+
+        for (key, value) in KMergeIter::new(sources) {
+            match value {
+                Some(account) => cursor.upsert(*key, account)?,
+                None => {
+                    if cursor.seek_exact(*key)?.is_some() {
+                        cursor.delete_current()?;
+                    }
                 }
             }
+        }
+        Ok(())
+    }
 
-            impl PartialOrd for AccountEntry {
-                fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                    Some(self.cmp(other))
-                }
+    fn write_hashed_storages_merged(
+        &self,
+        hashed_states: &[Arc<HashedPostStateSorted>],
+    ) -> ProviderResult<()> {
+        let mut all_storages: Vec<(&B256, usize, &HashedStorageSorted)> = hashed_states
+            .iter()
+            .enumerate()
+            .flat_map(|(block_idx, state)| {
+                state
+                    .account_storages()
+                    .iter()
+                    .map(move |(addr, storage)| (addr, block_idx, storage))
+            })
+            .collect();
+        all_storages.sort_unstable_by(|a, b| a.0.cmp(b.0));
+
+        let mut cursor = self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+
+        let mut i = 0;
+        while i < all_storages.len() {
+            let address = all_storages[i].0;
+
+            let start = i;
+            while i < all_storages.len() && all_storages[i].0 == address {
+                i += 1;
             }
+            let addr_storages = &all_storages[start..i];
 
-            // Initialize iterators and heap
-            let mut iters: Vec<_> = hashed_states
+            let wipe_block = addr_storages
                 .iter()
-                .enumerate()
-                .map(|(block_idx, state)| (block_idx, state.accounts().iter().peekable()))
-                .collect();
+                .filter(|(_, _, storage)| storage.is_wiped())
+                .map(|(_, block_idx, _)| *block_idx)
+                .max();
 
-            let mut heap = BinaryHeap::new();
-
-            // Seed heap with first element from each iterator
-            for (block_idx, iter) in &mut iters {
-                if let Some(&(key, value)) = iter.next() {
-                    heap.push(AccountEntry {
-                        key,
-                        block_idx: *block_idx,
-                        value,
-                        iter_idx: *block_idx,
-                    });
-                }
+            if wipe_block.is_some() && cursor.seek_exact(*address)?.is_some() {
+                cursor.delete_current_duplicates()?;
             }
 
-            let mut hashed_accounts_cursor =
-                self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+            let sources = addr_storages
+                .iter()
+                .filter(|(_, block_idx, _)| wipe_block.is_none_or(|w| *block_idx >= w))
+                .map(|(_, block_idx, storage)| {
+                    (*block_idx, storage.storage_slots_ref().iter().map(|(k, v)| (k, v)))
+                });
 
-            let mut last_key: Option<B256> = None;
-
-            while let Some(entry) = heap.pop() {
-                // Refill heap from this iterator
-                if let Some(&(next_key, next_value)) = iters[entry.iter_idx].1.next() {
-                    heap.push(AccountEntry {
-                        key: next_key,
-                        block_idx: entry.block_idx,
-                        value: next_value,
-                        iter_idx: entry.iter_idx,
-                    });
+            for (slot_key, value) in KMergeIter::<U256, _>::new(sources) {
+                if cursor
+                    .seek_by_key_subkey(*address, *slot_key)?
+                    .is_some_and(|e| e.key == *slot_key)
+                {
+                    cursor.delete_current()?;
                 }
-
-                // Skip duplicate keys (we already processed this key from a later block)
-                if last_key == Some(entry.key) {
-                    continue;
-                }
-
-                // Drain any remaining entries with the same key (take latest block)
-                let mut final_value = entry.value;
-                let mut final_block_idx = entry.block_idx;
-                while let Some(next) = heap.peek() {
-                    if next.key != entry.key {
-                        break;
-                    }
-                    let next = heap.pop().unwrap();
-                    // Refill heap
-                    if let Some(&(next_key, next_value)) = iters[next.iter_idx].1.next() {
-                        heap.push(AccountEntry {
-                            key: next_key,
-                            block_idx: next.block_idx,
-                            value: next_value,
-                            iter_idx: next.iter_idx,
-                        });
-                    }
-                    // Take value from later block
-                    if next.block_idx > final_block_idx {
-                        final_value = next.value;
-                        final_block_idx = next.block_idx;
-                    }
-                }
-
-                last_key = Some(entry.key);
-
-                // Write to database
-                if let Some(account) = final_value {
-                    hashed_accounts_cursor.upsert(entry.key, &account)?;
-                } else if hashed_accounts_cursor.seek_exact(entry.key)?.is_some() {
-                    hashed_accounts_cursor.delete_current()?;
+                if !value.is_zero() {
+                    cursor.upsert(*address, &StorageEntry { key: *slot_key, value: *value })?;
                 }
             }
         }
-
-        // === Write hashed storage using k-way merge ===
-        {
-            // First, collect all (address, block_idx, storage) tuples and sort by address
-            let mut all_storages: Vec<(B256, usize, &HashedStorageSorted)> = Vec::new();
-            for (block_idx, state) in hashed_states.iter().enumerate() {
-                for (addr, storage) in state.account_storages() {
-                    all_storages.push((*addr, block_idx, storage));
-                }
-            }
-            all_storages.sort_unstable_by_key(|(addr, _, _)| *addr);
-
-            let mut hashed_storage_cursor =
-                self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-
-            // Group by address and process each address's storage with merge
-            let mut i = 0;
-            while i < all_storages.len() {
-                let current_addr = all_storages[i].0;
-
-                // Collect all storages for this address
-                let mut addr_storages: Vec<(usize, &HashedStorageSorted)> = Vec::new();
-                while i < all_storages.len() && all_storages[i].0 == current_addr {
-                    addr_storages.push((all_storages[i].1, all_storages[i].2));
-                    i += 1;
-                }
-
-                // Check if any block wiped this storage (latest wipe wins)
-                let mut is_wiped = false;
-                let mut wipe_block_idx = 0;
-                for (block_idx, storage) in &addr_storages {
-                    if storage.is_wiped() && *block_idx >= wipe_block_idx {
-                        is_wiped = true;
-                        wipe_block_idx = *block_idx;
-                    }
-                }
-
-                if is_wiped {
-                    if hashed_storage_cursor.seek_exact(current_addr)?.is_some() {
-                        hashed_storage_cursor.delete_current_duplicates()?;
-                    }
-                    // Only include slots from blocks >= wipe_block_idx
-                    addr_storages.retain(|(block_idx, _)| *block_idx >= wipe_block_idx);
-                }
-
-                // K-way merge for storage slots
-                #[derive(Eq, PartialEq)]
-                struct SlotEntry<'a> {
-                    key: B256,
-                    value: U256,
-                    block_idx: usize,
-                    iter_idx: usize,
-                    remaining: &'a [(B256, U256)],
-                }
-
-                impl Ord for SlotEntry<'_> {
-                    fn cmp(&self, other: &Self) -> Ordering {
-                        other.key.cmp(&self.key).then_with(|| self.block_idx.cmp(&other.block_idx))
-                    }
-                }
-
-                impl PartialOrd for SlotEntry<'_> {
-                    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                        Some(self.cmp(other))
-                    }
-                }
-
-                let mut heap: BinaryHeap<SlotEntry<'_>> = BinaryHeap::new();
-
-                // Initialize heap with first slot from each storage
-                for (idx, (block_idx, storage)) in addr_storages.iter().enumerate() {
-                    let slots = storage.storage_slots_ref();
-                    if let Some((&(key, value), remaining)) = slots.split_first() {
-                        heap.push(SlotEntry {
-                            key,
-                            value,
-                            block_idx: *block_idx,
-                            iter_idx: idx,
-                            remaining,
-                        });
-                    }
-                }
-
-                let mut last_slot: Option<B256> = None;
-
-                while let Some(entry) = heap.pop() {
-                    // Refill heap
-                    if let Some((&(next_key, next_value), next_remaining)) =
-                        entry.remaining.split_first()
-                    {
-                        heap.push(SlotEntry {
-                            key: next_key,
-                            value: next_value,
-                            block_idx: entry.block_idx,
-                            iter_idx: entry.iter_idx,
-                            remaining: next_remaining,
-                        });
-                    }
-
-                    // Skip if we already processed this slot
-                    if last_slot == Some(entry.key) {
-                        continue;
-                    }
-
-                    // Drain duplicates, taking latest block's value
-                    let mut final_value = entry.value;
-                    let mut final_block_idx = entry.block_idx;
-                    while let Some(next) = heap.peek() {
-                        if next.key != entry.key {
-                            break;
-                        }
-                        let next = heap.pop().unwrap();
-                        if let Some((&(next_key, next_value), next_remaining)) =
-                            next.remaining.split_first()
-                        {
-                            heap.push(SlotEntry {
-                                key: next_key,
-                                value: next_value,
-                                block_idx: next.block_idx,
-                                iter_idx: next.iter_idx,
-                                remaining: next_remaining,
-                            });
-                        }
-                        if next.block_idx > final_block_idx {
-                            final_value = next.value;
-                            final_block_idx = next.block_idx;
-                        }
-                    }
-
-                    last_slot = Some(entry.key);
-
-                    // Write to database
-                    let storage_entry = StorageEntry { key: entry.key, value: final_value };
-
-                    if let Some(db_entry) =
-                        hashed_storage_cursor.seek_by_key_subkey(current_addr, storage_entry.key)? &&
-                        db_entry.key == storage_entry.key
-                    {
-                        hashed_storage_cursor.delete_current()?;
-                    }
-
-                    if !storage_entry.value.is_zero() {
-                        hashed_storage_cursor.upsert(current_addr, &storage_entry)?;
-                    }
-                }
-            }
-        }
-
         Ok(())
     }
 
