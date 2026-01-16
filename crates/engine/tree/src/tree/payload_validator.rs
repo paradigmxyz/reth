@@ -41,9 +41,9 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, ExecutionOutcome,
-    HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
-    StateProvider, StateProviderFactory, StateReader,
+    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
+    StateProviderFactory, StateReader,
 };
 use reth_revm::db::State;
 use reth_trie::{
@@ -376,7 +376,6 @@ where
         }
 
         let parent_hash = input.parent_hash();
-        let block_num_hash = input.num_hash();
 
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
         let _enter =
@@ -586,7 +585,7 @@ where
 
         // Create ExecutionOutcome and wrap in Arc for sharing with both the caching task
         // and the deferred trie task. This avoids cloning the expensive BundleState.
-        let execution_outcome = Arc::new(ExecutionOutcome::from((output, block_num_hash.number)));
+        let execution_outcome = Arc::new(output);
 
         // Terminate prewarming task with the shared execution outcome
         handle.terminate_caching(Some(Arc::clone(&execution_outcome)));
@@ -1097,7 +1096,7 @@ where
     fn spawn_deferred_trie_task(
         &self,
         block: RecoveredBlock<N::Block>,
-        execution_outcome: Arc<ExecutionOutcome<N::Receipt>>,
+        execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
         hashed_state: HashedPostState,
         trie_output: TrieUpdates,
@@ -1344,7 +1343,7 @@ where
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>) {
         self.payload_processor.on_inserted_executed_block(
             block.recovered_block.block_with_parent(),
-            block.execution_output.state(),
+            &block.execution_output.state,
         );
     }
 }

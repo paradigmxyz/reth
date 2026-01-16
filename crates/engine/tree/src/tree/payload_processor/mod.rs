@@ -28,10 +28,10 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
     TxEnvFor,
 };
-use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockReader, DatabaseProviderROFactory, StateProvider, StateProviderFactory, StateReader,
+    BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProvider,
+    StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
@@ -665,12 +665,12 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Terminates the entire caching task.
     ///
-    /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
+    /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` allows sharing with the main execution
     /// path without cloning the expensive `BundleState`.
     pub(super) fn terminate_caching(
         &mut self,
-        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
+        execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
     ) {
         self.prewarm_handle.terminate_caching(execution_outcome)
     }
@@ -707,11 +707,11 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
 
     /// Terminates the entire pre-warming task.
     ///
-    /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
+    /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive `BundleState`.
     pub(super) fn terminate_caching(
         &mut self,
-        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
+        execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
     ) {
         if let Some(tx) = self.to_prewarm_task.take() {
             let event = PrewarmTaskEvent::Terminate { execution_outcome };
@@ -1059,7 +1059,9 @@ mod tests {
                         nonce: rng.random::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
+                        account_id: None,
                     },
+                    original_info: Box::new(AccountInfo::default()),
                     storage,
                     status: AccountStatus::Touched,
                     transaction_id: 0,
