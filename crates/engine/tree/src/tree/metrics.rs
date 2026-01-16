@@ -394,7 +394,6 @@ mod tests {
     use reth_evm_ethereum::EthEvm;
     use reth_execution_types::BlockExecutionResult;
     use reth_primitives_traits::RecoveredBlock;
-    use reth_static_file::segments::Receipts;
     use revm::{
         context::result::{ExecutionResult, Output, ResultAndState, SuccessReason},
         database::State,
