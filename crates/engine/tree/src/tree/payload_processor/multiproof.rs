@@ -141,7 +141,8 @@ impl ProofSequencer {
     /// Adds a proof with the corresponding state update and returns all sequential proofs and state
     /// updates if we have a continuous sequence
     fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
-        // Optimization: fast path for in-order delivery
+        // Optimization: fast path for in-order delivery to avoid BTreeMap overhead.
+        // If this is the expected sequence, return it immediately without buffering.
         if sequence == self.next_to_deliver {
             let mut consecutive_proofs = Vec::with_capacity(1);
             consecutive_proofs.push(update);
@@ -1091,10 +1092,7 @@ impl MultiProofTask {
                                 .proof_calculation_duration_histogram
                                 .record(proof_result.elapsed);
 
-                            // Only record worker stats periodically to reduce overhead in the hot loop
-                            if batch_metrics.proofs_processed % 25 == 0 {
-                                self.multiproof_manager.on_calculation_complete();
-                            }
+                            self.multiproof_manager.on_calculation_complete();
 
                             // Convert ProofResultMessage to SparseTrieUpdate
                             match proof_result.result {
