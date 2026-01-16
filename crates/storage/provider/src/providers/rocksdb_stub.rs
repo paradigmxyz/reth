@@ -87,6 +87,13 @@ impl RocksDBProvider {
         Err(UnsupportedProvider)
     }
 
+    /// Clear all entries from a table (stub implementation).
+    ///
+    /// Returns `Ok(())` since the stub behaves as if the database is empty.
+    pub const fn clear<T: Table>(&self) -> ProviderResult<()> {
+        Ok(())
+    }
+
     /// Write a batch of operations (stub implementation).
     pub fn write_batch<F>(&self, _f: F) -> ProviderResult<()>
     where

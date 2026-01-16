@@ -430,6 +430,32 @@ impl RocksDBProvider {
         })
     }
 
+    /// Clears all entries from the specified table.
+    ///
+    /// This iterates through all entries in the table and deletes them.
+    pub fn clear<T: Table>(&self) -> ProviderResult<()> {
+        self.execute_with_operation_metric(RocksDBOperation::Delete, T::NAME, |this| {
+            let cf = this.get_cf_handle::<T>()?;
+            let iter = this.0.db.iterator_cf(cf, IteratorMode::Start);
+
+            for result in iter {
+                let (key, _) = result.map_err(|e| {
+                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })?;
+                this.0.db.delete_cf(cf, &key).map_err(|e| {
+                    ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })?;
+            }
+            Ok(())
+        })
+    }
+
     /// Gets the first (smallest key) entry from the specified table.
     pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
         self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
