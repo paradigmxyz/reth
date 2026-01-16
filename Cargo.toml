@@ -739,10 +739,10 @@ tracing-subscriber = { version = "0.3", default-features = false }
 tracing-tracy = "0.11"
 triehash = "0.8"
 typenum = "1.15.0"
-vergen = "9.0.4"
+vergen = "9.1.0"
 visibility = "0.1.1"
 walkdir = "2.3.3"
-vergen-git2 = "1.0.5"
+vergen-git2 = "9.1.0"
 
 # networking
 ipnet = "2.11"
