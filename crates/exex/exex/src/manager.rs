@@ -36,7 +36,7 @@ use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 ///
 /// 1024 notifications in the buffer is 3.5 hours of mainnet blocks,
 /// or 17 minutes of 1-second blocks.
-pub const DEFAULT_EXEX_MANAGER_CAPACITY: usize = 128;
+pub const DEFAULT_EXEX_MANAGER_CAPACITY: usize = 1024;
 
 /// Default maximum number of blocks allowed in the WAL before emitting a warning.
 ///
@@ -45,7 +45,7 @@ pub const DEFAULT_EXEX_MANAGER_CAPACITY: usize = 128;
 ///
 /// This value is appropriate for Ethereum mainnet with ~12 second block times. For L2 chains with
 /// faster block times, this value should be increased proportionally to avoid excessive warnings.
-pub const DEFAULT_WAL_BLOCKS_WARNING: usize = 64;
+pub const DEFAULT_WAL_BLOCKS_WARNING: usize = 128;
 
 /// The source of the notification.
 ///
