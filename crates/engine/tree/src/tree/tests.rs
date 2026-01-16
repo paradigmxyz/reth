@@ -491,7 +491,7 @@ fn test_tree_persist_block_batch() {
     let chain_spec = MAINNET.clone();
     let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
-    // we need more than tree_config.persistence_threshold() +1 blocks to
+    // we need at least tree_config.persistence_threshold() + 1 blocks to
     // trigger the persistence task.
     let blocks: Vec<_> = test_block_builder
         .get_executed_blocks(1..tree_config.persistence_threshold() + 2)
@@ -531,7 +531,7 @@ async fn test_tree_persist_blocks() {
     let chain_spec = MAINNET.clone();
     let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
-    // we need more than tree_config.persistence_threshold() +1 blocks to
+    // we need at least tree_config.persistence_threshold() + 1 blocks to
     // trigger the persistence task.
     let blocks: Vec<_> = test_block_builder
         .get_executed_blocks(1..tree_config.persistence_threshold() + 2)
