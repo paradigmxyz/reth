@@ -32,6 +32,7 @@ use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     SpecFor,
 };
+use reth_execution_types::BlockExecutionResult;
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
@@ -481,10 +482,19 @@ where
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
 
+        // Create ExecutionOutcome early so we can terminate caching before validation and state
+        // root computation. Using Arc allows sharing with both the caching task and the deferred
+        // trie task without cloning the expensive BundleState.
+        let execution_outcome = Arc::new(ExecutionOutcome::from((output, block_num_hash.number)));
+
+        // Terminate caching task early since execution is complete and caching is no longer
+        // needed. This frees up resources while state root computation continues.
+        handle.terminate_caching(Some(Arc::clone(&execution_outcome)));
+
         let block = self.convert_to_block(input)?.with_senders(senders);
 
         let hashed_state = ensure_ok_post_block!(
-            self.validate_post_execution(&block, &parent_block, &output, &mut ctx),
+            self.validate_post_execution(&block, &parent_block, &execution_outcome, &mut ctx),
             block
         );
 
@@ -568,7 +578,7 @@ where
             self.on_invalid_block(
                 &parent_block,
                 &block,
-                &output,
+                &execution_outcome,
                 Some((&trie_output, state_root)),
                 ctx.state_mut(),
             );
@@ -582,13 +592,6 @@ where
             )
             .into())
         }
-
-        // Create ExecutionOutcome and wrap in Arc for sharing with both the caching task
-        // and the deferred trie task. This avoids cloning the expensive BundleState.
-        let execution_outcome = Arc::new(output);
-
-        // Terminate prewarming task with the shared execution outcome
-        handle.terminate_caching(Some(Arc::clone(&execution_outcome)));
 
         Ok(self.spawn_deferred_trie_task(
             block,
@@ -754,7 +757,7 @@ where
         &self,
         block: &RecoveredBlock<N::Block>,
         parent_block: &SealedHeader<N::BlockHeader>,
-        output: &BlockExecutionOutput<N::Receipt>,
+        outcome: &ExecutionOutcome<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
     ) -> Result<HashedPostState, InsertBlockErrorKind>
     where
@@ -779,19 +782,27 @@ where
         drop(_enter);
 
         // Validate block post-execution rules
+        // Construct a temporary BlockExecutionResult from the ExecutionOutcome for consensus
+        // validation. The outcome was created from a single block, so we take the first element.
+        let result = BlockExecutionResult {
+            receipts: outcome.receipts.first().cloned().unwrap_or_default(),
+            requests: outcome.requests.first().cloned().unwrap_or_default(),
+            gas_used: 0,      // Not used by validation
+            blob_gas_used: 0, // Not used by validation
+        };
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        if let Err(err) = self.consensus.validate_block_post_execution(block, output) {
+        if let Err(err) = self.consensus.validate_block_post_execution(block, &result) {
             // call post-block hook
-            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
+            self.on_invalid_block(parent_block, block, outcome, None, ctx.state_mut());
             return Err(err.into())
         }
         drop(_enter);
 
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "hashed_post_state").entered();
-        let hashed_state = self.provider.hashed_post_state(&output.state);
+        let hashed_state = self.provider.hashed_post_state(&outcome.bundle);
         drop(_enter);
 
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
@@ -799,7 +810,7 @@ where
             self.validator.validate_block_post_execution_with_hashed_state(&hashed_state, block)
         {
             // call post-block hook
-            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
+            self.on_invalid_block(parent_block, block, outcome, None, ctx.state_mut());
             return Err(err.into())
         }
 
@@ -942,7 +953,7 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        output: &BlockExecutionOutput<N::Receipt>,
+        output: &ExecutionOutcome<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
         state: &mut EngineApiTreeState<N>,
     ) {
