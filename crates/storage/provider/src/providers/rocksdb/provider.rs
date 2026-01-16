@@ -587,7 +587,7 @@ impl RocksDBProvider {
         let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let bundle = &block.execution_outcome().bundle;
+            let bundle = &block.execution_outcome().state;
             for &address in bundle.state().keys() {
                 account_history.entry(address).or_default().push(block_number);
             }
@@ -612,7 +612,7 @@ impl RocksDBProvider {
         let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let bundle = &block.execution_outcome().bundle;
+            let bundle = &block.execution_outcome().state;
             for (&address, account) in bundle.state() {
                 for &slot in account.storage.keys() {
                     let key = B256::new(slot.to_be_bytes());

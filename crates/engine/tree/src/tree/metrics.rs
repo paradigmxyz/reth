@@ -404,12 +404,13 @@ mod tests {
     /// A simple mock executor for testing that doesn't require complex EVM setup
     struct MockExecutor {
         state: EvmState,
+        receipts: Vec<Receipt>,
         hook: Option<Box<dyn OnStateHook>>,
     }
 
     impl MockExecutor {
         fn new(state: EvmState) -> Self {
-            Self { state, hook: None }
+            Self { state, receipts: vec![], hook: None }
         }
     }
 
@@ -491,12 +492,16 @@ mod tests {
             self.hook = hook;
         }
 
+        fn evm_mut(&mut self) -> &mut Self::Evm {
+            panic!("Mock executor evm_mut() not implemented")
+        }
+
         fn evm(&self) -> &Self::Evm {
             panic!("Mock executor evm() not implemented")
         }
 
-        fn evm_mut(&mut self) -> &mut Self::Evm {
-            panic!("Mock executor evm_mut() not implemented")
+        fn receipts(&self) -> &[Self::Receipt] {
+            &self.receipts
         }
     }
 
