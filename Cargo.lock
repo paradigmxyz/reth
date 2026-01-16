@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.25.2"
-source = "git+https://github.com/rezzmah/evm.git?branch=configurable-evm-execution-limits#90a005549e62c7551a9570fe902dfc1de700056d"
+source = "git+https://github.com/rezzmah/evm.git?branch=configurable-evm-execution-limits#67c8e7cdce302246cd4aef32901086a9f99b8e18"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -403,7 +403,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.25.2"
-source = "git+https://github.com/rezzmah/evm.git?branch=configurable-evm-execution-limits#90a005549e62c7551a9570fe902dfc1de700056d"
+source = "git+https://github.com/rezzmah/evm.git?branch=configurable-evm-execution-limits#67c8e7cdce302246cd4aef32901086a9f99b8e18"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",

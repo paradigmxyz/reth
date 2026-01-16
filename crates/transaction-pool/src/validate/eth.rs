@@ -512,13 +512,13 @@ where
         // Transaction gas limit validation (EIP-7825 for Osaka+)
         let evm_limits =
             self.chain_spec().evm_limit_params_at_timestamp(self.fork_tracker.tip_timestamp());
-        if let Some(tx_gas_cap) = evm_limits.tx_gas_limit_cap {
-            if transaction.gas_limit() > tx_gas_cap {
-                return Err(TransactionValidationOutcome::Invalid(
-                    transaction,
-                    InvalidTransactionError::GasLimitTooHigh.into(),
-                ))
-            }
+        if let Some(tx_gas_cap) = evm_limits.tx_gas_limit_cap &&
+            transaction.gas_limit() > tx_gas_cap
+        {
+            return Err(TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::GasLimitTooHigh.into(),
+            ))
         }
 
         Ok(transaction)
