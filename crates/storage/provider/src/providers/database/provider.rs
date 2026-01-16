@@ -748,11 +748,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     }
 
     /// Writes hashed state from multiple blocks using k-way merge for sequential I/O.
-    ///
-    /// This method merges sorted hashed state from multiple blocks and writes them in globally
-    /// sorted key order, deduplicating keys (last block wins). This provides better I/O locality
-    /// than writing each block's state separately, as it avoids cursor jumping back and forth
-    /// in the B-tree.
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     pub fn write_hashed_state_merged(
         &self,
