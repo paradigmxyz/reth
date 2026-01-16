@@ -547,7 +547,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                     // Collect history indices from in-memory state (avoids DB scan later)
                     if collect_account_history || collect_storage_history {
-                        for (address, account) in execution_output.state.state().iter() {
+                        for (address, account) in execution_output.state.state() {
                             // Skip unmodified accounts
                             if account.status.is_not_modified() {
                                 continue;
@@ -557,7 +557,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                             }
                             // Collect storage changes for this account
                             if collect_storage_history {
-                                for (slot, _) in account.storage.iter() {
+                                for (slot, _) in &account.storage {
                                     let slot_key = B256::from(*slot);
                                     storage_transitions
                                         .entry((*address, slot_key))
