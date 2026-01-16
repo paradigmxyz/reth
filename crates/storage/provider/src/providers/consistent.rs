@@ -1551,7 +1551,7 @@ impl<N: ProviderNodeTypes> StateReader for ConsistentProvider<N> {
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
         if let Some(state) = self.head_block.as_ref().and_then(|b| b.block_on_chain(block.into())) {
             let state = state.block_ref().execution_outcome().clone();
-            Ok(Some(state))
+            Ok(Some(ExecutionOutcome::from((state, block))))
         } else {
             Self::get_state(self, block..=block)
         }
@@ -1571,7 +1571,7 @@ mod tests {
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
     use reth_db_api::models::AccountBeforeTx;
     use reth_ethereum_primitives::Block;
-    use reth_execution_types::ExecutionOutcome;
+    use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
     use reth_primitives_traits::{RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader};
     use reth_testing_utils::generators::{
@@ -1883,7 +1883,7 @@ mod tests {
                             block.clone(),
                             senders,
                         )),
-                        execution_output: Arc::new(ExecutionOutcome {
+                        execution_output: Arc::new(BlockExecutionOutput {
                             bundle: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
                                     (address, None, Some(account.into()), Default::default())
@@ -1893,8 +1893,12 @@ mod tests {
                                 })],
                                 [],
                             ),
-                            first_block: first_in_memory_block,
-                            ..Default::default()
+                            result: BlockExecutionResult {
+                                receipts: Default::default(),
+                                requests: Default::default(),
+                                gas_used: 0,
+                                blob_gas_used: 0,
+                            },
                         }),
                         ..Default::default()
                     }

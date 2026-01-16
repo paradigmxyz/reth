@@ -594,7 +594,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 continue
             }
 
-            for (i, receipt) in block.execution_outcome().receipts.iter().flatten().enumerate() {
+            for (i, receipt) in block.execution_outcome().receipts.iter().enumerate() {
                 w.append_receipt(first_tx + i as u64, receipt)?;
             }
         }

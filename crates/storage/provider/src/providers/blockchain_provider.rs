@@ -790,7 +790,9 @@ mod tests {
     use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
-    use reth_execution_types::{Chain, ExecutionOutcome};
+    use reth_execution_types::{
+        BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
+    };
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SignerRecoverable};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
@@ -909,8 +911,15 @@ mod tests {
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
                     let block_receipts = receipts.get(block.number as usize).unwrap().clone();
-                    let execution_outcome =
-                        ExecutionOutcome { receipts: vec![block_receipts], ..Default::default() };
+                    let execution_outcome = BlockExecutionOutput {
+                        result: BlockExecutionResult {
+                            receipts: block_receipts,
+                            requests: Default::default(),
+                            gas_used: 0,
+                            blob_gas_used: 0,
+                        },
+                        bundle: BundleState::default(),
+                    };
 
                     ExecutedBlock {
                         recovered_block: Arc::new(RecoveredBlock::new_sealed(
@@ -979,8 +988,7 @@ mod tests {
                     state.parent_state_chain().last().expect("qed").block();
                 let num_hash = lowest_memory_block.recovered_block().num_hash();
 
-                let mut execution_output = (*lowest_memory_block.execution_output).clone();
-                execution_output.first_block = lowest_memory_block.recovered_block().number;
+                let execution_output = (*lowest_memory_block.execution_output).clone();
                 lowest_memory_block.execution_output = Arc::new(execution_output);
 
                 // Push to disk
@@ -1708,7 +1716,7 @@ mod tests {
                             block.clone(),
                             senders,
                         )),
-                        execution_output: Arc::new(ExecutionOutcome {
+                        execution_output: Arc::new(BlockExecutionOutput {
                             bundle: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
                                     (address, None, Some(account.into()), Default::default())
@@ -1718,8 +1726,12 @@ mod tests {
                                 })],
                                 [],
                             ),
-                            first_block: first_in_memory_block,
-                            ..Default::default()
+                            result: BlockExecutionResult {
+                                receipts: Default::default(),
+                                requests: Default::default(),
+                                gas_used: 0,
+                                blob_gas_used: 0,
+                            },
                         }),
                         ..Default::default()
                     }

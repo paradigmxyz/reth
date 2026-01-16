@@ -25,7 +25,7 @@ pub(crate) fn to_execution_outcome(
     block_execution_output: &BlockExecutionOutput<Receipt>,
 ) -> ExecutionOutcome {
     ExecutionOutcome {
-        bundle: block_execution_output.state.clone(),
+        bundle: block_execution_output.bundle.clone(),
         receipts: vec![block_execution_output.receipts.clone()],
         first_block: block_number,
         requests: vec![block_execution_output.requests.clone()],
@@ -71,7 +71,7 @@ where
     let mut block_execution_output = EthEvmConfig::ethereum(chain_spec)
         .batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)))
         .execute(block)?;
-    block_execution_output.state.reverts.sort();
+    block_execution_output.bundle.reverts.sort();
 
     // Convert the block execution output to an execution outcome for committing to the database
     let execution_outcome = to_execution_outcome(block.number(), &block_execution_output);
