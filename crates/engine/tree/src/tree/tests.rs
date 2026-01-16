@@ -27,7 +27,7 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
-use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
+use reth_provider::test_utils::MockEthProvider;
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -838,7 +838,7 @@ fn test_tree_state_on_new_head_deep_fork() {
     for block in &chain_a {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
             Arc::new(block.clone()),
-            Arc::new(ExecutionOutcome::default()),
+            Arc::new(BlockExecutionOutput::default()),
             empty_trie_data(),
         ));
     }
@@ -847,7 +847,7 @@ fn test_tree_state_on_new_head_deep_fork() {
     for block in &chain_b {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
             Arc::new(block.clone()),
-            Arc::new(ExecutionOutcome::default()),
+            Arc::new(BlockExecutionOutput::default()),
             empty_trie_data(),
         ));
     }

@@ -30,10 +30,12 @@ use alloy_primitives::{keccak256, map::B256Set, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
-use reth_execution_types::ExecutionOutcome;
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{AccountReader, BlockReader, StateProvider, StateProviderFactory, StateReader};
+use reth_provider::{
+    AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory,
+    StateReader,
+};
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_trie::MultiProofTargets;
 use std::{
@@ -259,7 +261,7 @@ where
     ///
     /// This method is called from `run()` only after all execution tasks are complete.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn save_cache(self, execution_outcome: Arc<ExecutionOutcome<N::Receipt>>) {
+    fn save_cache(self, execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>) {
         let start = Instant::now();
 
         let Self { execution_cache, ctx: PrewarmContext { env, metrics, saved_cache, .. }, .. } =
@@ -277,7 +279,7 @@ where
 
                 // Insert state into cache while holding the lock
                 // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(execution_outcome.state()).is_err() {
+                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
                     // Clear the cache on error to prevent having a polluted cache
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on update error");
@@ -810,7 +812,7 @@ pub(super) enum PrewarmTaskEvent<R> {
     Terminate {
         /// The final execution outcome. Using `Arc` allows sharing with the main execution
         /// path without cloning the expensive `BundleState`.
-        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
+        execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
     },
     /// The outcome of a pre-warm task
     Outcome {
