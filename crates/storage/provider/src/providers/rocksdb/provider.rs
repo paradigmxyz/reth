@@ -659,7 +659,7 @@ pub struct RocksDBBatch<'a> {
     /// Tracks addresses that have had account history appended (debug only).
     #[cfg(debug_assertions)]
     touched_account_history: std::collections::HashSet<Address>,
-    /// Tracks (address, storage_key) pairs that have had storage history appended (debug only).
+    /// Tracks (address, `storage_key`) pairs that have had storage history appended (debug only).
     #[cfg(debug_assertions)]
     touched_storage_history: std::collections::HashSet<(Address, B256)>,
 }
@@ -811,9 +811,9 @@ impl<'a> RocksDBBatch<'a> {
     /// # Requirements
     ///
     /// - The `indices` MUST be strictly increasing and contain no duplicates.
-    /// - This method MUST only be called once per (address, storage_key) pair per batch. The batch
-    ///   reads existing shards from committed DB state, not from pending writes. Calling twice for
-    ///   the same key will cause the second call to overwrite the first.
+    /// - This method MUST only be called once per (address, `storage_key`) pair per batch. The
+    ///   batch reads existing shards from committed DB state, not from pending writes. Calling
+    ///   twice for the same key will cause the second call to overwrite the first.
     pub fn append_storage_history_shard(
         &mut self,
         address: Address,
