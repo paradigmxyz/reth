@@ -27,7 +27,7 @@ use alloy_consensus::{
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, B256Map, HashMap, HashSet},
+    map::{hash_map, HashMap, HashSet},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
@@ -1025,13 +1025,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(())
     }
 
-    /// Writes plain state changes from multiple blocks using sorted merge for sequential I/O.
+    /// Writes plain state changes from multiple blocks using parallel sort + merge for sequential
+    /// I/O.
     ///
     /// This batches writes across blocks to improve I/O locality by:
-    /// 1. Flattening all account/storage/bytecode updates with block indices
-    /// 2. Sorting by key (address/hash/slot)
-    /// 3. Deduplicating, keeping only the latest block's value
-    /// 4. Writing in sorted order for sequential I/O
+    /// 1. Flattening all updates with block indices into a single Vec
+    /// 2. Parallel sorting using rayon for better CPU utilization
+    /// 3. Deduplicating (keeping latest block's value) and writing in sorted order
+    ///
+    /// Benchmarks show flatten+parallel-sort outperforms k-way merge for typical block counts
+    /// (10-100 blocks) due to lower overhead and better cache locality.
     pub fn write_state_changes_merged(
         &self,
         changesets: Vec<StateChangeset>,
@@ -1041,7 +1044,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         }
 
         // === Write accounts ===
-        // Flatten all accounts with block index, sort, dedupe (latest wins)
+        // Flatten all accounts with block index, parallel sort, dedupe (latest wins)
         {
             let mut all_accounts: Vec<(Address, usize, Option<Account>)> = Vec::new();
             for (block_idx, cs) in changesets.iter().enumerate() {
@@ -1049,8 +1052,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     all_accounts.push((*addr, block_idx, info.clone().map(Into::into)));
                 }
             }
-            // Sort by address, then by block_idx descending (so latest block comes first)
-            all_accounts.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+            // Parallel sort by address, then by block_idx descending (latest block first)
+            all_accounts.par_sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
 
             let mut accounts_cursor = self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
             let mut last_addr: Option<Address> = None;
@@ -1078,7 +1081,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     all_contracts.push((*hash, block_idx, bytecode.clone()));
                 }
             }
-            all_contracts.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+            all_contracts.par_sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
 
             let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
             let mut last_hash: Option<B256> = None;
@@ -1094,7 +1097,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         // === Write storage ===
         // Track wipe operations per address (address -> latest block that wiped)
-        // Then flatten all slots, filter by wipe, sort, dedupe, write
+        // Then flatten all slots, filter by wipe, parallel sort, dedupe, write
         {
             // First pass: find the latest wipe block for each address
             let mut wipe_blocks: HashMap<Address, usize> = HashMap::default();
@@ -1125,8 +1128,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 }
             }
 
-            // Sort by (address, slot), then block_idx descending
-            all_slots.sort_unstable_by(|a, b| {
+            // Parallel sort by (address, slot), then block_idx descending
+            all_slots.par_sort_unstable_by(|a, b| {
                 a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)).then_with(|| b.2.cmp(&a.2))
             });
 

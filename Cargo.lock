@@ -10205,6 +10205,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "assert_matches",
+ "codspeed-criterion-compat",
  "dashmap 6.1.0",
  "eyre",
  "itertools 0.14.0",
