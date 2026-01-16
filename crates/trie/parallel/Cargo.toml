@@ -69,7 +69,3 @@ test-utils = [
 [[bench]]
 name = "root"
 harness = false
-
-[[bench]]
-name = "heavy_root"
-harness = false
