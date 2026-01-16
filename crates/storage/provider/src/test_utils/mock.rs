@@ -67,6 +67,8 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     pub state_roots: Arc<Mutex<Vec<B256>>>,
     /// Local block body indices store
     pub block_body_indices: Arc<Mutex<HashMap<BlockNumber, StoredBlockBodyIndices>>>,
+    /// Local prune checkpoints
+    pub prune_checkpoints: Arc<Mutex<HashMap<PruneSegment, PruneCheckpoint>>>,
     tx: TxMock,
     prune_modes: Arc<PruneModes>,
 }
@@ -84,6 +86,7 @@ where
             chain_spec: self.chain_spec.clone(),
             state_roots: self.state_roots.clone(),
             block_body_indices: self.block_body_indices.clone(),
+            prune_checkpoints: self.prune_checkpoints.clone(),
             tx: self.tx.clone(),
             prune_modes: self.prune_modes.clone(),
         }
@@ -101,6 +104,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             chain_spec: Arc::new(reth_chainspec::ChainSpecBuilder::mainnet().build()),
             state_roots: Default::default(),
             block_body_indices: Default::default(),
+            prune_checkpoints: Default::default(),
             tx: Default::default(),
             prune_modes: Default::default(),
         }
@@ -174,6 +178,11 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.state_roots.lock().push(state_root);
     }
 
+    /// Add prune checkpoint to local prune checkpoint store
+    pub fn add_prune_checkpoint(&self, segment: PruneSegment, checkpoint: PruneCheckpoint) {
+        self.prune_checkpoints.lock().insert(segment, checkpoint);
+    }
+
     /// Set chain spec.
     pub fn with_chain_spec<C>(self, chain_spec: C) -> MockEthProvider<T, C> {
         MockEthProvider {
@@ -184,6 +193,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             chain_spec: Arc::new(chain_spec),
             state_roots: self.state_roots,
             block_body_indices: self.block_body_indices,
+            prune_checkpoints: self.prune_checkpoints,
             tx: self.tx,
             prune_modes: self.prune_modes,
         }
@@ -747,13 +757,13 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> PruneCheckpointReader
 {
     fn get_prune_checkpoint(
         &self,
-        _segment: PruneSegment,
+        segment: PruneSegment,
     ) -> ProviderResult<Option<PruneCheckpoint>> {
-        Ok(None)
+        Ok(self.prune_checkpoints.lock().get(&segment).copied())
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        Ok(vec![])
+        Ok(self.prune_checkpoints.lock().iter().map(|(k, v)| (*k, *v)).collect())
     }
 }
 

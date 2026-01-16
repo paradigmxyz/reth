@@ -17,6 +17,7 @@ use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
+use reth_prune_types::PruneSegment;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadReceipt},
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
@@ -29,7 +30,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
-    ProviderReceipt, ReceiptProvider,
+    ProviderReceipt, PruneCheckpointReader, ReceiptProvider,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
@@ -51,7 +52,7 @@ use tracing::{debug, error, trace};
 impl<Eth> EngineEthFilter for EthFilter<Eth>
 where
     Eth: FullEthApiTypes
-        + RpcNodeCoreExt<Provider: BlockIdReader>
+        + RpcNodeCoreExt<Provider: BlockIdReader + PruneCheckpointReader>
         + LoadReceipt
         + EthBlocks
         + 'static,
@@ -202,7 +203,7 @@ where
 impl<Eth> EthFilter<Eth>
 where
     Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader>
-        + RpcNodeCoreExt
+        + RpcNodeCoreExt<Provider: PruneCheckpointReader>
         + LoadReceipt
         + EthBlocks
         + 'static,
@@ -328,7 +329,11 @@ where
 #[async_trait]
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>> for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt + LoadReceipt + EthBlocks + 'static,
+    Eth: FullEthApiTypes
+        + RpcNodeCoreExt<Provider: PruneCheckpointReader>
+        + LoadReceipt
+        + EthBlocks
+        + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -443,7 +448,7 @@ struct EthFilterInner<Eth: EthApiTypes> {
 
 impl<Eth> EthFilterInner<Eth>
 where
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader + PruneCheckpointReader, Pool: TransactionPool>
         + EthApiTypes<NetworkTypes: reth_rpc_eth_api::types::RpcTypes>
         + LoadReceipt
         + EthBlocks
@@ -459,6 +464,23 @@ where
         self.eth_api.cache()
     }
 
+    /// Checks if the requested block range overlaps with pruned receipts.
+    /// Returns error if any blocks in the range are pruned.
+    ///
+    /// Note: We only check the `Receipts` segment, not `ContractLogs`. The `ContractLogs` segment
+    /// does selective pruning based on contract addresses but still keeps some receipts, so
+    /// queries can return partial results which is valid behavior.
+    fn check_receipts_pruning(&self, from_block: u64) -> Result<(), EthFilterError> {
+        if let Some(checkpoint) = self.provider().get_prune_checkpoint(PruneSegment::Receipts)? &&
+            let Some(pruned_block) = checkpoint.block_number &&
+            from_block <= pruned_block
+        {
+            return Err(ProviderError::StateAtBlockPruned(from_block).into());
+        }
+
+        Ok(())
+    }
+
     /// Returns logs matching given filter object.
     async fn logs_for_filter(
         self: Arc<Self>,
@@ -471,6 +493,12 @@ where
                 let Some((receipts, maybe_block)) =
                     self.eth_cache().get_receipts_and_maybe_block(block_hash).await?
                 else {
+                    // Receipts not found - check if it's because they're pruned
+                    if let Some(header) =
+                        self.provider().header_by_hash_or_number(block_hash.into())?
+                    {
+                        self.check_receipts_pruning(header.number())?;
+                    }
                     return Err(ProviderError::HeaderNotFound(block_hash.into()).into())
                 };
 
@@ -564,6 +592,9 @@ where
 
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info)?;
+
+                // Check if requested range overlaps with pruned receipts
+                self.check_receipts_pruning(from_block_number)?;
 
                 self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
                     .await
@@ -979,7 +1010,7 @@ where
 
 /// Represents different modes for processing block ranges when filtering logs
 enum RangeMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader + PruneCheckpointReader, Pool: TransactionPool>
         + EthApiTypes
         + LoadReceipt
         + EthBlocks
@@ -992,7 +1023,7 @@ enum RangeMode<
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader + PruneCheckpointReader, Pool: TransactionPool>
             + EthApiTypes
             + LoadReceipt
             + EthBlocks
@@ -1068,7 +1099,7 @@ impl<
 
 /// Mode for processing blocks using cache optimization for recent blocks
 struct CachedMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader + PruneCheckpointReader, Pool: TransactionPool>
         + EthApiTypes
         + LoadReceipt
         + EthBlocks
@@ -1079,7 +1110,7 @@ struct CachedMode<
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader + PruneCheckpointReader, Pool: TransactionPool>
             + EthApiTypes
             + LoadReceipt
             + EthBlocks
@@ -1110,7 +1141,7 @@ type ReceiptFetchFuture<P> =
 
 /// Mode for processing blocks using range queries for older blocks
 struct RangeBlockMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader + PruneCheckpointReader, Pool: TransactionPool>
         + EthApiTypes
         + LoadReceipt
         + EthBlocks
@@ -1125,7 +1156,7 @@ struct RangeBlockMode<
 }
 
 impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader + PruneCheckpointReader, Pool: TransactionPool>
             + EthApiTypes
             + LoadReceipt
             + EthBlocks
@@ -1305,6 +1336,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::MockEthProvider;
+    use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_rpc_convert::RpcConverter;
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
     use reth_rpc_eth_types::receipt::EthReceiptConverter;
@@ -1896,5 +1928,94 @@ mod tests {
         // Each block hash should be the hash of its own header, not derived from any other header
         assert_eq!(logs[0].block_hash, Some(expected_hashes[0])); // block 100
         assert_eq!(logs[1].block_hash, Some(expected_hashes[2])); // block 102
+    }
+
+    #[tokio::test]
+    async fn test_logs_for_filter_returns_error_for_pruned_receipts() {
+        // Create a provider with Receipts pruning checkpoint set at block 50
+        let provider = MockEthProvider::default();
+        provider.add_prune_checkpoint(
+            PruneSegment::Receipts,
+            PruneCheckpoint {
+                block_number: Some(50),
+                tx_number: None,
+                prune_mode: PruneMode::Before(50),
+            },
+        );
+
+        // Add a block header at block 100 so we have a valid chain
+        let header_100 = alloy_consensus::Header { number: 100, ..Default::default() };
+        let block_hash_100 = header_100.hash_slow();
+        provider.add_header(block_hash_100, header_100);
+
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter = super::EthFilter::new(
+            eth_api,
+            EthFilterConfig::default(),
+            Box::new(TokioTaskExecutor::default()),
+        );
+
+        // Query logs for a range that includes pruned blocks (from block 40 to 60)
+        // Note: logs_for_filter contains the pruning check
+        let filter = Filter::new().from_block(40u64).to_block(60u64);
+
+        let result = eth_filter.inner.clone().logs_for_filter(filter, QueryLimits::default()).await;
+
+        // Should return an error for pruned history (same as eth_getBalance)
+        assert!(result.is_err(), "Expected error for pruned receipts but got: {:?}", result);
+
+        let error = result.unwrap_err();
+        // Verify the error is StateAtBlockPruned (matching eth_getBalance behavior)
+        match error {
+            EthFilterError::EthAPIError(EthApiError::Internal(ref inner)) => {
+                // Should contain the pruned message
+                assert!(
+                    inner.to_string().contains("pruned"),
+                    "Expected error message to contain 'pruned', got: {:?}",
+                    inner
+                );
+            }
+            _ => panic!("Expected Internal error with pruned message, got: {:?}", error),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_logs_for_filter_succeeds_for_non_pruned_range() {
+        // Create a provider with Receipts pruning checkpoint set at block 50
+        let provider = MockEthProvider::default();
+        provider.add_prune_checkpoint(
+            PruneSegment::Receipts,
+            PruneCheckpoint {
+                block_number: Some(50),
+                tx_number: None,
+                prune_mode: PruneMode::Before(50),
+            },
+        );
+
+        // Add block headers and receipts for blocks 60-70
+        for i in 60u64..=70 {
+            let header = alloy_consensus::Header { number: i, ..Default::default() };
+            let block_hash = header.hash_slow();
+            provider.add_header(block_hash, header);
+        }
+
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter = super::EthFilter::new(
+            eth_api,
+            EthFilterConfig::default(),
+            Box::new(TokioTaskExecutor::default()),
+        );
+
+        // Query logs for a range that does not include pruned blocks (from block 60 to 70)
+        let filter = Filter::new().from_block(60u64).to_block(70u64);
+
+        let result = eth_filter.inner.clone().logs_for_filter(filter, QueryLimits::default()).await;
+
+        // Should succeed - no pruned blocks in range
+        assert!(
+            result.is_ok(),
+            "Expected success for non-pruned range but got error: {:?}",
+            result
+        );
     }
 }
