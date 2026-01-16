@@ -7912,8 +7912,8 @@ dependencies = [
  "tokio-stream",
  "toml",
  "tracing",
- "urlencoding",
  "url",
+ "urlencoding",
  "zstd",
 ]
 

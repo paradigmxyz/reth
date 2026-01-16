@@ -247,7 +247,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         provider_factory.db_ref().view(|tx| {
             for table in Tables::ALL {
                 if let Ok(table_db) = tx.inner.open_db(Some(table.name())) &&
-                    let Ok(table_stats) = tx.inner.db_stat(&table_db)
+                    let Ok(table_stats) = tx.inner.db_stat(table_db.dbi())
                 {
                     let page_size = table_stats.page_size() as u64;
                     let num_pages = (table_stats.leaf_pages() +
