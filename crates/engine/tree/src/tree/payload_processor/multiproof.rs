@@ -141,22 +141,27 @@ impl ProofSequencer {
     /// Adds a proof with the corresponding state update and returns all sequential proofs and state
     /// updates if we have a continuous sequence
     fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
-        if sequence >= self.next_to_deliver {
+        // Optimization: fast path for in-order delivery to avoid BTreeMap overhead.
+        // If this is the expected sequence, return it immediately without buffering.
+        if sequence == self.next_to_deliver {
+            let mut consecutive_proofs = Vec::with_capacity(1);
+            consecutive_proofs.push(update);
+            self.next_to_deliver += 1;
+
+            // Check if we have subsequent proofs in the pending buffer
+            while let Some(pending) = self.pending_proofs.remove(&self.next_to_deliver) {
+                consecutive_proofs.push(pending);
+                self.next_to_deliver += 1;
+            }
+
+            return consecutive_proofs;
+        }
+
+        if sequence > self.next_to_deliver {
             self.pending_proofs.insert(sequence, update);
         }
 
-        let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
-        let mut current_sequence = self.next_to_deliver;
-
-        // keep collecting proofs and state updates as long as we have consecutive sequence numbers
-        while let Some(pending) = self.pending_proofs.remove(&current_sequence) {
-            consecutive_proofs.push(pending);
-            current_sequence += 1;
-        }
-
-        self.next_to_deliver += consecutive_proofs.len() as u64;
-
-        consecutive_proofs
+        Vec::new()
     }
 
     /// Returns true if we still have pending proofs
@@ -1814,7 +1819,9 @@ mod tests {
                     nonce: 1,
                     code_hash: Default::default(),
                     code: Default::default(),
+                    account_id: None,
                 },
+                original_info: Box::new(revm_state::AccountInfo::default()),
                 transaction_id: Default::default(),
                 storage: Default::default(),
                 status: revm_state::AccountStatus::Touched,
@@ -1831,7 +1838,9 @@ mod tests {
                     nonce: 2,
                     code_hash: Default::default(),
                     code: Default::default(),
+                    account_id: None,
                 },
+                original_info: Box::new(revm_state::AccountInfo::default()),
                 transaction_id: Default::default(),
                 storage: Default::default(),
                 status: revm_state::AccountStatus::Touched,
@@ -1933,7 +1942,9 @@ mod tests {
                     nonce: 1,
                     code_hash: Default::default(),
                     code: Default::default(),
+                    account_id: None,
                 },
+                original_info: Box::new(revm_state::AccountInfo::default()),
                 transaction_id: Default::default(),
                 storage: Default::default(),
                 status: revm_state::AccountStatus::Touched,
