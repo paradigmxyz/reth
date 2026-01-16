@@ -37,7 +37,7 @@ use tracing::*;
 /// the entire trie, only operating on the modified parts.
 #[derive(Debug)]
 pub struct ParallelStateRoot<Provider> {
-    /// Clonable provider for trie and hashed cursor access.
+    /// Cloneable provider for trie and hashed cursor access.
     provider: Provider,
     // Prefix sets indicating which portions of the trie need to be recomputed.
     prefix_sets: TriePrefixSets,

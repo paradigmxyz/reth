@@ -1154,7 +1154,7 @@ mod tests {
                 Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
                 std::convert::identity,
             ),
-            StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+            StateProviderBuilder::new(provider_factory, genesis_hash, None),
             overlay_provider,
             &TreeConfig::default(),
             None, // No BAL for test

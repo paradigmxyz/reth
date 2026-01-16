@@ -502,10 +502,10 @@ where
 
         // Create overlay provider once for state root computation (parallel/serial paths).
         // The StateRootTask path doesn't need this since it uses the provider passed to spawn.
-        let overlay_provider_for_root = if !matches!(strategy, StateRootStrategy::StateRootTask) {
-            Some(ensure_ok_post_block!(overlay_factory.database_provider_ro(), block))
-        } else {
+        let overlay_provider_for_root = if matches!(strategy, StateRootStrategy::StateRootTask) {
             None
+        } else {
+            Some(ensure_ok_post_block!(overlay_factory.database_provider_ro(), block))
         };
 
         match strategy {

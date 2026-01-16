@@ -246,7 +246,7 @@ fn bench_state_root(c: &mut Criterion) {
                                     >::new(),
                                     std::convert::identity,
                                 ),
-                                StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                                StateProviderBuilder::new(provider, genesis_hash, None),
                                 overlay_provider,
                                 &TreeConfig::default(),
                                 None,
