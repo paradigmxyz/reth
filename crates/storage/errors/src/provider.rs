@@ -107,6 +107,12 @@ pub enum ProviderError {
     /// Provider does not support this particular request.
     #[error("this provider does not support this request")]
     UnsupportedProvider,
+    /// RocksDB transaction required but not provided.
+    ///
+    /// This error occurs when storage settings indicate RocksDB should be used for a table,
+    /// but no RocksDB transaction was provided to the reader constructor.
+    #[error("RocksDB transaction required but not provided")]
+    RocksDbTxRequired,
     /// Static File is not found at specified path.
     #[cfg(feature = "std")]
     #[error("not able to find {_0} static file at {_1:?}")]

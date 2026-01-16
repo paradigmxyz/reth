@@ -6,7 +6,7 @@ use crate::{
     HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider,
+    StorageRootProvider, StorageSettingsCache, TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -25,6 +25,7 @@ use core::{
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 #[cfg(feature = "db-api")]
 use reth_db_api::mock::{DatabaseMock, TxMock};
+use reth_db_api::models::StorageSettings;
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
@@ -603,6 +604,16 @@ impl<C: Send + Sync, N: NodePrimitives> PruneCheckpointReader for NoopProvider<C
 
 impl<C: Send + Sync, N: NodePrimitives> NodePrimitivesProvider for NoopProvider<C, N> {
     type Primitives = N;
+}
+
+impl<C: Send + Sync, N: Send + Sync> StorageSettingsCache for NoopProvider<C, N> {
+    fn cached_storage_settings(&self) -> StorageSettings {
+        StorageSettings::legacy()
+    }
+
+    fn set_storage_settings_cache(&self, _settings: StorageSettings) {
+        // No-op for NoopProvider
+    }
 }
 
 impl<C: Send + Sync, N: Send + Sync> BlockBodyIndicesProvider for NoopProvider<C, N> {

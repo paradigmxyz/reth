@@ -292,7 +292,7 @@ impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
+impl<TX: Send, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
     /// Returns the `RocksDB` provider.
     fn rocksdb_provider(&self) -> RocksDBProvider {
         self.rocksdb_provider.clone()
