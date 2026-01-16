@@ -128,7 +128,3 @@ op = [
     "reth-evm/op",
     "reth-primitives-traits/op",
 ]
-edge = [
-    "reth-provider/rocksdb",
-    "reth-stages/rocksdb",
-]

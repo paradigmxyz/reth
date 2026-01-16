@@ -180,7 +180,7 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
-edge = ["reth-ethereum-cli/edge", "reth-node-core/edge", "reth-node-ethereum/edge"]
+edge = ["reth-ethereum-cli/edge", "reth-node-core/edge"]
 
 [[bin]]
 name = "reth"
