@@ -449,7 +449,7 @@ where
     )?;
 
     // Register for commit
-    reth_provider::register_rocksdb_batch!(provider, writer);
+    writer.register_for_commit(provider);
 
     Ok(())
 }

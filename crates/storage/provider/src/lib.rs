@@ -118,29 +118,3 @@ macro_rules! make_rocksdb_batch_arg {
     };
 }
 
-/// Registers a `RocksDB` batch for commit if the writer contains one.
-///
-/// This extracts the raw `RocksDB` write batch from an `EitherWriter` and registers it
-/// with the provider for later atomic commit.
-#[macro_export]
-#[cfg(all(unix, feature = "rocksdb"))]
-macro_rules! register_rocksdb_batch {
-    ($provider:expr, $writer:expr) => {{
-        use $crate::RocksDBProviderFactory;
-        if let Some(batch) = $writer.into_raw_rocksdb_batch() {
-            $provider.set_pending_rocksdb_batch(batch);
-        }
-    }};
-}
-
-/// Registers a `RocksDB` batch for commit if the writer contains one.
-///
-/// This extracts the raw `RocksDB` write batch from an `EitherWriter` and registers it
-/// with the provider for later atomic commit.
-#[macro_export]
-#[cfg(not(all(unix, feature = "rocksdb")))]
-macro_rules! register_rocksdb_batch {
-    ($provider:expr, $writer:expr) => {
-        let _ = ($provider, $writer);
-    };
-}

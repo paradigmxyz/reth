@@ -288,6 +288,27 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         }
     }
 
+    /// Registers this writer's `RocksDB` batch (if any) with the provider for later commit.
+    ///
+    /// This consumes the writer and extracts any pending `RocksDB` batch, registering it
+    /// with the provider to be committed atomically with MDBX and static file commits.
+    ///
+    /// For non-`RocksDB` variants, this is a no-op.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pub fn register_for_commit<P: crate::RocksDBProviderFactory>(self, provider: &P) {
+        if let Some(batch) = self.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+    }
+
+    /// Registers this writer's `RocksDB` batch (if any) with the provider for later commit.
+    ///
+    /// Without the `rocksdb` feature, this is a no-op.
+    #[cfg(not(all(unix, feature = "rocksdb")))]
+    pub fn register_for_commit<P>(self, _provider: &P) {
+        // No-op when RocksDB feature is disabled
+    }
+
     /// Increment the block number.
     ///
     /// Relevant only for [`Self::StaticFile`]. It is a no-op for [`Self::Database`].
