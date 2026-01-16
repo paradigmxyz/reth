@@ -3,7 +3,7 @@ use core::ops::Not;
 use crate::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    utils::extend_sorted_vec,
+    utils::{extend_sorted_vec, kway_merge_sorted},
     KeyHasher, MultiProofTargets, Nibbles,
 };
 use alloc::{borrow::Cow, vec::Vec};
@@ -634,6 +634,62 @@ impl HashedPostStateSorted {
         }
     }
 
+    /// Batch-merge sorted hashed post states. Iterator yields **newest to oldest**.
+    ///
+    /// Uses k-way merge for O(n log k) complexity and one-pass accumulation for storages.
+    pub fn merge_batch<'a>(states: impl IntoIterator<Item = &'a Self>) -> Self {
+        let states: Vec<_> = states.into_iter().collect();
+        if states.is_empty() {
+            return Self::default();
+        }
+
+        let accounts = kway_merge_sorted(states.iter().map(|s| s.accounts.as_slice()));
+
+        struct StorageAcc<'a> {
+            /// Account storage was cleared (e.g., SELFDESTRUCT).
+            wiped: bool,
+            /// Stop collecting older slices after seeing a wipe.
+            sealed: bool,
+            /// Storage slot slices to merge, ordered newest to oldest.
+            slices: Vec<&'a [(B256, U256)]>,
+        }
+
+        let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
+
+        // Accumulate storage slices per address from newest to oldest state.
+        // Once we see a `wiped` flag, the account was cleared at that point,
+        // so older storage slots are irrelevant - we "seal" and stop collecting.
+        for state in &states {
+            for (addr, storage) in &state.storages {
+                let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
+                    wiped: false,
+                    sealed: false,
+                    slices: Vec::new(),
+                });
+
+                if entry.sealed {
+                    continue;
+                }
+
+                entry.slices.push(storage.storage_slots.as_slice());
+                if storage.wiped {
+                    entry.wiped = true;
+                    entry.sealed = true;
+                }
+            }
+        }
+
+        let storages = acc
+            .into_iter()
+            .map(|(addr, entry)| {
+                let storage_slots = kway_merge_sorted(entry.slices);
+                (addr, HashedStorageSorted { wiped: entry.wiped, storage_slots })
+            })
+            .collect();
+
+        Self { accounts, storages }
+    }
+
     /// Clears all accounts and storage data.
     pub fn clear(&mut self) {
         self.accounts.clear();
@@ -648,7 +704,7 @@ impl AsRef<Self> for HashedPostStateSorted {
 }
 
 /// Sorted hashed storage optimized for iterating during state trie calculation.
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedStorageSorted {
     /// Sorted collection of updated storage slots. [`U256::ZERO`] indicates a deleted value.
@@ -693,6 +749,21 @@ impl HashedStorageSorted {
 
         // Extend the sorted non-zero valued slots
         extend_sorted_vec(&mut self.storage_slots, &other.storage_slots);
+    }
+
+    /// Batch-merge sorted hashed storage. Iterator yields **newest to oldest**.
+    /// If any update is wiped, prior data is discarded.
+    pub fn merge_batch<'a>(updates: impl IntoIterator<Item = &'a Self>) -> Self {
+        let updates: Vec<_> = updates.into_iter().collect();
+        if updates.is_empty() {
+            return Self::default();
+        }
+
+        let wipe_idx = updates.iter().position(|u| u.wiped);
+        let relevant = wipe_idx.map_or(&updates[..], |idx| &updates[..=idx]);
+        let storage_slots = kway_merge_sorted(relevant.iter().map(|u| u.storage_slots.as_slice()));
+
+        Self { wiped: wipe_idx.is_some(), storage_slots }
     }
 }
 

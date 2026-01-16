@@ -1,10 +1,8 @@
 use crate::{
-    changesets_utils::{
-        storage_trie_wiped_changeset_iter, StorageRevertsIter, StorageTrieCurrentValuesIter,
-    },
+    changesets_utils::StorageRevertsIter,
     providers::{
         database::{chain::ChainStorage, metrics},
-        rocksdb::RocksDBProvider,
+        rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
         static_file::{StaticFileWriteCtx, StaticFileWriter},
         NodeTypesForProvider, StaticFileProvider,
     },
@@ -20,7 +18,7 @@ use crate::{
     PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
     RocksDBProviderFactory, RocksTxRefArg, StageCheckpointReader, StateProviderBox, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, TrieReader, TrieWriter,
+    TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -66,17 +64,13 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
-    trie_cursor::{
-        InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
-        TrieCursorIter,
-    },
+    changesets::storage_trie_wiped_changeset_iter,
+    trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorIter, TrieStorageCursor},
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, HashedStorageSorted, StoredNibbles, StoredNibblesSubKey,
     TrieChangeSetsEntry,
 };
-use reth_trie_db::{
-    DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
-};
+use reth_trie_db::{ChangesetCache, DatabaseAccountTrieCursor, DatabaseStorageTrieCursor};
 use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
@@ -188,9 +182,11 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
+    /// Changeset cache for trie unwinding
+    changeset_cache: ChangesetCache,
     /// Pending `RocksDB` batches to be committed at provider commit time.
-    #[cfg(all(unix, feature = "rocksdb"))]
-    pending_rocksdb_batches: parking_lot::Mutex<Vec<rocksdb::WriteBatchWithTransaction<true>>>,
+    #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
+    pending_rocksdb_batches: PendingRocksDBBatches,
     /// Minimum distance from tip required for pruning
     minimum_pruning_distance: u64,
     /// Database provider metrics
@@ -206,10 +202,11 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("prune_modes", &self.prune_modes)
             .field("storage", &self.storage)
             .field("storage_settings", &self.storage_settings)
-            .field("rocksdb_provider", &self.rocksdb_provider);
-        #[cfg(all(unix, feature = "rocksdb"))]
-        s.field("pending_rocksdb_batches", &"<pending batches>");
-        s.field("minimum_pruning_distance", &self.minimum_pruning_distance).finish()
+            .field("rocksdb_provider", &self.rocksdb_provider)
+            .field("changeset_cache", &self.changeset_cache)
+            .field("pending_rocksdb_batches", &"<pending batches>")
+            .field("minimum_pruning_distance", &self.minimum_pruning_distance)
+            .finish()
     }
 }
 
@@ -320,6 +317,7 @@ impl<TX: Debug + Send, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpe
 
 impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-write transaction.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_rw(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
@@ -328,6 +326,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
+        changeset_cache: ChangesetCache,
     ) -> Self {
         Self {
             tx,
@@ -337,8 +336,8 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            #[cfg(all(unix, feature = "rocksdb"))]
-            pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
+            changeset_cache,
+            pending_rocksdb_batches: Default::default(),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
         }
@@ -404,6 +403,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         })
     }
 
+    /// Creates the context for `RocksDB` writes.
+    #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
+    fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
+        RocksDBWriteCtx {
+            first_block_number: first_block,
+            prune_tx_lookup: self.prune_modes.transaction_lookup,
+            storage_settings: self.cached_storage_settings(),
+            pending_batches: self.pending_rocksdb_batches.clone(),
+        }
+    }
+
     /// Writes executed blocks and state to storage.
     ///
     /// This method parallelizes static file (SF) writes with MDBX writes.
@@ -453,6 +463,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // avoid capturing &self.tx in scope below.
         let sf_provider = &self.static_file_provider;
         let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb_provider = self.rocksdb_provider.clone();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
 
         thread::scope(|s| {
             // SF writes
@@ -460,6 +474,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let start = Instant::now();
                 sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx)?;
                 Ok::<_, ProviderError>(start.elapsed())
+            });
+
+            // RocksDB writes
+            #[cfg(all(unix, feature = "rocksdb"))]
+            let rocksdb_handle = rocksdb_ctx.storage_settings.any_in_rocksdb().then(|| {
+                s.spawn(|| {
+                    let start = Instant::now();
+                    rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)?;
+                    Ok::<_, ProviderError>(start.elapsed())
+                })
             });
 
             // MDBX writes
@@ -511,7 +535,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                 if save_mode.with_state() {
                     let execution_output = block.execution_outcome();
-                    let block_number = recovered_block.number();
 
                     let state_config = StateWriteConfig {
                         write_receipts: !sf_ctx.write_receipts,
@@ -540,11 +563,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     let trie_data = block.trie_data();
 
                     // Trie changesets must be written per-block (keyed by block number)
-                    let start = Instant::now();
-                    self.write_trie_changesets(block_number, &trie_data.trie_updates, None)?;
-                    timings.write_trie_changesets += start.elapsed();
-
-                    // Trie updates written per-block
                     let start = Instant::now();
                     self.write_trie_updates_sorted(&trie_data.trie_updates)?;
                     timings.write_trie_updates += start.elapsed();
@@ -586,6 +604,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             timings.sf = sf_handle
                 .join()
                 .map_err(|_| StaticFileWriterError::ThreadPanic("static file"))??;
+
+            // Wait for RocksDB thread
+            #[cfg(all(unix, feature = "rocksdb"))]
+            if let Some(handle) = rocksdb_handle {
+                timings.rocksdb = handle.join().expect("RocksDB thread panicked")?;
+            }
 
             timings.total = total_start.elapsed();
 
@@ -692,7 +716,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         self.unwind_storage_history_indices(changed_storages.iter().copied())?;
 
         // Unwind accounts/storages trie tables using the revert.
-        let trie_revert = self.trie_reverts(from)?;
+        // Get the database tip block number
+        let db_tip_block = self
+            .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
+            .as_ref()
+            .map(|chk| chk.block_number)
+            .ok_or_else(|| ProviderError::InsufficientChangesets {
+                requested: from,
+                available: 0..=0,
+            })?;
+
+        let trie_revert = self.changeset_cache.get_or_compute_range(self, from..=db_tip_block)?;
         self.write_trie_updates_sorted(&trie_revert)?;
 
         // Clear trie changesets which have been unwound.
@@ -1327,6 +1361,7 @@ where
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-only transaction.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
@@ -1335,6 +1370,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
+        changeset_cache: ChangesetCache,
     ) -> Self {
         Self {
             tx,
@@ -1344,8 +1380,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            #[cfg(all(unix, feature = "rocksdb"))]
-            pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
+            changeset_cache,
+            pending_rocksdb_batches: Default::default(),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
         }
@@ -2681,7 +2717,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         // Write account changes
-        tracing::debug!(target: "sync::stages::merkle_changesets", ?first_block, "Writing account changes");
+        tracing::trace!(?first_block, "Writing account changes");
         for (block_index, account_block_reverts) in reverts.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
             let changeset = account_block_reverts
@@ -3174,127 +3210,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     }
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
-    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
-        let tx = self.tx_ref();
-
-        // Read account trie changes directly into a Vec - data is already sorted by nibbles
-        // within each block, and we want the oldest (first) version of each node sorted by path.
-        let mut account_nodes = Vec::new();
-        let mut seen_account_keys = HashSet::new();
-        let mut accounts_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
-
-        for entry in accounts_cursor.walk_range(from..)? {
-            let (_, TrieChangeSetsEntry { nibbles, node }) = entry?;
-            // Only keep the first (oldest) version of each node
-            if seen_account_keys.insert(nibbles.0) {
-                account_nodes.push((nibbles.0, node));
-            }
-        }
-
-        account_nodes.sort_by_key(|(path, _)| *path);
-
-        // Read storage trie changes - data is sorted by (block, hashed_address, nibbles)
-        // Keep track of seen (address, nibbles) pairs to only keep the oldest version per address,
-        // sorted by path.
-        let mut storage_tries = B256Map::<Vec<_>>::default();
-        let mut seen_storage_keys = HashSet::new();
-        let mut storages_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
-
-        // Create storage range starting from `from` block
-        let storage_range_start = BlockNumberHashedAddress((from, B256::ZERO));
-
-        for entry in storages_cursor.walk_range(storage_range_start..)? {
-            let (
-                BlockNumberHashedAddress((_, hashed_address)),
-                TrieChangeSetsEntry { nibbles, node },
-            ) = entry?;
-
-            // Only keep the first (oldest) version of each node for this address
-            if seen_storage_keys.insert((hashed_address, nibbles.0)) {
-                storage_tries.entry(hashed_address).or_default().push((nibbles.0, node));
-            }
-        }
-
-        // Convert to StorageTrieUpdatesSorted
-        let storage_tries = storage_tries
-            .into_iter()
-            .map(|(address, mut nodes)| {
-                nodes.sort_by_key(|(path, _)| *path);
-                (address, StorageTrieUpdatesSorted { storage_nodes: nodes, is_deleted: false })
-            })
-            .collect();
-
-        Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
-    }
-
-    fn get_block_trie_updates(
-        &self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<TrieUpdatesSorted> {
-        let tx = self.tx_ref();
-
-        // Step 1: Get the trie reverts for the state after the target block
-        let reverts = self.trie_reverts(block_number + 1)?;
-
-        // Step 2: Create an InMemoryTrieCursorFactory with the reverts
-        // This gives us the trie state as it was after the target block was processed
-        let db_cursor_factory = DatabaseTrieCursorFactory::new(tx);
-        let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
-
-        // Step 3: Collect all account trie nodes that changed in the target block
-        let mut account_nodes = Vec::new();
-
-        // Walk through all account trie changes for this block
-        let mut accounts_trie_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
-        let mut account_cursor = cursor_factory.account_trie_cursor()?;
-
-        for entry in accounts_trie_cursor.walk_dup(Some(block_number), None)? {
-            let (_, TrieChangeSetsEntry { nibbles, .. }) = entry?;
-            // Look up the current value of this trie node using the overlay cursor
-            let node_value = account_cursor.seek_exact(nibbles.0)?.map(|(_, node)| node);
-            account_nodes.push((nibbles.0, node_value));
-        }
-
-        // Step 4: Collect all storage trie nodes that changed in the target block
-        let mut storage_tries = B256Map::default();
-        let mut storages_trie_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
-        let storage_range_start = BlockNumberHashedAddress((block_number, B256::ZERO));
-        let storage_range_end = BlockNumberHashedAddress((block_number + 1, B256::ZERO));
-
-        let mut current_hashed_address = None;
-        let mut storage_cursor = None;
-
-        for entry in storages_trie_cursor.walk_range(storage_range_start..storage_range_end)? {
-            let (
-                BlockNumberHashedAddress((_, hashed_address)),
-                TrieChangeSetsEntry { nibbles, .. },
-            ) = entry?;
-
-            // Check if we need to create a new storage cursor for a different account
-            if current_hashed_address != Some(hashed_address) {
-                storage_cursor = Some(cursor_factory.storage_trie_cursor(hashed_address)?);
-                current_hashed_address = Some(hashed_address);
-            }
-
-            // Look up the current value of this storage trie node
-            let cursor =
-                storage_cursor.as_mut().expect("storage_cursor was just initialized above");
-            let node_value = cursor.seek_exact(nibbles.0)?.map(|(_, node)| node);
-            storage_tries
-                .entry(hashed_address)
-                .or_insert_with(|| StorageTrieUpdatesSorted {
-                    storage_nodes: Vec::new(),
-                    is_deleted: false,
-                })
-                .storage_nodes
-                .push((nibbles.0, node_value));
-        }
-
-        Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
-    }
-}
-
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseProvider<TX, N> {
     /// Writes storage trie updates from the given storage trie map with already sorted updates.
     ///
@@ -3337,22 +3252,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
 
         let mut changeset_cursor =
             self.tx_ref().cursor_dup_write::<tables::StoragesTrieChangeSets>()?;
+        let curr_values_cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
 
-        // We hold two cursors to the same table because we use them simultaneously when an
-        // account's storage is wiped. We keep them outside the for-loop so they can be re-used
-        // between accounts.
-        let changed_curr_values_cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
-        let wiped_nodes_cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
-
-        // DatabaseStorageTrieCursor requires ownership of the cursor. The easiest way to deal with
-        // this is to create this outer variable with an initial dummy account, and overwrite it on
-        // every loop for every real account.
-        let mut changed_curr_values_cursor = DatabaseStorageTrieCursor::new(
-            changed_curr_values_cursor,
-            B256::default(), // Will be set per iteration
-        );
-        let mut wiped_nodes_cursor = DatabaseStorageTrieCursor::new(
-            wiped_nodes_cursor,
+        // Wrap the cursor in DatabaseStorageTrieCursor
+        let mut db_storage_cursor = DatabaseStorageTrieCursor::new(
+            curr_values_cursor,
             B256::default(), // Will be set per iteration
         );
 
@@ -3362,43 +3266,22 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         for (hashed_address, storage_trie_updates) in storage_tries {
             let changeset_key = BlockNumberHashedAddress((block_number, *hashed_address));
 
-            // Update the hashed address for the cursors
-            changed_curr_values_cursor =
-                DatabaseStorageTrieCursor::new(changed_curr_values_cursor.cursor, *hashed_address);
+            // Update the hashed address for the cursor
+            db_storage_cursor.set_hashed_address(*hashed_address);
 
             // Get the overlay updates, or use empty updates
             let overlay = updates_overlay.unwrap_or(&empty_updates);
 
             // Wrap the cursor in InMemoryTrieCursor with the overlay
-            let mut in_memory_changed_cursor = InMemoryTrieCursor::new_storage(
-                &mut changed_curr_values_cursor,
-                overlay,
-                *hashed_address,
-            );
+            let mut in_memory_storage_cursor =
+                InMemoryTrieCursor::new_storage(&mut db_storage_cursor, overlay, *hashed_address);
 
-            // Create an iterator which produces the current values of all updated paths, or None if
-            // they are currently unset.
-            let curr_values_of_changed = StorageTrieCurrentValuesIter::new(
-                storage_trie_updates.storage_nodes.iter().map(|e| e.0),
-                &mut in_memory_changed_cursor,
-            )?;
+            let changed_paths = storage_trie_updates.storage_nodes.iter().map(|e| e.0);
 
             if storage_trie_updates.is_deleted() {
-                // Create an iterator that starts from the beginning of the storage trie for this
-                // account
-                wiped_nodes_cursor =
-                    DatabaseStorageTrieCursor::new(wiped_nodes_cursor.cursor, *hashed_address);
+                let all_nodes = TrieCursorIter::new(&mut in_memory_storage_cursor);
 
-                // Wrap the wiped nodes cursor in InMemoryTrieCursor with the overlay
-                let mut in_memory_wiped_cursor = InMemoryTrieCursor::new_storage(
-                    &mut wiped_nodes_cursor,
-                    overlay,
-                    *hashed_address,
-                );
-
-                let all_nodes = TrieCursorIter::new(&mut in_memory_wiped_cursor);
-
-                for wiped in storage_trie_wiped_changeset_iter(curr_values_of_changed, all_nodes)? {
+                for wiped in storage_trie_wiped_changeset_iter(changed_paths, all_nodes)? {
                     let (path, node) = wiped?;
                     num_written += 1;
                     changeset_cursor.append_dup(
@@ -3407,8 +3290,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
                     )?;
                 }
             } else {
-                for curr_value in curr_values_of_changed {
-                    let (path, node) = curr_value?;
+                for path in changed_paths {
+                    let node = in_memory_storage_cursor.seek_exact(path)?.map(|(_, node)| node);
                     num_written += 1;
                     changeset_cursor.append_dup(
                         changeset_key,
@@ -3690,14 +3573,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
-        // account history stage
-        {
+        let storage_settings = self.cached_storage_settings();
+        if !storage_settings.account_history_in_rocksdb {
             let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
-        // storage history stage
-        {
+        if !storage_settings.storages_history_in_rocksdb {
             let indices = self.changed_storages_and_blocks_with_range(range)?;
             self.insert_storage_history_index(indices)?;
         }
@@ -4167,6 +4049,7 @@ mod tests {
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
         BlockWriter,
     };
+    use alloy_primitives::map::B256Map;
     use reth_ethereum_primitives::Receipt;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::Nibbles;
@@ -5406,279 +5289,6 @@ mod tests {
         assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
 
         provider_rw.commit().unwrap();
-    }
-
-    #[test]
-    fn test_get_block_trie_updates() {
-        use reth_db_api::models::BlockNumberHashedAddress;
-        use reth_trie::{BranchNodeCompact, StorageTrieEntry};
-
-        let factory = create_test_provider_factory();
-        let provider_rw = factory.provider_rw().unwrap();
-
-        let target_block = 2u64;
-        let next_block = 3u64;
-
-        // Create test nibbles and nodes for accounts
-        let account_nibbles1 = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
-        let account_nibbles2 = Nibbles::from_nibbles([0x5, 0x6, 0x7, 0x8]);
-        let account_nibbles3 = Nibbles::from_nibbles([0x9, 0xa, 0xb, 0xc]);
-
-        let node1 = BranchNodeCompact::new(
-            0b1111_1111_0000_0000,
-            0b0000_0000_0000_0000,
-            0b0000_0000_0000_0000,
-            vec![],
-            None,
-        );
-
-        let node2 = BranchNodeCompact::new(
-            0b0000_0000_1111_1111,
-            0b0000_0000_0000_0000,
-            0b0000_0000_0000_0000,
-            vec![],
-            None,
-        );
-
-        let node3 = BranchNodeCompact::new(
-            0b1010_1010_1010_1010,
-            0b0000_0000_0000_0000,
-            0b0000_0000_0000_0000,
-            vec![],
-            None,
-        );
-
-        // Pre-populate AccountsTrie with nodes that will be the final state
-        {
-            let mut cursor = provider_rw.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
-            cursor.insert(StoredNibbles(account_nibbles1), &node1).unwrap();
-            cursor.insert(StoredNibbles(account_nibbles2), &node2).unwrap();
-            // account_nibbles3 will be deleted (not in final state)
-        }
-
-        // Insert trie changesets for target_block
-        {
-            let mut cursor =
-                provider_rw.tx_ref().cursor_dup_write::<tables::AccountsTrieChangeSets>().unwrap();
-            // nibbles1 was updated in target_block (old value stored)
-            cursor
-                .append_dup(
-                    target_block,
-                    TrieChangeSetsEntry {
-                        nibbles: StoredNibblesSubKey(account_nibbles1),
-                        node: Some(BranchNodeCompact::new(
-                            0b1111_0000_0000_0000, // old value
-                            0b0000_0000_0000_0000,
-                            0b0000_0000_0000_0000,
-                            vec![],
-                            None,
-                        )),
-                    },
-                )
-                .unwrap();
-            // nibbles2 was created in target_block (no old value)
-            cursor
-                .append_dup(
-                    target_block,
-                    TrieChangeSetsEntry {
-                        nibbles: StoredNibblesSubKey(account_nibbles2),
-                        node: None,
-                    },
-                )
-                .unwrap();
-        }
-
-        // Insert trie changesets for next_block (to test overlay)
-        {
-            let mut cursor =
-                provider_rw.tx_ref().cursor_dup_write::<tables::AccountsTrieChangeSets>().unwrap();
-            // nibbles3 was deleted in next_block (old value stored)
-            cursor
-                .append_dup(
-                    next_block,
-                    TrieChangeSetsEntry {
-                        nibbles: StoredNibblesSubKey(account_nibbles3),
-                        node: Some(node3),
-                    },
-                )
-                .unwrap();
-        }
-
-        // Storage trie updates
-        let storage_address1 = B256::from([1u8; 32]);
-        let storage_nibbles1 = Nibbles::from_nibbles([0xa, 0xb]);
-        let storage_nibbles2 = Nibbles::from_nibbles([0xc, 0xd]);
-
-        let storage_node1 = BranchNodeCompact::new(
-            0b1111_1111_1111_0000,
-            0b0000_0000_0000_0000,
-            0b0000_0000_0000_0000,
-            vec![],
-            None,
-        );
-
-        let storage_node2 = BranchNodeCompact::new(
-            0b0101_0101_0101_0101,
-            0b0000_0000_0000_0000,
-            0b0000_0000_0000_0000,
-            vec![],
-            None,
-        );
-
-        // Pre-populate StoragesTrie with final state
-        {
-            let mut cursor =
-                provider_rw.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
-            cursor
-                .upsert(
-                    storage_address1,
-                    &StorageTrieEntry {
-                        nibbles: StoredNibblesSubKey(storage_nibbles1),
-                        node: storage_node1.clone(),
-                    },
-                )
-                .unwrap();
-            // storage_nibbles2 was deleted in next_block, so it's not in final state
-        }
-
-        // Insert storage trie changesets for target_block
-        {
-            let mut cursor =
-                provider_rw.tx_ref().cursor_dup_write::<tables::StoragesTrieChangeSets>().unwrap();
-            let key = BlockNumberHashedAddress((target_block, storage_address1));
-
-            // storage_nibbles1 was updated
-            cursor
-                .append_dup(
-                    key,
-                    TrieChangeSetsEntry {
-                        nibbles: StoredNibblesSubKey(storage_nibbles1),
-                        node: Some(BranchNodeCompact::new(
-                            0b0000_0000_1111_1111, // old value
-                            0b0000_0000_0000_0000,
-                            0b0000_0000_0000_0000,
-                            vec![],
-                            None,
-                        )),
-                    },
-                )
-                .unwrap();
-
-            // storage_nibbles2 was created
-            cursor
-                .append_dup(
-                    key,
-                    TrieChangeSetsEntry {
-                        nibbles: StoredNibblesSubKey(storage_nibbles2),
-                        node: None,
-                    },
-                )
-                .unwrap();
-        }
-
-        // Insert storage trie changesets for next_block (to test overlay)
-        {
-            let mut cursor =
-                provider_rw.tx_ref().cursor_dup_write::<tables::StoragesTrieChangeSets>().unwrap();
-            let key = BlockNumberHashedAddress((next_block, storage_address1));
-
-            // storage_nibbles2 was deleted in next_block
-            cursor
-                .append_dup(
-                    key,
-                    TrieChangeSetsEntry {
-                        nibbles: StoredNibblesSubKey(storage_nibbles2),
-                        node: Some(BranchNodeCompact::new(
-                            0b0101_0101_0101_0101, // value that was deleted
-                            0b0000_0000_0000_0000,
-                            0b0000_0000_0000_0000,
-                            vec![],
-                            None,
-                        )),
-                    },
-                )
-                .unwrap();
-        }
-
-        provider_rw.commit().unwrap();
-
-        // Now test get_block_trie_updates
-        let provider = factory.provider().unwrap();
-        let result = provider.get_block_trie_updates(target_block).unwrap();
-
-        // Verify account trie updates
-        assert_eq!(result.account_nodes_ref().len(), 2, "Should have 2 account trie updates");
-
-        // Check nibbles1 - should have the current value (node1)
-        let nibbles1_update = result
-            .account_nodes_ref()
-            .iter()
-            .find(|(n, _)| n == &account_nibbles1)
-            .expect("Should find nibbles1");
-        assert!(nibbles1_update.1.is_some(), "nibbles1 should have a value");
-        assert_eq!(
-            nibbles1_update.1.as_ref().unwrap().state_mask,
-            node1.state_mask,
-            "nibbles1 should have current value"
-        );
-
-        // Check nibbles2 - should have the current value (node2)
-        let nibbles2_update = result
-            .account_nodes_ref()
-            .iter()
-            .find(|(n, _)| n == &account_nibbles2)
-            .expect("Should find nibbles2");
-        assert!(nibbles2_update.1.is_some(), "nibbles2 should have a value");
-        assert_eq!(
-            nibbles2_update.1.as_ref().unwrap().state_mask,
-            node2.state_mask,
-            "nibbles2 should have current value"
-        );
-
-        // nibbles3 should NOT be in the result (it was changed in next_block, not target_block)
-        assert!(
-            !result.account_nodes_ref().iter().any(|(n, _)| n == &account_nibbles3),
-            "nibbles3 should not be in target_block updates"
-        );
-
-        // Verify storage trie updates
-        assert_eq!(result.storage_tries_ref().len(), 1, "Should have 1 storage trie");
-        let storage_updates = result
-            .storage_tries_ref()
-            .get(&storage_address1)
-            .expect("Should have storage updates for address1");
-
-        assert_eq!(storage_updates.storage_nodes.len(), 2, "Should have 2 storage node updates");
-
-        // Check storage_nibbles1 - should have current value
-        let storage1_update = storage_updates
-            .storage_nodes
-            .iter()
-            .find(|(n, _)| n == &storage_nibbles1)
-            .expect("Should find storage_nibbles1");
-        assert!(storage1_update.1.is_some(), "storage_nibbles1 should have a value");
-        assert_eq!(
-            storage1_update.1.as_ref().unwrap().state_mask,
-            storage_node1.state_mask,
-            "storage_nibbles1 should have current value"
-        );
-
-        // Check storage_nibbles2 - was created in target_block, will be deleted in next_block
-        // So it should have a value (the value that will be deleted)
-        let storage2_update = storage_updates
-            .storage_nodes
-            .iter()
-            .find(|(n, _)| n == &storage_nibbles2)
-            .expect("Should find storage_nibbles2");
-        assert!(
-            storage2_update.1.is_some(),
-            "storage_nibbles2 should have a value (the node that will be deleted in next block)"
-        );
-        assert_eq!(
-            storage2_update.1.as_ref().unwrap().state_mask,
-            storage_node2.state_mask,
-            "storage_nibbles2 should have the value that was created and will be deleted"
-        );
     }
 
     #[test]

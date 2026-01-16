@@ -5,7 +5,7 @@ use crate::{
     BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider,
     ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
-    TransactionsProvider, TrieReader,
+    TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{
@@ -30,7 +30,6 @@ use reth_storage_api::{
     StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::updates::TrieUpdatesSorted;
 use revm_database::states::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
@@ -1556,19 +1555,6 @@ impl<N: ProviderNodeTypes> StateReader for ConsistentProvider<N> {
         } else {
             Self::get_state(self, block..=block)
         }
-    }
-}
-
-impl<N: ProviderNodeTypes> TrieReader for ConsistentProvider<N> {
-    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
-        self.storage_provider.trie_reverts(from)
-    }
-
-    fn get_block_trie_updates(
-        &self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<TrieUpdatesSorted> {
-        self.storage_provider.get_block_trie_updates(block_number)
     }
 }
 

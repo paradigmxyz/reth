@@ -82,8 +82,6 @@ pub(crate) struct DatabaseProviderMetrics {
     save_blocks_write_state: Histogram,
     /// Duration of `write_hashed_state` in `save_blocks`
     save_blocks_write_hashed_state: Histogram,
-    /// Duration of `write_trie_changesets` in `save_blocks`
-    save_blocks_write_trie_changesets: Histogram,
     /// Duration of `write_trie_updates` in `save_blocks`
     save_blocks_write_trie_updates: Histogram,
     /// Duration of `update_history_indices` in `save_blocks`
@@ -110,7 +108,6 @@ pub(crate) struct SaveBlocksTimings {
     pub insert_block: Duration,
     pub write_state: Duration,
     pub write_hashed_state: Duration,
-    pub write_trie_changesets: Duration,
     pub write_trie_updates: Duration,
     pub update_history_indices: Duration,
     pub update_pipeline_stages: Duration,
@@ -153,7 +150,6 @@ impl DatabaseProviderMetrics {
         self.save_blocks_insert_block.record(timings.insert_block);
         self.save_blocks_write_state.record(timings.write_state);
         self.save_blocks_write_hashed_state.record(timings.write_hashed_state);
-        self.save_blocks_write_trie_changesets.record(timings.write_trie_changesets);
         self.save_blocks_write_trie_updates.record(timings.write_trie_updates);
         self.save_blocks_update_history_indices.record(timings.update_history_indices);
         self.save_blocks_update_pipeline_stages.record(timings.update_pipeline_stages);

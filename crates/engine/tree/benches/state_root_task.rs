@@ -239,7 +239,10 @@ fn bench_state_root(c: &mut Criterion) {
                                     std::convert::identity,
                                 ),
                                 StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-                                OverlayStateProviderFactory::new(provider),
+                                OverlayStateProviderFactory::new(
+                                    provider,
+                                    reth_trie_db::ChangesetCache::new(),
+                                ),
                                 &TreeConfig::default(),
                                 None,
                             );
