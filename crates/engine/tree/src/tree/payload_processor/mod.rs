@@ -669,10 +669,12 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` allows sharing with the main execution
     /// path without cloning the expensive `BundleState`.
+    ///
+    /// Returns a sender for the channel that should be notified on block validation success.
     pub(super) fn terminate_caching(
         &mut self,
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
-    ) {
+    ) -> Option<mpsc::Sender<()>> {
         self.prewarm_handle.terminate_caching(execution_outcome)
     }
 
@@ -710,13 +712,19 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     ///
     /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive `BundleState`.
+    #[must_use = "sender must be used and notified on block validation success"]
     pub(super) fn terminate_caching(
         &mut self,
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
-    ) {
+    ) -> Option<mpsc::Sender<()>> {
         if let Some(tx) = self.to_prewarm_task.take() {
-            let event = PrewarmTaskEvent::Terminate { execution_outcome };
+            let (valid_block_tx, valid_block_rx) = mpsc::channel();
+            let event = PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx };
             let _ = tx.send(event);
+
+            Some(valid_block_tx)
+        } else {
+            None
         }
     }
 }
@@ -725,7 +733,10 @@ impl<R> Drop for CacheTaskHandle<R> {
     fn drop(&mut self) {
         // Ensure we always terminate on drop - send None without needing Send + Sync bounds
         if let Some(tx) = self.to_prewarm_task.take() {
-            let _ = tx.send(PrewarmTaskEvent::Terminate { execution_outcome: None });
+            let _ = tx.send(PrewarmTaskEvent::Terminate {
+                execution_outcome: None,
+                valid_block_rx: mpsc::channel().1,
+            });
         }
     }
 }
