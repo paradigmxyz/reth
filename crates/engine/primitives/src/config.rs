@@ -45,7 +45,17 @@ pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
-const DEFAULT_CROSS_BLOCK_CACHE_SIZE: usize = 4 * 1024 * 1024 * 1024;
+const DEFAULT_CROSS_BLOCK_CACHE_SIZE: usize = default_cross_block_cache_size();
+
+const fn default_cross_block_cache_size() -> usize {
+    if cfg!(test) {
+        1024 * 1024 // 1 MB in tests
+    } else if cfg!(target_pointer_width = "32") {
+        usize::MAX // max possible on wasm32 / 32-bit
+    } else {
+        4 * 1024 * 1024 * 1024 // 4 GB on 64-bit
+    }
+}
 
 /// Determines if the host has enough parallelism to run the payload processor.
 ///
