@@ -35,6 +35,7 @@ reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
 reth-trie-sparse-parallel = { workspace = true, features = ["std"] }
 reth-trie.workspace = true
 reth-trie-db.workspace = true
+reth-ethereum-consensus = { workspace = true, features = ["std"] }
 
 # alloy
 alloy-evm.workspace = true

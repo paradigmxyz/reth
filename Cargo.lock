@@ -287,9 +287,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.26.0"
+version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "249337d8316a9ab983784597adfad66b78047ec9522d8b510185bc968c272618"
+checksum = "a96827207397445a919a8adc49289b53cc74e48e460411740bba31cec2fc307d"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -404,9 +404,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-evm"
-version = "0.26.0"
+version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc9fc7cbe100f7b094428b488225c9aedb835f28a31b74f474ee1c41878e58c6"
+checksum = "54dc5c46a92fc7267055a174d30efb34e2599a0047102a4d38a025ae521435ba"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8732,12 +8732,14 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
+ "crossbeam-channel",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
  "reth-ethereum-primitives",
  "reth-execution-types",
  "reth-primitives-traits",
+ "reth-trie-common",
  "tracing",
 ]
 
