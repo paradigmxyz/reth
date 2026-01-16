@@ -26,6 +26,9 @@ reth-metrics = { workspace = true, optional = true }
 # alloy
 alloy-primitives.workspace = true
 
+# misc
+parking_lot.workspace = true
+
 # metrics
 metrics = { workspace = true, optional = true }
 

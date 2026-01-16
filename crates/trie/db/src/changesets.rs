@@ -9,6 +9,7 @@
 
 use crate::{DatabaseHashedPostState, DatabaseStateRoot, DatabaseTrieCursorFactory};
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
+use parking_lot::RwLock;
 use reth_storage_api::{BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
@@ -20,7 +21,7 @@ use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
 use std::{
     collections::{BTreeMap, HashMap},
     ops::RangeInclusive,
-    sync::{Arc, RwLock},
+    sync::Arc,
     time::Instant,
 };
 use tracing::debug;
@@ -271,7 +272,7 @@ impl ChangesetCache {
     /// Returns `None` if the block is not in the cache (either evicted or never computed).
     /// Updates hit/miss metrics accordingly.
     pub fn get(&self, block_hash: &B256) -> Option<Arc<TrieUpdatesSorted>> {
-        self.inner.read().unwrap().get(block_hash)
+        self.inner.read().get(block_hash)
     }
 
     /// Inserts changesets for a block into the cache.
@@ -285,7 +286,7 @@ impl ChangesetCache {
     /// * `block_number` - Block number for tracking and eviction
     /// * `changesets` - Trie changesets to cache
     pub fn insert(&self, block_hash: B256, block_number: u64, changesets: Arc<TrieUpdatesSorted>) {
-        self.inner.write().unwrap().insert(block_hash, block_number, changesets)
+        self.inner.write().insert(block_hash, block_number, changesets)
     }
 
     /// Evicts changesets for blocks below the given block number.
@@ -298,7 +299,7 @@ impl ChangesetCache {
     /// * `up_to_block` - Evict blocks with number < this value. Blocks with number >= this value
     ///   are retained.
     pub fn evict(&self, up_to_block: BlockNumber) {
-        self.inner.write().unwrap().evict(up_to_block)
+        self.inner.write().evict(up_to_block)
     }
 
     /// Gets changesets from cache, or computes them on-the-fly if missing.
@@ -326,7 +327,7 @@ impl ChangesetCache {
     {
         // Try cache first (with read lock)
         {
-            let cache = self.inner.read().unwrap();
+            let cache = self.inner.read();
             if let Some(changesets) = cache.get(&block_hash) {
                 debug!(
                     target: "trie::changeset_cache",
@@ -365,7 +366,7 @@ impl ChangesetCache {
 
         // Store in cache (with write lock)
         {
-            let mut cache = self.inner.write().unwrap();
+            let mut cache = self.inner.write();
             cache.insert(block_hash, block_number, Arc::clone(&changesets));
         }
 
