@@ -522,6 +522,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
+            // Accumulate trie updates across blocks to batch the write at the end.
+            // This reduces cursor open/close overhead from N calls to 1.
+            let mut accumulated_trie_updates: Option<TrieUpdatesSorted> = None;
+
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 

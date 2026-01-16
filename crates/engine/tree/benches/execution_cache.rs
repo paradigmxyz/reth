@@ -10,11 +10,11 @@
 
 #![allow(missing_docs)]
 
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Bytes, B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use mini_moka::sync::CacheBuilder;
 use rand::Rng;
-use reth_primitives_traits::{Account, Bytecode};
+use reth_primitives_traits::Account;
 use revm_primitives::map::DefaultHashBuilder;
 use std::{sync::Arc, thread, time::Duration};
 
@@ -238,7 +238,7 @@ fn bench_tip20_cache_pattern(c: &mut Criterion) {
 
                     // TIP-20: Each transfer accesses sender, recipient, fee token contract
                     // Most are unique addresses → cache misses
-                    let mut rng = rand::rng();
+                    let _rng = rand::rng();
                     let transfer_accounts: Vec<(B256, B256, B256)> = (0..num_transfers)
                         .map(|_| (B256::random(), B256::random(), B256::random()))
                         .collect();
@@ -297,7 +297,7 @@ fn bench_prewarm_effectiveness(c: &mut Criterion) {
                     let config = CacheConfig::default();
                     let (account_cache, storage_cache, _) = create_caches(&config);
 
-                    let mut rng = rand::rng();
+                    let _rng = rand::rng();
                     let accounts: Vec<B256> = (0..num_accounts).map(|_| B256::random()).collect();
 
                     (account_cache, storage_cache, accounts)
@@ -330,7 +330,7 @@ fn bench_prewarm_effectiveness(c: &mut Criterion) {
                     let config = CacheConfig::default();
                     let (account_cache, storage_cache, _) = create_caches(&config);
 
-                    let mut rng = rand::rng();
+                    let _rng = rand::rng();
                     let accounts: Vec<B256> = (0..num_accounts).map(|_| B256::random()).collect();
 
                     // Pre-warm the cache
