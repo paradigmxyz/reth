@@ -1455,7 +1455,7 @@ mod tests {
     async fn test_deadlock_manager_wakes_after_buffer_clears() {
         // This test simulates the scenario where the buffer fills up, ingestion pauses,
         // and then space clears. We verify the manager wakes up to process pending items.
-        
+
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
         let provider_factory = create_test_provider_factory();
@@ -1490,9 +1490,7 @@ mod tests {
         // Helper to create notifications
         let mut rng = generators::rng();
         let mut make_notif = |id: u64| {
-            let block = random_block(&mut rng, id, BlockParams::default())
-                .try_recover()
-                .unwrap();
+            let block = random_block(&mut rng, id, BlockParams::default()).try_recover().unwrap();
             ExExNotification::ChainCommitted {
                 new: Arc::new(Chain::new(
                     vec![block],
@@ -1506,23 +1504,29 @@ mod tests {
         manager_handle.send(ExExNotificationSource::Pipeline, make_notif(1)).unwrap();
 
         // Send the "Stuck" Item (Notification #100).
-        // At this point, the Manager loop has skipped the ingestion logic because buffer is full (buffer_full=true).
-        // This item sits in the unbounded 'handle_rx' channel waiting.
+        // At this point, the Manager loop has skipped the ingestion logic because buffer is full
+        // (buffer_full=true). This item sits in the unbounded 'handle_rx' channel waiting.
         manager_handle.send(ExExNotificationSource::Pipeline, make_notif(100)).unwrap();
 
-        // 3. Relieve Pressure 
-        // We consume items from the ExEx. 
-        // As we pull items out, the ExEx frees space -> Manager sends buffered item -> Manager frees space.
-        // Once Manager frees space, the FIX (wake_by_ref) should trigger, causing it to read Notif #100.
-        
+        // 3. Relieve Pressure
+        // We consume items from the ExEx.
+        // As we pull items out, the ExEx frees space -> Manager sends buffered item -> Manager
+        // frees space. Once Manager frees space, the FIX (wake_by_ref) should trigger,
+        // causing it to read Notif #100.
+
         // Consume the jam
         let _ = notifications.next().await.unwrap();
 
         // 4. Assert No Deadlock
         // We expect Notification #100 next.
-        // If the wake_by_ref fix is missing, this will Time Out because the manager is sleeping despite having empty buffer.
-        let result = tokio::time::timeout(std::time::Duration::from_secs(1), notifications.next()).await;
-        
-        assert!(result.is_ok(), "Deadlock detected! Manager failed to wake up and process Pending Item #100.");
+        // If the wake_by_ref fix is missing, this will Time Out because the manager is sleeping
+        // despite having empty buffer.
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(1), notifications.next()).await;
+
+        assert!(
+            result.is_ok(),
+            "Deadlock detected! Manager failed to wake up and process Pending Item #100."
+        );
     }
 }
