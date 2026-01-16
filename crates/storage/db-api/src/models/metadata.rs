@@ -31,6 +31,19 @@ pub struct StorageSettings {
     /// Whether this node should read and write account changesets from static files.
     #[serde(default)]
     pub account_changesets_in_static_files: bool,
+    /// Whether this node uses hashed state tables (`HashedAccounts`/`HashedStorages`) as the
+    /// canonical state representation instead of plain state tables
+    /// (`PlainAccountState`/`PlainStorageState`).
+    ///
+    /// When enabled:
+    /// - Execution writes directly to hashed tables, eliminating need for separate hashing stages
+    /// - State reads come from hashed tables
+    /// - `AccountHashingStage` and `StorageHashingStage` become no-ops
+    ///
+    /// WARNING: This setting is only configurable at database creation; changing it later
+    /// requires re-syncing.
+    #[serde(default)]
+    pub use_hashed_state: bool,
 }
 
 impl StorageSettings {
@@ -47,6 +60,7 @@ impl StorageSettings {
             storages_history_in_rocksdb: false,
             transaction_hash_numbers_in_rocksdb: false,
             account_history_in_rocksdb: false,
+            use_hashed_state: false,
         }
     }
 
@@ -63,6 +77,7 @@ impl StorageSettings {
             transaction_hash_numbers_in_rocksdb: false,
             account_history_in_rocksdb: false,
             account_changesets_in_static_files: false,
+            use_hashed_state: false,
         }
     }
 
@@ -99,6 +114,12 @@ impl StorageSettings {
     /// Sets the `account_changesets_in_static_files` flag to the provided value.
     pub const fn with_account_changesets_in_static_files(mut self, value: bool) -> Self {
         self.account_changesets_in_static_files = value;
+        self
+    }
+
+    /// Sets the `use_hashed_state` flag to the provided value.
+    pub const fn with_use_hashed_state(mut self, value: bool) -> Self {
+        self.use_hashed_state = value;
         self
     }
 
