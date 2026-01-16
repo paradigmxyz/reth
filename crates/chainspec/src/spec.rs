@@ -403,9 +403,10 @@ pub enum EvmLimitParamsKind {
 
 impl Default for EvmLimitParamsKind {
     fn default() -> Self {
-        Self::Variable(ForkEvmLimitParams(vec![
-            (EthereumHardfork::Osaka.boxed(), EvmLimitParams::osaka()),
-        ]))
+        Self::Variable(ForkEvmLimitParams(vec![(
+            EthereumHardfork::Osaka.boxed(),
+            EvmLimitParams::osaka(),
+        )]))
     }
 }
 
