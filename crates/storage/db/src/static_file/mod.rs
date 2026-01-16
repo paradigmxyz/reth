@@ -1,6 +1,7 @@
 //! reth's static file database table import and access
 
-use std::{collections::HashMap, path::Path};
+use alloy_primitives::map::HashMap;
+use std::path::Path;
 
 mod cursor;
 pub use cursor::StaticFileCursor;
@@ -44,8 +45,8 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
         }
     }
 
+    // Sort by block end range.
     for range_list in static_files.values_mut() {
-        // Sort by block end range.
         range_list.sort_by_key(|(block_range, _)| block_range.end());
     }
 
