@@ -27,8 +27,7 @@ use alloy_eips::{
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives_traits::{
-    constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Account, Block,
-    GotExpected, SealedBlock,
+    transaction::error::InvalidTransactionError, Account, Block, GotExpected, SealedBlock,
 };
 use reth_storage_api::{AccountInfoReader, BytecodeReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -510,14 +509,16 @@ where
             }
         }
 
-        // Osaka validation of max tx gas.
-        if self.fork_tracker.is_osaka_activated() &&
-            transaction.gas_limit() > MAX_TX_GAS_LIMIT_OSAKA
-        {
-            return Err(TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::GasLimitTooHigh.into(),
-            ))
+        // Transaction gas limit validation (EIP-7825 for Osaka+)
+        let evm_limits =
+            self.chain_spec().evm_limit_params_at_timestamp(self.fork_tracker.tip_timestamp());
+        if let Some(tx_gas_cap) = evm_limits.tx_gas_limit_cap {
+            if transaction.gas_limit() > tx_gas_cap {
+                return Err(TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidTransactionError::GasLimitTooHigh.into(),
+                ))
+            }
         }
 
         Ok(transaction)

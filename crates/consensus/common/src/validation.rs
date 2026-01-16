@@ -5,9 +5,7 @@ use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{ConsensusError, TxGasLimitTooHighErr};
 use reth_primitives_traits::{
-    constants::{
-        GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MAX_TX_GAS_LIMIT_OSAKA, MINIMUM_GAS_LIMIT,
-    },
+    constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
     transaction::TxHashRef,
     Block, BlockBody, BlockHeader, GotExpected, SealedBlock, SealedHeader,
 };
@@ -140,13 +138,13 @@ where
 /// - Compares the ommer hash in the block header to the block body
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
-pub fn validate_block_pre_execution<B, ChainSpec>(
+pub fn validate_block_pre_execution<B, C>(
     block: &SealedBlock<B>,
-    chain_spec: &ChainSpec,
+    chain_spec: &C,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
-    ChainSpec: EthereumHardforks,
+    C: EthChainSpec + EthereumHardforks,
 {
     post_merge_hardfork_fields(block, chain_spec)?;
 
@@ -154,14 +152,15 @@ where
     if let Err(error) = block.ensure_transaction_root_valid() {
         return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
     }
-    // EIP-7825 validation
-    if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) {
+    // EIP-7825 transaction gas limit validation
+    let evm_limits = chain_spec.evm_limit_params_at_timestamp(block.timestamp());
+    if let Some(tx_gas_cap) = evm_limits.tx_gas_limit_cap {
         for tx in block.body().transactions() {
-            if tx.gas_limit() > MAX_TX_GAS_LIMIT_OSAKA {
+            if tx.gas_limit() > tx_gas_cap {
                 return Err(TxGasLimitTooHighErr {
                     tx_hash: *tx.tx_hash(),
                     gas_limit: tx.gas_limit(),
-                    max_allowed: MAX_TX_GAS_LIMIT_OSAKA,
+                    max_allowed: tx_gas_cap,
                 }
                 .into());
             }

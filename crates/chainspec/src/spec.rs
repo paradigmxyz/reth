@@ -126,7 +126,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (mainnet::MAINNET_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (mainnet::MAINNET_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
-        evm_limit_params: EvmLimitParamsKind::Constant(EvmLimitParams::ethereum()),
+        evm_limit_params: EvmLimitParamsKind::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -162,7 +162,7 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (sepolia::SEPOLIA_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (sepolia::SEPOLIA_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
-        evm_limit_params: EvmLimitParamsKind::Constant(EvmLimitParams::ethereum()),
+        evm_limit_params: EvmLimitParamsKind::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -193,7 +193,7 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (holesky::HOLESKY_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (holesky::HOLESKY_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
-        evm_limit_params: EvmLimitParamsKind::Constant(EvmLimitParams::ethereum()),
+        evm_limit_params: EvmLimitParamsKind::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -226,7 +226,7 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (hoodi::HOODI_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (hoodi::HOODI_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
-        evm_limit_params: EvmLimitParamsKind::Constant(EvmLimitParams::ethereum()),
+        evm_limit_params: EvmLimitParamsKind::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -403,7 +403,9 @@ pub enum EvmLimitParamsKind {
 
 impl Default for EvmLimitParamsKind {
     fn default() -> Self {
-        Self::Constant(EvmLimitParams::ethereum())
+        Self::Variable(ForkEvmLimitParams(vec![
+            (EthereumHardfork::Osaka.boxed(), EvmLimitParams::osaka()),
+        ]))
     }
 }
 
@@ -484,7 +486,7 @@ impl<H: BlockHeader> Default for ChainSpec<H> {
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
             blob_params: Default::default(),
-            evm_limit_params: EvmLimitParamsKind::Constant(EvmLimitParams::ethereum()),
+            evm_limit_params: EvmLimitParamsKind::default(),
         }
     }
 }
@@ -593,7 +595,8 @@ impl<H: BlockHeader> ChainSpec<H> {
                         return *params
                     }
                 }
-                fork_params.first().map(|(_, p)| *p).unwrap_or(EvmLimitParams::ethereum())
+                // No timestamp-based fork matched, return default limits
+                EvmLimitParams::default()
             }
         }
     }
