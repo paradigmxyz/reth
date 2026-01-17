@@ -1,7 +1,7 @@
 //! Lazy initialization wrapper for trie data.
 //!
 //! Provides a no-std compatible [`LazyTrieData`] type for lazily initialized
-//! trie-related data containing [`HashedPostStateSorted`] and [`TrieUpdatesSorted`].
+//! trie-related data containing sorted hashed state and trie updates.
 
 use crate::{updates::TrieUpdatesSorted, HashedPostStateSorted};
 use alloc::sync::Arc;
