@@ -163,16 +163,12 @@ where
         let file_path = self.file_path(file_id);
         debug!(target: "exex::wal::storage", ?file_path, "Writing notification to WAL");
 
-        // Serialize using the bincode- and msgpack-compatible serde wrapper via SerializeAs
+        // Serialize using the bincode- and msgpack-compatible serde wrapper
+        let notification =
+            reth_exex_types::serde_bincode_compat::ExExNotification::<N>::from(notification);
+
         reth_fs_util::atomic_write_file(&file_path, |file| {
-            use serde_with::SerializeAs;
-            let mut buf = Vec::new();
-            reth_exex_types::serde_bincode_compat::ExExNotification::<'_, N>::serialize_as(
-                notification,
-                &mut rmp_serde::Serializer::new(&mut buf),
-            )
-            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
-            std::io::Write::write_all(file, &buf)
+            rmp_serde::encode::write(file, &notification)
         })?;
 
         Ok(file_path.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len())
@@ -193,7 +189,7 @@ mod tests {
     use reth_testing_utils::generators::{self, random_block};
     use reth_trie_common::{
         updates::{StorageTrieUpdates, TrieUpdates},
-        BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
+        BranchNodeCompact, HashedPostState, HashedStorage, LazyTrieData, Nibbles,
     };
     use std::{collections::BTreeMap, fs::File, sync::Arc};
 
@@ -228,10 +224,8 @@ mod tests {
 
         // Get expected data
         let expected_notification = get_test_notification_data().unwrap();
-        // Compare by tip block since ExExNotification doesn't implement PartialEq
         assert_eq!(
-            *notification.committed_chain().unwrap().tip(),
-            *expected_notification.committed_chain().unwrap().tip(),
+            &notification, &expected_notification,
             "Decoded notification should match expected static data"
         );
     }
@@ -247,18 +241,18 @@ mod tests {
         let new_block = random_block(&mut rng, 0, Default::default()).try_recover()?;
 
         let notification = ExExNotification::ChainReorged {
-            new: Arc::new(Chain::new(vec![new_block.clone()], Default::default(), BTreeMap::new())),
-            old: Arc::new(Chain::new(vec![old_block.clone()], Default::default(), BTreeMap::new())),
+            new: Arc::new(Chain::new(vec![new_block], Default::default(), BTreeMap::new())),
+            old: Arc::new(Chain::new(vec![old_block], Default::default(), BTreeMap::new())),
         };
 
         // Do a round trip serialization and deserialization
         let file_id = 0;
         storage.write_notification(file_id, &notification)?;
         let deserialized_notification = storage.read_notification(file_id)?;
-        // Compare by chain tips since ExExNotification doesn't implement PartialEq
-        let deserialized = deserialized_notification.map(|(n, _)| n).unwrap();
-        assert_eq!(*deserialized.committed_chain().unwrap().tip(), new_block);
-        assert_eq!(*deserialized.reverted_chain().unwrap().tip(), old_block);
+        assert_eq!(
+            deserialized_notification.map(|(notification, _)| notification),
+            Some(notification)
+        );
 
         Ok(())
     }
@@ -276,14 +270,10 @@ mod tests {
 
         let notification = get_test_notification_data()?;
 
-        // Create a temp storage and write the notification using the existing serialization path
-        let temp_dir = tempfile::tempdir()?;
-        let storage = Storage::new(&temp_dir)?;
-        storage.write_notification(0, &notification)?;
-
-        // Read it back as raw bytes
-        let temp_path = temp_dir.path().join("0.wal");
-        let encoded = std::fs::read(&temp_path)?;
+        // Serialize the notification
+        let notification_compat =
+            reth_exex_types::serde_bincode_compat::ExExNotification::from(&notification);
+        let encoded = rmp_serde::encode::to_vec(&notification_compat)?;
 
         // Write to test-data directory
         let test_data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-data");
@@ -346,12 +336,11 @@ mod tests {
             )]),
         };
 
-        let trie_data =
-            reth_chain_state::DeferredTrieData::ready(reth_chain_state::ComputedTrieData {
-                hashed_state: Arc::new(hashed_state.into_sorted()),
-                trie_updates: Arc::new(trie_updates.into_sorted()),
-                anchored_trie_input: None,
-            });
+        let trie_data = LazyTrieData::ready(
+            Arc::new(hashed_state.into_sorted()),
+            Arc::new(trie_updates.into_sorted()),
+        );
+
         let notification: ExExNotification<reth_ethereum_primitives::EthPrimitives> =
             ExExNotification::ChainCommitted {
                 new: Arc::new(Chain::new(

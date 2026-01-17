@@ -11,8 +11,8 @@
 mod in_memory;
 pub use in_memory::*;
 
-// Re-export deferred_trie types from reth_chain
-pub use reth_chain::{AnchoredTrieInput, ComputedTrieData, DeferredTrieData};
+mod deferred_trie;
+pub use deferred_trie::*;
 
 mod lazy_overlay;
 pub use lazy_overlay::*;

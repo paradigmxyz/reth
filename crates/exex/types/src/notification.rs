@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
-use reth_chain::Chain;
 use reth_chain_state::CanonStateNotification;
+use reth_execution_types::Chain;
 use reth_primitives_traits::NodePrimitives;
 
 /// Notifications sent to an `ExEx`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(bound = ""))]
 pub enum ExExNotification<N: NodePrimitives = reth_chain_state::EthPrimitives> {
     /// Chain got committed without a reorg, and only the new chain is returned.
     ChainCommitted {
@@ -74,7 +73,7 @@ impl<P: NodePrimitives> From<CanonStateNotification<P>> for ExExNotification<P> 
 /// Bincode-compatible [`ExExNotification`] serde implementation.
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
-    use reth_chain::serde_bincode_compat::Chain;
+    use reth_execution_types::serde_bincode_compat::Chain;
     use reth_primitives_traits::NodePrimitives;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
@@ -125,6 +124,28 @@ pub(super) mod serde_bincode_compat {
         },
     }
 
+    impl<'a, N> From<&'a super::ExExNotification<N>> for ExExNotification<'a, N>
+    where
+        N: NodePrimitives,
+    {
+        fn from(value: &'a super::ExExNotification<N>) -> Self {
+            match value {
+                super::ExExNotification::ChainCommitted { new } => {
+                    ExExNotification::ChainCommitted { new: Chain::from(new.as_ref()) }
+                }
+                super::ExExNotification::ChainReorged { old, new } => {
+                    ExExNotification::ChainReorged {
+                        old: Chain::from(old.as_ref()),
+                        new: Chain::from(new.as_ref()),
+                    }
+                }
+                super::ExExNotification::ChainReverted { old } => {
+                    ExExNotification::ChainReverted { old: Chain::from(old.as_ref()) }
+                }
+            }
+        }
+    }
+
     impl<'a, N> From<ExExNotification<'a, N>> for super::ExExNotification<N>
     where
         N: NodePrimitives,
@@ -155,41 +176,7 @@ pub(super) mod serde_bincode_compat {
         where
             S: Serializer,
         {
-            // Helper that uses Chain's SerializeAs for bincode-compatible serialization
-            struct ChainWrapper<'a, N: NodePrimitives>(&'a reth_chain::Chain<N>);
-
-            impl<N: NodePrimitives> Serialize for ChainWrapper<'_, N> {
-                fn serialize<S2>(&self, serializer: S2) -> Result<S2::Ok, S2::Error>
-                where
-                    S2: Serializer,
-                {
-                    Chain::<'_, N>::serialize_as(self.0, serializer)
-                }
-            }
-
-            // Create an enum that matches the ExExNotification structure but uses ChainWrapper
-            #[derive(Serialize)]
-            #[serde(bound = "")]
-            #[allow(clippy::enum_variant_names)]
-            enum Repr<'a, N: NodePrimitives> {
-                ChainCommitted { new: ChainWrapper<'a, N> },
-                ChainReorged { old: ChainWrapper<'a, N>, new: ChainWrapper<'a, N> },
-                ChainReverted { old: ChainWrapper<'a, N> },
-            }
-
-            match source {
-                super::ExExNotification::ChainCommitted { new } => {
-                    Repr::ChainCommitted { new: ChainWrapper(new.as_ref()) }.serialize(serializer)
-                }
-                super::ExExNotification::ChainReorged { old, new } => Repr::ChainReorged {
-                    old: ChainWrapper(old.as_ref()),
-                    new: ChainWrapper(new.as_ref()),
-                }
-                .serialize(serializer),
-                super::ExExNotification::ChainReverted { old } => {
-                    Repr::ChainReverted { old: ChainWrapper(old.as_ref()) }.serialize(serializer)
-                }
-            }
+            ExExNotification::from(source).serialize(serializer)
         }
     }
 
@@ -210,7 +197,7 @@ pub(super) mod serde_bincode_compat {
         use super::super::{serde_bincode_compat, ExExNotification};
         use arbitrary::Arbitrary;
         use rand::Rng;
-        use reth_chain::Chain;
+        use reth_execution_types::Chain;
         use reth_primitives_traits::RecoveredBlock;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
@@ -219,7 +206,7 @@ pub(super) mod serde_bincode_compat {
         #[test]
         fn test_exex_notification_bincode_roundtrip() {
             #[serde_as]
-            #[derive(Debug, Serialize, Deserialize)]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
                 #[serde_as(
                     as = "serde_bincode_compat::ExExNotification<'_, reth_ethereum_primitives::EthPrimitives>"
@@ -229,34 +216,26 @@ pub(super) mod serde_bincode_compat {
 
             let mut bytes = [0u8; 1024];
             rand::rng().fill(bytes.as_mut_slice());
-            let old_block: reth_primitives_traits::RecoveredBlock<reth_ethereum_primitives::Block> =
-                RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-            let new_block: reth_primitives_traits::RecoveredBlock<reth_ethereum_primitives::Block> =
-                RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-
             let data = Data {
                 notification: ExExNotification::ChainReorged {
-                    old: Arc::new(Chain::new(vec![old_block], Default::default(), BTreeMap::new())),
-                    new: Arc::new(Chain::new(vec![new_block], Default::default(), BTreeMap::new())),
+                    old: Arc::new(Chain::new(
+                        vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                            .unwrap()],
+                        Default::default(),
+                        BTreeMap::new(),
+                    )),
+                    new: Arc::new(Chain::new(
+                        vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                            .unwrap()],
+                        Default::default(),
+                        BTreeMap::new(),
+                    )),
                 },
             };
 
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
-
-            // Compare fields individually since Chain doesn't implement PartialEq
-            match (&decoded.notification, &data.notification) {
-                (
-                    ExExNotification::ChainReorged { old: decoded_old, new: decoded_new },
-                    ExExNotification::ChainReorged { old: expected_old, new: expected_new },
-                ) => {
-                    assert_eq!(decoded_old.blocks(), expected_old.blocks());
-                    assert_eq!(decoded_old.execution_outcome(), expected_old.execution_outcome());
-                    assert_eq!(decoded_new.blocks(), expected_new.blocks());
-                    assert_eq!(decoded_new.execution_outcome(), expected_new.execution_outcome());
-                }
-                _ => panic!("Expected ChainReorged variant"),
-            }
+            assert_eq!(decoded, data);
         }
     }
 }
