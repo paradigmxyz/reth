@@ -139,7 +139,7 @@ impl StageConfig {
     /// `ExecutionStage`
     pub fn execution_external_clean_threshold(&self) -> u64 {
         self.merkle
-            .incremental_threshold
+            .rebuild_threshold
             .max(self.account_hashing.clean_threshold)
             .max(self.storage_hashing.clean_threshold)
     }
