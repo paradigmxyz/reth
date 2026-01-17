@@ -194,7 +194,7 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        let BuildArguments { cached_reads, config, cancel, best_payload } = args;
+        let BuildArguments { cached_reads, config, cancel, best_payload, is_resolving } = args;
         let PayloadConfig { parent_header, attributes } = config;
 
         match attributes {
@@ -210,6 +210,7 @@ where
                             None
                         }
                     }),
+                    is_resolving,
                 };
                 self.left.try_build(left_args).map(|out| out.map_payload(Either::Left))
             }
@@ -225,6 +226,7 @@ where
                             None
                         }
                     }),
+                    is_resolving,
                 };
                 self.right.try_build(right_args).map(|out| out.map_payload(Either::Right))
             }

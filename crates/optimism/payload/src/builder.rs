@@ -39,7 +39,13 @@ use reth_revm::{
 use reth_storage_api::{errors::ProviderError, StateProvider, StateProviderFactory};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::{Block, BlockEnv};
-use std::{marker::PhantomData, sync::Arc};
+use std::{
+    marker::PhantomData,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
@@ -180,7 +186,7 @@ where
         Txs:
             PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx> + OpPooledTx>,
     {
-        let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
+        let BuildArguments { mut cached_reads, config, cancel, best_payload, is_resolving } = args;
 
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
@@ -189,6 +195,7 @@ where
             config,
             cancel,
             best_payload,
+            is_resolving,
         };
 
         let builder = OpBuilder::new(best);
@@ -225,6 +232,7 @@ where
             config,
             cancel: Default::default(),
             best_payload: Default::default(),
+            is_resolving: Arc::new(AtomicBool::new(false)),
         };
 
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
@@ -279,6 +287,7 @@ where
             cached_reads: Default::default(),
             cancel: Default::default(),
             best_payload: None,
+            is_resolving: Arc::new(AtomicBool::new(false)),
         };
         self.build_payload(args, |_| NoopPayloadTransactions::<Pool::Transaction>::default())?
             .into_payload()
@@ -554,6 +563,8 @@ pub struct OpPayloadBuilderCtx<
     pub cancel: CancelOnDrop,
     /// The currently best payload.
     pub best_payload: Option<OpBuiltPayload<Evm::Primitives>>,
+    /// Flag indicating whether the payload job is being resolved.
+    pub is_resolving: Arc<AtomicBool>,
 }
 
 impl<Evm, ChainSpec, Attrs> OpPayloadBuilderCtx<Evm, ChainSpec, Attrs>
@@ -591,6 +602,13 @@ where
     /// Returns true if the fees are higher than the previous payload.
     pub fn is_better_payload(&self, total_fees: U256) -> bool {
         is_better_payload(self.best_payload.as_ref(), total_fees)
+    }
+
+    /// Returns `true` if the payload job is being resolved.
+    ///
+    /// When this returns `true`, the builder should finish as quickly as possible.
+    pub fn is_resolving(&self) -> bool {
+        self.is_resolving.load(Ordering::Relaxed)
     }
 
     /// Prepares a [`BlockBuilder`] for the next block.
@@ -733,6 +751,13 @@ where
             }
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
+                return Ok(Some(()))
+            }
+
+            // check if the payload is being resolved, if so we should stop adding more transactions
+            // and return whatever payload we have built so far
+            if self.is_resolving() {
+                debug!(target: "payload_builder", "payload is being resolved, stopping transaction processing");
                 return Ok(Some(()))
             }
 
