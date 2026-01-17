@@ -1478,7 +1478,7 @@ where
 
                                 self.metrics.engine.forkchoice_updated.update_response_metrics(
                                     start,
-                                    &mut self.metrics.engine.new_payload.latest_at,
+                                    &mut self.metrics.engine.new_payload.latest_finish_at,
                                     has_attrs,
                                     &output,
                                 );
