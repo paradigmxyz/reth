@@ -65,8 +65,9 @@ where
     {
         // Prepare data to be read
         let tx = db.tx_mut().expect("tx");
-        for (k, _, v, _) in pair.clone() {
-            tx.put::<T>(k, v).expect("submit");
+        // Avoid cloning the entire vector (including `Bytes`) when we only need key/value.
+        for (k, _, v, _) in pair.iter() {
+            tx.put::<T>(k.clone(), v.clone()).expect("submit");
         }
         tx.inner.commit().unwrap();
     }
