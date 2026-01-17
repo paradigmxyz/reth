@@ -954,19 +954,19 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
             [first, rest @ ..] => {
                 let mut chain = Chain::from_block(
                     first.recovered_block().clone(),
-                    ExecutionOutcome::from((
-                        first.execution_outcome().clone(),
+                    ExecutionOutcome::single(
                         first.block_number(),
-                    )),
+                        first.execution_outcome().clone(),
+                    ),
                     first.trie_data_handle(),
                 );
                 for exec in rest {
                     chain.append_block(
                         exec.recovered_block().clone(),
-                        ExecutionOutcome::from((
-                            exec.execution_outcome().clone(),
+                        ExecutionOutcome::single(
                             exec.block_number(),
-                        )),
+                            exec.execution_outcome().clone(),
+                        ),
                         exec.trie_data_handle(),
                     );
                 }
