@@ -230,7 +230,9 @@ where
 
         let spec = revm_spec_by_timestamp_after_bedrock(self.chain_spec(), timestamp);
 
-        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+        let cfg_env = CfgEnv::new()
+            .with_chain_id(self.chain_spec().chain().id())
+            .with_spec_and_mainnet_gas_params(spec);
 
         let blob_excess_gas_and_price = spec
             .into_eth_spec()
@@ -293,11 +295,10 @@ mod tests {
     use alloy_genesis::Genesis;
     use alloy_primitives::{bytes, map::HashMap, Address, LogData, B256};
     use op_revm::OpSpecId;
+    use reth_chain::Chain;
     use reth_chainspec::ChainSpec;
     use reth_evm::execute::ProviderError;
-    use reth_execution_types::{
-        AccountRevertInit, BundleStateInit, Chain, ExecutionOutcome, RevertsInit,
-    };
+    use reth_execution_types::{AccountRevertInit, BundleStateInit, ExecutionOutcome, RevertsInit};
     use reth_optimism_chainspec::{OpChainSpec, BASE_MAINNET};
     use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
     use reth_primitives_traits::{Account, RecoveredBlock};
@@ -362,7 +363,8 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         // Create a custom configuration environment with a chain ID of 111
-        let cfg = CfgEnv::new().with_chain_id(111).with_spec(OpSpecId::default());
+        let cfg =
+            CfgEnv::new().with_chain_id(111).with_spec_and_mainnet_gas_params(OpSpecId::default());
 
         let evm_env = EvmEnv { cfg_env: cfg.clone(), ..Default::default() };
 
@@ -400,8 +402,10 @@ mod tests {
 
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
-        let evm_env =
-            EvmEnv { cfg_env: CfgEnv::new().with_spec(OpSpecId::ECOTONE), ..Default::default() };
+        let evm_env = EvmEnv {
+            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(OpSpecId::ECOTONE),
+            ..Default::default()
+        };
 
         let evm = evm_config.evm_with_env(db, evm_env.clone());
 
@@ -427,7 +431,8 @@ mod tests {
         let evm_config = test_evm_config();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
-        let cfg = CfgEnv::new().with_chain_id(111).with_spec(OpSpecId::default());
+        let cfg =
+            CfgEnv::new().with_chain_id(111).with_spec_and_mainnet_gas_params(OpSpecId::default());
         let block = BlockEnv::default();
         let evm_env = EvmEnv { block_env: block, cfg_env: cfg.clone() };
 
@@ -463,8 +468,10 @@ mod tests {
         let evm_config = test_evm_config();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
-        let evm_env =
-            EvmEnv { cfg_env: CfgEnv::new().with_spec(OpSpecId::ECOTONE), ..Default::default() };
+        let evm_env = EvmEnv {
+            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(OpSpecId::ECOTONE),
+            ..Default::default()
+        };
 
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector {});
 
@@ -521,12 +528,8 @@ mod tests {
 
         // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
         // including block1_hash and block2_hash, and the execution_outcome
-        let chain: Chain<OpPrimitives> = Chain::new(
-            [block1, block2],
-            execution_outcome.clone(),
-            BTreeMap::new(),
-            BTreeMap::new(),
-        );
+        let chain: Chain<OpPrimitives> =
+            Chain::new([block1, block2], execution_outcome.clone(), BTreeMap::new());
 
         // Assert that the proper receipt vector is returned for block1_hash
         assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));

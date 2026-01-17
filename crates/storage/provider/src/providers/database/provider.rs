@@ -16,7 +16,7 @@ use crate::{
     HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
     LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
     PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
-    RocksDBProviderFactory, RocksTxRefArg, StageCheckpointReader, StateProviderBox, StateWriter,
+    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
@@ -33,6 +33,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
+use reth_chain::Chain;
 use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
@@ -47,7 +48,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, PlainAccountState, PlainStorageState,
 };
-use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, RecoveredBlock, SealedHeader, StorageEntry,
@@ -60,7 +61,7 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
     NodePrimitivesProvider, StateProvider, StateWriteConfig, StorageChangeSetReader,
-    StorageSettingsCache, TryIntoHistoricalStateProvider,
+    StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
@@ -493,7 +494,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
-                let mut all_tx_hashes = Vec::new();
+                let total_tx_count: usize =
+                    blocks.iter().map(|b| b.recovered_block().body().transaction_count()).sum();
+                let mut all_tx_hashes = Vec::with_capacity(total_tx_count);
                 for (i, block) in blocks.iter().enumerate() {
                     let recovered_block = block.recovered_block();
                     let mut tx_num = tx_nums[i];
@@ -535,7 +538,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     // Skip receipts/account changesets if they're being written to static files.
                     let start = Instant::now();
                     self.write_state(
-                        execution_output,
+                        WriteStateInput::Single {
+                            outcome: execution_output,
+                            block: recovered_block.number(),
+                        },
                         OriginalValuesKnown::No,
                         StateWriteConfig {
                             write_receipts: !sf_ctx.write_receipts,
@@ -550,11 +556,52 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     let start = Instant::now();
                     self.write_hashed_state(&trie_data.hashed_state)?;
                     timings.write_hashed_state += start.elapsed();
-
-                    let start = Instant::now();
-                    self.write_trie_updates_sorted(&trie_data.trie_updates)?;
-                    timings.write_trie_updates += start.elapsed();
                 }
+            }
+
+            // Write all trie updates in a single batch.
+            // This reduces cursor open/close overhead from N calls to 1.
+            // Uses hybrid algorithm: extend_ref for small batches, k-way merge for large.
+            if save_mode.with_state() {
+                const MERGE_BATCH_THRESHOLD: usize = 30;
+
+                let start = Instant::now();
+                let num_blocks = blocks.len();
+
+                let merged = if num_blocks == 0 {
+                    TrieUpdatesSorted::default()
+                } else if num_blocks == 1 {
+                    // Single block: use directly (Arc::try_unwrap avoids clone if refcount is 1)
+                    match Arc::try_unwrap(blocks[0].trie_updates()) {
+                        Ok(owned) => owned,
+                        Err(arc) => (*arc).clone(),
+                    }
+                } else if num_blocks < MERGE_BATCH_THRESHOLD {
+                    // Small k: extend_ref with Arc::make_mut (copy-on-write).
+                    // Blocks are oldest-to-newest, iterate forward so newest overrides.
+                    let mut blocks_iter = blocks.iter();
+                    let mut result = blocks_iter.next().expect("non-empty").trie_updates();
+
+                    for block in blocks_iter {
+                        Arc::make_mut(&mut result).extend_ref(block.trie_updates().as_ref());
+                    }
+
+                    match Arc::try_unwrap(result) {
+                        Ok(owned) => owned,
+                        Err(arc) => (*arc).clone(),
+                    }
+                } else {
+                    // Large k: k-way merge is faster (O(n log k)).
+                    // Collect Arcs first to extend lifetime, then pass refs.
+                    // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
+                    let arcs: Vec<_> = blocks.iter().rev().map(|b| b.trie_updates()).collect();
+                    TrieUpdatesSorted::merge_batch(arcs.iter().map(|arc| arc.as_ref()))
+                };
+
+                if !merged.is_empty() {
+                    self.write_trie_updates_sorted(&merged)?;
+                }
+                timings.write_trie_updates += start.elapsed();
             }
 
             // Full mode: update history indices
@@ -883,25 +930,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Returns a reference to the chain specification.
     pub fn chain_spec(&self) -> &N::ChainSpec {
         &self.chain_spec
-    }
-
-    /// Executes a closure with a `RocksDB` transaction for reading.
-    ///
-    /// This helper encapsulates all the cfg-gated `RocksDB` transaction handling for reads.
-    fn with_rocksdb_tx<F, R>(&self, f: F) -> ProviderResult<R>
-    where
-        F: FnOnce(RocksTxRefArg<'_>) -> ProviderResult<R>,
-    {
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb = self.rocksdb_provider();
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_tx = rocksdb.tx();
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_tx_ref = &rocksdb_tx;
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let rocksdb_tx_ref = ();
-
-        f(rocksdb_tx_ref)
     }
 }
 
@@ -2035,16 +2063,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     type Receipt = ReceiptTy<N>;
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
-    fn write_state(
+    fn write_state<'a>(
         &self,
-        execution_outcome: &ExecutionOutcome<Self::Receipt>,
+        execution_outcome: impl Into<WriteStateInput<'a, Self::Receipt>>,
         is_value_known: OriginalValuesKnown,
         config: StateWriteConfig,
     ) -> ProviderResult<()> {
+        let execution_outcome = execution_outcome.into();
         let first_block = execution_outcome.first_block();
 
         let (plain_state, reverts) =
-            execution_outcome.bundle.to_plain_state_and_reverts(is_value_known);
+            execution_outcome.state().to_plain_state_and_reverts(is_value_known);
 
         self.write_state_reverts(reverts, first_block, config)?;
         self.write_state_changes(plain_state)?;
@@ -2099,7 +2128,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         for (idx, (receipts, first_tx_index)) in
-            execution_outcome.receipts.iter().zip(block_indices).enumerate()
+            execution_outcome.receipts().zip(block_indices).enumerate()
         {
             let block_number = first_block + idx as u64;
 
@@ -3089,7 +3118,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         // Update pipeline progress
         self.update_pipeline_stages(block, true)?;
 
-        Ok(Chain::new(blocks, execution_state, BTreeMap::new(), BTreeMap::new()))
+        Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
     }
 
     fn remove_block_and_execution_above(&self, block: BlockNumber) -> ProviderResult<()> {
@@ -3128,12 +3157,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // Wrap block in ExecutedBlock with empty execution output (no receipts/state/trie)
         let executed_block = ExecutedBlock::new(
             Arc::new(block.clone()),
-            Arc::new(ExecutionOutcome::new(
-                Default::default(),
-                Vec::<Vec<ReceiptTy<N>>>::new(),
-                block_number,
-                vec![],
-            )),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: Default::default(),
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
             ComputedTrieData::default(),
         );
 

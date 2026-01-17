@@ -564,8 +564,8 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::TxType;
     use alloy_primitives::{bytes, Address, LogData, B256};
+    use reth_ethereum_primitives::TxType;
 
     #[test]
     fn test_initialization() {
@@ -934,10 +934,20 @@ mod tests {
         let address3 = Address::random();
 
         // Set up account info with some changes
-        let account_info1 =
-            AccountInfo { nonce: 1, balance: U256::from(100), code_hash: B256::ZERO, code: None };
-        let account_info2 =
-            AccountInfo { nonce: 2, balance: U256::from(200), code_hash: B256::ZERO, code: None };
+        let account_info1 = AccountInfo {
+            nonce: 1,
+            balance: U256::from(100),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        };
+        let account_info2 = AccountInfo {
+            nonce: 2,
+            balance: U256::from(200),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        };
 
         // Set up the bundle state with these accounts
         let mut bundle_state = BundleState::default();

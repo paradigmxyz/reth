@@ -30,9 +30,9 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
-    BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider,
-    ProviderError, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
-    TransactionVariant,
+    BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader, ChangeSetReader,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
+    StateProviderBox, StateProviderFactory, StateReader, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -1676,6 +1676,18 @@ where
                 )));
                 return Ok(());
             }
+        } else {
+            // We don't have the head block or any of its ancestors buffered. Request
+            // a download for the head block which will then trigger further sync.
+            debug!(
+                target: "engine::tree",
+                head_hash = %sync_target_state.head_block_hash,
+                "Backfill complete but head block not buffered, requesting download"
+            );
+            self.emit_event(EngineApiEvent::Download(DownloadRequest::single_block(
+                sync_target_state.head_block_hash,
+            )));
+            return Ok(());
         }
 
         // try to close the gap by executing buffered blocks that are child blocks of the new head
@@ -1856,7 +1868,7 @@ where
             .sealed_block_with_senders(hash.into(), TransactionVariant::WithHash)?
             .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?
             .split_sealed();
-        let execution_output = self
+        let mut execution_output = self
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
@@ -1880,9 +1892,19 @@ where
         let trie_data =
             ComputedTrieData::without_trie_input(sorted_hashed_state, sorted_trie_updates);
 
+        let execution_output = Arc::new(BlockExecutionOutput {
+            state: execution_output.bundle,
+            result: BlockExecutionResult {
+                receipts: execution_output.receipts.pop().unwrap_or_default(),
+                requests: execution_output.requests.pop().unwrap_or_default(),
+                gas_used: block.gas_used(),
+                blob_gas_used: block.blob_gas_used().unwrap_or_default(),
+            },
+        });
+
         Ok(Some(ExecutedBlock::new(
             Arc::new(RecoveredBlock::new_sealed(block, senders)),
-            Arc::new(execution_output),
+            execution_output,
             trie_data,
         )))
     }
