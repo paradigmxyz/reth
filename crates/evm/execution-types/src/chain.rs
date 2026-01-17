@@ -2,9 +2,9 @@
 
 use crate::ExecutionOutcome;
 use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
-use alloy_consensus::{transaction::Recovered, BlockHeader};
+use alloy_consensus::{transaction::Recovered, BlockHeader, TxReceipt};
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Log, TxHash, B256};
 use core::{fmt, ops::RangeInclusive};
 use reth_primitives_traits::{
     transaction::signed::SignedTransaction, Block, BlockBody, IndexedTx, NodePrimitives,
@@ -46,6 +46,100 @@ type ChainTxReceiptMeta<'a, N> = (
     &'a <N as NodePrimitives>::Receipt,
     &'a [<N as NodePrimitives>::Receipt],
 );
+
+/// A reference to an individual log with full block and transaction context.
+///
+/// This provides all the contextual information needed when processing logs from a chain,
+/// eliminating the need for manual index tracking during iteration.
+#[derive(Debug, Clone)]
+pub struct LogRef<'a, N: NodePrimitives> {
+    /// The block containing this log.
+    pub block: &'a RecoveredBlock<N::Block>,
+    /// Block number.
+    pub block_number: BlockNumber,
+    /// Block hash.
+    pub block_hash: BlockHash,
+    /// Index of the transaction within the block.
+    pub tx_index: usize,
+    /// The receipt containing this log.
+    pub receipt: &'a N::Receipt,
+    /// Index of the log within the receipt.
+    pub log_index: usize,
+    /// The log itself.
+    pub log: &'a Log,
+}
+
+/// A reference to a block paired with its execution outcome data.
+///
+/// This provides a convenient view of a block alongside its receipts,
+/// useful for ExEx implementations that process chain notifications.
+#[derive(Debug, Clone)]
+pub struct BlockOutcomeRef<'a, N: NodePrimitives> {
+    /// The block.
+    pub block: &'a RecoveredBlock<N::Block>,
+    /// Block number.
+    pub number: BlockNumber,
+    /// Block hash.
+    pub hash: BlockHash,
+    /// Receipts for all transactions in this block.
+    pub receipts: &'a [N::Receipt],
+}
+
+/// Filter for matching logs by address and/or topic0 (event signature).
+///
+/// This provides a simple, efficient way to filter logs when processing chain data.
+/// For more complex filtering needs, consider using the full `eth_getLogs` filter types.
+///
+/// # Example
+///
+/// ```ignore
+/// use alloy_primitives::{address, b256};
+///
+/// let filter = LogFilter::new()
+///     .address(address!("dAC17F958D2ee523a2206206994597C13D831ec7"))
+///     .topic0(b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"));
+///
+/// for log_ref in chain.logs_filtered(filter) {
+///     // Process matching Transfer events from USDT
+/// }
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LogFilter {
+    /// Filter by emitting contract address.
+    pub address: Option<Address>,
+    /// Filter by event signature (first topic).
+    pub topic0: Option<B256>,
+}
+
+impl LogFilter {
+    /// Create a new empty filter that matches all logs.
+    pub const fn new() -> Self {
+        Self { address: None, topic0: None }
+    }
+
+    /// Filter by emitting contract address.
+    pub const fn with_address(mut self, addr: Address) -> Self {
+        self.address = Some(addr);
+        self
+    }
+
+    /// Filter by event signature (topic0).
+    pub const fn with_topic0(mut self, sig: B256) -> Self {
+        self.topic0 = Some(sig);
+        self
+    }
+
+    /// Check if a log matches this filter.
+    pub fn matches(&self, log: &Log) -> bool {
+        if self.address.is_some_and(|addr| log.address != addr) {
+            return false;
+        }
+        if self.topic0.is_some_and(|t0| log.topics().first() != Some(&t0)) {
+            return false;
+        }
+        true
+    }
+}
 
 impl<N: NodePrimitives> Default for Chain<N> {
     fn default() -> Self {
@@ -196,6 +290,27 @@ impl<N: NodePrimitives> Chain<N> {
         self.blocks_iter().zip(self.block_receipts_iter())
     }
 
+    /// Returns an iterator over blocks paired with their execution outcome data.
+    ///
+    /// This provides a convenient way to iterate over blocks with their associated
+    /// receipts without manual index tracking.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// for outcome in chain.blocks_with_outcome() {
+    ///     println!("Block {} has {} receipts", outcome.number, outcome.receipts.len());
+    /// }
+    /// ```
+    pub fn blocks_with_outcome(&self) -> impl Iterator<Item = BlockOutcomeRef<'_, N>> + '_ {
+        self.blocks_and_receipts().map(|(block, receipts)| BlockOutcomeRef {
+            block,
+            number: block.header().number(),
+            hash: block.hash(),
+            receipts: receipts.as_slice(),
+        })
+    }
+
     /// Finds a transaction by hash and returns it along with its corresponding receipt data.
     ///
     /// Returns `None` if the transaction is not found in this chain.
@@ -326,6 +441,74 @@ impl<N: NodePrimitives> Chain<N> {
         self.trie_data.extend(other.trie_data);
 
         Ok(())
+    }
+}
+
+impl<N> Chain<N>
+where
+    N: NodePrimitives,
+    N::Receipt: TxReceipt<Log = Log>,
+{
+    /// Returns an iterator over all logs in the chain with full context.
+    ///
+    /// Each [`LogRef`] includes the block, transaction index, receipt, and log index,
+    /// eliminating the need for manual index tracking when processing events.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use alloy::sol_types::SolEvent;
+    ///
+    /// for log_ref in chain.logs_iter() {
+    ///     if log_ref.log.topics().first() == Some(&Transfer::SIGNATURE_HASH) {
+    ///         println!(
+    ///             "Transfer in block {} tx {} log {}",
+    ///             log_ref.block_number,
+    ///             log_ref.tx_index,
+    ///             log_ref.log_index
+    ///         );
+    ///     }
+    /// }
+    /// ```
+    pub fn logs_iter(&self) -> impl Iterator<Item = LogRef<'_, N>> + '_ {
+        self.blocks_and_receipts().flat_map(|(block, receipts)| {
+            let block_number = block.header().number();
+            let block_hash = block.hash();
+            receipts.iter().enumerate().flat_map(move |(tx_index, receipt)| {
+                receipt.logs().iter().enumerate().map(move |(log_index, log)| LogRef {
+                    block,
+                    block_number,
+                    block_hash,
+                    tx_index,
+                    receipt,
+                    log_index,
+                    log,
+                })
+            })
+        })
+    }
+
+    /// Returns an iterator over logs matching the given filter.
+    ///
+    /// This is a convenience method that combines [`logs_iter`](Self::logs_iter) with
+    /// [`LogFilter`] for the common case of filtering by address and/or event signature.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use alloy_primitives::{address, b256};
+    ///
+    /// // Filter for Transfer events from a specific contract
+    /// let filter = LogFilter::new()
+    ///     .with_address(address!("dAC17F958D2ee523a2206206994597C13D831ec7"))
+    ///     .with_topic0(b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"));
+    ///
+    /// for log_ref in chain.logs_filtered(filter) {
+    ///     // Process matching logs
+    /// }
+    /// ```
+    pub fn logs_filtered(&self, filter: LogFilter) -> impl Iterator<Item = LogRef<'_, N>> + '_ {
+        self.logs_iter().filter(move |log_ref| filter.matches(log_ref.log))
     }
 }
 
@@ -828,5 +1011,191 @@ mod tests {
 
         // Assert that the execution outcome at the tip block contains the whole execution outcome
         assert_eq!(chain.execution_outcome_at_block(11), Some(execution_outcome));
+    }
+
+    #[test]
+    fn test_blocks_with_outcome() {
+        let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        let mut block2: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        let block1_hash = B256::new([0x01; 32]);
+        let block2_hash = B256::new([0x02; 32]);
+
+        block1.set_block_number(10);
+        block1.set_hash(block1_hash);
+        block2.set_block_number(11);
+        block2.set_hash(block2_hash);
+
+        let receipt1 = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 100,
+            logs: vec![],
+            success: true,
+        };
+        let receipt2 = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 200,
+            logs: vec![],
+            success: true,
+        };
+
+        let execution_outcome = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: vec![vec![receipt1], vec![receipt2]],
+            requests: vec![],
+            first_block: 10,
+        };
+
+        let chain: Chain = Chain {
+            blocks: BTreeMap::from([(10, block1), (11, block2)]),
+            execution_outcome,
+            ..Default::default()
+        };
+
+        let outcomes: Vec<_> = chain.blocks_with_outcome().collect();
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(outcomes[0].number, 10);
+        assert_eq!(outcomes[0].hash, block1_hash);
+        assert_eq!(outcomes[0].receipts.len(), 1);
+        assert_eq!(outcomes[1].number, 11);
+        assert_eq!(outcomes[1].hash, block2_hash);
+        assert_eq!(outcomes[1].receipts.len(), 1);
+    }
+
+    #[test]
+    fn test_logs_iter() {
+        let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        let block1_hash = B256::new([0x01; 32]);
+        block1.set_block_number(10);
+        block1.set_hash(block1_hash);
+
+        let log1 = Log::new_unchecked(
+            Address::new([0xaa; 20]),
+            vec![B256::new([0x11; 32])],
+            Default::default(),
+        );
+        let log2 = Log::new_unchecked(
+            Address::new([0xbb; 20]),
+            vec![B256::new([0x22; 32])],
+            Default::default(),
+        );
+
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 100,
+            logs: vec![log1.clone(), log2.clone()],
+            success: true,
+        };
+
+        let execution_outcome = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: vec![vec![receipt]],
+            requests: vec![],
+            first_block: 10,
+        };
+
+        let chain: Chain = Chain {
+            blocks: BTreeMap::from([(10, block1)]),
+            execution_outcome,
+            ..Default::default()
+        };
+
+        let logs: Vec<_> = chain.logs_iter().collect();
+        assert_eq!(logs.len(), 2);
+
+        // Check first log
+        assert_eq!(logs[0].block_number, 10);
+        assert_eq!(logs[0].block_hash, block1_hash);
+        assert_eq!(logs[0].tx_index, 0);
+        assert_eq!(logs[0].log_index, 0);
+        assert_eq!(logs[0].log.address, Address::new([0xaa; 20]));
+
+        // Check second log
+        assert_eq!(logs[1].log_index, 1);
+        assert_eq!(logs[1].log.address, Address::new([0xbb; 20]));
+    }
+
+    #[test]
+    fn test_logs_filtered() {
+        let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        block1.set_block_number(10);
+        block1.set_hash(B256::new([0x01; 32]));
+
+        let target_addr = Address::new([0xaa; 20]);
+        let target_topic = B256::new([0x11; 32]);
+        let other_addr = Address::new([0xbb; 20]);
+        let other_topic = B256::new([0x22; 32]);
+
+        let log1 = Log::new_unchecked(target_addr, vec![target_topic], Default::default());
+        let log2 = Log::new_unchecked(other_addr, vec![target_topic], Default::default());
+        let log3 = Log::new_unchecked(target_addr, vec![other_topic], Default::default());
+
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 100,
+            logs: vec![log1, log2, log3],
+            success: true,
+        };
+
+        let execution_outcome = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: vec![vec![receipt]],
+            requests: vec![],
+            first_block: 10,
+        };
+
+        let chain: Chain = Chain {
+            blocks: BTreeMap::from([(10, block1)]),
+            execution_outcome,
+            ..Default::default()
+        };
+
+        // Filter by address only
+        let filter = LogFilter::new().with_address(target_addr);
+        let logs: Vec<_> = chain.logs_filtered(filter).collect();
+        assert_eq!(logs.len(), 2);
+
+        // Filter by topic only
+        let filter = LogFilter::new().with_topic0(target_topic);
+        let logs: Vec<_> = chain.logs_filtered(filter).collect();
+        assert_eq!(logs.len(), 2);
+
+        // Filter by both address and topic
+        let filter = LogFilter::new().with_address(target_addr).with_topic0(target_topic);
+        let logs: Vec<_> = chain.logs_filtered(filter).collect();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].log.address, target_addr);
+        assert_eq!(logs[0].log.topics().first(), Some(&target_topic));
+    }
+
+    #[test]
+    fn test_log_filter_matches() {
+        let addr = Address::new([0xaa; 20]);
+        let topic = B256::new([0x11; 32]);
+        let log = Log::new_unchecked(addr, vec![topic], Default::default());
+
+        // Empty filter matches everything
+        let filter = LogFilter::new();
+        assert!(filter.matches(&log));
+
+        // Address filter
+        let filter = LogFilter::new().with_address(addr);
+        assert!(filter.matches(&log));
+
+        let filter = LogFilter::new().with_address(Address::new([0xbb; 20]));
+        assert!(!filter.matches(&log));
+
+        // Topic filter
+        let filter = LogFilter::new().with_topic0(topic);
+        assert!(filter.matches(&log));
+
+        let filter = LogFilter::new().with_topic0(B256::new([0x22; 32]));
+        assert!(!filter.matches(&log));
+
+        // Combined filter
+        let filter = LogFilter::new().with_address(addr).with_topic0(topic);
+        assert!(filter.matches(&log));
+
+        let filter = LogFilter::new().with_address(Address::new([0xbb; 20])).with_topic0(topic);
+        assert!(!filter.matches(&log));
     }
 }
