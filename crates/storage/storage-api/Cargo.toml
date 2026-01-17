@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chain.workspace = true
+reth-chain = { workspace = true, optional = true }
 reth-db-models.workspace = true
 reth-chainspec.workspace = true
 reth-db-api = { workspace = true, optional = true }
@@ -38,6 +38,7 @@ serde_json = { workspace = true, optional = true }
 [features]
 default = ["std"]
 std = [
+    "dep:reth-chain",
     "reth-chainspec/std",
     "alloy-consensus/std",
     "alloy-eips/std",
@@ -61,7 +62,7 @@ db-api = [
 ]
 
 serde = [
-    "reth-chain/serde",
+    "reth-chain?/serde",
     "reth-ethereum-primitives/serde",
     "reth-db-models/serde",
     "reth-execution-types/serde",
@@ -80,7 +81,7 @@ serde-bincode-compat = [
     "reth-execution-types/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
     "reth-trie-common/serde-bincode-compat",
-    "reth-chain/serde-bincode-compat",
+    "reth-chain?/serde-bincode-compat",
     "reth-ethereum-primitives/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
     "alloy-consensus/serde-bincode-compat",
