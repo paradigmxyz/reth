@@ -388,20 +388,59 @@ impl DecodedMultiProof {
     /// proofs.
     pub fn extend(&mut self, other: Self) {
         self.account_subtree.extend_from(other.account_subtree);
+        self.branch_node_masks.reserve(other.branch_node_masks.len());
         self.branch_node_masks.extend(other.branch_node_masks);
 
+        self.storages.reserve(other.storages.len());
         for (hashed_address, storage) in other.storages {
             match self.storages.entry(hashed_address) {
                 hash_map::Entry::Occupied(mut entry) => {
                     debug_assert_eq!(entry.get().root, storage.root);
                     let entry = entry.get_mut();
                     entry.subtree.extend_from(storage.subtree);
+                    entry.branch_node_masks.reserve(storage.branch_node_masks.len());
                     entry.branch_node_masks.extend(storage.branch_node_masks);
                 }
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(storage);
                 }
             }
+        }
+    }
+
+    /// Extends this multiproof with another, using swap-extend heuristic for efficiency.
+    ///
+    /// When `other` has more entries than `self`, this swaps the contents first to avoid
+    /// rehashing the larger map. This is optimal when merging proofs of varying sizes.
+    pub fn extend_swap(&mut self, mut other: Self) {
+        // Swap if other is larger to minimize rehashing
+        if other.storages.len() > self.storages.len() {
+            std::mem::swap(&mut self.account_subtree, &mut other.account_subtree);
+            std::mem::swap(&mut self.branch_node_masks, &mut other.branch_node_masks);
+            std::mem::swap(&mut self.storages, &mut other.storages);
+        }
+        self.extend(other);
+    }
+
+    /// Extends this multiproof with multiple others, reserving capacity upfront for efficiency.
+    ///
+    /// This is more efficient than calling [`extend`](Self::extend) repeatedly when merging
+    /// many proofs, as it calculates total capacity needed and reserves once.
+    pub fn extend_batch(&mut self, others: impl IntoIterator<Item = Self>) {
+        let others: Vec<_> = others.into_iter().collect();
+        if others.is_empty() {
+            return;
+        }
+
+        // Calculate total capacity needed
+        let total_masks: usize = others.iter().map(|o| o.branch_node_masks.len()).sum();
+        let total_storages: usize = others.iter().map(|o| o.storages.len()).sum();
+
+        self.branch_node_masks.reserve(total_masks);
+        self.storages.reserve(total_storages);
+
+        for other in others {
+            self.extend(other);
         }
     }
 
