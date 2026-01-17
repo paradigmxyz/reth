@@ -660,6 +660,26 @@ impl<TxEnv: Clone, T> ToTxEnv<TxEnv> for WithTxEnv<TxEnv, T> {
     }
 }
 
+impl<TxEnv, T> WithTxEnv<TxEnv, T> {
+    /// Takes ownership of the inner [`TxEnv`].
+    ///
+    /// This is more efficient than cloning when you have ownership of the
+    /// `WithTxEnv` and only need the transaction environment.
+    pub fn into_tx_env(self) -> TxEnv {
+        self.tx_env
+    }
+
+    /// Returns a reference to the inner [`TxEnv`].
+    pub fn tx_env(&self) -> &TxEnv {
+        &self.tx_env
+    }
+
+    /// Returns a mutable reference to the inner [`TxEnv`].
+    pub fn tx_env_mut(&mut self) -> &mut TxEnv {
+        &mut self.tx_env
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
