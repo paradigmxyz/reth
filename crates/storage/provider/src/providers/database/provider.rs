@@ -489,6 +489,18 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // MDBX writes
             let mdbx_start = Instant::now();
 
+            // Pre-collect history indices from in-memory execution outcomes to avoid DB scans.
+            // This is a significant optimization (26% of persist time was spent scanning
+            // changesets).
+            let storage_settings = self.cached_storage_settings();
+            let collect_account_history =
+                save_mode.with_state() && !storage_settings.account_history_in_rocksdb;
+            let collect_storage_history =
+                save_mode.with_state() && !storage_settings.storages_history_in_rocksdb;
+
+            let mut account_transitions: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+            let mut storage_transitions: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+
             // Collect all transaction hashes across all blocks, sort them, and write in batch
             if !self.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
@@ -532,16 +544,37 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                 if save_mode.with_state() {
                     let execution_output = block.execution_outcome();
+                    let block_number = recovered_block.number();
+
+                    // Collect history indices from in-memory state (avoids DB scan later)
+                    if collect_account_history || collect_storage_history {
+                        for (address, account) in execution_output.state.state() {
+                            // Skip unmodified accounts
+                            if account.status.is_not_modified() {
+                                continue;
+                            }
+                            if collect_account_history {
+                                account_transitions.entry(*address).or_default().push(block_number);
+                            }
+                            // Collect storage changes for this account
+                            if collect_storage_history {
+                                for (slot, _) in &account.storage {
+                                    let slot_key = B256::from(*slot);
+                                    storage_transitions
+                                        .entry((*address, slot_key))
+                                        .or_default()
+                                        .push(block_number);
+                                }
+                            }
+                        }
+                    }
 
                     // Write state and changesets to the database.
                     // Must be written after blocks because of the receipt lookup.
                     // Skip receipts/account changesets if they're being written to static files.
                     let start = Instant::now();
                     self.write_state(
-                        WriteStateInput::Single {
-                            outcome: execution_output,
-                            block: recovered_block.number(),
-                        },
+                        WriteStateInput::Single { outcome: execution_output, block: block_number },
                         OriginalValuesKnown::No,
                         StateWriteConfig {
                             write_receipts: !sf_ctx.write_receipts,
@@ -563,10 +596,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 }
             }
 
-            // Full mode: update history indices
+            // Full mode: update history indices from pre-collected in-memory data
             if save_mode.with_state() {
                 let start = Instant::now();
-                self.update_history_indices(first_number..=last_block_number)?;
+                if collect_account_history {
+                    self.insert_account_history_index(account_transitions)?;
+                }
+                if collect_storage_history {
+                    self.insert_storage_history_index(storage_transitions)?;
+                }
                 timings.update_history_indices = start.elapsed();
             }
 
