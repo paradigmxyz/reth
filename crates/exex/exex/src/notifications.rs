@@ -449,7 +449,7 @@ mod tests {
     use crate::Wal;
     use alloy_consensus::Header;
     use alloy_eips::BlockNumHash;
-
+    use eyre::OptionExt;
     use futures::StreamExt;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block;
@@ -491,15 +491,14 @@ mod tests {
         let exex_head =
             ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
 
-        let expected_block = random_block(
-            &mut rng,
-            node_head.number + 1,
-            BlockParams { parent: Some(node_head.hash), ..Default::default() },
-        )
-        .try_recover()?;
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![expected_block.clone()],
+                vec![random_block(
+                    &mut rng,
+                    node_head.number + 1,
+                    BlockParams { parent: Some(node_head.hash), ..Default::default() },
+                )
+                .try_recover()?],
                 Default::default(),
                 BTreeMap::new(),
             )),
@@ -519,16 +518,23 @@ mod tests {
         .with_head(exex_head);
 
         // First notification is the backfill of missing blocks from the canonical chain
-        let backfill_notification = notifications.next().await.transpose()?;
-        assert!(backfill_notification.is_some());
-        // Verify it's a commit notification with the expected block range
-        let backfill_chain = backfill_notification.unwrap().committed_chain().unwrap();
-        assert_eq!(backfill_chain.first().header().number(), 1);
+        assert_eq!(
+            notifications.next().await.transpose()?,
+            Some(ExExNotification::ChainCommitted {
+                new: Arc::new(
+                    BackfillJobFactory::new(
+                        notifications.evm_config.clone(),
+                        notifications.provider.clone()
+                    )
+                    .backfill(1..=1)
+                    .next()
+                    .ok_or_eyre("failed to backfill")??
+                )
+            })
+        );
 
         // Second notification is the actual notification that we sent before
-        let received = notifications.next().await.transpose()?;
-        assert!(received.is_some());
-        assert_eq!(*received.unwrap().committed_chain().unwrap().tip(), expected_block);
+        assert_eq!(notifications.next().await.transpose()?, Some(notification));
 
         Ok(())
     }
@@ -549,19 +555,18 @@ mod tests {
         let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
         let exex_head = ExExHead { block: node_head };
 
-        let expected_block = Block {
-            header: Header {
-                parent_hash: node_head.hash,
-                number: node_head.number + 1,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-        .seal_slow()
-        .try_recover()?;
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![expected_block.clone()],
+                vec![Block {
+                    header: Header {
+                        parent_hash: node_head.hash,
+                        number: node_head.number + 1,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+                .seal_slow()
+                .try_recover()?],
                 Default::default(),
                 BTreeMap::new(),
             )),
@@ -581,8 +586,7 @@ mod tests {
         .with_head(exex_head);
 
         let new_notification = notifications.next().await.transpose()?;
-        assert!(new_notification.is_some());
-        assert_eq!(*new_notification.unwrap().committed_chain().unwrap().tip(), expected_block);
+        assert_eq!(new_notification, Some(notification));
 
         Ok(())
     }
@@ -612,7 +616,7 @@ mod tests {
         let provider_rw = provider.database_provider_rw()?;
         provider_rw.insert_block(&node_head_block)?;
         provider_rw.commit()?;
-        let _node_head_notification = ExExNotification::ChainCommitted {
+        let node_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(
                 BackfillJobFactory::new(EthEvmConfig::mainnet(), provider.clone())
                     .backfill(node_head.number..=node_head.number)
@@ -627,24 +631,26 @@ mod tests {
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         );
         let exex_head = ExExHead { block: exex_head_block.num_hash() };
-        let exex_head_recovered = exex_head_block.clone().try_recover()?;
         let exex_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![exex_head_recovered.clone()],
+                vec![exex_head_block.clone().try_recover()?],
                 Default::default(),
                 BTreeMap::new(),
             )),
         };
         wal.commit(&exex_head_notification)?;
 
-        let new_block = random_block(
-            &mut rng,
-            node_head.number + 1,
-            BlockParams { parent: Some(node_head.hash), ..Default::default() },
-        )
-        .try_recover()?;
         let new_notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![new_block.clone()], Default::default(), BTreeMap::new())),
+            new: Arc::new(Chain::new(
+                vec![random_block(
+                    &mut rng,
+                    node_head.number + 1,
+                    BlockParams { parent: Some(node_head.hash), ..Default::default() },
+                )
+                .try_recover()?],
+                Default::default(),
+                BTreeMap::new(),
+            )),
         };
 
         let (notifications_tx, notifications_rx) = mpsc::channel(1);
@@ -662,25 +668,15 @@ mod tests {
 
         // First notification is the revert of the ExEx head block to get back to the canonical
         // chain
-        let revert_notification = notifications.next().await.transpose()?;
-        assert!(revert_notification.is_some());
-        // Verify it's a revert with the exex_head block
         assert_eq!(
-            *revert_notification.unwrap().reverted_chain().unwrap().tip(),
-            exex_head_recovered
+            notifications.next().await.transpose()?,
+            Some(exex_head_notification.into_inverted())
         );
         // Second notification is the backfilled block from the canonical chain to get back to the
         // canonical tip
-        let backfill_notification = notifications.next().await.transpose()?;
-        assert!(backfill_notification.is_some());
-        assert_eq!(
-            backfill_notification.unwrap().committed_chain().unwrap().tip().header().number(),
-            node_head.number
-        );
+        assert_eq!(notifications.next().await.transpose()?, Some(node_head_notification));
         // Third notification is the actual notification that we sent before
-        let received = notifications.next().await.transpose()?;
-        assert!(received.is_some());
-        assert_eq!(*received.unwrap().committed_chain().unwrap().tip(), new_block);
+        assert_eq!(notifications.next().await.transpose()?, Some(new_notification));
 
         Ok(())
     }
@@ -706,10 +702,9 @@ mod tests {
             genesis_block.number + 1,
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         );
-        let exex_head_recovered = exex_head_block.clone().try_recover()?;
         let exex_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![exex_head_recovered.clone()],
+                vec![exex_head_block.clone().try_recover()?],
                 Default::default(),
                 BTreeMap::new(),
             )),
@@ -721,14 +716,17 @@ mod tests {
             block: BlockNumHash { number: exex_head_block.number, hash: exex_head_block.hash() },
         };
 
-        let new_block = random_block(
-            &mut rng,
-            genesis_block.number + 1,
-            BlockParams { parent: Some(genesis_hash), ..Default::default() },
-        )
-        .try_recover()?;
         let new_notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![new_block.clone()], Default::default(), BTreeMap::new())),
+            new: Arc::new(Chain::new(
+                vec![random_block(
+                    &mut rng,
+                    genesis_block.number + 1,
+                    BlockParams { parent: Some(genesis_hash), ..Default::default() },
+                )
+                .try_recover()?],
+                Default::default(),
+                BTreeMap::new(),
+            )),
         };
 
         let (notifications_tx, notifications_rx) = mpsc::channel(1);
@@ -746,17 +744,13 @@ mod tests {
 
         // First notification is the revert of the ExEx head block to get back to the canonical
         // chain
-        let revert_notification = notifications.next().await.transpose()?;
-        assert!(revert_notification.is_some());
         assert_eq!(
-            *revert_notification.unwrap().reverted_chain().unwrap().tip(),
-            exex_head_recovered
+            notifications.next().await.transpose()?,
+            Some(exex_head_notification.into_inverted())
         );
 
         // Second notification is the actual notification that we sent before
-        let received = notifications.next().await.transpose()?;
-        assert!(received.is_some());
-        assert_eq!(*received.unwrap().committed_chain().unwrap().tip(), new_block);
+        assert_eq!(notifications.next().await.transpose()?, Some(new_notification));
 
         Ok(())
     }

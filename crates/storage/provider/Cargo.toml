@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chain.workspace = true
 reth-chainspec.workspace = true
 reth-execution-types.workspace = true
 reth-ethereum-primitives = { workspace = true, features = ["reth-codec"] }
@@ -87,15 +86,6 @@ tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
 rocksdb = ["dep:rocksdb"]
-serde-bincode-compat = [
-    "reth-chain/serde-bincode-compat",
-    "alloy-consensus/serde-bincode-compat",
-    "alloy-eips/serde-bincode-compat",
-    "reth-ethereum-primitives/serde-bincode-compat",
-    "reth-execution-types/serde-bincode-compat",
-    "reth-primitives-traits/serde-bincode-compat",
-    "reth-storage-api/serde-bincode-compat",
-]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
