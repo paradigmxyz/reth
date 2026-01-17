@@ -298,6 +298,8 @@ pub(crate) struct NewPayloadStatusMetrics {
     pub(crate) new_payload_latency: Histogram,
     /// Latency for the last new payload call.
     pub(crate) new_payload_last: Gauge,
+    /// Time between consecutive new payload calls (payload-to-payload interval).
+    pub(crate) time_between_new_payloads: Histogram,
 }
 
 impl NewPayloadStatusMetrics {
@@ -311,6 +313,9 @@ impl NewPayloadStatusMetrics {
         let finish = Instant::now();
         let elapsed = finish - start;
 
+        if let Some(prev) = self.latest_at {
+            self.time_between_new_payloads.record(start - prev);
+        }
         self.latest_at = Some(finish);
         match result {
             Ok(outcome) => match outcome.outcome.status {
