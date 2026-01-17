@@ -1,10 +1,11 @@
 use crate::{
-    cache::SequenceManager, worker::FlashBlockBuilder, FlashBlock, FlashBlockCompleteSequence,
-    FlashBlockCompleteSequenceRx, InProgressFlashBlockRx, PendingFlashBlock,
+    cache::SequenceManager, validation::ReconciliationStrategy, worker::FlashBlockBuilder,
+    FlashBlock, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx, InProgressFlashBlockRx,
+    PendingFlashBlock,
 };
 use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
-use metrics::{Gauge, Histogram};
+use metrics::{Counter, Gauge, Histogram};
 use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_evm::ConfigureEvm;
 use reth_metrics::Metrics;
@@ -13,8 +14,20 @@ use reth_revm::cached::CachedReads;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskExecutor;
 use std::{sync::Arc, time::Instant};
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tracing::*;
+
+/// Default maximum depth for pending blocks ahead of canonical.
+const DEFAULT_MAX_DEPTH: u64 = 64;
+
+/// Notification about a new canonical block for reconciliation.
+#[derive(Debug, Clone)]
+pub struct CanonicalBlockNotification {
+    /// The canonical block number.
+    pub block_number: u64,
+    /// Transaction hashes in the canonical block.
+    pub tx_hashes: Vec<B256>,
+}
 
 /// The `FlashBlockService` maintains an in-memory [`PendingFlashBlock`] built out of a sequence of
 /// [`FlashBlock`]s.
@@ -27,6 +40,8 @@ pub struct FlashBlockService<
 > {
     /// Incoming flashblock stream.
     incoming_flashblock_rx: S,
+    /// Receiver for canonical block notifications.
+    canonical_block_rx: Option<mpsc::UnboundedReceiver<CanonicalBlockNotification>>,
     /// Signals when a block build is in progress.
     in_progress_tx: watch::Sender<Option<FlashBlockBuildInfo>>,
     /// Broadcast channel to forward received flashblocks from the subscription.
@@ -41,6 +56,8 @@ pub struct FlashBlockService<
     /// Manages flashblock sequences with caching and intelligent build selection.
     sequences: SequenceManager<N::SignedTx>,
 
+    /// Maximum depth for pending blocks ahead of canonical before clearing.
+    max_depth: u64,
     /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
 }
@@ -74,14 +91,37 @@ where
         let (received_flashblocks_tx, _) = tokio::sync::broadcast::channel(128);
         Self {
             incoming_flashblock_rx,
+            canonical_block_rx: None,
             in_progress_tx,
             received_flashblocks_tx,
             builder: FlashBlockBuilder::new(evm_config, provider),
             spawner,
             job: None,
             sequences: SequenceManager::new(compute_state_root),
+            max_depth: DEFAULT_MAX_DEPTH,
             metrics: FlashBlockServiceMetrics::default(),
         }
+    }
+
+    /// Sets the canonical block receiver for reconciliation.
+    ///
+    /// When canonical blocks are received, the service will reconcile the pending
+    /// flashblock state to handle catch-up and reorg scenarios.
+    pub fn with_canonical_block_rx(
+        mut self,
+        rx: mpsc::UnboundedReceiver<CanonicalBlockNotification>,
+    ) -> Self {
+        self.canonical_block_rx = Some(rx);
+        self
+    }
+
+    /// Sets the maximum depth for pending blocks ahead of canonical.
+    ///
+    /// If pending blocks get too far ahead of the canonical chain, the pending
+    /// state will be cleared to prevent unbounded memory growth.
+    pub const fn with_max_depth(mut self, max_depth: u64) -> Self {
+        self.max_depth = max_depth;
+        self
     }
 
     /// Returns the sender half for the received flashblocks broadcast channel.
@@ -113,7 +153,8 @@ where
     /// This loop:
     /// 1. Checks if any build job has completed and processes results
     /// 2. Receives and batches all immediately available flashblocks
-    /// 3. Attempts to build a block from the complete sequence
+    /// 3. Processes canonical block notifications for reconciliation
+    /// 4. Attempts to build a block from the complete sequence
     ///
     /// Note: this should be spawned
     pub async fn run(mut self, tx: watch::Sender<Option<PendingFlashBlock<N>>>) {
@@ -175,6 +216,41 @@ where
                         }
                     }
                 }
+
+                // Event 3: Canonical block notification for reconciliation
+                Some(notification) = async {
+                    match self.canonical_block_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    self.process_canonical_block(notification);
+                    // Try to build after reconciliation in case we can now build
+                    self.try_start_build_job();
+                }
+            }
+        }
+    }
+
+    /// Processes a canonical block notification and reconciles pending state.
+    fn process_canonical_block(&mut self, notification: CanonicalBlockNotification) {
+        let strategy = self.sequences.process_canonical_block(
+            notification.block_number,
+            &notification.tx_hashes,
+            self.max_depth,
+        );
+
+        // Record metrics based on strategy
+        match strategy {
+            ReconciliationStrategy::HandleReorg => {
+                self.metrics.reorg_count.increment(1);
+            }
+            ReconciliationStrategy::CatchUp | ReconciliationStrategy::DepthLimitExceeded { .. } => {
+                // State was cleared, clear the pending block output
+                // (will be rebuilt on next flashblock)
+            }
+            ReconciliationStrategy::Continue | ReconciliationStrategy::NoPendingState => {
+                // No action needed
             }
         }
     }
@@ -259,4 +335,6 @@ struct FlashBlockServiceMetrics {
     current_block_height: Gauge,
     /// Current flashblock index.
     current_index: Gauge,
+    /// Number of reorgs detected during canonical block reconciliation.
+    reorg_count: Counter,
 }
