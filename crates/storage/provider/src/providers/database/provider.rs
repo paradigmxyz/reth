@@ -33,6 +33,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
+use reth_chain::Chain;
 use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
@@ -47,7 +48,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, PlainAccountState, PlainStorageState,
 };
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, RecoveredBlock, SealedHeader, StorageEntry,
@@ -514,9 +515,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             });
 
             // Prepare all hashed state writes in background - runs in parallel with block writes
-            let hashed_prep_handle = (hashed_states.len() > 1).then(|| {
-                s.spawn(|| Self::prepare_hashed_state_writes(&hashed_states))
-            });
+            let hashed_prep_handle = (hashed_states.len() > 1)
+                .then(|| s.spawn(|| Self::prepare_hashed_state_writes(&hashed_states)));
 
             // MDBX writes
             let mdbx_start = Instant::now();
@@ -581,13 +581,52 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                         },
                     )?;
                     timings.write_state += start.elapsed();
-
-                    let trie_data = block.trie_data();
-
-                    let start = Instant::now();
-                    self.write_trie_updates_sorted(&trie_data.trie_updates)?;
-                    timings.write_trie_updates += start.elapsed();
                 }
+            }
+
+            // Write all trie updates in a single batch.
+            // This reduces cursor open/close overhead from N calls to 1.
+            // Uses hybrid algorithm: extend_ref for small batches, k-way merge for large.
+            if save_mode.with_state() {
+                const MERGE_BATCH_THRESHOLD: usize = 30;
+
+                let start = Instant::now();
+                let num_blocks = blocks.len();
+
+                let merged = if num_blocks == 0 {
+                    TrieUpdatesSorted::default()
+                } else if num_blocks == 1 {
+                    // Single block: use directly (Arc::try_unwrap avoids clone if refcount is 1)
+                    match Arc::try_unwrap(blocks[0].trie_updates()) {
+                        Ok(owned) => owned,
+                        Err(arc) => (*arc).clone(),
+                    }
+                } else if num_blocks < MERGE_BATCH_THRESHOLD {
+                    // Small k: extend_ref with Arc::make_mut (copy-on-write).
+                    // Blocks are oldest-to-newest, iterate forward so newest overrides.
+                    let mut blocks_iter = blocks.iter();
+                    let mut result = blocks_iter.next().expect("non-empty").trie_updates();
+
+                    for block in blocks_iter {
+                        Arc::make_mut(&mut result).extend_ref(block.trie_updates().as_ref());
+                    }
+
+                    match Arc::try_unwrap(result) {
+                        Ok(owned) => owned,
+                        Err(arc) => (*arc).clone(),
+                    }
+                } else {
+                    // Large k: k-way merge is faster (O(n log k)).
+                    // Collect Arcs first to extend lifetime, then pass refs.
+                    // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
+                    let arcs: Vec<_> = blocks.iter().rev().map(|b| b.trie_updates()).collect();
+                    TrieUpdatesSorted::merge_batch(arcs.iter().map(|arc| arc.as_ref()))
+                };
+
+                if !merged.is_empty() {
+                    self.write_trie_updates_sorted(&merged)?;
+                }
+                timings.write_trie_updates += start.elapsed();
             }
 
             // Full mode: update history indices
@@ -830,8 +869,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             let slots: Vec<(&B256, &U256)> = KMergeIter::<U256, _>::new(sources).collect();
 
-            storages
-                .push(PreparedStorageWrites { address, wipe_first: wipe_block.is_some(), slots });
+            storages.push(PreparedStorageWrites {
+                address,
+                wipe_first: wipe_block.is_some(),
+                slots,
+            });
         }
 
         PreparedHashedStateWrites { accounts, storages }
@@ -869,8 +911,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     storage_cursor.delete_current()?;
                 }
                 if !value.is_zero() {
-                    storage_cursor
-                        .upsert(*storage.address, &StorageEntry { key: *slot_key, value: *value })?;
+                    storage_cursor.upsert(
+                        *storage.address,
+                        &StorageEntry { key: *slot_key, value: *value },
+                    )?;
                 }
             }
         }
@@ -3303,7 +3347,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         // Update pipeline progress
         self.update_pipeline_stages(block, true)?;
 
-        Ok(Chain::new(blocks, execution_state, BTreeMap::new(), BTreeMap::new()))
+        Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
     }
 
     fn remove_block_and_execution_above(&self, block: BlockNumber) -> ProviderResult<()> {

@@ -1,8 +1,9 @@
 use crate::NodePrimitivesProvider;
 use alloc::vec::Vec;
 use alloy_primitives::BlockNumber;
+use reth_chain::Chain;
 use reth_db_models::StoredBlockBodyIndices;
-use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostStateSorted;

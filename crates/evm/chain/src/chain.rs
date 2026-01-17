@@ -1,16 +1,16 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
-use crate::ExecutionOutcome;
-use alloc::{borrow::Cow, collections::BTreeMap, sync::Arc, vec::Vec};
+use crate::DeferredTrieData;
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
-use core::{fmt, ops::RangeInclusive};
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
     transaction::signed::SignedTransaction, Block, BlockBody, IndexedTx, NodePrimitives,
     RecoveredBlock, SealedHeader,
 };
 use reth_trie_common::{updates::TrieUpdatesSorted, HashedPostStateSorted};
+use std::{borrow::Cow, collections::BTreeMap, fmt, ops::RangeInclusive, sync::Arc, vec::Vec};
 
 /// A chain of blocks and their final state.
 ///
@@ -22,8 +22,7 @@ use reth_trie_common::{updates::TrieUpdatesSorted, HashedPostStateSorted};
 /// # Warning
 ///
 /// A chain of blocks should not be empty.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug)]
 pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// All blocks in this chain.
     blocks: BTreeMap<BlockNumber, RecoveredBlock<N::Block>>,
@@ -34,10 +33,12 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     ///
     /// Additionally, it includes the individual state changes that led to the current state.
     execution_outcome: ExecutionOutcome<N::Receipt>,
-    /// State trie updates for each block in the chain, keyed by block number.
-    trie_updates: BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
-    /// Hashed post state for each block in the chain, keyed by block number.
-    hashed_state: BTreeMap<BlockNumber, Arc<HashedPostStateSorted>>,
+    /// Deferred trie data for each block in the chain, keyed by block number.
+    ///
+    /// Contains handles to lazily-computed sorted trie updates and hashed state.
+    /// This allows Chain to be constructed without blocking on expensive trie
+    /// computations - the data is only materialized when actually needed.
+    trie_data: BTreeMap<BlockNumber, DeferredTrieData>,
 }
 
 type ChainTxReceiptMeta<'a, N> = (
@@ -52,8 +53,7 @@ impl<N: NodePrimitives> Default for Chain<N> {
         Self {
             blocks: Default::default(),
             execution_outcome: Default::default(),
-            trie_updates: Default::default(),
-            hashed_state: Default::default(),
+            trie_data: Default::default(),
         }
     }
 }
@@ -67,27 +67,24 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn new(
         blocks: impl IntoIterator<Item = RecoveredBlock<N::Block>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_updates: BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
-        hashed_state: BTreeMap<BlockNumber, Arc<HashedPostStateSorted>>,
+        trie_data: BTreeMap<BlockNumber, DeferredTrieData>,
     ) -> Self {
         let blocks =
             blocks.into_iter().map(|b| (b.header().number(), b)).collect::<BTreeMap<_, _>>();
         debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
 
-        Self { blocks, execution_outcome, trie_updates, hashed_state }
+        Self { blocks, execution_outcome, trie_data }
     }
 
     /// Create new Chain from a single block and its state.
     pub fn from_block(
         block: RecoveredBlock<N::Block>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_updates: Arc<TrieUpdatesSorted>,
-        hashed_state: Arc<HashedPostStateSorted>,
+        trie_data: DeferredTrieData,
     ) -> Self {
         let block_number = block.header().number();
-        let trie_updates_map = BTreeMap::from([(block_number, trie_updates)]);
-        let hashed_state_map = BTreeMap::from([(block_number, hashed_state)]);
-        Self::new([block], execution_outcome, trie_updates_map, hashed_state_map)
+        let trie_data_map = BTreeMap::from([(block_number, trie_data)]);
+        Self::new([block], execution_outcome, trie_data_map)
     }
 
     /// Get the blocks in this chain.
@@ -105,37 +102,62 @@ impl<N: NodePrimitives> Chain<N> {
         self.blocks.values().map(|block| block.clone_sealed_header())
     }
 
+    /// Get all deferred trie data for this chain.
+    ///
+    /// Returns handles to lazily-computed sorted trie updates and hashed state.
+    /// [`DeferredTrieData`] allows `Chain` to be constructed without blocking on
+    /// expensive trie computations - the data is only materialized when actually needed
+    /// via [`DeferredTrieData::wait_cloned`] or similar methods.
+    ///
+    /// This method does **not** block. To access the computed trie data, call
+    /// [`DeferredTrieData::wait_cloned`] on individual entries, which will block
+    /// if the background computation has not yet completed.
+    pub const fn trie_data(&self) -> &BTreeMap<BlockNumber, DeferredTrieData> {
+        &self.trie_data
+    }
+
+    /// Get deferred trie data for a specific block number.
+    ///
+    /// Returns a handle to the lazily-computed trie data. This method does **not** block.
+    /// Call [`DeferredTrieData::wait_cloned`] on the result to wait for and retrieve
+    /// the computed data, which will block if computation is still in progress.
+    pub fn trie_data_at(&self, block_number: BlockNumber) -> Option<&DeferredTrieData> {
+        self.trie_data.get(&block_number)
+    }
+
     /// Get all trie updates for this chain.
-    pub const fn trie_updates(&self) -> &BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>> {
-        &self.trie_updates
+    ///
+    /// Note: This blocks on deferred trie data for all blocks in the chain.
+    /// Prefer using [`trie_data`](Self::trie_data) when possible to avoid blocking.
+    pub fn trie_updates(&self) -> BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>> {
+        self.trie_data.iter().map(|(num, data)| (*num, data.wait_cloned().trie_updates)).collect()
     }
 
     /// Get trie updates for a specific block number.
-    pub fn trie_updates_at(&self, block_number: BlockNumber) -> Option<&Arc<TrieUpdatesSorted>> {
-        self.trie_updates.get(&block_number)
+    ///
+    /// Note: This waits for deferred trie data if not already computed.
+    pub fn trie_updates_at(&self, block_number: BlockNumber) -> Option<Arc<TrieUpdatesSorted>> {
+        self.trie_data.get(&block_number).map(|data| data.wait_cloned().trie_updates)
     }
 
-    /// Remove all trie updates for this chain.
-    pub fn clear_trie_updates(&mut self) {
-        self.trie_updates.clear();
+    /// Remove all trie data for this chain.
+    pub fn clear_trie_data(&mut self) {
+        self.trie_data.clear();
     }
 
     /// Get all hashed states for this chain.
-    pub const fn hashed_state(&self) -> &BTreeMap<BlockNumber, Arc<HashedPostStateSorted>> {
-        &self.hashed_state
+    ///
+    /// Note: This blocks on deferred trie data for all blocks in the chain.
+    /// Prefer using [`trie_data`](Self::trie_data) when possible to avoid blocking.
+    pub fn hashed_state(&self) -> BTreeMap<BlockNumber, Arc<HashedPostStateSorted>> {
+        self.trie_data.iter().map(|(num, data)| (*num, data.wait_cloned().hashed_state)).collect()
     }
 
     /// Get hashed state for a specific block number.
-    pub fn hashed_state_at(
-        &self,
-        block_number: BlockNumber,
-    ) -> Option<&Arc<HashedPostStateSorted>> {
-        self.hashed_state.get(&block_number)
-    }
-
-    /// Remove all hashed states for this chain.
-    pub fn clear_hashed_state(&mut self) {
-        self.hashed_state.clear();
+    ///
+    /// Note: This waits for deferred trie data if not already computed.
+    pub fn hashed_state_at(&self, block_number: BlockNumber) -> Option<Arc<HashedPostStateSorted>> {
+        self.trie_data.get(&block_number).map(|data| data.wait_cloned().hashed_state)
     }
 
     /// Get execution outcome of this chain
@@ -183,23 +205,16 @@ impl<N: NodePrimitives> Chain<N> {
     /// Destructure the chain into its inner components:
     /// 1. The blocks contained in the chain.
     /// 2. The execution outcome representing the final state.
-    /// 3. The trie updates map.
-    /// 4. The hashed state map.
+    /// 3. The deferred trie data map.
     #[allow(clippy::type_complexity)]
     pub fn into_inner(
         self,
     ) -> (
         ChainBlocks<'static, N::Block>,
         ExecutionOutcome<N::Receipt>,
-        BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
-        BTreeMap<BlockNumber, Arc<HashedPostStateSorted>>,
+        BTreeMap<BlockNumber, DeferredTrieData>,
     ) {
-        (
-            ChainBlocks { blocks: Cow::Owned(self.blocks) },
-            self.execution_outcome,
-            self.trie_updates,
-            self.hashed_state,
-        )
+        (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.execution_outcome, self.trie_data)
     }
 
     /// Destructure the chain into its inner components:
@@ -329,14 +344,12 @@ impl<N: NodePrimitives> Chain<N> {
         &mut self,
         block: RecoveredBlock<N::Block>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_updates: Arc<TrieUpdatesSorted>,
-        hashed_state: Arc<HashedPostStateSorted>,
+        trie_data: DeferredTrieData,
     ) {
         let block_number = block.header().number();
         self.blocks.insert(block_number, block);
         self.execution_outcome.extend(execution_outcome);
-        self.trie_updates.insert(block_number, trie_updates);
-        self.hashed_state.insert(block_number, hashed_state);
+        self.trie_data.insert(block_number, trie_data);
     }
 
     /// Merge two chains by appending the given chain into the current one.
@@ -355,8 +368,7 @@ impl<N: NodePrimitives> Chain<N> {
         // Insert blocks from other chain
         self.blocks.extend(other.blocks);
         self.execution_outcome.extend(other.execution_outcome);
-        self.trie_updates.extend(other.trie_updates);
-        self.hashed_state.extend(other.hashed_state);
+        self.trie_data.extend(other.trie_data);
 
         Ok(())
     }
@@ -459,7 +471,7 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
 
 impl<B: Block> IntoIterator for ChainBlocks<'_, B> {
     type Item = (BlockNumber, RecoveredBlock<B>);
-    type IntoIter = alloc::collections::btree_map::IntoIter<BlockNumber, RecoveredBlock<B>>;
+    type IntoIter = std::collections::btree_map::IntoIter<BlockNumber, RecoveredBlock<B>>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.blocks.into_owned().into_iter()
@@ -477,25 +489,95 @@ pub struct BlockReceipts<T = reth_ethereum_primitives::Receipt> {
     pub timestamp: u64,
 }
 
+#[cfg(feature = "serde")]
+mod chain_serde {
+    use super::*;
+    use crate::ComputedTrieData;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    /// Serializable representation of Chain that waits for deferred trie data.
+    #[derive(Serialize, Deserialize)]
+    #[serde(bound = "")]
+    struct ChainRepr<N: NodePrimitives> {
+        blocks: BTreeMap<BlockNumber, RecoveredBlock<N::Block>>,
+        execution_outcome: ExecutionOutcome<N::Receipt>,
+        #[serde(default)]
+        trie_updates: BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
+        #[serde(default)]
+        hashed_state: BTreeMap<BlockNumber, Arc<HashedPostStateSorted>>,
+    }
+
+    impl<N: NodePrimitives> Serialize for Chain<N> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            // Wait for deferred trie data for serialization
+            let trie_updates: BTreeMap<_, _> = self
+                .trie_data
+                .iter()
+                .map(|(num, data)| (*num, data.wait_cloned().trie_updates))
+                .collect();
+            let hashed_state: BTreeMap<_, _> = self
+                .trie_data
+                .iter()
+                .map(|(num, data)| (*num, data.wait_cloned().hashed_state))
+                .collect();
+
+            let repr = ChainRepr::<N> {
+                blocks: self.blocks.clone(),
+                execution_outcome: self.execution_outcome.clone(),
+                trie_updates,
+                hashed_state,
+            };
+            repr.serialize(serializer)
+        }
+    }
+
+    impl<'de, N: NodePrimitives> Deserialize<'de> for Chain<N> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let repr = ChainRepr::<N>::deserialize(deserializer)?;
+
+            // Convert to ready DeferredTrieData handles
+            let trie_data = repr
+                .trie_updates
+                .into_iter()
+                .map(|(num, trie_updates)| {
+                    let hashed_state = repr.hashed_state.get(&num).cloned().unwrap_or_default();
+                    let computed = ComputedTrieData::without_trie_input(hashed_state, trie_updates);
+                    (num, DeferredTrieData::ready(computed))
+                })
+                .collect();
+
+            Ok(Self { blocks: repr.blocks, execution_outcome: repr.execution_outcome, trie_data })
+        }
+    }
+}
+
 /// Bincode-compatible [`Chain`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
-    use crate::{serde_bincode_compat, ExecutionOutcome};
-    use alloc::{borrow::Cow, collections::BTreeMap, sync::Arc};
     use alloy_primitives::BlockNumber;
     use reth_ethereum_primitives::EthPrimitives;
+    use reth_execution_types::{
+        serde_bincode_compat as exec_serde_bincode_compat, ExecutionOutcome,
+    };
     use reth_primitives_traits::{
         serde_bincode_compat::{RecoveredBlock, SerdeBincodeCompat},
         Block, NodePrimitives,
     };
     use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
+    use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 
     /// Bincode-compatible [`super::Chain`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use reth_execution_types::{serde_bincode_compat, Chain};
+    /// use reth_chain::{serde_bincode_compat, Chain};
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
@@ -515,7 +597,7 @@ pub(super) mod serde_bincode_compat {
         >,
     {
         blocks: RecoveredBlocks<'a, N::Block>,
-        execution_outcome: serde_bincode_compat::ExecutionOutcome<'a, N::Receipt>,
+        execution_outcome: exec_serde_bincode_compat::ExecutionOutcome<'a, N::Receipt>,
         #[serde(default, rename = "trie_updates_legacy")]
         _trie_updates_legacy:
             Option<reth_trie_common::serde_bincode_compat::updates::TrieUpdates<'a>>,
@@ -571,31 +653,6 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a, N> From<&'a super::Chain<N>> for Chain<'a, N>
-    where
-        N: NodePrimitives<
-            Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
-        >,
-    {
-        fn from(value: &'a super::Chain<N>) -> Self {
-            Self {
-                blocks: RecoveredBlocks(Cow::Borrowed(&value.blocks)),
-                execution_outcome: value.execution_outcome.as_repr(),
-                _trie_updates_legacy: None,
-                trie_updates: value
-                    .trie_updates
-                    .iter()
-                    .map(|(k, v)| (*k, v.as_ref().into()))
-                    .collect(),
-                hashed_state: value
-                    .hashed_state
-                    .iter()
-                    .map(|(k, v)| (*k, v.as_ref().into()))
-                    .collect(),
-            }
-        }
-    }
-
     impl<'a, N> From<Chain<'a, N>> for super::Chain<N>
     where
         N: NodePrimitives<
@@ -603,19 +660,26 @@ pub(super) mod serde_bincode_compat {
         >,
     {
         fn from(value: Chain<'a, N>) -> Self {
+            use crate::{ComputedTrieData, DeferredTrieData};
+
+            let trie_updates: BTreeMap<_, _> =
+                value.trie_updates.into_iter().map(|(k, v)| (k, Arc::new(v.into()))).collect();
+            let hashed_state: BTreeMap<_, _> =
+                value.hashed_state.into_iter().map(|(k, v)| (k, Arc::new(v.into()))).collect();
+
+            let trie_data = trie_updates
+                .into_iter()
+                .map(|(num, trie_updates)| {
+                    let hashed_state = hashed_state.get(&num).cloned().unwrap_or_default();
+                    let computed = ComputedTrieData::without_trie_input(hashed_state, trie_updates);
+                    (num, DeferredTrieData::ready(computed))
+                })
+                .collect();
+
             Self {
                 blocks: value.blocks.0.into_owned(),
                 execution_outcome: ExecutionOutcome::from_repr(value.execution_outcome),
-                trie_updates: value
-                    .trie_updates
-                    .into_iter()
-                    .map(|(k, v)| (k, Arc::new(v.into())))
-                    .collect(),
-                hashed_state: value
-                    .hashed_state
-                    .into_iter()
-                    .map(|(k, v)| (k, Arc::new(v.into())))
-                    .collect(),
+                trie_data,
             }
         }
     }
@@ -630,7 +694,31 @@ pub(super) mod serde_bincode_compat {
         where
             S: Serializer,
         {
-            Chain::from(source).serialize(serializer)
+            use reth_trie_common::serde_bincode_compat as trie_serde;
+
+            // Wait for deferred trie data and collect into maps we can borrow from
+            let trie_updates_data: BTreeMap<BlockNumber, _> =
+                source.trie_data.iter().map(|(k, v)| (*k, v.wait_cloned().trie_updates)).collect();
+            let hashed_state_data: BTreeMap<BlockNumber, _> =
+                source.trie_data.iter().map(|(k, v)| (*k, v.wait_cloned().hashed_state)).collect();
+
+            // Now create the serde-compatible struct borrowing from the collected data
+            let chain: Chain<'_, N> = Chain {
+                blocks: RecoveredBlocks(Cow::Borrowed(&source.blocks)),
+                execution_outcome: source.execution_outcome.as_repr(),
+                _trie_updates_legacy: None,
+                trie_updates: trie_updates_data
+                    .iter()
+                    .map(|(k, v)| (*k, trie_serde::updates::TrieUpdatesSorted::from(v.as_ref())))
+                    .collect(),
+                hashed_state: hashed_state_data
+                    .iter()
+                    .map(|(k, v)| {
+                        (*k, trie_serde::hashed_state::HashedPostStateSorted::from(v.as_ref()))
+                    })
+                    .collect(),
+            };
+            chain.serialize(serializer)
         }
     }
 
@@ -659,10 +747,10 @@ pub(super) mod serde_bincode_compat {
 
         #[test]
         fn test_chain_bincode_roundtrip() {
-            use alloc::collections::BTreeMap;
+            use std::collections::BTreeMap;
 
             #[serde_as]
-            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            #[derive(Debug, Serialize, Deserialize)]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::Chain")]
                 chain: Chain,
@@ -676,13 +764,14 @@ pub(super) mod serde_bincode_compat {
                         .unwrap()],
                     Default::default(),
                     BTreeMap::new(),
-                    BTreeMap::new(),
                 ),
             };
 
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
-            assert_eq!(decoded, data);
+            // Note: Can't compare directly because DeferredTrieData doesn't implement PartialEq
+            assert_eq!(decoded.chain.blocks, data.chain.blocks);
+            assert_eq!(decoded.chain.execution_outcome, data.chain.execution_outcome);
         }
     }
 }
@@ -776,12 +865,8 @@ mod tests {
         let mut block_state_extended = execution_outcome1;
         block_state_extended.extend(execution_outcome2);
 
-        let chain: Chain = Chain::new(
-            vec![block1.clone(), block2.clone()],
-            block_state_extended,
-            BTreeMap::new(),
-            BTreeMap::new(),
-        );
+        let chain: Chain =
+            Chain::new(vec![block1.clone(), block2.clone()], block_state_extended, BTreeMap::new());
 
         // return tip state
         assert_eq!(

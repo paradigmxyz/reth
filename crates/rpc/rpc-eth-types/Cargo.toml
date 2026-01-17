@@ -12,11 +12,11 @@ description = "Types supporting implementation of 'eth' namespace RPC server API
 workspace = true
 
 [dependencies]
+reth-chain.workspace = true
 reth-chainspec.workspace = true
 reth-chain-state.workspace = true
 reth-errors.workspace = true
 reth-evm.workspace = true
-reth-execution-types.workspace = true
 reth-metrics.workspace = true
 reth-ethereum-primitives = { workspace = true, features = ["rpc"] }
 reth-primitives-traits = { workspace = true, features = ["rpc-compat"] }

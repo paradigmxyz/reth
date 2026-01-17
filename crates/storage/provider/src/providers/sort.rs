@@ -123,8 +123,7 @@ mod tests {
             block.sort_by_key(|(k, _)| *k);
         }
 
-        let sources =
-            sorted_blocks.iter().enumerate().map(|(idx, block)| (idx, block.iter()));
+        let sources = sorted_blocks.iter().enumerate().map(|(idx, block)| (idx, block.iter()));
 
         KMergeIter::new(sources).map(|(k, v)| (*k, v.clone())).collect()
     }
