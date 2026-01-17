@@ -764,10 +764,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         &self,
         hashed_states: &[Arc<HashedPostStateSorted>],
     ) -> ProviderResult<()> {
-        let sources = hashed_states
-            .iter()
-            .enumerate()
-            .map(|(block_idx, state)| (block_idx, state.accounts().iter().map(|(k, v)| (k, v))));
+        let sources =
+            hashed_states.iter().enumerate().map(|(block_idx, state)| (block_idx, state.accounts().iter()));
 
         let mut cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
 
@@ -825,9 +823,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let sources = addr_storages
                 .iter()
                 .filter(|(_, block_idx, _)| wipe_block.is_none_or(|w| *block_idx >= w))
-                .map(|(_, block_idx, storage)| {
-                    (*block_idx, storage.storage_slots_ref().iter().map(|(k, v)| (k, v)))
-                });
+                .map(|(_, block_idx, storage)| (*block_idx, storage.storage_slots_ref().iter()));
 
             for (slot_key, value) in KMergeIter::<U256, _>::new(sources) {
                 if cursor

@@ -7,29 +7,29 @@ use std::{cmp::Ordering, collections::BinaryHeap};
 ///
 /// Orders by key (ascending) then `block_idx` (descending) so that for duplicate keys,
 /// the value from the latest block is selected.
-///
-/// Stores key and value by reference, and owns the iterator to avoid external Vec storage.
 struct KMergeEntry<'a, V, I> {
-    key: &'a B256,
-    value: &'a V,
+    item: &'a (B256, V),
     block_idx: usize,
     iter: I,
 }
 
 impl<V, I> Ord for KMergeEntry<'_, V, I> {
+    #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         // Min-heap by key, then max by block_idx (latest block wins on ties)
-        other.key.cmp(self.key).then_with(|| self.block_idx.cmp(&other.block_idx))
+        other.item.0.cmp(&self.item.0).then_with(|| self.block_idx.cmp(&other.block_idx))
     }
 }
 
 impl<V, I> PartialOrd for KMergeEntry<'_, V, I> {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl<V, I> PartialEq for KMergeEntry<'_, V, I> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
@@ -43,43 +43,42 @@ pub(crate) struct KMergeIter<'a, V, I> {
     heap: BinaryHeap<KMergeEntry<'a, V, I>>,
 }
 
-impl<'a, V, I: Iterator<Item = (&'a B256, &'a V)>> KMergeIter<'a, V, I> {
+impl<'a, V, I: Iterator<Item = &'a (B256, V)>> KMergeIter<'a, V, I> {
+    #[inline]
     pub(crate) fn new(sources: impl IntoIterator<Item = (usize, I)>) -> Self {
         let mut heap = BinaryHeap::new();
         for (block_idx, mut source) in sources {
-            if let Some((key, value)) = source.next() {
-                heap.push(KMergeEntry { key, value, block_idx, iter: source });
+            if let Some(item) = source.next() {
+                heap.push(KMergeEntry { item, block_idx, iter: source });
             }
         }
         Self { heap }
     }
 }
 
-impl<'a, V, I: Iterator<Item = (&'a B256, &'a V)>> Iterator for KMergeIter<'a, V, I> {
+impl<'a, V, I: Iterator<Item = &'a (B256, V)>> Iterator for KMergeIter<'a, V, I> {
     type Item = (&'a B256, &'a V);
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let mut entry = self.heap.pop()?;
-        let key = entry.key;
-        let value = entry.value;
+        let (key, value) = (&entry.item.0, &entry.item.1);
 
         // Advance this source's iterator
-        if let Some((next_key, next_value)) = entry.iter.next() {
+        if let Some(next_item) = entry.iter.next() {
             self.heap.push(KMergeEntry {
-                key: next_key,
-                value: next_value,
+                item: next_item,
                 block_idx: entry.block_idx,
                 iter: entry.iter,
             });
         }
 
         // Drain duplicate keys (heap ordering guarantees first pop is the winner)
-        while self.heap.peek().is_some_and(|e| e.key == key) {
+        while self.heap.peek().is_some_and(|e| e.item.0 == *key) {
             let mut next = self.heap.pop().unwrap();
-            if let Some((next_key, next_value)) = next.iter.next() {
+            if let Some(next_item) = next.iter.next() {
                 self.heap.push(KMergeEntry {
-                    key: next_key,
-                    value: next_value,
+                    item: next_item,
                     block_idx: next.block_idx,
                     iter: next.iter,
                 });
@@ -124,10 +123,8 @@ mod tests {
             block.sort_by_key(|(k, _)| *k);
         }
 
-        let sources = sorted_blocks
-            .iter()
-            .enumerate()
-            .map(|(idx, block)| (idx, block.iter().map(|(k, v)| (k, v))));
+        let sources =
+            sorted_blocks.iter().enumerate().map(|(idx, block)| (idx, block.iter()));
 
         KMergeIter::new(sources).map(|(k, v)| (*k, v.clone())).collect()
     }
@@ -379,38 +376,18 @@ mod tests {
     fn heap_ordering_with_gaps_in_block_indices() {
         // Non-contiguous block indices: 0, 5, 3, 9, 2
         // Block 9 should win despite not being last in input order
-        let blocks = [
-            (0usize, vec![(b256(1), U256::from(100))]),
+        let blocks: [(usize, Vec<(B256, U256)>); 5] = [
+            (0, vec![(b256(1), U256::from(100))]),
             (5, vec![(b256(1), U256::from(500))]),
             (3, vec![(b256(1), U256::from(300))]),
             (9, vec![(b256(1), U256::from(900))]),
             (2, vec![(b256(1), U256::from(200))]),
         ];
 
-        let mut sorted_blocks: Vec<Vec<(B256, U256)>> =
-            blocks.iter().map(|(_, b)| b.clone()).collect();
-        for block in &mut sorted_blocks {
-            block.sort_by_key(|(k, _)| *k);
-        }
-
-        // Use actual block indices, not enumerate
-        let sources = blocks.iter().map(|(block_idx, block)| {
-            let sorted: Vec<_> = {
-                let mut b = block.clone();
-                b.sort_by_key(|(k, _)| *k);
-                b
-            };
-            (*block_idx, sorted)
-        });
-
-        let sources_with_iters: Vec<_> =
-            sources.map(|(idx, block)| (idx, block.into_iter().collect::<Vec<_>>())).collect();
-
-        let merged: Vec<_> = KMergeIter::new(
-            sources_with_iters.iter().map(|(idx, block)| (*idx, block.iter().map(|(k, v)| (k, v)))),
-        )
-        .map(|(k, v)| (*k, *v))
-        .collect();
+        let merged: Vec<_> =
+            KMergeIter::new(blocks.iter().map(|(idx, block)| (*idx, block.iter())))
+                .map(|(k, v)| (*k, *v))
+                .collect();
 
         assert_eq!(merged.len(), 1);
         // Block 9 must win (highest block_idx)
