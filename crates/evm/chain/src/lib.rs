@@ -1,7 +1,8 @@
-//! Chain and deferred trie data types for reth.
+//! Chain and trie data types for reth.
 //!
 //! This crate contains the [`Chain`] type representing a chain of blocks and their final state,
-//! as well as [`DeferredTrieData`] for handling asynchronously computed trie data.
+//! as well as [`DeferredTrieData`] for handling asynchronously computed trie data and
+//! re-exports [`LazyTrieData`] for lazy initialization.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -16,6 +17,9 @@ pub use chain::*;
 
 mod deferred_trie;
 pub use deferred_trie::*;
+
+// Re-export LazyTrieData from trie-common for convenience
+pub use reth_trie_common::LazyTrieData;
 
 /// Bincode-compatible serde implementations for chain types.
 ///

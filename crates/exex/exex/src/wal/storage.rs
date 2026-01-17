@@ -357,7 +357,7 @@ mod tests {
                 new: Arc::new(Chain::new(
                     vec![block],
                     Default::default(),
-                    BTreeMap::from([(block_number, trie_data)]),
+                    BTreeMap::from([(block_number, trie_data.to_lazy())]),
                 )),
             };
         Ok(notification)

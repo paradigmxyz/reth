@@ -1,6 +1,5 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
-use crate::DeferredTrieData;
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
@@ -9,7 +8,7 @@ use reth_primitives_traits::{
     transaction::signed::SignedTransaction, Block, BlockBody, IndexedTx, NodePrimitives,
     RecoveredBlock, SealedHeader,
 };
-use reth_trie_common::{updates::TrieUpdatesSorted, HashedPostStateSorted};
+use reth_trie_common::{updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData};
 use std::{borrow::Cow, collections::BTreeMap, fmt, ops::RangeInclusive, sync::Arc, vec::Vec};
 
 /// A chain of blocks and their final state.
@@ -33,12 +32,12 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     ///
     /// Additionally, it includes the individual state changes that led to the current state.
     execution_outcome: ExecutionOutcome<N::Receipt>,
-    /// Deferred trie data for each block in the chain, keyed by block number.
+    /// Lazy trie data for each block in the chain, keyed by block number.
     ///
-    /// Contains handles to lazily-computed sorted trie updates and hashed state.
+    /// Contains handles to lazily-initialized sorted trie updates and hashed state.
     /// This allows Chain to be constructed without blocking on expensive trie
     /// computations - the data is only materialized when actually needed.
-    trie_data: BTreeMap<BlockNumber, DeferredTrieData>,
+    trie_data: BTreeMap<BlockNumber, LazyTrieData>,
 }
 
 type ChainTxReceiptMeta<'a, N> = (
@@ -67,7 +66,7 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn new(
         blocks: impl IntoIterator<Item = RecoveredBlock<N::Block>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: BTreeMap<BlockNumber, DeferredTrieData>,
+        trie_data: BTreeMap<BlockNumber, LazyTrieData>,
     ) -> Self {
         let blocks =
             blocks.into_iter().map(|b| (b.header().number(), b)).collect::<BTreeMap<_, _>>();
@@ -80,7 +79,7 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn from_block(
         block: RecoveredBlock<N::Block>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: DeferredTrieData,
+        trie_data: LazyTrieData,
     ) -> Self {
         let block_number = block.header().number();
         let trie_data_map = BTreeMap::from([(block_number, trie_data)]);
@@ -102,42 +101,38 @@ impl<N: NodePrimitives> Chain<N> {
         self.blocks.values().map(|block| block.clone_sealed_header())
     }
 
-    /// Get all deferred trie data for this chain.
+    /// Get all lazy trie data for this chain.
     ///
-    /// Returns handles to lazily-computed sorted trie updates and hashed state.
-    /// [`DeferredTrieData`] allows `Chain` to be constructed without blocking on
-    /// expensive trie computations - the data is only materialized when actually needed
-    /// via [`DeferredTrieData::wait_cloned`] or similar methods.
-    ///
-    /// This method does **not** block. To access the computed trie data, call
-    /// [`DeferredTrieData::wait_cloned`] on individual entries, which will block
-    /// if the background computation has not yet completed.
-    pub const fn trie_data(&self) -> &BTreeMap<BlockNumber, DeferredTrieData> {
+    /// Returns handles to lazily-initialized sorted trie updates and hashed state.
+    /// [`LazyTrieData`] allows `Chain` to be constructed without blocking on
+    /// expensive trie computations - the data is only materialized when actually needed.
+    pub const fn trie_data(&self) -> &BTreeMap<BlockNumber, LazyTrieData> {
         &self.trie_data
     }
 
-    /// Get deferred trie data for a specific block number.
+    /// Get lazy trie data for a specific block number.
     ///
-    /// Returns a handle to the lazily-computed trie data. This method does **not** block.
-    /// Call [`DeferredTrieData::wait_cloned`] on the result to wait for and retrieve
-    /// the computed data, which will block if computation is still in progress.
-    pub fn trie_data_at(&self, block_number: BlockNumber) -> Option<&DeferredTrieData> {
+    /// Returns a handle to the lazily-initialized trie data.
+    pub fn trie_data_at(&self, block_number: BlockNumber) -> Option<&LazyTrieData> {
         self.trie_data.get(&block_number)
     }
 
     /// Get all trie updates for this chain.
     ///
-    /// Note: This blocks on deferred trie data for all blocks in the chain.
-    /// Prefer using [`trie_data`](Self::trie_data) when possible to avoid blocking.
+    /// # Panics
+    ///
+    /// Panics if any trie data has not been initialized.
     pub fn trie_updates(&self) -> BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>> {
-        self.trie_data.iter().map(|(num, data)| (*num, data.wait_cloned().trie_updates)).collect()
+        self.trie_data.iter().map(|(num, data)| (*num, data.trie_updates())).collect()
     }
 
     /// Get trie updates for a specific block number.
     ///
-    /// Note: This waits for deferred trie data if not already computed.
+    /// # Panics
+    ///
+    /// Panics if the trie data for this block has not been initialized.
     pub fn trie_updates_at(&self, block_number: BlockNumber) -> Option<Arc<TrieUpdatesSorted>> {
-        self.trie_data.get(&block_number).map(|data| data.wait_cloned().trie_updates)
+        self.trie_data.get(&block_number).map(|data| data.trie_updates())
     }
 
     /// Remove all trie data for this chain.
@@ -147,17 +142,20 @@ impl<N: NodePrimitives> Chain<N> {
 
     /// Get all hashed states for this chain.
     ///
-    /// Note: This blocks on deferred trie data for all blocks in the chain.
-    /// Prefer using [`trie_data`](Self::trie_data) when possible to avoid blocking.
+    /// # Panics
+    ///
+    /// Panics if any trie data has not been initialized.
     pub fn hashed_state(&self) -> BTreeMap<BlockNumber, Arc<HashedPostStateSorted>> {
-        self.trie_data.iter().map(|(num, data)| (*num, data.wait_cloned().hashed_state)).collect()
+        self.trie_data.iter().map(|(num, data)| (*num, data.hashed_state())).collect()
     }
 
     /// Get hashed state for a specific block number.
     ///
-    /// Note: This waits for deferred trie data if not already computed.
+    /// # Panics
+    ///
+    /// Panics if the trie data for this block has not been initialized.
     pub fn hashed_state_at(&self, block_number: BlockNumber) -> Option<Arc<HashedPostStateSorted>> {
-        self.trie_data.get(&block_number).map(|data| data.wait_cloned().hashed_state)
+        self.trie_data.get(&block_number).map(|data| data.hashed_state())
     }
 
     /// Get execution outcome of this chain
@@ -205,14 +203,14 @@ impl<N: NodePrimitives> Chain<N> {
     /// Destructure the chain into its inner components:
     /// 1. The blocks contained in the chain.
     /// 2. The execution outcome representing the final state.
-    /// 3. The deferred trie data map.
+    /// 3. The lazy trie data map.
     #[allow(clippy::type_complexity)]
     pub fn into_inner(
         self,
     ) -> (
         ChainBlocks<'static, N::Block>,
         ExecutionOutcome<N::Receipt>,
-        BTreeMap<BlockNumber, DeferredTrieData>,
+        BTreeMap<BlockNumber, LazyTrieData>,
     ) {
         (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.execution_outcome, self.trie_data)
     }
@@ -344,7 +342,7 @@ impl<N: NodePrimitives> Chain<N> {
         &mut self,
         block: RecoveredBlock<N::Block>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: DeferredTrieData,
+        trie_data: LazyTrieData,
     ) {
         let block_number = block.header().number();
         self.blocks.insert(block_number, block);
@@ -492,10 +490,9 @@ pub struct BlockReceipts<T = reth_ethereum_primitives::Receipt> {
 #[cfg(feature = "serde")]
 mod chain_serde {
     use super::*;
-    use crate::ComputedTrieData;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    /// Serializable representation of Chain that waits for deferred trie data.
+    /// Serializable representation of Chain that waits for lazy trie data.
     #[derive(Serialize, Deserialize)]
     #[serde(bound = "")]
     struct ChainRepr<N: NodePrimitives> {
@@ -512,17 +509,11 @@ mod chain_serde {
         where
             S: Serializer,
         {
-            // Wait for deferred trie data for serialization
-            let trie_updates: BTreeMap<_, _> = self
-                .trie_data
-                .iter()
-                .map(|(num, data)| (*num, data.wait_cloned().trie_updates))
-                .collect();
-            let hashed_state: BTreeMap<_, _> = self
-                .trie_data
-                .iter()
-                .map(|(num, data)| (*num, data.wait_cloned().hashed_state))
-                .collect();
+            // Get trie data for serialization (panics if not initialized)
+            let trie_updates: BTreeMap<_, _> =
+                self.trie_data.iter().map(|(num, data)| (*num, data.trie_updates())).collect();
+            let hashed_state: BTreeMap<_, _> =
+                self.trie_data.iter().map(|(num, data)| (*num, data.hashed_state())).collect();
 
             let repr = ChainRepr::<N> {
                 blocks: self.blocks.clone(),
@@ -541,14 +532,13 @@ mod chain_serde {
         {
             let repr = ChainRepr::<N>::deserialize(deserializer)?;
 
-            // Convert to ready DeferredTrieData handles
+            // Convert to ready LazyTrieData handles
             let trie_data = repr
                 .trie_updates
                 .into_iter()
                 .map(|(num, trie_updates)| {
                     let hashed_state = repr.hashed_state.get(&num).cloned().unwrap_or_default();
-                    let computed = ComputedTrieData::without_trie_input(hashed_state, trie_updates);
-                    (num, DeferredTrieData::ready(computed))
+                    (num, LazyTrieData::ready(hashed_state, trie_updates))
                 })
                 .collect();
 
@@ -660,7 +650,7 @@ pub(super) mod serde_bincode_compat {
         >,
     {
         fn from(value: Chain<'a, N>) -> Self {
-            use crate::{ComputedTrieData, DeferredTrieData};
+            use super::LazyTrieData;
 
             let trie_updates: BTreeMap<_, _> =
                 value.trie_updates.into_iter().map(|(k, v)| (k, Arc::new(v.into()))).collect();
@@ -671,8 +661,7 @@ pub(super) mod serde_bincode_compat {
                 .into_iter()
                 .map(|(num, trie_updates)| {
                     let hashed_state = hashed_state.get(&num).cloned().unwrap_or_default();
-                    let computed = ComputedTrieData::without_trie_input(hashed_state, trie_updates);
-                    (num, DeferredTrieData::ready(computed))
+                    (num, LazyTrieData::ready(hashed_state, trie_updates))
                 })
                 .collect();
 
@@ -696,11 +685,11 @@ pub(super) mod serde_bincode_compat {
         {
             use reth_trie_common::serde_bincode_compat as trie_serde;
 
-            // Wait for deferred trie data and collect into maps we can borrow from
+            // Get trie data and collect into maps we can borrow from
             let trie_updates_data: BTreeMap<BlockNumber, _> =
-                source.trie_data.iter().map(|(k, v)| (*k, v.wait_cloned().trie_updates)).collect();
+                source.trie_data.iter().map(|(k, v)| (*k, v.trie_updates())).collect();
             let hashed_state_data: BTreeMap<BlockNumber, _> =
-                source.trie_data.iter().map(|(k, v)| (*k, v.wait_cloned().hashed_state)).collect();
+                source.trie_data.iter().map(|(k, v)| (*k, v.hashed_state())).collect();
 
             // Now create the serde-compatible struct borrowing from the collected data
             let chain: Chain<'_, N> = Chain {

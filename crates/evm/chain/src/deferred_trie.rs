@@ -3,7 +3,7 @@ use parking_lot::Mutex;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted, TrieInputSorted,
+    HashedPostState, HashedPostStateSorted, LazyTrieData, SortedTrieData, TrieInputSorted,
 };
 use std::{
     fmt,
@@ -231,6 +231,24 @@ impl DeferredTrieData {
             }
         }
     }
+
+    /// Converts this [`DeferredTrieData`] to a [`LazyTrieData`].
+    ///
+    /// The computation is deferred - `sorted_trie_data()` will only be called when
+    /// the `LazyTrieData` is first accessed. This allows non-blocking conversion.
+    pub fn to_lazy(&self) -> LazyTrieData {
+        let this = self.clone();
+        LazyTrieData::deferred(move || this.sorted_trie_data())
+    }
+
+    /// Returns the sorted trie data, waiting for computation if necessary.
+    ///
+    /// This is a convenience method that bundles both hashed state and trie updates
+    /// into a [`SortedTrieData`] container.
+    pub fn sorted_trie_data(&self) -> SortedTrieData {
+        let computed = self.wait_cloned();
+        SortedTrieData::new(computed.hashed_state, computed.trie_updates)
+    }
 }
 
 /// Sorted trie data computed for an executed block.
@@ -284,6 +302,11 @@ impl ComputedTrieData {
     /// Returns the trie input, if present.
     pub fn trie_input(&self) -> Option<&Arc<TrieInputSorted>> {
         self.anchored_trie_input.as_ref().map(|anchored| &anchored.trie_input)
+    }
+
+    /// Returns a [`SortedTrieData`] containing the hashed state and trie updates.
+    pub fn sorted_trie_data(&self) -> SortedTrieData {
+        SortedTrieData::new(Arc::clone(&self.hashed_state), Arc::clone(&self.trie_updates))
     }
 }
 

@@ -958,7 +958,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                         first.block_number(),
                         first.execution_outcome().clone(),
                     ),
-                    first.trie_data_handle(),
+                    first.trie_data_handle().to_lazy(),
                 );
                 for exec in rest {
                     chain.append_block(
@@ -967,7 +967,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                             exec.block_number(),
                             exec.execution_outcome().clone(),
                         ),
-                        exec.trie_data_handle(),
+                        exec.trie_data_handle().to_lazy(),
                     );
                 }
                 chain
@@ -1577,14 +1577,14 @@ mod tests {
         // Compare execution outcome
         assert_eq!(*new.execution_outcome(), commit_execution_outcome);
 
-        // Compare trie data by waiting on deferred data
+        // Compare trie data
         for (block_num, expected_updates) in &expected_trie_updates {
-            let actual = new.trie_data_at(*block_num).unwrap().wait_cloned();
-            assert_eq!(actual.trie_updates, *expected_updates);
+            let actual = new.trie_data_at(*block_num).unwrap();
+            assert_eq!(actual.trie_updates(), *expected_updates);
         }
         for (block_num, expected_state) in &expected_hashed_state {
-            let actual = new.trie_data_at(*block_num).unwrap().wait_cloned();
-            assert_eq!(actual.hashed_state, *expected_state);
+            let actual = new.trie_data_at(*block_num).unwrap();
+            assert_eq!(actual.hashed_state(), *expected_state);
         }
 
         // Test reorg notification
@@ -1639,12 +1639,12 @@ mod tests {
 
         // Compare old chain trie data
         for (block_num, expected_updates) in &old_trie_updates {
-            let actual = old.trie_data_at(*block_num).unwrap().wait_cloned();
-            assert_eq!(actual.trie_updates, *expected_updates);
+            let actual = old.trie_data_at(*block_num).unwrap();
+            assert_eq!(actual.trie_updates(), *expected_updates);
         }
         for (block_num, expected_state) in &old_hashed_state {
-            let actual = old.trie_data_at(*block_num).unwrap().wait_cloned();
-            assert_eq!(actual.hashed_state, *expected_state);
+            let actual = old.trie_data_at(*block_num).unwrap();
+            assert_eq!(actual.hashed_state(), *expected_state);
         }
 
         // Compare new chain blocks
@@ -1658,12 +1658,12 @@ mod tests {
 
         // Compare new chain trie data
         for (block_num, expected_updates) in &new_trie_updates {
-            let actual = new.trie_data_at(*block_num).unwrap().wait_cloned();
-            assert_eq!(actual.trie_updates, *expected_updates);
+            let actual = new.trie_data_at(*block_num).unwrap();
+            assert_eq!(actual.trie_updates(), *expected_updates);
         }
         for (block_num, expected_state) in &new_hashed_state {
-            let actual = new.trie_data_at(*block_num).unwrap().wait_cloned();
-            assert_eq!(actual.hashed_state, *expected_state);
+            let actual = new.trie_data_at(*block_num).unwrap();
+            assert_eq!(actual.hashed_state(), *expected_state);
         }
     }
 }
