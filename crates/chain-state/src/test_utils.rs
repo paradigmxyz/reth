@@ -3,20 +3,18 @@ use crate::{
     CanonStateSubscriptions, ComputedTrieData,
 };
 use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
-use alloy_eips::{
-    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, INITIAL_BASE_FEE},
-    eip7685::Requests,
-};
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, INITIAL_BASE_FEE};
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use core::marker::PhantomData;
 use rand::Rng;
+use reth_chain::Chain;
 use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{
     Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
 };
-use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
 use reth_primitives_traits::{
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
     Account, NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
@@ -202,7 +200,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     fn get_executed_block(
         &mut self,
         block_number: BlockNumber,
-        receipts: Vec<Vec<Receipt>>,
+        mut receipts: Vec<Vec<Receipt>>,
         parent_hash: B256,
     ) -> ExecutedBlock {
         let block = self.generate_random_block(block_number, parent_hash);
@@ -210,12 +208,15 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let trie_data = ComputedTrieData::default();
         ExecutedBlock::new(
             Arc::new(RecoveredBlock::new_sealed(block, senders)),
-            Arc::new(ExecutionOutcome::new(
-                BundleState::default(),
-                receipts,
-                block_number,
-                vec![Requests::default()],
-            )),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: receipts.pop().unwrap_or_default(),
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: BundleState::default(),
+            }),
             trie_data,
         )
     }

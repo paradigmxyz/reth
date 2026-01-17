@@ -6,7 +6,6 @@ use alloy_primitives::{keccak256, Address, StorageKey, U256};
 use reth_primitives_traits::Account;
 use reth_provider::{AccountReader, ProviderError};
 use reth_trie::{HashedPostState, HashedStorage};
-use revm_primitives::B256;
 use std::ops::Range;
 
 /// Returns the total number of storage slots (both changed and read-only) across all accounts in
@@ -102,7 +101,7 @@ impl<'a> Iterator for BALSlotIter<'a> {
                     return None;
                 }
 
-                return Some((address, StorageKey::from(U256::from(slot))));
+                return Some((address, StorageKey::from(slot)));
             }
 
             // Move to next account
@@ -178,7 +177,7 @@ where
             let mut storage_map = HashedStorage::new(false);
 
             for slot_changes in &account_changes.storage_changes {
-                let hashed_slot = keccak256(B256::from(slot_changes.slot));
+                let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
 
                 // Get the last change for this slot
                 if let Some(last_change) = slot_changes.changes.last() {
@@ -257,7 +256,7 @@ mod tests {
         assert!(result.storages.contains_key(&hashed_address));
 
         let storage = result.storages.get(&hashed_address).unwrap();
-        let hashed_slot = keccak256(B256::from(slot));
+        let hashed_slot = keccak256(slot.to_be_bytes::<32>());
 
         let stored_value = storage.storage.get(&hashed_slot).unwrap();
         assert_eq!(*stored_value, value);
@@ -417,7 +416,7 @@ mod tests {
 
         let hashed_address = keccak256(address);
         let storage = result.storages.get(&hashed_address).unwrap();
-        let hashed_slot = keccak256(B256::from(slot));
+        let hashed_slot = keccak256(slot.to_be_bytes::<32>());
 
         let stored_value = storage.storage.get(&hashed_slot).unwrap();
 

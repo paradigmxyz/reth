@@ -1,6 +1,6 @@
 use crate::segments::{
-    user::ReceiptsByLogs, AccountHistory, Bodies, MerkleChangeSets, Segment, SenderRecovery,
-    StorageHistory, TransactionLookup, UserReceipts,
+    user::ReceiptsByLogs, AccountHistory, Bodies, Segment, SenderRecovery, StorageHistory,
+    TransactionLookup, UserReceipts,
 };
 use alloy_eips::eip2718::Encodable2718;
 use reth_db_api::{table::Value, transaction::DbTxMut};
@@ -67,15 +67,12 @@ where
             account_history,
             storage_history,
             bodies_history,
-            merkle_changesets,
             receipts_log_filter,
         } = prune_modes;
 
         Self::default()
             // Bodies - run first since file deletion is fast
             .segment_opt(bodies_history.map(Bodies::new))
-            // Merkle changesets
-            .segment(MerkleChangeSets::new(merkle_changesets))
             // Account history
             .segment_opt(account_history.map(AccountHistory::new))
             // Storage history

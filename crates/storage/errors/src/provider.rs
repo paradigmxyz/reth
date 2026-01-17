@@ -6,7 +6,8 @@ use derive_more::Display;
 use reth_primitives_traits::{transaction::signed::RecoveryError, GotExpected};
 use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
-use revm_database_interface::DBErrorMarker;
+use revm_database_interface::{bal::EvmDatabaseError, DBErrorMarker};
+use revm_state::bal::BalError;
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
@@ -17,6 +18,9 @@ pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
+    /// BAL error.
+    #[error("BAL error:{_0}")]
+    Bal(BalError),
     /// Pruning error.
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),
@@ -207,6 +211,12 @@ impl From<RecoveryError> for ProviderError {
     }
 }
 
+impl From<ProviderError> for EvmDatabaseError<ProviderError> {
+    fn from(error: ProviderError) -> Self {
+        Self::Database(error)
+    }
+}
+
 /// A root mismatch error at a given block height.
 #[derive(Clone, Debug, PartialEq, Eq, Display)]
 #[display("root mismatch at #{block_number} ({block_hash}): {root}")]
@@ -225,6 +235,9 @@ pub enum StaticFileWriterError {
     /// Cannot call `sync_all` or `finalize` when prune is queued.
     #[error("cannot call sync_all or finalize when prune is queued, use commit() instead")]
     FinalizeWithPruneQueued,
+    /// Thread panicked during execution.
+    #[error("thread panicked: {_0}")]
+    ThreadPanic(&'static str),
     /// Other error with message.
     #[error("{0}")]
     Other(String),

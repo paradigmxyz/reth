@@ -1,11 +1,20 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
-use crate::providers::{needs_prev_shard_check, HistoryInfo};
-use alloy_primitives::{Address, BlockNumber, B256};
+use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
+use alloy_consensus::transaction::TxHashRef;
+use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
+use itertools::Itertools;
+use parking_lot::Mutex;
+use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    models::{
+        sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
+        StorageSettings,
+    },
     table::{Compress, Decode, Decompress, Encode, Table},
     tables, BlockNumberList, DatabaseError,
 };
+use reth_primitives_traits::BlockBody as _;
+use reth_prune_types::PruneMode;
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
     provider::{ProviderError, ProviderResult},
@@ -16,11 +25,41 @@ use rocksdb::{
     OptimisticTransactionOptions, Options, Transaction, WriteBatchWithTransaction, WriteOptions,
 };
 use std::{
+    collections::BTreeMap,
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
+    thread,
     time::Instant,
 };
+use tracing::instrument;
+
+/// Pending `RocksDB` batches type alias.
+pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
+
+/// Context for `RocksDB` block writes.
+#[derive(Clone)]
+pub(crate) struct RocksDBWriteCtx {
+    /// The first block number being written.
+    pub first_block_number: BlockNumber,
+    /// The prune mode for transaction lookup, if any.
+    pub prune_tx_lookup: Option<PruneMode>,
+    /// Storage settings determining what goes to `RocksDB`.
+    pub storage_settings: StorageSettings,
+    /// Pending batches to push to after writing.
+    pub pending_batches: PendingRocksDBBatches,
+}
+
+impl fmt::Debug for RocksDBWriteCtx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBWriteCtx")
+            .field("first_block_number", &self.first_block_number)
+            .field("prune_tx_lookup", &self.prune_tx_lookup)
+            .field("storage_settings", &self.storage_settings)
+            .field("pending_batches", &"<pending batches>")
+            .finish()
+    }
+}
 
 /// Default cache size for `RocksDB` block cache (128 MB).
 const DEFAULT_CACHE_SIZE: usize = 128 << 20;
@@ -474,6 +513,125 @@ impl RocksDBProvider {
             }))
         })
     }
+
+    /// Writes all `RocksDB` data for multiple blocks in parallel.
+    ///
+    /// This handles transaction hash numbers, account history, and storage history based on
+    /// the provided storage settings. Each operation runs in parallel with its own batch,
+    /// pushing to `ctx.pending_batches` for later commit.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    pub(crate) fn write_blocks_data<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+        ctx: RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        if !ctx.storage_settings.any_in_rocksdb() {
+            return Ok(());
+        }
+
+        thread::scope(|s| {
+            let handles: Vec<_> = [
+                (ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
+                    ctx.prune_tx_lookup.is_none_or(|m| !m.is_full()))
+                .then(|| s.spawn(|| self.write_tx_hash_numbers(blocks, tx_nums, &ctx))),
+                ctx.storage_settings
+                    .account_history_in_rocksdb
+                    .then(|| s.spawn(|| self.write_account_history(blocks, &ctx))),
+                ctx.storage_settings
+                    .storages_history_in_rocksdb
+                    .then(|| s.spawn(|| self.write_storage_history(blocks, &ctx))),
+            ]
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, h)| h.map(|h| (i, h)))
+            .collect();
+
+            for (i, handle) in handles {
+                handle.join().map_err(|_| {
+                    ProviderError::Database(DatabaseError::Other(format!(
+                        "rocksdb write thread {i} panicked"
+                    )))
+                })??;
+            }
+
+            Ok(())
+        })
+    }
+
+    /// Writes transaction hash to number mappings for the given blocks.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_tx_hash_numbers<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+        for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
+            let body = block.recovered_block().body();
+            let mut tx_num = first_tx_num;
+            for transaction in body.transactions_iter() {
+                batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
+                tx_num += 1;
+            }
+        }
+        ctx.pending_batches.lock().push(batch.into_inner());
+        Ok(())
+    }
+
+    /// Writes account history indices for the given blocks.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_account_history<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+        let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+        for (block_idx, block) in blocks.iter().enumerate() {
+            let block_number = ctx.first_block_number + block_idx as u64;
+            let bundle = &block.execution_outcome().state;
+            for &address in bundle.state().keys() {
+                account_history.entry(address).or_default().push(block_number);
+            }
+        }
+
+        // Write account history using proper shard append logic
+        for (address, indices) in account_history {
+            batch.append_account_history_shard(address, indices)?;
+        }
+        ctx.pending_batches.lock().push(batch.into_inner());
+        Ok(())
+    }
+
+    /// Writes storage history indices for the given blocks.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_storage_history<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+        let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+        for (block_idx, block) in blocks.iter().enumerate() {
+            let block_number = ctx.first_block_number + block_idx as u64;
+            let bundle = &block.execution_outcome().state;
+            for (&address, account) in bundle.state() {
+                for &slot in account.storage.keys() {
+                    let key = B256::new(slot.to_be_bytes());
+                    storage_history.entry((address, key)).or_default().push(block_number);
+                }
+            }
+        }
+
+        // Write storage history using proper shard append logic
+        for ((address, slot), indices) in storage_history {
+            batch.append_storage_history_shard(address, slot, indices)?;
+        }
+        ctx.pending_batches.lock().push(batch.into_inner());
+        Ok(())
+    }
 }
 
 /// Handle for building a batch of operations atomically.
@@ -559,6 +717,129 @@ impl<'a> RocksDBBatch<'a> {
     /// This is used to defer commits to the provider level.
     pub fn into_inner(self) -> WriteBatchWithTransaction<true> {
         self.inner
+    }
+
+    /// Appends indices to an account history shard with proper shard management.
+    ///
+    /// Loads the existing shard (if any), appends new indices, and rechunks into
+    /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    ///
+    /// # Requirements
+    ///
+    /// - The `indices` MUST be strictly increasing and contain no duplicates.
+    /// - This method MUST only be called once per address per batch. The batch reads existing
+    ///   shards from committed DB state, not from pending writes. Calling twice for the same
+    ///   address will cause the second call to overwrite the first.
+    pub fn append_account_history_shard(
+        &mut self,
+        address: Address,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        let indices: Vec<u64> = indices.into_iter().collect();
+
+        if indices.is_empty() {
+            return Ok(());
+        }
+
+        debug_assert!(
+            indices.windows(2).all(|w| w[0] < w[1]),
+            "indices must be strictly increasing: {:?}",
+            indices
+        );
+
+        let last_key = ShardedKey::new(address, u64::MAX);
+        let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
+        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+        last_shard.append(indices).map_err(ProviderError::other)?;
+
+        // Fast path: all indices fit in one shard
+        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            self.put::<tables::AccountsHistory>(last_key, &last_shard)?;
+            return Ok(());
+        }
+
+        // Slow path: rechunk into multiple shards
+        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+
+            self.put::<tables::AccountsHistory>(
+                ShardedKey::new(address, highest_block_number),
+                &shard,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Appends indices to a storage history shard with proper shard management.
+    ///
+    /// Loads the existing shard (if any), appends new indices, and rechunks into
+    /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    ///
+    /// # Requirements
+    ///
+    /// - The `indices` MUST be strictly increasing and contain no duplicates.
+    /// - This method MUST only be called once per (address, `storage_key`) pair per batch. The
+    ///   batch reads existing shards from committed DB state, not from pending writes. Calling
+    ///   twice for the same key will cause the second call to overwrite the first.
+    pub fn append_storage_history_shard(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        let indices: Vec<u64> = indices.into_iter().collect();
+
+        if indices.is_empty() {
+            return Ok(());
+        }
+
+        debug_assert!(
+            indices.windows(2).all(|w| w[0] < w[1]),
+            "indices must be strictly increasing: {:?}",
+            indices
+        );
+
+        let last_key = StorageShardedKey::last(address, storage_key);
+        let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
+        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+        last_shard.append(indices).map_err(ProviderError::other)?;
+
+        // Fast path: all indices fit in one shard
+        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            self.put::<tables::StoragesHistory>(last_key, &last_shard)?;
+            return Ok(());
+        }
+
+        // Slow path: rechunk into multiple shards
+        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+
+            self.put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, highest_block_number),
+                &shard,
+            )?;
+        }
+
+        Ok(())
     }
 }
 
@@ -747,6 +1028,16 @@ impl<'db> RocksTx<'db> {
     where
         T: Table<Value = BlockNumberList>,
     {
+        // History may be pruned if a lowest available block is set.
+        let is_maybe_pruned = lowest_available_block_number.is_some();
+        let fallback = || {
+            Ok(if is_maybe_pruned {
+                HistoryInfo::MaybeInPlainState
+            } else {
+                HistoryInfo::NotYetWritten
+            })
+        };
+
         let cf = self.provider.0.db.cf_handle(T::NAME).ok_or_else(|| {
             ProviderError::Database(DatabaseError::Other(format!(
                 "column family not found: {}",
@@ -764,53 +1055,28 @@ impl<'db> RocksTx<'db> {
 
         if !iter.valid() {
             // No shard found at or after target block.
-            return if lowest_available_block_number.is_some() {
-                // The key may have been written, but due to pruning we may not have changesets
-                // and history, so we need to make a plain state lookup.
-                Ok(HistoryInfo::MaybeInPlainState)
-            } else {
-                // The key has not been written to at all.
-                Ok(HistoryInfo::NotYetWritten)
-            };
+            //
+            // (MaybeInPlainState) The key may have been written, but due to pruning we may not have
+            // changesets and history, so we need to make a plain state lookup.
+            // (HistoryInfo::NotYetWritten) The key has not been written to at all.
+            return fallback();
         }
 
         // Check if the found key matches our target entity.
         let Some(key_bytes) = iter.key() else {
-            return if lowest_available_block_number.is_some() {
-                Ok(HistoryInfo::MaybeInPlainState)
-            } else {
-                Ok(HistoryInfo::NotYetWritten)
-            };
+            return fallback();
         };
         if !key_matches(key_bytes)? {
             // The found key is for a different entity.
-            return if lowest_available_block_number.is_some() {
-                Ok(HistoryInfo::MaybeInPlainState)
-            } else {
-                Ok(HistoryInfo::NotYetWritten)
-            };
+            return fallback();
         }
 
         // Decompress the block list for this shard.
         let Some(value_bytes) = iter.value() else {
-            return if lowest_available_block_number.is_some() {
-                Ok(HistoryInfo::MaybeInPlainState)
-            } else {
-                Ok(HistoryInfo::NotYetWritten)
-            };
+            return fallback();
         };
         let chunk = BlockNumberList::decompress(value_bytes)?;
-
-        // Get the rank of the first entry before or equal to our block.
-        let mut rank = chunk.rank(block_number);
-
-        // Adjust the rank, so that we have the rank of the first entry strictly before our
-        // block (not equal to it).
-        if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
-            rank -= 1;
-        }
-
-        let found_block = chunk.select(rank);
+        let (rank, found_block) = compute_history_rank(&chunk, block_number);
 
         // Lazy check for previous shard - only called when needed.
         // If we can step to a previous shard for this same key, history already exists,
@@ -949,7 +1215,11 @@ mod tests {
     use crate::providers::HistoryInfo;
     use alloy_primitives::{Address, TxHash, B256};
     use reth_db_api::{
-        models::{sharded_key::ShardedKey, storage_sharded_key::StorageShardedKey, IntegerList},
+        models::{
+            sharded_key::{ShardedKey, NUM_OF_INDICES_IN_SHARD},
+            storage_sharded_key::StorageShardedKey,
+            IntegerList,
+        },
         table::Table,
         tables,
     };
@@ -1297,5 +1567,157 @@ mod tests {
         assert_eq!(result, HistoryInfo::InChangeset(100));
 
         tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn test_account_history_shard_split_at_boundary() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let limit = NUM_OF_INDICES_IN_SHARD;
+
+        // Add exactly NUM_OF_INDICES_IN_SHARD + 1 indices to trigger a split
+        let indices: Vec<u64> = (0..=(limit as u64)).collect();
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, indices).unwrap();
+        batch.commit().unwrap();
+
+        // Should have 2 shards: one completed shard and one sentinel shard
+        let completed_key = ShardedKey::new(address, (limit - 1) as u64);
+        let sentinel_key = ShardedKey::new(address, u64::MAX);
+
+        let completed_shard = provider.get::<tables::AccountsHistory>(completed_key).unwrap();
+        let sentinel_shard = provider.get::<tables::AccountsHistory>(sentinel_key).unwrap();
+
+        assert!(completed_shard.is_some(), "completed shard should exist");
+        assert!(sentinel_shard.is_some(), "sentinel shard should exist");
+
+        let completed_shard = completed_shard.unwrap();
+        let sentinel_shard = sentinel_shard.unwrap();
+
+        assert_eq!(completed_shard.len(), limit as u64, "completed shard should be full");
+        assert_eq!(sentinel_shard.len(), 1, "sentinel shard should have 1 element");
+    }
+
+    #[test]
+    fn test_account_history_multiple_shard_splits() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x43; 20]);
+        let limit = NUM_OF_INDICES_IN_SHARD;
+
+        // First batch: add NUM_OF_INDICES_IN_SHARD indices
+        let first_batch_indices: Vec<u64> = (0..limit as u64).collect();
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, first_batch_indices).unwrap();
+        batch.commit().unwrap();
+
+        // Should have just a sentinel shard (exactly at limit, not over)
+        let sentinel_key = ShardedKey::new(address, u64::MAX);
+        let shard = provider.get::<tables::AccountsHistory>(sentinel_key.clone()).unwrap();
+        assert!(shard.is_some());
+        assert_eq!(shard.unwrap().len(), limit as u64);
+
+        // Second batch: add another NUM_OF_INDICES_IN_SHARD + 1 indices (causing 2 more shards)
+        let second_batch_indices: Vec<u64> = (limit as u64..=(2 * limit) as u64).collect();
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, second_batch_indices).unwrap();
+        batch.commit().unwrap();
+
+        // Now we should have: 2 completed shards + 1 sentinel shard
+        let first_completed = ShardedKey::new(address, (limit - 1) as u64);
+        let second_completed = ShardedKey::new(address, (2 * limit - 1) as u64);
+
+        assert!(
+            provider.get::<tables::AccountsHistory>(first_completed).unwrap().is_some(),
+            "first completed shard should exist"
+        );
+        assert!(
+            provider.get::<tables::AccountsHistory>(second_completed).unwrap().is_some(),
+            "second completed shard should exist"
+        );
+        assert!(
+            provider.get::<tables::AccountsHistory>(sentinel_key).unwrap().is_some(),
+            "sentinel shard should exist"
+        );
+    }
+
+    #[test]
+    fn test_storage_history_shard_split_at_boundary() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x44; 20]);
+        let slot = B256::from([0x55; 32]);
+        let limit = NUM_OF_INDICES_IN_SHARD;
+
+        // Add exactly NUM_OF_INDICES_IN_SHARD + 1 indices to trigger a split
+        let indices: Vec<u64> = (0..=(limit as u64)).collect();
+        let mut batch = provider.batch();
+        batch.append_storage_history_shard(address, slot, indices).unwrap();
+        batch.commit().unwrap();
+
+        // Should have 2 shards: one completed shard and one sentinel shard
+        let completed_key = StorageShardedKey::new(address, slot, (limit - 1) as u64);
+        let sentinel_key = StorageShardedKey::new(address, slot, u64::MAX);
+
+        let completed_shard = provider.get::<tables::StoragesHistory>(completed_key).unwrap();
+        let sentinel_shard = provider.get::<tables::StoragesHistory>(sentinel_key).unwrap();
+
+        assert!(completed_shard.is_some(), "completed shard should exist");
+        assert!(sentinel_shard.is_some(), "sentinel shard should exist");
+
+        let completed_shard = completed_shard.unwrap();
+        let sentinel_shard = sentinel_shard.unwrap();
+
+        assert_eq!(completed_shard.len(), limit as u64, "completed shard should be full");
+        assert_eq!(sentinel_shard.len(), 1, "sentinel shard should have 1 element");
+    }
+
+    #[test]
+    fn test_storage_history_multiple_shard_splits() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x46; 20]);
+        let slot = B256::from([0x57; 32]);
+        let limit = NUM_OF_INDICES_IN_SHARD;
+
+        // First batch: add NUM_OF_INDICES_IN_SHARD indices
+        let first_batch_indices: Vec<u64> = (0..limit as u64).collect();
+        let mut batch = provider.batch();
+        batch.append_storage_history_shard(address, slot, first_batch_indices).unwrap();
+        batch.commit().unwrap();
+
+        // Should have just a sentinel shard (exactly at limit, not over)
+        let sentinel_key = StorageShardedKey::new(address, slot, u64::MAX);
+        let shard = provider.get::<tables::StoragesHistory>(sentinel_key.clone()).unwrap();
+        assert!(shard.is_some());
+        assert_eq!(shard.unwrap().len(), limit as u64);
+
+        // Second batch: add another NUM_OF_INDICES_IN_SHARD + 1 indices (causing 2 more shards)
+        let second_batch_indices: Vec<u64> = (limit as u64..=(2 * limit) as u64).collect();
+        let mut batch = provider.batch();
+        batch.append_storage_history_shard(address, slot, second_batch_indices).unwrap();
+        batch.commit().unwrap();
+
+        // Now we should have: 2 completed shards + 1 sentinel shard
+        let first_completed = StorageShardedKey::new(address, slot, (limit - 1) as u64);
+        let second_completed = StorageShardedKey::new(address, slot, (2 * limit - 1) as u64);
+
+        assert!(
+            provider.get::<tables::StoragesHistory>(first_completed).unwrap().is_some(),
+            "first completed shard should exist"
+        );
+        assert!(
+            provider.get::<tables::StoragesHistory>(second_completed).unwrap().is_some(),
+            "second completed shard should exist"
+        );
+        assert!(
+            provider.get::<tables::StoragesHistory>(sentinel_key).unwrap().is_some(),
+            "sentinel shard should exist"
+        );
     }
 }

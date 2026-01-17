@@ -237,6 +237,7 @@ where
         &output.receipts,
         &output.requests,
         &output.block_access_list,
+        None,
     )
     .map_err(StatelessValidationError::ConsensusValidationFailed)?;
 

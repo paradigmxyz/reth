@@ -245,6 +245,8 @@ impl From<Account> for AccountInfo {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use alloy_primitives::{hex_literal::hex, B256, U256};
     use reth_codecs::Compact;
@@ -305,14 +307,12 @@ mod tests {
         assert_eq!(len, 17);
 
         let mut buf = vec![];
-        let bytecode = Bytecode(RevmBytecode::LegacyAnalyzed(
-            LegacyAnalyzedBytecode::new(
+        let bytecode =
+            Bytecode(RevmBytecode::LegacyAnalyzed(Arc::new(LegacyAnalyzedBytecode::new(
                 Bytes::from(&hex!("ff00")),
                 2,
                 JumpTable::from_slice(&[0], 2),
-            )
-            .into(),
-        ));
+            ))));
         let len = bytecode.to_compact(&mut buf);
         assert_eq!(len, 16);
 

@@ -11,9 +11,6 @@
 
 extern crate alloc;
 
-mod chain;
-pub use chain::*;
-
 mod execute;
 pub use execute::*;
 
@@ -29,5 +26,5 @@ pub use execution_outcome::*;
 /// Read more: <https://github.com/bincode-org/bincode/issues/326>
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
-    pub use super::{chain::serde_bincode_compat::*, execution_outcome::serde_bincode_compat::*};
+    pub use super::execution_outcome::serde_bincode_compat::*;
 }

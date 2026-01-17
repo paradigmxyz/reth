@@ -28,6 +28,7 @@ fn create_bench_state(num_accounts: usize) -> EvmState {
                 code: Default::default(),
                 account_id: None,
             },
+            original_info: Box::new(AccountInfo::default()),
             storage,
             status: AccountStatus::empty(),
             transaction_id: 0,

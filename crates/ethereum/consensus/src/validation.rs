@@ -12,12 +12,16 @@ use reth_primitives_traits::{
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
+///
+/// If `receipt_root_bloom` is provided, the pre-computed receipt root and logs bloom are used
+/// instead of computing them from the receipts.
 pub fn validate_block_post_execution<B, R, ChainSpec>(
     block: &RecoveredBlock<B>,
     chain_spec: &ChainSpec,
     receipts: &[R],
     requests: &Requests,
     block_access_list: &Option<BlockAccessList>,
+    receipt_root_bloom: Option<(B256, Bloom)>,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -38,19 +42,26 @@ where
     // operation as hashing that is required for state root got calculated in every
     // transaction This was replaced with is_success flag.
     // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-    if chain_spec.is_byzantium_active_at_block(block.header().number()) &&
-        let Err(error) = verify_receipts(
-            block.header().receipts_root(),
-            block.header().logs_bloom(),
-            receipts,
-        )
-    {
-        let receipts = receipts
-            .iter()
-            .map(|r| Bytes::from(r.with_bloom_ref().encoded_2718()))
-            .collect::<Vec<_>>();
-        tracing::debug!(%error, ?receipts, "receipts verification failed");
-        return Err(error)
+    if chain_spec.is_byzantium_active_at_block(block.header().number()) {
+        let result = if let Some((receipts_root, logs_bloom)) = receipt_root_bloom {
+            compare_receipts_root_and_logs_bloom(
+                receipts_root,
+                logs_bloom,
+                block.header().receipts_root(),
+                block.header().logs_bloom(),
+            )
+        } else {
+            verify_receipts(block.header().receipts_root(), block.header().logs_bloom(), receipts)
+        };
+
+        if let Err(error) = result {
+            let receipts = receipts
+                .iter()
+                .map(|r| Bytes::from(r.with_bloom_ref().encoded_2718()))
+                .collect::<Vec<_>>();
+            tracing::debug!(%error, ?receipts, "receipts verification failed");
+            return Err(error)
+        }
     }
 
     // Validate that the header requests hash matches the calculated requests hash

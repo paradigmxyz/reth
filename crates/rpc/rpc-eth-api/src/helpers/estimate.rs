@@ -13,7 +13,7 @@ use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
 use reth_revm::{
     database::{EvmStateProvider, StateProviderDatabase},
-    db::State,
+    db::{bal::EvmDatabaseError, State},
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
@@ -27,7 +27,6 @@ use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GA
 use revm::{
     context::Block,
     context_interface::{result::ExecutionResult, Transaction},
-    database::bal::EvmDatabaseError,
 };
 use tracing::trace;
 
@@ -171,7 +170,7 @@ pub trait EstimateCall: Call {
                 return Err(RpcInvalidTransactionError::GasRequiredExceedsAllowance {
                     gas_limit: tx_env.gas_limit(),
                 }
-                .into_eth_err())
+                .into_eth_err());
             }
             // Propagate other results (successful or other errors).
             ethres => ethres?,
@@ -192,7 +191,7 @@ pub trait EstimateCall: Call {
                 } else {
                     // the transaction did revert
                     Err(Self::Error::from_revert(output))
-                }
+                };
             }
         };
 

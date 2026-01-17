@@ -8,9 +8,10 @@ use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, BlockNumber, TxHash, B256};
 use parking_lot::RwLock;
+use reth_chain::Chain;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
     BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
@@ -18,7 +19,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
-use std::{collections::BTreeMap, ops::Deref, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -648,7 +649,7 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Returns the `Receipts` of executed block that determines the state.
-    pub fn receipts(&self) -> &Vec<Vec<N::Receipt>> {
+    pub fn receipts(&self) -> &Vec<N::Receipt> {
         &self.block.execution_outcome().receipts
     }
 
@@ -659,15 +660,7 @@ impl<N: NodePrimitives> BlockState<N> {
     ///
     /// This clones the vector of receipts. To avoid it, use [`Self::executed_block_receipts_ref`].
     pub fn executed_block_receipts(&self) -> Vec<N::Receipt> {
-        let receipts = self.receipts();
-
-        debug_assert!(
-            receipts.len() <= 1,
-            "Expected at most one block's worth of receipts, found {}",
-            receipts.len()
-        );
-
-        receipts.first().cloned().unwrap_or_default()
+        self.receipts().clone()
     }
 
     /// Returns a slice of `Receipt` of executed block that determines the state.
@@ -675,15 +668,7 @@ impl<N: NodePrimitives> BlockState<N> {
     /// has only one element corresponding to the executed block associated to
     /// the state.
     pub fn executed_block_receipts_ref(&self) -> &[N::Receipt] {
-        let receipts = self.receipts();
-
-        debug_assert!(
-            receipts.len() <= 1,
-            "Expected at most one block's worth of receipts, found {}",
-            receipts.len()
-        );
-
-        receipts.first().map(|receipts| receipts.deref()).unwrap_or_default()
+        self.receipts()
     }
 
     /// Returns an iterator over __parent__ `BlockStates`.
@@ -767,7 +752,7 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// Recovered Block
     pub recovered_block: Arc<RecoveredBlock<N::Block>>,
     /// Block's execution outcome.
-    pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
+    pub execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
     /// Deferred trie data produced by execution.
     ///
     /// This allows deferring the computation of the trie data which can be expensive.
@@ -779,7 +764,16 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
     fn default() -> Self {
         Self {
             recovered_block: Default::default(),
-            execution_output: Default::default(),
+            execution_output: Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: Default::default(),
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                    block_access_list: Default::default(),
+                },
+                state: Default::default(),
+            }),
             trie_data: DeferredTrieData::ready(ComputedTrieData::default()),
         }
     }
@@ -800,7 +794,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// payload builders). This is the safe default path.
     pub fn new(
         recovered_block: Arc<RecoveredBlock<N::Block>>,
-        execution_output: Arc<ExecutionOutcome<N::Receipt>>,
+        execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: ComputedTrieData,
     ) -> Self {
         Self { recovered_block, execution_output, trie_data: DeferredTrieData::ready(trie_data) }
@@ -822,7 +816,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// Use [`Self::new()`] instead when trie data is already computed and available immediately.
     pub const fn with_deferred_trie_data(
         recovered_block: Arc<RecoveredBlock<N::Block>>,
-        execution_output: Arc<ExecutionOutcome<N::Receipt>>,
+        execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: DeferredTrieData,
     ) -> Self {
         Self { recovered_block, execution_output, trie_data }
@@ -842,7 +836,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
     /// Returns a reference to the block's execution outcome
     #[inline]
-    pub fn execution_outcome(&self) -> &ExecutionOutcome<N::Receipt> {
+    pub fn execution_outcome(&self) -> &BlockExecutionOutput<N::Receipt> {
         &self.execution_output
     }
 
@@ -942,37 +936,42 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     pub fn to_chain_notification(&self) -> CanonStateNotification<N> {
         match self {
             Self::Commit { new } => {
-                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
-                    chain.append_block(
-                        exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
-                        exec.trie_updates(),
-                        exec.hashed_state(),
-                    );
-                    chain
-                }));
-                CanonStateNotification::Commit { new }
+                CanonStateNotification::Commit { new: Arc::new(Self::blocks_to_chain(new)) }
             }
-            Self::Reorg { new, old } => {
-                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
+            Self::Reorg { new, old } => CanonStateNotification::Reorg {
+                new: Arc::new(Self::blocks_to_chain(new)),
+                old: Arc::new(Self::blocks_to_chain(old)),
+            },
+        }
+    }
+
+    /// Converts a slice of executed blocks into a [`Chain`].
+    ///
+    /// Uses [`ExecutedBlock::trie_data_handle`] to avoid blocking on deferred trie computations.
+    /// The trie data will be computed lazily when actually needed by consumers.
+    fn blocks_to_chain(blocks: &[ExecutedBlock<N>]) -> Chain<N> {
+        match blocks {
+            [] => Chain::default(),
+            [first, rest @ ..] => {
+                let mut chain = Chain::from_block(
+                    first.recovered_block().clone(),
+                    ExecutionOutcome::single(
+                        first.block_number(),
+                        first.execution_outcome().clone(),
+                    ),
+                    first.trie_data_handle(),
+                );
+                for exec in rest {
                     chain.append_block(
                         exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
-                        exec.trie_updates(),
-                        exec.hashed_state(),
+                        ExecutionOutcome::single(
+                            exec.block_number(),
+                            exec.execution_outcome().clone(),
+                        ),
+                        exec.trie_data_handle(),
                     );
-                    chain
-                }));
-                let old = Arc::new(old.iter().fold(Chain::default(), |mut chain, exec| {
-                    chain.append_block(
-                        exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
-                        exec.trie_updates(),
-                        exec.hashed_state(),
-                    );
-                    chain
-                }));
-                CanonStateNotification::Reorg { new, old }
+                }
+                chain
             }
         }
     }
@@ -1266,7 +1265,7 @@ mod tests {
 
         let state = BlockState::new(block);
 
-        assert_eq!(state.receipts(), &receipts);
+        assert_eq!(state.receipts(), receipts.first().unwrap());
     }
 
     #[test]
@@ -1543,12 +1542,6 @@ mod tests {
         let block2a =
             test_block_builder.get_executed_block_with_number(2, block1.recovered_block.hash());
 
-        let sample_execution_outcome = ExecutionOutcome {
-            receipts: vec![vec![], vec![]],
-            requests: vec![Requests::default(), Requests::default()],
-            ..Default::default()
-        };
-
         // Test commit notification
         let chain_commit = NewCanonicalChain::Commit { new: vec![block0.clone(), block1.clone()] };
 
@@ -1562,17 +1555,38 @@ mod tests {
         expected_hashed_state.insert(0, block0.hashed_state());
         expected_hashed_state.insert(1, block1.hashed_state());
 
-        assert_eq!(
-            chain_commit.to_chain_notification(),
-            CanonStateNotification::Commit {
-                new: Arc::new(Chain::new(
-                    vec![block0.recovered_block().clone(), block1.recovered_block().clone()],
-                    sample_execution_outcome.clone(),
-                    expected_trie_updates,
-                    expected_hashed_state
-                ))
-            }
-        );
+        // Build expected execution outcome (first_block matches first block number)
+        let commit_execution_outcome = ExecutionOutcome {
+            receipts: vec![vec![], vec![]],
+            requests: vec![Requests::default(), Requests::default()],
+            first_block: 0,
+            ..Default::default()
+        };
+
+        // Get the notification and verify
+        let notification = chain_commit.to_chain_notification();
+        let CanonStateNotification::Commit { new } = notification else {
+            panic!("Expected Commit notification");
+        };
+
+        // Compare blocks
+        let expected_blocks: Vec<_> =
+            vec![block0.recovered_block().clone(), block1.recovered_block().clone()];
+        let actual_blocks: Vec<_> = new.blocks().values().cloned().collect();
+        assert_eq!(actual_blocks, expected_blocks);
+
+        // Compare execution outcome
+        assert_eq!(*new.execution_outcome(), commit_execution_outcome);
+
+        // Compare trie data by waiting on deferred data
+        for (block_num, expected_updates) in &expected_trie_updates {
+            let actual = new.trie_data_at(*block_num).unwrap().wait_cloned();
+            assert_eq!(actual.trie_updates, *expected_updates);
+        }
+        for (block_num, expected_state) in &expected_hashed_state {
+            let actual = new.trie_data_at(*block_num).unwrap().wait_cloned();
+            assert_eq!(actual.hashed_state, *expected_state);
+        }
 
         // Test reorg notification
         let chain_reorg = NewCanonicalChain::Reorg {
@@ -1600,22 +1614,57 @@ mod tests {
         new_hashed_state.insert(1, block1a.hashed_state());
         new_hashed_state.insert(2, block2a.hashed_state());
 
-        assert_eq!(
-            chain_reorg.to_chain_notification(),
-            CanonStateNotification::Reorg {
-                old: Arc::new(Chain::new(
-                    vec![block1.recovered_block().clone(), block2.recovered_block().clone()],
-                    sample_execution_outcome.clone(),
-                    old_trie_updates,
-                    old_hashed_state
-                )),
-                new: Arc::new(Chain::new(
-                    vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()],
-                    sample_execution_outcome,
-                    new_trie_updates,
-                    new_hashed_state
-                ))
-            }
-        );
+        // Build expected execution outcome for reorg chains (first_block matches first block
+        // number)
+        let reorg_execution_outcome = ExecutionOutcome {
+            receipts: vec![vec![], vec![]],
+            requests: vec![Requests::default(), Requests::default()],
+            first_block: 1,
+            ..Default::default()
+        };
+
+        // Get the notification and verify
+        let notification = chain_reorg.to_chain_notification();
+        let CanonStateNotification::Reorg { old, new } = notification else {
+            panic!("Expected Reorg notification");
+        };
+
+        // Compare old chain blocks
+        let expected_old_blocks: Vec<_> =
+            vec![block1.recovered_block().clone(), block2.recovered_block().clone()];
+        let actual_old_blocks: Vec<_> = old.blocks().values().cloned().collect();
+        assert_eq!(actual_old_blocks, expected_old_blocks);
+
+        // Compare old chain execution outcome
+        assert_eq!(*old.execution_outcome(), reorg_execution_outcome);
+
+        // Compare old chain trie data
+        for (block_num, expected_updates) in &old_trie_updates {
+            let actual = old.trie_data_at(*block_num).unwrap().wait_cloned();
+            assert_eq!(actual.trie_updates, *expected_updates);
+        }
+        for (block_num, expected_state) in &old_hashed_state {
+            let actual = old.trie_data_at(*block_num).unwrap().wait_cloned();
+            assert_eq!(actual.hashed_state, *expected_state);
+        }
+
+        // Compare new chain blocks
+        let expected_new_blocks: Vec<_> =
+            vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()];
+        let actual_new_blocks: Vec<_> = new.blocks().values().cloned().collect();
+        assert_eq!(actual_new_blocks, expected_new_blocks);
+
+        // Compare new chain execution outcome
+        assert_eq!(*new.execution_outcome(), reorg_execution_outcome);
+
+        // Compare new chain trie data
+        for (block_num, expected_updates) in &new_trie_updates {
+            let actual = new.trie_data_at(*block_num).unwrap().wait_cloned();
+            assert_eq!(actual.trie_updates, *expected_updates);
+        }
+        for (block_num, expected_state) in &new_hashed_state {
+            let actual = new.trie_data_at(*block_num).unwrap().wait_cloned();
+            assert_eq!(actual.hashed_state, *expected_state);
+        }
     }
 }

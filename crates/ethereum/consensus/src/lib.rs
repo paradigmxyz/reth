@@ -15,7 +15,7 @@ use alloc::{fmt::Debug, sync::Arc};
 use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
+use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
     validate_against_parent_eip1559_base_fee, validate_against_parent_gas_limit,
@@ -74,6 +74,7 @@ where
         &self,
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
+        receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(
             block,
@@ -81,6 +82,7 @@ where
             &result.receipts,
             &result.requests,
             &result.block_access_list,
+            receipt_root_bloom,
         )
     }
 }

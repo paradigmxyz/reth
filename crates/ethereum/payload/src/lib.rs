@@ -251,7 +251,7 @@ where
                     limit: MAX_RLP_BLOCK_SIZE,
                 },
             );
-            continue;
+            continue
         }
 
         // There's only limited amount of blob space available per block, so we need to check if

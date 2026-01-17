@@ -25,7 +25,11 @@ use reth_evm::{
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
-use reth_revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, db::State};
+use reth_revm::{
+    cancelled::CancelOnDrop,
+    database::StateProviderDatabase,
+    db::{bal::EvmDatabaseError, State},
+};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper,
@@ -37,7 +41,6 @@ use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Transaction},
-    database::bal::EvmDatabaseError,
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};

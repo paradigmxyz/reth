@@ -21,7 +21,8 @@ pub mod providers;
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
-    StaticFileAccess, StaticFileProviderBuilder, StaticFileWriter,
+    SaveBlocksMode, StaticFileAccess, StaticFileProviderBuilder, StaticFileWriteCtx,
+    StaticFileWriter,
 };
 
 pub mod changeset_walker;
@@ -34,18 +35,27 @@ pub mod test_utils;
 pub mod either_writer;
 pub use either_writer::*;
 
+#[cfg(feature = "serde-bincode-compat")]
+pub use reth_chain::serde_bincode_compat;
+pub use reth_chain::{
+    AnchoredTrieInput, BlockReceipts, Chain, ChainBlocks, ComputedTrieData, DeferredTrieData,
+    DisplayBlocksChain,
+};
 pub use reth_chain_state::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
     CanonStateNotifications, CanonStateSubscriptions,
 };
-pub use reth_execution_types::*;
+pub use reth_execution_types::{
+    AccountRevertInit, BlockExecutionOutput, BlockExecutionResult, BundleStateInit, ChangedAccount,
+    ExecutionOutcome, RevertsInit,
+};
 /// Re-export `OriginalValuesKnown`
 pub use revm_database::states::OriginalValuesKnown;
 // reexport traits to avoid breaking changes
 pub use reth_static_file_types as static_file;
 pub use reth_storage_api::{
-    HistoryWriter, MetadataProvider, MetadataWriter, StatsReader, StorageSettings,
-    StorageSettingsCache,
+    HistoryWriter, MetadataProvider, MetadataWriter, StateWriteConfig, StatsReader,
+    StorageSettings, StorageSettingsCache,
 };
 /// Re-export provider error.
 pub use reth_storage_errors::provider::{ProviderError, ProviderResult};

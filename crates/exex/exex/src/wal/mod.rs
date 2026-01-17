@@ -255,6 +255,36 @@ mod tests {
         })
     }
 
+    fn notifications_equal(a: &[ExExNotification], b: &[ExExNotification]) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+        a.iter().zip(b.iter()).all(|(n1, n2)| {
+            let committed_eq = match (n1.committed_chain(), n2.committed_chain()) {
+                (Some(c1), Some(c2)) => {
+                    c1.tip().hash() == c2.tip().hash() && c1.blocks() == c2.blocks()
+                }
+                (None, None) => true,
+                _ => false,
+            };
+            let reverted_eq = match (n1.reverted_chain(), n2.reverted_chain()) {
+                (Some(c1), Some(c2)) => {
+                    c1.tip().hash() == c2.tip().hash() && c1.blocks() == c2.blocks()
+                }
+                (None, None) => true,
+                _ => false,
+            };
+            committed_eq && reverted_eq
+        })
+    }
+
+    fn assert_notifications_eq(actual: Vec<ExExNotification>, expected: Vec<ExExNotification>) {
+        assert!(
+            notifications_equal(&actual, &expected),
+            "notifications mismatch:\nactual: {actual:?}\nexpected: {expected:?}"
+        );
+    }
+
     fn sort_committed_blocks(
         committed_blocks: Vec<(B256, u32, CachedBlock)>,
     ) -> Vec<(B256, u32, CachedBlock)> {
@@ -304,36 +334,23 @@ mod tests {
                 vec![blocks[0].clone(), blocks[1].clone()],
                 Default::default(),
                 BTreeMap::new(),
-                BTreeMap::new(),
             )),
         };
         let reverted_notification = ExExNotification::ChainReverted {
-            old: Arc::new(Chain::new(
-                vec![blocks[1].clone()],
-                Default::default(),
-                BTreeMap::new(),
-                BTreeMap::new(),
-            )),
+            old: Arc::new(Chain::new(vec![blocks[1].clone()], Default::default(), BTreeMap::new())),
         };
         let committed_notification_2 = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
                 vec![block_1_reorged.clone(), blocks[2].clone()],
                 Default::default(),
                 BTreeMap::new(),
-                BTreeMap::new(),
             )),
         };
         let reorged_notification = ExExNotification::ChainReorged {
-            old: Arc::new(Chain::new(
-                vec![blocks[2].clone()],
-                Default::default(),
-                BTreeMap::new(),
-                BTreeMap::new(),
-            )),
+            old: Arc::new(Chain::new(vec![blocks[2].clone()], Default::default(), BTreeMap::new())),
             new: Arc::new(Chain::new(
                 vec![block_2_reorged.clone(), blocks[3].clone()],
                 Default::default(),
-                BTreeMap::new(),
                 BTreeMap::new(),
             )),
         };
@@ -371,7 +388,7 @@ mod tests {
             wal.inner.block_cache().committed_blocks_sorted(),
             committed_notification_1_cache_committed_blocks
         );
-        assert_eq!(read_notifications(&wal)?, vec![committed_notification_1.clone()]);
+        assert_notifications_eq(read_notifications(&wal)?, vec![committed_notification_1.clone()]);
 
         // Second notification (revert block 1)
         wal.commit(&reverted_notification)?;
@@ -385,9 +402,9 @@ mod tests {
             wal.inner.block_cache().committed_blocks_sorted(),
             committed_notification_1_cache_committed_blocks
         );
-        assert_eq!(
+        assert_notifications_eq(
             read_notifications(&wal)?,
-            vec![committed_notification_1.clone(), reverted_notification.clone()]
+            vec![committed_notification_1.clone(), reverted_notification.clone()],
         );
 
         // Third notification (commit block 1, 2)
@@ -430,13 +447,13 @@ mod tests {
                 .concat()
             )
         );
-        assert_eq!(
+        assert_notifications_eq(
             read_notifications(&wal)?,
             vec![
                 committed_notification_1.clone(),
                 reverted_notification.clone(),
-                committed_notification_2.clone()
-            ]
+                committed_notification_2.clone(),
+            ],
         );
 
         // Fourth notification (revert block 2, commit block 2, 3)
@@ -481,14 +498,14 @@ mod tests {
                 .concat()
             )
         );
-        assert_eq!(
+        assert_notifications_eq(
             read_notifications(&wal)?,
             vec![
                 committed_notification_1,
                 reverted_notification,
                 committed_notification_2.clone(),
-                reorged_notification.clone()
-            ]
+                reorged_notification.clone(),
+            ],
         );
 
         // Now, finalize the WAL up to the block 1. Block 1 was in the third notification that also
@@ -510,9 +527,9 @@ mod tests {
                 .concat()
             )
         );
-        assert_eq!(
+        assert_notifications_eq(
             read_notifications(&wal)?,
-            vec![committed_notification_2.clone(), reorged_notification.clone()]
+            vec![committed_notification_2.clone(), reorged_notification.clone()],
         );
 
         // Re-open the WAL and verify that the cache population works correctly
@@ -531,7 +548,10 @@ mod tests {
                 .concat()
             )
         );
-        assert_eq!(read_notifications(&wal)?, vec![committed_notification_2, reorged_notification]);
+        assert_notifications_eq(
+            read_notifications(&wal)?,
+            vec![committed_notification_2, reorged_notification],
+        );
 
         Ok(())
     }

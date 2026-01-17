@@ -36,6 +36,10 @@ where
         self.inner.apply_pre_execution_changes()
     }
 
+    fn receipts(&self) -> &[Self::Receipt] {
+        self.inner.receipts()
+    }
+
     fn execute_transaction_without_commit(
         &mut self,
         tx: impl ExecutableTx<Self>,

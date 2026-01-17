@@ -3,7 +3,7 @@
 use alloy_consensus::Typed2718;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{BlockNumber, B256};
-use reth_execution_types::ChainBlocks;
+use reth_chain::ChainBlocks;
 use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
 use std::collections::BTreeMap;
 
@@ -91,8 +91,8 @@ mod tests {
     use super::*;
     use alloy_consensus::{Header, Signed};
     use alloy_primitives::Signature;
+    use reth_chain::Chain;
     use reth_ethereum_primitives::Transaction;
-    use reth_execution_types::Chain;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
 
     #[test]
@@ -175,8 +175,7 @@ mod tests {
         );
 
         // Extract blocks from the chain
-        let chain: Chain =
-            Chain::new(vec![block1, block2], Default::default(), BTreeMap::new(), BTreeMap::new());
+        let chain: Chain = Chain::new(vec![block1, block2], Default::default(), BTreeMap::new());
         let blocks = chain.into_inner().0;
 
         // Add new chain blocks to the tracker

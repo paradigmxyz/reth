@@ -408,6 +408,24 @@ impl From<EthTxEnvError> for EthApiError {
     }
 }
 
+impl<E> From<EvmDatabaseError<E>> for EthApiError
+where
+    E: Into<Self>,
+{
+    fn from(value: EvmDatabaseError<E>) -> Self {
+        match value {
+            EvmDatabaseError::Bal(err) => err.into(),
+            EvmDatabaseError::Database(err) => err.into(),
+        }
+    }
+}
+
+impl From<BalError> for EthApiError {
+    fn from(err: BalError) -> Self {
+        Self::EvmCustom(format!("bal error: {:?}", err))
+    }
+}
+
 #[cfg(feature = "js-tracer")]
 impl From<revm_inspectors::tracing::js::JsInspectorError> for EthApiError {
     fn from(error: revm_inspectors::tracing::js::JsInspectorError) -> Self {
@@ -1097,38 +1115,6 @@ pub enum SignError {
     /// No chain ID was given.
     #[error("no chainid")]
     NoChainId,
-}
-
-// /// Converts the evm [`ExecutionResult`] into a result where `Ok` variant is the output bytes if
-// it /// is [`ExecutionResult::Success`].
-// pub fn ensure_success<Halt, Error: FromEvmHalt<Halt> + FromEthApiError>(
-//     result: ExecutionResult<Halt>,
-// ) -> Result<Bytes, Error> {
-//     match result {
-//         ExecutionResult::Success { output, .. } => Ok(output.into_data()),
-//         ExecutionResult::Revert { output, .. } => {
-//
-// Err(Error::from_eth_err(RpcInvalidTransactionError::Revert(RevertError::new(output))))         }
-//         ExecutionResult::Halt { reason, gas_used } => Err(Error::from_evm_halt(reason,
-// gas_used)),     }
-// }
-
-impl<E> From<EvmDatabaseError<E>> for EthApiError
-where
-    E: Into<Self>,
-{
-    fn from(value: EvmDatabaseError<E>) -> Self {
-        match value {
-            EvmDatabaseError::Bal(err) => err.into(),
-            EvmDatabaseError::Database(err) => err.into(),
-        }
-    }
-}
-
-impl From<BalError> for EthApiError {
-    fn from(err: BalError) -> Self {
-        Self::EvmCustom(format!("bal error: {:?}", err))
-    }
 }
 
 #[cfg(test)]

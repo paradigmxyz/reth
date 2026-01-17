@@ -15,6 +15,12 @@ use alloc::{boxed::Box, fmt::Debug, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
 use core::error::Error;
+
+/// Pre-computed receipt root and logs bloom.
+///
+/// When provided to [`FullConsensus::validate_block_post_execution`], this allows skipping
+/// the receipt root computation and using the pre-computed values instead.
+pub type ReceiptRootBloom = (B256, Bloom);
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
@@ -39,11 +45,15 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
     ///
     /// See the Yellow Paper sections 4.3.2 "Holistic Validity".
     ///
+    /// If `receipt_root_bloom` is provided, the implementation should use the pre-computed
+    /// receipt root and logs bloom instead of computing them from the receipts.
+    ///
     /// Note: validating blocks does not include other validations of the Consensus
     fn validate_block_post_execution(
         &self,
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
+        receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError>;
 }
 

@@ -12,7 +12,7 @@ use reth_chain_state::{BlockState, ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, ExecutionOutcome},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
@@ -367,12 +367,8 @@ pub trait LoadPendingBlock:
         let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates } =
             builder.finish(NoopProvider::default()).map_err(Self::Error::from_eth_err)?;
 
-        let execution_outcome = ExecutionOutcome::new(
-            db.take_bundle(),
-            vec![execution_result.receipts],
-            block.number(),
-            vec![execution_result.requests],
-        );
+        let execution_outcome =
+            BlockExecutionOutput { state: db.take_bundle(), result: execution_result };
 
         Ok(ExecutedBlock::new(
             block.into(),

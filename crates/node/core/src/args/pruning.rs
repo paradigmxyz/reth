@@ -5,10 +5,7 @@ use alloy_primitives::{Address, BlockNumber};
 use clap::{builder::RangedU64ValueParser, Args};
 use reth_chainspec::EthereumHardforks;
 use reth_config::config::PruneConfig;
-use reth_prune_types::{
-    PruneMode, PruneModes, ReceiptsLogPruneConfig, MERKLE_CHANGESETS_RETENTION_BLOCKS,
-    MINIMUM_PRUNING_DISTANCE,
-};
+use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
 use std::{collections::BTreeMap, ops::Not};
 
 /// Parameters for pruning and full node
@@ -143,7 +140,6 @@ impl PruningArgs {
                         .ethereum_fork_activation(EthereumHardfork::Paris)
                         .block_number()
                         .map(PruneMode::Before),
-                    merkle_changesets: PruneMode::Distance(MERKLE_CHANGESETS_RETENTION_BLOCKS),
                     receipts_log_filter: Default::default(),
                 },
             }
@@ -160,7 +156,6 @@ impl PruningArgs {
                     account_history: Some(PruneMode::Distance(10064)),
                     storage_history: Some(PruneMode::Distance(10064)),
                     bodies_history: Some(PruneMode::Distance(10064)),
-                    merkle_changesets: PruneMode::Distance(MERKLE_CHANGESETS_RETENTION_BLOCKS),
                     receipts_log_filter: Default::default(),
                 },
             }
