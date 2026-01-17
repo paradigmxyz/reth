@@ -69,6 +69,16 @@ pub enum SetCommand {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
+    /// Use hashed state tables (HashedAccounts/HashedStorages) as canonical state
+    ///
+    /// When enabled, execution writes directly to hashed tables, eliminating need for
+    /// separate hashing stages. State reads come from hashed tables.
+    ///
+    /// WARNING: Changing this setting requires re-syncing the database.
+    UseHashedState {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
 }
 
 impl Command {
@@ -115,6 +125,7 @@ impl Command {
             transaction_hash_numbers_in_rocksdb: _,
             account_history_in_rocksdb: _,
             account_changesets_in_static_files: _,
+            use_hashed_state: _,
         } = settings.unwrap_or_else(StorageSettings::legacy);
 
         // Update the setting based on the key
@@ -166,6 +177,15 @@ impl Command {
                 }
                 settings.account_history_in_rocksdb = value;
                 println!("Set account_history_in_rocksdb = {}", value);
+            }
+            SetCommand::UseHashedState { value } => {
+                if settings.use_hashed_state == value {
+                    println!("use_hashed_state is already set to {}", value);
+                    return Ok(());
+                }
+                settings.use_hashed_state = value;
+                println!("Set use_hashed_state = {}", value);
+                println!("WARNING: Changing this setting requires re-syncing the database.");
             }
         }
 
