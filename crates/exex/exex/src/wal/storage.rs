@@ -141,12 +141,12 @@ where
         };
         let size = file.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len();
 
-        // Deserialize directly. ExExNotification has serde Serialize/Deserialize
-        // implemented with custom Chain serialization that creates ready DeferredTrieData.
-        let notification: ExExNotification<N> = rmp_serde::decode::from_read(&mut file)
-            .map_err(|err| WalError::Decode(file_id, file_path, err))?;
+        // Deserialize using the bincode- and msgpack-compatible serde wrapper
+        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_, N> =
+            rmp_serde::decode::from_read(&mut file)
+                .map_err(|err| WalError::Decode(file_id, file_path, err))?;
 
-        Ok(Some((notification, size)))
+        Ok(Some((notification.into(), size)))
     }
 
     /// Writes the notification to the file with the given ID.
@@ -163,11 +163,16 @@ where
         let file_path = self.file_path(file_id);
         debug!(target: "exex::wal::storage", ?file_path, "Writing notification to WAL");
 
-        // Serialize the notification directly. ExExNotification has serde Serialize/Deserialize
-        // implemented, and the underlying Chain type has custom serde that properly handles
-        // DeferredTrieData by materializing it during serialization.
+        // Serialize using the bincode- and msgpack-compatible serde wrapper via SerializeAs
         reth_fs_util::atomic_write_file(&file_path, |file| {
-            rmp_serde::encode::write(file, notification)
+            use serde_with::SerializeAs;
+            let mut buf = Vec::new();
+            reth_exex_types::serde_bincode_compat::ExExNotification::<'_, N>::serialize_as(
+                notification,
+                &mut rmp_serde::Serializer::new(&mut buf),
+            )
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+            std::io::Write::write_all(file, &buf)
         })?;
 
         Ok(file_path.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len())
