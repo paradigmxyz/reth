@@ -551,7 +551,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                     let trie_data = block.trie_data();
 
-                    // insert hashes and intermediate merkle nodes
                     let start = Instant::now();
                     self.write_hashed_state(&trie_data.hashed_state)?;
                     timings.write_hashed_state += start.elapsed();
