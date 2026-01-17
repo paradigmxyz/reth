@@ -121,7 +121,11 @@ impl BlockCache {
                 self.lowest_committed_block_height
                     .map_or(first_block_number, |lowest| lowest.min(first_block_number)),
             );
-            self.highest_committed_block_height = Some(committed_chain.tip().number());
+            let tip_block_number = committed_chain.tip().number();
+            self.highest_committed_block_height = Some(
+                self.highest_committed_block_height
+                    .map_or(tip_block_number, |highest| highest.max(tip_block_number)),
+            );
         }
     }
 
