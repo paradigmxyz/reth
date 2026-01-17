@@ -10,7 +10,7 @@ use crate::{
     },
     valid_payload::{block_to_new_payload, call_new_payload},
 };
-use alloy_provider::Provider;
+use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use clap::Parser;
 use csv::Writer;
 use eyre::{Context, OptionExt};
@@ -46,11 +46,13 @@ impl Command {
         let BenchContext {
             benchmark_mode,
             block_provider,
-            auth_provider,
+            auth_providers,
             mut next_block,
             is_optimism,
             ..
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
+
+        info!("Broadcasting payloads to {} engine(s)", auth_providers.len());
 
         let buffer_size = self.rpc_block_buffer_size;
 
@@ -102,7 +104,8 @@ impl Command {
             let (version, params) = block_to_new_payload(block, is_optimism)?;
 
             let start = Instant::now();
-            call_new_payload(&auth_provider, version, params).await?;
+            // Broadcast newPayload to all engines in parallel
+            broadcast_new_payload(&auth_providers, version, params).await?;
 
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
             info!(%new_payload_result);
@@ -160,4 +163,32 @@ impl Command {
 
         Ok(())
     }
+}
+
+/// Broadcast `newPayload` to all engine providers in parallel.
+async fn broadcast_new_payload(
+    providers: &[RootProvider<AnyNetwork>],
+    version: reth_node_api::EngineApiMessageVersion,
+    params: serde_json::Value,
+) -> eyre::Result<()> {
+    let futures: Vec<_> = providers
+        .iter()
+        .enumerate()
+        .map(|(i, provider)| {
+            let params = params.clone();
+            async move {
+                call_new_payload(provider, version, params)
+                    .await
+                    .map_err(|e| eyre::eyre!("Engine {} newPayload failed: {}", i, e))
+            }
+        })
+        .collect();
+
+    let results = futures::future::join_all(futures).await;
+
+    for result in results {
+        result?;
+    }
+
+    Ok(())
 }
