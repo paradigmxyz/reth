@@ -1002,6 +1002,15 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
         _ => panic!("Unexpected event: {event:#?}"),
     }
 
+    // After backfill completes with head not buffered, we also request head download
+    let event = test_harness.from_tree_rx.recv().await.unwrap();
+    match event {
+        EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
+            assert_eq!(hash_set, HashSet::from_iter([main_chain_last_hash]));
+        }
+        _ => panic!("Unexpected event: {event:#?}"),
+    }
+
     let _ = test_harness
         .tree
         .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
