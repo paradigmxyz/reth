@@ -48,7 +48,6 @@ itertools = { workspace = true, features = ["use_std"] }
 metrics.workspace = true
 parking_lot.workspace = true
 rmp-serde.workspace = true
-serde_with.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 

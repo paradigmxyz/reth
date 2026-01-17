@@ -2,7 +2,7 @@
 
 use alloy_eips::{eip2718::Encodable2718, BlockNumHash};
 use derive_more::{Deref, DerefMut};
-use reth_chain::{BlockReceipts, Chain};
+use reth_execution_types::{BlockReceipts, Chain};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_storage_api::NodePrimitivesProvider;
 use std::{
@@ -80,7 +80,7 @@ impl<N: NodePrimitives> Stream for CanonStateNotificationStream<N> {
 ///
 /// The notification contains at least one [`Chain`] with the imported segment. If some blocks were
 /// reverted (e.g. during a reorg), the old chain is also returned.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(bound = ""))]
 pub enum CanonStateNotification<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
@@ -285,8 +285,8 @@ mod tests {
         // Create a commit notification
         let notification = CanonStateNotification::Commit { new: chain.clone() };
 
-        // Test that `committed` returns the correct chain (compare Arc pointers)
-        assert!(Arc::ptr_eq(&notification.committed(), &chain));
+        // Test that `committed` returns the correct chain
+        assert_eq!(notification.committed(), chain);
 
         // Test that `reverted` returns None for `Commit`
         assert!(notification.reverted().is_none());
@@ -329,11 +329,11 @@ mod tests {
         let notification =
             CanonStateNotification::Reorg { old: old_chain.clone(), new: new_chain.clone() };
 
-        // Test that `reverted` returns the old chain (compare Arc pointers)
-        assert!(Arc::ptr_eq(&notification.reverted().unwrap(), &old_chain));
+        // Test that `reverted` returns the old chain
+        assert_eq!(notification.reverted(), Some(old_chain));
 
-        // Test that `committed` returns the new chain (compare Arc pointers)
-        assert!(Arc::ptr_eq(&notification.committed(), &new_chain));
+        // Test that `committed` returns the new chain
+        assert_eq!(notification.committed(), new_chain);
 
         // Test that `tip` returns the tip of the new chain (last block in the new chain)
         assert_eq!(*notification.tip(), block3);

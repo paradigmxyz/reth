@@ -33,7 +33,6 @@ use alloy_primitives::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
-use reth_chain::Chain;
 use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
@@ -48,7 +47,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, PlainAccountState, PlainStorageState,
 };
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, RecoveredBlock, SealedHeader, StorageEntry,

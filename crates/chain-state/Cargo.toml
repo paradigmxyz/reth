@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chain.workspace = true
 reth-chainspec.workspace = true
 reth-errors.workspace = true
 reth-execution-types.workspace = true
@@ -66,7 +65,6 @@ serde = [
     "alloy-primitives/serde",
     "parking_lot/serde",
     "rand?/serde",
-    "reth-chain/serde",
     "reth-ethereum-primitives/serde",
     "reth-execution-types/serde",
     "reth-primitives-traits/serde",

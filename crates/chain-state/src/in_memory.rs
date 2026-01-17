@@ -8,17 +8,16 @@ use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, BlockNumber, TxHash, B256};
 use parking_lot::RwLock;
-use reth_chain::Chain;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
     BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
+use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, TrieInputSorted};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -945,29 +944,26 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     }
 
     /// Converts a slice of executed blocks into a [`Chain`].
-    ///
-    /// Uses [`ExecutedBlock::trie_data_handle`] to avoid blocking on deferred trie computations.
-    /// The trie data will be computed lazily when actually needed by consumers.
     fn blocks_to_chain(blocks: &[ExecutedBlock<N>]) -> Chain<N> {
         match blocks {
             [] => Chain::default(),
             [first, rest @ ..] => {
                 let mut chain = Chain::from_block(
                     first.recovered_block().clone(),
-                    ExecutionOutcome::single(
-                        first.block_number(),
+                    ExecutionOutcome::from((
                         first.execution_outcome().clone(),
-                    ),
-                    first.trie_data_handle(),
+                        first.block_number(),
+                    )),
+                    LazyTrieData::ready(first.hashed_state(), first.trie_updates()),
                 );
                 for exec in rest {
                     chain.append_block(
                         exec.recovered_block().clone(),
-                        ExecutionOutcome::single(
-                            exec.block_number(),
+                        ExecutionOutcome::from((
                             exec.execution_outcome().clone(),
-                        ),
-                        exec.trie_data_handle(),
+                            exec.block_number(),
+                        )),
+                        LazyTrieData::ready(exec.hashed_state(), exec.trie_updates()),
                     );
                 }
                 chain
@@ -1544,15 +1540,12 @@ mod tests {
         // Test commit notification
         let chain_commit = NewCanonicalChain::Commit { new: vec![block0.clone(), block1.clone()] };
 
-        // Build expected trie updates map
-        let mut expected_trie_updates = BTreeMap::new();
-        expected_trie_updates.insert(0, block0.trie_updates());
-        expected_trie_updates.insert(1, block1.trie_updates());
-
-        // Build expected hashed state map
-        let mut expected_hashed_state = BTreeMap::new();
-        expected_hashed_state.insert(0, block0.hashed_state());
-        expected_hashed_state.insert(1, block1.hashed_state());
+        // Build expected trie data map
+        let mut expected_trie_data = BTreeMap::new();
+        expected_trie_data
+            .insert(0, LazyTrieData::ready(block0.hashed_state(), block0.trie_updates()));
+        expected_trie_data
+            .insert(1, LazyTrieData::ready(block1.hashed_state(), block1.trie_updates()));
 
         // Build expected execution outcome (first_block matches first block number)
         let commit_execution_outcome = ExecutionOutcome {
@@ -1562,30 +1555,16 @@ mod tests {
             ..Default::default()
         };
 
-        // Get the notification and verify
-        let notification = chain_commit.to_chain_notification();
-        let CanonStateNotification::Commit { new } = notification else {
-            panic!("Expected Commit notification");
-        };
-
-        // Compare blocks
-        let expected_blocks: Vec<_> =
-            vec![block0.recovered_block().clone(), block1.recovered_block().clone()];
-        let actual_blocks: Vec<_> = new.blocks().values().cloned().collect();
-        assert_eq!(actual_blocks, expected_blocks);
-
-        // Compare execution outcome
-        assert_eq!(*new.execution_outcome(), commit_execution_outcome);
-
-        // Compare trie data by waiting on deferred data
-        for (block_num, expected_updates) in &expected_trie_updates {
-            let actual = new.trie_data_at(*block_num).unwrap().wait_cloned();
-            assert_eq!(actual.trie_updates, *expected_updates);
-        }
-        for (block_num, expected_state) in &expected_hashed_state {
-            let actual = new.trie_data_at(*block_num).unwrap().wait_cloned();
-            assert_eq!(actual.hashed_state, *expected_state);
-        }
+        assert_eq!(
+            chain_commit.to_chain_notification(),
+            CanonStateNotification::Commit {
+                new: Arc::new(Chain::new(
+                    vec![block0.recovered_block().clone(), block1.recovered_block().clone()],
+                    commit_execution_outcome,
+                    expected_trie_data,
+                ))
+            }
+        );
 
         // Test reorg notification
         let chain_reorg = NewCanonicalChain::Reorg {
@@ -1593,25 +1572,17 @@ mod tests {
             old: vec![block1.clone(), block2.clone()],
         };
 
-        // Build expected trie updates for old chain
-        let mut old_trie_updates = BTreeMap::new();
-        old_trie_updates.insert(1, block1.trie_updates());
-        old_trie_updates.insert(2, block2.trie_updates());
+        // Build expected trie data for old chain
+        let mut old_trie_data = BTreeMap::new();
+        old_trie_data.insert(1, LazyTrieData::ready(block1.hashed_state(), block1.trie_updates()));
+        old_trie_data.insert(2, LazyTrieData::ready(block2.hashed_state(), block2.trie_updates()));
 
-        // Build expected trie updates for new chain
-        let mut new_trie_updates = BTreeMap::new();
-        new_trie_updates.insert(1, block1a.trie_updates());
-        new_trie_updates.insert(2, block2a.trie_updates());
-
-        // Build expected hashed state for old chain
-        let mut old_hashed_state = BTreeMap::new();
-        old_hashed_state.insert(1, block1.hashed_state());
-        old_hashed_state.insert(2, block2.hashed_state());
-
-        // Build expected hashed state for new chain
-        let mut new_hashed_state = BTreeMap::new();
-        new_hashed_state.insert(1, block1a.hashed_state());
-        new_hashed_state.insert(2, block2a.hashed_state());
+        // Build expected trie data for new chain
+        let mut new_trie_data = BTreeMap::new();
+        new_trie_data
+            .insert(1, LazyTrieData::ready(block1a.hashed_state(), block1a.trie_updates()));
+        new_trie_data
+            .insert(2, LazyTrieData::ready(block2a.hashed_state(), block2a.trie_updates()));
 
         // Build expected execution outcome for reorg chains (first_block matches first block
         // number)
@@ -1622,48 +1593,20 @@ mod tests {
             ..Default::default()
         };
 
-        // Get the notification and verify
-        let notification = chain_reorg.to_chain_notification();
-        let CanonStateNotification::Reorg { old, new } = notification else {
-            panic!("Expected Reorg notification");
-        };
-
-        // Compare old chain blocks
-        let expected_old_blocks: Vec<_> =
-            vec![block1.recovered_block().clone(), block2.recovered_block().clone()];
-        let actual_old_blocks: Vec<_> = old.blocks().values().cloned().collect();
-        assert_eq!(actual_old_blocks, expected_old_blocks);
-
-        // Compare old chain execution outcome
-        assert_eq!(*old.execution_outcome(), reorg_execution_outcome);
-
-        // Compare old chain trie data
-        for (block_num, expected_updates) in &old_trie_updates {
-            let actual = old.trie_data_at(*block_num).unwrap().wait_cloned();
-            assert_eq!(actual.trie_updates, *expected_updates);
-        }
-        for (block_num, expected_state) in &old_hashed_state {
-            let actual = old.trie_data_at(*block_num).unwrap().wait_cloned();
-            assert_eq!(actual.hashed_state, *expected_state);
-        }
-
-        // Compare new chain blocks
-        let expected_new_blocks: Vec<_> =
-            vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()];
-        let actual_new_blocks: Vec<_> = new.blocks().values().cloned().collect();
-        assert_eq!(actual_new_blocks, expected_new_blocks);
-
-        // Compare new chain execution outcome
-        assert_eq!(*new.execution_outcome(), reorg_execution_outcome);
-
-        // Compare new chain trie data
-        for (block_num, expected_updates) in &new_trie_updates {
-            let actual = new.trie_data_at(*block_num).unwrap().wait_cloned();
-            assert_eq!(actual.trie_updates, *expected_updates);
-        }
-        for (block_num, expected_state) in &new_hashed_state {
-            let actual = new.trie_data_at(*block_num).unwrap().wait_cloned();
-            assert_eq!(actual.hashed_state, *expected_state);
-        }
+        assert_eq!(
+            chain_reorg.to_chain_notification(),
+            CanonStateNotification::Reorg {
+                old: Arc::new(Chain::new(
+                    vec![block1.recovered_block().clone(), block2.recovered_block().clone()],
+                    reorg_execution_outcome.clone(),
+                    old_trie_data,
+                )),
+                new: Arc::new(Chain::new(
+                    vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()],
+                    reorg_execution_outcome,
+                    new_trie_data,
+                ))
+            }
+        );
     }
 }
