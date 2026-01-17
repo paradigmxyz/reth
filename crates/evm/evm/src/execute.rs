@@ -7,7 +7,7 @@ use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTx},
-    Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
+    Evm, EvmEnv, EvmFactory, IntoTxEnv, RecoveredTx, ToTxEnv,
 };
 use alloy_primitives::{Address, B256};
 pub use reth_execution_errors::{
@@ -660,6 +660,32 @@ impl<TxEnv: Clone, T> ToTxEnv<TxEnv> for WithTxEnv<TxEnv, T> {
     }
 }
 
+impl<TxEnv, T> IntoTxEnv<TxEnv> for WithTxEnv<TxEnv, T> {
+    fn into_tx_env(self) -> TxEnv {
+        self.tx_env
+    }
+}
+
+impl<TxEnv, T> WithTxEnv<TxEnv, T> {
+    /// Takes ownership of the inner [`TxEnv`].
+    ///
+    /// This is more efficient than cloning when you have ownership of the
+    /// `WithTxEnv` and only need the transaction environment.
+    pub fn into_tx_env(self) -> TxEnv {
+        self.tx_env
+    }
+
+    /// Returns a reference to the inner [`TxEnv`].
+    pub const fn tx_env(&self) -> &TxEnv {
+        &self.tx_env
+    }
+
+    /// Returns a mutable reference to the inner [`TxEnv`].
+    pub const fn tx_env_mut(&mut self) -> &mut TxEnv {
+        &mut self.tx_env
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -823,5 +849,42 @@ mod tests {
         assert_eq!(result.len(), 1, "Only non-zero increments should be included");
         assert!(!result.contains_key(&addr1), "Zero increment account should not be included");
         assert_eq!(result.get(&addr2).unwrap().info.balance, U256::from(200));
+    }
+
+    #[test]
+    fn test_with_tx_env_into_tx_env() {
+        use alloy_consensus::TxLegacy;
+        use alloy_primitives::{Bytes, TxKind};
+        use reth_primitives_traits::Recovered;
+        use revm::context::TxEnv;
+
+        let tx = TxLegacy {
+            chain_id: Some(1),
+            nonce: 42,
+            gas_price: 100,
+            gas_limit: 21000,
+            to: TxKind::Call(address!("0x1234567890123456789012345678901234567890")),
+            value: U256::from(1000),
+            input: Bytes::from_static(b"hello"),
+        };
+        let sender = address!("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd");
+        let recovered = Recovered::new_unchecked(tx, sender);
+
+        let mut expected_tx_env = TxEnv::default();
+        expected_tx_env.caller = sender;
+        expected_tx_env.nonce = 42;
+        expected_tx_env.gas_price = 100;
+        expected_tx_env.gas_limit = 21000;
+        expected_tx_env.value = U256::from(1000);
+
+        let with_tx_env = WithTxEnv { tx_env: expected_tx_env.clone(), tx: Arc::new(recovered) };
+
+        let result: TxEnv = with_tx_env.into_tx_env();
+
+        assert_eq!(result.caller, sender);
+        assert_eq!(result.nonce, 42);
+        assert_eq!(result.gas_price, 100);
+        assert_eq!(result.gas_limit, 21000);
+        assert_eq!(result.value, U256::from(1000));
     }
 }

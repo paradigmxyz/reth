@@ -37,6 +37,11 @@ rayon = { workspace = true, optional = true }
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true
 reth-ethereum-forks.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "tx_env"
+harness = false
 
 [features]
 default = ["std"]
