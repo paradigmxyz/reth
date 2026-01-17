@@ -191,7 +191,7 @@ pub(crate) fn payload_to_new_payload(
                         serde_json::to_value((
                             OpExecutionPayloadV4 {
                                 payload_inner: payload.payload_inner,
-                                withdrawals_root: block.withdrawals_root.unwrap(),
+                                withdrawals_root: withdrawals_root.unwrap_or_default(),
                             },
                             cancun.versioned_hashes.clone(),
                             cancun.parent_beacon_block_root,
