@@ -2,14 +2,15 @@ use crate::common::EnvironmentArgs;
 use clap::Parser;
 use eyre::Result;
 use lz4::Decoder;
-use reqwest::Client;
+use reqwest::{blocking::Client as BlockingClient, header::RANGE, Client, StatusCode};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_fs_util as fs;
 use std::{
     borrow::Cow,
+    fs::{File, OpenOptions},
     io::{self, Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
@@ -327,18 +328,153 @@ fn extract_from_file(path: &Path, format: CompressionFormat, target_dir: &Path) 
     extract_archive(file, total_size, format, target_dir)
 }
 
-/// Fetches the snapshot from a remote URL, uncompressing it in a streaming fashion.
+const MAX_DOWNLOAD_RETRIES: u32 = 10;
+const RETRY_BACKOFF_SECS: u64 = 5;
+
+/// Downloads a file with resume support using HTTP Range requests.
+/// Automatically retries on failure, resuming from where it left off.
+/// Returns the path to the downloaded file and its total size.
+fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
+    let file_name = Url::parse(url)
+        .ok()
+        .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
+        .unwrap_or_else(|| "snapshot.tar".to_string());
+
+    let final_path = target_dir.join(&file_name);
+    let part_path = target_dir.join(format!("{file_name}.part"));
+
+    let client = BlockingClient::builder().timeout(Duration::from_secs(30)).build()?;
+
+    let mut total_size: Option<u64> = None;
+    let mut last_error: Option<eyre::Error> = None;
+
+    for attempt in 1..=MAX_DOWNLOAD_RETRIES {
+        let existing_size = std::fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
+
+        if let Some(total) = total_size &&
+            existing_size >= total
+        {
+            std::fs::rename(&part_path, &final_path)?;
+            info!(target: "reth::cli", "Download complete: {}", final_path.display());
+            return Ok((final_path, total));
+        }
+
+        if attempt > 1 {
+            info!(target: "reth::cli",
+                "Retry attempt {}/{} - resuming from {} bytes",
+                attempt, MAX_DOWNLOAD_RETRIES, existing_size
+            );
+        }
+
+        let mut request = client.get(url);
+        if existing_size > 0 {
+            request = request.header(RANGE, format!("bytes={existing_size}-"));
+            if attempt == 1 {
+                info!(target: "reth::cli", "Resuming download from {} bytes", existing_size);
+            }
+        }
+
+        let response = match request.send().and_then(|r| r.error_for_status()) {
+            Ok(r) => r,
+            Err(e) => {
+                last_error = Some(e.into());
+                if attempt < MAX_DOWNLOAD_RETRIES {
+                    info!(target: "reth::cli",
+                        "Download failed, retrying in {} seconds...", RETRY_BACKOFF_SECS
+                    );
+                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                }
+                continue;
+            }
+        };
+
+        let is_partial = response.status() == StatusCode::PARTIAL_CONTENT;
+
+        let size = if is_partial {
+            response
+                .headers()
+                .get("Content-Range")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.split('/').next_back())
+                .and_then(|v| v.parse().ok())
+        } else {
+            response.content_length()
+        };
+
+        if total_size.is_none() {
+            total_size = size;
+        }
+
+        let current_total = total_size.ok_or_else(|| {
+            eyre::eyre!("Server did not provide Content-Length or Content-Range header")
+        })?;
+
+        let mut file = if is_partial && existing_size > 0 {
+            OpenOptions::new().append(true).open(&part_path)?
+        } else {
+            File::create(&part_path)?
+        };
+
+        let start_offset = if is_partial { existing_size } else { 0 };
+        let mut progress = DownloadProgress::new(current_total);
+        progress.downloaded = start_offset;
+
+        let mut buf = [0u8; 64 * 1024];
+        let mut reader = response;
+        let mut download_error: Option<eyre::Error> = None;
+
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if let Err(e) = file.write_all(&buf[..n]) {
+                        download_error = Some(e.into());
+                        break;
+                    }
+                    let _ = progress.update(n as u64);
+                }
+                Err(e) => {
+                    download_error = Some(e.into());
+                    break;
+                }
+            }
+        }
+
+        let _ = file.flush();
+        println!();
+
+        if let Some(e) = download_error {
+            last_error = Some(e);
+            if attempt < MAX_DOWNLOAD_RETRIES {
+                info!(target: "reth::cli",
+                    "Download interrupted, retrying in {} seconds...", RETRY_BACKOFF_SECS
+                );
+                std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+            }
+            continue;
+        }
+
+        std::fs::rename(&part_path, &final_path)?;
+        info!(target: "reth::cli", "Download complete: {}", final_path.display());
+        return Ok((final_path, current_total));
+    }
+
+    Err(last_error
+        .unwrap_or_else(|| eyre::eyre!("Download failed after {} attempts", MAX_DOWNLOAD_RETRIES)))
+}
+
+/// Fetches the snapshot from a remote URL with resume support, then extracts it.
 fn download_and_extract(url: &str, format: CompressionFormat, target_dir: &Path) -> Result<()> {
-    let client = reqwest::blocking::Client::builder().build()?;
-    let response = client.get(url).send()?.error_for_status()?;
+    let (downloaded_path, total_size) = resumable_download(url, target_dir)?;
 
-    let total_size = response.content_length().ok_or_else(|| {
-        eyre::eyre!(
-            "Server did not provide Content-Length header. This is required for snapshot downloads"
-        )
-    })?;
+    info!(target: "reth::cli", "Extracting snapshot...");
+    let file = File::open(&downloaded_path)?;
+    extract_archive(file, total_size, format, target_dir)?;
 
-    extract_archive(response, total_size, format, target_dir)
+    std::fs::remove_file(&downloaded_path)?;
+    info!(target: "reth::cli", "Removed downloaded archive");
+
+    Ok(())
 }
 
 /// Downloads and extracts a snapshot, blocking until finished.
