@@ -4,7 +4,7 @@ use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{
         CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache,
-        ExecutionCacheBuilder, SavedCache,
+        FixedCacheMetrics, SavedCache,
     },
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
@@ -117,7 +117,7 @@ where
     /// Metrics for trie operations
     trie_metrics: MultiProofTaskMetrics,
     /// Cross-block cache size in bytes.
-    cross_block_cache_size: u64,
+    cross_block_cache_size: usize,
     /// Whether transactions should not be executed on prewarming task.
     disable_transaction_prewarming: bool,
     /// Whether state cache should be disable
@@ -300,7 +300,7 @@ where
             // Build a state provider for the multiproof task
             let provider = provider_builder.build().expect("failed to build provider");
             let provider = if let Some(saved_cache) = saved_cache {
-                let (cache, metrics) = saved_cache.split();
+                let (cache, metrics, _) = saved_cache.split();
                 Box::new(CachedStateProvider::new(provider, cache, metrics))
                     as Box<dyn StateProvider>
             } else {
@@ -475,8 +475,13 @@ where
             cache
         } else {
             debug!("creating new execution cache on cache miss");
-            let cache = ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
-            SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
+            let cache = crate::tree::cached_state::ExecutionCache::new(self.cross_block_cache_size);
+            SavedCache::new(
+                parent_hash,
+                cache,
+                CachedStateMetrics::zeroed(),
+                FixedCacheMetrics::zeroed(),
+            )
         }
     }
 
@@ -569,18 +574,22 @@ where
             }
 
             // Take existing cache (if any) or create fresh caches
-            let (caches, cache_metrics) = match cached.take() {
-                Some(existing) => {
-                    existing.split()
-                }
+            let (caches, cache_metrics, fixed_cache_metrics) = match cached.take() {
+                Some(existing) => existing.split(),
                 None => (
-                    ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size),
+                    crate::tree::cached_state::ExecutionCache::new(self.cross_block_cache_size),
                     CachedStateMetrics::zeroed(),
+                    FixedCacheMetrics::zeroed(),
                 ),
             };
 
             // Insert the block's bundle state into cache
-            let new_cache = SavedCache::new(block_with_parent.block.hash, caches, cache_metrics);
+            let new_cache = SavedCache::new(
+                block_with_parent.block.hash,
+                caches,
+                cache_metrics,
+                fixed_cache_metrics,
+            );
             if new_cache.cache().insert_state(bundle_state).is_err() {
                 *cached = None;
                 debug!(target: "engine::caching", "cleared execution cache on update error");
@@ -808,7 +817,10 @@ impl ExecutionCache {
                 "Existing cache found"
             );
 
-            if hash_matches && available {
+            if available {
+                if !hash_matches {
+                    c.clear();
+                }
                 return Some(c.clone());
             }
         } else {
@@ -874,7 +886,7 @@ where
 mod tests {
     use super::ExecutionCache;
     use crate::tree::{
-        cached_state::{CachedStateMetrics, ExecutionCacheBuilder, SavedCache},
+        cached_state::{CachedStateMetrics, FixedCacheMetrics, SavedCache},
         payload_processor::{
             evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
         },
@@ -904,8 +916,13 @@ mod tests {
     use std::sync::Arc;
 
     fn make_saved_cache(hash: B256) -> SavedCache {
-        let execution_cache = ExecutionCacheBuilder::default().build_caches(1_000);
-        SavedCache::new(hash, execution_cache, CachedStateMetrics::zeroed())
+        let execution_cache = crate::tree::cached_state::ExecutionCache::new(1_000);
+        SavedCache::new(
+            hash,
+            execution_cache,
+            CachedStateMetrics::zeroed(),
+            FixedCacheMetrics::zeroed(),
+        )
     }
 
     #[test]
@@ -945,14 +962,16 @@ mod tests {
     }
 
     #[test]
-    fn execution_cache_mismatch_parent_returns_none() {
+    fn execution_cache_mismatch_parent_clears_and_returns() {
         let execution_cache = ExecutionCache::default();
         let hash = B256::from([3u8; 32]);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
-        let miss = execution_cache.get_cache_for(B256::from([4u8; 32]));
-        assert!(miss.is_none(), "checkout should fail for different parent hash");
+        // When the parent hash doesn't match, the cache is cleared and returned for reuse
+        let different_hash = B256::from([4u8; 32]);
+        let cache = execution_cache.get_cache_for(different_hash);
+        assert!(cache.is_some(), "cache should be returned for reuse after clearing");
     }
 
     #[test]
