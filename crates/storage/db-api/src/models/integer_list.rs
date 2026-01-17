@@ -161,6 +161,10 @@ pub enum IntegerListError {
 impl Compress for IntegerList {
     type Compressed = Vec<u8>;
 
+    fn compressed_size(&self) -> usize {
+        self.0.serialized_size()
+    }
+
     fn compress(self) -> Self::Compressed {
         self.to_bytes()
     }
