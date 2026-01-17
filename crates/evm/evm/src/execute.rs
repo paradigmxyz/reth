@@ -670,12 +670,12 @@ impl<TxEnv, T> WithTxEnv<TxEnv, T> {
     }
 
     /// Returns a reference to the inner [`TxEnv`].
-    pub fn tx_env(&self) -> &TxEnv {
+    pub const fn tx_env(&self) -> &TxEnv {
         &self.tx_env
     }
 
     /// Returns a mutable reference to the inner [`TxEnv`].
-    pub fn tx_env_mut(&mut self) -> &mut TxEnv {
+    pub const fn tx_env_mut(&mut self) -> &mut TxEnv {
         &mut self.tx_env
     }
 }

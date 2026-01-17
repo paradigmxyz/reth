@@ -313,12 +313,12 @@ impl ReusableTxEnv {
     }
 
     /// Returns a reference to the inner [`TxEnv`].
-    pub fn as_tx_env(&self) -> &TxEnv {
+    pub const fn as_tx_env(&self) -> &TxEnv {
         &self.inner
     }
 
     /// Returns a mutable reference to the inner [`TxEnv`].
-    pub fn as_tx_env_mut(&mut self) -> &mut TxEnv {
+    pub const fn as_tx_env_mut(&mut self) -> &mut TxEnv {
         &mut self.inner
     }
 
