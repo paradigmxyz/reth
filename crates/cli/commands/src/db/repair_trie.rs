@@ -2,7 +2,12 @@ use clap::Parser;
 use metrics::{self, Counter};
 use reth_chainspec::EthChainSpec;
 use reth_cli_util::parse_socket_address;
-use reth_db_api::{database::Database, transaction::DbTx};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    database::Database,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_db_common::DbTool;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -21,6 +26,7 @@ use reth_trie::{
     verify::{Output, Verifier},
     Nibbles,
 };
+use reth_trie_common::{StorageTrieEntry, StoredNibbles, StoredNibblesSubKey};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{
     net::SocketAddr,
@@ -157,7 +163,6 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
 }
 
 /// Checks that the merkle stage has completed running up to the account and storage hashing stages.
-#[allow(dead_code)]
 fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> {
     let account_hashing_checkpoint =
         provider.get_stage_checkpoint(StageId::AccountHashing)?.unwrap_or_default();
@@ -193,21 +198,129 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
     Ok(())
 }
 
-// TODO(cursor-lifetimes): This function has a borrow conflict that needs to be resolved.
-// The code simultaneously borrows `provider_rw` mutably (for write cursors) and immutably
-// (for cursor factories used by the Verifier). With the new cursor lifetime parameters that
-// bind cursors to their parent transaction, this is correctly caught by the borrow checker.
-//
-// The fix is to restructure this into two phases:
-// 1. Collect all repairs needed using read-only iteration
-// 2. Apply the repairs using write cursors
-//
-// See: https://github.com/paradigmxyz/reth/issues/XXXX
-fn verify_and_repair<N: ProviderNodeTypes>(_tool: &DbTool<N>) -> eyre::Result<()> {
-    Err(eyre::eyre!(
-        "repair-trie command is temporarily disabled pending cursor lifetime refactoring. \
-         Use --dry-run to verify without repairing."
-    ))
+fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
+    // Get a read-write database provider for checkpoints and committing
+    let provider_rw = tool.provider_factory.provider_rw()?;
+
+    // Log the database block tip from Finish stage checkpoint
+    let finish_checkpoint = provider_rw.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
+    info!("Database block tip: {}", finish_checkpoint.block_number);
+
+    // Check that a pipeline sync isn't in progress.
+    verify_checkpoints(provider_rw.as_ref())?;
+
+    // Get the database reference for creating transactions
+    let db = tool.provider_factory.db_ref();
+
+    // Create a read-only transaction for the Verifier
+    let mut read_tx = db.tx()?;
+    read_tx.disable_long_read_transaction_safety();
+
+    // Create a read-write transaction for the write cursors
+    let write_tx = db.tx_mut()?;
+    let mut account_trie_cursor = write_tx.cursor_write::<tables::AccountsTrie>()?;
+    let mut storage_trie_cursor = write_tx.cursor_dup_write::<tables::StoragesTrie>()?;
+
+    // Create the cursor factories using the read-only transaction
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&read_tx);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&read_tx);
+
+    // Create the verifier
+    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
+
+    let metrics = RepairTrieMetrics::new();
+
+    let mut inconsistent_nodes = 0;
+    let start_time = Instant::now();
+    let mut last_progress_time = Instant::now();
+
+    // Iterate over the verifier and repair inconsistencies
+    for output_result in verifier {
+        let output = output_result?;
+
+        if !matches!(output, Output::Progress(_)) {
+            warn!("Inconsistency found, will repair: {output:?}");
+            inconsistent_nodes += 1;
+
+            // Record metrics based on output type
+            match &output {
+                Output::AccountExtra(_, _) |
+                Output::AccountWrong { .. } |
+                Output::AccountMissing(_, _) => {
+                    metrics.account_inconsistencies.increment(1);
+                }
+                Output::StorageExtra(_, _, _) |
+                Output::StorageWrong { .. } |
+                Output::StorageMissing(_, _, _) => {
+                    metrics.storage_inconsistencies.increment(1);
+                }
+                Output::Progress(_) => {}
+            }
+        }
+
+        match output {
+            Output::AccountExtra(path, _node) => {
+                // Extra account node in trie, remove it
+                let nibbles = StoredNibbles(path);
+                if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                    account_trie_cursor.delete_current()?;
+                }
+            }
+            Output::StorageExtra(account, path, _node) => {
+                // Extra storage node in trie, remove it
+                let nibbles = StoredNibblesSubKey(path);
+                if storage_trie_cursor
+                    .seek_by_key_subkey(account, nibbles.clone())?
+                    .filter(|e| e.nibbles == nibbles)
+                    .is_some()
+                {
+                    storage_trie_cursor.delete_current()?;
+                }
+            }
+            Output::AccountWrong { path, expected: node, .. } |
+            Output::AccountMissing(path, node) => {
+                // Wrong/missing account node value, upsert it
+                let nibbles = StoredNibbles(path);
+                account_trie_cursor.upsert(nibbles, &node)?;
+            }
+            Output::StorageWrong { account, path, expected: node, .. } |
+            Output::StorageMissing(account, path, node) => {
+                // Wrong/missing storage node value, upsert it
+                // (We can't just use `upsert` method with a dup cursor, it's not properly
+                // supported)
+                let nibbles = StoredNibblesSubKey(path);
+                let entry = StorageTrieEntry { nibbles: nibbles.clone(), node };
+                if storage_trie_cursor
+                    .seek_by_key_subkey(account, nibbles.clone())?
+                    .filter(|v| v.nibbles == nibbles)
+                    .is_some()
+                {
+                    storage_trie_cursor.delete_current()?;
+                }
+                storage_trie_cursor.upsert(account, &entry)?;
+            }
+            Output::Progress(path) => {
+                if last_progress_time.elapsed() > PROGRESS_PERIOD {
+                    output_progress(path, start_time, inconsistent_nodes);
+                    last_progress_time = Instant::now();
+                }
+            }
+        }
+    }
+
+    // Drop read transaction and cursors before committing
+    drop(account_trie_cursor);
+    drop(storage_trie_cursor);
+    drop(read_tx);
+
+    if inconsistent_nodes == 0 {
+        info!("No inconsistencies found");
+    } else {
+        write_tx.commit()?;
+        info!("Repaired {} inconsistencies and committed changes", inconsistent_nodes);
+    }
+
+    Ok(())
 }
 
 /// Output progress information based on the last seen account path.
