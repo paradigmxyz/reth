@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
 };
 mod account_storage;
-mod checksum;
+pub mod checksum;
 mod clear;
 mod diff;
 mod get;
