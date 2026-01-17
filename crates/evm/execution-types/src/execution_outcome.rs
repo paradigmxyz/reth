@@ -249,19 +249,6 @@ impl<T> ExecutionOutcome<T> {
         &self.receipts[index]
     }
 
-    /// Returns receipts by index (0-indexed from `first_block`).
-    ///
-    /// This is useful when iterating over blocks and receipts in parallel,
-    /// as it avoids the need to compute block numbers.
-    pub fn receipts_by_index(&self, index: usize) -> Option<&[T]> {
-        self.receipts.get(index).map(|v| v.as_slice())
-    }
-
-    /// Returns the block number for a given index (0-indexed from `first_block`).
-    pub const fn block_number_at_index(&self, index: usize) -> BlockNumber {
-        self.first_block + index as u64
-    }
-
     /// Returns an iterator over receipt slices, one per block.
     ///
     /// This is a more ergonomic alternative to `receipts()` that yields slices
