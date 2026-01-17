@@ -32,6 +32,9 @@ pub use blockchain_provider::BlockchainProvider;
 mod consistent;
 pub use consistent::ConsistentProvider;
 
+mod sort;
+pub(crate) use sort::KMergeIter;
+
 // RocksDB currently only supported on Unix platforms
 // Windows support is planned for future releases
 #[cfg_attr(all(unix, feature = "rocksdb"), path = "rocksdb/mod.rs")]

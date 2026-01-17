@@ -4,7 +4,7 @@ use crate::{
         database::{chain::ChainStorage, metrics},
         rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
         static_file::{StaticFileWriteCtx, StaticFileWriter},
-        NodeTypesForProvider, StaticFileProvider,
+        KMergeIter, NodeTypesForProvider, StaticFileProvider,
     },
     to_range,
     traits::{
@@ -28,7 +28,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, HashMap, HashSet},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -67,7 +67,8 @@ use reth_trie::{
     changesets::storage_trie_wiped_changeset_iter,
     trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorIter, TrieStorageCursor},
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    HashedPostStateSorted, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
+    HashedPostStateSorted, HashedStorageSorted, StoredNibbles, StoredNibblesSubKey,
+    TrieChangeSetsEntry,
 };
 use reth_trie_db::{ChangesetCache, DatabaseAccountTrieCursor, DatabaseStorageTrieCursor};
 use revm_database::states::{
@@ -162,6 +163,26 @@ impl SaveBlocksMode {
     pub const fn with_state(self) -> bool {
         matches!(self, Self::Full)
     }
+}
+
+/// Pre-computed hashed state writes ready for cursor operations.
+/// All k-merge logic is done upfront so the writer just loops and calls cursor ops.
+struct PreparedHashedStateWrites<'a> {
+    /// Accounts: (key, Some(account)) to upsert, (key, None) to delete.
+    /// Sorted by key in ascending order.
+    accounts: Vec<(&'a B256, &'a Option<Account>)>,
+    /// Storages grouped by address, sorted by address in ascending order.
+    storages: Vec<PreparedStorageWrites<'a>>,
+}
+
+/// Pre-computed storage writes for a single address.
+struct PreparedStorageWrites<'a> {
+    address: &'a B256,
+    /// If true, delete all existing slots for this address before inserting.
+    wipe_first: bool,
+    /// Slots: (slot_key, value) - sorted by slot_key.
+    /// Zero value means delete the slot.
+    slots: Vec<(&'a B256, &'a U256)>,
 }
 
 /// A provider struct that fetches data from the database.
@@ -467,6 +488,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
 
+        // Extract hashed states upfront so we can start sorting storages in parallel
+        let hashed_states: Vec<Arc<HashedPostStateSorted>> = if save_mode.with_state() {
+            blocks.iter().map(|b| Arc::clone(&b.trie_data().hashed_state)).collect()
+        } else {
+            Vec::new()
+        };
+
         thread::scope(|s| {
             // SF writes
             let sf_handle = s.spawn(|| {
@@ -484,6 +512,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     Ok::<_, ProviderError>(start.elapsed())
                 })
             });
+
+            // Prepare all hashed state writes in background - runs in parallel with block writes
+            let hashed_prep_handle = (hashed_states.len() > 1)
+                .then(|| s.spawn(|| Self::prepare_hashed_state_writes(&hashed_states)));
 
             // MDBX writes
             let mdbx_start = Instant::now();
@@ -548,13 +580,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                         },
                     )?;
                     timings.write_state += start.elapsed();
-
-                    let trie_data = block.trie_data();
-
-                    // insert hashes and intermediate merkle nodes
-                    let start = Instant::now();
-                    self.write_hashed_state(&trie_data.hashed_state)?;
-                    timings.write_hashed_state += start.elapsed();
                 }
             }
 
@@ -614,6 +639,18 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let start = Instant::now();
             self.update_pipeline_stages(last_block_number, false)?;
             timings.update_pipeline_stages = start.elapsed();
+
+            // Write hashed state last - this is the final DB write
+            let start = Instant::now();
+            if hashed_states.len() == 1 {
+                self.write_hashed_state(&hashed_states[0])?;
+            } else if hashed_states.len() > 1 {
+                // Get fully prepared writes from background thread
+                let prepared =
+                    hashed_prep_handle.unwrap().join().expect("hashed state prep thread panicked");
+                self.write_prepared_hashed_state(prepared)?;
+            }
+            timings.write_hashed_state = start.elapsed();
 
             timings.mdbx = mdbx_start.elapsed();
 
@@ -772,6 +809,198 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             self.static_file_provider
                 .latest_writer(StaticFileSegment::Receipts)?
                 .prune_receipts(to_delete, last_block)?;
+        }
+
+        Ok(())
+    }
+
+    /// Prepares all hashed state writes by running k-merge and collecting results.
+    /// This does all CPU work upfront so the writer just loops and calls cursor ops.
+    fn prepare_hashed_state_writes(
+        hashed_states: &[Arc<HashedPostStateSorted>],
+    ) -> PreparedHashedStateWrites<'_> {
+        // Merge accounts using k-merge - just collect references
+        let accounts: Vec<(&B256, &Option<Account>)> = {
+            let sources = hashed_states
+                .iter()
+                .enumerate()
+                .map(|(block_idx, state)| (block_idx, state.accounts().iter()));
+            KMergeIter::new(sources).collect()
+        };
+
+        // Collect and sort storages by address
+        let mut all_storages: Vec<(&B256, usize, &HashedStorageSorted)> = hashed_states
+            .iter()
+            .enumerate()
+            .flat_map(|(block_idx, state)| {
+                state
+                    .account_storages()
+                    .iter()
+                    .map(move |(addr, storage)| (addr, block_idx, storage))
+            })
+            .collect();
+        all_storages.sort_unstable_by(|a, b| a.0.cmp(b.0));
+
+        // Process each address's storages
+        let mut storages = Vec::new();
+        let mut i = 0;
+        while i < all_storages.len() {
+            let address = all_storages[i].0;
+
+            let start = i;
+            while i < all_storages.len() && all_storages[i].0 == address {
+                i += 1;
+            }
+            let addr_storages = &all_storages[start..i];
+
+            // Find latest wipe block
+            let wipe_block = addr_storages
+                .iter()
+                .filter(|(_, _, storage)| storage.is_wiped())
+                .map(|(_, block_idx, _)| *block_idx)
+                .max();
+
+            // Merge slots from blocks >= wipe_block using k-merge - just collect references
+            let sources = addr_storages
+                .iter()
+                .filter(|(_, block_idx, _)| wipe_block.is_none_or(|w| *block_idx >= w))
+                .map(|(_, block_idx, storage)| (*block_idx, storage.storage_slots_ref().iter()));
+
+            let slots: Vec<(&B256, &U256)> = KMergeIter::<U256, _>::new(sources).collect();
+
+            storages.push(PreparedStorageWrites {
+                address,
+                wipe_first: wipe_block.is_some(),
+                slots,
+            });
+        }
+
+        PreparedHashedStateWrites { accounts, storages }
+    }
+
+    /// Writes pre-computed hashed state. Just loops and calls cursor ops.
+    fn write_prepared_hashed_state(
+        &self,
+        prepared: PreparedHashedStateWrites<'_>,
+    ) -> ProviderResult<()> {
+        // Write accounts
+        let mut account_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+        for (key, value) in prepared.accounts {
+            match value {
+                Some(account) => account_cursor.upsert(*key, account)?,
+                None => {
+                    if account_cursor.seek_exact(*key)?.is_some() {
+                        account_cursor.delete_current()?;
+                    }
+                }
+            }
+        }
+
+        // Write storages
+        let mut storage_cursor = self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+        for storage in prepared.storages {
+            if storage.wipe_first && storage_cursor.seek_exact(*storage.address)?.is_some() {
+                storage_cursor.delete_current_duplicates()?;
+            }
+            for (slot_key, value) in storage.slots {
+                if storage_cursor
+                    .seek_by_key_subkey(*storage.address, *slot_key)?
+                    .is_some_and(|e| e.key == *slot_key)
+                {
+                    storage_cursor.delete_current()?;
+                }
+                if !value.is_zero() {
+                    storage_cursor.upsert(
+                        *storage.address,
+                        &StorageEntry { key: *slot_key, value: *value },
+                    )?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Write receipts for a single block's execution outcome.
+    ///
+    /// This is used by `save_blocks` to write receipts per-block while batching other state writes.
+    pub fn write_receipts(
+        &self,
+        execution_outcome: &ExecutionOutcome<ReceiptTy<N>>,
+        config: StateWriteConfig,
+    ) -> ProviderResult<()> {
+        if !config.write_receipts {
+            return Ok(());
+        }
+
+        let first_block = execution_outcome.first_block();
+        let block_count = execution_outcome.len() as u64;
+        let last_block = execution_outcome.last_block();
+        let block_range = first_block..=last_block;
+
+        let tip = self.last_block_number()?.max(last_block);
+
+        // Fetch the first transaction number for each block in the range
+        let block_indices: Vec<_> = self
+            .block_body_indices_range(block_range)?
+            .into_iter()
+            .map(|b| b.first_tx_num)
+            .collect();
+
+        // Ensure all expected blocks are present.
+        if block_indices.len() < block_count as usize {
+            let missing_blocks = block_count - block_indices.len() as u64;
+            return Err(ProviderError::BlockBodyIndicesNotFound(
+                last_block.saturating_sub(missing_blocks - 1),
+            ));
+        }
+
+        let mut receipts_writer = EitherWriter::new_receipts(self, first_block)?;
+
+        let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
+        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
+
+        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database() ||
+            self.static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_none()) &&
+            PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
+
+        let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
+        for (_, addresses) in contract_log_pruner.range(..first_block) {
+            allowed_addresses.extend(addresses.iter().copied());
+        }
+
+        for (idx, (receipts, first_tx_index)) in
+            execution_outcome.receipts.iter().zip(block_indices).enumerate()
+        {
+            let block_number = first_block + idx as u64;
+
+            receipts_writer.increment_block(block_number)?;
+
+            if prunable_receipts &&
+                self.prune_modes
+                    .receipts
+                    .is_some_and(|mode| mode.should_prune(block_number, tip))
+            {
+                continue;
+            }
+
+            if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
+                allowed_addresses.extend(new_addresses.iter().copied());
+            }
+
+            for (idx, receipt) in receipts.iter().enumerate() {
+                let receipt_idx = first_tx_index + idx as u64;
+                if prunable_receipts &&
+                    has_contract_log_filter &&
+                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                {
+                    continue;
+                }
+
+                receipts_writer.append_receipt(receipt_idx, receipt)?;
+            }
         }
 
         Ok(())
