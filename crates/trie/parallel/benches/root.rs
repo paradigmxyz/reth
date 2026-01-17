@@ -5,16 +5,15 @@ use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
 use reth_primitives_traits::Account;
 use reth_provider::{
-    providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory, StateWriter,
-    TrieWriter,
+    providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
+    DatabaseProviderROFactory, StateWriter, TrieWriter,
 };
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
-    TrieInput,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
+use reth_trie_db::{ChangesetCache, DatabaseHashedCursorFactory, DatabaseStateRoot};
 use reth_trie_parallel::root::ParallelStateRoot;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 pub fn calculate_state_root(c: &mut Criterion) {
     let mut group = c.benchmark_group("Calculate State Root");
@@ -38,8 +37,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
             provider_rw.commit().unwrap();
         }
 
-        let changeset_cache = reth_trie_db::ChangesetCache::new();
-        let factory = OverlayStateProviderFactory::new(provider_factory.clone(), changeset_cache);
+        let changeset_cache = ChangesetCache::new();
 
         // state root
         group.bench_function(BenchmarkId::new("sync root", size), |b| {
@@ -67,8 +65,15 @@ pub fn calculate_state_root(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("parallel root", size), |b| {
             b.iter_with_setup(
                 || {
-                    let trie_input = TrieInput::from_state(updated_state.clone());
-                    ParallelStateRoot::new(factory.clone(), trie_input.prefix_sets.freeze())
+                    let prefix_sets = updated_state.construct_prefix_sets().freeze();
+                    let sorted_state = Arc::new(updated_state.clone().into_sorted());
+                    let factory = OverlayStateProviderFactory::new(
+                        provider_factory.clone(),
+                        changeset_cache.clone(),
+                    )
+                    .with_hashed_state_overlay(Some(sorted_state));
+                    let overlay_provider = factory.database_provider_ro().unwrap();
+                    ParallelStateRoot::new(overlay_provider, prefix_sets)
                 },
                 |calculator| calculator.incremental_root(),
             );

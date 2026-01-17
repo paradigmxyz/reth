@@ -30,8 +30,7 @@ use reth_evm::{
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProvider,
-    StateProviderFactory, StateReader,
+    BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
@@ -218,21 +217,18 @@ where
         name = "payload processor",
         skip_all
     )]
-    pub fn spawn<P, F, I: ExecutableTxIterator<Evm>>(
+    pub fn spawn<P, Prov, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
-        multiproof_provider_factory: F,
+        multiproof_provider: Prov,
         config: &TreeConfig,
         bal: Option<Arc<BlockAccessList>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-            + Clone
-            + Send
-            + 'static,
+        Prov: TrieCursorFactory + HashedCursorFactory + Clone + Send + 'static,
     {
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx, transaction_count_hint) =
@@ -272,7 +268,7 @@ where
         };
 
         // Create and spawn the storage proof task
-        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
+        let task_ctx = ProofTaskCtx::new(multiproof_provider);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
         let v2_proofs_enabled = config.enable_proof_v2();
@@ -893,7 +889,7 @@ mod tests {
     use reth_provider::{
         providers::{BlockchainProvider, OverlayStateProviderFactory},
         test_utils::create_test_provider_factory_with_chain_spec,
-        ChainSpecProvider, HashingWriter,
+        ChainSpecProvider, DatabaseProviderROFactory, HashingWriter,
     };
     use reth_revm::db::BundleState;
     use reth_testing_utils::generators;
@@ -1148,6 +1144,9 @@ mod tests {
         );
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();
+        let overlay_factory =
+            OverlayStateProviderFactory::new(provider_factory.clone(), ChangesetCache::new());
+        let overlay_provider = overlay_factory.database_provider_ro().unwrap();
 
         let mut handle = payload_processor.spawn(
             Default::default(),
@@ -1155,8 +1154,8 @@ mod tests {
                 Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
                 std::convert::identity,
             ),
-            StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-            OverlayStateProviderFactory::new(provider_factory, ChangesetCache::new()),
+            StateProviderBuilder::new(provider_factory, genesis_hash, None),
+            overlay_provider,
             &TreeConfig::default(),
             None, // No BAL for test
         );

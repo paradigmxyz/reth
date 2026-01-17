@@ -216,6 +216,24 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 }
 
+impl<TX: Clone, N: NodeTypes> Clone for DatabaseProvider<TX, N> {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            chain_spec: self.chain_spec.clone(),
+            static_file_provider: self.static_file_provider.clone(),
+            prune_modes: self.prune_modes.clone(),
+            storage: self.storage.clone(),
+            storage_settings: self.storage_settings.clone(),
+            rocksdb_provider: self.rocksdb_provider.clone(),
+            changeset_cache: self.changeset_cache.clone(),
+            pending_rocksdb_batches: self.pending_rocksdb_batches.clone(),
+            minimum_pruning_distance: self.minimum_pruning_distance,
+            metrics: self.metrics.clone(),
+        }
+    }
+}
+
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// State provider for latest state
     pub fn latest<'a>(&'a self) -> Box<dyn StateProvider + 'a> {

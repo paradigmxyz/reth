@@ -42,6 +42,16 @@ pub struct Tx<K: TransactionKind> {
     metrics_handler: Option<MetricsHandler<K>>,
 }
 
+impl<K: TransactionKind> Clone for Tx<K> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            dbis: self.dbis.clone(),
+            metrics_handler: self.metrics_handler.clone(),
+        }
+    }
+}
+
 impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
     #[inline]
@@ -191,6 +201,24 @@ struct MetricsHandler<K: TransactionKind> {
     #[cfg(debug_assertions)]
     open_backtrace: Backtrace,
     _marker: PhantomData<K>,
+}
+
+impl<K: TransactionKind> Clone for MetricsHandler<K> {
+    fn clone(&self) -> Self {
+        Self {
+            txn_id: self.txn_id,
+            start: self.start,
+            long_transaction_duration: self.long_transaction_duration,
+            // Mark clones as already having their close recorded to avoid double-counting
+            close_recorded: true,
+            record_backtrace: self.record_backtrace,
+            backtrace_recorded: AtomicBool::new(self.backtrace_recorded.load(Ordering::Relaxed)),
+            env_metrics: self.env_metrics.clone(),
+            #[cfg(debug_assertions)]
+            open_backtrace: Backtrace::disabled(),
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<K: TransactionKind> MetricsHandler<K> {

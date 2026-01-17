@@ -1322,8 +1322,9 @@ mod tests {
     use alloy_primitives::Address;
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
-        BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
-        PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
+        BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+        DatabaseProviderROFactory, LatestStateProvider, PruneCheckpointReader,
+        StageCheckpointReader, StateProviderBox,
     };
     use reth_trie::MultiProof;
     use reth_trie_db::ChangesetCache;
@@ -1350,7 +1351,8 @@ mod tests {
                               + StageCheckpointReader
                               + PruneCheckpointReader
                               + ChangeSetReader
-                              + BlockNumReader,
+                              + BlockNumReader
+                              + Clone,
             > + Clone
             + Send
             + 'static,
@@ -1358,7 +1360,8 @@ mod tests {
         let rt_handle = get_test_runtime_handle();
         let changeset_cache = ChangesetCache::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
-        let task_ctx = ProofTaskCtx::new(overlay_factory);
+        let overlay_provider = overlay_factory.database_provider_ro().unwrap();
+        let task_ctx = ProofTaskCtx::new(overlay_provider);
         let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();

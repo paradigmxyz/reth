@@ -27,6 +27,21 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument};
 
+/// Helper to extend an `Option<Arc<HashedPostStateSorted>>` with additional state.
+///
+/// If `existing` is `Some`, extends it in place (using `Arc::make_mut` for COW semantics).
+/// If `existing` is `None`, wraps `other` in a new `Arc`.
+fn extend_hashed_state_overlay(
+    existing: &mut Option<Arc<HashedPostStateSorted>>,
+    other: HashedPostStateSorted,
+) {
+    if let Some(overlay) = existing.as_mut() {
+        Arc::make_mut(overlay).extend_ref(&other);
+    } else {
+        *existing = Some(Arc::new(other));
+    }
+}
+
 /// Metrics for overlay state provider operations.
 #[derive(Clone, Metrics)]
 #[metrics(scope = "storage.providers.overlay")]
@@ -470,7 +485,7 @@ where
 /// This provider uses in-memory trie updates and hashed post state as an overlay
 /// on top of a database provider, implementing [`TrieCursorFactory`] and [`HashedCursorFactory`]
 /// using the in-memory overlay factories.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OverlayStateProvider<Provider: DBProvider> {
     provider: Provider,
     trie_updates: Arc<TrieUpdatesSorted>,
@@ -489,6 +504,16 @@ where
         hashed_post_state: Arc<HashedPostStateSorted>,
     ) -> Self {
         Self { provider, trie_updates, hashed_post_state }
+    }
+
+    /// Extends the existing hashed state overlay with the given [`HashedPostStateSorted`].
+    ///
+    /// Returns a new `OverlayStateProvider` with the extended hashed post state.
+    pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
+        let mut overlay = Some(self.hashed_post_state);
+        extend_hashed_state_overlay(&mut overlay, other);
+        self.hashed_post_state = overlay.expect("extend always produces Some");
+        self
     }
 }
 
