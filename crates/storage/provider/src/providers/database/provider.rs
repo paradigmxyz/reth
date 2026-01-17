@@ -165,6 +165,26 @@ impl SaveBlocksMode {
     }
 }
 
+/// Pre-computed hashed state writes ready for cursor operations.
+/// All k-merge logic is done upfront so the writer just loops and calls cursor ops.
+struct PreparedHashedStateWrites<'a> {
+    /// Accounts: (key, Some(account)) to upsert, (key, None) to delete.
+    /// Sorted by key in ascending order.
+    accounts: Vec<(&'a B256, &'a Option<Account>)>,
+    /// Storages grouped by address, sorted by address in ascending order.
+    storages: Vec<PreparedStorageWrites<'a>>,
+}
+
+/// Pre-computed storage writes for a single address.
+struct PreparedStorageWrites<'a> {
+    address: &'a B256,
+    /// If true, delete all existing slots for this address before inserting.
+    wipe_first: bool,
+    /// Slots: (slot_key, value) - sorted by slot_key.
+    /// Zero value means delete the slot.
+    slots: Vec<(&'a B256, &'a U256)>,
+}
+
 /// A provider struct that fetches data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashReader`]
 pub struct DatabaseProvider<TX, N: NodeTypes> {
@@ -468,6 +488,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
 
+        // Extract hashed states upfront so we can start sorting storages in parallel
+        let hashed_states: Vec<Arc<HashedPostStateSorted>> = if save_mode.with_state() {
+            blocks.iter().map(|b| Arc::clone(&b.trie_data().hashed_state)).collect()
+        } else {
+            Vec::new()
+        };
+
         thread::scope(|s| {
             // SF writes
             let sf_handle = s.spawn(|| {
@@ -484,6 +511,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)?;
                     Ok::<_, ProviderError>(start.elapsed())
                 })
+            });
+
+            // Prepare all hashed state writes in background - runs in parallel with block writes
+            let hashed_prep_handle = (hashed_states.len() > 1).then(|| {
+                s.spawn(|| Self::prepare_hashed_state_writes(&hashed_states))
             });
 
             // MDBX writes
@@ -523,9 +555,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
-            let mut hashed_states: Vec<Arc<HashedPostStateSorted>> =
-                Vec::with_capacity(blocks.len());
-
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
@@ -555,25 +584,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                     let trie_data = block.trie_data();
 
-                    // collect hashed state reference for batched write later
-                    hashed_states.push(Arc::clone(&trie_data.hashed_state));
-
                     let start = Instant::now();
                     self.write_trie_updates_sorted(&trie_data.trie_updates)?;
                     timings.write_trie_updates += start.elapsed();
                 }
             }
-
-            let start = Instant::now();
-            if !hashed_states.is_empty() {
-                if hashed_states.len() == 1 {
-                    self.write_hashed_state(&hashed_states[0])?;
-                } else {
-                    self.write_hashed_state_merged(&hashed_states)?;
-                }
-            }
-
-            timings.write_hashed_state = start.elapsed();
 
             // Full mode: update history indices
             if save_mode.with_state() {
@@ -586,6 +601,18 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let start = Instant::now();
             self.update_pipeline_stages(last_block_number, false)?;
             timings.update_pipeline_stages = start.elapsed();
+
+            // Write hashed state last - this is the final DB write
+            let start = Instant::now();
+            if hashed_states.len() == 1 {
+                self.write_hashed_state(&hashed_states[0])?;
+            } else if hashed_states.len() > 1 {
+                // Get fully prepared writes from background thread
+                let prepared =
+                    hashed_prep_handle.unwrap().join().expect("hashed state prep thread panicked");
+                self.write_prepared_hashed_state(prepared)?;
+            }
+            timings.write_hashed_state = start.elapsed();
 
             timings.mdbx = mdbx_start.elapsed();
 
@@ -749,43 +776,21 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(())
     }
 
-    /// Writes hashed state from multiple blocks using k-way merge for sequential I/O.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
-    pub fn write_hashed_state_merged(
-        &self,
+    /// Prepares all hashed state writes by running k-merge and collecting results.
+    /// This does all CPU work upfront so the writer just loops and calls cursor ops.
+    fn prepare_hashed_state_writes(
         hashed_states: &[Arc<HashedPostStateSorted>],
-    ) -> ProviderResult<()> {
-        self.write_hashed_accounts_merged(hashed_states)?;
-        self.write_hashed_storages_merged(hashed_states)
-    }
+    ) -> PreparedHashedStateWrites<'_> {
+        // Merge accounts using k-merge - just collect references
+        let accounts: Vec<(&B256, &Option<Account>)> = {
+            let sources = hashed_states
+                .iter()
+                .enumerate()
+                .map(|(block_idx, state)| (block_idx, state.accounts().iter()));
+            KMergeIter::new(sources).collect()
+        };
 
-    /// Writes hashed accounts using k-way merge for sequential B-tree insertion.
-    fn write_hashed_accounts_merged(
-        &self,
-        hashed_states: &[Arc<HashedPostStateSorted>],
-    ) -> ProviderResult<()> {
-        let sources =
-            hashed_states.iter().enumerate().map(|(block_idx, state)| (block_idx, state.accounts().iter()));
-
-        let mut cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-
-        for (key, value) in KMergeIter::new(sources) {
-            match value {
-                Some(account) => cursor.upsert(*key, account)?,
-                None => {
-                    if cursor.seek_exact(*key)?.is_some() {
-                        cursor.delete_current()?;
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn write_hashed_storages_merged(
-        &self,
-        hashed_states: &[Arc<HashedPostStateSorted>],
-    ) -> ProviderResult<()> {
+        // Collect and sort storages by address
         let mut all_storages: Vec<(&B256, usize, &HashedStorageSorted)> = hashed_states
             .iter()
             .enumerate()
@@ -798,8 +803,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             .collect();
         all_storages.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
-        let mut cursor = self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-
+        // Process each address's storages
+        let mut storages = Vec::new();
         let mut i = 0;
         while i < all_storages.len() {
             let address = all_storages[i].0;
@@ -810,33 +815,66 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             }
             let addr_storages = &all_storages[start..i];
 
+            // Find latest wipe block
             let wipe_block = addr_storages
                 .iter()
                 .filter(|(_, _, storage)| storage.is_wiped())
                 .map(|(_, block_idx, _)| *block_idx)
                 .max();
 
-            if wipe_block.is_some() && cursor.seek_exact(*address)?.is_some() {
-                cursor.delete_current_duplicates()?;
-            }
-
+            // Merge slots from blocks >= wipe_block using k-merge - just collect references
             let sources = addr_storages
                 .iter()
                 .filter(|(_, block_idx, _)| wipe_block.is_none_or(|w| *block_idx >= w))
                 .map(|(_, block_idx, storage)| (*block_idx, storage.storage_slots_ref().iter()));
 
-            for (slot_key, value) in KMergeIter::<U256, _>::new(sources) {
-                if cursor
-                    .seek_by_key_subkey(*address, *slot_key)?
-                    .is_some_and(|e| e.key == *slot_key)
-                {
-                    cursor.delete_current()?;
-                }
-                if !value.is_zero() {
-                    cursor.upsert(*address, &StorageEntry { key: *slot_key, value: *value })?;
+            let slots: Vec<(&B256, &U256)> = KMergeIter::<U256, _>::new(sources).collect();
+
+            storages
+                .push(PreparedStorageWrites { address, wipe_first: wipe_block.is_some(), slots });
+        }
+
+        PreparedHashedStateWrites { accounts, storages }
+    }
+
+    /// Writes pre-computed hashed state. Just loops and calls cursor ops.
+    fn write_prepared_hashed_state(
+        &self,
+        prepared: PreparedHashedStateWrites<'_>,
+    ) -> ProviderResult<()> {
+        // Write accounts
+        let mut account_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+        for (key, value) in prepared.accounts {
+            match value {
+                Some(account) => account_cursor.upsert(*key, account)?,
+                None => {
+                    if account_cursor.seek_exact(*key)?.is_some() {
+                        account_cursor.delete_current()?;
+                    }
                 }
             }
         }
+
+        // Write storages
+        let mut storage_cursor = self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+        for storage in prepared.storages {
+            if storage.wipe_first && storage_cursor.seek_exact(*storage.address)?.is_some() {
+                storage_cursor.delete_current_duplicates()?;
+            }
+            for (slot_key, value) in storage.slots {
+                if storage_cursor
+                    .seek_by_key_subkey(*storage.address, *slot_key)?
+                    .is_some_and(|e| e.key == *slot_key)
+                {
+                    storage_cursor.delete_current()?;
+                }
+                if !value.is_zero() {
+                    storage_cursor
+                        .upsert(*storage.address, &StorageEntry { key: *slot_key, value: *value })?;
+                }
+            }
+        }
+
         Ok(())
     }
 
