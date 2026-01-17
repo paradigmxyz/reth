@@ -53,9 +53,11 @@ impl TrieInput {
     ) -> Self {
         let mut input = Self::default();
         for (hashed_state, trie_updates) in blocks {
-            // Extend directly from sorted types, avoiding intermediate HashMap allocations
             input.nodes.extend_from_sorted(trie_updates);
             input.state.extend_from_sorted(hashed_state);
+            if trie_updates.is_empty() {
+                input.prefix_sets.extend(hashed_state.construct_prefix_sets());
+            }
         }
         input
     }
@@ -66,7 +68,11 @@ impl TrieInput {
         blocks: impl IntoIterator<Item = (&'a HashedPostState, &'a TrieUpdates)>,
     ) {
         for (hashed_state, trie_updates) in blocks {
-            self.append_cached_ref(trie_updates, hashed_state);
+            if trie_updates.is_empty() {
+                self.append_ref(hashed_state);
+            } else {
+                self.append_cached_ref(trie_updates, hashed_state);
+            }
         }
     }
 
