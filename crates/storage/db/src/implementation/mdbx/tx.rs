@@ -1,6 +1,6 @@
 //! Transaction wrapper for libmdbx-sys.
 
-use super::{cursor::Cursor, utils::*};
+use super::{cursor::Cursor, cursor_cache::CursorCache, utils::*};
 use crate::{
     metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
     DatabaseError,
@@ -40,6 +40,10 @@ pub struct Tx<K: TransactionKind> {
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
+
+    /// Cache for reusing cursors across operations.
+    /// Must be declared after `inner` to ensure cursors are closed before the transaction.
+    cursor_cache: CursorCache,
 }
 
 impl<K: TransactionKind> Tx<K> {
@@ -59,7 +63,7 @@ impl<K: TransactionKind> Tx<K> {
                 Ok(handler)
             })
             .transpose()?;
-        Ok(Self { inner, dbis, metrics_handler })
+        Ok(Self { inner, dbis, metrics_handler, cursor_cache: CursorCache::new() })
     }
 
     /// Gets this transaction ID.
@@ -86,7 +90,7 @@ impl<K: TransactionKind> Tx<K> {
         self.get_dbi_raw(T::NAME)
     }
 
-    /// Create db Cursor
+    /// Create db Cursor without caching (cursor will be closed on drop).
     pub fn new_cursor<T: Table>(&self) -> Result<Cursor<'_, K, T>, DatabaseError> {
         let inner = self
             .inner
@@ -96,6 +100,31 @@ impl<K: TransactionKind> Tx<K> {
         Ok(Cursor::new_with_metrics(
             inner,
             self.metrics_handler.as_ref().map(|h| h.env_metrics.clone()),
+        ))
+    }
+
+    /// Create db Cursor with caching (cursor will be returned to cache on drop).
+    ///
+    /// If a cursor for this table is already in the cache, it will be reused.
+    /// Otherwise, a new cursor is created. Either way, when the returned cursor
+    /// is dropped, it will be stored in the cache for future reuse.
+    pub fn new_cursor_cached<T: Table>(&self) -> Result<Cursor<'_, K, T>, DatabaseError> {
+        // Try to get a cached cursor
+        let inner = if let Some(raw_cursor) = self.cursor_cache.take(T::INDEX) {
+            // SAFETY: The raw cursor was created for this transaction and the
+            // transaction is still alive (we have &self).
+            unsafe { reth_libmdbx::Cursor::from_raw(&self.inner, raw_cursor) }
+        } else {
+            // Create a new cursor
+            self.inner
+                .cursor_with_dbi(self.get_dbi::<T>()?)
+                .map_err(|e| DatabaseError::InitCursor(e.into()))?
+        };
+
+        Ok(Cursor::new_with_cache(
+            inner,
+            self.metrics_handler.as_ref().map(|h| h.env_metrics.clone()),
+            &self.cursor_cache,
         ))
     }
 
@@ -325,12 +354,12 @@ impl<K: TransactionKind> DbTx for Tx<K> {
 
     // Iterate over read only values in database.
     fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<'_, T>, DatabaseError> {
-        self.new_cursor()
+        self.new_cursor_cached()
     }
 
     /// Iterate over read only values in database.
     fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<'_, T>, DatabaseError> {
-        self.new_cursor()
+        self.new_cursor_cached()
     }
 
     /// Returns number of entries in the table using cheap DB stats invocation.
@@ -444,11 +473,11 @@ impl DbTxMut for Tx<RW> {
     }
 
     fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<'_, T>, DatabaseError> {
-        self.new_cursor()
+        self.new_cursor_cached()
     }
 
     fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<'_, T>, DatabaseError> {
-        self.new_cursor()
+        self.new_cursor_cached()
     }
 }
 

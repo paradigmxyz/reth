@@ -126,6 +126,8 @@ macro_rules! tables {
         concat!("`", stringify!($value), "`")
     };
 
+
+
     ($($(#[$attr:meta])* table $name:ident$(<$($generic:ident $(= $default:ty)?),*>)? { type Key = $key:ty; type Value = $value:ty; $(type SubKey = $subkey:ty;)? } )*) => {
         // Table marker types.
         $(
@@ -154,6 +156,7 @@ macro_rules! tables {
             {
                 const NAME: &'static str = table_names::$name;
                 const DUPSORT: bool = tables!(@bool $($subkey)?);
+                const INDEX: usize = Tables::$name.index();
 
                 type Key = $key;
                 type Value = $value;
@@ -183,6 +186,30 @@ macro_rules! tables {
 
             /// The number of tables in the database.
             pub const COUNT: usize = Self::ALL.len();
+
+            /// Returns the unique index of this table (0..COUNT).
+            ///
+            /// This is used for O(1) cursor cache slot access.
+            ///
+            /// # Stability
+            ///
+            /// **This index is NOT stable across versions.** It is based on declaration
+            /// order in the `tables!` macro and may change when tables are added, removed,
+            /// or reordered. Use only for runtime operations, never for persistent storage.
+            #[allow(clippy::enum_glob_use)]
+            pub const fn index(&self) -> usize {
+                use Tables::*;
+                // Generate a match with incrementing indices
+                let mut idx = 0usize;
+                $(
+                    if matches!(self, $name) {
+                        return idx;
+                    }
+                    idx += 1;
+                )*
+                let _ = idx; // suppress unused warning
+                unreachable!()
+            }
 
             /// Returns the name of the table as a string.
             pub const fn name(&self) -> &'static str {

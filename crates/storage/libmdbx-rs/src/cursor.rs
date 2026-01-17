@@ -60,6 +60,35 @@ where
         self.cursor
     }
 
+    /// Consumes the cursor and returns the raw pointer without closing it.
+    ///
+    /// This is useful for cursor caching - the raw pointer can be stored and
+    /// later reconstituted with [`Cursor::from_raw`].
+    ///
+    /// # Safety
+    ///
+    /// The caller takes ownership of the raw cursor pointer and is responsible for:
+    /// - Either closing it via `mdbx_cursor_close`, or
+    /// - Reconstituting it via [`Cursor::from_raw`] before the transaction ends
+    pub const fn into_raw(self) -> *mut ffi::MDBX_cursor {
+        let ptr = self.cursor;
+        mem::forget(self);
+        ptr
+    }
+
+    /// Reconstitutes a cursor from a raw pointer.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure:
+    /// - The pointer was obtained from [`Cursor::into_raw`]
+    /// - The pointer was created for this same transaction (or a prior transaction on the same
+    ///   environment that has been renewed)
+    /// - The pointer has not been closed or used to create another Cursor
+    pub const unsafe fn from_raw(txn: &'tx Transaction<K>, cursor: *mut ffi::MDBX_cursor) -> Self {
+        Self { txn, cursor, _marker: PhantomData }
+    }
+
     /// Returns an iterator over the raw key value slices.
     pub fn iter_slices<'a>(self) -> IntoIter<'tx, K, Cow<'a, [u8]>, Cow<'a, [u8]>> {
         self.into_iter()

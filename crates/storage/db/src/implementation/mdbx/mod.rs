@@ -32,6 +32,7 @@ use std::{
 use tx::Tx;
 
 pub mod cursor;
+pub mod cursor_cache;
 pub mod tx;
 
 mod utils;
@@ -1027,29 +1028,32 @@ mod tests {
 
         let key_to_insert = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
 
-        // INSERT
-        assert!(cursor.insert(key_to_insert, &B256::ZERO).is_ok());
-        assert_eq!(cursor.current().unwrap(), Some((key_to_insert, B256::ZERO)));
-        // INSERT (failure)
-        assert!(matches!(
-        cursor.insert(key_to_insert, &B256::ZERO).unwrap_err(),
-        DatabaseError::Write(err) if *err == DatabaseWriteError {
-            info: Error::KeyExist.into(),
-            operation: DatabaseWriteOperation::CursorInsert,
-            table_name: CanonicalHeaders::NAME,
-            key: key_to_insert.encode().into(),
-        }));
-        assert_eq!(cursor.current().unwrap(), Some((key_to_insert, B256::ZERO)));
-
+            // INSERT
+            assert!(cursor.insert(key_to_insert, &B256::ZERO).is_ok());
+            assert_eq!(cursor.current().unwrap(), Some((key_to_insert, B256::ZERO)));
+            // INSERT (failure)
+            assert!(matches!(
+            cursor.insert(key_to_insert, &B256::ZERO).unwrap_err(),
+            DatabaseError::Write(err) if *err == DatabaseWriteError {
+                info: Error::KeyExist.into(),
+                operation: DatabaseWriteOperation::CursorInsert,
+                table_name: CanonicalHeaders::NAME,
+                key: key_to_insert.encode().into(),
+            }));
+            assert_eq!(cursor.current().unwrap(), Some((key_to_insert, B256::ZERO)));
+        }
         tx.commit().expect(ERROR_COMMIT);
 
         // Confirm the result
         let tx = db.tx().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
-        assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
+        {
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+            let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+            assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
+        }
         tx.commit().expect(ERROR_COMMIT);
     }
 
@@ -1114,23 +1118,27 @@ mod tests {
         tx.commit().expect(ERROR_COMMIT);
 
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
 
-        // INSERT (cursor starts at last)
-        cursor.last().unwrap();
-        assert_eq!(cursor.current().unwrap(), Some((9, B256::ZERO)));
+            // INSERT (cursor starts at last)
+            cursor.last().unwrap();
+            assert_eq!(cursor.current().unwrap(), Some((9, B256::ZERO)));
 
-        for pos in (2..=8).step_by(2) {
-            assert!(cursor.insert(pos, &B256::ZERO).is_ok());
-            assert_eq!(cursor.current().unwrap(), Some((pos, B256::ZERO)));
+            for pos in (2..=8).step_by(2) {
+                assert!(cursor.insert(pos, &B256::ZERO).is_ok());
+                assert_eq!(cursor.current().unwrap(), Some((pos, B256::ZERO)));
+            }
         }
         tx.commit().expect(ERROR_COMMIT);
 
         // Confirm the result
         let tx = db.tx().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
-        assert_eq!(res, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        {
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+            let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+            assert_eq!(res, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        }
         tx.commit().expect(ERROR_COMMIT);
     }
 
@@ -1149,15 +1157,19 @@ mod tests {
         // APPEND
         let key_to_append = 5;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
-        assert!(cursor.append(key_to_append, &B256::ZERO).is_ok());
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            assert!(cursor.append(key_to_append, &B256::ZERO).is_ok());
+        }
         tx.commit().expect(ERROR_COMMIT);
 
         // Confirm the result
         let tx = db.tx().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
-        assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
+        {
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+            let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+            assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
+        }
         tx.commit().expect(ERROR_COMMIT);
     }
 
@@ -1176,23 +1188,27 @@ mod tests {
         // APPEND
         let key_to_append = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
-        assert!(matches!(
-        cursor.append(key_to_append, &B256::ZERO).unwrap_err(),
-        DatabaseError::Write(err) if *err == DatabaseWriteError {
-            info: Error::KeyMismatch.into(),
-            operation: DatabaseWriteOperation::CursorAppend,
-            table_name: CanonicalHeaders::NAME,
-            key: key_to_append.encode().into(),
-        }));
-        assert_eq!(cursor.current().unwrap(), Some((5, B256::ZERO))); // the end of table
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            assert!(matches!(
+            cursor.append(key_to_append, &B256::ZERO).unwrap_err(),
+            DatabaseError::Write(err) if *err == DatabaseWriteError {
+                info: Error::KeyMismatch.into(),
+                operation: DatabaseWriteOperation::CursorAppend,
+                table_name: CanonicalHeaders::NAME,
+                key: key_to_append.encode().into(),
+            }));
+            assert_eq!(cursor.current().unwrap(), Some((5, B256::ZERO))); // the end of table
+        }
         tx.commit().expect(ERROR_COMMIT);
 
         // Confirm the result
         let tx = db.tx().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
-        assert_eq!(res, vec![0, 1, 3, 4, 5]);
+        {
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+            let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+            assert_eq!(res, vec![0, 1, 3, 4, 5]);
+        }
         tx.commit().expect(ERROR_COMMIT);
     }
 
@@ -1238,43 +1254,30 @@ mod tests {
         let transition_id = 2;
 
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_write::<AccountChangeSets>().unwrap();
-        vec![0, 1, 3, 4, 5]
-            .into_iter()
-            .try_for_each(|val| {
-                cursor.append(
-                    transition_id,
-                    &AccountBeforeTx { address: Address::with_last_byte(val), info: None },
-                )
-            })
-            .expect(ERROR_APPEND);
+        {
+            let mut cursor = tx.cursor_write::<AccountChangeSets>().unwrap();
+            vec![0, 1, 3, 4, 5]
+                .into_iter()
+                .try_for_each(|val| {
+                    cursor.append(
+                        transition_id,
+                        &AccountBeforeTx { address: Address::with_last_byte(val), info: None },
+                    )
+                })
+                .expect(ERROR_APPEND);
+        }
         tx.commit().expect(ERROR_COMMIT);
 
         // APPEND DUP & APPEND
         let subkey_to_append = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_write::<AccountChangeSets>().unwrap();
-        assert!(matches!(
-        cursor
-            .append_dup(
-                transition_id,
-                AccountBeforeTx {
-                    address: Address::with_last_byte(subkey_to_append),
-                    info: None
-                }
-            )
-            .unwrap_err(),
-        DatabaseError::Write(err) if *err == DatabaseWriteError {
-            info: Error::KeyMismatch.into(),
-            operation: DatabaseWriteOperation::CursorAppendDup,
-            table_name: AccountChangeSets::NAME,
-            key: transition_id.encode().into(),
-        }));
-        assert!(matches!(
+        {
+            let mut cursor = tx.cursor_write::<AccountChangeSets>().unwrap();
+            assert!(matches!(
             cursor
-                .append(
-                    transition_id - 1,
-                    &AccountBeforeTx {
+                .append_dup(
+                    transition_id,
+                    AccountBeforeTx {
                         address: Address::with_last_byte(subkey_to_append),
                         info: None
                     }
@@ -1282,17 +1285,37 @@ mod tests {
                 .unwrap_err(),
             DatabaseError::Write(err) if *err == DatabaseWriteError {
                 info: Error::KeyMismatch.into(),
-                operation: DatabaseWriteOperation::CursorAppend,
+                operation: DatabaseWriteOperation::CursorAppendDup,
                 table_name: AccountChangeSets::NAME,
-                key: (transition_id - 1).encode().into(),
-            }
-        ));
-        assert!(cursor
-            .append(
-                transition_id,
-                &AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
-            )
-            .is_ok());
+                key: transition_id.encode().into(),
+            }));
+            assert!(matches!(
+                cursor
+                    .append(
+                        transition_id - 1,
+                        &AccountBeforeTx {
+                            address: Address::with_last_byte(subkey_to_append),
+                            info: None
+                        }
+                    )
+                    .unwrap_err(),
+                DatabaseError::Write(err) if *err == DatabaseWriteError {
+                    info: Error::KeyMismatch.into(),
+                    operation: DatabaseWriteOperation::CursorAppend,
+                    table_name: AccountChangeSets::NAME,
+                    key: (transition_id - 1).encode().into(),
+                }
+            ));
+            assert!(cursor
+                .append(
+                    transition_id,
+                    &AccountBeforeTx {
+                        address: Address::with_last_byte(subkey_to_append),
+                        info: None
+                    }
+                )
+                .is_ok());
+        }
     }
 
     #[test]
