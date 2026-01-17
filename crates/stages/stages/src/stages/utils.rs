@@ -179,6 +179,7 @@ where
 /// `Address.StorageKey`). It flushes indices to disk when reaching a shard's max length
 /// (`NUM_OF_INDICES_IN_SHARD`) or when the partial key changes, ensuring the last previous partial
 /// key shard is stored.
+#[allow(dead_code)]
 pub(crate) fn load_history_indices<Provider, H, P>(
     provider: &Provider,
     mut collector: Collector<H::Key, H::Value>,
@@ -263,6 +264,7 @@ where
 }
 
 /// Shard and insert the indices list according to [`LoadMode`] and its length.
+#[allow(dead_code)]
 pub(crate) fn load_indices<H, C, P>(
     cursor: &mut C,
     partial_key: P,
@@ -308,6 +310,7 @@ where
 }
 
 /// Mode on how to load index shards into the database.
+#[allow(dead_code)]
 pub(crate) enum LoadMode {
     /// Keep the last shard in memory and don't flush it to the database.
     KeepLast,
