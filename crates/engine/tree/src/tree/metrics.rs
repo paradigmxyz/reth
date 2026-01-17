@@ -270,7 +270,10 @@ impl ForkchoiceUpdatedMetrics {
 pub(crate) struct NewPayloadStatusMetrics {
     /// Finish time of the latest new payload call.
     #[metric(skip)]
-    pub(crate) latest_at: Option<Instant>,
+    pub(crate) latest_finish_at: Option<Instant>,
+    /// Start time of the latest new payload call.
+    #[metric(skip)]
+    pub(crate) latest_start_at: Option<Instant>,
     /// The total count of new payload messages received.
     pub(crate) new_payload_messages: Counter,
     /// The total count of new payload messages that we responded to with
@@ -298,8 +301,10 @@ pub(crate) struct NewPayloadStatusMetrics {
     pub(crate) new_payload_latency: Histogram,
     /// Latency for the last new payload call.
     pub(crate) new_payload_last: Gauge,
-    /// Time between consecutive new payload calls (payload-to-payload interval).
+    /// Time from previous payload finish to current payload start (idle time).
     pub(crate) time_between_new_payloads: Histogram,
+    /// Time from previous payload start to current payload start (total interval).
+    pub(crate) new_payload_interval: Histogram,
 }
 
 impl NewPayloadStatusMetrics {
@@ -313,10 +318,14 @@ impl NewPayloadStatusMetrics {
         let finish = Instant::now();
         let elapsed = finish - start;
 
-        if let Some(prev) = self.latest_at {
-            self.time_between_new_payloads.record(start - prev);
+        if let Some(prev_finish) = self.latest_finish_at {
+            self.time_between_new_payloads.record(start - prev_finish);
         }
-        self.latest_at = Some(finish);
+        if let Some(prev_start) = self.latest_start_at {
+            self.new_payload_interval.record(start - prev_start);
+        }
+        self.latest_finish_at = Some(finish);
+        self.latest_start_at = Some(start);
         match result {
             Ok(outcome) => match outcome.outcome.status {
                 PayloadStatusEnum::Valid => {
