@@ -17,6 +17,7 @@ use std::{
 
 use alloy_eips::BlockNumHash;
 use futures_util::FutureExt;
+use reth_chain::Chain;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_consensus::test_utils::TestConsensus;
 use reth_db::{
@@ -28,7 +29,6 @@ use reth_db::{
 use reth_db_common::init::init_genesis;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm_ethereum::MockEvmConfig;
-use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
 use reth_network::{config::rng_secret_key, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{

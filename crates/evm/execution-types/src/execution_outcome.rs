@@ -564,8 +564,8 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::TxType;
     use alloy_primitives::{bytes, Address, LogData, B256};
+    use reth_ethereum_primitives::TxType;
 
     #[test]
     fn test_initialization() {
