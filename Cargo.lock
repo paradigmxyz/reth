@@ -8952,7 +8952,6 @@ dependencies = [
 name = "reth-execution-types"
 version = "1.10.0"
 dependencies = [
- "alloy-consensus",
  "alloy-eips",
  "alloy-evm",
  "alloy-primitives",
