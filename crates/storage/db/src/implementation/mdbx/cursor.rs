@@ -16,6 +16,7 @@ use reth_db_api::{
 use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds, sync::Arc};
+use reth_tracing::tracing::trace_span;
 
 /// Read only Cursor.
 pub type CursorRO<T> = Cursor<RO, T>;
@@ -59,6 +60,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
             f(self)
         }
     }
+
 }
 
 /// Decodes a `(key, value)` pair from the database.
@@ -90,26 +92,32 @@ macro_rules! compress_to_buf_or_ref {
 
 impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
     fn first(&mut self) -> PairResult<T> {
+        let _span = trace_span!(target: "libmdbx::cursor", "first", table = T::NAME).entered();
         decode::<T>(self.inner.first())
     }
 
     fn seek_exact(&mut self, key: <T as Table>::Key) -> PairResult<T> {
+        let _span = trace_span!(target: "libmdbx::cursor", "seek_exact", table = T::NAME).entered();
         decode::<T>(self.inner.set_key(key.encode().as_ref()))
     }
 
     fn seek(&mut self, key: <T as Table>::Key) -> PairResult<T> {
+        let _span = trace_span!(target: "libmdbx::cursor", "seek", table = T::NAME).entered();
         decode::<T>(self.inner.set_range(key.encode().as_ref()))
     }
 
     fn next(&mut self) -> PairResult<T> {
+        let _span = trace_span!(target: "libmdbx::cursor", "next", table = T::NAME).entered();
         decode::<T>(self.inner.next())
     }
 
     fn prev(&mut self) -> PairResult<T> {
+        let _span = trace_span!(target: "libmdbx::cursor", "prev", table = T::NAME).entered();
         decode::<T>(self.inner.prev())
     }
 
     fn last(&mut self) -> PairResult<T> {
+        let _span = trace_span!(target: "libmdbx::cursor", "last", table = T::NAME).entered();
         decode::<T>(self.inner.last())
     }
 
@@ -196,6 +204,8 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
         key: <T as Table>::Key,
         subkey: <T as DupSort>::SubKey,
     ) -> ValueOnlyResult<T> {
+        let _span =
+            trace_span!(target: "libmdbx::cursor", "seek_by_subkey", table = T::NAME).entered();
         self.inner
             .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
             .map_err(|e| DatabaseError::Read(e.into()))?
