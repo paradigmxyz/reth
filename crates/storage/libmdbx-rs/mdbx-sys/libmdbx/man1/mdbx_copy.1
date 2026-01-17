@@ -1,8 +1,8 @@
-.\" Copyright 2015-2025 Leonid Yuriev <leo@yuriev.ru>.
+.\" Copyright 2015-2026 Leonid Yuriev <leo@yuriev.ru>.
 .\" Copyright 2015,2016 Peter-Service R&D LLC <http://billing.ru/>.
 .\" Copyright 2012-2015 Howard Chu, Symas Corp. All Rights Reserved.
 .\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
-.TH MDBX_COPY 1 "2024-08-29" "MDBX 0.13"
+.TH MDBX_COPY 1 "2025-01-14" "MDBX 0.14"
 .SH NAME
 mdbx_copy \- MDBX environment copy tool
 .SH SYNOPSIS
@@ -13,6 +13,8 @@ mdbx_copy \- MDBX environment copy tool
 .BR \-q ]
 [\c
 .BR \-c ]
+[\c
+.BR \-f ]
 [\c
 .BR \-d ]
 [\c
@@ -48,6 +50,9 @@ Compact while copying. Only current data pages will be copied; freed
 or unused pages will be omitted from the copy. This option will
 slow down the backup process as it is more CPU-intensive.
 Currently it fails if the environment has suffered a page leak.
+.TP
+.BR \-f
+Silently overwrite the target file, if it exists, instead of reaching an error.
 .TP
 .BR \-d
 Alters geometry to enforce the copy to be a dynamic size DB,

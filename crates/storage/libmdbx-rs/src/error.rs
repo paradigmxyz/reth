@@ -132,6 +132,12 @@ pub enum Error {
     /// Permission defined
     #[error("permission denied to setup database")]
     Permission,
+    /// Transaction was ousted for MVCC snapshot recycling.
+    #[error("transaction was ousted for MVCC snapshot recycling")]
+    Ousted,
+    /// MVCC snapshot used by transaction was bygone.
+    #[error("MVCC snapshot used by transaction was bygone")]
+    MvccRetarded,
     /// Unknown error code.
     #[error("unknown error code: {0}")]
     Other(i32),
@@ -171,6 +177,8 @@ impl Error {
             ffi::MDBX_TOO_LARGE => Self::TooLarge,
             ffi::MDBX_EBADSIGN => Self::BadSignature,
             ffi::MDBX_EPERM => Self::Permission,
+            ffi::MDBX_OUSTED => Self::Ousted,
+            ffi::MDBX_MVCC_RETARDED => Self::MvccRetarded,
             other => Self::Other(other),
         }
     }
@@ -212,6 +220,8 @@ impl Error {
             Self::ReadTransactionTimeout => -96000, // Custom non-MDBX error code
             Self::BotchedTransaction => -96001,
             Self::Permission => ffi::MDBX_EPERM,
+            Self::Ousted => ffi::MDBX_OUSTED,
+            Self::MvccRetarded => ffi::MDBX_MVCC_RETARDED,
             Self::Other(err_code) => *err_code,
         }
     }

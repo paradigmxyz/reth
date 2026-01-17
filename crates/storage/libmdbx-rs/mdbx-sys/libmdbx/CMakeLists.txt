@@ -1,21 +1,21 @@
-# Copyright (c) 2020-2025 Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> ###############################################
+# Copyright (c) 2020-2026 Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> ###############################################
 # SPDX-License-Identifier: Apache-2.0
 #
-# Donations are welcome to ETH `0xD104d8f8B2dC312aaD74899F83EBf3EEBDC1EA3A`. Всё будет хорошо!
+# Donations are welcome to ETH `0xD104d8f8B2dC312aaD74899F83EBf3EEBDC1EA3A`,
+# BTC `bc1qzvl9uegf2ea6cwlytnanrscyv8snwsvrc0xfsu`, SOL `FTCTgbHajoLVZGr8aEFWMzx3NDMyS5wXJgfeMTmJznRi`.
+# Всё будет хорошо!
 
-# libmdbx = { Revised and extended descendant of Symas LMDB. } Please see README.md at
-# https://gitflic.ru/project/erthink/libmdbx
+# libmdbx = { Revised and extended descendant of Symas LMDB. }
+# Please see README.md at https://sourcecraft.dev/dqdkfa/libmdbx
 #
 # Libmdbx is superior to LMDB in terms of features and reliability, not inferior in performance. libmdbx works on Linux,
 # FreeBSD, MacOS X and other systems compliant with POSIX.1-2008, but also support Windows as a complementary platform.
 #
 # The next version is under active non-public development and will be released as MithrilDB and libmithrildb for
 # libraries & packages. Admittedly mythical Mithril is resembling silver but being stronger and lighter than steel.
-# Therefore MithrilDB is rightly relevant name.
-#
-# MithrilDB will be radically different from libmdbx by the new database format and API based on C++17, as well as the
-# Apache 2.0 License. The goal of this revolution is to provide a clearer and robust API, add more features and new
-# valuable properties of database.
+# Therefore MithrilDB is rightly relevant name. MithrilDB will be radically different from libmdbx by the new database
+# format and API based on C++20. The goal of this revolution is to provide a clearer and robust API, add more features
+# and new valuable properties.
 
 if(CMAKE_VERSION VERSION_LESS 3.8.2)
   cmake_minimum_required(VERSION 3.0.2)
@@ -53,141 +53,32 @@ endif()
 
 cmake_policy(SET CMP0054 NEW)
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git"
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION.json"
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/COPYRIGHT"
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE"
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/GNUmakefile"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.c++"
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.h"
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.h++"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/alloy.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/api-cold.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/api-copy.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/api-cursor.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/api-dbi.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/api-env.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/api-extra.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/api-key-transform.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/api-misc.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/api-opts.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/api-range-estimate.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/api-txn-data.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/api-txn.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/atomics-ops.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/atomics-types.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/audit.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/chk.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/cogs.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/cogs.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/coherency.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/config.h.in"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/cursor.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/cursor.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/dbi.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/dbi.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/debug_begin.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/debug_end.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/dpl.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/dpl.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/dxb.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/env.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/essentials.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/gc-get.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/gc-put.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/gc.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/global.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/internals.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/layout-dxb.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/layout-lck.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/lck-posix.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/lck-windows.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/lck.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/lck.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/logging_and_debug.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/logging_and_debug.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/man1/mdbx_chk.1"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/man1/mdbx_copy.1"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/man1/mdbx_drop.1"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/man1/mdbx_dump.1"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/man1/mdbx_load.1"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/man1/mdbx_stat.1"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/mdbx.c++"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/meta.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/meta.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/mvcc-readers.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/node.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/node.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/ntdll.def"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/options.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/osal.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/osal.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/page-get.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/page-iov.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/page-iov.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/page-ops.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/page-ops.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tree-search.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/pnl.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/pnl.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/preface.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/proto.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/refund.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sort.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/spill.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/spill.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/table.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tls.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tls.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/chk.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/copy.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/drop.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/dump.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/load.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/stat.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/wingetopt.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/wingetopt.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/tree-ops.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/txl.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/txl.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/txn.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/unaligned.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/utils.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/utils.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/version.c.in"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/walk.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/walk.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/windows-import.c"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/windows-import.h"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt")
-  set(MDBX_AMALGAMATED_SOURCE FALSE)
-  find_program(GIT git)
-  if(NOT GIT)
-    message(SEND_ERROR "Git command-line tool not found")
-  endif()
-  set(MDBX_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
-elseif(
-  EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION.json"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.c++"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.h"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.h++"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_chk.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_copy.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_dump.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_load.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_stat.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_drop.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ntdll.def"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/config.h.in")
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_chk.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_copy.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_dump.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_load.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_stat.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_drop.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ntdll.def"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/config.h.in")
   set(MDBX_AMALGAMATED_SOURCE TRUE)
   set(MDBX_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 else()
   message(
     FATAL_ERROR
-      "\nThe set of libmdbx source code files is incomplete!  "
-      "Instead just follow the https://libmdbx.dqdkfa.ru/usage.html  " "PLEASE, AVOID USING ANY OTHER TECHNIQUES.")
+      "\nThe set of libmdbx source code files is incomplete!"
+      "  Instead just follow the https://libmdbx.dqdkfa.ru/usage.html"
+      "  PLEASE, AVOID USING ANY OTHER TECHNIQUES.")
 endif()
 
 # Provide version
@@ -206,9 +97,6 @@ endif()
 if(DEFINED PROJECT_NAME AND NOT MDBX_FORCE_BUILD_AS_MAIN_PROJECT)
   set(SUBPROJECT ON)
   set(NOT_SUBPROJECT OFF)
-  if(NOT MDBX_AMALGAMATED_SOURCE AND NOT DEFINED BUILD_TESTING)
-    set(BUILD_TESTING OFF)
-  endif()
   enable_language(C)
 else()
   set(SUBPROJECT OFF)
@@ -228,25 +116,21 @@ else()
   endif()
 
   project(libmdbx C)
-  if(NOT MDBX_AMALGAMATED_SOURCE AND NOT DEFINED BUILD_TESTING)
-    set(BUILD_TESTING ON)
-  endif()
 endif()
 
-if(NOT MDBX_AMALGAMATED_SOURCE)
+if(NOT CMAKE_VERSION VERSION_LESS 3.8.2)
+  source_group("markdown" FILES REGULAR_EXPRESSION ".*[.]md")
+endif()
+
+if(NOT ((DEFINED BUILD_TESTING AND NOT BUILD_TESTING) OR (DEFINED MDBX_ENABLE_TESTS AND NOT MDBX_ENABLE_TESTS)))
   include(CTest)
-  option(MDBX_ENABLE_TESTS "Build libmdbx tests." ${BUILD_TESTING})
-elseif(DEFINED MDBX_ENABLE_TESTS AND MDBX_ENABLE_TESTS)
-  message(WARNING "MDBX_ENABLE_TESTS=${MDBX_ENABLE_TESTS}: But amalgamated source code don't includes tests.")
-  set(MDBX_ENABLE_TESTS OFF)
+  option(MDBX_ENABLE_TESTS "Build MDBX tests" ${BUILD_TESTING})
 endif()
 
 # Try to find a C++ compiler unless sure that this is unnecessary.
 if(NOT CMAKE_CXX_COMPILER_LOADED)
   include(CheckLanguage)
-  if(NOT DEFINED MDBX_BUILD_CXX
-     OR MDBX_BUILD_CXX
-     OR (NOT MDBX_AMALGAMATED_SOURCE AND (NOT DEFINED MDBX_ENABLE_TESTS OR MDBX_ENABLE_TESTS)))
+  if(NOT (DEFINED MDBX_BUILD_CXX AND NOT MDBX_BUILD_CXX) OR NOT (DEFINED MDBX_ENABLE_TESTS AND NOT MDBX_ENABLE_TESTS))
     check_language(CXX)
     if(CMAKE_CXX_COMPILER)
       enable_language(CXX)
@@ -327,19 +211,6 @@ if(NOT APPLE
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pthread")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -pthread")
     set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -pthread")
-  endif()
-endif()
-
-check_function_exists(pow NOT_NEED_LIBM)
-if(NOT_NEED_LIBM)
-  set(LIB_MATH "")
-else()
-  set(CMAKE_REQUIRED_LIBRARIES m)
-  check_function_exists(pow HAVE_LIBM)
-  if(HAVE_LIBM)
-    set(LIB_MATH m)
-  else()
-    message(FATAL_ERROR "No libm found for math support")
   endif()
 endif()
 
@@ -443,68 +314,6 @@ else()
     set(LTO_ENABLED FALSE)
   endif()
 
-  if(NOT MDBX_AMALGAMATED_SOURCE)
-    find_program(VALGRIND valgrind)
-    if(VALGRIND)
-      # (LY) cmake is ugly and nasty. Therefore memcheck-options should be defined before including ctest. Otherwise
-      # ctest may ignore it.
-      set(MEMORYCHECK_SUPPRESSIONS_FILE
-          "${CMAKE_CURRENT_SOURCE_DIR}/test/valgrind_suppress.txt"
-          CACHE FILEPATH "Suppressions file for Valgrind" FORCE)
-      set(MEMORYCHECK_COMMAND_OPTIONS
-          "--trace-children=yes --leak-check=full --track-origins=yes --track-origins=yes --error-exitcode=42 --error-markers=@ --errors-for-leak-kinds=definite --fair-sched=yes --suppressions=${MEMORYCHECK_SUPPRESSIONS_FILE}"
-          CACHE STRING "Valgrind options" FORCE)
-      set(VALGRIND_COMMAND_OPTIONS
-          "${MEMORYCHECK_COMMAND_OPTIONS}"
-          CACHE STRING "Valgrind options" FORCE)
-    endif()
-
-    # Enable 'make tags' target.
-    find_program(CTAGS ctags)
-    if(CTAGS)
-      add_custom_target(
-        tags
-        COMMAND ${CTAGS} -R -f tags
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-      add_custom_target(ctags DEPENDS tags)
-    endif(CTAGS)
-
-    if(UNIX)
-      find_program(CLANG_FORMAT NAMES clang-format-13 clang-format)
-      if(CLANG_FORMAT)
-        execute_process(COMMAND ${CLANG_FORMAT} "--version" OUTPUT_VARIABLE clang_format_version_info)
-        string(REGEX MATCH "version ([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?" clang_format_version_info CLANG_FORMAT_VERSION)
-        if(clang_format_version_info AND NOT CLANG_FORMAT_VERSION VERSION_LESS 13.0)
-          # Enable 'make reformat' target.
-          add_custom_target(
-            reformat
-            VERBATIM
-            COMMAND git ls-files | grep -E \\.\(c|cxx|cc|cpp|h|hxx|hpp\)\(\\.in\)?\$ | xargs ${CLANG_FORMAT} -i
-                    --style=file
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-        endif()
-      endif()
-    endif()
-
-    if(NOT "${PROJECT_BINARY_DIR}" STREQUAL "${PROJECT_SOURCE_DIR}")
-      add_custom_target(distclean)
-      add_custom_command(
-        TARGET distclean
-        POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E remove_directory "${PROJECT_BINARY_DIR}"
-        COMMENT "Removing the build directory and its content")
-    elseif(IS_DIRECTORY .git AND GIT)
-      add_custom_target(distclean)
-      add_custom_command(
-        TARGET distclean
-        POST_BUILD
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        COMMAND ${GIT} submodule foreach --recursive git clean -f -X -d
-        COMMAND ${GIT} clean -f -X -d
-        COMMENT "Removing all build files from the source directory")
-    endif()
-  endif(NOT MDBX_AMALGAMATED_SOURCE)
-
   set(MDBX_MANAGE_BUILD_FLAGS_DEFAULT ON)
 endif(SUBPROJECT)
 
@@ -538,7 +347,9 @@ if(NOT DEFINED MDBX_CXX_STANDARD)
   elseif(CXX_FALLBACK_GNU11 OR CXX_FALLBACK_11)
     set(MDBX_CXX_STANDARD 11)
   else()
-    set(MDBX_CXX_STANDARD 98)
+    message(NOTICE
+            "The C++ example will be skipped, since C++20 standard is unavailable or C++ API of libmdbx was disabled.")
+    set(MDBX_CXX_STANDARD 0)
   endif()
 endif()
 
@@ -574,9 +385,8 @@ if(WIN32 AND EXISTS "${MDBX_SOURCE_DIR}/ntdll.def")
   if(MSVC)
     if(NOT MSVC_LIB_EXE)
       # Find lib.exe
-      get_filename_component(CL_NAME ${CMAKE_C_COMPILER} NAME)
-      string(REPLACE cl.exe lib.exe MSVC_LIB_EXE ${CL_NAME})
-      find_program(MSVC_LIB_EXE ${MSVC_LIB_EXE})
+      get_filename_component(CC_DIR ${CMAKE_C_COMPILER} DIRECTORY)
+      find_program(MSVC_LIB_EXE "lib.exe" HINTS ${CC_DIR})
     endif()
     if(MSVC_LIB_EXE)
       message(STATUS "Found MSVC's lib tool: ${MSVC_LIB_EXE}")
@@ -588,25 +398,24 @@ if(WIN32 AND EXISTS "${MDBX_SOURCE_DIR}/ntdll.def")
         COMMAND ${MSVC_LIB_EXE} /def:"${MDBX_SOURCE_DIR}/ntdll.def" /out:"${MDBX_NTDLL_EXTRA_IMPLIB}"
                 ${INITIAL_CMAKE_STATIC_LINKER_FLAGS})
     else()
-      message(WARNING "MSVC's lib tool not found")
+      message(WARNING "MSVC's lib.exe not found")
     endif()
   elseif(MINGW OR MINGW64)
-    if(NOT DLLTOOL)
-      # Find dlltool
-      get_filename_component(GCC_NAME ${CMAKE_C_COMPILER} NAME)
-      string(REPLACE gcc dlltool DLLTOOL_NAME ${GCC_NAME})
-      find_program(DLLTOOL NAMES ${DLLTOOL_NAME})
+    if(NOT MINGW_DLLTOOL_EXE)
+      # Find dlltool.exe
+      get_filename_component(CC_DIR ${CMAKE_C_COMPILER} DIRECTORY)
+      find_program(MINGW_DLLTOOL_EXE "dlltool.exe" HINTS ${CC_DIR})
     endif()
-    if(DLLTOOL)
-      message(STATUS "Found dlltool: ${DLLTOOL}")
+    if(MINGW_DLLTOOL_EXE)
+      message(STATUS "Found MINGW's dlltool: ${MINGW_DLLTOOL_EXE}")
       set(MDBX_NTDLL_EXTRA_IMPLIB "${CMAKE_CURRENT_BINARY_DIR}/mdbx_ntdll_extra.a")
       add_custom_command(
         OUTPUT "${MDBX_NTDLL_EXTRA_IMPLIB}"
         COMMENT "Create extra-import-library for ntdll.dll"
         MAIN_DEPENDENCY "${MDBX_SOURCE_DIR}/ntdll.def"
-        COMMAND ${DLLTOOL} -d "${MDBX_SOURCE_DIR}/ntdll.def" -l "${MDBX_NTDLL_EXTRA_IMPLIB}")
+        COMMAND ${MINGW_DLLTOOL_EXE} -d "${MDBX_SOURCE_DIR}/ntdll.def" -l "${MDBX_NTDLL_EXTRA_IMPLIB}")
     else()
-      message(WARNING "dlltool not found")
+      message(WARNING "MINGW's dlltool.exe not found")
     endif()
   endif()
 
@@ -688,8 +497,7 @@ add_option(MDBX TRUST_RTC "Does a system have battery-backed Real-Time Clock or 
 mark_as_advanced(MDBX_TRUST_RTC)
 add_option(MDBX FORCE_ASSERTIONS "Force enable assertion checking" OFF)
 add_option(
-  MDBX
-  DISABLE_VALIDATION
+  MDBX DISABLE_VALIDATION
   "Disable some checks to reduce an overhead and detection probability of database corruption to a values closer to the LMDB"
   OFF)
 mark_as_advanced(MDBX_DISABLE_VALIDATION)
@@ -702,15 +510,8 @@ mark_as_advanced(MDBX_ENABLE_PROFGC)
 add_option(MDBX ENABLE_DBI_SPARSE
            "Support for sparse sets of DBI handles to reduce overhead when starting and processing transactions" ON)
 add_option(MDBX ENABLE_DBI_LOCKFREE "Support for deferred releasing and a lockfree path to quickly open DBI handles" ON)
-
-if(NOT MDBX_AMALGAMATED_SOURCE)
-  if(CMAKE_CONFIGURATION_TYPES OR CMAKE_BUILD_TYPE_UPPERCASE STREQUAL "DEBUG")
-    set(MDBX_ALLOY_BUILD_DEFAULT OFF)
-  else()
-    set(MDBX_ALLOY_BUILD_DEFAULT ON)
-  endif()
-  add_option(MDBX ALLOY_BUILD "Build MDBX library through single/alloyed object file" ${MDBX_ALLOY_BUILD_DEFAULT})
-endif()
+add_option(MDBX USE_FALLOCATE "Using posix_fallocate() or fcntl(F_PREALLOCATE) on OSX" AUTO)
+mark_as_advanced(MDBX_USE_FALLOCATE)
 
 if((MDBX_BUILD_TOOLS OR MDBX_ENABLE_TESTS) AND MDBX_BUILD_SHARED_LIBRARY)
   add_option(MDBX LINK_TOOLS_NONSTATIC "Link MDBX tools with non-static libmdbx" OFF)
@@ -718,23 +519,33 @@ else()
   unset(MDBX_LINK_TOOLS_NONSTATIC CACHE)
 endif()
 
-if(CMAKE_CXX_COMPILER_LOADED
-   AND MDBX_CXX_STANDARD LESS 83
-   AND NOT MDBX_CXX_STANDARD LESS 11)
-  if(NOT MDBX_AMALGAMATED_SOURCE)
-    option(MDBX_ENABLE_TESTS "Build MDBX tests" ${BUILD_TESTING})
-  endif()
+set(MDBX_CXX_AVAILABLE FALSE)
+if(CMAKE_CXX_COMPILER_LOADED AND NOT MDBX_CXX_STANDARD LESS 11)
   if(NOT MDBX_WITHOUT_MSVC_CRT
      AND NOT (CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.8)
      AND NOT (CMAKE_COMPILER_IS_CLANG AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 3.9)
      AND NOT (MSVC AND MSVC_VERSION LESS 1900))
+    set(MDBX_CXX_AVAILABLE TRUE)
     option(MDBX_BUILD_CXX "Build C++ portion" ON)
   else()
+    if(DEFINED MDBX_BUILD_CXX AND MDBX_BUILD_CXX)
+      if(MDBX_WITHOUT_MSVC_CRT)
+        message(
+          WARNING
+            "MDBX_BUILD_CXX=${MDBX_BUILD_CXX}: But MDBX_WITHOUT_MSVC_CRT=${MDBX_WITHOUT_MSVC_CRT} which does not allow the use of C++."
+        )
+      else()
+        message(WARNING "MDBX_BUILD_CXX=${MDBX_BUILD_CXX}: But there is no suitable C++ compiler available.")
+      endif()
+    endif()
     set(MDBX_BUILD_CXX FALSE)
   endif()
 else()
-  set(MDBX_BUILD_CXX FALSE)
-  set(MDBX_ENABLE_TESTS FALSE)
+  if(DEFINED MDBX_BUILD_CXX AND MDBX_BUILD_CXX)
+    message(WARNING "MDBX_BUILD_CXX=${MDBX_BUILD_CXX}: But there is no suitable C++11 compiler available.")
+  endif()
+  set(MDBX_ENABLE_TESTS OFF)
+  set(MDBX_BUILD_CXX OFF)
 endif()
 
 if(CI)
@@ -743,8 +554,8 @@ endif()
 
 # ######################################################################################################################
 
-if(MDBX_BUILD_CXX AND NOT CMAKE_CXX_COMPILER_LOADED)
-  message(FATAL_ERROR "MDBX_BUILD_CXX=${MDBX_BUILD_CXX}: The C++ compiler is required to build the C++API.")
+if(MDBX_BUILD_CXX AND NOT MDBX_CXX_AVAILABLE)
+  message(FATAL_ERROR "MDBX_BUILD_CXX=${MDBX_BUILD_CXX}: The C++ 11 compiler is required to build the C++API.")
 endif()
 
 if(MDBX_BUILD_CXX)
@@ -754,107 +565,19 @@ endif()
 
 # sources list
 set(LIBMDBX_PUBLIC_HEADERS mdbx.h)
-set(LIBMDBX_SOURCES mdbx.h "${CMAKE_CURRENT_BINARY_DIR}/config.h")
+set(LIBMDBX_SOURCES mdbx.h "${CMAKE_CURRENT_BINARY_DIR}/config-cmake.h")
 if(MDBX_AMALGAMATED_SOURCE)
   list(APPEND LIBMDBX_SOURCES mdbx.c)
 else()
-  # generate version file
-  configure_file("${MDBX_SOURCE_DIR}/version.c.in" "${CMAKE_CURRENT_BINARY_DIR}/version.c" ESCAPE_QUOTES)
-  file(SHA256 "${CMAKE_CURRENT_BINARY_DIR}/version.c" MDBX_SOURCERY_DIGEST)
-  string(MAKE_C_IDENTIFIER "${MDBX_GIT_DESCRIBE}" MDBX_SOURCERY_SUFFIX)
-  set(MDBX_BUILD_SOURCERY "${MDBX_SOURCERY_DIGEST}_${MDBX_SOURCERY_SUFFIX}")
-
-  if(MDBX_ALLOY_BUILD)
-    list(APPEND LIBMDBX_SOURCES "${MDBX_SOURCE_DIR}/alloy.c")
-    include_directories("${MDBX_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
-  else()
-    list(
-      APPEND
-      LIBMDBX_SOURCES
-      "${MDBX_SOURCE_DIR}/api-cold.c"
-      "${MDBX_SOURCE_DIR}/api-copy.c"
-      "${MDBX_SOURCE_DIR}/api-cursor.c"
-      "${MDBX_SOURCE_DIR}/api-dbi.c"
-      "${MDBX_SOURCE_DIR}/api-env.c"
-      "${MDBX_SOURCE_DIR}/api-extra.c"
-      "${MDBX_SOURCE_DIR}/api-key-transform.c"
-      "${MDBX_SOURCE_DIR}/api-misc.c"
-      "${MDBX_SOURCE_DIR}/api-opts.c"
-      "${MDBX_SOURCE_DIR}/api-range-estimate.c"
-      "${MDBX_SOURCE_DIR}/api-txn-data.c"
-      "${MDBX_SOURCE_DIR}/api-txn.c"
-      "${MDBX_SOURCE_DIR}/atomics-ops.h"
-      "${MDBX_SOURCE_DIR}/atomics-types.h"
-      "${MDBX_SOURCE_DIR}/audit.c"
-      "${MDBX_SOURCE_DIR}/chk.c"
-      "${MDBX_SOURCE_DIR}/cogs.c"
-      "${MDBX_SOURCE_DIR}/cogs.h"
-      "${MDBX_SOURCE_DIR}/coherency.c"
-      "${MDBX_SOURCE_DIR}/cursor.c"
-      "${MDBX_SOURCE_DIR}/cursor.h"
-      "${MDBX_SOURCE_DIR}/dbi.c"
-      "${MDBX_SOURCE_DIR}/dbi.h"
-      "${MDBX_SOURCE_DIR}/dpl.c"
-      "${MDBX_SOURCE_DIR}/dpl.h"
-      "${MDBX_SOURCE_DIR}/dxb.c"
-      "${MDBX_SOURCE_DIR}/env.c"
-      "${MDBX_SOURCE_DIR}/essentials.h"
-      "${MDBX_SOURCE_DIR}/gc-get.c"
-      "${MDBX_SOURCE_DIR}/gc-put.c"
-      "${MDBX_SOURCE_DIR}/gc.h"
-      "${MDBX_SOURCE_DIR}/global.c"
-      "${MDBX_SOURCE_DIR}/internals.h"
-      "${MDBX_SOURCE_DIR}/layout-dxb.h"
-      "${MDBX_SOURCE_DIR}/layout-lck.h"
-      "${MDBX_SOURCE_DIR}/lck.c"
-      "${MDBX_SOURCE_DIR}/lck.h"
-      "${MDBX_SOURCE_DIR}/logging_and_debug.c"
-      "${MDBX_SOURCE_DIR}/logging_and_debug.h"
-      "${MDBX_SOURCE_DIR}/meta.c"
-      "${MDBX_SOURCE_DIR}/meta.h"
-      "${MDBX_SOURCE_DIR}/mvcc-readers.c"
-      "${MDBX_SOURCE_DIR}/node.c"
-      "${MDBX_SOURCE_DIR}/node.h"
-      "${MDBX_SOURCE_DIR}/options.h"
-      "${MDBX_SOURCE_DIR}/osal.c"
-      "${MDBX_SOURCE_DIR}/osal.h"
-      "${MDBX_SOURCE_DIR}/page-get.c"
-      "${MDBX_SOURCE_DIR}/page-iov.c"
-      "${MDBX_SOURCE_DIR}/page-iov.h"
-      "${MDBX_SOURCE_DIR}/page-ops.c"
-      "${MDBX_SOURCE_DIR}/page-ops.h"
-      "${MDBX_SOURCE_DIR}/tree-search.c"
-      "${MDBX_SOURCE_DIR}/pnl.c"
-      "${MDBX_SOURCE_DIR}/pnl.h"
-      "${MDBX_SOURCE_DIR}/preface.h"
-      "${MDBX_SOURCE_DIR}/proto.h"
-      "${MDBX_SOURCE_DIR}/refund.c"
-      "${MDBX_SOURCE_DIR}/sort.h"
-      "${MDBX_SOURCE_DIR}/spill.c"
-      "${MDBX_SOURCE_DIR}/spill.h"
-      "${MDBX_SOURCE_DIR}/table.c"
-      "${MDBX_SOURCE_DIR}/tls.c"
-      "${MDBX_SOURCE_DIR}/tls.h"
-      "${MDBX_SOURCE_DIR}/tree-ops.c"
-      "${MDBX_SOURCE_DIR}/txl.c"
-      "${MDBX_SOURCE_DIR}/txl.h"
-      "${MDBX_SOURCE_DIR}/txn.c"
-      "${MDBX_SOURCE_DIR}/unaligned.h"
-      "${MDBX_SOURCE_DIR}/utils.c"
-      "${MDBX_SOURCE_DIR}/utils.h"
-      "${MDBX_SOURCE_DIR}/walk.c"
-      "${MDBX_SOURCE_DIR}/walk.h"
-      "${CMAKE_CURRENT_BINARY_DIR}/version.c")
-    if(NOT MSVC)
-      list(APPEND LIBMDBX_SOURCES "${MDBX_SOURCE_DIR}/lck-posix.c")
-    endif()
-    if(NOT APPLE)
-      list(APPEND LIBMDBX_SOURCES "${MDBX_SOURCE_DIR}/windows-import.h" "${MDBX_SOURCE_DIR}/windows-import.c"
-           "${MDBX_SOURCE_DIR}/lck-windows.c")
-    endif()
-    include_directories("${MDBX_SOURCE_DIR}")
+  if(NOT CMAKE_CURRENT_LIST_FILE)
+    set(CMAKE_CURRENT_LIST_FILE "CMakeLists.txt")
   endif()
+  message(
+    FATAL_ERROR
+      "This \"${CMAKE_CURRENT_LIST_FILE}\" has been trimmed and is therefore intended only for build from an amalgamated form of the source code."
+  )
 endif(MDBX_AMALGAMATED_SOURCE)
+
 if(MDBX_BUILD_CXX)
   message(STATUS "Use C${MDBX_C_STANDARD} and C++${MDBX_CXX_STANDARD} for libmdbx")
   list(APPEND LIBMDBX_PUBLIC_HEADERS mdbx.h++)
@@ -938,8 +661,10 @@ target_setup_options(mdbx-static)
 libmdbx_setup_libs(mdbx-static INTERFACE)
 if(MDBX_BUILD_SHARED_LIBRARY)
   set_target_properties(mdbx-static PROPERTIES OUTPUT_NAME mdbx-static)
+  set(MDBX_LIBRARY mdbx)
 else()
   set_target_properties(mdbx-static PROPERTIES OUTPUT_NAME mdbx)
+  set(MDBX_LIBRARY mdbx-static)
 endif()
 target_include_directories(mdbx-static INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -947,6 +672,12 @@ target_include_directories(mdbx-static INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # build shared library
 if(MDBX_BUILD_SHARED_LIBRARY)
+  if((MINGW OR MINGW64) AND MDBX_BUILD_CXX)
+    message(
+      WARNING
+        "Most MinGW versions have various problems with exporting and/or importing C++ template symbols instantiated in a DLL."
+    )
+  endif()
   add_library(mdbx SHARED ${LIBMDBX_SOURCES})
   set_target_properties(mdbx PROPERTIES PUBLIC_HEADER "${LIBMDBX_PUBLIC_HEADERS}")
   target_compile_definitions(
@@ -960,6 +691,24 @@ if(MDBX_BUILD_SHARED_LIBRARY)
       set_property(TARGET mdbx PROPERTY LINKER_FLAGS "/NODEFAULTLIB")
     else()
       set_property(TARGET mdbx PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    endif()
+  else()
+    include(CheckLinkerFlag)
+    check_linker_flag(C "LINKER:-z,combreloc" HAVE_LINKER_COMBRELOC)
+    check_linker_flag(C "LINKER:--gc-sections" HAVE_LINKER_GC_SECTIONS)
+    check_linker_flag(C "LINKER:-z,relro" HAVE_LINKER_Z_RELRO)
+    check_linker_flag(C "LINKER:-O1" HAVE_LINKER_O1)
+    if(HAVE_LINKER_COMBRELOC)
+      target_link_options(mdbx PRIVATE "LINKER:-z,combreloc")
+    endif()
+    if(HAVE_LINKER_GC_SECTIONS)
+      target_link_options(mdbx PRIVATE "LINKER:--gc-sections")
+    endif()
+    if(HAVE_LINKER_Z_RELRO)
+      target_link_options(mdbx PRIVATE "LINKER:-z,relro")
+    endif()
+    if(HAVE_LINKER_O1)
+      target_link_options(mdbx PRIVATE "LINKER:-O1")
     endif()
   endif()
   if(CC_HAS_VISIBILITY AND (LTO_ENABLED OR INTERPROCEDURAL_OPTIMIZATION))
@@ -1026,10 +775,6 @@ if(MDBX_BUILD_TOOLS)
     target_setup_options(mdbx_${TOOL})
     target_link_libraries(mdbx_${TOOL} ${TOOL_MDBX_LIB})
   endforeach()
-  if(LIB_MATH)
-    target_link_libraries(mdbx_chk ${LIB_MATH})
-    target_link_libraries(mdbx_stat ${LIB_MATH})
-  endif()
 endif()
 
 # ######################################################################################################################
@@ -1241,17 +986,15 @@ foreach(item IN LISTS options)
   message(STATUS "${item}: ${value}")
 endforeach(item)
 
-# provide config.h for library build info
-configure_file("${MDBX_SOURCE_DIR}/config.h.in" "${CMAKE_CURRENT_BINARY_DIR}/config.h" ESCAPE_QUOTES)
-add_definitions(-DMDBX_CONFIG_H="${CMAKE_CURRENT_BINARY_DIR}/config.h")
+# provide config-cmake.h for library build info
+file(REMOVE "${MDBX_SOURCE_DIR}/config-cmake.h")
+configure_file("${MDBX_SOURCE_DIR}/config.h.in" "${CMAKE_CURRENT_BINARY_DIR}/config-cmake.h" ESCAPE_QUOTES)
+add_definitions(-DMDBX_CONFIG_H="${CMAKE_CURRENT_BINARY_DIR}/config-cmake.h")
 
 # ######################################################################################################################
 
-if(NOT MDBX_AMALGAMATED_SOURCE AND MDBX_ENABLE_TESTS)
-  if(NOT CMAKE_CXX_COMPILER_LOADED)
-    message(FATAL_ERROR "MDBX_ENABLE_TESTS=${MDBX_ENABLE_TESTS}: The C++ compiler is required to build the tests.")
-  endif()
-  add_subdirectory(test)
+if(MDBX_ENABLE_TESTS)
+  add_subdirectory(ut_and_examples)
 endif()
 
 # ######################################################################################################################

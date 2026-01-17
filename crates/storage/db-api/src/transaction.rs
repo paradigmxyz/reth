@@ -5,6 +5,23 @@ use crate::{
 };
 use std::fmt::Debug;
 
+/// A read-only transaction that can clone its MVCC snapshot.
+///
+/// This allows creating independent transactions that read from the same database snapshot,
+/// useful when multiple threads need a consistent view without racing with persistence updates.
+pub trait CloneableDbTx: DbTx {
+    /// The type of the cloned transaction.
+    type ClonedTx: DbTx;
+
+    /// Clones this transaction, creating a new independent transaction that reads the same
+    /// MVCC snapshot.
+    ///
+    /// The cloned transaction can be used from a different thread and will see the exact
+    /// same database state as the original, regardless of any commits that happen after
+    /// this call.
+    fn clone_snapshot(&self) -> Result<Self::ClonedTx, DatabaseError>;
+}
+
 /// Helper adapter type for accessing [`DbTx`] cursor.
 pub type CursorTy<TX, T> = <TX as DbTx>::Cursor<T>;
 

@@ -183,6 +183,45 @@ where
     }
 }
 
+/// A provider that can clone its underlying database transaction.
+///
+/// This allows creating independent providers that read from the same MVCC snapshot,
+/// useful when multiple threads need a consistent view without racing with persistence updates.
+pub trait CloneableProvider: Sized {
+    /// The type of the cloned provider.
+    type ClonedProvider;
+
+    /// Clones this provider, creating a new independent provider that reads the same
+    /// MVCC snapshot.
+    ///
+    /// The cloned provider can be used from a different thread and will see the exact
+    /// same database state as the original, regardless of any commits that happen after
+    /// this call.
+    fn clone_with_snapshot(&self) -> ProviderResult<Self::ClonedProvider>;
+}
+
+/// A factory that can create providers by cloning an existing provider's transaction.
+///
+/// This is useful when multiple threads need to read from the same database snapshot
+/// without creating new transactions at the current (potentially different) database tip.
+///
+/// The typical use case is during parallel proof computation where persistence might
+/// advance the database tip while workers are still operating. By cloning from a shared
+/// origin provider, all workers see the same consistent MVCC snapshot.
+pub trait CloneableProviderFactory: DatabaseProviderROFactory {
+    /// Creates a provider by cloning the transaction from an existing provider.
+    ///
+    /// The returned provider will read from the same MVCC snapshot as the origin,
+    /// regardless of any commits that happen after this call.
+    ///
+    /// # Arguments
+    /// * `origin` - The provider whose transaction should be cloned
+    fn database_provider_ro_cloned(
+        &self,
+        origin: &Self::Provider,
+    ) -> ProviderResult<Self::Provider>;
+}
+
 /// Returns the length of the range if the range has a bounded end.
 pub fn range_size_hint(range: &impl RangeBounds<u64>) -> Option<usize> {
     let start = match range.start_bound().cloned() {
