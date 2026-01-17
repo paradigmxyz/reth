@@ -667,7 +667,7 @@ impl<TxEnv, T> IntoTxEnv<TxEnv> for WithTxEnv<TxEnv, T> {
 }
 
 impl<TxEnv, T> WithTxEnv<TxEnv, T> {
-    /// Takes ownership of the inner [`TxEnv`].
+    /// Takes ownership of the inner `TxEnv`.
     ///
     /// This is more efficient than cloning when you have ownership of the
     /// `WithTxEnv` and only need the transaction environment.
@@ -675,12 +675,12 @@ impl<TxEnv, T> WithTxEnv<TxEnv, T> {
         self.tx_env
     }
 
-    /// Returns a reference to the inner [`TxEnv`].
+    /// Returns a reference to the inner `TxEnv`.
     pub const fn tx_env(&self) -> &TxEnv {
         &self.tx_env
     }
 
-    /// Returns a mutable reference to the inner [`TxEnv`].
+    /// Returns a mutable reference to the inner `TxEnv`.
     pub const fn tx_env_mut(&mut self) -> &mut TxEnv {
         &mut self.tx_env
     }

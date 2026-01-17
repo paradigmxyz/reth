@@ -1,19 +1,20 @@
 //! Transaction environment reuse utilities.
 //!
-//! This module provides traits and utilities for reusing [`TxEnv`] allocations
+//! This module provides traits and utilities for reusing [`revm::context::TxEnv`] allocations
 //! across multiple transaction executions, reducing per-transaction overhead.
 //!
 //! # Overview
 //!
 //! When executing many transactions (e.g., during block execution), the standard
-//! pattern of creating a new [`TxEnv`] for each transaction incurs allocation
+//! pattern of creating a new [`revm::context::TxEnv`] for each transaction incurs allocation
 //! overhead for heap-allocated fields like `access_list`, `blob_hashes`, and
 //! `authorization_list`.
 //!
 //! This module provides:
-//! - [`FillTxEnv`]: A trait for filling an existing `TxEnv` in-place
-//! - [`TxEnvExt`]: Extension methods for `TxEnv` including `clear_for_reuse`
-//! - [`ReusableTxEnv`]: A wrapper for managing a reusable `TxEnv`
+//! - [`FillTxEnv`](crate::tx_env::FillTxEnv): A trait for filling an existing `TxEnv` in-place
+//! - [`TxEnvExt`](crate::tx_env::TxEnvExt): Extension methods for `TxEnv` including
+//!   `clear_for_reuse`
+//! - [`ReusableTxEnv`](crate::tx_env::ReusableTxEnv): A wrapper for managing a reusable `TxEnv`
 //!
 //! # Example
 //!
