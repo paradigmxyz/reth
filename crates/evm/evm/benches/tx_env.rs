@@ -1,7 +1,7 @@
-//! Benchmarks for TxEnv allocation patterns.
+//! Benchmarks for `TxEnv` allocation patterns.
 //!
 //! Measures the performance difference between:
-//! 1. Clone path: `to_tx_env()` which clones the TxEnv data
+//! 1. Clone path: `to_tx_env()` which clones the `TxEnv` data
 //! 2. Move path: `into_tx_env()` which moves ownership without cloning
 //!
 //! The key insight is that `WithTxEnv` already contains a prepared `TxEnv`,
@@ -9,7 +9,7 @@
 
 use alloy_consensus::{TxEip1559, TxLegacy};
 use alloy_eips::eip2930::{AccessList, AccessListItem};
-use alloy_evm::{IntoTxEnv, ToTxEnv};
+use alloy_evm::ToTxEnv;
 use alloy_primitives::{address, Address, Bytes, TxKind, B256, U256};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use reth_evm::{execute::WithTxEnv, tx_env::FillTxEnv};
@@ -66,7 +66,7 @@ fn create_eip1559_txs_with_access_list(
         .collect()
 }
 
-/// Prepares WithTxEnv wrappers
+/// Prepares `WithTxEnv` wrappers
 fn prepare_with_tx_envs<T: Clone>(txs: &[Recovered<T>]) -> Vec<WithTxEnv<TxEnv, Recovered<T>>>
 where
     TxEnv: FillTxEnv<T>,
@@ -82,8 +82,8 @@ where
 
 /// Benchmark comparing the conversion costs.
 ///
-/// - `to_tx_env_clone`: Calls `to_tx_env()` on WithTxEnv which clones the inner TxEnv
-/// - `into_tx_env_move`: Calls `into_tx_env()` on WithTxEnv which moves the inner TxEnv
+/// - `to_tx_env_clone`: Calls `to_tx_env()` on `WithTxEnv` which clones the inner `TxEnv`
+/// - `into_tx_env_move`: Calls `into_tx_env()` on `WithTxEnv` which moves the inner `TxEnv`
 fn bench_tx_env_extraction(c: &mut Criterion) {
     let mut group = c.benchmark_group("tx_env_extraction");
 
@@ -179,7 +179,7 @@ fn bench_tx_env_extraction_eip1559(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmarks the TxEnv reuse pattern for consecutive transactions
+/// Benchmarks the `TxEnv` reuse pattern for consecutive transactions
 fn bench_tx_env_reuse(c: &mut Criterion) {
     use reth_evm::tx_env::ReusableTxEnv;
 
