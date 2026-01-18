@@ -347,7 +347,6 @@ where
     // Accumulator for block numbers where the current address changed.
     let mut current_list = Vec::<u64>::new();
 
-    // Progress reporting setup.
     let total_entries = collector.len();
     let interval = (total_entries / 10).max(1);
 
