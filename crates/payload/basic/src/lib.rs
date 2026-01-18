@@ -729,7 +729,7 @@ impl<Payload> BuildOutcome<Payload> {
 
     /// Returns true if the outcome is `Freeze`.
     pub const fn is_frozen(&self) -> bool {
-        matches!(self, Self::Freeze { .. })
+        matches!(self, Self::Freeze(..))
     }
 
     /// Returns true if the outcome is `Aborted`.
