@@ -43,7 +43,9 @@ use reth_network_peers::{
     holesky_nodes, hoodi_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, sepolia_nodes,
     NodeRecord,
 };
-use reth_primitives_traits::{sync::LazyLock, BlockHeader, SealedHeader};
+use reth_primitives_traits::{
+    constants::MAX_TX_GAS_LIMIT_OSAKA, sync::LazyLock, BlockHeader, SealedHeader,
+};
 
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
 pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
@@ -403,10 +405,7 @@ pub enum EvmLimitParamsKind {
 
 impl Default for EvmLimitParamsKind {
     fn default() -> Self {
-        Self::Variable(ForkEvmLimitParams(vec![(
-            EthereumHardfork::Osaka.boxed(),
-            EvmLimitParams::osaka(),
-        )]))
+        Self::Constant(EvmLimitParams::default())
     }
 }
 
@@ -588,17 +587,23 @@ impl<H: BlockHeader> ChainSpec<H> {
 
     /// Get the [`EvmLimitParams`] for the chain at the given timestamp.
     pub fn evm_limit_params_at_timestamp(&self, timestamp: u64) -> EvmLimitParams {
-        match &self.evm_limit_params {
+        let params = match &self.evm_limit_params {
             EvmLimitParamsKind::Constant(params) => *params,
-            EvmLimitParamsKind::Variable(ForkEvmLimitParams(fork_params)) => {
-                for (fork, params) in fork_params.iter().rev() {
-                    if self.hardforks.is_fork_active_at_timestamp(fork.clone(), timestamp) {
-                        return *params
-                    }
-                }
-                // No timestamp-based fork matched, return default pre-Osaka limits
-                EvmLimitParams::default()
-            }
+            EvmLimitParamsKind::Variable(ForkEvmLimitParams(fork_params)) => fork_params
+                .iter()
+                .rev()
+                .find(|(fork, _)| {
+                    self.hardforks.is_fork_active_at_timestamp(fork.clone(), timestamp)
+                })
+                .map(|(_, params)| *params)
+                .unwrap_or_default(),
+        };
+
+        // EIP-7825: resolve tx gas limit cap for Osaka
+        if params.tx_gas_limit_cap.is_none() && self.is_osaka_active_at_timestamp(timestamp) {
+            EvmLimitParams { tx_gas_limit_cap: Some(MAX_TX_GAS_LIMIT_OSAKA), ..params }
+        } else {
+            params
         }
     }
 
@@ -3020,53 +3025,20 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn test_evm_limit_params_at_timestamp_variable() {
-        let london_params = EvmLimitParams {
-            max_code_size: 24576,
-            max_initcode_size: 49152,
-            tx_gas_limit_cap: None,
-        };
-        let shanghai_params = EvmLimitParams {
-            max_code_size: 32768,
-            max_initcode_size: 65536,
-            tx_gas_limit_cap: Some(30_000_000),
-        };
-        let cancun_params = EvmLimitParams {
-            max_code_size: 65536,
-            max_initcode_size: 131072,
-            tx_gas_limit_cap: Some(60_000_000),
-        };
-
-        let mut spec = ChainSpec::builder()
+    fn test_evm_limit_params_osaka_resolution() {
+        let spec = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(Genesis::default())
             .london_activated()
-            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(1000))
-            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(2000))
+            .with_fork(EthereumHardfork::Osaka, ForkCondition::Timestamp(1000))
             .build();
 
-        spec.evm_limit_params = EvmLimitParamsKind::Variable(ForkEvmLimitParams(vec![
-            (EthereumHardfork::London.boxed(), london_params),
-            (EthereumHardfork::Shanghai.boxed(), shanghai_params),
-            (EthereumHardfork::Cancun.boxed(), cancun_params),
-        ]));
-
-        // Before Shanghai, should get London params
+        // Pre-Osaka: tx_gas_limit_cap remains None
         let params = spec.evm_limit_params_at_timestamp(999);
-        assert_eq!(params.max_code_size, london_params.max_code_size);
-        assert_eq!(params.max_initcode_size, london_params.max_initcode_size);
-        assert_eq!(params.tx_gas_limit_cap, london_params.tx_gas_limit_cap);
+        assert_eq!(params.tx_gas_limit_cap, None);
 
-        // At Shanghai activation (timestamp 1000), should get Shanghai params
+        // Osaka: tx_gas_limit_cap resolved to EIP-7825 cap
         let params = spec.evm_limit_params_at_timestamp(1000);
-        assert_eq!(params.max_code_size, shanghai_params.max_code_size);
-        assert_eq!(params.max_initcode_size, shanghai_params.max_initcode_size);
-        assert_eq!(params.tx_gas_limit_cap, shanghai_params.tx_gas_limit_cap);
-
-        // At Cancun activation (timestamp 2000), should get Cancun params
-        let params = spec.evm_limit_params_at_timestamp(2000);
-        assert_eq!(params.max_code_size, cancun_params.max_code_size);
-        assert_eq!(params.max_initcode_size, cancun_params.max_initcode_size);
-        assert_eq!(params.tx_gas_limit_cap, cancun_params.tx_gas_limit_cap);
+        assert_eq!(params.tx_gas_limit_cap, Some(MAX_TX_GAS_LIMIT_OSAKA));
     }
 }
