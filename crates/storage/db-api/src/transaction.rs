@@ -8,8 +8,14 @@ use std::fmt::Debug;
 /// Helper adapter type for accessing [`DbTx`] cursor.
 pub type CursorTy<TX, T> = <TX as DbTx>::Cursor<T>;
 
+/// Helper adapter type for accessing [`DbTx`] dup cursor.
+pub type DupCursorTy<TX, T> = <TX as DbTx>::DupCursor<T>;
+
 /// Helper adapter type for accessing [`DbTxMut`] mutable cursor.
 pub type CursorMutTy<TX, T> = <TX as DbTxMut>::CursorMut<T>;
+
+/// Helper adapter type for accessing [`DbTxMut`] mutable dup cursor.
+pub type DupCursorMutTy<TX, T> = <TX as DbTxMut>::DupCursorMut<T>;
 
 /// Read only transaction
 pub trait DbTx: Debug + Send {
@@ -29,7 +35,7 @@ pub trait DbTx: Debug + Send {
     ) -> Result<Option<T::Value>, DatabaseError>;
     /// Commit for read only transaction will consume and free transaction and allows
     /// freeing of memory pages
-    fn commit(self) -> Result<bool, DatabaseError>;
+    fn commit(self) -> Result<(), DatabaseError>;
     /// Aborts transaction
     fn abort(self);
     /// Iterate over read only values in table.

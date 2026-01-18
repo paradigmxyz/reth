@@ -637,7 +637,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         //
         // known txns have already been successfully fetched or received over gossip.
         //
-        // most hashes will be filtered out here since this the mempool protocol is a gossip
+        // most hashes will be filtered out here since the mempool protocol is a gossip
         // protocol, healthy peers will send many of the same hashes.
         //
         let hashes_count_pre_pool_filter = partially_valid_msg.len();
@@ -1931,8 +1931,14 @@ impl PooledTransactionsHashesBuilder {
 
     fn build(self) -> NewPooledTransactionHashes {
         match self {
-            Self::Eth66(msg) => msg.into(),
-            Self::Eth68(msg) => msg.into(),
+            Self::Eth66(mut msg) => {
+                msg.0.shrink_to_fit();
+                msg.into()
+            }
+            Self::Eth68(mut msg) => {
+                msg.shrink_to_fit();
+                msg.into()
+            }
         }
     }
 }
@@ -1994,7 +2000,7 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
         &self.request_tx
     }
 
-    /// Return a
+    /// Returns a mutable reference to the seen transactions LRU cache.
     pub const fn seen_transactions_mut(&mut self) -> &mut LruCache<TxHash> {
         &mut self.seen_transactions
     }

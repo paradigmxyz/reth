@@ -39,7 +39,8 @@ pub(crate) struct BenchmarkResults {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct CombinedLatencyRow {
     pub block_number: u64,
-    pub transaction_count: u64,
+    #[serde(default)]
+    pub transaction_count: Option<u64>,
     pub gas_used: u64,
     pub new_payload_latency: u128,
 }
@@ -48,7 +49,8 @@ pub(crate) struct CombinedLatencyRow {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct TotalGasRow {
     pub block_number: u64,
-    pub transaction_count: u64,
+    #[serde(default)]
+    pub transaction_count: Option<u64>,
     pub gas_used: u64,
     pub time: u128,
 }
@@ -97,6 +99,7 @@ pub(crate) struct RefInfo {
 /// Summary of the comparison between references.
 ///
 /// Percent deltas are `(feature - baseline) / baseline * 100`:
+/// - `new_payload_latency_mean_change_percent`: percent changes of the per-block means.
 /// - `new_payload_latency_p50_change_percent` / p90 / p99: percent changes of the respective
 ///   per-block percentiles.
 /// - `per_block_latency_change_mean_percent` / `per_block_latency_change_median_percent` are the
@@ -114,6 +117,7 @@ pub(crate) struct ComparisonSummary {
     pub per_block_latency_change_median_percent: f64,
     pub per_block_latency_change_std_dev_percent: f64,
     pub new_payload_total_latency_change_percent: f64,
+    pub new_payload_latency_mean_change_percent: f64,
     pub new_payload_latency_p50_change_percent: f64,
     pub new_payload_latency_p90_change_percent: f64,
     pub new_payload_latency_p99_change_percent: f64,
@@ -125,7 +129,8 @@ pub(crate) struct ComparisonSummary {
 #[derive(Debug, Serialize)]
 pub(crate) struct BlockComparison {
     pub block_number: u64,
-    pub transaction_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_count: Option<u64>,
     pub gas_used: u64,
     pub baseline_new_payload_latency: u128,
     pub feature_new_payload_latency: u128,
@@ -442,6 +447,10 @@ impl ComparisonGenerator {
             per_block_latency_change_median_percent,
             per_block_latency_change_std_dev_percent,
             new_payload_total_latency_change_percent,
+            new_payload_latency_mean_change_percent: calc_percent_change(
+                baseline.mean_new_payload_latency_ms,
+                feature.mean_new_payload_latency_ms,
+            ),
             new_payload_latency_p50_change_percent: calc_percent_change(
                 baseline.median_new_payload_latency_ms,
                 feature.median_new_payload_latency_ms,
@@ -571,6 +580,10 @@ impl ComparisonGenerator {
         println!(
             "  Total newPayload time change:                {:+.2}%",
             summary.new_payload_total_latency_change_percent
+        );
+        println!(
+            "  NewPayload Latency mean:           {:+.2}%",
+            summary.new_payload_latency_mean_change_percent
         );
         println!(
             "  NewPayload Latency p50:           {:+.2}%",

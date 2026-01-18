@@ -62,8 +62,14 @@ pub trait DbCursorRO<T: Table> {
 
 /// A read-only cursor over the dup table `T`.
 pub trait DbDupCursorRO<T: DupSort> {
+    /// Positions the cursor at the prev KV pair of the table, returning it.
+    fn prev_dup(&mut self) -> PairResult<T>;
+
     /// Positions the cursor at the next KV pair of the table, returning it.
     fn next_dup(&mut self) -> PairResult<T>;
+
+    /// Positions the cursor at the last duplicate value of the current key.
+    fn last_dup(&mut self) -> ValueOnlyResult<T>;
 
     /// Positions the cursor at the next KV pair of the table, skipping duplicates.
     fn next_no_dup(&mut self) -> PairResult<T>;
@@ -119,7 +125,7 @@ pub trait DbCursorRW<T: Table> {
     fn delete_current(&mut self) -> Result<(), DatabaseError>;
 }
 
-/// Read Write Cursor over `DupSorted` table.
+/// Read Write Cursor over `DupSort` table.
 pub trait DbDupCursorRW<T: DupSort> {
     /// Delete all duplicate entries for current key.
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError>;

@@ -16,8 +16,8 @@ use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
     BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
     HashingWriter, HeaderProvider, HistoryWriter, MetadataWriter, OriginalValuesKnown,
-    ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter, StateWriter,
-    StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
+    ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
+    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -104,13 +104,20 @@ where
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
-    init_genesis_with_settings(factory, StorageSettings::legacy())
+    #[cfg(feature = "edge")]
+    {
+        init_genesis_with_settings(factory, StorageSettings::edge())
+    }
+    #[cfg(not(feature = "edge"))]
+    {
+        init_genesis_with_settings(factory, StorageSettings::legacy())
+    }
 }
 
 /// Write the genesis block if it has not already been written with [`StorageSettings`].
 pub fn init_genesis_with_settings<PF>(
     factory: &PF,
-    storage_settings: StorageSettings,
+    genesis_storage_settings: StorageSettings,
 ) -> Result<B256, InitStorageError>
 where
     PF: DatabaseProviderFactory
@@ -169,10 +176,17 @@ where
 
     debug!("Writing genesis block.");
 
+    // Make sure to set storage settings before anything writes
+    factory.set_storage_settings_cache(genesis_storage_settings);
+
     let alloc = &genesis.alloc;
 
     // use transaction to insert genesis header
     let provider_rw = factory.database_provider_rw()?;
+
+    // Behaviour reserved only for new nodes should be set in the storage settings.
+    provider_rw.write_storage_settings(genesis_storage_settings)?;
+
     insert_genesis_hashes(&provider_rw, alloc.iter())?;
     insert_genesis_history(&provider_rw, alloc.iter())?;
 
@@ -191,6 +205,10 @@ where
     }
 
     // Static file segments start empty, so we need to initialize the genesis block.
+    //
+    // We do not do this for changesets because they get initialized in `insert_state` /
+    // `write_state` / `write_state_reverts`. If the node is configured for writing changesets to
+    // static files they will be written there, otherwise they will be written to the DB.
     let static_file_provider = provider_rw.static_file_provider();
 
     // Static file segments start empty, so we need to initialize the genesis block.
@@ -205,13 +223,16 @@ where
         .user_header_mut()
         .set_block_range(genesis_block_number, genesis_block_number);
 
-    // Behaviour reserved only for new nodes should be set here.
-    provider_rw.write_storage_settings(storage_settings)?;
+    if genesis_storage_settings.transaction_senders_in_static_files {
+        static_file_provider
+            .get_writer(genesis_block_number, StaticFileSegment::TransactionSenders)?
+            .user_header_mut()
+            .set_block_range(genesis_block_number, genesis_block_number);
+    }
 
     // `commit_unwind`` will first commit the DB and then the static file provider, which is
     // necessary on `init_genesis`.
     provider_rw.commit()?;
-    factory.set_storage_settings_cache(storage_settings);
 
     Ok(hash)
 }
@@ -313,7 +334,11 @@ where
         Vec::new(),
     );
 
-    provider.write_state(&execution_outcome, OriginalValuesKnown::Yes)?;
+    provider.write_state(
+        &execution_outcome,
+        OriginalValuesKnown::Yes,
+        StateWriteConfig::default(),
+    )?;
 
     trace!(target: "reth::cli", "Inserted state");
 

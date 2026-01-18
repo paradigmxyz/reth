@@ -8,8 +8,8 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
-    DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
-    StatsReader, TrieWriter,
+    ChangeSetReader, DBProvider, HeaderProvider, ProviderError, StageCheckpointReader,
+    StageCheckpointWriter, StatsReader, TrieWriter,
 };
 use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
@@ -158,6 +158,7 @@ where
         + TrieWriter
         + StatsReader
         + HeaderProvider
+        + ChangeSetReader
         + StageCheckpointReader
         + StageCheckpointWriter,
 {
@@ -312,7 +313,7 @@ where
                     "Processing chunk"
                 );
                 let (root, updates) =
-                StateRoot::incremental_root_with_updates(provider.tx_ref(), chunk_range)
+                StateRoot::incremental_root_with_updates(provider, chunk_range)
                     .map_err(|e| {
                         error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                         StageError::Fatal(Box::new(e))
@@ -389,7 +390,7 @@ where
         if range.is_empty() {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
-            let (block_root, updates) = StateRoot::incremental_root_with_updates(tx, range)
+            let (block_root, updates) = StateRoot::incremental_root_with_updates(provider, range)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             // Validate the calculated state root
@@ -587,9 +588,9 @@ mod tests {
 
         let actual_root = runner
             .db
-            .query(|tx| {
+            .query_with_provider(|provider| {
                 Ok(StateRoot::incremental_root_with_updates(
-                    tx,
+                    &provider,
                     stage_progress + 1..=previous_stage,
                 ))
             })

@@ -604,10 +604,10 @@ impl FinalizedBlockTracker {
     /// Updates the tracked finalized block and returns the new finalized block if it changed
     fn update(&mut self, finalized_block: Option<BlockNumber>) -> Option<BlockNumber> {
         let finalized = finalized_block?;
-        self.last_finalized_block
-            .replace(finalized)
-            .is_none_or(|last| last < finalized)
-            .then_some(finalized)
+        self.last_finalized_block.is_none_or(|last| last < finalized).then(|| {
+            self.last_finalized_block = Some(finalized);
+            finalized
+        })
     }
 }
 
@@ -934,7 +934,8 @@ mod tests {
     fn test_update_with_lower_finalized_block() {
         let mut tracker = FinalizedBlockTracker::new(Some(20));
         assert_eq!(tracker.update(Some(15)), None);
-        assert_eq!(tracker.last_finalized_block, Some(15));
+        // finalized block should NOT go backwards
+        assert_eq!(tracker.last_finalized_block, Some(20));
     }
 
     #[test]
