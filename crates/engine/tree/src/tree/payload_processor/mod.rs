@@ -48,7 +48,7 @@ use std::{
     collections::BTreeMap,
     ops::Not,
     sync::{
-        atomic::AtomicBool,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, channel},
         Arc,
     },
@@ -139,6 +139,11 @@ where
     disable_parallel_sparse_trie: bool,
     /// Maximum concurrency for prewarm task.
     prewarm_max_concurrency: usize,
+    /// Dynamic account worker count based on previous block's queue pressure.
+    /// Starts at config value and adjusts based on observed pressure.
+    account_worker_count: Arc<AtomicUsize>,
+    /// Maximum account workers allowed (capped at 64 or available parallelism).
+    account_worker_max: usize,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -158,6 +163,10 @@ where
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     ) -> Self {
+        let account_worker_max = std::thread::available_parallelism()
+            .map(|p| p.get().min(64))
+            .unwrap_or(64);
+
         Self {
             executor,
             execution_cache: Default::default(),
@@ -171,6 +180,8 @@ where
             sparse_state_trie: Arc::default(),
             disable_parallel_sparse_trie: config.disable_parallel_sparse_trie(),
             prewarm_max_concurrency: config.prewarm_max_concurrency(),
+            account_worker_count: Arc::new(AtomicUsize::new(config.account_worker_count())),
+            account_worker_max,
         }
     }
 }
@@ -274,7 +285,9 @@ where
         // Create and spawn the storage proof task
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let storage_worker_count = config.storage_worker_count();
-        let account_worker_count = config.account_worker_count();
+        let account_worker_count = self.account_worker_count.load(Ordering::Relaxed);
+        let account_worker_count_arc = self.account_worker_count.clone();
+        let account_worker_max = self.account_worker_max;
         let v2_proofs_enabled = config.enable_proof_v2();
         let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
@@ -295,6 +308,7 @@ where
         // spawn multi-proof task
         let parent_span = span.clone();
         let saved_cache = prewarm_handle.saved_cache.clone();
+        let proof_handle_for_scaling = proof_handle.clone();
         self.executor.spawn_blocking(move || {
             let _enter = parent_span.entered();
             // Build a state provider for the multiproof task
@@ -307,6 +321,29 @@ where
                 Box::new(provider)
             };
             multi_proof_task.run(provider);
+
+            // After block processing, check if we experienced queue pressure and adjust
+            // worker count for next block. Pressure = pending_tasks / workers.
+            // If pressure was high (>= 8), scale up by 25% for next block.
+            let pending = proof_handle_for_scaling.pending_account_tasks();
+            let workers = proof_handle_for_scaling.total_account_workers();
+            let pressure = pending / workers.max(1);
+
+            const PRESSURE_THRESHOLD: usize = 8;
+            const SCALE_PERCENT: usize = 25;
+
+            if pressure >= PRESSURE_THRESHOLD {
+                let new_count = ((workers * (100 + SCALE_PERCENT)) / 100).min(account_worker_max);
+                account_worker_count_arc.store(new_count, Ordering::Relaxed);
+                debug!(
+                    target: "engine::payload",
+                    workers,
+                    pending,
+                    pressure,
+                    new_count,
+                    "Scaling up account workers for next block due to queue pressure"
+                );
+            }
         });
 
         // wire the sparse trie to the state root response receiver
