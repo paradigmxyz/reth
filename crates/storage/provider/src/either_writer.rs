@@ -518,8 +518,22 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
 where
     CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
 {
-    /// Puts an account history entry.
-    pub fn put_account_history(
+    /// Appends an account history entry (for first sync - more efficient).
+    pub fn append_account_history(
+        &mut self,
+        key: ShardedKey<Address>,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.append(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, value),
+        }
+    }
+
+    /// Upserts an account history entry (for incremental sync).
+    pub fn upsert_account_history(
         &mut self,
         key: ShardedKey<Address>,
         value: &BlockNumberList,
@@ -529,6 +543,21 @@ where
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, value),
+        }
+    }
+
+    /// Gets the last shard for an address (keyed with `u64::MAX`).
+    pub fn get_last_account_history_shard(
+        &mut self,
+        address: Address,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        match self {
+            Self::Database(cursor) => {
+                Ok(cursor.seek_exact(ShardedKey::last(address))?.map(|(_, v)| v))
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.get::<tables::AccountsHistory>(ShardedKey::last(address)),
         }
     }
 
@@ -1266,8 +1295,8 @@ mod rocksdb_tests {
         for (highest_block, blocks) in shards {
             let key = ShardedKey::new(address, *highest_block);
             let value = IntegerList::new(blocks.clone()).unwrap();
-            mdbx_writer.put_account_history(key.clone(), &value).unwrap();
-            rocks_writer.put_account_history(key, &value).unwrap();
+            mdbx_writer.upsert_account_history(key.clone(), &value).unwrap();
+            rocks_writer.upsert_account_history(key, &value).unwrap();
         }
 
         // Commit both backends
