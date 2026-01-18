@@ -712,7 +712,7 @@ mod tests {
         use reth_storage_api::StorageSettings;
 
         /// Test that when `account_history_in_rocksdb` is enabled, the stage
-        /// writes account history indices to RocksDB instead of MDBX.
+        /// writes account history indices to `RocksDB` instead of MDBX.
         #[tokio::test]
         async fn execute_writes_to_rocksdb_when_enabled() {
             // init
@@ -761,7 +761,7 @@ mod tests {
 
         /// Test that unwind works correctly when `account_history_in_rocksdb` is enabled.
         ///
-        /// Note: Full unwind support for RocksDB requires updates to the HistoryWriter trait
+        /// Note: Full unwind support for `RocksDB` requires updates to the `HistoryWriter` trait
         /// implementation. This test verifies the unwind doesn't panic and updates checkpoints.
         #[tokio::test]
         async fn unwind_works_when_rocksdb_enabled() {
