@@ -287,7 +287,7 @@ where
 }
 
 /// Mode on how to load index shards into the database.
-#[derive(Clone, Copy)]
+#[derive(Copy, Clone)]
 pub(crate) enum LoadMode {
     /// Keep the last shard in memory and don't flush it to the database.
     KeepLast,
@@ -302,14 +302,10 @@ impl LoadMode {
 }
 
 /// Writes shards of block number indices using the provided put function.
-/// This is the core sharding algorithm, abstracted from the storage backend.
 ///
-/// This function handles the sharding logic: splitting indices into chunks of
-/// `NUM_OF_INDICES_IN_SHARD` and writing them using the provided `put` closure.
-///
-/// The `mode` parameter controls whether to flush all shards or keep the last one in memory:
-/// - [`LoadMode::Flush`]: Write all shards, with the last one using `u64::MAX` as the highest block
-/// - [`LoadMode::KeepLast`]: Write all complete shards, keep the last partial shard in `list`
+/// Splits indices into chunks of `NUM_OF_INDICES_IN_SHARD` and writes them.
+/// With [`LoadMode::Flush`], writes all shards (last uses `u64::MAX`).
+/// With [`LoadMode::KeepLast`], keeps the last partial shard in `list`.
 pub(crate) fn write_shards<K, P>(
     partial_key: P,
     list: &mut Vec<u64>,
@@ -320,149 +316,29 @@ pub(crate) fn write_shards<K, P>(
 where
     P: Copy,
 {
-    if list.len() > NUM_OF_INDICES_IN_SHARD || mode.is_flush() {
-        let chunks = list
-            .chunks(NUM_OF_INDICES_IN_SHARD)
-            .map(|chunk| chunk.to_vec())
-            .collect::<Vec<Vec<u64>>>();
-
-        let mut iter = chunks.into_iter().peekable();
-        while let Some(chunk) = iter.next() {
-            let mut highest = *chunk.last().expect("at least one index");
-
-            if !mode.is_flush() && iter.peek().is_none() {
-                *list = chunk;
-            } else {
-                if iter.peek().is_none() {
-                    highest = u64::MAX;
-                }
-                let key = sharded_key_factory(partial_key, highest);
-                let value = BlockNumberList::new_pre_sorted(chunk);
-                put(key, value)?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Trait for writing account history shards to a storage backend.
-///
-/// This trait abstracts over the underlying storage (MDBX, `RocksDB`, etc.)
-/// allowing the sharding algorithm to work with any backend.
-pub(crate) trait AccountHistoryShardWriter {
-    /// Retrieves the last shard for an account (the one with `u64::MAX` as the highest block).
-    fn get_last_shard(&self, address: Address) -> Result<Option<BlockNumberList>, StageError>;
-
-    /// Writes a shard to the storage backend.
-    fn put(&mut self, key: ShardedKey<Address>, value: BlockNumberList) -> Result<(), StageError>;
-
-    /// Deletes a shard from the storage backend.
-    fn delete(&mut self, key: ShardedKey<Address>) -> Result<(), StageError>;
-}
-
-/// Loads account history indices from a collector using an [`AccountHistoryShardWriter`].
-///
-/// This function processes entries from the collector, grouping indices by address and
-/// writing them as shards when they reach the maximum shard size. It handles merging
-/// with existing shards during incremental syncs.
-pub(crate) fn load_account_history_indices_with_writer<W>(
-    mut collector: Collector<ShardedKey<Address>, BlockNumberList>,
-    append_only: bool,
-    writer: &mut W,
-) -> Result<(), StageError>
-where
-    W: AccountHistoryShardWriter,
-{
-    use reth_db_api::table::{Decode, Decompress};
-
-    let mut current_address = Address::ZERO;
-    let mut current_list = Vec::<u64>::new();
-
-    let total_entries = collector.len();
-    let interval = (total_entries / 10).max(1);
-
-    for (index, element) in collector.iter()?.enumerate() {
-        let (k, v) = element?;
-        let sharded_key = ShardedKey::<Address>::decode_owned(k)?;
-        let new_list = BlockNumberList::decompress_owned(v)?;
-
-        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
-            info!(target: "sync::stages::index_account_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
-        }
-
-        let address = sharded_key.key;
-
-        if current_address != address {
-            flush_shards_with_writer(current_address, &mut current_list, append_only, writer)?;
-            current_address = address;
-            current_list.clear();
-
-            if !append_only && let Some(existing_list) = writer.get_last_shard(current_address)? {
-                current_list.extend(existing_list.iter());
-            }
-        }
-
-        current_list.extend(new_list.iter());
-
-        write_account_history_shards_keep_last(current_address, &mut current_list, writer)?;
-    }
-
-    flush_shards_with_writer(current_address, &mut current_list, append_only, writer)?;
-
-    Ok(())
-}
-
-/// Writes full shards to storage, keeping only the last partial shard in memory.
-fn write_account_history_shards_keep_last<W>(
-    address: Address,
-    list: &mut Vec<u64>,
-    writer: &mut W,
-) -> Result<(), StageError>
-where
-    W: AccountHistoryShardWriter,
-{
-    while list.len() > NUM_OF_INDICES_IN_SHARD {
-        let chunk: Vec<u64> = list.drain(..NUM_OF_INDICES_IN_SHARD).collect();
-        let highest = *chunk.last().expect("chunk is not empty");
-        let key = ShardedKey::new(address, highest);
-        let value = BlockNumberList::new_pre_sorted(chunk);
-        writer.put(key, value)?;
-    }
-    Ok(())
-}
-
-/// Flushes all remaining shards to storage.
-/// The last shard uses `u64::MAX` as its highest block.
-fn flush_shards_with_writer<W>(
-    address: Address,
-    list: &mut Vec<u64>,
-    append_only: bool,
-    writer: &mut W,
-) -> Result<(), StageError>
-where
-    W: AccountHistoryShardWriter,
-{
-    if list.is_empty() {
+    if list.len() <= NUM_OF_INDICES_IN_SHARD && !mode.is_flush() {
         return Ok(());
     }
 
-    while list.len() > NUM_OF_INDICES_IN_SHARD {
-        let chunk: Vec<u64> = list.drain(..NUM_OF_INDICES_IN_SHARD).collect();
-        let highest = *chunk.last().expect("chunk is not empty");
-        let key = ShardedKey::new(address, highest);
-        let value = BlockNumberList::new_pre_sorted(chunk);
-        writer.put(key, value)?;
+    let num_chunks = list.len().div_ceil(NUM_OF_INDICES_IN_SHARD);
+    for (i, chunk) in list.chunks(NUM_OF_INDICES_IN_SHARD).enumerate() {
+        let is_last = i == num_chunks - 1;
+
+        if !mode.is_flush() && is_last {
+            // Keep last partial shard in memory
+            let remaining: Vec<u64> = chunk.to_vec();
+            *list = remaining;
+            return Ok(());
+        }
+
+        let highest = if is_last { u64::MAX } else { *chunk.last().expect("chunk not empty") };
+        let key = sharded_key_factory(partial_key, highest);
+        let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
+        put(key, value)?;
     }
 
-    if !list.is_empty() {
-        let key = ShardedKey::last(address);
-        let value = BlockNumberList::new_pre_sorted(list.drain(..));
-
-        if !append_only {
-            writer.delete(key.clone())?;
-        }
-        writer.put(key, value)?;
+    if mode.is_flush() {
+        list.clear();
     }
 
     Ok(())
