@@ -2979,7 +2979,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             {
                 // For RocksDB, we need to find the minimum block number per address
                 // (the unwind_to point) and call unwind_account_history_to for each.
-                use std::collections::HashMap;
 
                 // Group by address and find the minimum block number for each (unwind_to - 1)
                 let mut address_unwind_to: HashMap<Address, BlockNumber> = HashMap::new();
