@@ -108,7 +108,7 @@ where
     for (address, indices) in cache {
         insert_fn(address, indices)?
     }
-    Ok::<(), StageError>(())
+    Ok(())
 }
 
 /// Collects account history indices using a provider that implements `ChangeSetReader`.
@@ -124,12 +124,12 @@ where
     let mut cache: HashMap<Address, Vec<u64>> = HashMap::default();
 
     let mut insert_fn = |address: Address, indices: Vec<u64>| {
-        let last = indices.last().expect("qed");
+        let last = indices.last().expect("indices is non-empty");
         collector.insert(
             ShardedKey::new(address, *last),
             BlockNumberList::new_pre_sorted(indices.into_iter()),
         )?;
-        Ok::<(), StageError>(())
+        Ok(())
     };
 
     // Convert range bounds to concrete range
@@ -170,32 +170,44 @@ where
     Ok(collector)
 }
 
-/// Given a [`Collector`] created by [`collect_history_indices`] it iterates all entries, loading
-/// the indices into the database in shards.
+/// Backend operations for loading history indices.
 ///
-///  ## Process
-/// Iterates over elements, grouping indices by their partial keys (e.g., `Address` or
-/// `Address.StorageKey`). It flushes indices to disk when reaching a shard's max length
-/// (`NUM_OF_INDICES_IN_SHARD`) or when the partial key changes, ensuring the last previous partial
-/// key shard is stored.
-pub(crate) fn load_history_indices<Provider, H, P>(
-    provider: &Provider,
-    mut collector: Collector<H::Key, H::Value>,
+/// This trait abstracts the storage backend (MDBX cursor, `EitherWriter`, etc.)
+/// allowing the same loading algorithm to work with different backends.
+pub(super) trait HistoryIndexWriter<K, P> {
+    /// Get the last shard for a partial key (stored with `highest_block_number = u64::MAX`).
+    fn get_last_shard(&mut self, partial: P) -> Result<Option<BlockNumberList>, StageError>;
+
+    /// Write a shard to storage.
+    fn put(&mut self, key: K, value: &BlockNumberList, append_only: bool)
+        -> Result<(), StageError>;
+}
+
+/// Core implementation of history index loading.
+///
+/// This is the shared algorithm for loading history indices that works with any backend
+/// implementing [`HistoryIndexWriter`].
+///
+/// # Invariant
+///
+/// The last shard for each partial key is always stored with `highest_block_number = u64::MAX`.
+/// This allows `get_last_shard` to find it via `seek_exact(partial_key, u64::MAX)`.
+pub(crate) fn load_history_indices_with<K, P, W>(
+    mut collector: Collector<K, BlockNumberList>,
     append_only: bool,
-    sharded_key_factory: impl Clone + Fn(P, u64) -> <H as Table>::Key,
-    decode_key: impl Fn(Vec<u8>) -> Result<<H as Table>::Key, DatabaseError>,
-    get_partial: impl Fn(<H as Table>::Key) -> P,
+    decode_key: impl Fn(Vec<u8>) -> Result<K, DatabaseError>,
+    get_partial: impl Fn(&K) -> P,
+    sharded_key_factory: impl Clone + Fn(P, u64) -> K,
+    writer: &mut W,
 ) -> Result<(), StageError>
 where
-    Provider: DBProvider<Tx: DbTxMut>,
-    H: Table<Value = BlockNumberList>,
-    P: Copy + Default + Eq,
+    K: reth_db_api::table::Key,
+    P: Copy + Eq,
+    W: HistoryIndexWriter<K, P>,
 {
-    let mut write_cursor = provider.tx_ref().cursor_write::<H>()?;
-    let mut current_partial = P::default();
+    let mut current_partial: Option<P> = None;
     let mut current_list = Vec::<u64>::new();
 
-    // observability
     let total_entries = collector.len();
     let interval = (total_entries / 10).max(1);
 
@@ -208,136 +220,151 @@ where
             info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
         }
 
-        // AccountsHistory: `Address`.
-        // StorageHistory: `Address.StorageKey`.
-        let partial_key = get_partial(sharded_key);
+        let partial_key = get_partial(&sharded_key);
 
-        if current_partial != partial_key {
-            // We have reached the end of this subset of keys so
-            // we need to flush its last indice shard.
-            load_indices(
-                &mut write_cursor,
-                current_partial,
-                &mut current_list,
-                &sharded_key_factory,
-                append_only,
-                LoadMode::Flush,
-            )?;
+        if current_partial != Some(partial_key) {
+            // Flush previous partial key's shards (skip if this is the first key)
+            if let Some(prev) = current_partial {
+                write_shards(prev, &mut current_list, &sharded_key_factory, true, |key, value| {
+                    writer.put(key, &value, append_only)
+                })?;
+            }
 
-            current_partial = partial_key;
+            current_partial = Some(partial_key);
             current_list.clear();
 
-            // If it's not the first sync, there might an existing shard already, so we need to
-            // merge it with the one coming from the collector
-            if !append_only &&
-                let Some((_, last_database_shard)) =
-                    write_cursor.seek_exact(sharded_key_factory(current_partial, u64::MAX))?
+            // Merge existing shard if not first sync
+            if !append_only
+                && let Some(last_database_shard) = writer.get_last_shard(partial_key)?
             {
                 current_list.extend(last_database_shard.iter());
             }
         }
 
         current_list.extend(new_list.iter());
-        load_indices(
-            &mut write_cursor,
-            current_partial,
-            &mut current_list,
-            &sharded_key_factory,
-            append_only,
-            LoadMode::KeepLast,
-        )?;
+        write_shards(partial_key, &mut current_list, &sharded_key_factory, false, |key, value| {
+            writer.put(key, &value, append_only)
+        })?;
     }
 
-    // There will be one remaining shard that needs to be flushed to DB.
-    load_indices(
-        &mut write_cursor,
-        current_partial,
-        &mut current_list,
-        &sharded_key_factory,
-        append_only,
-        LoadMode::Flush,
-    )?;
+    // Flush remaining shard
+    if let Some(partial) = current_partial {
+        write_shards(partial, &mut current_list, &sharded_key_factory, true, |key, value| {
+            writer.put(key, &value, append_only)
+        })?;
+    }
 
     Ok(())
 }
 
-/// Shard and insert the indices list according to [`LoadMode`] and its length.
-pub(crate) fn load_indices<H, C, P>(
-    cursor: &mut C,
-    partial_key: P,
-    list: &mut Vec<BlockNumber>,
-    sharded_key_factory: &impl Fn(P, BlockNumber) -> <H as Table>::Key,
-    append_only: bool,
-    mode: LoadMode,
-) -> Result<(), StageError>
+/// Wrapper for MDBX cursor that implements [`HistoryIndexWriter`].
+struct CursorWriter<'a, H, C, F> {
+    cursor: &'a mut C,
+    sharded_key_factory: F,
+    _table: std::marker::PhantomData<H>,
+}
+
+impl<H, P, C, F> HistoryIndexWriter<H::Key, P> for CursorWriter<'_, H, C, F>
 where
-    C: DbCursorRO<H> + DbCursorRW<H>,
     H: Table<Value = BlockNumberList>,
-    H::Key: Clone,
     P: Copy,
+    C: DbCursorRO<H> + DbCursorRW<H>,
+    F: Fn(P, u64) -> H::Key,
 {
-    write_shards(partial_key, list, sharded_key_factory, mode, |key, value| {
+    fn get_last_shard(&mut self, partial: P) -> Result<Option<BlockNumberList>, StageError> {
+        let key = (self.sharded_key_factory)(partial, u64::MAX);
+        Ok(self.cursor.seek_exact(key)?.map(|(_, v)| v))
+    }
+
+    fn put(
+        &mut self,
+        key: H::Key,
+        value: &BlockNumberList,
+        append_only: bool,
+    ) -> Result<(), StageError> {
         if append_only {
-            cursor.append(key, &value)?;
+            self.cursor.append(key, value)?;
         } else {
-            cursor.upsert(key, &value)?;
+            self.cursor.upsert(key, value)?;
         }
         Ok(())
-    })
-}
-
-/// Mode on how to load index shards into the database.
-#[derive(Copy, Clone)]
-pub(crate) enum LoadMode {
-    /// Keep the last shard in memory and don't flush it to the database.
-    KeepLast,
-    /// Flush all shards into the database.
-    Flush,
-}
-
-impl LoadMode {
-    const fn is_flush(&self) -> bool {
-        matches!(self, Self::Flush)
     }
+}
+
+/// Given a [`Collector`] created by [`collect_history_indices`] it iterates all entries, loading
+/// the indices into the database in shards.
+///
+/// Iterates over elements, grouping indices by their partial keys (e.g., `Address` or
+/// `Address.StorageKey`). It flushes indices to disk when reaching a shard's max length
+/// (`NUM_OF_INDICES_IN_SHARD`) or when the partial key changes.
+pub(crate) fn load_history_indices<Provider, H, P>(
+    provider: &Provider,
+    collector: Collector<H::Key, H::Value>,
+    append_only: bool,
+    sharded_key_factory: impl Clone + Fn(P, u64) -> <H as Table>::Key,
+    decode_key: impl Fn(Vec<u8>) -> Result<<H as Table>::Key, DatabaseError>,
+    get_partial: impl Fn(&<H as Table>::Key) -> P,
+) -> Result<(), StageError>
+where
+    Provider: DBProvider<Tx: DbTxMut>,
+    H: Table<Value = BlockNumberList>,
+    P: Copy + Eq,
+{
+    let mut cursor = provider.tx_ref().cursor_write::<H>()?;
+    let mut writer = CursorWriter::<H, _, _> {
+        cursor: &mut cursor,
+        sharded_key_factory: sharded_key_factory.clone(),
+        _table: std::marker::PhantomData,
+    };
+
+    load_history_indices_with(
+        collector,
+        append_only,
+        decode_key,
+        get_partial,
+        sharded_key_factory,
+        &mut writer,
+    )
 }
 
 /// Writes shards of block number indices using the provided put function.
 ///
 /// Splits indices into chunks of `NUM_OF_INDICES_IN_SHARD` and writes them.
-/// With [`LoadMode::Flush`], writes all shards (last uses `u64::MAX`).
-/// With [`LoadMode::KeepLast`], keeps the last partial shard in `list`.
+/// With `flush=true`, writes all shards (last uses `u64::MAX` as the highest block number).
+/// With `flush=false`, keeps the last partial shard in `list` for continued accumulation.
 pub(crate) fn write_shards<K, P>(
     partial_key: P,
     list: &mut Vec<u64>,
     sharded_key_factory: &impl Fn(P, u64) -> K,
-    mode: LoadMode,
+    flush: bool,
     mut put: impl FnMut(K, BlockNumberList) -> Result<(), StageError>,
 ) -> Result<(), StageError>
 where
     P: Copy,
 {
-    if list.len() <= NUM_OF_INDICES_IN_SHARD && !mode.is_flush() {
+    if list.len() <= NUM_OF_INDICES_IN_SHARD && !flush {
         return Ok(());
     }
 
     let num_chunks = list.len().div_ceil(NUM_OF_INDICES_IN_SHARD);
+    let last_chunk_start = (num_chunks - 1) * NUM_OF_INDICES_IN_SHARD;
+
     for (i, chunk) in list.chunks(NUM_OF_INDICES_IN_SHARD).enumerate() {
         let is_last = i == num_chunks - 1;
 
-        if !mode.is_flush() && is_last {
-            // Keep last partial shard in memory
-            let remaining: Vec<u64> = chunk.to_vec();
-            *list = remaining;
+        if !flush && is_last {
+            // Keep last partial shard in memory using split_off to avoid element-by-element copy
+            *list = list.split_off(last_chunk_start);
             return Ok(());
         }
 
-        let highest = if is_last { u64::MAX } else { *chunk.last().expect("chunk not empty") };
+        let highest = if is_last { u64::MAX } else { *chunk.last().expect("chunk is non-empty") };
         let key = sharded_key_factory(partial_key, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
         put(key, value)?;
     }
 
-    if mode.is_flush() {
+    if flush {
         list.clear();
     }
 
