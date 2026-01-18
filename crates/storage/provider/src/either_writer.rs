@@ -13,7 +13,7 @@ use crate::{
     providers::{history_info, HistoryInfo, StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
 };
-use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
@@ -512,6 +512,140 @@ where
             Self::RocksDB(batch) => batch.delete::<tables::StoragesHistory>(key),
         }
     }
+
+    /// Appends a storage history entry (for first sync - more efficient).
+    pub fn append_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.append(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
+        }
+    }
+
+    /// Upserts a storage history entry (for incremental sync).
+    pub fn upsert_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
+        }
+    }
+
+    /// Gets the last shard for an address and storage key (keyed with `u64::MAX`).
+    pub fn get_last_storage_history_shard(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        let key = StorageShardedKey::last(address, storage_key);
+        match self {
+            Self::Database(cursor) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.get::<tables::StoragesHistory>(key),
+        }
+    }
+
+    /// Unwinds storage history by removing block numbers >= `rem_index` from shards.
+    ///
+    /// For `RocksDB`: reads the last shard, filters out blocks >= `rem_index`,
+    /// and either deletes (if empty) or updates with the filtered list.
+    ///
+    /// For Database: uses cursor-based shard unwinding logic similar to MDBX.
+    pub fn unwind_storage_history_shard(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        rem_index: BlockNumber,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                let start_key = StorageShardedKey::last(address, storage_key);
+                let partial_shard = unwind_storage_history_shards_cursor(
+                    cursor,
+                    start_key,
+                    rem_index,
+                    |storage_sharded_key| {
+                        storage_sharded_key.address == address &&
+                            storage_sharded_key.sharded_key.key == storage_key
+                    },
+                )?;
+
+                if !partial_shard.is_empty() {
+                    cursor.insert(
+                        StorageShardedKey::last(address, storage_key),
+                        &BlockNumberList::new_pre_sorted(partial_shard),
+                    )?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => {
+                let key = StorageShardedKey::last(address, storage_key);
+                let shard_opt = batch.get::<tables::StoragesHistory>(key.clone())?;
+
+                if let Some(shard) = shard_opt {
+                    let filtered: Vec<u64> =
+                        shard.iter().take_while(|&bn| bn < rem_index).collect();
+
+                    if filtered.is_empty() {
+                        batch.delete::<tables::StoragesHistory>(key)?;
+                    } else {
+                        batch.put::<tables::StoragesHistory>(
+                            key,
+                            &BlockNumberList::new_pre_sorted(filtered),
+                        )?;
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Unwinds storage history shards using a cursor, returning the partial shard to reinsert.
+///
+/// This is the cursor-based logic for MDBX that handles multi-shard unwinding.
+fn unwind_storage_history_shards_cursor<C>(
+    cursor: &mut C,
+    start_key: StorageShardedKey,
+    block_number: BlockNumber,
+    mut shard_belongs_to_key: impl FnMut(&StorageShardedKey) -> bool,
+) -> ProviderResult<Vec<u64>>
+where
+    C: DbCursorRO<tables::StoragesHistory> + DbCursorRW<tables::StoragesHistory>,
+{
+    let mut item = cursor.seek_exact(start_key)?;
+    while let Some((sharded_key, list)) = item {
+        if !shard_belongs_to_key(&sharded_key) {
+            break
+        }
+
+        cursor.delete_current()?;
+
+        let first = list.iter().next().expect("List can't be empty");
+
+        if first >= block_number {
+            item = cursor.prev()?;
+            continue
+        } else if block_number <= sharded_key.sharded_key.highest_block_number {
+            return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>())
+        }
+        return Ok(list.iter().collect::<Vec<_>>())
+    }
+
+    Ok(Vec::new())
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
