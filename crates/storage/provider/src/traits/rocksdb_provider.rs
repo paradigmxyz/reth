@@ -15,20 +15,24 @@ pub trait RocksDBProviderFactory {
     #[cfg(all(unix, feature = "rocksdb"))]
     fn set_pending_rocksdb_batch(&self, batch: rocksdb::WriteBatchWithTransaction<true>);
 
-    /// Executes a closure with a `RocksDB` transaction for reading.
+    /// Executes a closure with an optional `RocksDB` transaction for reading.
     ///
     /// This helper encapsulates all the cfg-gated `RocksDB` transaction handling for reads.
-    fn with_rocksdb_tx<F, R>(&self, f: F) -> ProviderResult<R>
+    fn with_rocksdb_tx<F, R>(&self, _needs_rocksdb: bool, f: F) -> ProviderResult<R>
     where
-        F: FnOnce(RocksTxRefArg<'_>) -> ProviderResult<R>,
+        F: FnOnce(Option<RocksTxRefArg<'_>>) -> ProviderResult<R>,
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         {
-            let rocksdb = self.rocksdb_provider();
-            let tx = rocksdb.tx();
-            f(&tx)
+            if _needs_rocksdb {
+                let rocksdb = self.rocksdb_provider();
+                let tx = rocksdb.tx();
+                f(Some(&tx))
+            } else {
+                f(None)
+            }
         }
         #[cfg(not(all(unix, feature = "rocksdb")))]
-        f(())
+        f(None)
     }
 }

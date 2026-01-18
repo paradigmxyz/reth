@@ -613,15 +613,15 @@ impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for storages history based on storage settings.
     pub fn new_storages_history<P>(
         provider: &P,
-        _rocksdb_tx: RocksTxRefArg<'a>,
+        _rocksdb_tx: Option<RocksTxRefArg<'a>>,
     ) -> ProviderResult<EitherReaderTy<'a, P, tables::StoragesHistory>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
     {
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().storages_history_in_rocksdb {
-            return Ok(EitherReader::RocksDB(_rocksdb_tx));
+        if let Some(rocksdb_tx) = _rocksdb_tx {
+            return Ok(EitherReader::RocksDB(rocksdb_tx));
         }
 
         Ok(EitherReader::Database(
@@ -631,17 +631,18 @@ impl<'a> EitherReader<'a, (), ()> {
     }
 
     /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
+    #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(unused_variables))]
     pub fn new_transaction_hash_numbers<P>(
         provider: &P,
-        _rocksdb_tx: RocksTxRefArg<'a>,
+        rocksdb_tx: Option<RocksTxRefArg<'a>>,
     ) -> ProviderResult<EitherReaderTy<'a, P, tables::TransactionHashNumbers>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
     {
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            return Ok(EitherReader::RocksDB(_rocksdb_tx));
+        if let Some(rocksdb_tx) = rocksdb_tx {
+            return Ok(EitherReader::RocksDB(rocksdb_tx));
         }
 
         Ok(EitherReader::Database(
@@ -651,17 +652,18 @@ impl<'a> EitherReader<'a, (), ()> {
     }
 
     /// Creates a new [`EitherReader`] for account history based on storage settings.
+    #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(unused_variables))]
     pub fn new_accounts_history<P>(
         provider: &P,
-        _rocksdb_tx: RocksTxRefArg<'a>,
+        rocksdb_tx: Option<RocksTxRefArg<'a>>,
     ) -> ProviderResult<EitherReaderTy<'a, P, tables::AccountsHistory>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
     {
         #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().account_history_in_rocksdb {
-            return Ok(EitherReader::RocksDB(_rocksdb_tx));
+        if let Some(rocksdb_tx) = rocksdb_tx {
+            return Ok(EitherReader::RocksDB(rocksdb_tx));
         }
 
         Ok(EitherReader::Database(
