@@ -229,16 +229,23 @@ struct MultiproofInput {
     source: Option<Source>,
     hashed_state_update: HashedPostState,
     proof_targets: MultiProofTargets,
-    proof_sequence_number: u64,
+    /// Sequence number for ordering. `None` for prefetch proofs that bypass sequencing.
+    proof_sequence_number: Option<u64>,
     state_root_message_sender: CrossbeamSender<MultiProofMessage>,
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
 }
 
 impl MultiproofInput {
     /// Destroys the input and sends a [`MultiProofMessage::EmptyProof`] message to the sender.
+    ///
+    /// # Panics
+    /// Panics if `proof_sequence_number` is `None`. This should only be called for state updates
+    /// that require sequencing, not for prefetch proofs.
     fn send_empty_proof(self) {
         let _ = self.state_root_message_sender.send(MultiProofMessage::EmptyProof {
-            sequence_number: self.proof_sequence_number,
+            sequence_number: self
+                .proof_sequence_number
+                .expect("send_empty_proof requires a sequence number"),
             state: self.hashed_state_update,
         });
     }
@@ -285,13 +292,17 @@ impl MultiproofManager {
 
     /// Dispatches a new multiproof calculation to worker pools.
     fn dispatch(&self, input: MultiproofInput) {
-        // If there are no proof targets, we can just send an empty multiproof back immediately
+        // If there are no proof targets, handle based on whether this is a prefetch or state update
         if input.proof_targets.is_empty() {
             trace!(
-                sequence_number = input.proof_sequence_number,
-                "No proof targets, sending empty multiproof back immediately"
+                sequence_number = ?input.proof_sequence_number,
+                "No proof targets"
             );
-            input.send_empty_proof();
+            // For prefetch (None), just skip - nothing to reveal
+            // For state updates (Some), send empty proof to maintain sequencing
+            if input.proof_sequence_number.is_some() {
+                input.send_empty_proof();
+            }
             return;
         }
 
@@ -330,7 +341,7 @@ impl MultiproofManager {
 
         trace!(
             target: "engine::tree::payload_processor::multiproof",
-            proof_sequence_number,
+            ?proof_sequence_number,
             ?proof_targets,
             account_targets,
             storage_targets,
@@ -652,7 +663,8 @@ impl MultiProofTask {
                     source: None,
                     hashed_state_update: Default::default(),
                     proof_targets,
-                    proof_sequence_number: self.proof_sequencer.next_sequence(),
+                    // Prefetch proofs bypass sequencing - send reveals immediately
+                    proof_sequence_number: None,
                     state_root_message_sender: self.tx.clone(),
                     multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
                 });
@@ -777,7 +789,8 @@ impl MultiProofTask {
                     source: Some(source),
                     hashed_state_update,
                     proof_targets,
-                    proof_sequence_number: self.proof_sequencer.next_sequence(),
+                    // State updates require sequencing for correct ordering
+                    proof_sequence_number: Some(self.proof_sequencer.next_sequence()),
                     state_root_message_sender: self.tx.clone(),
                     multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
                 });
@@ -1099,7 +1112,7 @@ impl MultiProofTask {
                                 Ok(proof_result_data) => {
                                     trace!(
                                         target: "engine::tree::payload_processor::multiproof",
-                                        sequence = proof_result.sequence_number,
+                                        sequence = ?proof_result.sequence_number,
                                         total_proofs = batch_metrics.proofs_processed,
                                         "Processing calculated proof from worker"
                                     );
@@ -1109,10 +1122,21 @@ impl MultiProofTask {
                                         multiproof: proof_result_data.proof,
                                     };
 
-                                    if let Some(combined_update) =
-                                        self.on_proof(proof_result.sequence_number, update)
-                                    {
-                                        let _ = self.to_sparse_trie.send(combined_update);
+                                    match proof_result.sequence_number {
+                                        // Prefetch proof - bypass sequencing, send immediately
+                                        None => {
+                                            if !update.multiproof.is_empty() {
+                                                let _ = self.to_sparse_trie.send(update);
+                                            }
+                                        }
+                                        // State update - go through sequencer for ordering
+                                        Some(sequence_number) => {
+                                            if let Some(combined_update) =
+                                                self.on_proof(sequence_number, update)
+                                            {
+                                                let _ = self.to_sparse_trie.send(combined_update);
+                                            }
+                                        }
                                     }
                                 }
                                 Err(error) => {

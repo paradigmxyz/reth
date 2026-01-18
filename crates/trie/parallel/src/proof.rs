@@ -204,7 +204,7 @@ impl ParallelProof {
             multi_added_removed_keys: self.multi_added_removed_keys.clone(),
             proof_result_sender: ProofResultContext::new(
                 result_tx,
-                0,
+                Some(0),
                 HashedPostState::default(),
                 account_multiproof_start_time,
             ),

@@ -631,8 +631,9 @@ pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 /// This type enables workers to send proof results directly to the `MultiProofTask` event loop.
 #[derive(Debug)]
 pub struct ProofResultMessage {
-    /// Sequence number for ordering proofs
-    pub sequence_number: u64,
+    /// Sequence number for ordering proofs.
+    /// `None` indicates a prefetch proof that should bypass sequencing and be applied immediately.
+    pub sequence_number: Option<u64>,
     /// The proof calculation result (either account multiproof or storage proof)
     pub result: Result<ProofResult, ParallelStateRootError>,
     /// Time taken for the entire proof calculation (from dispatch to completion)
@@ -649,8 +650,9 @@ pub struct ProofResultMessage {
 pub struct ProofResultContext {
     /// Channel sender for result delivery
     pub sender: ProofResultSender,
-    /// Sequence number for proof ordering
-    pub sequence_number: u64,
+    /// Sequence number for proof ordering.
+    /// `None` indicates a prefetch proof that should bypass sequencing.
+    pub sequence_number: Option<u64>,
     /// Original state update that triggered this proof
     pub state: HashedPostState,
     /// Calculation start time for measuring elapsed duration
@@ -661,7 +663,7 @@ impl ProofResultContext {
     /// Creates a new proof result context.
     pub const fn new(
         sender: ProofResultSender,
-        sequence_number: u64,
+        sequence_number: Option<u64>,
         state: HashedPostState,
         start_time: Instant,
     ) -> Self {
