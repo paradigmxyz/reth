@@ -126,7 +126,9 @@ impl LazyOverlay {
     /// Blocks are ordered newest to oldest. Uses hybrid merge algorithm that
     /// switches between `extend_ref` (small batches) and k-way merge (large batches).
     fn merge_blocks(blocks: &[DeferredTrieData]) -> TrieInputSorted {
-        const MERGE_BATCH_THRESHOLD: usize = 64;
+        // Benchmarked crossover: `extend_ref` wins up to ~30 blocks.
+        // See: https://github.com/paradigmxyz/reth/pull/21098
+        const MERGE_BATCH_THRESHOLD: usize = 30;
 
         if blocks.is_empty() {
             return TrieInputSorted::default();
