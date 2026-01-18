@@ -1932,10 +1932,10 @@ where
         // Check single-entry cache for canonical tip (avoids DB on repeated FCU)
         {
             let cache = self.canonical_header_cache.read();
-            if let Some((cached_hash, cached_header)) = cache.as_ref() {
-                if *cached_hash == hash {
-                    return Ok(Some(cached_header.clone()));
-                }
+            if let Some((cached_hash, cached_header)) = cache.as_ref() &&
+                *cached_hash == hash
+            {
+                return Ok(Some(cached_header.clone()));
             }
         }
 
@@ -1944,10 +1944,10 @@ where
 
         // Only cache if this is the canonical tip (the FCU hot path we're optimizing).
         // Caching non-canonical lookups would pollute the single-entry cache.
-        if hash == self.state.tree_state.canonical_block_hash() {
-            if let Some(ref header) = from_db {
-                *self.canonical_header_cache.write() = Some((hash, header.clone()));
-            }
+        if hash == self.state.tree_state.canonical_block_hash() &&
+            let Some(ref header) = from_db
+        {
+            *self.canonical_header_cache.write() = Some((hash, header.clone()));
         }
 
         Ok(from_db)
