@@ -4,13 +4,14 @@ use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::{sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey},
-    table::{Decompress, Table},
+    table::{Decode, Decompress, Table},
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
 use reth_etl::Collector;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileProvider, to_range, BlockReader, DBProvider, ProviderError,
+    providers::StaticFileProvider, to_range, BlockReader, DBProvider, EitherWriter, ProviderError,
     StaticFileProviderFactory,
 };
 use reth_stages_api::StageError;
@@ -170,37 +171,29 @@ where
     Ok(collector)
 }
 
-use std::cell::RefCell;
-
-/// Core implementation of history index loading via closure-based backend operations.
+/// Given a [`Collector`] created by [`collect_history_indices`] it iterates all entries, loading
+/// the indices into the database in shards.
 ///
-/// This is the shared algorithm for loading history indices that works with any backend
-/// (MDBX cursor, `EitherWriter` for MDBX/RocksDB, etc.) by accepting operations as closures.
-///
-/// Uses `RefCell` internally to allow both closures to borrow the same state mutably.
-///
-/// # Invariant
-///
-/// The last shard for each partial key is always stored with `highest_block_number = u64::MAX`.
-/// This allows `get_last_shard` to find it via `seek_exact(partial_key, u64::MAX)`.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn load_history_indices_with<K, P, S, G, U>(
-    mut collector: Collector<K, BlockNumberList>,
+///  ## Process
+/// Iterates over elements, grouping indices by their partial keys (e.g., `Address` or
+/// `Address.StorageKey`). It flushes indices to disk when reaching a shard's max length
+/// (`NUM_OF_INDICES_IN_SHARD`) or when the partial key changes, ensuring the last previous partial
+/// key shard is stored.
+pub(crate) fn load_history_indices<Provider, H, P>(
+    provider: &Provider,
+    mut collector: Collector<H::Key, H::Value>,
     append_only: bool,
-    decode_key: impl Fn(Vec<u8>) -> Result<K, DatabaseError>,
-    get_partial: impl Fn(&K) -> P,
-    sharded_key_factory: impl Clone + Fn(P, u64) -> K,
-    state: &RefCell<S>,
-    get_last_shard: G,
-    put: U,
+    sharded_key_factory: impl Clone + Fn(P, u64) -> <H as Table>::Key,
+    decode_key: impl Fn(Vec<u8>) -> Result<<H as Table>::Key, DatabaseError>,
+    get_partial: impl Fn(<H as Table>::Key) -> P,
 ) -> Result<(), StageError>
 where
-    K: reth_db_api::table::Key,
-    P: Copy + Eq,
-    G: Fn(&RefCell<S>, P) -> Result<Option<BlockNumberList>, StageError>,
-    U: Fn(&RefCell<S>, K, &BlockNumberList) -> Result<(), StageError>,
+    Provider: DBProvider<Tx: DbTxMut>,
+    H: Table<Value = BlockNumberList>,
+    P: Copy + Default + Eq,
 {
-    let mut current_partial: Option<P> = None;
+    let mut write_cursor = provider.tx_ref().cursor_write::<H>()?;
+    let mut current_partial = P::default();
     let mut current_list = Vec::<u64>::new();
 
     let total_entries = collector.len();
@@ -215,103 +208,184 @@ where
             info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
         }
 
-        let partial_key = get_partial(&sharded_key);
+        let partial_key = get_partial(sharded_key);
 
-        if current_partial != Some(partial_key) {
-            // Flush previous partial key's shards (skip if this is the first key)
-            if let Some(prev) = current_partial {
-                write_shards(prev, &mut current_list, &sharded_key_factory, true, |key, value| {
-                    put(state, key, &value)
-                })?;
-            }
+        if current_partial != partial_key {
+            load_indices(
+                &mut write_cursor,
+                current_partial,
+                &mut current_list,
+                &sharded_key_factory,
+                append_only,
+                LoadMode::Flush,
+            )?;
 
-            current_partial = Some(partial_key);
+            current_partial = partial_key;
             current_list.clear();
 
-            // Merge existing shard if not first sync
-            if !append_only && let Some(last_database_shard) = get_last_shard(state, partial_key)? {
+            if !append_only &&
+                let Some((_, last_database_shard)) =
+                    write_cursor.seek_exact(sharded_key_factory(current_partial, u64::MAX))?
+            {
                 current_list.extend(last_database_shard.iter());
             }
         }
 
         current_list.extend(new_list.iter());
-        write_shards(partial_key, &mut current_list, &sharded_key_factory, false, |key, value| {
-            put(state, key, &value)
-        })?;
+        load_indices(
+            &mut write_cursor,
+            current_partial,
+            &mut current_list,
+            &sharded_key_factory,
+            append_only,
+            LoadMode::KeepLast,
+        )?;
     }
 
-    // Flush remaining shard
-    if let Some(partial) = current_partial {
-        write_shards(partial, &mut current_list, &sharded_key_factory, true, |key, value| {
-            put(state, key, &value)
-        })?;
+    load_indices(
+        &mut write_cursor,
+        current_partial,
+        &mut current_list,
+        &sharded_key_factory,
+        append_only,
+        LoadMode::Flush,
+    )?;
+
+    Ok(())
+}
+
+/// Shard and insert the indices list according to [`LoadMode`] and its length.
+pub(crate) fn load_indices<H, C, P>(
+    cursor: &mut C,
+    partial_key: P,
+    list: &mut Vec<BlockNumber>,
+    sharded_key_factory: &impl Fn(P, BlockNumber) -> <H as Table>::Key,
+    append_only: bool,
+    mode: LoadMode,
+) -> Result<(), StageError>
+where
+    C: DbCursorRO<H> + DbCursorRW<H>,
+    H: Table<Value = BlockNumberList>,
+    P: Copy,
+{
+    if list.len() > NUM_OF_INDICES_IN_SHARD || mode.is_flush() {
+        let chunks = list
+            .chunks(NUM_OF_INDICES_IN_SHARD)
+            .map(|chunks| chunks.to_vec())
+            .collect::<Vec<Vec<u64>>>();
+
+        let mut iter = chunks.into_iter().peekable();
+        while let Some(chunk) = iter.next() {
+            let mut highest = *chunk.last().expect("at least one index");
+
+            if !mode.is_flush() && iter.peek().is_none() {
+                *list = chunk;
+            } else {
+                if iter.peek().is_none() {
+                    highest = u64::MAX;
+                }
+                let key = sharded_key_factory(partial_key, highest);
+                let value = BlockNumberList::new_pre_sorted(chunk);
+
+                if append_only {
+                    cursor.append(key, &value)?;
+                } else {
+                    cursor.upsert(key, &value)?;
+                }
+            }
+        }
     }
 
     Ok(())
 }
 
-/// Given a [`Collector`] created by [`collect_history_indices`] it iterates all entries, loading
-/// the indices into the database in shards.
-///
-/// Iterates over elements, grouping indices by their partial keys (e.g., `Address` or
-/// `Address.StorageKey`). It flushes indices to disk when reaching a shard's max length
-/// (`NUM_OF_INDICES_IN_SHARD`) or when the partial key changes.
-pub(crate) fn load_history_indices<Provider, H, P>(
-    provider: &Provider,
-    collector: Collector<H::Key, H::Value>,
-    append_only: bool,
-    sharded_key_factory: impl Clone + Fn(P, u64) -> <H as Table>::Key,
-    decode_key: impl Fn(Vec<u8>) -> Result<<H as Table>::Key, DatabaseError>,
-    get_partial: impl Fn(&<H as Table>::Key) -> P,
-) -> Result<(), StageError>
-where
-    Provider: DBProvider<Tx: DbTxMut>,
-    H: Table<Value = BlockNumberList>,
-    P: Copy + Eq,
-{
-    let cursor = RefCell::new(provider.tx_ref().cursor_write::<H>()?);
-    let sharded_key_factory_clone = sharded_key_factory.clone();
-
-    load_history_indices_with(
-        collector,
-        append_only,
-        decode_key,
-        get_partial,
-        sharded_key_factory,
-        &cursor,
-        |cell, partial| {
-            Ok(cell
-                .borrow_mut()
-                .seek_exact(sharded_key_factory_clone(partial, u64::MAX))?
-                .map(|(_, v)| v))
-        },
-        |cell, key, value| {
-            if append_only {
-                cell.borrow_mut().append(key, value)?;
-            } else {
-                cell.borrow_mut().upsert(key, value)?;
-            }
-            Ok(())
-        },
-    )
+/// Mode on how to load index shards into the database.
+pub(crate) enum LoadMode {
+    /// Keep the last shard in memory and don't flush it to the database.
+    KeepLast,
+    /// Flush all shards into the database.
+    Flush,
 }
 
-/// Writes shards of block number indices using the provided put function.
+impl LoadMode {
+    const fn is_flush(&self) -> bool {
+        matches!(self, Self::Flush)
+    }
+}
+
+/// Loads account history indices into the database via `EitherWriter`.
 ///
-/// Splits indices into chunks of `NUM_OF_INDICES_IN_SHARD` and writes them.
-/// With `flush=true`, writes all shards (last uses `u64::MAX` as the highest block number).
-/// With `flush=false`, keeps the last partial shard in `list` for continued accumulation.
-pub(crate) fn write_shards<K, P>(
-    partial_key: P,
-    list: &mut Vec<u64>,
-    sharded_key_factory: &impl Fn(P, u64) -> K,
-    flush: bool,
-    mut put: impl FnMut(K, BlockNumberList) -> Result<(), StageError>,
+/// Similar to [`load_history_indices`] but works with [`EitherWriter`] to support
+/// both MDBX and `RocksDB` backends.
+///
+/// Uses `Option<Address>` instead of `Address::default()` as the sentinel to avoid
+/// incorrectly treating `Address::ZERO` as "no previous address".
+pub(crate) fn load_account_history_via_writer<N, CURSOR>(
+    mut collector: Collector<ShardedKey<Address>, BlockNumberList>,
+    append_only: bool,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
-    P: Copy,
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
+        + DbCursorRO<reth_db_api::tables::AccountsHistory>,
 {
-    if list.len() <= NUM_OF_INDICES_IN_SHARD && !flush {
+    let mut current_address: Option<Address> = None;
+    let mut current_list = Vec::<u64>::new();
+
+    let total_entries = collector.len();
+    let interval = (total_entries / 10).max(1);
+
+    for (index, element) in collector.iter()?.enumerate() {
+        let (k, v) = element?;
+        let sharded_key = ShardedKey::<Address>::decode_owned(k)?;
+        let new_list = BlockNumberList::decompress_owned(v)?;
+
+        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
+        }
+
+        let address = sharded_key.key;
+
+        if current_address != Some(address) {
+            if let Some(prev_addr) = current_address {
+                flush_account_history_shards(prev_addr, &mut current_list, append_only, writer)?;
+            }
+
+            current_address = Some(address);
+            current_list.clear();
+
+            if !append_only &&
+                let Some(last_shard) = writer.get_last_account_history_shard(address)?
+            {
+                current_list.extend(last_shard.iter());
+            }
+        }
+
+        current_list.extend(new_list.iter());
+        flush_account_history_shards_partial(address, &mut current_list, append_only, writer)?;
+    }
+
+    if let Some(addr) = current_address {
+        flush_account_history_shards(addr, &mut current_list, append_only, writer)?;
+    }
+
+    Ok(())
+}
+
+/// Flushes full shards for account history, keeping the last partial shard in memory.
+fn flush_account_history_shards_partial<N, CURSOR>(
+    address: Address,
+    list: &mut Vec<u64>,
+    append_only: bool,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
+        + DbCursorRO<reth_db_api::tables::AccountsHistory>,
+{
+    if list.len() <= NUM_OF_INDICES_IN_SHARD {
         return Ok(());
     }
 
@@ -321,22 +395,57 @@ where
     for (i, chunk) in list.chunks(NUM_OF_INDICES_IN_SHARD).enumerate() {
         let is_last = i == num_chunks - 1;
 
-        if !flush && is_last {
-            // Keep last partial shard in memory using split_off to avoid element-by-element copy
+        if is_last {
             *list = list.split_off(last_chunk_start);
             return Ok(());
         }
 
-        let highest = if is_last { u64::MAX } else { *chunk.last().expect("chunk is non-empty") };
-        let key = sharded_key_factory(partial_key, highest);
+        let highest = *chunk.last().expect("chunk is non-empty");
+        let key = ShardedKey::new(address, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
-        put(key, value)?;
+
+        if append_only {
+            writer.append_account_history(key, &value)?;
+        } else {
+            writer.upsert_account_history(key, &value)?;
+        }
     }
 
-    if flush {
-        list.clear();
+    Ok(())
+}
+
+/// Flushes all remaining shards for account history, using `u64::MAX` for the last shard.
+fn flush_account_history_shards<N, CURSOR>(
+    address: Address,
+    list: &mut Vec<u64>,
+    append_only: bool,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
+        + DbCursorRO<reth_db_api::tables::AccountsHistory>,
+{
+    if list.is_empty() {
+        return Ok(());
     }
 
+    let num_chunks = list.len().div_ceil(NUM_OF_INDICES_IN_SHARD);
+
+    for (i, chunk) in list.chunks(NUM_OF_INDICES_IN_SHARD).enumerate() {
+        let is_last = i == num_chunks - 1;
+        let highest = if is_last { u64::MAX } else { *chunk.last().expect("chunk is non-empty") };
+        let key = ShardedKey::new(address, highest);
+        let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
+
+        if append_only {
+            writer.append_account_history(key, &value)?;
+        } else {
+            writer.upsert_account_history(key, &value)?;
+        }
+    }
+
+    list.clear();
     Ok(())
 }
 

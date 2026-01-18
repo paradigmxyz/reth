@@ -1,8 +1,7 @@
 use super::collect_account_history_indices;
-use crate::stages::utils::{collect_history_indices, load_history_indices_with};
-use alloy_primitives::Address;
+use crate::stages::utils::{collect_history_indices, load_account_history_via_writer};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
-use reth_db_api::{models::ShardedKey, table::Decode, tables, transaction::DbTxMut};
+use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
 use reth_provider::{
     DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
     RocksDBProviderFactory, StorageSettingsCache,
@@ -142,29 +141,12 @@ where
         #[cfg(not(all(unix, feature = "rocksdb")))]
         let rocksdb_batch = ();
 
-        use std::cell::RefCell;
+        let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
 
-        let writer = RefCell::new(EitherWriter::new_accounts_history(provider, rocksdb_batch)?);
-
-        load_history_indices_with(
-            collector,
-            first_sync,
-            ShardedKey::<Address>::decode_owned,
-            |k| k.key,
-            ShardedKey::new,
-            &writer,
-            |cell, addr| Ok(cell.borrow_mut().get_last_account_history_shard(addr)?),
-            |cell, key, value| {
-                if first_sync {
-                    Ok(cell.borrow_mut().append_account_history(key, value)?)
-                } else {
-                    Ok(cell.borrow_mut().upsert_account_history(key, value)?)
-                }
-            },
-        )?;
+        load_account_history_via_writer(collector, first_sync, &mut writer)?;
 
         #[cfg(all(unix, feature = "rocksdb"))]
-        if let Some(batch) = writer.into_inner().into_raw_rocksdb_batch() {
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
             provider.set_pending_rocksdb_batch(batch);
         }
 
@@ -194,7 +176,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{address, BlockNumber, B256};
+    use alloy_primitives::{address, Address, BlockNumber, B256};
     use itertools::Itertools;
     use reth_db_api::{
         cursor::DbCursorRO,
