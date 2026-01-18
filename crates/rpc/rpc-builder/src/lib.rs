@@ -1925,43 +1925,46 @@ impl TransportRpcModules {
 
     /// Replace the given [`Methods`] in the configured http methods.
     ///
-    /// Fails if any of the methods in other is present already or if the method being removed is
-    /// not present
+    /// This removes any existing methods with the same names and then merges the new methods.
     ///
-    /// Returns [Ok(false)] if no http transport is configured.
+    /// Fails only if merging the new methods fails (for example due to name conflicts).
+    ///
+    /// Returns `Ok(false)` if no http transport is configured.
     pub fn replace_http(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         let other = other.into();
         self.remove_http_methods(other.method_names());
         self.merge_http(other)
     }
 
-    /// Replace the given [Methods] in the configured ipc methods.
+    /// Replace the given [`Methods`] in the configured ipc methods.
     ///
-    /// Fails if any of the methods in other is present already or if the method being removed is
-    /// not present
+    /// This removes any existing methods with the same names and then merges the new methods.
     ///
-    /// Returns [Ok(false)] if no ipc transport is configured.
+    /// Fails only if merging the new methods fails (for example due to name conflicts).
+    ///
+    /// Returns `Ok(false)` if no ipc transport is configured.
     pub fn replace_ipc(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         let other = other.into();
         self.remove_ipc_methods(other.method_names());
         self.merge_ipc(other)
     }
 
-    /// Replace the given [Methods] in the configured ws methods.
+    /// Replace the given [`Methods`] in the configured ws methods.
     ///
-    /// Fails if any of the methods in other is present already or if the method being removed is
-    /// not present
+    /// This removes any existing methods with the same names and then merges the new methods.
     ///
-    /// Returns [Ok(false)] if no ws transport is configured.
+    /// Fails only if merging the new methods fails (for example due to name conflicts).
+    ///
+    /// Returns `Ok(false)` if no ws transport is configured.
     pub fn replace_ws(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         let other = other.into();
         self.remove_ws_methods(other.method_names());
         self.merge_ws(other)
     }
 
-    /// Replaces the method with the given name from all configured transports.
+    /// Replaces methods with the same names in all configured transports.
     ///
-    /// Returns `true` if the method was found and replaced, `false` otherwise
+    /// Returns `Ok(true)` if the replacement succeeded for all configured transports.
     pub fn replace_configured(
         &mut self,
         other: impl Into<Methods>,
