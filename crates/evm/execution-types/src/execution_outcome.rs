@@ -536,7 +536,6 @@ pub(super) mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, ExecutionOutcome};
-        use rand::Rng;
         use reth_ethereum_primitives::Receipt;
         use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
         use serde::{Deserialize, Serialize};
@@ -551,8 +550,6 @@ pub(super) mod serde_bincode_compat {
                 data: ExecutionOutcome<T>,
             }
 
-            let mut bytes = [0u8; 1024];
-            rand::rng().fill(bytes.as_mut_slice());
             let data = Data {
                 data: ExecutionOutcome {
                     bundle: Default::default(),
