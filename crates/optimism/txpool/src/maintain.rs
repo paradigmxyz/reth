@@ -18,7 +18,9 @@ use metrics::{Gauge, Histogram};
 use reth_chain_state::CanonStateNotification;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives_traits::NodePrimitives;
-use reth_transaction_pool::{error::PoolTransactionError, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{
+    error::PoolTransactionError, PoolTransaction, TransactionPool, TransactionPoolExtExt,
+};
 use std::time::Instant;
 use tracing::warn;
 
@@ -84,7 +86,7 @@ pub fn maintain_transaction_pool_conditional_future<N, Pool, St>(
 ) -> BoxFuture<'static, ()>
 where
     N: NodePrimitives,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPoolExtExt + 'static,
     Pool::Transaction: MaybeConditionalTransaction,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
 {
@@ -102,7 +104,7 @@ where
 pub async fn maintain_transaction_pool_conditional<N, Pool, St>(pool: Pool, mut events: St)
 where
     N: NodePrimitives,
-    Pool: TransactionPool,
+    Pool: TransactionPoolExtExt,
     Pool::Transaction: MaybeConditionalTransaction,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
 {
@@ -114,12 +116,11 @@ where
                 number: new.tip().number(),
                 timestamp: new.tip().timestamp(),
             };
-            let mut to_remove = Vec::new();
-            for tx in &pool.pooled_transactions() {
-                if tx.transaction.has_exceeded_block_attributes(&block_attr) {
-                    to_remove.push(*tx.hash());
-                }
-            }
+            let to_remove: Vec<_> = pool
+                .filter_pooled_txs(|tx| tx.transaction.has_exceeded_block_attributes(&block_attr))
+                .iter()
+                .map(|tx| *tx.hash())
+                .collect();
             if !to_remove.is_empty() {
                 let removed = pool.remove_transactions(to_remove);
                 metrics.inc_removed_tx_conditional(removed.len());
