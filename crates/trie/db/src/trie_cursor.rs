@@ -128,6 +128,7 @@ where
         // The storage trie for this account has to be deleted.
         if updates.is_deleted() && self.cursor.seek_exact(self.hashed_address)?.is_some() {
             self.cursor.delete_current_duplicates()?;
+            return Ok(0);
         }
 
         let mut num_entries = 0;
