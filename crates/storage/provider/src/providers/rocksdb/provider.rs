@@ -534,6 +534,52 @@ impl RocksDBProvider {
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
     }
 
+    /// Returns all account history shards for the given address in ascending key order.
+    ///
+    /// This is used for unwind operations where we need to scan all shards for an address
+    /// and potentially delete or truncate them.
+    pub fn account_history_shards(
+        &self,
+        address: Address,
+    ) -> ProviderResult<Vec<(ShardedKey<Address>, BlockNumberList)>> {
+        let cf = self.get_cf_handle::<tables::AccountsHistory>()?;
+
+        let start_key = ShardedKey::new(address, 0u64);
+        let start_bytes = start_key.encode();
+
+        let iter = self
+            .0
+            .db
+            .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
+
+        let mut result = Vec::new();
+        for item in iter {
+            match item {
+                Ok((key_bytes, value_bytes)) => {
+                    let key = ShardedKey::<Address>::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                    if key.key != address {
+                        break;
+                    }
+
+                    let value = BlockNumberList::decompress(&value_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                    result.push((key, value));
+                }
+                Err(e) => {
+                    return Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })));
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
     /// Writes a batch of operations atomically.
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
@@ -888,6 +934,86 @@ impl<'a> RocksDBBatch<'a> {
                 &shard,
             )?;
         }
+
+        Ok(())
+    }
+
+    /// Unwinds account history for the given address to the specified block number.
+    ///
+    /// Removes all block numbers greater than `unwind_to` from the address's shards.
+    /// Ensures the last remaining shard is keyed with `u64::MAX` (the sentinel key).
+    ///
+    /// This mirrors the MDBX `unwind_history_shards` behavior:
+    /// - Deletes shards entirely if all their blocks are > `unwind_to`
+    /// - Truncates boundary shards and re-keys them to `u64::MAX`
+    /// - Preserves shards entirely below `unwind_to`
+    pub fn unwind_account_history_to(
+        &mut self,
+        address: Address,
+        unwind_to: BlockNumber,
+    ) -> ProviderResult<()> {
+        let shards = self.provider.account_history_shards(address)?;
+        if shards.is_empty() {
+            return Ok(());
+        }
+
+        // Find the first shard that might contain blocks > unwind_to.
+        // A shard might be affected if:
+        // - It's the sentinel shard (highest_block_number == u64::MAX), OR
+        // - Its highest_block_number > unwind_to
+        let boundary_idx = shards.iter().position(|(key, _)| {
+            key.highest_block_number == u64::MAX || key.highest_block_number > unwind_to
+        });
+
+        // If no shard is affected, just ensure the last shard is keyed by u64::MAX (repair case)
+        let Some(boundary_idx) = boundary_idx else {
+            let (last_key, last_value) = shards.last().expect("shards is non-empty");
+            if last_key.highest_block_number != u64::MAX {
+                self.delete::<tables::AccountsHistory>(last_key.clone())?;
+                self.put::<tables::AccountsHistory>(
+                    ShardedKey::new(address, u64::MAX),
+                    last_value,
+                )?;
+            }
+            return Ok(());
+        };
+
+        // Delete all shards strictly after the boundary (they are entirely > unwind_to)
+        for (key, _) in shards.iter().skip(boundary_idx + 1) {
+            self.delete::<tables::AccountsHistory>(key.clone())?;
+        }
+
+        // Process the boundary shard: filter out blocks > unwind_to
+        let (boundary_key, boundary_list) = &shards[boundary_idx];
+
+        // Keep only blocks <= unwind_to
+        let kept: Vec<u64> = boundary_list.iter().take_while(|&b| b <= unwind_to).collect();
+
+        // Delete the boundary shard (we'll either drop it or rewrite at u64::MAX)
+        self.delete::<tables::AccountsHistory>(boundary_key.clone())?;
+
+        if kept.is_empty() {
+            // Boundary shard is now empty. Previous shard becomes the last and must be keyed
+            // u64::MAX.
+            if boundary_idx == 0 {
+                // Nothing left for this address
+                return Ok(());
+            }
+
+            let (prev_key, prev_value) = &shards[boundary_idx - 1];
+            if prev_key.highest_block_number != u64::MAX {
+                self.delete::<tables::AccountsHistory>(prev_key.clone())?;
+                self.put::<tables::AccountsHistory>(
+                    ShardedKey::new(address, u64::MAX),
+                    prev_value,
+                )?;
+            }
+            return Ok(());
+        }
+
+        // Write truncated shard with u64::MAX key (sentinel for last shard)
+        let new_last = BlockNumberList::new_pre_sorted(kept);
+        self.put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &new_last)?;
 
         Ok(())
     }
@@ -1805,5 +1931,114 @@ mod tests {
         provider.clear::<tables::AccountsHistory>().unwrap();
 
         assert!(provider.first::<tables::AccountsHistory>().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_unwind_account_history_to_basic() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        // Add blocks 0-10
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, 0..=10).unwrap();
+        batch.commit().unwrap();
+
+        // Verify we have blocks 0-10
+        let key = ShardedKey::new(address, u64::MAX);
+        let result = provider.get::<tables::AccountsHistory>(key.clone()).unwrap();
+        assert!(result.is_some());
+        let blocks: Vec<u64> = result.unwrap().iter().collect();
+        assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
+
+        // Unwind to block 5 (keep blocks 0-5, remove 6-10)
+        let mut batch = provider.batch();
+        batch.unwind_account_history_to(address, 5).unwrap();
+        batch.commit().unwrap();
+
+        // Verify only blocks 0-5 remain
+        let result = provider.get::<tables::AccountsHistory>(key).unwrap();
+        assert!(result.is_some());
+        let blocks: Vec<u64> = result.unwrap().iter().collect();
+        assert_eq!(blocks, (0..=5).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_unwind_account_history_to_removes_all() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        // Add blocks 5-10
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, 5..=10).unwrap();
+        batch.commit().unwrap();
+
+        // Unwind to block 4 (removes all blocks since they're all > 4)
+        let mut batch = provider.batch();
+        batch.unwind_account_history_to(address, 4).unwrap();
+        batch.commit().unwrap();
+
+        // Verify no data remains for this address
+        let key = ShardedKey::new(address, u64::MAX);
+        let result = provider.get::<tables::AccountsHistory>(key).unwrap();
+        assert!(result.is_none(), "Should have no data after full unwind");
+    }
+
+    #[test]
+    fn test_unwind_account_history_to_no_op() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        // Add blocks 0-5
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, 0..=5).unwrap();
+        batch.commit().unwrap();
+
+        // Unwind to block 10 (no-op since all blocks are <= 10)
+        let mut batch = provider.batch();
+        batch.unwind_account_history_to(address, 10).unwrap();
+        batch.commit().unwrap();
+
+        // Verify blocks 0-5 still remain
+        let key = ShardedKey::new(address, u64::MAX);
+        let result = provider.get::<tables::AccountsHistory>(key).unwrap();
+        assert!(result.is_some());
+        let blocks: Vec<u64> = result.unwrap().iter().collect();
+        assert_eq!(blocks, (0..=5).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_account_history_shards_iterator() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let other_address = Address::from([0x43; 20]);
+
+        // Add data for two addresses
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, 0..=5).unwrap();
+        batch.append_account_history_shard(other_address, 10..=15).unwrap();
+        batch.commit().unwrap();
+
+        // Query shards for first address only
+        let shards = provider.account_history_shards(address).unwrap();
+        assert_eq!(shards.len(), 1);
+        assert_eq!(shards[0].0.key, address);
+
+        // Query shards for second address only
+        let shards = provider.account_history_shards(other_address).unwrap();
+        assert_eq!(shards.len(), 1);
+        assert_eq!(shards[0].0.key, other_address);
+
+        // Query shards for non-existent address
+        let non_existent = Address::from([0x99; 20]);
+        let shards = provider.account_history_shards(non_existent).unwrap();
+        assert!(shards.is_empty());
     }
 }

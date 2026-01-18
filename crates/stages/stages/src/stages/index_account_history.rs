@@ -718,9 +718,6 @@ mod tests {
         }
 
         /// Test that unwind works correctly when `account_history_in_rocksdb` is enabled.
-        ///
-        /// Note: Full unwind support for `RocksDB` requires updates to the `HistoryWriter` trait
-        /// implementation. This test verifies the unwind doesn't panic and updates checkpoints.
         #[tokio::test]
         async fn unwind_works_when_rocksdb_enabled() {
             let db = TestStageDB::default();
@@ -748,10 +745,14 @@ mod tests {
             assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(10), done: true });
             provider.commit().unwrap();
 
+            // Verify RocksDB has blocks 0-10 before unwind
             let rocksdb = db.factory.rocksdb_provider();
             let result = rocksdb.get::<tables::AccountsHistory>(shard(u64::MAX)).unwrap();
             assert!(result.is_some(), "RocksDB should have data before unwind");
+            let blocks_before: Vec<u64> = result.unwrap().iter().collect();
+            assert_eq!(blocks_before, (0..=10).collect::<Vec<_>>());
 
+            // Unwind to block 5 (remove blocks 6-10)
             let unwind_input =
                 UnwindInput { checkpoint: StageCheckpoint::new(10), unwind_to: 5, bad_block: None };
             let provider = db.factory.database_provider_rw().unwrap();
@@ -759,12 +760,12 @@ mod tests {
             assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(5) });
             provider.commit().unwrap();
 
-            // Verify RocksDB data still exists (unwind currently uses MDBX path which doesn't
-            // affect RocksDB). Once HistoryWriter is updated for RocksDB, this should verify
-            // that blocks 6-10 are removed.
+            // Verify RocksDB now only has blocks 0-5 (blocks 6-10 removed)
             let rocksdb = db.factory.rocksdb_provider();
             let result = rocksdb.get::<tables::AccountsHistory>(shard(u64::MAX)).unwrap();
-            assert!(result.is_some(), "RocksDB should still have data");
+            assert!(result.is_some(), "RocksDB should still have data after unwind");
+            let blocks_after: Vec<u64> = result.unwrap().iter().collect();
+            assert_eq!(blocks_after, (0..=5).collect::<Vec<_>>(), "Should only have blocks 0-5");
         }
 
         /// Test incremental sync merges new data with existing shards.
