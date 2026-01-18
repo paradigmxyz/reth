@@ -430,6 +430,43 @@ impl RocksDBProvider {
         })
     }
 
+    /// Clears all entries from the specified table using `delete_range`.
+    ///
+    /// This is more efficient than iterating and deleting individual keys.
+    /// Uses the bytewise comparator assumption: appending `0x00` to the last key
+    /// creates a key strictly greater than all existing keys.
+    pub fn clear<T: Table>(&self) -> ProviderResult<()> {
+        let cf = self.get_cf_handle::<T>()?;
+
+        let mut iter = self.0.db.raw_iterator_cf(cf);
+        iter.seek_to_last();
+
+        if !iter.valid() {
+            return Ok(());
+        }
+
+        let last_key = iter.key().ok_or_else(|| {
+            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: "invalid iterator key".into(),
+                code: -1,
+            }))
+        })?;
+
+        let mut end_key = Vec::with_capacity(last_key.len() + 1);
+        end_key.extend_from_slice(last_key);
+        end_key.push(0x00);
+
+        let start_key: &[u8] = b"";
+        self.0.db.delete_range_cf(cf, start_key, &end_key).map_err(|e| {
+            ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })?;
+
+        Ok(())
+    }
+
     /// Gets the first (smallest key) entry from the specified table.
     pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
         self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
@@ -1719,5 +1756,41 @@ mod tests {
             provider.get::<tables::StoragesHistory>(sentinel_key).unwrap().is_some(),
             "sentinel shard should exist"
         );
+    }
+
+    #[test]
+    fn test_clear_table() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let key = ShardedKey::new(address, u64::MAX);
+        let blocks = BlockNumberList::new_pre_sorted([1, 2, 3]);
+
+        provider.put::<tables::AccountsHistory>(key.clone(), &blocks).unwrap();
+        assert!(provider.get::<tables::AccountsHistory>(key.clone()).unwrap().is_some());
+
+        provider.clear::<tables::AccountsHistory>().unwrap();
+
+        assert!(
+            provider.get::<tables::AccountsHistory>(key).unwrap().is_none(),
+            "table should be empty after clear"
+        );
+        assert!(
+            provider.first::<tables::AccountsHistory>().unwrap().is_none(),
+            "first() should return None after clear"
+        );
+    }
+
+    #[test]
+    fn test_clear_empty_table() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        assert!(provider.first::<tables::AccountsHistory>().unwrap().is_none());
+
+        provider.clear::<tables::AccountsHistory>().unwrap();
+
+        assert!(provider.first::<tables::AccountsHistory>().unwrap().is_none());
     }
 }

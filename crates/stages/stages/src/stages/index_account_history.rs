@@ -117,8 +117,10 @@ where
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
         if first_sync {
-            // Only clear MDBX table if not using RocksDB
-            if !use_rocksdb {
+            if use_rocksdb {
+                #[cfg(all(unix, feature = "rocksdb"))]
+                provider.rocksdb_provider().clear::<tables::AccountsHistory>()?;
+            } else {
                 provider.tx_ref().clear::<tables::AccountsHistory>()?;
             }
             range = 0..=*input.next_block_range().end();
