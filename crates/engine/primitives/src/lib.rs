@@ -18,11 +18,13 @@ use reth_payload_primitives::{
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
+use reth_storage_api::StateProviderBox;
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
-pub use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
+#[cfg(feature = "std")]
+pub use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator, ExecutableTxTuple};
 pub use reth_payload_primitives::ExecutionPayload;
 
 mod error;
@@ -167,9 +169,21 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         &self,
         _state_updates: &HashedPostState,
         _block: &RecoveredBlock<Self::Block>,
+        _parent_state: Option<StateProviderBox>,
     ) -> Result<(), ConsensusError> {
         // method not used by l1
         Ok(())
+    }
+
+    /// Returns `true` if the validator requires access to the parent state when validating
+    /// post-execution rules.
+    ///
+    /// This allows engine-tree to avoid constructing parent state providers unless needed.
+    fn requires_parent_state_for_post_execution(
+        &self,
+        _block: &RecoveredBlock<Self::Block>,
+    ) -> bool {
+        false
     }
 
     /// Validates the payload attributes with respect to the header.
