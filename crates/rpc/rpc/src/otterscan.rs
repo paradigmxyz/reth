@@ -1,9 +1,10 @@
 use alloy_consensus::{BlockHeader, Typed2718};
 use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId};
 use alloy_network::{ReceiptResponse, TransactionResponse};
-use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{Address, Bloom, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, TransactionReceipt};
 use alloy_rpc_types_trace::{
+    filter::{TraceFilter, TraceFilterMode},
     otterscan::{
         BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
         OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
@@ -11,6 +12,7 @@ use alloy_rpc_types_trace::{
     parity::{Action, CreateAction, CreateOutput, TraceOutput},
 };
 use async_trait::async_trait;
+use futures::{stream::FuturesUnordered, StreamExt};
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_primitives_traits::TxTy;
 use reth_rpc_api::{EthApiServer, OtterscanServer};
@@ -21,11 +23,14 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
+use reth_storage_api::BlockReader;
 use revm::context_interface::result::ExecutionResult;
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
 };
+use revm_primitives::FixedBytes;
+use std::{cmp::Reverse, sync::Arc};
 
 const API_LEVEL: u64 = 8;
 
@@ -286,21 +291,394 @@ where
     /// Handler for `ots_searchTransactionsBefore`
     async fn search_transactions_before(
         &self,
-        _address: Address,
-        _block_number: LenientBlockNumberOrTag,
-        _page_size: usize,
-    ) -> RpcResult<TransactionsWithReceipts> {
-        Err(internal_rpc_err("unimplemented"))
+        address: Address,
+        block_number: LenientBlockNumberOrTag,
+        page_size: usize,
+    ) -> RpcResult<TransactionsWithReceipts<RpcTransaction<Eth::NetworkTypes>>> {
+        {
+            let state = self.eth.latest_state().map_err(|e| internal_rpc_err(e.to_string()))?;
+            let account =
+                state.basic_account(&address).map_err(|e| internal_rpc_err(e.to_string()))?;
+
+            if account.is_none() {
+                return Err(EthApiError::InvalidParams(
+                    "invalid parameter: address does not exist".to_string(),
+                )
+                .into());
+            }
+        }
+
+        let tip: u64 = self.eth.block_number()?.saturating_to();
+
+        if block_number > tip {
+            return Err(EthApiError::InvalidParams(
+                "invalid parameter: block number is larger than the chain tip".to_string(),
+            )
+            .into());
+        }
+
+        const BATCH_SIZE: u64 = 1000;
+
+        // Since the results are in reverse chronological order, if the search starts from the tip
+        // of the chain (block_number == 0) then it is the first page. If the search reaches
+        // the genesis block, then it is the last page
+        let mut txs_with_receipts = TransactionsWithReceipts {
+            txs: Vec::default(),
+            receipts: Vec::default(),
+            first_page: block_number == 0,
+            last_page: false,
+        };
+
+        let filter = TraceFilter {
+            from_block: None,
+            to_block: None,
+            from_address: vec![address],
+            to_address: vec![address],
+            mode: TraceFilterMode::Union,
+            after: None,
+            count: None,
+        };
+
+        let matcher = Arc::new(filter.matcher());
+        let mut cur_block = if block_number == 0 { tip } else { block_number - 1 };
+
+        // iterate over the blocks until `page_size` transactions are found or the genesis block is
+        // reached
+        while txs_with_receipts.txs.len() < page_size {
+            let start = cur_block.saturating_sub(BATCH_SIZE);
+            let end = cur_block;
+
+            let blocks = self
+                .eth
+                .provider()
+                .recovered_block_range(start..=end)
+                .map_err(|_| EthApiError::HeaderRangeNotFound(start.into(), end.into()))?
+                .into_iter()
+                .map(Arc::new)
+                .collect::<Vec<_>>();
+
+            let mut block_timestamps = std::collections::HashMap::new();
+            let mut futures = FuturesUnordered::new();
+
+            // trace a batch of blocks
+            for block in &blocks {
+                let matcher = matcher.clone();
+                block_timestamps.insert(block.hash(), block.header().timestamp());
+
+                let future = self.eth.trace_block_until(
+                    block.hash().into(),
+                    Some(block.clone()),
+                    None,
+                    TracingInspectorConfig::default_parity(),
+                    move |tx_info, inspector, _, _, _| {
+                        let mut traces = inspector
+                            .into_parity_builder()
+                            .into_localized_transaction_traces(tx_info);
+                        traces.retain(|trace| matcher.matches(&trace.trace));
+
+                        Ok(Some(traces))
+                    },
+                );
+
+                futures.push(future);
+            }
+
+            while let Some(result) = futures.next().await {
+                let traces = result
+                    .map_err(Into::into)?
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|traces| traces.into_iter().flatten())
+                    .collect::<Vec<_>>();
+
+                let mut prev_tx_hash = FixedBytes::default();
+
+                // iterate over the traces and fetch the corresponding transactions and receipts
+                for trace in &traces {
+                    let tx_hash = trace.transaction_hash.ok_or(EthApiError::TransactionNotFound)?;
+
+                    // If intermediate traces of the same transaction are matched, skip them
+                    if tx_hash == prev_tx_hash {
+                        continue;
+                    }
+                    prev_tx_hash = tx_hash;
+
+                    let tx = EthApiServer::transaction_by_hash(&self.eth, tx_hash);
+                    let receipt = EthApiServer::transaction_receipt(&self.eth, tx_hash);
+                    let (tx, receipt) = futures::try_join!(tx, receipt)?;
+                    let tx = tx.ok_or(EthApiError::TransactionNotFound)?;
+                    let receipt = receipt.ok_or(EthApiError::ReceiptNotFound)?;
+
+                    let inner = OtsReceipt {
+                        status: receipt.status(),
+                        cumulative_gas_used: receipt.cumulative_gas_used(),
+                        logs: Some(vec![]),
+                        logs_bloom: Some(Bloom::default()),
+                        r#type: tx.ty(),
+                    };
+
+                    let receipt = TransactionReceipt {
+                        inner,
+                        transaction_hash: receipt.transaction_hash(),
+                        transaction_index: receipt.transaction_index(),
+                        block_hash: receipt.block_hash(),
+                        block_number: receipt.block_number(),
+                        gas_used: receipt.gas_used(),
+                        effective_gas_price: receipt.effective_gas_price(),
+                        blob_gas_used: receipt.blob_gas_used(),
+                        blob_gas_price: receipt.blob_gas_price(),
+                        from: receipt.from(),
+                        to: receipt.to(),
+                        contract_address: receipt.contract_address(),
+                    };
+
+                    let receipt = OtsTransactionReceipt {
+                        receipt,
+                        timestamp: trace
+                            .block_hash
+                            .and_then(|hash| block_timestamps.get(&hash).copied()),
+                    };
+
+                    txs_with_receipts.txs.push(tx);
+                    txs_with_receipts.receipts.push(receipt);
+                }
+            }
+
+            if start == 0 {
+                // Genesis block is reached meaning this is the last page of the transactions
+                txs_with_receipts.last_page = true;
+                break;
+            }
+
+            cur_block = start - 1;
+        }
+
+        // Zip and sort transactions and receipts together by block number
+        let mut tx_receipt_pairs: Vec<_> =
+            txs_with_receipts.txs.into_iter().zip(txs_with_receipts.receipts).collect();
+
+        tx_receipt_pairs.sort_by_key(|(tx, _)| {
+            Reverse(tx.block_number().expect("Transactions on chain must have block number"))
+        });
+
+        // Get page_size number of transactions. If the page size is reached while within a
+        // block, all transactions in that block are included even if it exceeds the page_number
+        let (paginated_txs, paginated_receipts): (Vec<_>, Vec<_>) = tx_receipt_pairs
+            .into_iter()
+            .scan((None, 0), |(current_block_number, count), (tx, receipt)| {
+                let block_number =
+                    tx.block_number().expect("Transactions on chain must have block number");
+                if *count >= page_size && *current_block_number != Some(block_number) {
+                    return None;
+                }
+                if *current_block_number != Some(block_number) {
+                    *current_block_number = Some(block_number);
+                }
+                *count += 1;
+                Some((tx, receipt))
+            })
+            .unzip();
+
+        txs_with_receipts.txs = paginated_txs.into_iter().collect();
+        txs_with_receipts.receipts = paginated_receipts.into_iter().collect();
+
+        Ok(txs_with_receipts)
     }
 
     /// Handler for `ots_searchTransactionsAfter`
     async fn search_transactions_after(
         &self,
-        _address: Address,
-        _block_number: LenientBlockNumberOrTag,
-        _page_size: usize,
-    ) -> RpcResult<TransactionsWithReceipts> {
-        Err(internal_rpc_err("unimplemented"))
+        address: Address,
+        block_number: LenientBlockNumberOrTag,
+        page_size: usize,
+    ) -> RpcResult<TransactionsWithReceipts<RpcTransaction<Eth::NetworkTypes>>> {
+        {
+            let state = self.eth.latest_state().map_err(|e| internal_rpc_err(e.to_string()))?;
+            let account =
+                state.basic_account(&address).map_err(|e| internal_rpc_err(e.to_string()))?;
+
+            if account.is_none() {
+                return Err(EthApiError::InvalidParams(
+                    "invalid parameter: address does not exist".to_string(),
+                )
+                .into());
+            }
+        }
+
+        let tip: u64 = self.eth.block_number()?.saturating_to();
+
+        if block_number > tip {
+            return Err(EthApiError::InvalidParams(
+                "invalid parameter: block number is larger than the chain tip".to_string(),
+            )
+            .into());
+        }
+
+        const BATCH_SIZE: u64 = 1000;
+
+        // Since the results are in reverse chronological order, if the search reaches the tip of
+        // the chain then it is the first page. If the search starts from the genesis block,
+        // then it is the last page
+        let mut txs_with_receipts = TransactionsWithReceipts {
+            txs: Vec::default(),
+            receipts: Vec::default(),
+            first_page: false,
+            last_page: block_number == 0,
+        };
+
+        let filter = TraceFilter {
+            from_block: None,
+            to_block: None,
+            from_address: vec![address],
+            to_address: vec![address],
+            mode: TraceFilterMode::Union,
+            after: None,
+            count: None,
+        };
+
+        let matcher = Arc::new(filter.matcher());
+        let mut cur_block = if block_number == 0 { 0 } else { block_number + 1 };
+
+        // iterate over the blocks until `page_size` transactions are found or the tip is reached
+        while txs_with_receipts.txs.len() < page_size {
+            let start = cur_block;
+            let end = std::cmp::min(tip, cur_block + BATCH_SIZE);
+
+            let blocks = self
+                .eth
+                .provider()
+                .recovered_block_range(start..=end)
+                .map_err(|_| EthApiError::HeaderRangeNotFound(start.into(), end.into()))?
+                .into_iter()
+                .map(Arc::new)
+                .collect::<Vec<_>>();
+
+            let mut block_timestamps = std::collections::HashMap::new();
+            let mut futures = FuturesUnordered::new();
+
+            // trace a batch of blocks
+            for block in &blocks {
+                let matcher = matcher.clone();
+                block_timestamps.insert(block.hash(), block.header().timestamp());
+
+                let future = self.eth.trace_block_until(
+                    block.hash().into(),
+                    Some(block.clone()),
+                    None,
+                    TracingInspectorConfig::default_parity(),
+                    move |tx_info, inspector, _, _, _| {
+                        let mut traces = inspector
+                            .into_parity_builder()
+                            .into_localized_transaction_traces(tx_info);
+                        traces.retain(|trace| matcher.matches(&trace.trace));
+                        Ok(Some(traces))
+                    },
+                );
+
+                futures.push(future);
+            }
+
+            while let Some(result) = futures.next().await {
+                let traces = result
+                    .map_err(Into::into)?
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|traces| traces.into_iter().flatten())
+                    .collect::<Vec<_>>();
+
+                let mut prev_tx_hash = FixedBytes::default();
+
+                // iterate over the traces and fetch the corresponding transactions and receipts
+                for trace in &traces {
+                    let tx_hash = trace.transaction_hash.ok_or(EthApiError::TransactionNotFound)?;
+
+                    // If intermediate traces of the same transaction are matched, skip them
+                    if tx_hash == prev_tx_hash {
+                        continue;
+                    }
+                    prev_tx_hash = tx_hash;
+
+                    let tx = EthApiServer::transaction_by_hash(&self.eth, tx_hash);
+                    let receipt = EthApiServer::transaction_receipt(&self.eth, tx_hash);
+                    let (tx, receipt) = futures::try_join!(tx, receipt)?;
+                    let tx = tx.ok_or(EthApiError::TransactionNotFound)?;
+                    let receipt = receipt.ok_or(EthApiError::ReceiptNotFound)?;
+
+                    let inner = OtsReceipt {
+                        status: receipt.status(),
+                        cumulative_gas_used: receipt.cumulative_gas_used(),
+                        logs: Some(vec![]),
+                        logs_bloom: Some(Bloom::default()),
+                        r#type: tx.ty(),
+                    };
+
+                    let receipt = TransactionReceipt {
+                        inner,
+                        transaction_hash: receipt.transaction_hash(),
+                        transaction_index: receipt.transaction_index(),
+                        block_hash: receipt.block_hash(),
+                        block_number: receipt.block_number(),
+                        gas_used: receipt.gas_used(),
+                        effective_gas_price: receipt.effective_gas_price(),
+                        blob_gas_used: receipt.blob_gas_used(),
+                        blob_gas_price: receipt.blob_gas_price(),
+                        from: receipt.from(),
+                        to: receipt.to(),
+                        contract_address: receipt.contract_address(),
+                    };
+
+                    let receipt = OtsTransactionReceipt {
+                        receipt,
+                        timestamp: trace
+                            .block_hash
+                            .and_then(|hash| block_timestamps.get(&hash).copied()),
+                    };
+
+                    txs_with_receipts.txs.push(tx);
+                    txs_with_receipts.receipts.push(receipt);
+                }
+            }
+
+            if end == tip {
+                // most current block is reached meaning this is the first page of the transactions
+                txs_with_receipts.first_page = true;
+                break;
+            }
+
+            cur_block = end + 1;
+        }
+
+        // Zip and sort transactions and receipts together by block number
+        let mut tx_receipt_pairs: Vec<_> =
+            txs_with_receipts.txs.into_iter().zip(txs_with_receipts.receipts).collect();
+
+        tx_receipt_pairs.sort_by_key(|(tx, _)| {
+            tx.block_number().expect("Transactions on chain must have block number")
+        });
+
+        // Get page_size number of transactions. If the page size is reached while within a
+        // block, all transactions in that block are included even if it exceeds the page_number
+        let (paginated_txs, paginated_receipts): (Vec<_>, Vec<_>) = tx_receipt_pairs
+            .into_iter()
+            .scan((None, 0), |(current_block_number, count), (tx, receipt)| {
+                let block_number =
+                    tx.block_number().expect("Transactions on chain must have block number");
+                if *count >= page_size && *current_block_number != Some(block_number) {
+                    return None;
+                }
+                if *current_block_number != Some(block_number) {
+                    *current_block_number = Some(block_number);
+                }
+                *count += 1;
+                Some((tx, receipt))
+            })
+            .unzip();
+
+        // Reverse the order of the transactions to make the most recent ones appear first
+        txs_with_receipts.txs = paginated_txs.into_iter().rev().collect();
+        txs_with_receipts.receipts = paginated_receipts.into_iter().rev().collect();
+
+        Ok(txs_with_receipts)
     }
 
     /// Handler for `ots_getTransactionBySenderAndNonce`
