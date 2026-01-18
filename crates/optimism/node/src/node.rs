@@ -995,14 +995,15 @@ where
                     .additional_validation_tasks
                     .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
             )
-            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
+            .into_tasks_builder(blob_store.clone())
             .map(|validator| {
                 OpTransactionValidator::new(validator)
                     // In --dev mode we can't require gas fees because we're unable to decode
                     // the L1 block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev)
                     .with_supervisor(supervisor_client.clone())
-            });
+            })
+            .build_and_spawn(ctx.task_executor().clone());
 
         let final_pool_config = pool_config_overrides.apply(ctx.pool_config());
 
