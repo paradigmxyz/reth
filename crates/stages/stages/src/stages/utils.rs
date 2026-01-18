@@ -421,7 +421,6 @@ where
         return Ok(());
     }
 
-    // Calculate how many complete shards we have.
     let num_full_shards = list.len() / NUM_OF_INDICES_IN_SHARD;
 
     // Always keep at least one shard buffered for continued accumulation.
