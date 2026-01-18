@@ -343,8 +343,6 @@ where
     CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
         + DbCursorRO<reth_db_api::tables::AccountsHistory>,
 {
-    // Track current address being processed. Using Option<Address> instead of Address::default()
-    // to correctly handle Address::ZERO (which would otherwise be treated as "no address").
     let mut current_address: Option<Address> = None;
     // Accumulator for block numbers where the current address changed.
     let mut current_list = Vec::<u64>::new();
