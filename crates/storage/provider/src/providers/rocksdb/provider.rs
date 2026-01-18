@@ -542,11 +542,15 @@ impl RocksDBProvider {
         &self,
         address: Address,
     ) -> ProviderResult<Vec<(ShardedKey<Address>, BlockNumberList)>> {
+        // Get the column family handle for the AccountsHistory table.
         let cf = self.get_cf_handle::<tables::AccountsHistory>()?;
 
+        // Build a seek key starting at the first shard (highest_block_number = 0) for this address.
+        // ShardedKey is (address, highest_block_number) so this positions us at the beginning.
         let start_key = ShardedKey::new(address, 0u64);
         let start_bytes = start_key.encode();
 
+        // Create a forward iterator starting from our seek position.
         let iter = self
             .0
             .db
@@ -556,13 +560,16 @@ impl RocksDBProvider {
         for item in iter {
             match item {
                 Ok((key_bytes, value_bytes)) => {
+                    // Decode the sharded key to check if we're still on the same address.
                     let key = ShardedKey::<Address>::decode(&key_bytes)
                         .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
+                    // Stop when we reach a different address (keys are sorted by address first).
                     if key.key != address {
                         break;
                     }
 
+                    // Decompress the block number list stored in this shard.
                     let value = BlockNumberList::decompress(&value_bytes)
                         .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
