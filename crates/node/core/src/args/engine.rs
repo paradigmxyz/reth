@@ -206,7 +206,7 @@ impl Default for DefaultEngineValues {
             storage_worker_count: None,
             account_worker_count: None,
             enable_proof_v2: false,
-            prewarm_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY,
+            prewarm_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY * 2,
         }
     }
 }
