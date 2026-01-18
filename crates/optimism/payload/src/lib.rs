@@ -28,6 +28,7 @@ pub mod validator;
 pub use validator::OpExecutionPayloadValidator;
 
 pub mod config;
+pub use config::*;
 
 /// ZST that aggregates Optimism [`PayloadTypes`].
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
