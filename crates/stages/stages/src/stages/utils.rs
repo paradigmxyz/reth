@@ -1,9 +1,12 @@
 //! Utils for `stages`.
-use alloy_primitives::{Address, BlockNumber, TxNumber};
+use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    models::{sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey},
+    models::{
+        sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey,
+        AccountBeforeTx, ShardedKey,
+    },
     table::{Decode, Decompress, Table},
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
@@ -536,4 +539,174 @@ where
         block: Box::new(missing_block.block_with_parent()),
         segment,
     })
+}
+
+/// Loads storage history indices into the database via `EitherWriter`.
+///
+/// Similar to [`load_history_indices`] but works with [`EitherWriter`] to support
+/// both MDBX and `RocksDB` backends.
+///
+/// ## Process
+/// Iterates over elements, grouping indices by their (address, `storage_key`) pairs. It flushes
+/// indices to disk when reaching a shard's max length (`NUM_OF_INDICES_IN_SHARD`) or when the
+/// (address, `storage_key`) pair changes, ensuring the last previous shard is stored.
+///
+/// Uses `Option<(Address, B256)>` instead of default values as the sentinel to avoid
+/// incorrectly treating `(Address::ZERO, B256::ZERO)` as "no previous key".
+pub(crate) fn load_storage_history_via_writer<N, CURSOR>(
+    mut collector: Collector<StorageShardedKey, BlockNumberList>,
+    append_only: bool,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
+        + DbCursorRO<reth_db_api::tables::StoragesHistory>,
+{
+    let mut current_key: Option<(Address, B256)> = None;
+    let mut current_list = Vec::<u64>::new();
+
+    let total_entries = collector.len();
+    let interval = (total_entries / 10).max(1);
+
+    for (index, element) in collector.iter()?.enumerate() {
+        let (k, v) = element?;
+        let sharded_key = StorageShardedKey::decode_owned(k)?;
+        let new_list = BlockNumberList::decompress_owned(v)?;
+
+        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
+        }
+
+        let partial_key = (sharded_key.address, sharded_key.sharded_key.key);
+
+        if current_key != Some(partial_key) {
+            if let Some((prev_addr, prev_storage_key)) = current_key {
+                flush_storage_history_shards(
+                    prev_addr,
+                    prev_storage_key,
+                    &mut current_list,
+                    append_only,
+                    writer,
+                )?;
+            }
+
+            current_key = Some(partial_key);
+            current_list.clear();
+
+            if !append_only &&
+                let Some(last_shard) =
+                    writer.get_last_storage_history_shard(partial_key.0, partial_key.1)?
+            {
+                current_list.extend(last_shard.iter());
+            }
+        }
+
+        current_list.extend(new_list.iter());
+        flush_storage_history_shards_partial(
+            partial_key.0,
+            partial_key.1,
+            &mut current_list,
+            append_only,
+            writer,
+        )?;
+    }
+
+    if let Some((addr, storage_key)) = current_key {
+        flush_storage_history_shards(addr, storage_key, &mut current_list, append_only, writer)?;
+    }
+
+    Ok(())
+}
+
+/// Flushes complete shards for storage history, keeping the trailing partial shard buffered.
+///
+/// Only flushes when we have more than one shard's worth of data, keeping the last
+/// (possibly partial) shard for continued accumulation.
+fn flush_storage_history_shards_partial<N, CURSOR>(
+    address: Address,
+    storage_key: B256,
+    list: &mut Vec<u64>,
+    append_only: bool,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
+        + DbCursorRO<reth_db_api::tables::StoragesHistory>,
+{
+    if list.len() <= NUM_OF_INDICES_IN_SHARD {
+        return Ok(());
+    }
+
+    let num_full_shards = list.len() / NUM_OF_INDICES_IN_SHARD;
+
+    let shards_to_flush = if list.len().is_multiple_of(NUM_OF_INDICES_IN_SHARD) {
+        num_full_shards - 1
+    } else {
+        num_full_shards
+    };
+
+    if shards_to_flush == 0 {
+        return Ok(());
+    }
+
+    let flush_len = shards_to_flush * NUM_OF_INDICES_IN_SHARD;
+    let remainder = list.split_off(flush_len);
+
+    for chunk in list.chunks(NUM_OF_INDICES_IN_SHARD) {
+        let highest = *chunk.last().expect("chunk is non-empty");
+        let key = StorageShardedKey::new(address, storage_key, highest);
+        let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
+
+        if append_only {
+            writer.append_storage_history(key, &value)?;
+        } else {
+            writer.upsert_storage_history(key, &value)?;
+        }
+    }
+
+    *list = remainder;
+    Ok(())
+}
+
+/// Flushes all remaining shards for storage history, using `u64::MAX` for the last shard.
+///
+/// The `u64::MAX` key for the final shard is an invariant that allows
+/// `seek_exact(address, storage_key, u64::MAX)` to find the last shard during incremental
+/// sync for merging with new indices.
+fn flush_storage_history_shards<N, CURSOR>(
+    address: Address,
+    storage_key: B256,
+    list: &mut Vec<u64>,
+    append_only: bool,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
+        + DbCursorRO<reth_db_api::tables::StoragesHistory>,
+{
+    if list.is_empty() {
+        return Ok(());
+    }
+
+    let num_chunks = list.len().div_ceil(NUM_OF_INDICES_IN_SHARD);
+
+    for (i, chunk) in list.chunks(NUM_OF_INDICES_IN_SHARD).enumerate() {
+        let is_last = i == num_chunks - 1;
+        let highest = if is_last { u64::MAX } else { *chunk.last().expect("chunk is non-empty") };
+
+        let key = StorageShardedKey::new(address, storage_key, highest);
+        let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
+
+        if append_only {
+            writer.append_storage_history(key, &value)?;
+        } else {
+            writer.upsert_storage_history(key, &value)?;
+        }
+    }
+
+    list.clear();
+    Ok(())
 }
