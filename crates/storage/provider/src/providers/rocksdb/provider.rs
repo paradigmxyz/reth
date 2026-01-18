@@ -756,6 +756,11 @@ impl<'a> RocksDBBatch<'a> {
         self.inner
     }
 
+    /// Gets a value from the database (reads committed state, not pending batch writes).
+    pub fn get<T: Table>(&self, key: T::Key) -> ProviderResult<Option<T::Value>> {
+        self.provider.get::<T>(key)
+    }
+
     /// Appends indices to an account history shard with proper shard management.
     ///
     /// Loads the existing shard (if any), appends new indices, and rechunks into
