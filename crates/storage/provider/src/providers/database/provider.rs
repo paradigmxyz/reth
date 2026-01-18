@@ -2972,23 +2972,55 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .collect::<Vec<_>>();
         last_indices.sort_by_key(|(a, _)| *a);
 
-        // Unwind the account history index.
-        let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
-        for &(address, rem_index) in &last_indices {
-            let partial_shard = unwind_history_shards::<_, tables::AccountsHistory, _>(
-                &mut cursor,
-                ShardedKey::last(address),
-                rem_index,
-                |sharded_key| sharded_key.key == address,
-            )?;
+        let use_rocksdb = self.cached_storage_settings().account_history_in_rocksdb;
 
-            // Check the last returned partial shard.
-            // If it's not empty, the shard needs to be reinserted.
-            if !partial_shard.is_empty() {
-                cursor.insert(
+        if use_rocksdb {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                // For RocksDB, we need to find the minimum block number per address
+                // (the unwind_to point) and call unwind_account_history_to for each.
+                use std::collections::HashMap;
+
+                // Group by address and find the minimum block number for each (unwind_to - 1)
+                let mut address_unwind_to: HashMap<Address, BlockNumber> = HashMap::new();
+                for &(address, block_number) in &last_indices {
+                    address_unwind_to
+                        .entry(address)
+                        .and_modify(|min| *min = (*min).min(block_number))
+                        .or_insert(block_number);
+                }
+
+                let mut batch = self.rocksdb_provider.batch();
+                for (address, min_block) in address_unwind_to {
+                    // unwind_to is the last block to KEEP, so we pass min_block - 1
+                    // (we want to remove min_block and everything after)
+                    let unwind_to = min_block.saturating_sub(1);
+                    batch.unwind_account_history_to(address, unwind_to)?;
+                }
+                self.pending_rocksdb_batches.lock().push(batch.into_inner());
+            }
+
+            #[cfg(not(all(unix, feature = "rocksdb")))]
+            return Err(ProviderError::UnsupportedProvider);
+        } else {
+            // Unwind the account history index in MDBX.
+            let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
+            for &(address, rem_index) in &last_indices {
+                let partial_shard = unwind_history_shards::<_, tables::AccountsHistory, _>(
+                    &mut cursor,
                     ShardedKey::last(address),
-                    &BlockNumberList::new_pre_sorted(partial_shard),
+                    rem_index,
+                    |sharded_key| sharded_key.key == address,
                 )?;
+
+                // Check the last returned partial shard.
+                // If it's not empty, the shard needs to be reinserted.
+                if !partial_shard.is_empty() {
+                    cursor.insert(
+                        ShardedKey::last(address),
+                        &BlockNumberList::new_pre_sorted(partial_shard),
+                    )?;
+                }
             }
         }
 
