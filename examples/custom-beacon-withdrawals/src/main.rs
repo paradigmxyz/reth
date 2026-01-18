@@ -101,7 +101,7 @@ impl BlockExecutorFactory for CustomEvmConfig {
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: EthEvm<DB, I, PrecompilesMap>,
+        evm: EthEvm<&'a mut State<DB>, I, PrecompilesMap>,
         ctx: EthBlockExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
@@ -187,9 +187,10 @@ pub struct CustomBlockExecutor<'a, Evm> {
     inner: EthBlockExecutor<'a, Evm, &'a Arc<ChainSpec>, &'a RethReceiptBuilder>,
 }
 
-impl<E> BlockExecutor for CustomBlockExecutor<'_, E>
+impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<'_, E>
 where
-    E: Evm<DB: StateDB + DatabaseCommit + Database, Tx = TxEnv>,
+    DB: Database + 'db,
+    E: Evm<DB = &'db mut State<DB>, Tx = TxEnv>,
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;

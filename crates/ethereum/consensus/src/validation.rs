@@ -87,7 +87,7 @@ where
             let block_bal = block.body().block_access_list();
             tracing::debug!("Block Bal :{:?}", block_bal);
             if let Some(body_bal) = block_bal {
-                if body_bal.len() == 0 {
+                if body_bal.is_empty() {
                     tracing::debug!("Hit Empty BAL : Block is {:?}", block);
                 }
                 verify_bal(body_bal, bal)?;

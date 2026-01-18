@@ -286,7 +286,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.26.3"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal-devnet-1#35015873d34422778469007841a996d2adcfd46a"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal-devnet-2#342b5967c02c4d566ccb8cb260ddb01766cd1695"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -399,7 +399,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.26.3"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal-devnet-1#35015873d34422778469007841a996d2adcfd46a"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal-devnet-2#342b5967c02c4d566ccb8cb260ddb01766cd1695"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10386,7 +10386,6 @@ version = "1.10.0"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
- "alloy-eip7928",
  "alloy-eips",
  "alloy-evm",
  "alloy-genesis",
@@ -14612,9 +14611,9 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.14"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd8f3f50b848df28f887acb68e41201b5aea6bc8a8dacc00fb40635ff9a72fea"
+checksum = "94f63c051f4fe3c1509da62131a678643c5b6fbdc9273b2b79d4378ebda003d2"
 
 [[package]]
 name = "zstd"

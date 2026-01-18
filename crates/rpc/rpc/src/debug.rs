@@ -1,7 +1,4 @@
-use alloy_consensus::{
-    transaction::{SignerRecoverable, TxHashRef},
-    BlockHeader,
-};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, eip7928::BlockAccessList, BlockId, BlockNumberOrTag};
 use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
