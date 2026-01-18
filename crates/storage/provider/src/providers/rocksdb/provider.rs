@@ -514,6 +514,34 @@ impl RocksDBProvider {
         })
     }
 
+    /// Clears all entries from the specified table.
+    ///
+    /// This iterates over all keys and deletes them in a single batch.
+    pub fn clear_table<T: Table>(&self) -> ProviderResult<()> {
+        self.execute_with_operation_metric(RocksDBOperation::BatchWrite, T::NAME, |this| {
+            let cf = this.get_cf_handle::<T>()?;
+            let mut batch = WriteBatchWithTransaction::<true>::default();
+
+            let iter = this.0.db.iterator_cf(cf, IteratorMode::Start);
+            for result in iter {
+                let (key, _) = result.map_err(|e| {
+                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })?;
+                batch.delete_cf(cf, &key);
+            }
+
+            this.0.db.write_opt(batch, &WriteOptions::default()).map_err(|e| {
+                ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })
+        })
+    }
+
     /// Writes all `RocksDB` data for multiple blocks in parallel.
     ///
     /// This handles transaction hash numbers, account history, and storage history based on

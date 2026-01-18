@@ -117,7 +117,13 @@ where
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
         if first_sync {
-            // Only clear MDBX table if not using RocksDB
+            #[cfg(all(unix, feature = "rocksdb"))]
+            if use_rocksdb {
+                provider.rocksdb_provider().clear_table::<tables::AccountsHistory>()?;
+            }
+            #[cfg(not(all(unix, feature = "rocksdb")))]
+            let _ = use_rocksdb;
+
             if !use_rocksdb {
                 provider.tx_ref().clear::<tables::AccountsHistory>()?;
             }
@@ -233,12 +239,7 @@ where
         current_list.extend(new_list.iter());
 
         // Write full shards, keep the partial shard in memory
-        write_account_history_shards_keep_last(
-            writer,
-            current_address,
-            &mut current_list,
-            append_only,
-        )?;
+        write_full_shards(writer, current_address, &mut current_list)?;
     }
 
     // Flush the last address's remaining shard
@@ -268,19 +269,17 @@ where
     Ok(cursor.seek_exact(key)?.map(|(_, v)| v))
 }
 
-/// Writes full shards to the database, keeping only the last partial shard in memory.
-fn write_account_history_shards_keep_last<CURSOR, N>(
+/// Writes full shards from `list` to the database, draining them from the list.
+fn write_full_shards<CURSOR, N>(
     writer: &mut EitherWriter<'_, CURSOR, N>,
     address: Address,
     list: &mut Vec<u64>,
-    append_only: bool,
 ) -> Result<(), StageError>
 where
     CURSOR: reth_db_api::cursor::DbCursorRW<tables::AccountsHistory>
         + reth_db_api::cursor::DbCursorRO<tables::AccountsHistory>,
     N: reth_primitives_traits::NodePrimitives,
 {
-    let _ = append_only; // Currently unused, but kept for API consistency
     while list.len() > NUM_OF_INDICES_IN_SHARD {
         let chunk: Vec<u64> = list.drain(..NUM_OF_INDICES_IN_SHARD).collect();
         let highest = *chunk.last().expect("chunk is not empty");
@@ -308,14 +307,7 @@ where
         return Ok(());
     }
 
-    // Process full shards first
-    while list.len() > NUM_OF_INDICES_IN_SHARD {
-        let chunk: Vec<u64> = list.drain(..NUM_OF_INDICES_IN_SHARD).collect();
-        let highest = *chunk.last().expect("chunk is not empty");
-        let key = ShardedKey::new(address, highest);
-        let value = BlockNumberList::new_pre_sorted(chunk);
-        writer.put_account_history(key, &value)?;
-    }
+    write_full_shards(writer, address, list)?;
 
     // The last shard always uses u64::MAX
     if !list.is_empty() {
