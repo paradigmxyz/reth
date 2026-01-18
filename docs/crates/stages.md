@@ -7,7 +7,7 @@ The `stages` lib plays a central role in syncing the node, maintaining state, up
 - BodyStage
 - SenderRecoveryStage
 - ExecutionStage
-- PruneSenderRecoveryStage (if pruning for sender recovery is enabled)
+- PruneSenderRecoveryStage (execute, if pruning for sender recovery is enabled)
 - MerkleStage (unwind)
 - AccountHashingStage
 - StorageHashingStage
@@ -16,7 +16,7 @@ The `stages` lib plays a central role in syncing the node, maintaining state, up
 - TransactionLookupStage
 - IndexStorageHistoryStage
 - IndexAccountHistoryStage
-- PruneStage
+- PruneStage (execute)
 - FinishStage
 
 
