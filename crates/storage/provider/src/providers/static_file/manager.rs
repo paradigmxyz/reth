@@ -14,6 +14,7 @@ use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash,
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, NamedChain};
 use reth_db::{
     lockfile::StorageLock,
@@ -24,7 +25,7 @@ use reth_db::{
 };
 use reth_db_api::{
     cursor::DbCursorRO,
-    models::StoredBlockBodyIndices,
+    models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::{Decompress, Table, Value},
     tables,
     transaction::DbTx,
@@ -32,7 +33,9 @@ use reth_db_api::{
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::NodePrimitives;
-use reth_primitives_traits::{RecoveredBlock, SealedHeader, SignedTransaction};
+use reth_primitives_traits::{
+    AlloyBlockHeader as _, BlockBody as _, RecoveredBlock, SealedHeader, SignedTransaction,
+};
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileMap,
@@ -41,15 +44,16 @@ use reth_static_file_types::{
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChangeSetReader, DBProvider, StorageSettingsCache,
 };
-use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
 use std::{
     collections::BTreeMap,
     fmt::Debug,
     ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::{atomic::AtomicU64, mpsc, Arc},
+    thread,
 };
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 /// Alias type for a map that can be queried for block or transaction ranges. It uses `u64` to
 /// represent either a block or a transaction number end of a static file range.
@@ -75,6 +79,25 @@ impl StaticFileAccess {
     pub const fn is_read_write(&self) -> bool {
         matches!(self, Self::RW)
     }
+}
+
+/// Context for static file block writes.
+///
+/// Contains target segments and pruning configuration.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StaticFileWriteCtx {
+    /// Whether transaction senders should be written to static files.
+    pub write_senders: bool,
+    /// Whether receipts should be written to static files.
+    pub write_receipts: bool,
+    /// Whether account changesets should be written to static files.
+    pub write_account_changesets: bool,
+    /// The current chain tip block number (for pruning).
+    pub tip: BlockNumber,
+    /// The prune mode for receipts, if any.
+    pub receipts_prune_mode: Option<reth_prune_types::PruneMode>,
+    /// Whether receipts are prunable (based on storage settings and prune distance).
+    pub receipts_prunable: bool,
 }
 
 /// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
@@ -502,6 +525,192 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         }
 
         Ok(())
+    }
+
+    /// Writes headers for all blocks to the static file segment.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_headers(
+        w: &mut StaticFileProviderRWRefMut<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+    ) -> ProviderResult<()> {
+        for block in blocks {
+            let b = block.recovered_block();
+            w.append_header(b.header(), &b.hash())?;
+        }
+        Ok(())
+    }
+
+    /// Writes transactions for all blocks to the static file segment.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_transactions(
+        w: &mut StaticFileProviderRWRefMut<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+    ) -> ProviderResult<()> {
+        for (block, &first_tx) in blocks.iter().zip(tx_nums) {
+            let b = block.recovered_block();
+            w.increment_block(b.number())?;
+            for (i, tx) in b.body().transactions().iter().enumerate() {
+                w.append_transaction(first_tx + i as u64, tx)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes transaction senders for all blocks to the static file segment.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_transaction_senders(
+        w: &mut StaticFileProviderRWRefMut<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+    ) -> ProviderResult<()> {
+        for (block, &first_tx) in blocks.iter().zip(tx_nums) {
+            let b = block.recovered_block();
+            w.increment_block(b.number())?;
+            for (i, sender) in b.senders_iter().enumerate() {
+                w.append_transaction_sender(first_tx + i as u64, sender)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes receipts for all blocks to the static file segment.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_receipts(
+        w: &mut StaticFileProviderRWRefMut<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+        ctx: &StaticFileWriteCtx,
+    ) -> ProviderResult<()> {
+        for (block, &first_tx) in blocks.iter().zip(tx_nums) {
+            let block_number = block.recovered_block().number();
+            w.increment_block(block_number)?;
+
+            // skip writing receipts if pruning configuration requires us to.
+            if ctx.receipts_prunable &&
+                ctx.receipts_prune_mode
+                    .is_some_and(|mode| mode.should_prune(block_number, ctx.tip))
+            {
+                continue
+            }
+
+            for (i, receipt) in block.execution_outcome().receipts.iter().enumerate() {
+                w.append_receipt(first_tx + i as u64, receipt)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes account changesets for all blocks to the static file segment.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_account_changesets(
+        w: &mut StaticFileProviderRWRefMut<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+    ) -> ProviderResult<()> {
+        for block in blocks {
+            let block_number = block.recovered_block().number();
+            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+
+            for account_block_reverts in reverts.accounts {
+                let changeset = account_block_reverts
+                    .into_iter()
+                    .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                    .collect::<Vec<_>>();
+                w.append_account_changeset(changeset, block_number)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Spawns a scoped thread that writes to a static file segment using the provided closure.
+    ///
+    /// The closure receives a mutable reference to the segment writer. After the closure completes,
+    /// `sync_all()` is called to flush writes to disk.
+    fn spawn_segment_writer<'scope, 'env, F>(
+        &'env self,
+        scope: &'scope thread::Scope<'scope, 'env>,
+        segment: StaticFileSegment,
+        first_block_number: BlockNumber,
+        f: F,
+    ) -> thread::ScopedJoinHandle<'scope, ProviderResult<()>>
+    where
+        F: FnOnce(&mut StaticFileProviderRWRefMut<'_, N>) -> ProviderResult<()> + Send + 'env,
+    {
+        scope.spawn(move || {
+            let mut w = self.get_writer(first_block_number, segment)?;
+            f(&mut w)?;
+            w.sync_all()
+        })
+    }
+
+    /// Writes all static file data for multiple blocks in parallel per-segment.
+    ///
+    /// This spawns separate threads for each segment type and each thread calls `sync_all()` on its
+    /// writer when done.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    pub fn write_blocks_data(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+        ctx: StaticFileWriteCtx,
+    ) -> ProviderResult<()> {
+        if blocks.is_empty() {
+            return Ok(());
+        }
+
+        let first_block_number = blocks[0].recovered_block().number();
+
+        thread::scope(|s| {
+            let h_headers =
+                self.spawn_segment_writer(s, StaticFileSegment::Headers, first_block_number, |w| {
+                    Self::write_headers(w, blocks)
+                });
+
+            let h_txs = self.spawn_segment_writer(
+                s,
+                StaticFileSegment::Transactions,
+                first_block_number,
+                |w| Self::write_transactions(w, blocks, tx_nums),
+            );
+
+            let h_senders = ctx.write_senders.then(|| {
+                self.spawn_segment_writer(
+                    s,
+                    StaticFileSegment::TransactionSenders,
+                    first_block_number,
+                    |w| Self::write_transaction_senders(w, blocks, tx_nums),
+                )
+            });
+
+            let h_receipts = ctx.write_receipts.then(|| {
+                self.spawn_segment_writer(s, StaticFileSegment::Receipts, first_block_number, |w| {
+                    Self::write_receipts(w, blocks, tx_nums, &ctx)
+                })
+            });
+
+            let h_account_changesets = ctx.write_account_changesets.then(|| {
+                self.spawn_segment_writer(
+                    s,
+                    StaticFileSegment::AccountChangeSets,
+                    first_block_number,
+                    |w| Self::write_account_changesets(w, blocks),
+                )
+            });
+
+            h_headers.join().map_err(|_| StaticFileWriterError::ThreadPanic("headers"))??;
+            h_txs.join().map_err(|_| StaticFileWriterError::ThreadPanic("transactions"))??;
+            if let Some(h) = h_senders {
+                h.join().map_err(|_| StaticFileWriterError::ThreadPanic("senders"))??;
+            }
+            if let Some(h) = h_receipts {
+                h.join().map_err(|_| StaticFileWriterError::ThreadPanic("receipts"))??;
+            }
+            if let Some(h) = h_account_changesets {
+                h.join()
+                    .map_err(|_| StaticFileWriterError::ThreadPanic("account_changesets"))??;
+            }
+            Ok(())
+        })
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and start index that can be

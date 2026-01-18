@@ -1,12 +1,11 @@
 use crate::{
-    AccountReader, BlockHashReader, ChangeSetReader, HashedPostStateProvider, ProviderError,
-    StateProvider, StateRootProvider,
+    AccountReader, BlockHashReader, ChangeSetReader, EitherReader, HashedPostStateProvider,
+    ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
-    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
     table::Table,
     tables,
     transaction::DbTx,
@@ -14,7 +13,8 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
-    BlockNumReader, BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider,
+    BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, StateProofProvider,
+    StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -127,38 +127,47 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
         Self { provider, block_number, lowest_available_blocks }
     }
 
-    /// Lookup an account in the `AccountsHistory` table
-    pub fn account_history_lookup(&self, address: Address) -> ProviderResult<HistoryInfo> {
+    /// Lookup an account in the `AccountsHistory` table using `EitherReader`.
+    pub fn account_history_lookup(&self, address: Address) -> ProviderResult<HistoryInfo>
+    where
+        Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
+    {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        // history key to search IntegerList of block number changesets.
-        let history_key = ShardedKey::new(address, self.block_number);
-        self.history_info::<tables::AccountsHistory, _>(
-            history_key,
-            |key| key.key == address,
-            self.lowest_available_blocks.account_history_block_number,
-        )
+        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
+            let mut reader = EitherReader::new_accounts_history(self.provider, rocks_tx_ref)?;
+            reader.account_history_info(
+                address,
+                self.block_number,
+                self.lowest_available_blocks.account_history_block_number,
+            )
+        })
     }
 
-    /// Lookup a storage key in the `StoragesHistory` table
+    /// Lookup a storage key in the `StoragesHistory` table using `EitherReader`.
     pub fn storage_history_lookup(
         &self,
         address: Address,
         storage_key: StorageKey,
-    ) -> ProviderResult<HistoryInfo> {
+    ) -> ProviderResult<HistoryInfo>
+    where
+        Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
+    {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        // history key to search IntegerList of block number changesets.
-        let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
-        self.history_info::<tables::StoragesHistory, _>(
-            history_key,
-            |key| key.address == address && key.sharded_key.key == storage_key,
-            self.lowest_available_blocks.storage_history_block_number,
-        )
+        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
+            let mut reader = EitherReader::new_storages_history(self.provider, rocks_tx_ref)?;
+            reader.storage_history_info(
+                address,
+                storage_key,
+                self.block_number,
+                self.lowest_available_blocks.storage_history_block_number,
+            )
+        })
     }
 
     /// Checks and returns `true` if distance to historical block exceeds the provided limit.
@@ -204,57 +213,6 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
         Ok(HashedStorage::from_reverts(self.tx(), address, self.block_number)?)
     }
 
-    fn history_info<T, K>(
-        &self,
-        key: K,
-        key_filter: impl Fn(&K) -> bool,
-        lowest_available_block_number: Option<BlockNumber>,
-    ) -> ProviderResult<HistoryInfo>
-    where
-        T: Table<Key = K, Value = BlockNumberList>,
-    {
-        let mut cursor = self.tx().cursor_read::<T>()?;
-
-        // Lookup the history chunk in the history index. If the key does not appear in the
-        // index, the first chunk for the next key will be returned so we filter out chunks that
-        // have a different key.
-        if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1) {
-            // Get the rank of the first entry before or equal to our block.
-            let mut rank = chunk.rank(self.block_number);
-
-            // Adjust the rank, so that we have the rank of the first entry strictly before our
-            // block (not equal to it).
-            if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(self.block_number) {
-                rank -= 1;
-            }
-
-            let found_block = chunk.select(rank);
-
-            // If our block is before the first entry in the index chunk and this first entry
-            // doesn't equal to our block, it might be before the first write ever. To check, we
-            // look at the previous entry and check if the key is the same.
-            // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
-            // short-circuit) and when it passes we save a full seek into the changeset/plain state
-            // table.
-            let is_before_first_write =
-                needs_prev_shard_check(rank, found_block, self.block_number) &&
-                    !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key));
-
-            Ok(HistoryInfo::from_lookup(
-                found_block,
-                is_before_first_write,
-                lowest_available_block_number,
-            ))
-        } else if lowest_available_block_number.is_some() {
-            // The key may have been written, but due to pruning we may not have changesets and
-            // history, so we need to make a plain state lookup.
-            Ok(HistoryInfo::MaybeInPlainState)
-        } else {
-            // The key has not been written to at all.
-            Ok(HistoryInfo::NotYetWritten)
-        }
-    }
-
     /// Set the lowest block number at which the account history is available.
     pub const fn with_lowest_available_account_history_block_number(
         mut self,
@@ -280,8 +238,14 @@ impl<Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'_, Provi
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + ChangeSetReader> AccountReader
-    for HistoricalStateProviderRef<'_, Provider>
+impl<
+        Provider: DBProvider
+            + BlockNumReader
+            + ChangeSetReader
+            + StorageSettingsCache
+            + RocksDBProviderFactory
+            + NodePrimitivesProvider,
+    > AccountReader for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
@@ -436,8 +400,15 @@ impl<Provider> HashedPostStateProvider for HistoricalStateProviderRef<'_, Provid
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> StateProvider
-    for HistoricalStateProviderRef<'_, Provider>
+impl<
+        Provider: DBProvider
+            + BlockNumReader
+            + BlockHashReader
+            + ChangeSetReader
+            + StorageSettingsCache
+            + RocksDBProviderFactory
+            + NodePrimitivesProvider,
+    > StateProvider for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get storage.
     fn storage(
@@ -527,7 +498,7 @@ impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> HistoricalStatePro
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-reth_storage_api::macros::delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader]);
+reth_storage_api::macros::delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -557,6 +528,32 @@ impl LowestAvailableBlocks {
     }
 }
 
+/// Computes the rank and finds the next modification block in a history shard.
+///
+/// Given a `block_number`, this function returns:
+/// - `rank`: The number of entries strictly before `block_number` in the shard
+/// - `found_block`: The block number at position `rank` (i.e., the first block >= `block_number`
+///   where a modification occurred), or `None` if `rank` is out of bounds
+///
+/// The rank is adjusted when `block_number` exactly matches an entry in the shard,
+/// so that `found_block` always returns the modification at or after the target.
+///
+/// This logic is shared between MDBX cursor-based lookups and `RocksDB` iterator lookups.
+#[inline]
+pub fn compute_history_rank(
+    chunk: &reth_db_api::BlockNumberList,
+    block_number: BlockNumber,
+) -> (u64, Option<u64>) {
+    let mut rank = chunk.rank(block_number);
+    // `rank(block_number)` returns count of entries <= block_number.
+    // We want the first entry >= block_number, so if block_number is in the shard,
+    // we need to step back one position to point at it (not past it).
+    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
+        rank -= 1;
+    }
+    (rank, chunk.select(rank))
+}
+
 /// Checks if a previous shard lookup is needed to determine if we're before the first write.
 ///
 /// Returns `true` when `rank == 0` (first entry in shard) and the found block doesn't match
@@ -570,13 +567,59 @@ pub fn needs_prev_shard_check(
     rank == 0 && found_block != Some(block_number)
 }
 
+/// Generic history lookup for sharded history tables.
+///
+/// Seeks to the shard containing `block_number`, verifies the key via `key_filter`,
+/// and checks previous shard to detect if we're before the first write.
+pub fn history_info<T, K, C>(
+    cursor: &mut C,
+    key: K,
+    block_number: BlockNumber,
+    key_filter: impl Fn(&K) -> bool,
+    lowest_available_block_number: Option<BlockNumber>,
+) -> ProviderResult<HistoryInfo>
+where
+    T: Table<Key = K, Value = BlockNumberList>,
+    C: DbCursorRO<T>,
+{
+    // Lookup the history chunk in the history index. If the key does not appear in the
+    // index, the first chunk for the next key will be returned so we filter out chunks that
+    // have a different key.
+    if let Some(chunk) = cursor.seek(key)?.filter(|(k, _)| key_filter(k)).map(|x| x.1) {
+        let (rank, found_block) = compute_history_rank(&chunk, block_number);
+
+        // If our block is before the first entry in the index chunk and this first entry
+        // doesn't equal to our block, it might be before the first write ever. To check, we
+        // look at the previous entry and check if the key is the same.
+        // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
+        // short-circuit) and when it passes we save a full seek into the changeset/plain state
+        // table.
+        let is_before_first_write = needs_prev_shard_check(rank, found_block, block_number) &&
+            !cursor.prev()?.is_some_and(|(k, _)| key_filter(&k));
+
+        Ok(HistoryInfo::from_lookup(
+            found_block,
+            is_before_first_write,
+            lowest_available_block_number,
+        ))
+    } else if lowest_available_block_number.is_some() {
+        // The key may have been written, but due to pruning we may not have changesets and
+        // history, so we need to make a plain state lookup.
+        Ok(HistoryInfo::MaybeInPlainState)
+    } else {
+        // The key has not been written to at all.
+        Ok(HistoryInfo::NotYetWritten)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::needs_prev_shard_check;
     use crate::{
         providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
         test_utils::create_test_provider_factory,
-        AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
+        AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, RocksDBProviderFactory,
+        StateProvider,
     };
     use alloy_primitives::{address, b256, Address, B256, U256};
     use reth_db_api::{
@@ -588,6 +631,7 @@ mod tests {
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
         BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+        NodePrimitivesProvider, StorageSettingsCache,
     };
     use reth_storage_errors::provider::ProviderError;
 
@@ -599,7 +643,13 @@ mod tests {
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
     const fn assert_historical_state_provider<
-        T: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader,
+        T: DBProvider
+            + BlockNumReader
+            + BlockHashReader
+            + ChangeSetReader
+            + StorageSettingsCache
+            + RocksDBProviderFactory
+            + NodePrimitivesProvider,
     >() {
         assert_state_provider::<HistoricalStateProvider<T>>();
     }
