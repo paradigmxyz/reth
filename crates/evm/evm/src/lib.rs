@@ -40,6 +40,8 @@ use revm::{context::TxEnv, database::State};
 pub mod either;
 /// EVM environment configuration.
 pub mod execute;
+/// Transaction environment reuse utilities.
+pub mod tx_env;
 
 mod aliases;
 pub use aliases::*;
