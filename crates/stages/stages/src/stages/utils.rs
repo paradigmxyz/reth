@@ -57,12 +57,12 @@ where
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
     let mut cache: HashMap<P, Vec<u64>> = HashMap::default();
 
-    let mut collect = |cache: &HashMap<P, Vec<u64>>| {
-        for (key, indices) in cache {
-            let last = indices.last().expect("qed");
+    let mut collect = |cache: &mut HashMap<P, Vec<u64>>| {
+        for (key, indices) in cache.drain() {
+            let last = *indices.last().expect("qed");
             collector.insert(
-                sharded_key_factory(*key, *last),
-                BlockNumberList::new_pre_sorted(indices.iter().copied()),
+                sharded_key_factory(key, last),
+                BlockNumberList::new_pre_sorted(indices.into_iter()),
             )?;
         }
         Ok::<(), StageError>(())
@@ -87,13 +87,12 @@ where
             current_block_number = block_number;
             flush_counter += 1;
             if flush_counter > DEFAULT_CACHE_THRESHOLD {
-                collect(&cache)?;
-                cache.clear();
+                collect(&mut cache)?;
                 flush_counter = 0;
             }
         }
     }
-    collect(&cache)?;
+    collect(&mut cache)?;
 
     Ok(collector)
 }
