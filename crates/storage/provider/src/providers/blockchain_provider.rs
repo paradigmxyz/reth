@@ -1348,12 +1348,7 @@ mod tests {
 
         // Send and receive commit notifications.
         let block_2 = test_block_builder.generate_random_block(1, block_hash_1).try_recover()?;
-        let chain = Chain::new(
-            vec![block_2],
-            ExecutionOutcome::default(),
-            BTreeMap::new(),
-            BTreeMap::new(),
-        );
+        let chain = Chain::new(vec![block_2], ExecutionOutcome::default(), BTreeMap::new());
         let commit = CanonStateNotification::Commit { new: Arc::new(chain.clone()) };
         in_memory_state.notify_canon_state(commit.clone());
         let (notification_1, notification_2) = tokio::join!(rx_1.recv(), rx_2.recv());
@@ -1363,12 +1358,8 @@ mod tests {
         // Send and receive re-org notifications.
         let block_3 = test_block_builder.generate_random_block(1, block_hash_1).try_recover()?;
         let block_4 = test_block_builder.generate_random_block(2, block_3.hash()).try_recover()?;
-        let new_chain = Chain::new(
-            vec![block_3, block_4],
-            ExecutionOutcome::default(),
-            BTreeMap::new(),
-            BTreeMap::new(),
-        );
+        let new_chain =
+            Chain::new(vec![block_3, block_4], ExecutionOutcome::default(), BTreeMap::new());
         let re_org =
             CanonStateNotification::Reorg { old: Arc::new(chain), new: Arc::new(new_chain) };
         in_memory_state.notify_canon_state(re_org.clone());

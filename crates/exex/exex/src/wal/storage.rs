@@ -189,7 +189,7 @@ mod tests {
     use reth_testing_utils::generators::{self, random_block};
     use reth_trie_common::{
         updates::{StorageTrieUpdates, TrieUpdates},
-        BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
+        BranchNodeCompact, HashedPostState, HashedStorage, LazyTrieData, Nibbles,
     };
     use std::{collections::BTreeMap, fs::File, sync::Arc};
 
@@ -241,18 +241,8 @@ mod tests {
         let new_block = random_block(&mut rng, 0, Default::default()).try_recover()?;
 
         let notification = ExExNotification::ChainReorged {
-            new: Arc::new(Chain::new(
-                vec![new_block],
-                Default::default(),
-                BTreeMap::new(),
-                BTreeMap::new(),
-            )),
-            old: Arc::new(Chain::new(
-                vec![old_block],
-                Default::default(),
-                BTreeMap::new(),
-                BTreeMap::new(),
-            )),
+            new: Arc::new(Chain::new(vec![new_block], Default::default(), BTreeMap::new())),
+            old: Arc::new(Chain::new(vec![old_block], Default::default(), BTreeMap::new())),
         };
 
         // Do a round trip serialization and deserialization
@@ -346,13 +336,17 @@ mod tests {
             )]),
         };
 
+        let trie_data = LazyTrieData::ready(
+            Arc::new(hashed_state.into_sorted()),
+            Arc::new(trie_updates.into_sorted()),
+        );
+
         let notification: ExExNotification<reth_ethereum_primitives::EthPrimitives> =
             ExExNotification::ChainCommitted {
                 new: Arc::new(Chain::new(
                     vec![block],
                     Default::default(),
-                    BTreeMap::from([(block_number, Arc::new(trie_updates.into_sorted()))]),
-                    BTreeMap::from([(block_number, Arc::new(hashed_state.into_sorted()))]),
+                    BTreeMap::from([(block_number, trie_data)]),
                 )),
             };
         Ok(notification)

@@ -11,6 +11,10 @@
 
 extern crate alloc;
 
+/// Lazy initialization wrapper for trie data.
+mod lazy;
+pub use lazy::{LazyTrieData, SortedTrieData};
+
 /// In-memory hashed state.
 mod hashed_state;
 pub use hashed_state::*;

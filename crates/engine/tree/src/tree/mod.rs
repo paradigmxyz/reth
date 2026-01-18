@@ -1478,7 +1478,7 @@ where
 
                                 self.metrics.engine.forkchoice_updated.update_response_metrics(
                                     start,
-                                    &mut self.metrics.engine.new_payload.latest_at,
+                                    &mut self.metrics.engine.new_payload.latest_finish_at,
                                     has_attrs,
                                     &output,
                                 );
@@ -1676,6 +1676,18 @@ where
                 )));
                 return Ok(());
             }
+        } else {
+            // We don't have the head block or any of its ancestors buffered. Request
+            // a download for the head block which will then trigger further sync.
+            debug!(
+                target: "engine::tree",
+                head_hash = %sync_target_state.head_block_hash,
+                "Backfill complete but head block not buffered, requesting download"
+            );
+            self.emit_event(EngineApiEvent::Download(DownloadRequest::single_block(
+                sync_target_state.head_block_hash,
+            )));
+            return Ok(());
         }
 
         // try to close the gap by executing buffered blocks that are child blocks of the new head
