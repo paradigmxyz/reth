@@ -326,6 +326,11 @@ impl LoadMode {
 /// Similar to [`load_history_indices`] but works with [`EitherWriter`] to support
 /// both MDBX and `RocksDB` backends.
 ///
+/// ## Process
+/// Iterates over elements, grouping indices by their address. It flushes indices to disk
+/// when reaching a shard's max length (`NUM_OF_INDICES_IN_SHARD`) or when the address changes,
+/// ensuring the last previous address shard is stored.
+///
 /// Uses `Option<Address>` instead of `Address::default()` as the sentinel to avoid
 /// incorrectly treating `Address::ZERO` as "no previous address".
 pub(crate) fn load_account_history_via_writer<N, CURSOR>(
@@ -338,9 +343,13 @@ where
     CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
         + DbCursorRO<reth_db_api::tables::AccountsHistory>,
 {
+    // Track current address being processed. Using Option<Address> instead of Address::default()
+    // to correctly handle Address::ZERO (which would otherwise be treated as "no address").
     let mut current_address: Option<Address> = None;
+    // Accumulator for block numbers where the current address changed.
     let mut current_list = Vec::<u64>::new();
 
+    // Progress reporting setup.
     let total_entries = collector.len();
     let interval = (total_entries / 10).max(1);
 
@@ -355,7 +364,9 @@ where
 
         let address = sharded_key.key;
 
+        // When address changes, flush the previous address's shards and start fresh.
         if current_address != Some(address) {
+            // Flush all remaining shards for the previous address (uses u64::MAX for last shard).
             if let Some(prev_addr) = current_address {
                 flush_account_history_shards(prev_addr, &mut current_list, append_only, writer)?;
             }
@@ -363,6 +374,8 @@ where
             current_address = Some(address);
             current_list.clear();
 
+            // On incremental sync, merge with the existing last shard from the database.
+            // The last shard is stored with key (address, u64::MAX) so we can find it.
             if !append_only &&
                 let Some(last_shard) = writer.get_last_account_history_shard(address)?
             {
@@ -370,10 +383,14 @@ where
             }
         }
 
+        // Append new block numbers to the accumulator.
         current_list.extend(new_list.iter());
+
+        // Flush complete shards, keeping the last (partial) shard buffered.
         flush_account_history_shards_partial(address, &mut current_list, append_only, writer)?;
     }
 
+    // Flush the final address's remaining shard.
     if let Some(addr) = current_address {
         flush_account_history_shards(addr, &mut current_list, append_only, writer)?;
     }
@@ -386,6 +403,8 @@ where
 /// Only flushes when we have more than one shard's worth of data, keeping the last
 /// (possibly partial) shard for continued accumulation. This avoids writing a shard
 /// that may need to be updated when more indices arrive.
+///
+/// Equivalent to [`load_indices`] with [`LoadMode::KeepLast`].
 fn flush_account_history_shards_partial<N, CURSOR>(
     address: Address,
     list: &mut Vec<u64>,
@@ -397,13 +416,16 @@ where
     CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
         + DbCursorRO<reth_db_api::tables::AccountsHistory>,
 {
-    // Only flush if we have more than one shard's worth of data
+    // Nothing to flush if we haven't filled a complete shard yet.
     if list.len() <= NUM_OF_INDICES_IN_SHARD {
         return Ok(());
     }
 
+    // Calculate how many complete shards we have.
     let num_full_shards = list.len() / NUM_OF_INDICES_IN_SHARD;
-    // Keep the last chunk (partial or full) for continued accumulation
+
+    // Always keep at least one shard buffered for continued accumulation.
+    // If len is exact multiple of shard size, keep the last full shard.
     let shards_to_flush = if list.len().is_multiple_of(NUM_OF_INDICES_IN_SHARD) {
         num_full_shards - 1
     } else {
@@ -414,9 +436,11 @@ where
         return Ok(());
     }
 
+    // Split: flush the first N shards, keep the remainder buffered.
     let flush_len = shards_to_flush * NUM_OF_INDICES_IN_SHARD;
     let remainder = list.split_off(flush_len);
 
+    // Write each complete shard with its highest block number as the key.
     for chunk in list.chunks(NUM_OF_INDICES_IN_SHARD) {
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = ShardedKey::new(address, highest);
@@ -429,11 +453,17 @@ where
         }
     }
 
+    // Keep the remaining indices for the next iteration.
     *list = remainder;
     Ok(())
 }
 
 /// Flushes all remaining shards for account history, using `u64::MAX` for the last shard.
+///
+/// The `u64::MAX` key for the final shard is an invariant that allows `seek_exact(address,
+/// u64::MAX)` to find the last shard during incremental sync for merging with new indices.
+///
+/// Equivalent to [`load_indices`] with [`LoadMode::Flush`].
 fn flush_account_history_shards<N, CURSOR>(
     address: Address,
     list: &mut Vec<u64>,
@@ -453,7 +483,11 @@ where
 
     for (i, chunk) in list.chunks(NUM_OF_INDICES_IN_SHARD).enumerate() {
         let is_last = i == num_chunks - 1;
+
+        // Use u64::MAX for the final shard's key. This invariant allows incremental sync
+        // to find the last shard via seek_exact(address, u64::MAX) for merging.
         let highest = if is_last { u64::MAX } else { *chunk.last().expect("chunk is non-empty") };
+
         let key = ShardedKey::new(address, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
 
