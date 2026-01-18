@@ -170,40 +170,35 @@ where
     Ok(collector)
 }
 
-/// Backend operations for loading history indices.
-///
-/// This trait abstracts the storage backend (MDBX cursor, `EitherWriter`, etc.)
-/// allowing the same loading algorithm to work with different backends.
-pub(super) trait HistoryIndexWriter<K, P> {
-    /// Get the last shard for a partial key (stored with `highest_block_number = u64::MAX`).
-    fn get_last_shard(&mut self, partial: P) -> Result<Option<BlockNumberList>, StageError>;
+use std::cell::RefCell;
 
-    /// Write a shard to storage.
-    fn put(&mut self, key: K, value: &BlockNumberList, append_only: bool)
-        -> Result<(), StageError>;
-}
-
-/// Core implementation of history index loading.
+/// Core implementation of history index loading via closure-based backend operations.
 ///
 /// This is the shared algorithm for loading history indices that works with any backend
-/// implementing [`HistoryIndexWriter`].
+/// (MDBX cursor, `EitherWriter` for MDBX/RocksDB, etc.) by accepting operations as closures.
+///
+/// Uses `RefCell` internally to allow both closures to borrow the same state mutably.
 ///
 /// # Invariant
 ///
 /// The last shard for each partial key is always stored with `highest_block_number = u64::MAX`.
 /// This allows `get_last_shard` to find it via `seek_exact(partial_key, u64::MAX)`.
-pub(crate) fn load_history_indices_with<K, P, W>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn load_history_indices_with<K, P, S, G, U>(
     mut collector: Collector<K, BlockNumberList>,
     append_only: bool,
     decode_key: impl Fn(Vec<u8>) -> Result<K, DatabaseError>,
     get_partial: impl Fn(&K) -> P,
     sharded_key_factory: impl Clone + Fn(P, u64) -> K,
-    writer: &mut W,
+    state: &RefCell<S>,
+    get_last_shard: G,
+    put: U,
 ) -> Result<(), StageError>
 where
     K: reth_db_api::table::Key,
     P: Copy + Eq,
-    W: HistoryIndexWriter<K, P>,
+    G: Fn(&RefCell<S>, P) -> Result<Option<BlockNumberList>, StageError>,
+    U: Fn(&RefCell<S>, K, &BlockNumberList) -> Result<(), StageError>,
 {
     let mut current_partial: Option<P> = None;
     let mut current_list = Vec::<u64>::new();
@@ -226,7 +221,7 @@ where
             // Flush previous partial key's shards (skip if this is the first key)
             if let Some(prev) = current_partial {
                 write_shards(prev, &mut current_list, &sharded_key_factory, true, |key, value| {
-                    writer.put(key, &value, append_only)
+                    put(state, key, &value)
                 })?;
             }
 
@@ -234,59 +229,25 @@ where
             current_list.clear();
 
             // Merge existing shard if not first sync
-            if !append_only && let Some(last_database_shard) = writer.get_last_shard(partial_key)? {
+            if !append_only && let Some(last_database_shard) = get_last_shard(state, partial_key)? {
                 current_list.extend(last_database_shard.iter());
             }
         }
 
         current_list.extend(new_list.iter());
         write_shards(partial_key, &mut current_list, &sharded_key_factory, false, |key, value| {
-            writer.put(key, &value, append_only)
+            put(state, key, &value)
         })?;
     }
 
     // Flush remaining shard
     if let Some(partial) = current_partial {
         write_shards(partial, &mut current_list, &sharded_key_factory, true, |key, value| {
-            writer.put(key, &value, append_only)
+            put(state, key, &value)
         })?;
     }
 
     Ok(())
-}
-
-/// Wrapper for MDBX cursor that implements [`HistoryIndexWriter`].
-struct CursorWriter<'a, H, C, F> {
-    cursor: &'a mut C,
-    sharded_key_factory: F,
-    _table: std::marker::PhantomData<H>,
-}
-
-impl<H, P, C, F> HistoryIndexWriter<H::Key, P> for CursorWriter<'_, H, C, F>
-where
-    H: Table<Value = BlockNumberList>,
-    P: Copy,
-    C: DbCursorRO<H> + DbCursorRW<H>,
-    F: Fn(P, u64) -> H::Key,
-{
-    fn get_last_shard(&mut self, partial: P) -> Result<Option<BlockNumberList>, StageError> {
-        let key = (self.sharded_key_factory)(partial, u64::MAX);
-        Ok(self.cursor.seek_exact(key)?.map(|(_, v)| v))
-    }
-
-    fn put(
-        &mut self,
-        key: H::Key,
-        value: &BlockNumberList,
-        append_only: bool,
-    ) -> Result<(), StageError> {
-        if append_only {
-            self.cursor.append(key, value)?;
-        } else {
-            self.cursor.upsert(key, value)?;
-        }
-        Ok(())
-    }
 }
 
 /// Given a [`Collector`] created by [`collect_history_indices`] it iterates all entries, loading
@@ -308,12 +269,8 @@ where
     H: Table<Value = BlockNumberList>,
     P: Copy + Eq,
 {
-    let mut cursor = provider.tx_ref().cursor_write::<H>()?;
-    let mut writer = CursorWriter::<H, _, _> {
-        cursor: &mut cursor,
-        sharded_key_factory: sharded_key_factory.clone(),
-        _table: std::marker::PhantomData,
-    };
+    let cursor = RefCell::new(provider.tx_ref().cursor_write::<H>()?);
+    let sharded_key_factory_clone = sharded_key_factory.clone();
 
     load_history_indices_with(
         collector,
@@ -321,7 +278,21 @@ where
         decode_key,
         get_partial,
         sharded_key_factory,
-        &mut writer,
+        &cursor,
+        |cell, partial| {
+            Ok(cell
+                .borrow_mut()
+                .seek_exact(sharded_key_factory_clone(partial, u64::MAX))?
+                .map(|(_, v)| v))
+        },
+        |cell, key, value| {
+            if append_only {
+                cell.borrow_mut().append(key, value)?;
+            } else {
+                cell.borrow_mut().upsert(key, value)?;
+            }
+            Ok(())
+        },
     )
 }
 
