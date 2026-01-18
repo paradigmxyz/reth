@@ -1942,9 +1942,12 @@ where
         // Cache miss: fetch from database (DB I/O happens outside any lock)
         let from_db = self.provider.sealed_header_by_hash(hash)?;
 
-        // Populate cache on hit (only cache existing headers, never cache None)
-        if let Some(ref header) = from_db {
-            *self.canonical_header_cache.write() = Some((hash, header.clone()));
+        // Only cache if this is the canonical tip (the FCU hot path we're optimizing).
+        // Caching non-canonical lookups would pollute the single-entry cache.
+        if hash == self.state.tree_state.canonical_block_hash() {
+            if let Some(ref header) = from_db {
+                *self.canonical_header_cache.write() = Some((hash, header.clone()));
+            }
         }
 
         Ok(from_db)
