@@ -1,15 +1,18 @@
 use super::collect_account_history_indices;
-use crate::stages::utils::collect_history_indices;
+use crate::stages::utils::{
+    collect_history_indices, load_history_indices_with, HistoryIndexWriter,
+};
 use alloy_primitives::Address;
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
-    models::{sharded_key::NUM_OF_INDICES_IN_SHARD, ShardedKey},
-    table::{Decode, Decompress},
+    cursor::{DbCursorRO, DbCursorRW},
+    models::ShardedKey,
+    table::Decode,
     tables,
     transaction::DbTxMut,
     BlockNumberList,
 };
-use reth_etl::Collector;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
     RocksDBProviderFactory, StorageSettingsCache,
@@ -20,6 +23,30 @@ use reth_stages_api::{
 };
 use std::fmt::Debug;
 use tracing::info;
+
+/// Implement [`HistoryIndexWriter`] for [`EitherWriter`] with account history cursor.
+impl<'a, C, N> HistoryIndexWriter<ShardedKey<Address>, Address> for EitherWriter<'a, C, N>
+where
+    C: DbCursorRO<tables::AccountsHistory> + DbCursorRW<tables::AccountsHistory>,
+    N: NodePrimitives,
+{
+    fn get_last_shard(&mut self, addr: Address) -> Result<Option<BlockNumberList>, StageError> {
+        Ok(self.get_last_account_history_shard(addr)?)
+    }
+
+    fn put(
+        &mut self,
+        key: ShardedKey<Address>,
+        value: &BlockNumberList,
+        append_only: bool,
+    ) -> Result<(), StageError> {
+        if append_only {
+            Ok(self.append_account_history(key, value)?)
+        } else {
+            Ok(self.upsert_account_history(key, value)?)
+        }
+    }
+}
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
@@ -151,7 +178,14 @@ where
 
         let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
 
-        load_account_history_indices(collector, first_sync, &mut writer)?;
+        load_history_indices_with(
+            collector,
+            first_sync,
+            ShardedKey::<Address>::decode_owned,
+            |k| k.key,
+            ShardedKey::new,
+            &mut writer,
+        )?;
 
         #[cfg(all(unix, feature = "rocksdb"))]
         if let Some(batch) = writer.into_raw_rocksdb_batch() {
@@ -175,111 +209,6 @@ where
         // from HistoryIndex higher than that number.
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
     }
-}
-
-/// Loads account history indices using `EitherWriter` (handles both MDBX and `RocksDB`).
-fn load_account_history_indices<CURSOR, N>(
-    mut collector: Collector<ShardedKey<Address>, BlockNumberList>,
-    append_only: bool,
-    writer: &mut EitherWriter<'_, CURSOR, N>,
-) -> Result<(), StageError>
-where
-    CURSOR: reth_db_api::cursor::DbCursorRW<tables::AccountsHistory>
-        + reth_db_api::cursor::DbCursorRO<tables::AccountsHistory>,
-    N: reth_primitives_traits::NodePrimitives,
-{
-    let mut current_address = Address::ZERO;
-    let mut current_list = Vec::<u64>::new();
-
-    let total_entries = collector.len();
-    let interval = (total_entries / 10).max(1);
-
-    for (index, element) in collector.iter()?.enumerate() {
-        let (k, v) = element?;
-        let sharded_key = ShardedKey::<Address>::decode_owned(k)?;
-        let new_list = BlockNumberList::decompress_owned(v)?;
-
-        if index > 0 && index % interval == 0 && total_entries > 10 {
-            info!(target: "sync::stages::index_account_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
-        }
-
-        let address = sharded_key.key;
-
-        if current_address != address {
-            // Flush previous address
-            flush_account_history_shards(current_address, &mut current_list, append_only, writer)?;
-            current_address = address;
-            current_list.clear();
-
-            // Merge with existing shard if not first sync
-            if !append_only
-                && let Some(existing) = writer.get_last_account_history_shard(current_address)?
-            {
-                current_list.extend(existing.iter());
-            }
-        }
-
-        current_list.extend(new_list.iter());
-
-        // Write full shards, keep last partial in memory
-        while current_list.len() > NUM_OF_INDICES_IN_SHARD {
-            let chunk: Vec<u64> = current_list.drain(..NUM_OF_INDICES_IN_SHARD).collect();
-            let highest = *chunk.last().expect("chunk not empty");
-            let key = ShardedKey::new(current_address, highest);
-            let value = BlockNumberList::new_pre_sorted(chunk);
-            if append_only {
-                writer.append_account_history(key, &value)?;
-            } else {
-                writer.upsert_account_history(key, &value)?;
-            }
-        }
-    }
-
-    flush_account_history_shards(current_address, &mut current_list, append_only, writer)
-}
-
-/// Flushes remaining shards. The last shard uses `u64::MAX`.
-fn flush_account_history_shards<CURSOR, N>(
-    address: Address,
-    list: &mut Vec<u64>,
-    append_only: bool,
-    writer: &mut EitherWriter<'_, CURSOR, N>,
-) -> Result<(), StageError>
-where
-    CURSOR: reth_db_api::cursor::DbCursorRW<tables::AccountsHistory>
-        + reth_db_api::cursor::DbCursorRO<tables::AccountsHistory>,
-    N: reth_primitives_traits::NodePrimitives,
-{
-    if list.is_empty() {
-        return Ok(());
-    }
-
-    while list.len() > NUM_OF_INDICES_IN_SHARD {
-        let chunk: Vec<u64> = list.drain(..NUM_OF_INDICES_IN_SHARD).collect();
-        let highest = *chunk.last().expect("chunk not empty");
-        let key = ShardedKey::new(address, highest);
-        let value = BlockNumberList::new_pre_sorted(chunk);
-        if append_only {
-            writer.append_account_history(key, &value)?;
-        } else {
-            writer.upsert_account_history(key, &value)?;
-        }
-    }
-
-    if !list.is_empty() {
-        let key = ShardedKey::last(address);
-        let value = BlockNumberList::new_pre_sorted(list.drain(..));
-        if !append_only {
-            writer.delete_account_history(key.clone())?;
-        }
-        if append_only {
-            writer.append_account_history(key, &value)?;
-        } else {
-            writer.upsert_account_history(key, &value)?;
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
