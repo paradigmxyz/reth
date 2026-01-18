@@ -105,7 +105,7 @@ where
 
         // If there were blocks less than or equal to the target one
         // (so the shard has changed), update the shard.
-        if blocks.len() as usize == higher_blocks.len() {
+        if blocks.len() == higher_blocks.len() {
             return Ok(PruneShardOutcome::Unchanged);
         }
 
