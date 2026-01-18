@@ -432,7 +432,7 @@ impl RocksDBProvider {
 
     /// Clears all entries from the specified table.
     ///
-    /// RocksDB's `delete_range` uses an exclusive end bound `[start, end)`. To include the
+    /// `RocksDB`'s `delete_range` uses an exclusive end bound `[start, end)`. To include the
     /// last key, we compute `last_key || 0x00` which is the minimal key strictly greater
     /// than `last_key` under bytewise comparison.
     pub fn clear<T: Table>(&self) -> ProviderResult<()> {
