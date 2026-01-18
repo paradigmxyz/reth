@@ -170,6 +170,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 transactions: transactions.into_iter().map(|tx| tx.into_inner()).collect(),
                 ommers: Vec::new(),
                 withdrawals: Some(vec![].into()),
+                block_access_list: None,
             },
         )
     }
@@ -212,6 +213,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                     requests: Default::default(),
                     gas_used: 0,
                     blob_gas_used: 0,
+                    block_access_list: None,
                 },
                 state: BundleState::default(),
             }),

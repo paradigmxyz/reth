@@ -11,7 +11,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use reth_db_models::StoredBlockWithdrawals;
+use reth_db_models::{blocks::StoredBlockAccessList, StoredBlockWithdrawals};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{
     Block, BlockBody, FullBlockHeader, NodePrimitives, SignedTransaction,
@@ -107,6 +107,8 @@ where
         let mut ommers_cursor = provider.tx_ref().cursor_write::<tables::BlockOmmers<H>>()?;
         let mut withdrawals_cursor =
             provider.tx_ref().cursor_write::<tables::BlockWithdrawals>()?;
+        let mut block_access_lists_cursor =
+            provider.tx_ref().cursor_write::<tables::BlockAccessLists>()?;
 
         for (block_number, body) in bodies {
             let Some(body) = body else { continue };
@@ -123,6 +125,16 @@ where
             {
                 withdrawals_cursor.append(block_number, &StoredBlockWithdrawals { withdrawals })?;
             }
+
+            // Write block access lists  if any
+            if let Some(block_access_list) = &body.block_access_list &&
+                !block_access_list.is_empty()
+            {
+                block_access_lists_cursor.append(
+                    block_number,
+                    &StoredBlockAccessList { block_access_list: block_access_list.clone() },
+                )?;
+            }
         }
 
         Ok(())
@@ -134,7 +146,8 @@ where
         block: BlockNumber,
     ) -> ProviderResult<()> {
         provider.tx_ref().unwind_table_by_num::<tables::BlockWithdrawals>(block)?;
-        provider.tx_ref().unwind_table_by_num::<tables::BlockOmmers<H>>(block)?;
+        provider.tx_ref().unwind_table_by_num::<tables::BlockAccessLists>(block)?;
+        provider.tx_ref().unwind_table_by_num::<tables::BlockOmmers>(block)?;
 
         Ok(())
     }
@@ -172,6 +185,20 @@ where
             } else {
                 None
             };
+            // If we are past amsterdam, then all blocks should have a block access list,
+            // even if empty
+            let block_access_list =
+                if chain_spec.is_amsterdam_active_at_timestamp(header.timestamp()) {
+                    let mut block_access_lists_cursor =
+                        provider.tx_ref().cursor_read::<tables::BlockAccessLists>()?;
+                    block_access_lists_cursor
+                        .seek_exact(header.number())?
+                        .map(|(_, b)| b.block_access_list)
+                        .unwrap_or_default()
+                        .into()
+                } else {
+                    None
+                };
             let ommers = if chain_spec.is_paris_active_at_block(header.number()) {
                 Vec::new()
             } else {
@@ -183,7 +210,13 @@ where
                     .map(|(_, stored_ommers)| stored_ommers.ommers)
                     .unwrap_or_default()
             };
-            bodies.push(alloy_consensus::BlockBody { transactions, ommers, withdrawals });
+            //  Handled block access list
+            bodies.push(alloy_consensus::BlockBody {
+                transactions,
+                ommers,
+                withdrawals,
+                block_access_list,
+            });
         }
 
         Ok(bodies)
@@ -252,6 +285,9 @@ where
                     ommers: vec![], // Empty storage never has ommers
                     withdrawals: chain_spec
                         .is_shanghai_active_at_timestamp(header.timestamp())
+                        .then(Default::default),
+                    block_access_list: chain_spec
+                        .is_amsterdam_active_at_timestamp(header.timestamp())
                         .then(Default::default),
                 }
             })

@@ -78,7 +78,7 @@ impl ExecutionPayload for ExecutionData {
     }
 
     fn block_access_list(&self) -> Option<&Bytes> {
-        None
+        self.payload.block_access_list()
     }
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
@@ -132,6 +132,14 @@ where
         match self {
             Self::ExecutionPayload(payload) => payload.withdrawals(),
             Self::PayloadAttributes(attributes) => attributes.withdrawals(),
+        }
+    }
+
+    /// Returns `block_access_list` from  payload.
+    pub fn block_access_list(&self) -> Option<&Bytes> {
+        match self {
+            Self::ExecutionPayload(payload) => payload.block_access_list(),
+            Self::PayloadAttributes(_attributes) => None,
         }
     }
 

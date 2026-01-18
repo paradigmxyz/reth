@@ -917,6 +917,7 @@ mod tests {
                             requests: Default::default(),
                             gas_used: 0,
                             blob_gas_used: 0,
+                            block_access_list: None,
                         },
                         state: BundleState::default(),
                     };
@@ -1722,6 +1723,7 @@ mod tests {
                                 requests: Default::default(),
                                 gas_used: 0,
                                 blob_gas_used: 0,
+                                block_access_list: None,
                             },
                         }),
                         ..Default::default()

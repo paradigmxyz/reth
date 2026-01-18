@@ -23,6 +23,13 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "getRawBlock")]
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
+    /// Returns a Eip-7928 block access list.
+    #[method(name = "getBlockAccessList")]
+    async fn debug_get_block_access_list(
+        &self,
+        block_id: BlockId,
+    ) -> RpcResult<Option<BlockAccessList>>;
+
     /// Returns a EIP-2718 binary-encoded transaction.
     ///
     /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.
@@ -156,10 +163,6 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         hash: B256,
     ) -> RpcResult<ExecutionWitness>;
-
-    /// Re-executes a block and returns the Block Access List (BAL) as defined in EIP-7928.
-    #[method(name = "getBlockAccessList")]
-    async fn debug_get_block_access_list(&self, block_id: BlockId) -> RpcResult<BlockAccessList>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is
     /// emitted at that location, the stack of the goroutine executing the log statement will

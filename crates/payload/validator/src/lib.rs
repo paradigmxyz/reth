@@ -9,6 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod amsterdam;
 pub mod cancun;
 pub mod prague;
 pub mod shanghai;
