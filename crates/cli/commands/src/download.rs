@@ -331,7 +331,8 @@ fn extract_from_file(path: &Path, format: CompressionFormat, target_dir: &Path) 
 const MAX_DOWNLOAD_RETRIES: u32 = 10;
 const RETRY_BACKOFF_SECS: u64 = 5;
 
-/// Wrapper that tracks download progress while copying data.
+/// Wrapper that tracks download progress while writing data.
+/// Used with [`io::copy`] to display progress during downloads.
 struct ProgressWriter<W> {
     inner: W,
     progress: DownloadProgress,
