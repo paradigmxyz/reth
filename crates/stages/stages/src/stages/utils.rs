@@ -196,6 +196,7 @@ where
     let mut current_partial = P::default();
     let mut current_list = Vec::<u64>::new();
 
+    // observability
     let total_entries = collector.len();
     let interval = (total_entries / 10).max(1);
 
@@ -208,9 +209,13 @@ where
             info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
         }
 
+        // AccountsHistory: `Address`.
+        // StorageHistory: `Address.StorageKey`.
         let partial_key = get_partial(sharded_key);
 
         if current_partial != partial_key {
+            // We have reached the end of this subset of keys so
+            // we need to flush its last indice shard.
             load_indices(
                 &mut write_cursor,
                 current_partial,
@@ -223,6 +228,8 @@ where
             current_partial = partial_key;
             current_list.clear();
 
+            // If it's not the first sync, there might an existing shard already, so we need to
+            // merge it with the one coming from the collector
             if !append_only &&
                 let Some((_, last_database_shard)) =
                     write_cursor.seek_exact(sharded_key_factory(current_partial, u64::MAX))?
@@ -242,6 +249,7 @@ where
         )?;
     }
 
+    // There will be one remaining shard that needs to be flushed to DB.
     load_indices(
         &mut write_cursor,
         current_partial,
