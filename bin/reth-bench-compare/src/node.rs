@@ -163,6 +163,7 @@ impl NodeManager {
             "eth,reth".to_string(),
             "--disable-discovery".to_string(),
             "--trusted-only".to_string(),
+            "--disable-tx-gossip".to_string(),
         ]);
 
         // Add tracing arguments if OTLP endpoint is configured
