@@ -1,0 +1,22 @@
+---
+description: Engine API JSON-RPC methods exposed by reth.
+---
+
+# `engine` Namespace
+
+The `engine` API is used by Consensus Layer (CL) clients to communicate with the Execution Layer (EL).
+
+## `engine_getBlobsV3`
+
+Returns blob sidecars and proofs for a list of versioned hashes.
+
+| Client | Method invocation                                                     |
+| ------ | --------------------------------------------------------------------- |
+| RPC    | `{"method": "engine_getBlobsV3", "params": [versioned_hashes]}`       |
+
+### Example
+
+```js
+// > {"jsonrpc":"2.0","id":1,"method":"engine_getBlobsV3","params":[["0x..."]]}
+```
+
