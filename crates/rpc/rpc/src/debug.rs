@@ -18,7 +18,7 @@ use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
-use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor};
+use reth_evm::{execute::Executor, ConfigureEvm, Evm, EvmEnvFor};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
@@ -27,7 +27,7 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FromEthApiError, RpcConvert, RpcNodeCore,
+    FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -117,20 +117,24 @@ where
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
+                let block_env = evm_env.block_env.clone();
                 eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+
+                let mut evm = eth_api.evm_config().evm_with_env_and_inspector(
+                    &mut db,
+                    evm_env,
+                    inspector,
+                );
+
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx);
+                    let res = evm.transact(tx_env.clone()).map_err(Eth::Error::from_evm_err)?;
 
-                    let res = eth_api.inspect(
-                        &mut db,
-                        evm_env.clone(),
-                        tx_env.clone(),
-                        &mut inspector,
-                    )?;
+                    let (db, inspector, _) = evm.components_mut();
                     let result = inspector
                         .get_result(
                             Some(TransactionContext {
@@ -139,9 +143,9 @@ where
                                 tx_index: Some(index),
                             }),
                             &tx_env,
-                            &evm_env.block_env,
+                            &block_env,
                             &res,
-                            &mut db,
+                            db,
                         )
                         .map_err(Eth::Error::from_eth_err)?;
 
