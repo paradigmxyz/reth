@@ -1,12 +1,13 @@
+use super::{
+    collect_account_history_indices, load_account_history_indices_with_writer,
+    AccountHistoryShardWriter,
+};
 use crate::stages::utils::collect_history_indices;
-
-use super::collect_account_history_indices;
 use alloy_primitives::Address;
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
     cursor::DbCursorRO,
-    models::{sharded_key::NUM_OF_INDICES_IN_SHARD, ShardedKey},
-    table::{Decode, Decompress},
+    models::ShardedKey,
     tables,
     transaction::{DbTx, DbTxMut},
     BlockNumberList,
@@ -152,14 +153,17 @@ where
         let rocksdb_batch = ();
 
         // Create writer that routes to either MDBX or RocksDB based on settings
-        let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
+        let either_writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
 
-        // Load indices using the writer
-        load_account_history_indices_with_writer(provider, &mut writer, collector, first_sync)?;
+        // Wrap the EitherWriter with provider reference for the trait-based loading
+        let mut writer = AccountHistoryWriter { provider, writer: either_writer };
+
+        // Load indices using the shared helper
+        load_account_history_indices_with_writer(collector, first_sync, &mut writer)?;
 
         // Extract and register RocksDB batch for commit at provider level
         #[cfg(all(unix, feature = "rocksdb"))]
-        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+        if let Some(batch) = writer.writer.into_raw_rocksdb_batch() {
             provider.set_pending_rocksdb_batch(batch);
         }
 
@@ -182,155 +186,43 @@ where
     }
 }
 
-/// Loads account history indices from a collector into the database using an [`EitherWriter`].
-///
-/// This function processes entries from the collector, grouping indices by address and
-/// writing them as shards when they reach the maximum shard size. It handles merging
-/// with existing shards during incremental syncs.
-fn load_account_history_indices_with_writer<Provider, CURSOR, N>(
-    provider: &Provider,
-    writer: &mut EitherWriter<'_, CURSOR, N>,
-    mut collector: reth_etl::Collector<ShardedKey<Address>, BlockNumberList>,
-    append_only: bool,
-) -> Result<(), StageError>
+/// Wrapper struct that combines an `EitherWriter` with a provider reference
+/// to implement `AccountHistoryShardWriter`.
+struct AccountHistoryWriter<'a, P, CURSOR, N> {
+    provider: &'a P,
+    writer: EitherWriter<'a, CURSOR, N>,
+}
+
+impl<'a, P, CURSOR, N> AccountHistoryShardWriter for AccountHistoryWriter<'a, P, CURSOR, N>
 where
-    Provider: DBProvider<Tx: DbTxMut> + StorageSettingsCache + RocksDBProviderFactory,
+    P: DBProvider + StorageSettingsCache + RocksDBProviderFactory,
     CURSOR: reth_db_api::cursor::DbCursorRW<tables::AccountsHistory>
         + reth_db_api::cursor::DbCursorRO<tables::AccountsHistory>,
     N: reth_primitives_traits::NodePrimitives,
 {
-    let mut current_address = Address::ZERO;
-    let mut current_list = Vec::<u64>::new();
-
-    let total_entries = collector.len();
-    let interval = (total_entries / 10).max(1);
-
-    for (index, element) in collector.iter()?.enumerate() {
-        let (k, v) = element?;
-        let sharded_key = ShardedKey::<Address>::decode_owned(k)?;
-        let new_list = BlockNumberList::decompress_owned(v)?;
-
-        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
-            info!(target: "sync::stages::index_account_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
+    fn get_last_shard(&self, address: Address) -> Result<Option<BlockNumberList>, StageError> {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if self.provider.cached_storage_settings().account_history_in_rocksdb {
+            let rocksdb = self.provider.rocksdb_provider();
+            let key = ShardedKey::last(address);
+            return Ok(rocksdb.get::<tables::AccountsHistory>(key)?);
         }
 
-        let address = sharded_key.key;
-
-        if current_address != address {
-            // We have reached the end of this address, flush remaining indices
-            flush_account_history_shards(writer, current_address, &mut current_list, append_only)?;
-            current_address = address;
-            current_list.clear();
-
-            // If it's not the first sync, merge with existing last shard
-            if !append_only &&
-                let Some(existing_list) =
-                    get_last_account_history_shard(provider, current_address)?
-            {
-                current_list.extend(existing_list.iter());
-            }
-        }
-
-        current_list.extend(new_list.iter());
-
-        // Write full shards, keep the partial shard in memory
-        write_account_history_shards_keep_last(
-            writer,
-            current_address,
-            &mut current_list,
-            append_only,
-        )?;
-    }
-
-    // Flush the last address's remaining shard
-    flush_account_history_shards(writer, current_address, &mut current_list, append_only)?;
-
-    Ok(())
-}
-
-/// Retrieves the last shard for an account from `RocksDB` or MDBX based on storage settings.
-fn get_last_account_history_shard<Provider>(
-    provider: &Provider,
-    address: Address,
-) -> Result<Option<BlockNumberList>, StageError>
-where
-    Provider: DBProvider + StorageSettingsCache + RocksDBProviderFactory,
-{
-    #[cfg(all(unix, feature = "rocksdb"))]
-    if provider.cached_storage_settings().account_history_in_rocksdb {
-        let rocksdb = provider.rocksdb_provider();
+        // Read from MDBX
         let key = ShardedKey::last(address);
-        return Ok(rocksdb.get::<tables::AccountsHistory>(key)?);
+        let mut cursor = self.provider.tx_ref().cursor_read::<tables::AccountsHistory>()?;
+        Ok(cursor.seek_exact(key)?.map(|(_, v)| v))
     }
 
-    // Read from MDBX
-    let key = ShardedKey::last(address);
-    let mut cursor = provider.tx_ref().cursor_read::<tables::AccountsHistory>()?;
-    Ok(cursor.seek_exact(key)?.map(|(_, v)| v))
-}
-
-/// Writes full shards to the database, keeping only the last partial shard in memory.
-fn write_account_history_shards_keep_last<CURSOR, N>(
-    writer: &mut EitherWriter<'_, CURSOR, N>,
-    address: Address,
-    list: &mut Vec<u64>,
-    append_only: bool,
-) -> Result<(), StageError>
-where
-    CURSOR: reth_db_api::cursor::DbCursorRW<tables::AccountsHistory>
-        + reth_db_api::cursor::DbCursorRO<tables::AccountsHistory>,
-    N: reth_primitives_traits::NodePrimitives,
-{
-    let _ = append_only;
-    while list.len() > NUM_OF_INDICES_IN_SHARD {
-        let chunk: Vec<u64> = list.drain(..NUM_OF_INDICES_IN_SHARD).collect();
-        let highest = *chunk.last().expect("chunk is not empty");
-        let key = ShardedKey::new(address, highest);
-        let value = BlockNumberList::new_pre_sorted(chunk);
-        writer.put_account_history(key, &value)?;
-    }
-    Ok(())
-}
-
-/// Flushes all remaining shards to the database. The last shard gets `u64::MAX` as its highest
-/// block.
-fn flush_account_history_shards<CURSOR, N>(
-    writer: &mut EitherWriter<'_, CURSOR, N>,
-    address: Address,
-    list: &mut Vec<u64>,
-    append_only: bool,
-) -> Result<(), StageError>
-where
-    CURSOR: reth_db_api::cursor::DbCursorRW<tables::AccountsHistory>
-        + reth_db_api::cursor::DbCursorRO<tables::AccountsHistory>,
-    N: reth_primitives_traits::NodePrimitives,
-{
-    if list.is_empty() {
-        return Ok(());
+    fn put(&mut self, key: ShardedKey<Address>, value: BlockNumberList) -> Result<(), StageError> {
+        self.writer.put_account_history(key, &value)?;
+        Ok(())
     }
 
-    // Process full shards first
-    while list.len() > NUM_OF_INDICES_IN_SHARD {
-        let chunk: Vec<u64> = list.drain(..NUM_OF_INDICES_IN_SHARD).collect();
-        let highest = *chunk.last().expect("chunk is not empty");
-        let key = ShardedKey::new(address, highest);
-        let value = BlockNumberList::new_pre_sorted(chunk);
-        writer.put_account_history(key, &value)?;
+    fn delete(&mut self, key: ShardedKey<Address>) -> Result<(), StageError> {
+        self.writer.delete_account_history(key)?;
+        Ok(())
     }
-
-    // The last shard always uses u64::MAX
-    if !list.is_empty() {
-        let key = ShardedKey::last(address);
-        let value = BlockNumberList::new_pre_sorted(list.drain(..));
-
-        // For incremental sync, delete the old last shard first (it will be replaced)
-        if !append_only {
-            writer.delete_account_history(key.clone())?;
-        }
-        writer.put_account_history(key, &value)?;
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
