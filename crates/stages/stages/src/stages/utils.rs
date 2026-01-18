@@ -396,7 +396,7 @@ where
 
     let num_full_shards = list.len() / NUM_OF_INDICES_IN_SHARD;
     // Keep the last chunk (partial or full) for continued accumulation
-    let shards_to_flush = if list.len() % NUM_OF_INDICES_IN_SHARD == 0 {
+    let shards_to_flush = if list.len().is_multiple_of(NUM_OF_INDICES_IN_SHARD) {
         num_full_shards - 1
     } else {
         num_full_shards
