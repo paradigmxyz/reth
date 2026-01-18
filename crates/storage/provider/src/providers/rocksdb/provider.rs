@@ -430,11 +430,11 @@ impl RocksDBProvider {
         })
     }
 
-    /// Clears all entries from the specified table using `delete_range`.
+    /// Clears all entries from the specified table.
     ///
-    /// This is more efficient than iterating and deleting individual keys.
-    /// Uses the bytewise comparator assumption: appending `0x00` to the last key
-    /// creates a key strictly greater than all existing keys.
+    /// RocksDB's `delete_range` uses an exclusive end bound `[start, end)`. To include the
+    /// last key, we compute `last_key || 0x00` which is the minimal key strictly greater
+    /// than `last_key` under bytewise comparison.
     pub fn clear<T: Table>(&self) -> ProviderResult<()> {
         let cf = self.get_cf_handle::<T>()?;
 
@@ -452,12 +452,11 @@ impl RocksDBProvider {
             }))
         })?;
 
-        let mut end_key = Vec::with_capacity(last_key.len() + 1);
-        end_key.extend_from_slice(last_key);
-        end_key.push(0x00);
+        // Compute exclusive end bound: `last_key || 0x00` is the smallest key > last_key
+        // under bytewise ordering (avoids 0xFF carry issues of increment-last-byte approach)
+        let end_key = Self::exclusive_end_after(last_key);
 
-        let start_key: &[u8] = b"";
-        self.0.db.delete_range_cf(cf, start_key, &end_key).map_err(|e| {
+        self.0.db.delete_range_cf(cf, b"", &end_key).map_err(|e| {
             ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -465,6 +464,15 @@ impl RocksDBProvider {
         })?;
 
         Ok(())
+    }
+
+    /// Returns the smallest key strictly greater than `key` under bytewise comparison.
+    #[inline]
+    fn exclusive_end_after(key: &[u8]) -> Vec<u8> {
+        let mut end = Vec::with_capacity(key.len() + 1);
+        end.extend_from_slice(key);
+        end.push(0x00);
+        end
     }
 
     /// Gets the first (smallest key) entry from the specified table.

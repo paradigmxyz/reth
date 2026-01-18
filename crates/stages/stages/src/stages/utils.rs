@@ -373,7 +373,10 @@ where
     Ok(())
 }
 
-/// Flushes full shards for account history, keeping the last partial shard in memory.
+/// Flushes complete shards for account history, keeping any trailing partial shard buffered.
+///
+/// Callers accumulate more indices and call again; only full shards are written to avoid
+/// partial writes that would require read-modify-write on the next sync.
 fn flush_account_history_shards_partial<N, CURSOR>(
     address: Address,
     list: &mut Vec<u64>,
@@ -385,21 +388,16 @@ where
     CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
         + DbCursorRO<reth_db_api::tables::AccountsHistory>,
 {
-    if list.len() <= NUM_OF_INDICES_IN_SHARD {
+    // Only flush complete shards; keep remainder for caller to accumulate more
+    let flush_len = (list.len() / NUM_OF_INDICES_IN_SHARD) * NUM_OF_INDICES_IN_SHARD;
+    if flush_len == 0 {
         return Ok(());
     }
 
-    let num_chunks = list.len().div_ceil(NUM_OF_INDICES_IN_SHARD);
-    let last_chunk_start = (num_chunks - 1) * NUM_OF_INDICES_IN_SHARD;
+    // Split once: flush prefix of complete shards, keep remainder
+    let remainder = list.split_off(flush_len);
 
-    for (i, chunk) in list.chunks(NUM_OF_INDICES_IN_SHARD).enumerate() {
-        let is_last = i == num_chunks - 1;
-
-        if is_last {
-            *list = list.split_off(last_chunk_start);
-            return Ok(());
-        }
-
+    for chunk in list.chunks(NUM_OF_INDICES_IN_SHARD) {
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = ShardedKey::new(address, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
@@ -411,6 +409,8 @@ where
         }
     }
 
+    // Restore remainder for continued accumulation
+    *list = remainder;
     Ok(())
 }
 
