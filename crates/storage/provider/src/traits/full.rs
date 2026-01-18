@@ -36,6 +36,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     + ForkChoiceSubscriptions<Header = HeaderTy<N>>
     + PersistedBlockSubscriptions
     + StageCheckpointReader
+    + PruneCheckpointReader
     + Clone
     + Debug
     + Unpin
@@ -65,6 +66,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + ForkChoiceSubscriptions<Header = HeaderTy<N>>
         + PersistedBlockSubscriptions
         + StageCheckpointReader
+        + PruneCheckpointReader
         + Clone
         + Debug
         + Unpin

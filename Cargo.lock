@@ -10435,6 +10435,7 @@ dependencies = [
  "reth-node-api",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-prune-types",
  "reth-revm",
  "reth-rpc-api",
  "reth-rpc-convert",
