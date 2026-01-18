@@ -1295,8 +1295,8 @@ mod rocksdb_tests {
         for (highest_block, blocks) in shards {
             let key = ShardedKey::new(address, *highest_block);
             let value = IntegerList::new(blocks.clone()).unwrap();
-            mdbx_writer.put_account_history(key.clone(), &value).unwrap();
-            rocks_writer.put_account_history(key, &value).unwrap();
+            mdbx_writer.upsert_account_history(key.clone(), &value).unwrap();
+            rocks_writer.upsert_account_history(key, &value).unwrap();
         }
 
         // Commit both backends

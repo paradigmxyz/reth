@@ -234,9 +234,7 @@ where
             current_list.clear();
 
             // Merge existing shard if not first sync
-            if !append_only
-                && let Some(last_database_shard) = writer.get_last_shard(partial_key)?
-            {
+            if !append_only && let Some(last_database_shard) = writer.get_last_shard(partial_key)? {
                 current_list.extend(last_database_shard.iter());
             }
         }
