@@ -18,6 +18,7 @@ pub enum StageId {
     SenderRecovery,
     Execution,
     PruneSenderRecovery,
+    SnapSync,
     MerkleUnwind,
     AccountHashing,
     StorageHashing,
@@ -39,13 +40,14 @@ static ENCODED_STAGE_IDS: OnceLock<HashMap<StageId, Vec<u8>>> = OnceLock::new();
 
 impl StageId {
     /// All supported Stages
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Era,
         Self::Headers,
         Self::Bodies,
         Self::SenderRecovery,
         Self::Execution,
         Self::PruneSenderRecovery,
+        Self::SnapSync,
         Self::MerkleUnwind,
         Self::AccountHashing,
         Self::StorageHashing,
@@ -58,9 +60,10 @@ impl StageId {
     ];
 
     /// Stages that require state.
-    pub const STATE_REQUIRED: [Self; 9] = [
+    pub const STATE_REQUIRED: [Self; 10] = [
         Self::Execution,
         Self::PruneSenderRecovery,
+        Self::SnapSync,
         Self::MerkleUnwind,
         Self::AccountHashing,
         Self::StorageHashing,
@@ -81,6 +84,7 @@ impl StageId {
             Self::SenderRecovery => "SenderRecovery",
             Self::Execution => "Execution",
             Self::PruneSenderRecovery => "PruneSenderRecovery",
+            Self::SnapSync => "SnapSync",
             Self::MerkleUnwind => "MerkleUnwind",
             Self::AccountHashing => "AccountHashing",
             Self::StorageHashing => "StorageHashing",
