@@ -136,7 +136,8 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
+        let needs_rocksdb = self.provider.cached_storage_settings().account_history_in_rocksdb;
+        self.provider.with_rocksdb_tx(needs_rocksdb, |rocks_tx_ref| {
             let mut reader = EitherReader::new_accounts_history(self.provider, rocks_tx_ref)?;
             reader.account_history_info(
                 address,
@@ -159,7 +160,8 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
+        let needs_rocksdb = self.provider.cached_storage_settings().storages_history_in_rocksdb;
+        self.provider.with_rocksdb_tx(needs_rocksdb, |rocks_tx_ref| {
             let mut reader = EitherReader::new_storages_history(self.provider, rocks_tx_ref)?;
             reader.storage_history_info(
                 address,
