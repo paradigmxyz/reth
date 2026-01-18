@@ -1,18 +1,8 @@
 use super::collect_account_history_indices;
-use crate::stages::utils::{
-    collect_history_indices, load_history_indices_with, HistoryIndexWriter,
-};
+use crate::stages::utils::{collect_history_indices, load_history_indices_with};
 use alloy_primitives::Address;
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
-use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW},
-    models::ShardedKey,
-    table::Decode,
-    tables,
-    transaction::DbTxMut,
-    BlockNumberList,
-};
-use reth_primitives_traits::NodePrimitives;
+use reth_db_api::{models::ShardedKey, table::Decode, tables, transaction::DbTxMut};
 use reth_provider::{
     DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
     RocksDBProviderFactory, StorageSettingsCache,
@@ -23,30 +13,6 @@ use reth_stages_api::{
 };
 use std::fmt::Debug;
 use tracing::info;
-
-/// Implement [`HistoryIndexWriter`] for [`EitherWriter`] with account history cursor.
-impl<'a, C, N> HistoryIndexWriter<ShardedKey<Address>, Address> for EitherWriter<'a, C, N>
-where
-    C: DbCursorRO<tables::AccountsHistory> + DbCursorRW<tables::AccountsHistory>,
-    N: NodePrimitives,
-{
-    fn get_last_shard(&mut self, addr: Address) -> Result<Option<BlockNumberList>, StageError> {
-        Ok(self.get_last_account_history_shard(addr)?)
-    }
-
-    fn put(
-        &mut self,
-        key: ShardedKey<Address>,
-        value: &BlockNumberList,
-        append_only: bool,
-    ) -> Result<(), StageError> {
-        if append_only {
-            Ok(self.append_account_history(key, value)?)
-        } else {
-            Ok(self.upsert_account_history(key, value)?)
-        }
-    }
-}
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
@@ -176,7 +142,9 @@ where
         #[cfg(not(all(unix, feature = "rocksdb")))]
         let rocksdb_batch = ();
 
-        let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
+        use std::cell::RefCell;
+
+        let writer = RefCell::new(EitherWriter::new_accounts_history(provider, rocksdb_batch)?);
 
         load_history_indices_with(
             collector,
@@ -184,11 +152,19 @@ where
             ShardedKey::<Address>::decode_owned,
             |k| k.key,
             ShardedKey::new,
-            &mut writer,
+            &writer,
+            |cell, addr| Ok(cell.borrow_mut().get_last_account_history_shard(addr)?),
+            |cell, key, value| {
+                if first_sync {
+                    Ok(cell.borrow_mut().append_account_history(key, value)?)
+                } else {
+                    Ok(cell.borrow_mut().upsert_account_history(key, value)?)
+                }
+            },
         )?;
 
         #[cfg(all(unix, feature = "rocksdb"))]
-        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+        if let Some(batch) = writer.into_inner().into_raw_rocksdb_batch() {
             provider.set_pending_rocksdb_batch(batch);
         }
 
