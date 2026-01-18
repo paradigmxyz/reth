@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 reth-codecs = { workspace = true, optional = true }
+reth-prune-types.workspace = true
 reth-trie-common.workspace = true
 alloy-primitives.workspace = true
 
@@ -38,6 +39,7 @@ default = ["std"]
 std = [
     "alloy-primitives/std",
     "bytes?/std",
+    "reth-prune-types/std",
     "reth-trie-common/std",
     "serde?/std",
 ]
@@ -50,6 +52,7 @@ reth-codec = [
 test-utils = [
     "arbitrary",
     "reth-codecs?/test-utils",
+    "reth-prune-types/test-utils",
     "reth-trie-common/test-utils",
 ]
 arbitrary = [
@@ -57,6 +60,7 @@ arbitrary = [
     "dep:arbitrary",
     "alloy-primitives/arbitrary",
     "reth-codecs?/arbitrary",
+    "reth-prune-types/arbitrary",
     "reth-trie-common/arbitrary",
 ]
 serde = [
@@ -65,5 +69,6 @@ serde = [
     "bytes?/serde",
     "rand/serde",
     "reth-codecs?/serde",
+    "reth-prune-types/serde",
     "reth-trie-common/serde",
 ]
