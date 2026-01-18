@@ -11,7 +11,7 @@ use reth_provider::{
     ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory,
     PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter,
 };
-use reth_prune::PrunerBuilder;
+use reth_prune::{PruneModes, PrunerBuilder};
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
@@ -33,6 +33,60 @@ pub use builder::*;
 use progress::*;
 use reth_errors::RethResult;
 pub use set::*;
+
+/// Stages that require account/storage history changesets to unwind.
+///
+/// - `Execution`: needs changesets to revert plain state
+/// - `AccountHashing`: calls `unwind_account_hashing_range` which reads `AccountChangeSets`
+/// - `StorageHashing`: calls `unwind_storage_hashing_range` which reads `StorageChangeSets`
+const STAGES_REQUIRING_HISTORY_FOR_UNWIND: [StageId; 3] =
+    [StageId::Execution, StageId::AccountHashing, StageId::StorageHashing];
+
+/// Returns `true` if any stage that requires history changesets would need to unwind
+/// (i.e., has a checkpoint above the unwind target).
+fn any_history_dependent_stage_needs_unwind<P>(
+    provider: &P,
+    unwind_target: BlockNumber,
+) -> Result<bool, PipelineError>
+where
+    P: StageCheckpointReader,
+{
+    for stage_id in STAGES_REQUIRING_HISTORY_FOR_UNWIND {
+        let checkpoint = provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
+        if checkpoint > unwind_target {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Checks if we can safely unwind to the target block given current pruning state.
+///
+/// Only stages that require account/storage history changesets to unwind (`Execution`,
+/// `AccountHashing`, `StorageHashing`) need this check. Other stages like `Headers`, `Bodies`,
+/// and `SenderRecovery` can unwind without history data.
+///
+/// Returns `Ok(())` if:
+/// - No history-dependent stage needs to unwind (all checkpoints <= unwind target)
+/// - The required history data is available for the unwind
+///
+/// Returns an error if a history-dependent stage needs to unwind but required history
+/// has been pruned.
+pub fn check_unwind_history_available<P>(
+    provider: &P,
+    prune_modes: &PruneModes,
+    unwind_target: BlockNumber,
+) -> Result<(), PipelineError>
+where
+    P: StageCheckpointReader + PruneCheckpointReader + BlockNumReader,
+{
+    if any_history_dependent_stage_needs_unwind(provider, unwind_target)? {
+        let latest_block = provider.last_block_number()?;
+        let checkpoints = provider.get_prune_checkpoints()?;
+        prune_modes.ensure_unwind_target_unpruned(latest_block, unwind_target, &checkpoints)?;
+    }
+    Ok(())
+}
 
 /// A container for a queued stage.
 pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
@@ -298,15 +352,8 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
-        // Add validation before starting unwind
         let provider = self.provider_factory.provider()?;
-        let latest_block = provider.last_block_number()?;
-
-        // Get the actual pruning configuration
-        let prune_modes = provider.prune_modes_ref();
-
-        let checkpoints = provider.get_prune_checkpoints()?;
-        prune_modes.ensure_unwind_target_unpruned(latest_block, to, &checkpoints)?;
+        check_unwind_history_available(&provider, provider.prune_modes_ref(), to)?;
 
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();

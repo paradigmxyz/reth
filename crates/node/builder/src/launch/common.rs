@@ -74,8 +74,8 @@ use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
-    sets::DefaultStages, stages::EraImportSource, MetricEvent, PipelineBuilder, PipelineTarget,
-    StageId,
+    check_unwind_history_available, sets::DefaultStages, stages::EraImportSource, MetricEvent,
+    PipelineBuilder, PipelineTarget, StageId,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
@@ -551,6 +551,28 @@ where
                 "A {} inconsistency was found that would trigger an unwind to block 0",
                 inconsistency_source
             );
+
+            // Pre-check history availability before attempting unwind
+            if let Err(err) =
+                check_unwind_history_available(&provider_ro, &self.prune_modes(), unwind_block)
+            {
+                error!(
+                    target: "reth::cli",
+                    %err,
+                    unwind_block,
+                    %inconsistency_source,
+                    "Cannot recover from storage inconsistency: required history data has been pruned."
+                );
+                error!(
+                    target: "reth::cli",
+                    "Recovery options:\n\
+                     1. Re-sync from scratch by removing the data directory\n\
+                     2. Restore from a backup that has the required history\n\
+                     3. If only static files are corrupted, try deleting the affected static files \
+                        and using `reth stage drop <stage>` to reset the stage checkpoint"
+                );
+                return Err(eyre::Report::msg(err.to_string()));
+            }
 
             let unwind_target = PipelineTarget::Unwind(unwind_block);
 
