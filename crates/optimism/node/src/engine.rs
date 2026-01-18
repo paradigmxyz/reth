@@ -18,9 +18,9 @@ use reth_node_api::{
 use reth_optimism_consensus::isthmus;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{OpExecutionPayloadValidator, OpPayloadTypes};
-use reth_optimism_primitives::{OpBlock, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
+use reth_optimism_primitives::{OpBlock, L2_TO_L1_MESSAGE_PASSER_ADDRESS};
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SignedTransaction};
-use reth_provider::{ProviderError, StateProviderFactory};
+use reth_provider::{StateProviderBox, StateProviderFactory};
 use reth_trie_common::{HashedPostState, KeyHasher};
 use std::{marker::PhantomData, sync::Arc};
 
@@ -76,7 +76,7 @@ pub struct OpEngineValidator<P, Tx, ChainSpec> {
 impl<P, Tx, ChainSpec> OpEngineValidator<P, Tx, ChainSpec> {
     /// Instantiates a new validator.
     pub fn new<KH: KeyHasher>(chain_spec: Arc<ChainSpec>, provider: P) -> Self {
-        let hashed_addr_l2tol1_msg_passer = KH::hash_key(ADDRESS_L2_TO_L1_MESSAGE_PASSER);
+        let hashed_addr_l2tol1_msg_passer = KH::hash_key(L2_TO_L1_MESSAGE_PASSER_ADDRESS);
         Self {
             inner: OpExecutionPayloadValidator::new(chain_spec),
             provider,
@@ -125,26 +125,11 @@ where
         &self,
         state_updates: &HashedPostState,
         block: &RecoveredBlock<Self::Block>,
+        parent_state: Option<StateProviderBox>,
     ) -> Result<(), ConsensusError> {
         if self.chain_spec().is_isthmus_active_at_timestamp(block.timestamp()) {
             let parent_hash = block.parent_hash();
-            let state = match self.provider.state_by_block_hash(parent_hash) {
-                Ok(state) => state,
-                Err(ProviderError::StateForHashNotFound(_)) => self
-                    .provider
-                    .pending_state_by_hash(parent_hash)
-                    .map_err(|err| {
-                        ConsensusError::Other(format!(
-                            "failed to access pending parent state {parent_hash:?}: {err}"
-                        ))
-                    })?
-                    .ok_or(ConsensusError::ParentUnknown { hash: parent_hash })?,
-                Err(err) => {
-                    return Err(ConsensusError::Other(format!(
-                        "failed to access parent state {parent_hash:?}: {err}"
-                    )))
-                }
-            };
+            let state = parent_state.ok_or(ConsensusError::ParentUnknown { hash: parent_hash })?;
             let predeploy_storage_updates = state_updates
                 .storages
                 .get(&self.hashed_addr_l2tol1_msg_passer)
@@ -161,6 +146,10 @@ where
         }
 
         Ok(())
+    }
+
+    fn requires_parent_state_for_post_execution(&self, block: &RecoveredBlock<Self::Block>) -> bool {
+        self.chain_spec().is_isthmus_active_at_timestamp(block.timestamp())
     }
 
     fn convert_payload_to_block(
