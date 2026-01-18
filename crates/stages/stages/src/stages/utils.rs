@@ -373,10 +373,11 @@ where
     Ok(())
 }
 
-/// Flushes complete shards for account history, keeping any trailing partial shard buffered.
+/// Flushes complete shards for account history, keeping the trailing partial shard buffered.
 ///
-/// Callers accumulate more indices and call again; only full shards are written to avoid
-/// partial writes that would require read-modify-write on the next sync.
+/// Only flushes when we have more than one shard's worth of data, keeping the last
+/// (possibly partial) shard for continued accumulation. This avoids writing a shard
+/// that may need to be updated when more indices arrive.
 fn flush_account_history_shards_partial<N, CURSOR>(
     address: Address,
     list: &mut Vec<u64>,
@@ -388,13 +389,24 @@ where
     CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
         + DbCursorRO<reth_db_api::tables::AccountsHistory>,
 {
-    // Only flush complete shards; keep remainder for caller to accumulate more
-    let flush_len = (list.len() / NUM_OF_INDICES_IN_SHARD) * NUM_OF_INDICES_IN_SHARD;
-    if flush_len == 0 {
+    // Only flush if we have more than one shard's worth of data
+    if list.len() <= NUM_OF_INDICES_IN_SHARD {
         return Ok(());
     }
 
-    // Split once: flush prefix of complete shards, keep remainder
+    let num_full_shards = list.len() / NUM_OF_INDICES_IN_SHARD;
+    // Keep the last chunk (partial or full) for continued accumulation
+    let shards_to_flush = if list.len() % NUM_OF_INDICES_IN_SHARD == 0 {
+        num_full_shards - 1
+    } else {
+        num_full_shards
+    };
+
+    if shards_to_flush == 0 {
+        return Ok(());
+    }
+
+    let flush_len = shards_to_flush * NUM_OF_INDICES_IN_SHARD;
     let remainder = list.split_off(flush_len);
 
     for chunk in list.chunks(NUM_OF_INDICES_IN_SHARD) {
@@ -409,7 +421,6 @@ where
         }
     }
 
-    // Restore remainder for continued accumulation
     *list = remainder;
     Ok(())
 }
