@@ -38,13 +38,13 @@ impl<T: PayloadTypes<ExecutionData = OpExecutionData>> PayloadTypes for OpEngine
     type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
 
     fn block_to_payload(
-        block: SealedBlock<
+        block: &SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> <T as PayloadTypes>::ExecutionData {
         OpExecutionData::from_block_unchecked(
             block.hash(),
-            &block.into_block().into_ethereum_block(),
+            &block.clone_block().into_ethereum_block(),
         )
     }
 }

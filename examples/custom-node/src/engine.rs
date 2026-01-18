@@ -210,13 +210,13 @@ impl PayloadTypes for CustomPayloadTypes {
     type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
 
     fn block_to_payload(
-        block: SealedBlock<
+        block: &SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> Self::ExecutionData {
         let extension = block.header().extension;
         let block_hash = block.hash();
-        let block = block.into_block().map_header(|header| header.inner);
+        let block = block.clone_block().map_header(|header| header.inner);
         let (payload, sidecar) = OpExecutionPayload::from_block_unchecked(block_hash, &block);
         CustomExecutionData { inner: OpExecutionData { payload, sidecar }, extension }
     }

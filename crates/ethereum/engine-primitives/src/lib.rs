@@ -48,12 +48,12 @@ impl<
     type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
 
     fn block_to_payload(
-        block: SealedBlock<
+        block: &SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> Self::ExecutionData {
         let (payload, sidecar) =
-            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+            ExecutionPayload::from_block_unchecked(block.hash(), &block.clone_block());
         ExecutionData { payload, sidecar }
     }
 }
@@ -87,12 +87,12 @@ impl PayloadTypes for EthPayloadTypes {
     type ExecutionData = ExecutionData;
 
     fn block_to_payload(
-        block: SealedBlock<
+        block: &SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> Self::ExecutionData {
         let (payload, sidecar) =
-            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+            ExecutionPayload::from_block_unchecked(block.hash(), &block.clone_block());
         ExecutionData { payload, sidecar }
     }
 }
