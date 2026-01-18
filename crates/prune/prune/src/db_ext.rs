@@ -1,6 +1,6 @@
 use crate::PruneLimiter;
 use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW, RangeWalker},
+    cursor::{DbCursorRO, DbCursorRW},
     table::{DupSort, Table, TableRow},
     transaction::{DbTx, DbTxMut},
     DatabaseError,
@@ -81,47 +81,18 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
                 break false
             }
 
-            let done = self.prune_table_with_range_step(
-                &mut walker,
-                limiter,
-                &mut skip_filter,
-                &mut delete_callback,
-            )?;
+            let Some(res) = walker.next() else { break true };
+            let row = res?;
 
-            if done {
-                break true
+            if !skip_filter(&row) {
+                walker.delete_current()?;
+                limiter.increment_deleted_entries_count();
+                deleted_entries += 1;
+                delete_callback(row);
             }
-            deleted_entries += 1;
         };
 
         Ok((deleted_entries, done))
-    }
-
-    /// Steps once with the given walker and prunes the entry in the table.
-    ///
-    /// Returns `true` if the walker is finished, `false` if it may have more data to prune.
-    ///
-    /// CAUTION: Pruner limits are not checked. This allows for a clean exit of a prune run that's
-    /// pruning different tables concurrently, by letting them step to the same height before
-    /// timing out.
-    fn prune_table_with_range_step<T: Table>(
-        &self,
-        walker: &mut RangeWalker<'_, T, Self::CursorMut<T>>,
-        limiter: &mut PruneLimiter,
-        skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
-        delete_callback: &mut impl FnMut(TableRow<T>),
-    ) -> Result<bool, DatabaseError> {
-        let Some(res) = walker.next() else { return Ok(true) };
-
-        let row = res?;
-
-        if !skip_filter(&row) {
-            walker.delete_current()?;
-            limiter.increment_deleted_entries_count();
-            delete_callback(row);
-        }
-
-        Ok(false)
     }
 
     /// Prune a DUPSORT table for the specified key range.
