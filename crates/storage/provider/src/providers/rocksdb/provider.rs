@@ -456,7 +456,7 @@ impl RocksDBProvider {
         // under bytewise ordering (avoids 0xFF carry issues of increment-last-byte approach)
         let end_key = Self::exclusive_end_after(last_key);
 
-        self.0.db.delete_range_cf(cf, b"", &end_key).map_err(|e| {
+        self.0.db.delete_range_cf(cf, &[] as &[u8], &end_key).map_err(|e| {
             ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
