@@ -23,7 +23,7 @@ use reth_rpc_eth_api::{
     RpcNodeCoreExt, RpcTransaction,
 };
 use reth_rpc_eth_types::{
-    logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
+    logs_utils::{self, append_matching_block_logs, Cursor, ProviderOrBlock},
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
@@ -61,9 +61,9 @@ where
         &self,
         filter: Filter,
         limits: QueryLimits,
-    ) -> impl Future<Output = RpcResult<Vec<Log>>> + Send {
+    ) -> impl Future<Output = RpcResult<(Vec<Log>, Option<Cursor>)>> + Send {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        self.logs_for_filter(filter, limits).map_err(|e| e.into())
+        self.logs_for_filter(filter, limits, None, false).map_err(|e| e.into())
     }
 }
 
@@ -286,9 +286,11 @@ where
                         from_block_number,
                         to_block_number,
                         self.inner.query_limits,
+                        None,
+                        false,
                     )
                     .await?;
-                Ok(FilterChanges::Logs(logs))
+                Ok(FilterChanges::Logs(logs.0))
             }
         }
     }
@@ -312,7 +314,8 @@ where
             }
         };
 
-        self.logs_for_filter(filter, self.inner.query_limits).await
+        let res = self.logs_for_filter(filter, self.inner.query_limits, None, false).await?;
+        Ok(res.0)
     }
 
     /// Returns logs matching given filter object.
@@ -320,8 +323,13 @@ where
         &self,
         filter: Filter,
         limits: QueryLimits,
-    ) -> Result<Vec<Log>, EthFilterError> {
-        self.inner.clone().logs_for_filter(filter, limits).await
+        cursor: Option<Cursor>,
+        single_block_can_exceed_limit: bool,
+    ) -> Result<(Vec<Log>, Option<Cursor>), EthFilterError> {
+        self.inner
+            .clone()
+            .logs_for_filter(filter, limits, cursor, single_block_can_exceed_limit)
+            .await
     }
 }
 
@@ -409,7 +417,37 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        Ok(self.logs_for_filter(filter, self.inner.query_limits).await?)
+        let (logs, _cursor) =
+            self.logs_for_filter(filter, self.inner.query_limits, None, false).await?;
+
+        // if cursor.is_some() {
+        //     debug!(
+        //         target: "rpc::eth::filter",
+        //         max_logs_per_response = self.inner.query_limits.max_logs_per_response,
+        //         from_block,
+        //         to_block = num_hash.number.saturating_sub(1),
+        //         "Query exceeded max logs per response limit"
+        //     );
+        //     return Err(EthFilterError::QueryExceedsMaxResults {
+        //         max_logs: max_logs_per_response,
+        //         from_block,
+        //         to_block: num_hash.number.saturating_sub(1),
+        //     });
+        // }
+        Ok(logs)
+    }
+
+    /// Returns logs matching given filter object, paginated by a cursor.
+    ///
+    /// Handler for `eth_getLogsWithCursor`
+    async fn logs_with_cursor(
+        &self,
+        filter: Filter,
+        cursor: Option<Cursor>,
+    ) -> RpcResult<(Vec<Log>, Option<Cursor>)> {
+        trace!(target: "rpc::eth", "Serving eth_getLogsWithCursor");
+
+        Ok(self.logs_for_filter(filter, self.inner.query_limits, cursor, true).await?)
     }
 }
 
@@ -464,7 +502,9 @@ where
         self: Arc<Self>,
         filter: Filter,
         limits: QueryLimits,
-    ) -> Result<Vec<Log>, EthFilterError> {
+        cursor: Option<Cursor>,
+        single_block_can_exceed_limit: bool,
+    ) -> Result<(Vec<Log>, Option<Cursor>), EthFilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
                 // First try to get cached block and receipts, as it's likely they're already cached
@@ -485,6 +525,14 @@ where
 
                 let block_num_hash = BlockNumHash::new(header.number(), block_hash);
 
+                // we also need to ensure that the receipts are available and return an error if
+                // not, in case the block has been reorged
+                let (receipts, maybe_block) = self
+                    .eth_cache()
+                    .get_receipts_and_maybe_block(block_num_hash.hash)
+                    .await?
+                    .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+
                 let mut all_logs = Vec::new();
                 append_matching_block_logs(
                     &mut all_logs,
@@ -496,9 +544,11 @@ where
                     &receipts,
                     false,
                     header.timestamp(),
+                    None,
+                    0,
                 )?;
 
-                Ok(all_logs)
+                Ok((all_logs, None))
             }
             FilterBlockOption::Range { from_block, to_block } => {
                 // Handle special case where from block is pending
@@ -506,7 +556,7 @@ where
                     let to_block = to_block.unwrap_or(BlockNumberOrTag::Pending);
                     if !(to_block.is_pending() || to_block.is_number()) {
                         // always empty range
-                        return Ok(Vec::new());
+                        return Ok((Vec::new(), None));
                     }
                     // Try to get pending block and receipts
                     if let Ok(Some(pending_block)) = self.eth_api.local_pending_block().await {
@@ -514,7 +564,7 @@ where
                             to_block < pending_block.block.number()
                         {
                             // this block range is empty based on the user input
-                            return Ok(Vec::new());
+                            return Ok((Vec::new(), None));
                         }
 
                         let info = self.provider().chain_info()?;
@@ -531,8 +581,10 @@ where
                                 &pending_block.receipts,
                                 false, // removed = false for pending blocks
                                 timestamp,
+                                None,
+                                0,
                             )?;
-                            return Ok(all_logs);
+                            return Ok((all_logs, None));
                         }
                     }
                 }
@@ -559,14 +611,21 @@ where
                     f > info.best_number
                 {
                     // start block higher than local head, can return empty
-                    return Ok(Vec::new());
+                    return Ok((Vec::new(), None));
                 }
 
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info)?;
 
-                self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
-                    .await
+                self.get_logs_in_block_range(
+                    filter,
+                    from_block_number,
+                    to_block_number,
+                    limits,
+                    cursor,
+                    single_block_can_exceed_limit,
+                )
+                .await
             }
         }
     }
@@ -606,7 +665,9 @@ where
         from_block: u64,
         to_block: u64,
         limits: QueryLimits,
-    ) -> Result<Vec<Log>, EthFilterError> {
+        cursor: Option<Cursor>,
+        single_block_can_exceed_limit: bool,
+    ) -> Result<(Vec<Log>, Option<Cursor>), EthFilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
 
         // perform boundary checks first
@@ -623,8 +684,16 @@ where
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         self.task_spawner.spawn_blocking(Box::pin(async move {
-            let res =
-                this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits).await;
+            let res = this
+                .get_logs_in_block_range_inner(
+                    &filter,
+                    from_block,
+                    to_block,
+                    limits,
+                    cursor,
+                    single_block_can_exceed_limit,
+                )
+                .await;
             let _ = tx.send(res);
         }));
 
@@ -642,10 +711,12 @@ where
     async fn get_logs_in_block_range_inner(
         self: Arc<Self>,
         filter: &Filter,
-        from_block: u64,
+        mut from_block: u64,
         to_block: u64,
         limits: QueryLimits,
-    ) -> Result<Vec<Log>, EthFilterError> {
+        mut cursor: Option<Cursor>,
+        single_block_can_exceed_limit: bool,
+    ) -> Result<(Vec<Log>, Option<Cursor>), EthFilterError> {
         let mut all_logs = Vec::new();
         let mut matching_headers = Vec::new();
 
@@ -691,13 +762,21 @@ where
             self.max_headers_range,
             chain_tip,
         );
-
+        let is_multi_block_range = from_block != to_block;
         // iterate through the range mode to get receipts and blocks
         while let Some(ReceiptBlockResult { receipts, recovered_block, header }) =
             range_mode.next().await?
         {
+            // extract block_number & log_index from cursor
+            let mut cursor_log_idx = 0;
+            if let Some(Cursor { block_num, log_idx }) = cursor {
+                from_block = block_num;
+                cursor_log_idx = log_idx;
+            }
+
             let num_hash = header.num_hash();
-            append_matching_block_logs(
+
+            let offset = append_matching_block_logs(
                 &mut all_logs,
                 recovered_block
                     .map(ProviderOrBlock::Block)
@@ -707,14 +786,20 @@ where
                 &receipts,
                 false,
                 header.timestamp(),
+                // size check but only if range is multiple blocks, so we always return all
+                // logs of a single block
+                (is_multi_block_range || !single_block_can_exceed_limit)
+                    .then_some(limits.max_logs_per_response)
+                    .flatten(),
+                cursor_log_idx,
             )?;
 
             // size check but only if range is multiple blocks, so we always return all
             // logs of a single block
-            let is_multi_block_range = from_block != to_block;
             if let Some(max_logs_per_response) = limits.max_logs_per_response &&
+                single_block_can_exceed_limit &&
                 is_multi_block_range &&
-                all_logs.len() > max_logs_per_response
+                cursor.is_some()
             {
                 debug!(
                     target: "rpc::eth::filter",
@@ -730,9 +815,23 @@ where
                     to_block: num_hash.number,
                 });
             }
+
+            // update the cursor to the offest of the log within the same block
+            // when the logs are truncated to match maximum length
+            cursor = offset.map(|offset| Cursor { block_num: num_hash.number, log_idx: offset });
+
+            // set cursor to next block
+            if let Some(max_logs_per_response) = limits.max_logs_per_response &&
+                all_logs.len() >= max_logs_per_response &&
+                let Some(ReceiptBlockResult { header, .. }) = range_mode.next().await?
+            {
+                let num_hash = header.num_hash();
+
+                cursor = Some(Cursor { block_num: num_hash.number, log_idx: 0 });
+            }
         }
 
-        Ok(all_logs)
+        Ok((all_logs, cursor))
     }
 }
 
@@ -919,6 +1018,9 @@ pub enum EthFilterError {
         /// End block of the suggested retry range (last successfully processed block)
         to_block: u64,
     },
+    /// Error with cursor for pagination
+    #[error("problem decoding supplied cursor")]
+    CursorError,
     /// Error serving request in `eth_` namespace.
     #[error(transparent)]
     EthAPIError(#[from] EthApiError),
@@ -943,6 +1045,9 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             EthFilterError::QueryExceedsMaxResults { .. } |
             EthFilterError::BlockRangeExceedsHead) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
+            }
+            EthFilterError::CursorError => {
+                rpc_error_with_code(jsonrpsee::types::error::PARSE_ERROR_CODE, "cursor error")
             }
         }
     }

@@ -63,6 +63,7 @@ schnellru.workspace = true
 rand.workspace = true
 tracing.workspace = true
 itertools.workspace = true
+data-encoding.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
