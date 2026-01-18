@@ -8,12 +8,18 @@ use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
-    message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, EthMessage,
-    EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock,
-    NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData, PooledTransactions,
-    Receipts, SharedTransactions, Transactions,
+    eth_snap_stream::EthSnapMessage, message::RequestPair, BlockBodies, BlockHeaders,
+    BlockRangeUpdate, EthMessage, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders,
+    NetworkPrimitives, NewBlock, NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes,
+    NodeData, PooledTransactions, Receipts, SharedTransactions, Transactions,
 };
-use reth_eth_wire_types::RawCapabilityMessage;
+use reth_eth_wire_types::{
+    snap::{
+        AccountRangeMessage, ByteCodesMessage, SnapProtocolMessage, StorageRangesMessage,
+        TrieNodesMessage,
+    },
+    RawCapabilityMessage,
+};
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_primitives_traits::Block;
@@ -55,7 +61,7 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     SendTransactions(SharedTransactions<N::BroadcastedTransaction>),
     /// Send new pooled transactions
     PooledTransactions(NewPooledTransactionHashes),
-    /// All `eth` request variants.
+    /// All protocol request variants (`eth` and `snap` wrapped in `PeerRequest`).
     EthRequest(PeerRequest<N>),
     /// Announces when `BlockRange` is updated.
     BlockRangeUpdated(BlockRangeUpdate),
@@ -121,6 +127,26 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a receipts request.
         response: oneshot::Receiver<RequestResult<Receipts70<N::Receipt>>>,
     },
+    /// Snap account range response.
+    SnapAccountRange {
+        /// Receiver for the account range response.
+        response: oneshot::Receiver<RequestResult<AccountRangeMessage>>,
+    },
+    /// Snap storage ranges response.
+    SnapStorageRanges {
+        /// Receiver for the storage ranges response.
+        response: oneshot::Receiver<RequestResult<StorageRangesMessage>>,
+    },
+    /// Snap byte codes response.
+    SnapByteCodes {
+        /// Receiver for the byte codes response.
+        response: oneshot::Receiver<RequestResult<ByteCodesMessage>>,
+    },
+    /// Snap trie nodes response.
+    SnapTrieNodes {
+        /// Receiver for the trie nodes response.
+        response: oneshot::Receiver<RequestResult<TrieNodesMessage>>,
+    },
 }
 
 // === impl PeerResponse ===
@@ -138,12 +164,8 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
         }
 
         let res = match self {
-            Self::BlockHeaders { response } => {
-                poll_request!(response, BlockHeaders, cx)
-            }
-            Self::BlockBodies { response } => {
-                poll_request!(response, BlockBodies, cx)
-            }
+            Self::BlockHeaders { response } => poll_request!(response, BlockHeaders, cx),
+            Self::BlockBodies { response } => poll_request!(response, BlockBodies, cx),
             Self::PooledTransactions { response } => {
                 poll_request!(response, PooledTransactions, cx)
             }
@@ -159,6 +181,22 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
             Self::Receipts70 { response } => match ready!(response.poll_unpin(cx)) {
                 Ok(res) => PeerResponseResult::Receipts70(res),
                 Err(err) => PeerResponseResult::Receipts70(Err(err.into())),
+            },
+            Self::SnapAccountRange { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::SnapAccountRange(res),
+                Err(err) => PeerResponseResult::SnapAccountRange(Err(err.into())),
+            },
+            Self::SnapStorageRanges { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::SnapStorageRanges(res),
+                Err(err) => PeerResponseResult::SnapStorageRanges(Err(err.into())),
+            },
+            Self::SnapByteCodes { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::SnapByteCodes(res),
+                Err(err) => PeerResponseResult::SnapByteCodes(Err(err.into())),
+            },
+            Self::SnapTrieNodes { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::SnapTrieNodes(res),
+                Err(err) => PeerResponseResult::SnapTrieNodes(Err(err.into())),
             },
         };
         Poll::Ready(res)
@@ -182,6 +220,26 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     Receipts69(RequestResult<Vec<Vec<N::Receipt>>>),
     /// Represents a result containing receipts or an error for eth/70.
     Receipts70(RequestResult<Receipts70<N::Receipt>>),
+    /// Snap account range response.
+    SnapAccountRange(RequestResult<AccountRangeMessage>),
+    /// Snap storage ranges response.
+    SnapStorageRanges(RequestResult<StorageRangesMessage>),
+    /// Snap bytecodes response.
+    SnapByteCodes(RequestResult<ByteCodesMessage>),
+    /// Snap trie nodes response.
+    SnapTrieNodes(RequestResult<TrieNodesMessage>),
+}
+
+macro_rules! to_message {
+    ($response:expr, $item:ident, $request_id:expr, $wrap:expr) => {
+        match $response {
+            Ok(res) => {
+                let request = RequestPair { request_id: $request_id, message: $item(res) };
+                Ok($wrap(EthMessage::$item(request)))
+            }
+            Err(err) => Err(err),
+        }
+    };
 }
 
 // === impl PeerResponseResult ===
@@ -189,41 +247,95 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
 impl<N: NetworkPrimitives> PeerResponseResult<N> {
     /// Converts this response into an [`EthMessage`]
     pub fn try_into_message(self, id: u64) -> RequestResult<EthMessage<N>> {
-        macro_rules! to_message {
-            ($response:ident, $item:ident, $request_id:ident) => {
-                match $response {
-                    Ok(res) => {
-                        let request = RequestPair { request_id: $request_id, message: $item(res) };
-                        Ok(EthMessage::$item(request))
-                    }
-                    Err(err) => Err(err),
-                }
-            };
-        }
         match self {
             Self::BlockHeaders(resp) => {
-                to_message!(resp, BlockHeaders, id)
+                to_message!(resp, BlockHeaders, id, |message| message)
             }
             Self::BlockBodies(resp) => {
-                to_message!(resp, BlockBodies, id)
+                to_message!(resp, BlockBodies, id, |message| message)
             }
             Self::PooledTransactions(resp) => {
-                to_message!(resp, PooledTransactions, id)
+                to_message!(resp, PooledTransactions, id, |message| message)
             }
             Self::NodeData(resp) => {
-                to_message!(resp, NodeData, id)
+                to_message!(resp, NodeData, id, |message| message)
             }
             Self::Receipts(resp) => {
-                to_message!(resp, Receipts, id)
+                to_message!(resp, Receipts, id, |message| message)
             }
             Self::Receipts69(resp) => {
-                to_message!(resp, Receipts69, id)
+                to_message!(resp, Receipts69, id, |message| message)
             }
             Self::Receipts70(resp) => match resp {
                 Ok(res) => {
                     let request = RequestPair { request_id: id, message: res };
                     Ok(EthMessage::Receipts70(request))
                 }
+                Err(err) => Err(err),
+            },
+            // Snap responses cannot be represented as `EthMessage` directly.
+            // Callers that need snap support should use `try_into_eth_snap_message` instead.
+            Self::SnapAccountRange(resp) => match resp {
+                Ok(_) => Err(RequestError::UnsupportedCapability),
+                Err(err) => Err(err),
+            },
+            Self::SnapStorageRanges(resp) => match resp {
+                Ok(_) => Err(RequestError::UnsupportedCapability),
+                Err(err) => Err(err),
+            },
+            Self::SnapByteCodes(resp) => match resp {
+                Ok(_) => Err(RequestError::UnsupportedCapability),
+                Err(err) => Err(err),
+            },
+            Self::SnapTrieNodes(resp) => match resp {
+                Ok(_) => Err(RequestError::UnsupportedCapability),
+                Err(err) => Err(err),
+            },
+        }
+    }
+
+    /// Converts this response into an [`EthSnapMessage`].
+    pub fn try_into_eth_snap_message(self, id: u64) -> RequestResult<EthSnapMessage<N>> {
+        match self {
+            Self::BlockHeaders(resp) => {
+                to_message!(resp, BlockHeaders, id, EthSnapMessage::Eth)
+            }
+            Self::BlockBodies(resp) => {
+                to_message!(resp, BlockBodies, id, EthSnapMessage::Eth)
+            }
+            Self::PooledTransactions(resp) => {
+                to_message!(resp, PooledTransactions, id, EthSnapMessage::Eth)
+            }
+            Self::NodeData(resp) => {
+                to_message!(resp, NodeData, id, EthSnapMessage::Eth)
+            }
+            Self::Receipts(resp) => {
+                to_message!(resp, Receipts, id, EthSnapMessage::Eth)
+            }
+            Self::Receipts69(resp) => {
+                to_message!(resp, Receipts69, id, EthSnapMessage::Eth)
+            }
+            Self::Receipts70(resp) => match resp {
+                Ok(res) => {
+                    let request = RequestPair { request_id: id, message: res };
+                    Ok(EthSnapMessage::Eth(EthMessage::Receipts70(request)))
+                }
+                Err(err) => Err(err),
+            },
+            Self::SnapAccountRange(resp) => match resp {
+                Ok(resp) => Ok(EthSnapMessage::Snap(SnapProtocolMessage::AccountRange(resp))),
+                Err(err) => Err(err),
+            },
+            Self::SnapStorageRanges(resp) => match resp {
+                Ok(resp) => Ok(EthSnapMessage::Snap(SnapProtocolMessage::StorageRanges(resp))),
+                Err(err) => Err(err),
+            },
+            Self::SnapByteCodes(resp) => match resp {
+                Ok(resp) => Ok(EthSnapMessage::Snap(SnapProtocolMessage::ByteCodes(resp))),
+                Err(err) => Err(err),
+            },
+            Self::SnapTrieNodes(resp) => match resp {
+                Ok(resp) => Ok(EthSnapMessage::Snap(SnapProtocolMessage::TrieNodes(resp))),
                 Err(err) => Err(err),
             },
         }
@@ -239,6 +351,10 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts(res) => res.as_ref().err(),
             Self::Receipts69(res) => res.as_ref().err(),
             Self::Receipts70(res) => res.as_ref().err(),
+            Self::SnapAccountRange(res) => res.as_ref().err(),
+            Self::SnapStorageRanges(res) => res.as_ref().err(),
+            Self::SnapByteCodes(res) => res.as_ref().err(),
+            Self::SnapTrieNodes(res) => res.as_ref().err(),
         }
     }
 
