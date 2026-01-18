@@ -2020,6 +2020,107 @@ mod tests {
     }
 
     #[test]
+    fn test_unwind_account_history_to_block_zero() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        // Add blocks 0-5 (including block 0)
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, 0..=5).unwrap();
+        batch.commit().unwrap();
+
+        // Unwind to block 0 (keep only block 0, remove 1-5)
+        // This simulates the caller doing: unwind_to = min_block.saturating_sub(1) where min_block = 1
+        let mut batch = provider.batch();
+        batch.unwind_account_history_to(address, 0).unwrap();
+        batch.commit().unwrap();
+
+        // Verify only block 0 remains
+        let key = ShardedKey::new(address, u64::MAX);
+        let result = provider.get::<tables::AccountsHistory>(key).unwrap();
+        assert!(result.is_some());
+        let blocks: Vec<u64> = result.unwrap().iter().collect();
+        assert_eq!(blocks, vec![0]);
+    }
+
+    #[test]
+    fn test_unwind_account_history_to_multi_shard() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        // Create multiple shards by adding more than NUM_OF_INDICES_IN_SHARD entries
+        // For testing, we'll manually create shards with specific keys
+        let mut batch = provider.batch();
+
+        // First shard: blocks 1-50, keyed by 50
+        let shard1 = BlockNumberList::new_pre_sorted(1..=50);
+        batch.put::<tables::AccountsHistory>(ShardedKey::new(address, 50), &shard1).unwrap();
+
+        // Second shard: blocks 51-100, keyed by MAX (sentinel)
+        let shard2 = BlockNumberList::new_pre_sorted(51..=100);
+        batch.put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &shard2).unwrap();
+
+        batch.commit().unwrap();
+
+        // Verify we have 2 shards
+        let shards = provider.account_history_shards(address).unwrap();
+        assert_eq!(shards.len(), 2);
+
+        // Unwind to block 75 (keep 1-75, remove 76-100)
+        let mut batch = provider.batch();
+        batch.unwind_account_history_to(address, 75).unwrap();
+        batch.commit().unwrap();
+
+        // Verify: shard1 should be untouched, shard2 should be truncated
+        let shards = provider.account_history_shards(address).unwrap();
+        assert_eq!(shards.len(), 2);
+
+        // First shard unchanged
+        assert_eq!(shards[0].0.highest_block_number, 50);
+        assert_eq!(shards[0].1.iter().collect::<Vec<_>>(), (1..=50).collect::<Vec<_>>());
+
+        // Second shard truncated and re-keyed to MAX
+        assert_eq!(shards[1].0.highest_block_number, u64::MAX);
+        assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), (51..=75).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_unwind_account_history_to_multi_shard_boundary_empty() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        // Create two shards
+        let mut batch = provider.batch();
+
+        // First shard: blocks 1-50, keyed by 50
+        let shard1 = BlockNumberList::new_pre_sorted(1..=50);
+        batch.put::<tables::AccountsHistory>(ShardedKey::new(address, 50), &shard1).unwrap();
+
+        // Second shard: blocks 75-100, keyed by MAX
+        let shard2 = BlockNumberList::new_pre_sorted(75..=100);
+        batch.put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &shard2).unwrap();
+
+        batch.commit().unwrap();
+
+        // Unwind to block 60 (removes all of shard2 since 75 > 60, promotes shard1 to MAX)
+        let mut batch = provider.batch();
+        batch.unwind_account_history_to(address, 60).unwrap();
+        batch.commit().unwrap();
+
+        // Verify: only shard1 remains, now keyed as MAX
+        let shards = provider.account_history_shards(address).unwrap();
+        assert_eq!(shards.len(), 1);
+        assert_eq!(shards[0].0.highest_block_number, u64::MAX);
+        assert_eq!(shards[0].1.iter().collect::<Vec<_>>(), (1..=50).collect::<Vec<_>>());
+    }
+
+    #[test]
     fn test_account_history_shards_iterator() {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
