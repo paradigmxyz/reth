@@ -5,7 +5,7 @@
 
 use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx, StateDB},
+    block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx},
     eth::{EthBlockExecutionCtx, EthBlockExecutor},
     precompiles::PrecompilesMap,
     revm::context::{result::ResultAndState, Block as _},
@@ -24,6 +24,7 @@ use reth_ethereum::{
         },
         revm::{
             context::TxEnv,
+            db::State,
             primitives::{address, hardfork::SpecId, Address},
             DatabaseCommit,
         },
@@ -105,8 +106,8 @@ impl BlockExecutorFactory for CustomEvmConfig {
         ctx: EthBlockExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
-        DB: StateDB + DatabaseCommit + Database + 'a,
-        I: InspectorFor<Self, DB> + 'a,
+        DB: Database + 'a,
+        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
     {
         CustomBlockExecutor {
             inner: EthBlockExecutor::new(

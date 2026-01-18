@@ -9,7 +9,7 @@ use alloy_consensus::transaction::Recovered;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        BlockExecutorFor, ExecutableTx, OnStateHook, StateDB,
+        BlockExecutorFor, ExecutableTx, OnStateHook,
     },
     precompiles::PrecompilesMap,
     Database, Evm,
@@ -17,7 +17,7 @@ use alloy_evm::{
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor};
 use reth_ethereum::evm::primitives::InspectorFor;
 use reth_op::{chainspec::OpChainSpec, node::OpRethReceiptBuilder, OpReceipt};
-use revm::{context::result::ResultAndState, DatabaseCommit};
+use revm::{context::result::ResultAndState, database::State};
 use std::sync::Arc;
 
 pub struct CustomBlockExecutor<Evm> {
