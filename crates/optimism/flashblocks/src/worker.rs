@@ -2,16 +2,14 @@ use crate::PendingFlashBlock;
 use alloy_eips::{eip2718::WithEncoded, BlockNumberOrTag};
 use alloy_primitives::B256;
 use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_errors::RethError;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm,
 };
-use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered,
-};
+use reth_execution_types::BlockExecutionOutput;
+use reth_primitives_traits::{BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered};
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, StateProviderFactory};
@@ -112,21 +110,19 @@ where
                 builder.finish(NoopProvider::default())?
             };
 
-        let execution_outcome = ExecutionOutcome::new(
-            state.take_bundle(),
-            vec![execution_result.receipts],
-            block.number(),
-            vec![execution_result.requests],
-        );
+        let execution_outcome =
+            BlockExecutionOutput { state: state.take_bundle(), result: execution_result };
 
         let pending_block = PendingBlock::with_executed_block(
             Instant::now() + Duration::from_secs(1),
-            ExecutedBlock {
-                recovered_block: block.into(),
-                execution_output: Arc::new(execution_outcome),
-                hashed_state: Arc::new(hashed_state.into_sorted()),
-                trie_updates: Arc::default(),
-            },
+            ExecutedBlock::new(
+                block.into(),
+                Arc::new(execution_outcome),
+                ComputedTrieData::without_trie_input(
+                    Arc::new(hashed_state.into_sorted()),
+                    Arc::default(),
+                ),
+            ),
         );
         let pending_flashblock = PendingFlashBlock::new(
             pending_block,

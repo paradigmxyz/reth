@@ -1,14 +1,14 @@
 use crate::PruneLimiter;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, RangeWalker},
-    table::{Table, TableRow},
-    transaction::DbTxMut,
+    table::{DupSort, Table, TableRow},
+    transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
 use std::{fmt::Debug, ops::RangeBounds};
 use tracing::debug;
 
-pub(crate) trait DbTxPruneExt: DbTxMut {
+pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
     /// Prune the table for the specified pre-sorted key iterator.
     ///
     /// Returns number of rows pruned.
@@ -123,9 +123,56 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
 
         Ok(false)
     }
+
+    /// Prune a DUPSORT table for the specified key range.
+    ///
+    /// Returns number of rows pruned.
+    #[expect(unused)]
+    fn prune_dupsort_table_with_range<T: DupSort>(
+        &self,
+        keys: impl RangeBounds<T::Key> + Clone + Debug,
+        limiter: &mut PruneLimiter,
+        mut delete_callback: impl FnMut(TableRow<T>),
+    ) -> Result<(usize, bool), DatabaseError> {
+        let starting_entries = self.entries::<T>()?;
+        let mut cursor = self.cursor_dup_write::<T>()?;
+        let mut walker = cursor.walk_range(keys)?;
+
+        let done = loop {
+            if limiter.is_limit_reached() {
+                debug!(
+                    target: "providers::db",
+                    ?limiter,
+                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
+                    time_limit = %limiter.is_time_limit_reached(),
+                    table = %T::NAME,
+                    "Pruning limit reached"
+                );
+                break false
+            }
+
+            let Some(res) = walker.next() else { break true };
+            let row = res?;
+
+            walker.delete_current_duplicates()?;
+            limiter.increment_deleted_entries_count();
+            delete_callback(row);
+        };
+
+        debug!(
+            target: "providers::db",
+            table=?T::NAME,
+            cursor_current=?cursor.current(),
+            "done walking",
+        );
+
+        let ending_entries = self.entries::<T>()?;
+
+        Ok((starting_entries - ending_entries, done))
+    }
 }
 
-impl<Tx> DbTxPruneExt for Tx where Tx: DbTxMut {}
+impl<Tx> DbTxPruneExt for Tx where Tx: DbTxMut + DbTx {}
 
 #[cfg(test)]
 mod tests {

@@ -1,71 +1,86 @@
-use alloy_consensus::{
-    transaction::{SignerRecoverable, TxHashRef},
-    BlockHeader,
-};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
+use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_rpc_types_eth::{
-    state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo,
-};
+use alloy_rpc_types_eth::{state::EvmOverrides, BlockError, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
-    mux::MuxConfig, BlockTraceResult, CallConfig, FourByteFrame, GethDebugBuiltInTracerType,
-    GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions,
-    GethDefaultTracingOptions, GethTrace, NoopFrame, PreStateConfig, TraceResult,
+    BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use async_trait::async_trait;
+use futures::Stream;
 use jsonrpsee::core::RpcResult;
+use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor};
-use reth_primitives_traits::{Block as _, BlockBody, ReceiptWithBloom, RecoveredBlock};
+use reth_primitives_traits::{
+    Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
+};
 use reth_revm::{db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    EthApiTypes, FromEthApiError, RpcNodeCore,
+    FromEthApiError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, StateCacheDb};
+use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
     StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
-use reth_tasks::pool::BlockingTaskGuard;
+use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::{
-    context::{
-        result::{HaltReasonTr, ResultAndState},
-        ContextTr,
-    },
-    inspector::{JournalExt, NoOpInspector},
-    interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome, Interpreter},
-    DatabaseCommit, DatabaseRef, Inspector,
-};
-use revm_inspectors::tracing::{
-    FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
-};
-use revm_primitives::{Log, U256};
-use std::sync::Arc;
+use revm::DatabaseCommit;
+use revm_inspectors::tracing::{DebugInspector, TransactionContext};
+use serde::{Deserialize, Serialize};
+use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+use tokio_stream::StreamExt;
 
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
-pub struct DebugApi<Eth> {
+pub struct DebugApi<Eth: RpcNodeCore> {
     inner: Arc<DebugApiInner<Eth>>,
 }
 
-// === impl DebugApi ===
-
-impl<Eth> DebugApi<Eth> {
+impl<Eth> DebugApi<Eth>
+where
+    Eth: RpcNodeCore,
+{
     /// Create a new instance of the [`DebugApi`]
-    pub fn new(eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
-        let inner = Arc::new(DebugApiInner { eth_api, blocking_task_guard });
+    pub fn new(
+        eth_api: Eth,
+        blocking_task_guard: BlockingTaskGuard,
+        executor: impl TaskSpawner,
+        mut stream: impl Stream<Item = ConsensusEngineEvent<Eth::Primitives>> + Send + Unpin + 'static,
+    ) -> Self {
+        let bad_block_store = BadBlockStore::default();
+        let inner = Arc::new(DebugApiInner {
+            eth_api,
+            blocking_task_guard,
+            bad_block_store: bad_block_store.clone(),
+        });
+
+        // Spawn a task caching bad blocks
+        executor.spawn(Box::pin(async move {
+            while let Some(event) = stream.next().await {
+                if let ConsensusEngineEvent::InvalidBlock(block) = event &&
+                    let Ok(recovered) =
+                        RecoveredBlock::try_recover_sealed(block.as_ref().clone())
+                {
+                    bad_block_store.insert(recovered);
+                }
+            }
+        }));
+
         Self { inner }
     }
 
@@ -73,9 +88,7 @@ impl<Eth> DebugApi<Eth> {
     pub fn eth_api(&self) -> &Eth {
         &self.inner.eth_api
     }
-}
 
-impl<Eth: RpcNodeCore> DebugApi<Eth> {
     /// Access the underlying provider.
     pub fn provider(&self) -> &Eth::Provider {
         self.inner.eth_api.provider()
@@ -86,7 +99,7 @@ impl<Eth: RpcNodeCore> DebugApi<Eth> {
 
 impl<Eth> DebugApi<Eth>
 where
-    Eth: EthApiTypes + TraceExt + 'static,
+    Eth: TraceExt,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -107,7 +120,7 @@ where
                 eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let mut inspector = DebugInspector::new(opts)?;
+                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx);
@@ -118,21 +131,23 @@ where
                         tx_env.clone(),
                         &mut inspector,
                     )?;
-                    let result = inspector.get_result(
-                        Some(TransactionContext {
-                            block_hash: Some(block.hash()),
-                            tx_hash: Some(tx_hash),
-                            tx_index: Some(index),
-                        }),
-                        &tx_env,
-                        &evm_env.block_env,
-                        &res,
-                        &mut db,
-                    )?;
+                    let result = inspector
+                        .get_result(
+                            Some(TransactionContext {
+                                block_hash: Some(block.hash()),
+                                tx_hash: Some(tx_hash),
+                                tx_index: Some(index),
+                            }),
+                            &tx_env,
+                            &evm_env.block_env,
+                            &res,
+                            &mut db,
+                        )
+                        .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
-                        inspector.fuse()?;
+                        inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
                         db.commit(res.state)
@@ -168,20 +183,11 @@ where
         // Depending on EIP-2 we need to recover the transactions differently
         let senders =
             if self.provider().chain_spec().is_homestead_active_at_block(block.header().number()) {
-                block
-                    .body()
-                    .transactions()
-                    .iter()
-                    .map(|tx| tx.recover_signer().map_err(Eth::Error::from_eth_err))
-                    .collect::<Result<Vec<_>, _>>()?
+                block.body().recover_signers()
             } else {
-                block
-                    .body()
-                    .transactions()
-                    .iter()
-                    .map(|tx| tx.recover_signer_unchecked().map_err(Eth::Error::from_eth_err))
-                    .collect::<Result<Vec<_>, _>>()?
-            };
+                block.body().recover_signers_unchecked()
+            }
+            .map_err(Eth::Error::from_eth_err)?;
 
         self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts).await
     }
@@ -246,20 +252,22 @@ where
 
                 let tx_env = eth_api.evm_config().tx_env(&tx);
 
-                let mut inspector = DebugInspector::new(opts)?;
+                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
                 let res =
                     eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
-                let trace = inspector.get_result(
-                    Some(TransactionContext {
-                        block_hash: Some(block_hash),
-                        tx_index: Some(index),
-                        tx_hash: Some(*tx.tx_hash()),
-                    }),
-                    &tx_env,
-                    &evm_env.block_env,
-                    &res,
-                    &mut db,
-                )?;
+                let trace = inspector
+                    .get_result(
+                        Some(TransactionContext {
+                            block_hash: Some(block_hash),
+                            tx_index: Some(index),
+                            tx_hash: Some(*tx.tx_hash()),
+                        }),
+                        &tx_env,
+                        &evm_env.block_env,
+                        &res,
+                        &mut db,
+                    )
+                    .map_err(Eth::Error::from_eth_err)?;
 
                 Ok(trace)
             })
@@ -300,14 +308,17 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                let mut inspector = DebugInspector::new(tracing_options)?;
+                let mut inspector =
+                    DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
                 let res = this.eth_api().inspect(
                     &mut *db,
                     evm_env.clone(),
                     tx_env.clone(),
                     &mut inspector,
                 )?;
-                let trace = inspector.get_result(None, &tx_env, &evm_env.block_env, &res, db)?;
+                let trace = inspector
+                    .get_result(None, &tx_env, &evm_env.block_env, &res, db)
+                    .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace)
             })
             .await
@@ -362,11 +373,13 @@ where
                 let (evm_env, tx_env) =
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
-                let mut inspector = DebugInspector::new(tracing_options)?;
+                let mut inspector =
+                    DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
                 let res =
                     eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
-                let trace =
-                    inspector.get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)?;
+                let trace = inspector
+                    .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
+                    .map_err(Eth::Error::from_eth_err)?;
 
                 Ok(trace)
             })
@@ -435,7 +448,8 @@ where
 
                 // Trace all bundles
                 let mut bundles = bundles.into_iter().peekable();
-                let mut inspector = DebugInspector::new(tracing_options.clone())?;
+                let mut inspector = DebugInspector::new(tracing_options.clone())
+                    .map_err(Eth::Error::from_eth_err)?;
                 while let Some(bundle) = bundles.next() {
                     let mut results = Vec::with_capacity(bundle.transactions.len());
                     let Bundle { transactions, block_override } = bundle;
@@ -457,18 +471,14 @@ where
                             tx_env.clone(),
                             &mut inspector,
                         )?;
-                        let trace = inspector.get_result(
-                            None,
-                            &tx_env,
-                            &evm_env.block_env,
-                            &res,
-                            &mut db,
-                        )?;
+                        let trace = inspector
+                            .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
+                            .map_err(Eth::Error::from_eth_err)?;
 
                         // If there is more transactions, commit the database
                         // If there is no transactions, but more bundles, commit to the database too
                         if transactions.peek().is_some() || bundles.peek().is_some() {
-                            inspector.fuse()?;
+                            inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                             db.commit(res.state);
                         }
                         results.push(trace);
@@ -617,7 +627,7 @@ where
 #[async_trait]
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
-    Eth: EthApiTypes + EthTransactions + TraceExt + 'static,
+    Eth: EthTransactions + TraceExt,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
@@ -667,7 +677,7 @@ where
     /// Handler for `debug_getRawTransactions`
     /// Returns the bytes of the transaction for the given hash.
     async fn raw_transactions(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
-        let block = self
+        let block: RecoveredBlock<BlockTy<Eth::Primitives>> = self
             .provider()
             .block_with_senders_by_id(block_id, TransactionVariant::NoHash)
             .to_rpc_result()?
@@ -688,8 +698,36 @@ where
     }
 
     /// Handler for `debug_getBadBlocks`
-    async fn bad_blocks(&self) -> RpcResult<Vec<RpcBlock>> {
-        Ok(vec![])
+    async fn bad_blocks(&self) -> RpcResult<Vec<serde_json::Value>> {
+        let blocks = self.inner.bad_block_store.all();
+        let mut bad_blocks = Vec::with_capacity(blocks.len());
+
+        #[derive(Serialize, Deserialize)]
+        struct BadBlockSerde<T> {
+            block: T,
+            hash: B256,
+            rlp: Bytes,
+        }
+
+        for block in blocks {
+            let rlp = alloy_rlp::encode(block.sealed_block()).into();
+            let hash = block.hash();
+
+            let block = block
+                .clone_into_rpc_block(
+                    BlockTransactionsKind::Full,
+                    |tx, tx_info| self.eth_api().converter().fill(tx, tx_info),
+                    |header, size| self.eth_api().converter().convert_header(header, size),
+                )
+                .map_err(|err| Eth::Error::from(err).into())?;
+
+            let bad_block = serde_json::to_value(BadBlockSerde { block, hash, rlp })
+                .map_err(|err| EthApiError::other(internal_rpc_err(err.to_string())))?;
+
+            bad_blocks.push(bad_block);
+        }
+
+        Ok(bad_blocks)
     }
 
     /// Handler for `debug_traceChain`
@@ -788,6 +826,10 @@ where
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_execution_witness_by_block_hash(self, hash).await.map_err(Into::into)
+    }
+
+    async fn debug_get_block_access_list(&self, _block_id: BlockId) -> RpcResult<BlockAccessList> {
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
@@ -1052,286 +1094,66 @@ where
     }
 }
 
-impl<Eth> std::fmt::Debug for DebugApi<Eth> {
+impl<Eth: RpcNodeCore> std::fmt::Debug for DebugApi<Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
 }
 
-impl<Eth> Clone for DebugApi<Eth> {
+impl<Eth: RpcNodeCore> Clone for DebugApi<Eth> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
-struct DebugApiInner<Eth> {
+struct DebugApiInner<Eth: RpcNodeCore> {
     /// The implementation of `eth` API
     eth_api: Eth,
     // restrict the number of concurrent calls to blocking calls
     blocking_task_guard: BlockingTaskGuard,
+    /// Cache for bad blocks.
+    bad_block_store: BadBlockStore<BlockTy<Eth::Primitives>>,
 }
 
-/// Inspector for the `debug` API
-///
-/// This inspector is used to trace the execution of a transaction or call and supports all variants
-/// of [`GethDebugTracerType`].
-///
-/// This inspector can be re-used for tracing multiple transactions. This is supported by
-/// requiring caller to invoke [`DebugInspector::fuse`] after each transaction. See method
-/// documentation for more details.
-enum DebugInspector {
-    FourByte(FourByteInspector),
-    CallTracer(TracingInspector, CallConfig),
-    PreStateTracer(TracingInspector, PreStateConfig),
-    Noop(NoOpInspector),
-    Mux(MuxInspector, MuxConfig),
-    FlatCallTracer(TracingInspector),
-    Default(TracingInspector, GethDefaultTracingOptions),
-    #[cfg(feature = "js-tracer")]
-    Js(Box<revm_inspectors::tracing::js::JsInspector>, String, serde_json::Value),
+/// A bounded, deduplicating store of recently observed bad blocks.
+#[derive(Clone, Debug)]
+struct BadBlockStore<B: BlockTrait> {
+    inner: Arc<RwLock<VecDeque<Arc<RecoveredBlock<B>>>>>,
+    limit: usize,
 }
 
-impl DebugInspector {
-    /// Create a new `DebugInspector` from the given tracing options.
-    fn new(opts: GethDebugTracingOptions) -> Result<Self, EthApiError> {
-        let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
-
-        let this = if let Some(tracer) = tracer {
-            #[allow(unreachable_patterns)]
-            match tracer {
-                GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
-                    GethDebugBuiltInTracerType::FourByteTracer => {
-                        Self::FourByte(FourByteInspector::default())
-                    }
-                    GethDebugBuiltInTracerType::CallTracer => {
-                        let config = tracer_config
-                            .into_call_config()
-                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
-
-                        Self::CallTracer(
-                            TracingInspector::new(TracingInspectorConfig::from_geth_call_config(
-                                &config,
-                            )),
-                            config,
-                        )
-                    }
-                    GethDebugBuiltInTracerType::PreStateTracer => {
-                        let config = tracer_config
-                            .into_pre_state_config()
-                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
-
-                        Self::PreStateTracer(
-                            TracingInspector::new(
-                                TracingInspectorConfig::from_geth_prestate_config(&config),
-                            ),
-                            config,
-                        )
-                    }
-                    GethDebugBuiltInTracerType::NoopTracer => Self::Noop(NoOpInspector),
-                    GethDebugBuiltInTracerType::MuxTracer => {
-                        let config = tracer_config
-                            .into_mux_config()
-                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
-
-                        Self::Mux(MuxInspector::try_from_config(config.clone())?, config)
-                    }
-                    GethDebugBuiltInTracerType::FlatCallTracer => {
-                        let flat_call_config = tracer_config
-                            .into_flat_call_config()
-                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
-
-                        Self::FlatCallTracer(TracingInspector::new(
-                            TracingInspectorConfig::from_flat_call_config(&flat_call_config),
-                        ))
-                    }
-                    _ => {
-                        // Note: this match is non-exhaustive in case we need to add support for
-                        // additional tracers
-                        return Err(EthApiError::Unsupported("unsupported tracer"))
-                    }
-                },
-                #[cfg(not(feature = "js-tracer"))]
-                GethDebugTracerType::JsTracer(_) => {
-                    return Err(EthApiError::Unsupported("JS Tracer is not enabled"))
-                }
-                #[cfg(feature = "js-tracer")]
-                GethDebugTracerType::JsTracer(code) => {
-                    let config = tracer_config.into_json();
-                    Self::Js(
-                        revm_inspectors::tracing::js::JsInspector::new(
-                            code.clone(),
-                            config.clone(),
-                        )?
-                        .into(),
-                        code,
-                        config,
-                    )
-                }
-                _ => {
-                    // Note: this match is non-exhaustive in case we need to add support for
-                    // additional tracers
-                    return Err(EthApiError::Unsupported("unsupported tracer"))
-                }
-            }
-        } else {
-            Self::Default(
-                TracingInspector::new(TracingInspectorConfig::from_geth_config(&config)),
-                config,
-            )
-        };
-
-        Ok(this)
+impl<B: BlockTrait> BadBlockStore<B> {
+    /// Creates a new store with the given capacity.
+    fn new(limit: usize) -> Self {
+        Self { inner: Arc::new(RwLock::new(VecDeque::with_capacity(limit))), limit }
     }
 
-    /// Prepares inspector for executing the next transaction. This will remove any state from
-    /// previous transactions.
-    fn fuse(&mut self) -> Result<(), EthApiError> {
-        match self {
-            Self::FourByte(inspector) => {
-                std::mem::take(inspector);
-            }
-            Self::CallTracer(inspector, _) |
-            Self::PreStateTracer(inspector, _) |
-            Self::FlatCallTracer(inspector) |
-            Self::Default(inspector, _) => inspector.fuse(),
-            Self::Noop(_) => {}
-            Self::Mux(inspector, config) => {
-                *inspector = MuxInspector::try_from_config(config.clone())?
-            }
-            #[cfg(feature = "js-tracer")]
-            Self::Js(inspector, code, config) => {
-                *inspector =
-                    revm_inspectors::tracing::js::JsInspector::new(code.clone(), config.clone())?
-                        .into();
-            }
+    /// Inserts a recovered block, keeping only the most recent `limit` entries and deduplicating
+    /// by block hash.
+    fn insert(&self, block: RecoveredBlock<B>) {
+        let hash = block.hash();
+        let mut guard = self.inner.write();
+
+        // skip if we already recorded this bad block , and keep original ordering
+        if guard.iter().any(|b| b.hash() == hash) {
+            return;
         }
+        guard.push_back(Arc::new(block));
 
-        Ok(())
-    }
-
-    /// Should be invoked after each transaction to obtain the resulting [`GethTrace`].
-    fn get_result(
-        &mut self,
-        tx_context: Option<TransactionContext>,
-        tx_env: &impl revm::context::Transaction,
-        block_env: &impl revm::context::Block,
-        res: &ResultAndState<impl HaltReasonTr>,
-        db: &mut StateCacheDb,
-    ) -> Result<GethTrace, EthApiError> {
-        let tx_info = TransactionInfo {
-            hash: tx_context.as_ref().map(|c| c.tx_hash).unwrap_or_default(),
-            index: tx_context.as_ref().map(|c| c.tx_index.map(|i| i as u64)).unwrap_or_default(),
-            block_hash: tx_context.as_ref().map(|c| c.block_hash).unwrap_or_default(),
-            block_number: Some(block_env.number().saturating_to()),
-            base_fee: Some(block_env.basefee()),
-        };
-
-        let res = match self {
-            Self::FourByte(inspector) => FourByteFrame::from(&*inspector).into(),
-            Self::CallTracer(inspector, config) => {
-                inspector.set_transaction_gas_limit(tx_env.gas_limit());
-                inspector.geth_builder().geth_call_traces(*config, res.result.gas_used()).into()
-            }
-            Self::PreStateTracer(inspector, config) => {
-                inspector.set_transaction_gas_limit(tx_env.gas_limit());
-                inspector.geth_builder().geth_prestate_traces(res, config, db)?.into()
-            }
-            Self::Noop(_) => NoopFrame::default().into(),
-            Self::Mux(inspector, _) => inspector.try_into_mux_frame(res, db, tx_info)?.into(),
-            Self::FlatCallTracer(inspector) => {
-                inspector.set_transaction_gas_limit(tx_env.gas_limit());
-                inspector
-                    .clone()
-                    .into_parity_builder()
-                    .into_localized_transaction_traces(tx_info)
-                    .into()
-            }
-            Self::Default(inspector, config) => {
-                inspector.set_transaction_gas_limit(tx_env.gas_limit());
-                inspector
-                    .geth_builder()
-                    .geth_traces(
-                        res.result.gas_used(),
-                        res.result.output().unwrap_or_default().clone(),
-                        *config,
-                    )
-                    .into()
-            }
-            #[cfg(feature = "js-tracer")]
-            Self::Js(inspector, _, _) => {
-                inspector.set_transaction_context(tx_context.unwrap_or_default());
-                let res = inspector.json_result(res.clone(), tx_env, block_env, db)?;
-
-                GethTrace::JS(res)
-            }
-        };
-
-        Ok(res)
-    }
-}
-
-macro_rules! delegate {
-    ($self:expr => $insp:ident.$method:ident($($arg:expr),*)) => {
-        match $self {
-            Self::FourByte($insp) => Inspector::<CTX>::$method($insp, $($arg),*),
-            Self::CallTracer($insp, _) => Inspector::<CTX>::$method($insp, $($arg),*),
-            Self::PreStateTracer($insp, _) => Inspector::<CTX>::$method($insp, $($arg),*),
-            Self::FlatCallTracer($insp) => Inspector::<CTX>::$method($insp, $($arg),*),
-            Self::Default($insp, _) => Inspector::<CTX>::$method($insp, $($arg),*),
-            Self::Noop($insp) => Inspector::<CTX>::$method($insp, $($arg),*),
-            Self::Mux($insp, _) => Inspector::<CTX>::$method($insp, $($arg),*),
-            #[cfg(feature = "js-tracer")]
-            Self::Js($insp, _, _) => Inspector::<CTX>::$method($insp, $($arg),*),
+        while guard.len() > self.limit {
+            guard.pop_front();
         }
-    };
+    }
+
+    /// Returns all cached bad blocks ordered from newest to oldest.
+    fn all(&self) -> Vec<Arc<RecoveredBlock<B>>> {
+        let guard = self.inner.read();
+        guard.iter().rev().cloned().collect()
+    }
 }
 
-impl<CTX> Inspector<CTX> for DebugInspector
-where
-    CTX: ContextTr<Journal: JournalExt, Db: DatabaseRef>,
-{
-    fn initialize_interp(&mut self, interp: &mut Interpreter, context: &mut CTX) {
-        delegate!(self => inspector.initialize_interp(interp, context))
-    }
-
-    fn step(&mut self, interp: &mut Interpreter, context: &mut CTX) {
-        delegate!(self => inspector.step(interp, context))
-    }
-
-    fn step_end(&mut self, interp: &mut Interpreter, context: &mut CTX) {
-        delegate!(self => inspector.step_end(interp, context))
-    }
-
-    fn log(&mut self, context: &mut CTX, log: Log) {
-        delegate!(self => inspector.log(context, log))
-    }
-
-    fn log_full(&mut self, interp: &mut Interpreter, context: &mut CTX, log: Log) {
-        delegate!(self => inspector.log_full(interp, context, log))
-    }
-
-    fn call(&mut self, context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
-        delegate!(self => inspector.call(context, inputs))
-    }
-
-    fn call_end(&mut self, context: &mut CTX, inputs: &CallInputs, outcome: &mut CallOutcome) {
-        delegate!(self => inspector.call_end(context, inputs, outcome))
-    }
-
-    fn create(&mut self, context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
-        delegate!(self => inspector.create(context, inputs))
-    }
-
-    fn create_end(
-        &mut self,
-        context: &mut CTX,
-        inputs: &CreateInputs,
-        outcome: &mut CreateOutcome,
-    ) {
-        delegate!(self => inspector.create_end(context, inputs, outcome))
-    }
-
-    fn selfdestruct(&mut self, contract: Address, target: Address, value: U256) {
-        delegate!(self => inspector.selfdestruct(contract, target, value))
+impl<B: BlockTrait> Default for BadBlockStore<B> {
+    fn default() -> Self {
+        Self::new(64)
     }
 }

@@ -23,7 +23,7 @@ use reth_storage_api::noop::NoopProvider;
 use revm::{
     context::Block,
     context_interface::result::ExecutionResult,
-    primitives::{Address, Bytes, TxKind},
+    primitives::{Address, Bytes, TxKind, U256},
     Database,
 };
 
@@ -36,12 +36,67 @@ pub enum EthSimulateError {
     /// Max gas limit for entire operation exceeded.
     #[error("Client adjustable limit reached")]
     GasLimitReached,
+    /// Block number in sequence did not increase.
+    #[error("Block number in sequence did not increase")]
+    BlockNumberInvalid,
+    /// Block timestamp in sequence did not increase or stay the same.
+    #[error("Block timestamp in sequence did not increase")]
+    BlockTimestampInvalid,
+    /// Transaction nonce is too low.
+    #[error("nonce too low: next nonce {state}, tx nonce {tx}")]
+    NonceTooLow {
+        /// Transaction nonce.
+        tx: u64,
+        /// Current state nonce.
+        state: u64,
+    },
+    /// Transaction nonce is too high.
+    #[error("nonce too high")]
+    NonceTooHigh,
+    /// Transaction's baseFeePerGas is too low.
+    #[error("max fee per gas less than block base fee")]
+    BaseFeePerGasTooLow,
+    /// Not enough gas provided to pay for intrinsic gas.
+    #[error("intrinsic gas too low")]
+    IntrinsicGasTooLow,
+    /// Insufficient funds to pay for gas fees and value.
+    #[error("insufficient funds for gas * price + value: have {balance} want {cost}")]
+    InsufficientFunds {
+        /// Transaction cost.
+        cost: U256,
+        /// Sender balance.
+        balance: U256,
+    },
+    /// Sender is not an EOA.
+    #[error("sender is not an EOA")]
+    SenderNotEOA,
+    /// Max init code size exceeded.
+    #[error("max initcode size exceeded")]
+    MaxInitCodeSizeExceeded,
+    /// `MovePrecompileToAddress` referenced itself in replacement.
+    #[error("MovePrecompileToAddress referenced itself")]
+    PrecompileSelfReference,
+    /// Multiple `MovePrecompileToAddress` referencing the same address.
+    #[error("Multiple MovePrecompileToAddress referencing the same address")]
+    PrecompileDuplicateAddress,
 }
 
 impl EthSimulateError {
-    const fn error_code(&self) -> i32 {
+    /// Returns the JSON-RPC error code for a `eth_simulateV1` error.
+    pub const fn error_code(&self) -> i32 {
         match self {
+            Self::NonceTooLow { .. } => -38010,
+            Self::NonceTooHigh => -38011,
+            Self::BaseFeePerGasTooLow => -38012,
+            Self::IntrinsicGasTooLow => -38013,
+            Self::InsufficientFunds { .. } => -38014,
             Self::BlockGasLimitExceeded => -38015,
+            Self::BlockNumberInvalid => -38020,
+            Self::BlockTimestampInvalid => -38021,
+            Self::PrecompileSelfReference => -38022,
+            Self::PrecompileDuplicateAddress => -38023,
+            Self::SenderNotEOA => -38024,
+            Self::MaxInitCodeSizeExceeded => -38025,
             Self::GasLimitReached => -38026,
         }
     }
@@ -65,7 +120,7 @@ pub fn execute_transactions<S, T>(
     calls: Vec<RpcTxReq<T::Network>>,
     default_gas_limit: u64,
     chain_id: u64,
-    tx_resp_builder: &T,
+    converter: &T,
 ) -> Result<
     (
         BlockBuilderOutcome<S::Primitives>,
@@ -89,7 +144,7 @@ where
             builder.evm().block().basefee(),
             chain_id,
             builder.evm_mut().db_mut(),
-            tx_resp_builder,
+            converter,
         )?;
         // Create transaction with an empty envelope.
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
@@ -117,7 +172,7 @@ pub fn resolve_transaction<DB: Database, Tx, T>(
     block_base_fee_per_gas: u64,
     chain_id: u64,
     db: &mut DB,
-    tx_resp_builder: &T,
+    converter: &T,
 ) -> Result<Recovered<Tx>, EthApiError>
 where
     DB::Error: Into<EthApiError>,
@@ -175,9 +230,8 @@ where
         }
     }
 
-    let tx = tx_resp_builder
-        .build_simulate_v1_transaction(tx)
-        .map_err(|e| EthApiError::other(e.into()))?;
+    let tx =
+        converter.build_simulate_v1_transaction(tx).map_err(|e| EthApiError::other(e.into()))?;
 
     Ok(Recovered::new_unchecked(tx, from))
 }
@@ -187,7 +241,7 @@ pub fn build_simulated_block<Err, T>(
     block: RecoveredBlock<BlockTy<T::Primitives>>,
     results: Vec<ExecutionResult<HaltReasonFor<T::Evm>>>,
     txs_kind: BlockTransactionsKind,
-    tx_resp_builder: &T,
+    converter: &T,
 ) -> Result<SimulatedBlock<RpcBlock<T::Network>>, Err>
 where
     Err: std::error::Error
@@ -256,8 +310,8 @@ where
 
     let block = block.into_rpc_block(
         txs_kind,
-        |tx, tx_info| tx_resp_builder.fill(tx, tx_info),
-        |header, size| tx_resp_builder.convert_header(header, size),
+        |tx, tx_info| converter.fill(tx, tx_info),
+        |header, size| converter.convert_header(header, size),
     )?;
     Ok(SimulatedBlock { inner: block, calls })
 }

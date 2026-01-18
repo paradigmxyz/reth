@@ -28,7 +28,7 @@ use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
     precompiles::PrecompilesMap,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
 use execute::{BasicBlockExecutor, BlockAssembler, BlockBuilder};
 use reth_execution_errors::BlockExecutionError;
@@ -44,8 +44,10 @@ pub mod execute;
 mod aliases;
 pub use aliases::*;
 
+#[cfg(feature = "std")]
 mod engine;
-pub use engine::{ConfigureEngineEvm, ExecutableTxIterator};
+#[cfg(feature = "std")]
+pub use engine::{ConfigureEngineEvm, ExecutableTxIterator, ExecutableTxTuple};
 
 #[cfg(feature = "metrics")]
 pub mod metrics;
@@ -58,8 +60,6 @@ pub use alloy_evm::{
     block::{state_changes, system_calls, OnStateHook},
     *,
 };
-
-pub use alloy_evm::block::state_changes as state_change;
 
 /// A complete configuration of EVM for Reth.
 ///
@@ -256,7 +256,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error>;
 
-    /// Returns a [`TxEnv`] from a transaction and [`Address`].
+    /// Returns a [`TxEnv`] from a transaction.
     fn tx_env(&self, transaction: impl IntoTxEnv<TxEnvFor<Self>>) -> TxEnvFor<Self> {
         transaction.into_tx_env()
     }
@@ -399,7 +399,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// // Complete block building
     /// let outcome = builder.finish(state_provider)?;
     /// ```
-    fn builder_for_next_block<'a, DB: Database>(
+    fn builder_for_next_block<'a, DB: Database + 'a>(
         &'a self,
         db: &'a mut State<DB>,
         parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
@@ -501,6 +501,8 @@ pub struct NextBlockEnvAttributes {
     pub parent_beacon_block_root: Option<B256>,
     /// Withdrawals
     pub withdrawals: Option<Withdrawals>,
+    /// Optional extra data.
+    pub extra_data: Bytes,
 }
 
 /// Abstraction over transaction environment.

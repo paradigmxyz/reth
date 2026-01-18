@@ -121,8 +121,9 @@ where
                 ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
             })?;
 
-        self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
-        self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
+        let end = Instant::now();
+        self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
+        self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
@@ -166,15 +167,14 @@ where
 
     // Update storage slots with new values and calculate storage roots.
     let span = tracing::Span::current();
-    let (tx, rx) = mpsc::channel();
-    state
+    let results: Vec<_> = state
         .storages
         .into_iter()
         .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
         .par_bridge()
         .map(|(address, storage, storage_trie)| {
             let _enter =
-                debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: span.clone(), "storage trie", ?address)
+                debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie", ?address)
                     .entered();
 
             trace!(target: "engine::tree::payload_processor::sparse_trie", "Updating storage");
@@ -217,13 +217,7 @@ where
 
             SparseStateTrieResult::Ok((address, storage_trie))
         })
-        .for_each_init(
-            || tx.clone(),
-            |tx, result| {
-                let _ = tx.send(result);
-            },
-        );
-    drop(tx);
+        .collect();
 
     // Defer leaf removals until after updates/additions, so that we don't delete an intermediate
     // branch node during a removal and then re-add that branch back during a later leaf addition.
@@ -235,7 +229,7 @@ where
     let _enter =
         tracing::debug_span!(target: "engine::tree::payload_processor::sparse_trie", "account trie")
             .entered();
-    for result in rx {
+    for result in results {
         let (address, storage_trie) = result?;
         trie.insert_storage_trie(address, storage_trie);
 

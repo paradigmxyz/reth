@@ -2,6 +2,8 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod changesets;
+pub use changesets::*;
 mod hashed_cursor;
 mod prefix_set;
 mod proof;
@@ -13,7 +15,7 @@ mod witness;
 pub use hashed_cursor::{
     DatabaseHashedAccountCursor, DatabaseHashedCursorFactory, DatabaseHashedStorageCursor,
 };
-pub use prefix_set::PrefixSetLoader;
+pub use prefix_set::{load_prefix_sets_with_provider, PrefixSetLoader};
 pub use proof::{DatabaseProof, DatabaseStorageProof};
 pub use state::{DatabaseHashedPostState, DatabaseStateRoot};
 pub use storage::{DatabaseHashedStorage, DatabaseStorageRoot};

@@ -1,12 +1,18 @@
 use crate::utils::eth_payload_attributes;
+use alloy_eips::eip7685::RequestsOrHash;
 use alloy_genesis::Genesis;
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use alloy_primitives::{Address, B256};
+use alloy_rpc_types_engine::{PayloadAttributes, PayloadStatusEnum};
+use jsonrpsee_core::client::ClientT;
+use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
 use reth_e2e_test_utils::{
     node::NodeTestContext, setup, transaction::TransactionTestContext, wallet::Wallet,
 };
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
+use reth_provider::BlockNumReader;
+use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_tasks::TaskManager;
 use std::sync::Arc;
 
@@ -124,6 +130,129 @@ async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyr
     // Ensure that the engine api client is not available
     let client = node.inner.engine_ipc_client().await;
     assert!(client.is_none(), "ipc auth should be disabled by default");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut nodes, _tasks, wallet) = setup::<EthereumNode>(
+        1,
+        Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+                .cancun_activated()
+                .build(),
+        ),
+        false,
+        eth_payload_attributes,
+    )
+    .await?;
+
+    let mut node = nodes.pop().unwrap();
+
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
+    let payload = node.advance_block().await?;
+    node.assert_new_block(tx_hash, payload.block().hash(), payload.block().number).await?;
+
+    // Get block number before shutdown
+    let block_before = node.inner.provider.best_block_number()?;
+    assert_eq!(block_before, 1, "Expected 1 block before shutdown");
+
+    // Verify block is NOT yet persisted to database
+    let db_block_before = node.inner.provider.last_block_number()?;
+    assert_eq!(db_block_before, 0, "Block should not be persisted yet");
+
+    // Trigger graceful shutdown
+    let done_rx = node
+        .inner
+        .add_ons_handle
+        .engine_shutdown
+        .shutdown()
+        .expect("shutdown should return receiver");
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), done_rx)
+        .await
+        .expect("shutdown timed out")
+        .expect("shutdown completion channel should not be closed");
+
+    let db_block = node.inner.provider.last_block_number()?;
+    assert_eq!(db_block, 1, "Database should have persisted block 1");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let tasks = TaskManager::current();
+    let exec = tasks.executor();
+
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default().chain(MAINNET.chain).genesis(genesis).osaka_activated().build(),
+    );
+    let genesis_hash = chain_spec.genesis_hash();
+
+    let node_config =
+        NodeConfig::test().with_chain(chain_spec.clone()).with_unused_ports().with_rpc(
+            RpcServerArgs::default()
+                .with_unused_ports()
+                .with_http()
+                .with_http_api(reth_rpc_server_types::RpcModuleSelection::All),
+        );
+
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(exec)
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    let node = NodeTestContext::new(node, eth_payload_attributes).await?;
+
+    let wallet = Wallet::default();
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+
+    let payload_attributes = PayloadAttributes {
+        timestamp: chain_spec.genesis().timestamp + 1,
+        prev_randao: B256::ZERO,
+        suggested_fee_recipient: Address::ZERO,
+        withdrawals: Some(vec![]),
+        parent_beacon_block_root: Some(B256::ZERO),
+    };
+
+    let request = TestingBuildBlockRequestV1 {
+        parent_block_hash: genesis_hash,
+        payload_attributes,
+        transactions: vec![raw_tx],
+        extra_data: None,
+    };
+
+    let envelope = node.testing_build_block_v1(request).await?;
+
+    let engine_client = node.auth_server_handle().http_client();
+    let payload = envelope.execution_payload.clone();
+    let block_hash = payload.payload_inner.payload_inner.block_hash;
+
+    let versioned_hashes: Vec<B256> = Vec::new();
+    let parent_beacon_block_root = B256::ZERO;
+    let execution_requests = RequestsOrHash::Requests(envelope.execution_requests);
+
+    let status: alloy_rpc_types_engine::PayloadStatus = engine_client
+        .request(
+            "engine_newPayloadV4",
+            (payload, versioned_hashes, parent_beacon_block_root, execution_requests),
+        )
+        .await?;
+    assert_eq!(status.status, PayloadStatusEnum::Valid);
+
+    node.update_forkchoice(genesis_hash, block_hash).await?;
+
+    node.wait_block(1, block_hash, false).await?;
 
     Ok(())
 }

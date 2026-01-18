@@ -22,7 +22,7 @@ pub use payload::*;
 pub use pool::*;
 
 use crate::{ConfigureEvm, FullNodeTypes};
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_network::types::NetPrimitivesFor;
 use reth_network_api::FullNetwork;
 use reth_node_api::{NodeTypes, PrimitivesTy, TxTy};
@@ -43,10 +43,7 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Debug + Unpin + Send + Sync 
     type Evm: ConfigureEvm<Primitives = <T::Types as NodeTypes>::Primitives>;
 
     /// The consensus type of the node.
-    type Consensus: FullConsensus<<T::Types as NodeTypes>::Primitives, Error = ConsensusError>
-        + Clone
-        + Unpin
-        + 'static;
+    type Consensus: FullConsensus<<T::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static;
 
     /// Network API.
     type Network: FullNetwork<Primitives: NetPrimitivesFor<<T::Types as NodeTypes>::Primitives>>;
@@ -99,8 +96,7 @@ where
         + Unpin
         + 'static,
     EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
-    Cons:
-        FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
+    Cons: FullConsensus<PrimitivesTy<Node::Types>> + Clone + Unpin + 'static,
 {
     type Pool = Pool;
     type Evm = EVM;

@@ -47,7 +47,7 @@ alloy-eips.workspace = true
 
 # misc
 eyre.workspace = true
-clap = { workspace = true, features = ["derive", "env"] }
+clap = { workspace = true, features = ["derive", "env", "string"] }
 humantime.workspace = true
 rand.workspace = true
 derive_more.workspace = true
@@ -80,14 +80,19 @@ tokio.workspace = true
 # Features for vergen to generate correct env vars
 jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
-# Feature to enable opentelemetry export
-otlp = ["reth-tracing/otlp"]
+keccak-cache-global = ["alloy-primitives/keccak-cache-global"]
+otlp = ["reth-tracing/otlp", "reth-tracing-otlp/otlp"]
+otlp-logs = ["reth-tracing/otlp-logs", "reth-tracing-otlp/otlp-logs"]
+tracy = ["reth-tracing/tracy"]
 
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
+
+# Marker feature for edge/unstable builds - captured by vergen in build.rs
+edge = []
 
 [build-dependencies]
 vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }

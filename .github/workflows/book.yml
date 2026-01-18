@@ -10,9 +10,12 @@ on:
     types: [opened, reopened, synchronize, closed]
   merge_group:
 
+env:
+  RUSTC_WRAPPER: "sccache"
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest-8
     timeout-minutes: 90
     steps:
       - name: Checkout
@@ -32,6 +35,8 @@ jobs:
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Build docs
         run: cd docs/vocs && bash scripts/build-cargo-docs.sh

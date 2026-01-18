@@ -1,5 +1,6 @@
 //! Metadata provider trait for reading and writing node metadata.
 
+use alloc::vec::Vec;
 use reth_db_api::models::StorageSettings;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
@@ -10,8 +11,8 @@ pub mod keys {
 }
 
 /// Client trait for reading node metadata from the database.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait MetadataProvider: Send + Sync {
+#[auto_impl::auto_impl(&)]
+pub trait MetadataProvider: Send {
     /// Get a metadata value by key
     fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>>;
 
@@ -24,7 +25,7 @@ pub trait MetadataProvider: Send + Sync {
 }
 
 /// Client trait for writing node metadata to the database.
-pub trait MetadataWriter: Send + Sync {
+pub trait MetadataWriter: Send {
     /// Write a metadata value
     fn write_metadata(&self, key: &str, value: Vec<u8>) -> ProviderResult<()>;
 
@@ -41,7 +42,7 @@ pub trait MetadataWriter: Send + Sync {
 }
 
 /// Trait for caching storage settings on a provider factory.
-pub trait StorageSettingsCache: Send + Sync {
+pub trait StorageSettingsCache: Send {
     /// Gets the cached storage settings.
     fn cached_storage_settings(&self) -> StorageSettings;
 

@@ -10,7 +10,8 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use either::Either;
-use reth_execution_types::ExecutionOutcome;
+use reth_chain_state::ComputedTrieData;
+use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie_common::{
     updates::{TrieUpdates, TrieUpdatesSorted},
@@ -26,7 +27,7 @@ pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
     /// Recovered Block
     pub recovered_block: Arc<RecoveredBlock<N::Block>>,
     /// Block's execution outcome.
-    pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
+    pub execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
     /// Block's hashed state.
     ///
     /// Supports both unsorted and sorted variants so payload builders can avoid cloning in order
@@ -59,12 +60,11 @@ impl<N: NodePrimitives> BuiltPayloadExecutedBlock<N> {
             Either::Right(sorted) => sorted,
         };
 
-        reth_chain_state::ExecutedBlock {
-            recovered_block: self.recovered_block,
-            execution_output: self.execution_output,
-            hashed_state,
-            trie_updates,
-        }
+        reth_chain_state::ExecutedBlock::new(
+            self.recovered_block,
+            self.execution_output,
+            ComputedTrieData::without_trie_input(hashed_state, trie_updates),
+        )
     }
 }
 
