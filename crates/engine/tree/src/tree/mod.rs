@@ -13,6 +13,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use error::{InsertBlockError, InsertBlockFatalError};
+use parking_lot::RwLock;
 use reth_chain_state::{
     CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, MemoryOverlayStateProvider,
     NewCanonicalChain,
@@ -275,6 +276,9 @@ where
     evm_config: C,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
+    /// Single-entry cache for canonical tip header to avoid DB lookups on FCU hot path.
+    /// Keyed by hash - cache miss on hash mismatch naturally handles invalidation.
+    canonical_header_cache: RwLock<Option<(B256, SealedHeader<N::BlockHeader>)>>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -300,6 +304,7 @@ where
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
+            .field("canonical_header_cache", &"...")
             .finish()
     }
 }
@@ -359,6 +364,7 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
+            canonical_header_cache: RwLock::new(None),
         }
     }
 
@@ -1910,18 +1916,38 @@ where
     }
 
     /// Return sealed block header from in-memory state or database by hash.
+    ///
+    /// Uses a single-entry cache for the canonical tip header to avoid repeated
+    /// database lookups on the FCU hot path. Cache invalidation is implicit:
+    /// when the canonical hash changes, cache misses naturally trigger refill.
     fn sealed_header_by_hash(
         &self,
         hash: B256,
     ) -> ProviderResult<Option<SealedHeader<N::BlockHeader>>> {
-        // check memory first
-        let header = self.state.tree_state.sealed_header_by_hash(&hash);
-
-        if header.is_some() {
-            Ok(header)
-        } else {
-            self.provider.sealed_header_by_hash(hash)
+        // Check in-memory tree state first (fastest path)
+        if let Some(header) = self.state.tree_state.sealed_header_by_hash(&hash) {
+            return Ok(Some(header));
         }
+
+        // Check single-entry cache for canonical tip (avoids DB on repeated FCU)
+        {
+            let cache = self.canonical_header_cache.read();
+            if let Some((cached_hash, cached_header)) = cache.as_ref() {
+                if *cached_hash == hash {
+                    return Ok(Some(cached_header.clone()));
+                }
+            }
+        }
+
+        // Cache miss: fetch from database (DB I/O happens outside any lock)
+        let from_db = self.provider.sealed_header_by_hash(hash)?;
+
+        // Populate cache on hit (only cache existing headers, never cache None)
+        if let Some(ref header) = from_db {
+            *self.canonical_header_cache.write() = Some((hash, header.clone()));
+        }
+
+        Ok(from_db)
     }
 
     /// Return the parent hash of the lowest buffered ancestor for the requested block, if there
