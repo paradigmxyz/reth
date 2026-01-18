@@ -11,7 +11,7 @@ use reth_trie_common::{HashedPostState, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE};
 use reth_trie_sparse::{
     errors::SparseStateTrieResult,
     provider::{DefaultTrieNodeProvider, DefaultTrieNodeProviderFactory},
-    SparseStateTrie, SparseTrie, SparseTrieInterface,
+    SparseStateTrie, SparseTrie, SparseTrieInterface, StorageTrieEntry,
 };
 
 /// Trait for stateless trie implementations that can be used for stateless validation.
@@ -244,11 +244,14 @@ fn calculate_state_root(
 
     for (address, storage) in state.storages.into_iter().sorted_unstable_by_key(|(addr, _)| *addr) {
         // Take the existing storage trie (or create an empty, “revealed” one)
-        let mut storage_trie =
-            trie.take_storage_trie(&address).unwrap_or_else(SparseTrie::revealed_empty);
+        let mut storage_entry =
+            trie.take_storage_trie_entry(&address).unwrap_or_else(|| StorageTrieEntry {
+                trie: SparseTrie::revealed_empty(),
+                revealed_paths: Default::default(),
+            });
 
         if storage.wiped {
-            storage_trie.wipe()?;
+            storage_entry.trie.wipe()?;
         }
 
         // Apply slot‑level changes
@@ -257,9 +260,9 @@ fn calculate_state_root(
         {
             let nibbles = Nibbles::unpack(hashed_slot);
             if value.is_zero() {
-                storage_trie.remove_leaf(&nibbles, &storage_provider)?;
+                storage_entry.trie.remove_leaf(&nibbles, &storage_provider)?;
             } else {
-                storage_trie.update_leaf(
+                storage_entry.trie.update_leaf(
                     nibbles,
                     alloy_rlp::encode_fixed_size(&value).to_vec(),
                     &storage_provider,
@@ -268,13 +271,13 @@ fn calculate_state_root(
         }
 
         // Finalise the storage‑trie root before pushing the result
-        storage_trie.root();
-        storage_results.push((address, storage_trie));
+        storage_entry.trie.root();
+        storage_results.push((address, storage_entry));
     }
 
     // Insert every updated storage trie back into the outer state trie
-    for (address, storage_trie) in storage_results {
-        trie.insert_storage_trie(address, storage_trie);
+    for (address, storage_entry) in storage_results {
+        trie.insert_storage_trie_entry(address, storage_entry);
     }
 
     // 2. Apply account‑level updates and (re)encode the account nodes
