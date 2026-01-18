@@ -236,7 +236,7 @@ impl reth_codecs::Compact for Transaction {
     // # Panics
     //
     // A panic will be triggered if an identifier larger than 3 is passed from the database. For
-    // optimism a identifier with value [`DEPOSIT_TX_TYPE_ID`] is allowed.
+    // optimism an identifier with value [`DEPOSIT_TX_TYPE_ID`] is allowed.
     fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
         let (tx_type, buf) = TxType::from_compact(buf, identifier);
 
