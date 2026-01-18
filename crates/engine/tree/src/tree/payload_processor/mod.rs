@@ -48,7 +48,7 @@ use std::{
     collections::BTreeMap,
     ops::Not,
     sync::{
-        atomic::AtomicBool,
+        atomic::{AtomicBool, AtomicUsize},
         mpsc::{self, channel},
         Arc,
     },
@@ -437,6 +437,8 @@ where
             terminate_execution: Arc::new(AtomicBool::new(false)),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
+            active_workers: Arc::new(AtomicUsize::new(0)),
+            total_workers: self.prewarm_max_concurrency,
         };
 
         let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(

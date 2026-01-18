@@ -41,7 +41,7 @@ use reth_trie::MultiProofTargets;
 use std::{
     ops::Range,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, channel, Receiver, Sender},
         Arc,
     },
@@ -478,6 +478,10 @@ where
     pub(super) terminate_execution: Arc<AtomicBool>,
     pub(super) precompile_cache_disabled: bool,
     pub(super) precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    /// Counter tracking active prewarm workers for utilization logging.
+    pub(super) active_workers: Arc<AtomicUsize>,
+    /// Total number of prewarm workers spawned.
+    pub(super) total_workers: usize,
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -499,6 +503,7 @@ where
             terminate_execution,
             precompile_cache_disabled,
             precompile_cache_map,
+            ..
         } = self;
 
         let mut state_provider = match provider.build() {
@@ -569,6 +574,9 @@ where
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
+        let active_workers = self.active_workers.clone();
+        let total_workers = self.total_workers;
+
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
         while let Ok(IndexedTransaction { index, tx }) = {
@@ -576,6 +584,14 @@ where
                 .entered();
             txs.recv()
         } {
+            let active = active_workers.fetch_add(1, Ordering::Relaxed) + 1;
+            debug!(
+                target: "prewarm::worker_utilization",
+                worker_type = "prewarm",
+                active,
+                total = total_workers,
+                "worker_state_change"
+            );
             let enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 "prewarm tx",
@@ -639,6 +655,15 @@ where
             }
 
             metrics.total_runtime.record(start.elapsed());
+
+            let active = active_workers.fetch_sub(1, Ordering::Relaxed) - 1;
+            debug!(
+                target: "prewarm::worker_utilization",
+                worker_type = "prewarm",
+                active,
+                total = total_workers,
+                "worker_state_change"
+            );
         }
 
         // send a message to the main task to flag that we're done
