@@ -620,8 +620,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
     > + Send {
         async move {
             // First, try the RPC cache for O(1) lookup of recently cached blocks
-            if let Some((block_hash, tx_index)) = self.cache().get_transaction_by_hash(hash).await &&
-                let Ok(Some(block)) = self.cache().get_recovered_block(block_hash).await &&
+            if let Some((block, tx_index)) = self.cache().get_transaction_by_hash(hash).await &&
                 let Some(tx) = block.body().transactions().get(tx_index)
             {
                 let transaction = tx
@@ -632,7 +631,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                 return Ok(Some(TransactionSource::Block {
                     transaction,
                     index: tx_index as u64,
-                    block_hash,
+                    block_hash: block.hash(),
                     block_number: block.number(),
                     base_fee: block.base_fee_per_gas(),
                 }));
