@@ -36,7 +36,7 @@ use reth_primitives_traits::{
     SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::{OverlayStateProvider, OverlayStateProviderFactory},
+    providers::{CloneTx, OverlayStateProvider, OverlayStateProviderFactory},
     BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
     StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
@@ -145,7 +145,7 @@ where
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + BlockNumReader
-                          + Clone,
+                          + CloneTx,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
         + BlockNumReader
@@ -502,7 +502,8 @@ where
 
         // Create overlay provider once for state root computation (parallel/serial paths).
         // The StateRootTask path doesn't need this since it uses the provider passed to spawn.
-        let overlay_provider_for_root = if matches!(strategy, StateRootStrategy::StateRootTask) {
+        let mut overlay_provider_for_root = if matches!(strategy, StateRootStrategy::StateRootTask)
+        {
             None
         } else {
             Some(ensure_ok_post_block!(overlay_factory.database_provider_ro(), block))
@@ -535,7 +536,7 @@ where
             StateRootStrategy::Parallel => {
                 debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
                 let overlay_provider = overlay_provider_for_root
-                    .clone()
+                    .take()
                     .expect("overlay_provider_for_root is Some for Parallel strategy");
                 match self.compute_state_root_parallel(overlay_provider, &hashed_state) {
                     Ok(result) => {
@@ -572,9 +573,9 @@ where
                 self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
             }
 
-            // For fallback, we need a provider. If we already created one (Parallel strategy that
-            // failed), reuse it. Otherwise create one now.
-            let overlay_provider = match overlay_provider_for_root {
+            // For fallback, we need a provider. If we have one left (StateRootTask path or
+            // Synchronous path), reuse it. Otherwise create one now (Parallel path consumed it).
+            let overlay_provider = match overlay_provider_for_root.take() {
                 Some(p) => p,
                 None => ensure_ok_post_block!(overlay_factory.database_provider_ro(), block),
             };
@@ -1261,7 +1262,7 @@ where
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + BlockNumReader
-                          + Clone,
+                          + CloneTx,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader

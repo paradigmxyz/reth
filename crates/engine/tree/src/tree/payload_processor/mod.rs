@@ -30,14 +30,12 @@ use reth_evm::{
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory, StateReader,
+    providers::CloneTx, BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory,
+    StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
-use reth_trie_parallel::{
-    proof_task::{ProofTaskCtx, ProofWorkerHandle},
-    root::ParallelStateRootError,
-};
+use reth_trie_parallel::{proof_task::ProofWorkerHandle, root::ParallelStateRootError};
 use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
@@ -228,7 +226,7 @@ where
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-        Prov: TrieCursorFactory + HashedCursorFactory + Clone + Send + 'static,
+        Prov: TrieCursorFactory + HashedCursorFactory + CloneTx + Send + 'static,
     {
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx, transaction_count_hint) =
@@ -268,17 +266,17 @@ where
         };
 
         // Create and spawn the storage proof task
-        let task_ctx = ProofTaskCtx::new(multiproof_provider);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
         let v2_proofs_enabled = config.enable_proof_v2();
         let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
-            task_ctx,
+            multiproof_provider,
             storage_worker_count,
             account_worker_count,
             v2_proofs_enabled,
-        );
+        )
+        .expect("failed to create proof worker handle");
 
         let multi_proof_task = MultiProofTask::new(
             proof_handle.clone(),

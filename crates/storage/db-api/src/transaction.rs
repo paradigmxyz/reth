@@ -24,6 +24,14 @@ pub trait DbTx: Clone + Debug + Send {
     /// `DupCursor` type for this read-only transaction
     type DupCursor<T: DupSort>: DbDupCursorRO<T> + DbCursorRO<T> + Send + Sync;
 
+    /// Creates a deep clone of the read-only transaction that reads the same MVCC snapshot.
+    ///
+    /// This method is only valid for read-only transactions. Write transactions
+    /// cannot be cloned and will return an error.
+    fn clone_tx(&self) -> Result<Self, DatabaseError>
+    where
+        Self: Sized;
+
     /// Get value by an owned key
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, DatabaseError>;
     /// Get value by a reference to the encoded key, especially useful for "raw" keys

@@ -314,6 +314,15 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     type Cursor<T: Table> = Cursor<K, T>;
     type DupCursor<T: DupSort> = Cursor<K, T>;
 
+    fn clone_tx(&self) -> Result<Self, DatabaseError> {
+        let cloned_inner = self.inner.clone_tx().map_err(|e| DatabaseError::Open(e.into()))?;
+        Ok(Self {
+            inner: cloned_inner,
+            dbis: self.dbis.clone(),
+            metrics_handler: self.metrics_handler.clone(),
+        })
+    }
+
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
         self.get_by_encoded_key::<T>(&key.encode())
     }

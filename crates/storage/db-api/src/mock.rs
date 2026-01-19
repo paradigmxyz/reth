@@ -69,6 +69,10 @@ impl DbTx for TxMock {
     type Cursor<T: Table> = CursorMock;
     type DupCursor<T: DupSort> = CursorMock;
 
+    fn clone_tx(&self) -> Result<Self, DatabaseError> {
+        Ok(Self::default())
+    }
+
     /// Retrieves a value by key from the specified table.
     ///
     /// **Mock behavior**: Always returns `None` regardless of the key.

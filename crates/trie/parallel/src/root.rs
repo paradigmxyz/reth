@@ -5,7 +5,7 @@ use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::{StateProofError, StorageRootError};
-use reth_provider::ProviderError;
+use reth_provider::{providers::CloneTx, ProviderError};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
@@ -60,7 +60,7 @@ impl<Provider> ParallelStateRoot<Provider> {
 
 impl<Provider> ParallelStateRoot<Provider>
 where
-    Provider: TrieCursorFactory + HashedCursorFactory + Clone + Send + 'static,
+    Provider: TrieCursorFactory + HashedCursorFactory + CloneTx + Send + 'static,
 {
     /// Calculate incremental state root in parallel.
     pub fn incremental_root(self) -> Result<B256, ParallelStateRootError> {
@@ -100,7 +100,7 @@ where
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
-            let provider = self.provider.clone();
+            let provider = self.provider.clone_tx()?;
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
@@ -248,6 +248,12 @@ impl From<ParallelStateRootError> for ProviderError {
 impl From<alloy_rlp::Error> for ParallelStateRootError {
     fn from(error: alloy_rlp::Error) -> Self {
         Self::Provider(ProviderError::Rlp(error))
+    }
+}
+
+impl From<DatabaseError> for ParallelStateRootError {
+    fn from(error: DatabaseError) -> Self {
+        Self::Provider(ProviderError::Database(error))
     }
 }
 

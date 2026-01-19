@@ -42,7 +42,7 @@ use alloy_rlp::{BufMut, Encodable};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
-use reth_provider::{ProviderError, ProviderResult};
+use reth_provider::{providers::CloneTx, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedCursorMetricsCache, InstrumentedHashedCursor},
@@ -117,15 +117,19 @@ impl ProofWorkerHandle {
     /// - `storage_worker_count`: Number of storage workers to spawn
     /// - `account_worker_count`: Number of account workers to spawn
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if cloning the provider for any worker fails (e.g., no reader slots).
     pub fn new<Provider>(
         executor: Handle,
-        task_ctx: ProofTaskCtx<Provider>,
+        provider: Provider,
         storage_worker_count: usize,
         account_worker_count: usize,
         v2_proofs_enabled: bool,
-    ) -> Self
+    ) -> Result<Self, DatabaseError>
     where
-        Provider: TrieCursorFactory + HashedCursorFactory + Clone + Send + 'static,
+        Provider: TrieCursorFactory + HashedCursorFactory + CloneTx + Send + 'static,
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
@@ -148,10 +152,10 @@ impl ProofWorkerHandle {
         let parent_span =
             debug_span!(target: "trie::proof_task", "storage proof workers", ?storage_worker_count)
                 .entered();
-        // Spawn storage workers
+        // Spawn storage workers - clone provider for each before spawning
         for worker_id in 0..storage_worker_count {
             let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
-            let task_ctx_clone = task_ctx.clone();
+            let task_ctx = ProofTaskCtx::new(provider.clone_tx()?);
             let work_rx_clone = storage_work_rx.clone();
             let storage_available_workers_clone = storage_available_workers.clone();
             let cached_storage_roots = cached_storage_roots.clone();
@@ -164,7 +168,7 @@ impl ProofWorkerHandle {
 
                 let _guard = span.enter();
                 let worker = StorageProofWorker::new(
-                    task_ctx_clone,
+                    task_ctx,
                     work_rx_clone,
                     worker_id,
                     storage_available_workers_clone,
@@ -190,10 +194,10 @@ impl ProofWorkerHandle {
         let parent_span =
             debug_span!(target: "trie::proof_task", "account proof workers", ?account_worker_count)
                 .entered();
-        // Spawn account workers
+        // Spawn account workers - clone provider for each before spawning
         for worker_id in 0..account_worker_count {
             let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
-            let task_ctx_clone = task_ctx.clone();
+            let task_ctx = ProofTaskCtx::new(provider.clone_tx()?);
             let work_rx_clone = account_work_rx.clone();
             let storage_work_tx_clone = storage_work_tx.clone();
             let account_available_workers_clone = account_available_workers.clone();
@@ -207,7 +211,7 @@ impl ProofWorkerHandle {
 
                 let _guard = span.enter();
                 let worker = AccountProofWorker::new(
-                    task_ctx_clone,
+                    task_ctx,
                     work_rx_clone,
                     worker_id,
                     storage_work_tx_clone,
@@ -230,7 +234,7 @@ impl ProofWorkerHandle {
         }
         drop(parent_span);
 
-        Self {
+        Ok(Self {
             storage_work_tx,
             account_work_tx,
             storage_available_workers,
@@ -238,7 +242,7 @@ impl ProofWorkerHandle {
             storage_worker_count,
             account_worker_count,
             v2_proofs_enabled,
-        }
+        })
     }
 
     /// Returns whether V2 storage proofs are enabled for this worker pool.
@@ -385,8 +389,11 @@ impl ProofWorkerHandle {
     }
 }
 
-/// Data used for initializing cursor factories that is shared across all proof worker instances.
-#[derive(Clone, Debug)]
+/// Data used for initializing cursor factories for a single proof worker instance.
+///
+/// Each worker receives its own `ProofTaskCtx` with an independent provider that reads
+/// from the same MVCC snapshot as all other workers.
+#[derive(Debug)]
 pub struct ProofTaskCtx<Provider> {
     /// The provider that implements `TrieCursorFactory` and `HashedCursorFactory`.
     provider: Provider,
@@ -396,6 +403,16 @@ impl<Provider> ProofTaskCtx<Provider> {
     /// Creates a new [`ProofTaskCtx`] with the given provider.
     pub const fn new(provider: Provider) -> Self {
         Self { provider }
+    }
+}
+
+impl<Provider: CloneTx> ProofTaskCtx<Provider> {
+    /// Creates a deep clone of the provider with an independent MVCC snapshot.
+    ///
+    /// Each proof worker should call this at startup to get its own transaction handle
+    /// that reads from the same database snapshot as all other workers.
+    fn clone_provider(&self) -> Result<Provider, DatabaseError> {
+        self.provider.clone_tx()
     }
 }
 
@@ -765,7 +782,7 @@ struct StorageProofWorker<Provider> {
 
 impl<Provider> StorageProofWorker<Provider>
 where
-    Provider: TrieCursorFactory + HashedCursorFactory + Clone,
+    Provider: TrieCursorFactory + HashedCursorFactory + CloneTx,
 {
     /// Creates a new storage proof worker.
     const fn new(
@@ -815,8 +832,8 @@ where
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        // Clone provider from task context
-        let provider = self.task_ctx.provider.clone();
+        // Create a deep clone of the provider with an independent MVCC snapshot
+        let provider = self.task_ctx.clone_provider().map_err(ProviderError::Database)?;
         let proof_tx = ProofTaskTx::new(provider, self.worker_id);
 
         trace!(
@@ -1057,7 +1074,7 @@ struct AccountProofWorker<Provider> {
 
 impl<Provider> AccountProofWorker<Provider>
 where
-    Provider: TrieCursorFactory + HashedCursorFactory + Clone,
+    Provider: TrieCursorFactory + HashedCursorFactory + CloneTx,
 {
     /// Creates a new account proof worker.
     #[allow(clippy::too_many_arguments)]
@@ -1103,8 +1120,8 @@ where
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        // Clone provider from task context
-        let provider = self.task_ctx.provider.clone();
+        // Create a deep clone of the provider with an independent MVCC snapshot
+        let provider = self.task_ctx.clone_provider().map_err(ProviderError::Database)?;
         let proof_tx = ProofTaskTx::new(provider, self.worker_id);
 
         trace!(

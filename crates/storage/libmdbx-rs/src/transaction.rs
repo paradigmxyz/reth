@@ -287,6 +287,34 @@ where
     }
 }
 
+impl<K> Transaction<K>
+where
+    K: TransactionKind,
+{
+    /// Creates a deep clone of the transaction that reads the same MVCC snapshot.
+    ///
+    /// This uses the MDBX `mdbx_txn_clone` API to create a new transaction handle
+    /// that reads the same database snapshot as the original transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The transaction is a write transaction (only read-only transactions can be cloned)
+    /// - The MVCC snapshot is too old or there are no available reader slots
+    pub fn clone_tx(&self) -> Result<Self> {
+        if !K::IS_READ_ONLY {
+            return Err(Error::Access);
+        }
+        self.txn_execute(|txn| {
+            let mut clone_txn: *mut ffi::MDBX_txn = ptr::null_mut();
+            unsafe {
+                mdbx_result(ffi::mdbx_txn_clone(txn, &mut clone_txn, ptr::null_mut()))?;
+            }
+            Ok(Self::new_from_ptr(self.env().clone(), clone_txn))
+        })?
+    }
+}
+
 impl<K> fmt::Debug for Transaction<K>
 where
     K: TransactionKind,
@@ -504,27 +532,6 @@ impl Transaction<RO> {
         mdbx_result(unsafe { ffi::mdbx_dbi_close(self.env().env_ptr(), dbi) })?;
 
         Ok(())
-    }
-
-    /// Creates a deep clone of the read-only transaction that reads the same MVCC snapshot.
-    ///
-    /// This uses the MDBX `mdbx_txn_clone` API to create a new transaction handle
-    /// that reads the same database snapshot as the original transaction. Unlike the standard
-    /// `Clone` implementation which shares the underlying transaction handle, this creates
-    /// a completely independent transaction.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the transaction cannot be cloned, for example if the
-    /// MVCC snapshot is too old or if there are no available reader slots.
-    pub fn clone_tx(&self) -> Result<Self> {
-        self.txn_execute(|txn| {
-            let mut clone_txn: *mut ffi::MDBX_txn = ptr::null_mut();
-            unsafe {
-                mdbx_result(ffi::mdbx_txn_clone(txn, &mut clone_txn, ptr::null_mut()))?;
-            }
-            Ok(Self::new_from_ptr(self.env().clone(), clone_txn))
-        })?
     }
 }
 

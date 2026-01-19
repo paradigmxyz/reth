@@ -517,6 +517,31 @@ where
     }
 }
 
+/// Trait for providers that can create deep clones with independent MVCC snapshots.
+///
+/// This is used for proof workers that need to read from the same database snapshot
+/// concurrently without sharing the same underlying transaction handle.
+pub trait CloneTx: Sized {
+    /// Creates a deep clone of this provider with a new MVCC snapshot.
+    ///
+    /// The cloned provider reads from the same database snapshot as the original
+    /// but has its own independent transaction handle.
+    fn clone_tx(&self) -> Result<Self, DatabaseError>;
+}
+
+impl<Provider> CloneTx for OverlayStateProvider<Provider>
+where
+    Provider: DBProvider + CloneTx,
+{
+    fn clone_tx(&self) -> Result<Self, DatabaseError> {
+        Ok(Self {
+            provider: self.provider.clone_tx()?,
+            trie_updates: Arc::clone(&self.trie_updates),
+            hashed_post_state: Arc::clone(&self.hashed_post_state),
+        })
+    }
+}
+
 impl<Provider> TrieCursorFactory for OverlayStateProvider<Provider>
 where
     Provider: DBProvider,
