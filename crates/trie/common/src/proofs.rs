@@ -422,23 +422,8 @@ impl DecodedMultiProof {
         self.extend(other);
     }
 
-    /// Extends this multiproof with multiple others, reserving capacity upfront for efficiency.
-    ///
-    /// This is more efficient than calling [`extend`](Self::extend) repeatedly when merging
-    /// many proofs, as it calculates total capacity needed and reserves once.
+    /// Extends this multiproof with multiple others.
     pub fn extend_batch(&mut self, others: impl IntoIterator<Item = Self>) {
-        let others: Vec<_> = others.into_iter().collect();
-        if others.is_empty() {
-            return;
-        }
-
-        // Calculate total capacity needed
-        let total_masks: usize = others.iter().map(|o| o.branch_node_masks.len()).sum();
-        let total_storages: usize = others.iter().map(|o| o.storages.len()).sum();
-
-        self.branch_node_masks.reserve(total_masks);
-        self.storages.reserve(total_storages);
-
         for other in others {
             self.extend(other);
         }
