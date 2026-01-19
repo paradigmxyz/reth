@@ -130,6 +130,7 @@ members = [
     "crates/storage/nippy-jar/",
     "crates/storage/provider/",
     "crates/storage/storage-api/",
+    "crates/storage/storage-bloom/",
     "crates/storage/zstd-compressors/",
     "crates/tasks/",
     "crates/tokio-util/",
@@ -455,6 +456,7 @@ reth-stateless = { path = "crates/stateless", default-features = false }
 reth-static-file = { path = "crates/static-file/static-file" }
 reth-static-file-types = { path = "crates/static-file/types", default-features = false }
 reth-storage-api = { path = "crates/storage/storage-api", default-features = false }
+reth-storage-bloom = { path = "crates/storage/storage-bloom" }
 reth-storage-errors = { path = "crates/storage/errors", default-features = false }
 reth-tasks = { path = "crates/tasks" }
 reth-testing-utils = { path = "testing/testing-utils" }
