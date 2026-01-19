@@ -9,7 +9,7 @@ use alloy_trie::{nodes::TrieNode, proof::DecodedProofNodes};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use reth_trie_common::{BranchNodeMasksMap, DecodedMultiProof, DecodedStorageMultiProof, Nibbles};
 
-/// Baseline implementation without reserve() calls - for comparison
+/// Baseline implementation without `reserve()` calls - for comparison
 fn extend_baseline(base: &mut DecodedMultiProof, other: DecodedMultiProof) {
     base.account_subtree.extend_from(other.account_subtree);
     // NO reserve call
@@ -51,7 +51,7 @@ fn random_nibbles(seed: u64) -> Nibbles {
     Nibbles::unpack(random_b256(seed))
 }
 
-/// Create a mock DecodedStorageMultiProof with the given number of entries
+/// Create a mock [`DecodedStorageMultiProof`] with the given number of entries
 fn create_storage_multiproof(num_entries: usize, seed: u64) -> DecodedStorageMultiProof {
     let mut subtree = DecodedProofNodes::default();
     let mut branch_node_masks = BranchNodeMasksMap::default();
@@ -65,7 +65,7 @@ fn create_storage_multiproof(num_entries: usize, seed: u64) -> DecodedStorageMul
     DecodedStorageMultiProof { root: random_b256(seed), subtree, branch_node_masks }
 }
 
-/// Create a mock DecodedMultiProof with the given number of accounts and storage entries per
+/// Create a mock [`DecodedMultiProof`] with the given number of accounts and storage entries per
 /// account
 fn create_multiproof(
     num_accounts: usize,
@@ -148,7 +148,7 @@ fn bench_extend(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark extend_swap with varying sizes - baseline extend vs swap-extend
+/// Benchmark `extend_swap` with varying sizes - baseline extend vs swap-extend
 fn bench_extend_swap(c: &mut Criterion) {
     let mut group = c.benchmark_group("DecodedMultiProof::extend_swap");
     group.sample_size(50);
@@ -201,7 +201,7 @@ fn bench_extend_swap(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark extend_batch vs sequential extend
+/// Benchmark `extend_batch` vs sequential extend
 fn bench_extend_batch(c: &mut Criterion) {
     let mut group = c.benchmark_group("DecodedMultiProof::extend_batch");
     group.sample_size(50);

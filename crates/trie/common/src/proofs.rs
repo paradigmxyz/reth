@@ -415,9 +415,9 @@ impl DecodedMultiProof {
     pub fn extend_swap(&mut self, mut other: Self) {
         // Swap if other is larger to minimize rehashing
         if other.storages.len() > self.storages.len() {
-            std::mem::swap(&mut self.account_subtree, &mut other.account_subtree);
-            std::mem::swap(&mut self.branch_node_masks, &mut other.branch_node_masks);
-            std::mem::swap(&mut self.storages, &mut other.storages);
+            core::mem::swap(&mut self.account_subtree, &mut other.account_subtree);
+            core::mem::swap(&mut self.branch_node_masks, &mut other.branch_node_masks);
+            core::mem::swap(&mut self.storages, &mut other.storages);
         }
         self.extend(other);
     }
