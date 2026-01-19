@@ -42,7 +42,7 @@ use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_db_common::init::{init_genesis_with_settings, InitStorageError};
+use reth_db_common::init::{init_genesis_with_overrides, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
@@ -68,7 +68,7 @@ use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
     ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
-    StaticFileProviderFactory,
+    StaticFileProviderFactory, StorageSettings,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -678,19 +678,19 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
-        init_genesis_with_settings(
-            self.provider_factory(),
-            self.node_config().storage.to_settings(),
-        )?;
+        self.init_genesis()?;
         Ok(self)
     }
 
-    /// Write the genesis block and state if it has not already been written
+    /// Write the genesis block and state if it has not already been written.
+    ///
+    /// Validates that any explicitly set CLI storage flags match the stored settings.
     pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
-        init_genesis_with_settings(
-            self.provider_factory(),
-            self.node_config().storage.to_settings(),
-        )
+        let storage_args = &self.node_config().storage;
+        let overrides = storage_args.to_overrides();
+        let settings = storage_args.to_settings(StorageSettings::legacy());
+
+        init_genesis_with_overrides(self.provider_factory(), settings, overrides)
     }
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the

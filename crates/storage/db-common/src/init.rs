@@ -15,9 +15,10 @@ use reth_primitives_traits::{
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
     BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
-    HashingWriter, HeaderProvider, HistoryWriter, MetadataWriter, OriginalValuesKnown,
-    ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
-    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
+    HashingWriter, HeaderProvider, HistoryWriter, MetadataProvider, MetadataWriter,
+    OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter,
+    StateWriteConfig, StateWriter, StaticFileProviderFactory, StorageSettings,
+    StorageSettingsCache, StorageSettingsMismatch, StorageSettingsOverrides, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -75,6 +76,15 @@ pub enum InitStorageError {
     /// State root doesn't match the expected one.
     #[error("state root mismatch: {_0}")]
     StateRootMismatch(GotExpected<B256>),
+    /// CLI storage settings don't match the stored database settings.
+    #[error("{_0}")]
+    StorageSettingsMismatch(StorageSettingsMismatch),
+}
+
+impl From<StorageSettingsMismatch> for InitStorageError {
+    fn from(error: StorageSettingsMismatch) -> Self {
+        Self::StorageSettingsMismatch(error)
+    }
 }
 
 impl From<DatabaseError> for InitStorageError {
@@ -92,6 +102,7 @@ where
         + StageCheckpointReader
         + BlockHashReader
         + StorageSettingsCache,
+    PF::Provider: MetadataProvider,
     PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
         + StageCheckpointWriter
         + HistoryWriter
@@ -100,6 +111,7 @@ where
         + StateWriter
         + TrieWriter
         + MetadataWriter
+        + MetadataProvider
         + ChainSpecProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
@@ -115,6 +127,9 @@ where
 }
 
 /// Write the genesis block if it has not already been written with [`StorageSettings`].
+///
+/// This is a convenience wrapper around [`init_genesis_with_overrides`] that does not validate
+/// any CLI overrides against stored settings.
 pub fn init_genesis_with_settings<PF>(
     factory: &PF,
     genesis_storage_settings: StorageSettings,
@@ -126,6 +141,7 @@ where
         + StageCheckpointReader
         + BlockHashReader
         + StorageSettingsCache,
+    PF::Provider: MetadataProvider,
     PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
         + StageCheckpointWriter
         + HistoryWriter
@@ -134,6 +150,44 @@ where
         + StateWriter
         + TrieWriter
         + MetadataWriter
+        + MetadataProvider
+        + ChainSpecProvider
+        + AsRef<PF::ProviderRW>,
+    PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
+{
+    init_genesis_with_overrides(
+        factory,
+        genesis_storage_settings,
+        StorageSettingsOverrides::default(),
+    )
+}
+
+/// Write the genesis block if it has not already been written with [`StorageSettings`].
+///
+/// If the genesis block already exists, validates that any explicitly set CLI overrides
+/// match the stored settings. Returns an error if there's a mismatch.
+pub fn init_genesis_with_overrides<PF>(
+    factory: &PF,
+    genesis_storage_settings: StorageSettings,
+    overrides: StorageSettingsOverrides,
+) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
+        + ChainSpecProvider
+        + StageCheckpointReader
+        + BlockHashReader
+        + StorageSettingsCache,
+    PF::Provider: MetadataProvider,
+    PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
+        + StageCheckpointWriter
+        + HistoryWriter
+        + HeaderProvider
+        + HashingWriter
+        + StateWriter
+        + TrieWriter
+        + MetadataWriter
+        + MetadataProvider
         + ChainSpecProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
@@ -157,6 +211,14 @@ where
                 if factory.get_stage_checkpoint(StageId::Headers)?.is_none() {
                     error!(target: "reth::storage", "Genesis header found on static files, but database is uninitialized.");
                     return Err(InitStorageError::UninitializedDatabase)
+                }
+
+                // Validate CLI overrides against stored settings if any are explicitly set
+                if overrides.any_set() {
+                    let provider = factory.database_provider_ro()?;
+                    let stored_settings =
+                        provider.storage_settings()?.unwrap_or_else(StorageSettings::legacy);
+                    stored_settings.validate_overrides(&overrides)?;
                 }
 
                 debug!("Genesis already written, skipping.");

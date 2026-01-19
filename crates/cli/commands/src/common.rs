@@ -9,7 +9,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::noop::NoopConsensus;
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
-use reth_db_common::init::init_genesis_with_settings;
+use reth_db_common::init::init_genesis_with_overrides;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_eth_wire::NetPrimitivesFor;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
@@ -27,7 +27,7 @@ use reth_provider::{
         BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
         StaticFileProviderBuilder,
     },
-    ProviderFactory, StaticFileProviderFactory,
+    ProviderFactory, StaticFileProviderFactory, StorageSettings,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
@@ -131,7 +131,9 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
-            init_genesis_with_settings(&provider_factory, self.storage.to_settings())?;
+            let overrides = self.storage.to_overrides();
+            let settings = self.storage.to_settings(StorageSettings::legacy());
+            init_genesis_with_overrides(&provider_factory, settings, overrides)?;
         }
 
         Ok(Environment { config, provider_factory, data_dir })

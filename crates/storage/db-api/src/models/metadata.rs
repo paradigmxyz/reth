@@ -208,15 +208,12 @@ impl std::fmt::Display for StorageSettingsMismatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,
-            "Storage settings mismatch: database was initialized with different RocksDB storage layout.\n"
+            "Storage settings mismatch: database was initialized with different RocksDB storage layout."
         )?;
+        writeln!(f)?;
         writeln!(f, "Conflicts:")?;
         for m in &self.mismatches {
-            writeln!(
-                f,
-                "  - {}: db={}, cli={} ({}={})",
-                m.name, m.db_value, m.cli_value, m.flag, m.cli_value
-            )?;
+            writeln!(f, "  - {} {}: db={}, cli={}", m.flag, m.name, m.db_value, m.cli_value)?;
         }
         writeln!(f)?;
         writeln!(f, "These flags are genesis-only. To proceed:")?;
