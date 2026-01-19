@@ -15,6 +15,7 @@ use schnellru::{ByLength, Limiter, LruMap};
 use std::{
     future::Future,
     pin::Pin,
+    rc::Rc,
     sync::Arc,
     task::{Context, Poll},
 };
@@ -361,7 +362,22 @@ pub(crate) struct EthStateCacheService<
     /// This restricts the max concurrent fetch tasks at the same time.
     rate_limiter: Arc<Semaphore>,
     /// LRU index mapping transaction hashes to their block hash and index within the block.
-    tx_hash_index: LruMap<TxHash, (B256, usize), ByLength>,
+    tx_hash_index: LruMap<TxHash, (Rc<B256>, usize), ByLength>,
+}
+
+// SAFETY: The `Rc<B256>` in `tx_hash_index` is only ever accessed from within the single
+// `EthStateCacheService` task. It is created in `index_block_transactions`, accessed in the
+// `GetTransactionByHash` handler, and removed in `remove_block_transactions` - all within
+// the same task's poll loop.
+unsafe impl<Provider, Tasks, LimitBlocks, LimitReceipts, LimitHeaders> Send
+    for EthStateCacheService<Provider, Tasks, LimitBlocks, LimitReceipts, LimitHeaders>
+where
+    Provider: BlockReader + Send,
+    Tasks: Send,
+    LimitBlocks: Limiter<B256, Arc<RecoveredBlock<Provider::Block>>> + Send,
+    LimitReceipts: Limiter<B256, Arc<Vec<Provider::Receipt>>> + Send,
+    LimitHeaders: Limiter<B256, Provider::Header> + Send,
+{
 }
 
 impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
@@ -371,9 +387,9 @@ where
 {
     /// Indexes all transactions in a block by transaction hash.
     fn index_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
-        let block_hash = block.hash();
+        let block_hash = Rc::new(block.hash());
         for (tx_idx, tx) in block.body().transactions().iter().enumerate() {
-            self.tx_hash_index.insert(*tx.tx_hash(), (block_hash, tx_idx));
+            self.tx_hash_index.insert(*tx.tx_hash(), (Rc::clone(&block_hash), tx_idx));
         }
     }
 
@@ -664,8 +680,10 @@ where
                         CacheAction::GetTransactionByHash { tx_hash, response_tx } => {
                             let result =
                                 this.tx_hash_index.get(&tx_hash).and_then(|(block_hash, idx)| {
-                                    let block = this.full_block_cache.get(block_hash).cloned()?;
-                                    let receipts = this.receipts_cache.get(block_hash).cloned();
+                                    let block =
+                                        this.full_block_cache.get(block_hash.as_ref()).cloned()?;
+                                    let receipts =
+                                        this.receipts_cache.get(block_hash.as_ref()).cloned();
                                     Some(CachedTransaction::new(block, *idx, receipts))
                                 });
                             let _ = response_tx.send(result);
