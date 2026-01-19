@@ -782,7 +782,6 @@ mod tests {
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use itertools::Itertools;
     use rand::Rng;
-    use reth_chain::Chain;
     use reth_chain_state::{
         test_utils::TestBlockBuilder, CanonStateNotification, CanonStateSubscriptions,
         CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
@@ -791,7 +790,9 @@ mod tests {
     use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
-    use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
+    use reth_execution_types::{
+        BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
+    };
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SignerRecoverable};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
@@ -1348,33 +1349,24 @@ mod tests {
 
         // Send and receive commit notifications.
         let block_2 = test_block_builder.generate_random_block(1, block_hash_1).try_recover()?;
-        let chain = Chain::new(vec![block_2.clone()], ExecutionOutcome::default(), BTreeMap::new());
+        let chain = Chain::new(vec![block_2], ExecutionOutcome::default(), BTreeMap::new());
         let commit = CanonStateNotification::Commit { new: Arc::new(chain.clone()) };
         in_memory_state.notify_canon_state(commit.clone());
         let (notification_1, notification_2) = tokio::join!(rx_1.recv(), rx_2.recv());
-        // Verify both subscribers received commit notifications with matching tip
-        let n1 = notification_1.unwrap();
-        let n2 = notification_2.unwrap();
-        assert_eq!(*n1.tip(), block_2);
-        assert_eq!(*n2.tip(), block_2);
+        assert_eq!(notification_1, Ok(commit.clone()));
+        assert_eq!(notification_2, Ok(commit.clone()));
 
         // Send and receive re-org notifications.
         let block_3 = test_block_builder.generate_random_block(1, block_hash_1).try_recover()?;
         let block_4 = test_block_builder.generate_random_block(2, block_3.hash()).try_recover()?;
-        let new_chain = Chain::new(
-            vec![block_3, block_4.clone()],
-            ExecutionOutcome::default(),
-            BTreeMap::new(),
-        );
+        let new_chain =
+            Chain::new(vec![block_3, block_4], ExecutionOutcome::default(), BTreeMap::new());
         let re_org =
             CanonStateNotification::Reorg { old: Arc::new(chain), new: Arc::new(new_chain) };
         in_memory_state.notify_canon_state(re_org.clone());
         let (notification_1, notification_2) = tokio::join!(rx_1.recv(), rx_2.recv());
-        // Verify both subscribers received reorg notifications with matching tip
-        let n1 = notification_1.unwrap();
-        let n2 = notification_2.unwrap();
-        assert_eq!(*n1.tip(), block_4);
-        assert_eq!(*n2.tip(), block_4);
+        assert_eq!(notification_1, Ok(re_org.clone()));
+        assert_eq!(notification_2, Ok(re_org.clone()));
 
         Ok(())
     }

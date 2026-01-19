@@ -249,6 +249,14 @@ impl<T> ExecutionOutcome<T> {
         &self.receipts[index]
     }
 
+    /// Returns an iterator over receipt slices, one per block.
+    ///
+    /// This is a more ergonomic alternative to `receipts()` that yields slices
+    /// instead of requiring indexing into a nested `Vec<Vec<T>>`.
+    pub fn receipts_iter(&self) -> impl Iterator<Item = &[T]> + '_ {
+        self.receipts.iter().map(|v| v.as_slice())
+    }
+
     /// Is execution outcome empty.
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
@@ -564,8 +572,8 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::TxType;
     use alloy_primitives::{bytes, Address, LogData, B256};
-    use reth_ethereum_primitives::TxType;
 
     #[test]
     fn test_initialization() {

@@ -7747,30 +7747,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-chain"
-version = "1.10.0"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "arbitrary",
- "bincode 1.3.3",
- "metrics",
- "parking_lot",
- "rand 0.9.2",
- "reth-ethereum-primitives",
- "reth-execution-types",
- "reth-metrics",
- "reth-primitives-traits",
- "reth-trie",
- "reth-trie-common",
- "revm",
- "serde",
- "serde_with",
- "tracing",
-]
-
-[[package]]
 name = "reth-chain-state"
 version = "1.10.0"
 dependencies = [
@@ -7785,7 +7761,6 @@ dependencies = [
  "parking_lot",
  "pin-project",
  "rand 0.9.2",
- "reth-chain",
  "reth-chainspec",
  "reth-errors",
  "reth-ethereum-primitives",
@@ -8929,6 +8904,7 @@ dependencies = [
 name = "reth-execution-types"
 version = "1.10.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-evm",
  "alloy-primitives",
@@ -8982,7 +8958,6 @@ dependencies = [
  "reth-trie-common",
  "rmp-serde",
  "secp256k1 0.30.0",
- "serde_with",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
@@ -8997,7 +8972,6 @@ dependencies = [
  "alloy-eips",
  "eyre",
  "futures-util",
- "reth-chain",
  "reth-chainspec",
  "reth-config",
  "reth-consensus",
@@ -9005,6 +8979,7 @@ dependencies = [
  "reth-db-common",
  "reth-ethereum-primitives",
  "reth-evm-ethereum",
+ "reth-execution-types",
  "reth-exex",
  "reth-network",
  "reth-node-api",
@@ -9030,9 +9005,9 @@ dependencies = [
  "arbitrary",
  "bincode 1.3.3",
  "rand 0.9.2",
- "reth-chain",
  "reth-chain-state",
  "reth-ethereum-primitives",
+ "reth-execution-types",
  "reth-primitives-traits",
  "serde",
  "serde_with",
@@ -9775,7 +9750,6 @@ dependencies = [
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "op-revm",
- "reth-chain",
  "reth-chainspec",
  "reth-evm",
  "reth-execution-errors",
@@ -10226,7 +10200,6 @@ dependencies = [
  "parking_lot",
  "rand 0.9.2",
  "rayon",
- "reth-chain",
  "reth-chain-state",
  "reth-chainspec",
  "reth-codecs",
@@ -10715,12 +10688,12 @@ dependencies = [
  "metrics",
  "rand 0.9.2",
  "reqwest",
- "reth-chain",
  "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
  "reth-ethereum-primitives",
  "reth-evm",
+ "reth-execution-types",
  "reth-metrics",
  "reth-primitives-traits",
  "reth-revm",
@@ -10793,7 +10766,6 @@ dependencies = [
  "rand 0.9.2",
  "rayon",
  "reqwest",
- "reth-chain",
  "reth-chainspec",
  "reth-codecs",
  "reth-config",
@@ -10809,6 +10781,7 @@ dependencies = [
  "reth-etl",
  "reth-evm",
  "reth-evm-ethereum",
+ "reth-execution-types",
  "reth-exex",
  "reth-fs-util",
  "reth-network-p2p",
@@ -10955,7 +10928,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "auto_impl",
- "reth-chain",
  "reth-chainspec",
  "reth-db-api",
  "reth-db-models",
@@ -11114,7 +11086,6 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.2",
- "reth-chain",
  "reth-chain-state",
  "reth-chainspec",
  "reth-eth-wire-types",

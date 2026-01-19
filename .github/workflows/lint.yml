@@ -285,7 +285,7 @@ jobs:
       - run: zepter run check
 
   deny:
-    uses: ithacaxyz/ci/.github/workflows/deny.yml@main
+    uses: tempoxyz/ci/.github/workflows/deny.yml@main
 
   lint-success:
     name: lint success
