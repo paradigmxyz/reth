@@ -136,11 +136,12 @@ where
 
         info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
 
-        let rocksdb = provider.rocksdb_provider();
-        let rocksdb_batch = rocksdb.batch();
-        let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
-        load_account_history_via_writer(collector, first_sync, &mut writer)?;
-        provider.register_raw_rocksdb_batch(writer.into_raw_rocksdb_batch());
+        provider.with_rocksdb_batch(|rocksdb_batch| {
+            let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
+            load_account_history_via_writer(collector, first_sync, &mut writer)
+                .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
+            Ok(((), writer.into_raw_rocksdb_batch()))
+        })?;
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
