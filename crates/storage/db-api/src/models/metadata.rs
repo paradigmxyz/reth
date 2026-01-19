@@ -108,4 +108,123 @@ impl StorageSettings {
             self.account_history_in_rocksdb ||
             self.storages_history_in_rocksdb
     }
+
+    /// Validates that the given overrides match this settings.
+    ///
+    /// Returns `Ok(())` if all explicitly set overrides match, or an error describing
+    /// the mismatches.
+    pub fn validate_overrides(
+        &self,
+        overrides: &StorageSettingsOverrides,
+    ) -> Result<(), StorageSettingsMismatch> {
+        let mut mismatches = Vec::new();
+
+        if let Some(cli_value) = overrides
+            .transaction_hash_numbers_in_rocksdb
+            .filter(|&v| v != self.transaction_hash_numbers_in_rocksdb)
+        {
+            mismatches.push(SettingMismatch {
+                name: "transaction_hash_numbers_in_rocksdb",
+                flag: "--storage.tx-hash-in-rocksdb",
+                db_value: self.transaction_hash_numbers_in_rocksdb,
+                cli_value,
+            });
+        }
+
+        if let Some(cli_value) =
+            overrides.storages_history_in_rocksdb.filter(|&v| v != self.storages_history_in_rocksdb)
+        {
+            mismatches.push(SettingMismatch {
+                name: "storages_history_in_rocksdb",
+                flag: "--storage.storages-history-in-rocksdb",
+                db_value: self.storages_history_in_rocksdb,
+                cli_value,
+            });
+        }
+
+        if let Some(cli_value) =
+            overrides.account_history_in_rocksdb.filter(|&v| v != self.account_history_in_rocksdb)
+        {
+            mismatches.push(SettingMismatch {
+                name: "account_history_in_rocksdb",
+                flag: "--storage.account-history-in-rocksdb",
+                db_value: self.account_history_in_rocksdb,
+                cli_value,
+            });
+        }
+
+        if mismatches.is_empty() {
+            Ok(())
+        } else {
+            Err(StorageSettingsMismatch { mismatches })
+        }
+    }
 }
+
+/// Overrides for storage settings that were explicitly set via CLI.
+///
+/// `None` means the flag was not provided (use DB value), `Some(v)` means the user
+/// explicitly requested this value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StorageSettingsOverrides {
+    /// Override for `transaction_hash_numbers_in_rocksdb`.
+    pub transaction_hash_numbers_in_rocksdb: Option<bool>,
+    /// Override for `storages_history_in_rocksdb`.
+    pub storages_history_in_rocksdb: Option<bool>,
+    /// Override for `account_history_in_rocksdb`.
+    pub account_history_in_rocksdb: Option<bool>,
+}
+
+impl StorageSettingsOverrides {
+    /// Returns `true` if any override is set.
+    pub const fn any_set(&self) -> bool {
+        self.transaction_hash_numbers_in_rocksdb.is_some() ||
+            self.storages_history_in_rocksdb.is_some() ||
+            self.account_history_in_rocksdb.is_some()
+    }
+}
+
+/// A single setting mismatch between CLI and DB.
+#[derive(Debug, Clone)]
+pub struct SettingMismatch {
+    /// The setting name.
+    pub name: &'static str,
+    /// The CLI flag name.
+    pub flag: &'static str,
+    /// The value stored in the database.
+    pub db_value: bool,
+    /// The value provided via CLI.
+    pub cli_value: bool,
+}
+
+/// Error when CLI storage settings don't match database settings.
+#[derive(Debug, Clone)]
+pub struct StorageSettingsMismatch {
+    /// The list of mismatched settings.
+    pub mismatches: Vec<SettingMismatch>,
+}
+
+impl std::fmt::Display for StorageSettingsMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "Storage settings mismatch: database was initialized with different RocksDB storage layout.\n"
+        )?;
+        writeln!(f, "Conflicts:")?;
+        for m in &self.mismatches {
+            writeln!(
+                f,
+                "  - {}: db={}, cli={} ({}={})",
+                m.name, m.db_value, m.cli_value, m.flag, m.cli_value
+            )?;
+        }
+        writeln!(f)?;
+        writeln!(f, "These flags are genesis-only. To proceed:")?;
+        writeln!(f, "  1) Remove the conflicting CLI flags (recommended), or")?;
+        writeln!(f, "  2) Wipe the database and re-sync with the desired flags.")?;
+        writeln!(f)?;
+        write!(f, "Inspect current DB settings: `reth db settings get`")
+    }
+}
+
+impl std::error::Error for StorageSettingsMismatch {}

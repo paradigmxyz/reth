@@ -101,7 +101,9 @@ pub mod metadata;
 #[cfg(feature = "db-api")]
 pub use metadata::{MetadataProvider, MetadataWriter, StorageSettingsCache};
 #[cfg(feature = "db-api")]
-pub use reth_db_api::models::StorageSettings;
+pub use reth_db_api::models::{
+    SettingMismatch, StorageSettings, StorageSettingsMismatch, StorageSettingsOverrides,
+};
 
 mod full;
 pub use full::*;
