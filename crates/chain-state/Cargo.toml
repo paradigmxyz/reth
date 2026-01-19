@@ -37,6 +37,7 @@ tokio-stream = { workspace = true, features = ["sync"] }
 tracing.workspace = true
 
 # misc
+dashmap.workspace = true
 derive_more.workspace = true
 metrics.workspace = true
 parking_lot.workspace = true
@@ -87,5 +88,10 @@ test-utils = [
 
 [[bench]]
 name = "canonical_hashes_range"
+harness = false
+required-features = ["test-utils"]
+
+[[bench]]
+name = "transaction_by_hash"
 harness = false
 required-features = ["test-utils"]

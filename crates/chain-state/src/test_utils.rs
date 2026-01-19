@@ -238,6 +238,119 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         self.get_executed_block(block_number, vec![vec![]], parent_hash)
     }
 
+    /// Generates an [`ExecutedBlock`] with the given [`BlockNumber`] and a specific number of
+    /// transactions.
+    pub fn get_executed_block_with_tx_count(
+        &mut self,
+        block_number: BlockNumber,
+        parent_hash: B256,
+        num_txs: usize,
+    ) -> ExecutedBlock {
+        let block = self.generate_block_with_tx_count(block_number, parent_hash, num_txs);
+        let senders = vec![self.signer; block.body().transactions.len()];
+        let trie_data = ComputedTrieData::default();
+        ExecutedBlock::new(
+            Arc::new(RecoveredBlock::new_sealed(block, senders)),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: BundleState::default(),
+            }),
+            trie_data,
+        )
+    }
+
+    /// Generates a [`SealedBlock`] with a specific number of transactions.
+    pub fn generate_block_with_tx_count(
+        &mut self,
+        number: BlockNumber,
+        parent_hash: B256,
+        num_txs: usize,
+    ) -> SealedBlock<reth_ethereum_primitives::Block> {
+        let mock_tx = |nonce: u64| -> Recovered<_> {
+            let tx = Transaction::Eip1559(TxEip1559 {
+                chain_id: self.chain_spec.chain.id(),
+                nonce,
+                gas_limit: MIN_TRANSACTION_GAS,
+                to: Address::random().into(),
+                max_fee_per_gas: INITIAL_BASE_FEE as u128,
+                max_priority_fee_per_gas: 1,
+                ..Default::default()
+            });
+            let signature_hash = tx.signature_hash();
+            let signature = self.signer_pk.sign_hash_sync(&signature_hash).unwrap();
+
+            TransactionSigned::new_unhashed(tx, signature).with_signer(self.signer)
+        };
+
+        let signer_balance_decrease = Self::single_tx_cost() * U256::from(num_txs);
+        let transactions: Vec<Recovered<_>> = (0..num_txs)
+            .map(|_| {
+                let tx = mock_tx(self.signer_build_account_info.nonce);
+                self.signer_build_account_info.nonce += 1;
+                self.signer_build_account_info.balance -= Self::single_tx_cost();
+                tx
+            })
+            .collect();
+
+        let receipts = transactions
+            .iter()
+            .enumerate()
+            .map(|(idx, tx)| {
+                Receipt {
+                    tx_type: tx.tx_type(),
+                    success: true,
+                    cumulative_gas_used: (idx as u64 + 1) * MIN_TRANSACTION_GAS,
+                    ..Default::default()
+                }
+                .into_with_bloom()
+            })
+            .collect::<Vec<_>>();
+
+        let initial_signer_balance = U256::from(10).pow(U256::from(18));
+
+        let header = Header {
+            number,
+            parent_hash,
+            gas_used: transactions.len() as u64 * MIN_TRANSACTION_GAS,
+            mix_hash: B256::random(),
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            base_fee_per_gas: Some(INITIAL_BASE_FEE),
+            transactions_root: calculate_transaction_root(&transactions),
+            receipts_root: calculate_receipt_root(&receipts),
+            beneficiary: Address::random(),
+            state_root: state_root_unhashed([(
+                self.signer,
+                Account {
+                    balance: initial_signer_balance - signer_balance_decrease,
+                    nonce: num_txs as u64,
+                    ..Default::default()
+                }
+                .into_trie_account(EMPTY_ROOT_HASH),
+            )]),
+            timestamp: number +
+                EthereumHardfork::Cancun.activation_timestamp(self.chain_spec.chain).unwrap(),
+            withdrawals_root: Some(calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            parent_beacon_block_root: Some(B256::random()),
+            ..Default::default()
+        };
+
+        SealedBlock::from_sealed_parts(
+            SealedHeader::seal_slow(header),
+            BlockBody {
+                transactions: transactions.into_iter().map(|tx| tx.into_inner()).collect(),
+                ommers: Vec::new(),
+                withdrawals: Some(vec![].into()),
+            },
+        )
+    }
+
     /// Generates a range of executed blocks with ascending block numbers.
     pub fn get_executed_blocks(
         &mut self,

@@ -4,9 +4,13 @@ use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainInfoTracker, ComputedTrieData, DeferredTrieData, MemoryOverlayStateProvider,
 };
-use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
+use alloy_consensus::{
+    transaction::{TransactionMeta, TxHashRef},
+    BlockHeader,
+};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, BlockNumber, TxHash, B256};
+use dashmap::DashMap;
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
@@ -147,6 +151,8 @@ pub(crate) struct CanonicalInMemoryStateInner<N: NodePrimitives> {
     pub(crate) in_memory_state: InMemoryState<N>,
     /// A broadcast stream that emits events when the canonical chain is updated.
     pub(crate) canon_state_notification_sender: CanonStateNotificationSender<N>,
+    /// Cache mapping transaction hashes to (`block_hash`, `tx_index`) for O(1) lookups.
+    pub(crate) tx_cache: DashMap<TxHash, (B256, usize)>,
 }
 
 impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
@@ -158,6 +164,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
             let mut blocks = self.in_memory_state.blocks.write();
             numbers.clear();
             blocks.clear();
+            self.tx_cache.clear();
             self.in_memory_state.pending.send_modify(|p| {
                 p.take();
             });
@@ -187,6 +194,15 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         finalized: Option<SealedHeader<N::BlockHeader>>,
         safe: Option<SealedHeader<N::BlockHeader>>,
     ) -> Self {
+        // Build tx cache from initial blocks
+        let tx_cache = DashMap::new();
+        for (block_hash, block_state) in &blocks {
+            let recovered = block_state.block_ref().recovered_block();
+            for (tx_idx, tx) in recovered.body().transactions().iter().enumerate() {
+                tx_cache.insert(*tx.tx_hash(), (*block_hash, tx_idx));
+            }
+        }
+
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
         let header = in_memory_state.head_state().map_or_else(SealedHeader::default, |state| {
             state.block_ref().recovered_block().clone_sealed_header()
@@ -200,6 +216,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                 chain_info_tracker,
                 in_memory_state,
                 canon_state_notification_sender,
+                tx_cache,
             }),
         }
     }
@@ -224,6 +241,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             chain_info_tracker,
             in_memory_state,
             canon_state_notification_sender,
+            tx_cache: DashMap::new(),
         };
 
         Self { inner: Arc::new(inner) }
@@ -278,6 +296,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                 let number = block.recovered_block().number();
                 blocks.remove(&hash);
                 numbers.remove(&number);
+
+                // remove transactions from cache
+                for tx in block.recovered_block().body().transactions() {
+                    self.inner.tx_cache.remove(tx.tx_hash());
+                }
             }
 
             // insert the new blocks
@@ -286,6 +309,18 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                 let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
+
+                // add transactions to cache
+                for (tx_idx, tx) in block_state
+                    .block_ref()
+                    .recovered_block()
+                    .body()
+                    .transactions()
+                    .iter()
+                    .enumerate()
+                {
+                    self.inner.tx_cache.insert(*tx.tx_hash(), (hash, tx_idx));
+                }
 
                 // append new blocks
                 blocks.insert(hash, Arc::new(block_state));
@@ -336,8 +371,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
             let BlockNumHash { number: persisted_height, hash: _ } = persisted_num_hash;
 
-            // clear all numbers
+            // clear all numbers and tx cache (we'll rebuild it from remaining blocks)
             numbers.clear();
+            self.inner.tx_cache.clear();
 
             // drain all blocks and only keep the ones that are not persisted (below the persisted
             // height)
@@ -356,6 +392,18 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                 let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
+
+                // rebuild tx cache for remaining blocks
+                for (tx_idx, tx) in block_state
+                    .block_ref()
+                    .recovered_block()
+                    .body()
+                    .transactions()
+                    .iter()
+                    .enumerate()
+                {
+                    self.inner.tx_cache.insert(*tx.tx_hash(), (hash, tx_idx));
+                }
 
                 // append new blocks
                 blocks.insert(hash, Arc::new(block_state));
@@ -560,14 +608,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns [`SignedTransaction`] type for the given `TxHash` if found.
     pub fn transaction_by_hash(&self, hash: TxHash) -> Option<N::SignedTx> {
-        for block_state in self.canonical_chain() {
-            if let Some(tx) =
-                block_state.block_ref().recovered_block().body().transaction_by_hash(&hash)
-            {
-                return Some(tx.clone())
-            }
-        }
-        None
+        // Use the tx cache for O(1) lookup
+        let (block_hash, tx_idx) = self.inner.tx_cache.get(&hash).map(|r| *r)?;
+        let block_state = self.inner.in_memory_state.state_by_hash(block_hash)?;
+        block_state.block_ref().recovered_block().body().transactions().get(tx_idx).cloned()
     }
 
     /// Returns a tuple with [`SignedTransaction`] type and [`TransactionMeta`] for the
