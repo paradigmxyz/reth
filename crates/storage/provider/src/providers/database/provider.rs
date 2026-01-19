@@ -560,43 +560,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Write all trie updates in a single batch.
             // This reduces cursor open/close overhead from N calls to 1.
-            // Uses hybrid algorithm: extend_ref for small batches, k-way merge for large.
             if save_mode.with_state() {
-                const MERGE_BATCH_THRESHOLD: usize = 30;
-
                 let start = Instant::now();
-                let num_blocks = blocks.len();
 
-                let merged = if num_blocks == 0 {
-                    TrieUpdatesSorted::default()
-                } else if num_blocks == 1 {
-                    // Single block: use directly (Arc::try_unwrap avoids clone if refcount is 1)
-                    match Arc::try_unwrap(blocks[0].trie_updates()) {
-                        Ok(owned) => owned,
-                        Err(arc) => (*arc).clone(),
-                    }
-                } else if num_blocks < MERGE_BATCH_THRESHOLD {
-                    // Small k: extend_ref with Arc::make_mut (copy-on-write).
-                    // Blocks are oldest-to-newest, iterate forward so newest overrides.
-                    let mut blocks_iter = blocks.iter();
-                    let mut result = blocks_iter.next().expect("non-empty").trie_updates();
-
-                    for block in blocks_iter {
-                        Arc::make_mut(&mut result)
-                            .extend_ref_and_sort(block.trie_updates().as_ref());
-                    }
-
-                    match Arc::try_unwrap(result) {
-                        Ok(owned) => owned,
-                        Err(arc) => (*arc).clone(),
-                    }
-                } else {
-                    // Large k: k-way merge is faster (O(n log k)).
-                    // Collect Arcs first to extend lifetime, then pass refs.
-                    // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
-                    let arcs: Vec<_> = blocks.iter().rev().map(|b| b.trie_updates()).collect();
-                    TrieUpdatesSorted::merge_batch(arcs.iter().map(|arc| arc.as_ref()))
-                };
+                // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
+                let merged =
+                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
 
                 if !merged.is_empty() {
                     self.write_trie_updates_sorted(&merged)?;
