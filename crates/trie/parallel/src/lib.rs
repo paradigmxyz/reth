@@ -35,3 +35,6 @@ pub mod metrics;
 /// Proof task manager metrics.
 #[cfg(feature = "metrics")]
 pub mod proof_task_metrics;
+
+/// Implementation of value encoder for `proof_v2`
+mod value_encoder;
