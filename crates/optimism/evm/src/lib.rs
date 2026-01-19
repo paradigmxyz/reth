@@ -296,11 +296,8 @@ mod tests {
     use alloy_consensus::{Header, Receipt};
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
-    use alloy_primitives::{bytes, map::HashMap, Address, Bloom, LogData, B256};
-    use alloy_rpc_types_engine::ExecutionPayloadV1;
-    use op_alloy_rpc_types_engine::{
-        OpExecutionData, OpExecutionPayload, OpExecutionPayloadSidecar,
-    };
+    use alloy_primitives::{bytes, map::HashMap, Address, LogData, B256};
+    use op_alloy_rpc_types_engine::OpExecutionData;
     use op_revm::OpSpecId;
     use reth_chainspec::{ChainSpec, EvmLimitParams, EvmLimitParamsKind};
     use reth_evm::execute::ProviderError;
@@ -953,28 +950,6 @@ mod tests {
         assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), 999_999);
     }
 
-    fn test_execution_data(timestamp: u64) -> OpExecutionData {
-        OpExecutionData::new(
-            OpExecutionPayload::V1(ExecutionPayloadV1 {
-                parent_hash: B256::ZERO,
-                fee_recipient: Address::ZERO,
-                state_root: B256::ZERO,
-                receipts_root: B256::ZERO,
-                logs_bloom: Bloom::ZERO,
-                prev_randao: B256::ZERO,
-                block_number: 0,
-                gas_limit: 30_000_000,
-                gas_used: 0,
-                timestamp,
-                extra_data: Default::default(),
-                base_fee_per_gas: U256::ZERO,
-                block_hash: B256::ZERO,
-                transactions: vec![],
-            }),
-            OpExecutionPayloadSidecar::default(),
-        )
-    }
-
     #[test]
     fn test_fill_cfg_and_block_env_for_payload() {
         let chain_spec = ChainSpec::builder()
@@ -985,7 +960,7 @@ mod tests {
             .shanghai_activated()
             .build();
         let evm_config = OpEvmConfig::optimism(Arc::new(OpChainSpec { inner: chain_spec.clone() }));
-        let payload = test_execution_data(1);
+        let payload = OpExecutionData::from_block_slow(&OpBlock::default());
 
         let evm_env = evm_config.evm_env_for_payload(&payload).unwrap();
 
@@ -1012,7 +987,7 @@ mod tests {
             tx_gas_limit_cap: Some(999_999),
         });
         let evm_config = OpEvmConfig::optimism(Arc::new(OpChainSpec { inner: chain_spec }));
-        let payload = test_execution_data(1);
+        let payload = OpExecutionData::from_block_slow(&OpBlock::default());
 
         let evm_env = evm_config.evm_env_for_payload(&payload).unwrap();
         assert_eq!(evm_env.cfg_env.max_code_size(), 1234);

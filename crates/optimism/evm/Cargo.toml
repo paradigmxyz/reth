@@ -47,7 +47,6 @@ thiserror.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
 alloy-genesis.workspace = true
-alloy-rpc-types-engine.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["arbitrary"] }
 
 [features]
@@ -75,7 +74,6 @@ std = [
     "reth-evm/std",
     "op-alloy-rpc-types-engine/std",
     "reth-storage-errors/std",
-    "alloy-rpc-types-engine/std",
 ]
 portable = [
     "reth-revm/portable",
