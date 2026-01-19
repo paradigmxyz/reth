@@ -3,8 +3,8 @@ use crate::stages::utils::{collect_history_indices, load_account_history_via_wri
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
 use reth_provider::{
-    DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
-    RocksDBProviderFactory, StorageSettingsCache,
+    DBProvider, EitherWriter, HistoryWriter, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, RocksDBProviderFactory, StorageSettingsCache,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
@@ -105,8 +105,22 @@ where
         // Check if we're using RocksDB for account history
         let use_rocksdb = provider.cached_storage_settings().account_history_in_rocksdb;
 
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        if use_rocksdb {
+            return Err(StageError::Fatal(Box::new(ProviderError::other(
+                std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "account_history_in_rocksdb is enabled but this binary was built without the 'rocksdb' feature",
+                ),
+            ))));
+        }
+
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
+        //
+        // Note: RocksDB clear() executes immediately (not deferred to commit like MDBX), but this
+        // is safe for first_sync because if we crash before commit, the checkpoint stays at 0 and
+        // we'll just clear and rebuild again on restart. The source data (changesets) is intact.
         if first_sync {
             if use_rocksdb {
                 #[cfg(all(unix, feature = "rocksdb"))]
@@ -159,6 +173,16 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        if provider.cached_storage_settings().account_history_in_rocksdb {
+            return Err(StageError::Fatal(Box::new(ProviderError::other(
+                std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "account_history_in_rocksdb is enabled but this binary was built without the 'rocksdb' feature",
+                ),
+            ))));
+        }
+
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
