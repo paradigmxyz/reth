@@ -2,9 +2,11 @@ use super::collect_account_history_indices;
 use crate::stages::utils::{collect_history_indices, load_account_history_via_writer};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
+#[cfg(not(all(unix, feature = "rocksdb")))]
+use reth_provider::ProviderError;
 use reth_provider::{
-    DBProvider, EitherWriter, HistoryWriter, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, RocksDBProviderFactory, StorageSettingsCache,
+    DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
+    RocksDBProviderFactory, StorageSettingsCache,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
