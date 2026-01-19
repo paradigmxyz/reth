@@ -4,6 +4,7 @@ use crate::{
 };
 use alloc::{
     collections::{btree_map::BTreeMap, btree_set::BTreeSet},
+    sync::Arc,
     vec::Vec,
 };
 use alloy_primitives::{
@@ -696,6 +697,38 @@ impl TrieUpdatesSorted {
             .collect();
 
         Self { account_nodes, storage_tries }.into()
+    }
+
+    /// Parallel batch-merge sorted trie updates. Slice is **oldest to newest**.
+    ///
+    /// This is more efficient than sequential `extend_ref` calls when merging many updates,
+    /// as it processes all updates in parallel with tree reduction.
+    #[cfg(feature = "rayon")]
+    pub fn merge_parallel(updates: &[Arc<Self>]) -> Self {
+        use rayon::prelude::*;
+
+        if updates.is_empty() {
+            return Self::default();
+        }
+        if updates.len() == 1 {
+            return (*updates[0]).clone();
+        }
+
+        // Ordered parallel tree reduction: merge pairs in parallel, preserving order
+        // Input is oldest-to-newest, reverse for merge_batch which expects newest-first
+        let mut current: Vec<Self> = updates
+            .par_chunks(2)
+            .map(|chunk| Self::merge_batch(chunk.iter().rev().map(|arc| arc.as_ref().clone())))
+            .collect();
+
+        while current.len() > 1 {
+            current = current
+                .par_chunks(2)
+                .map(|chunk| Self::merge_batch(chunk.iter().rev().cloned()))
+                .collect();
+        }
+
+        current.pop().unwrap_or_default()
     }
 }
 

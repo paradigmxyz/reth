@@ -6,7 +6,7 @@ use crate::{
     utils::{extend_sorted_vec, kway_merge_sorted},
     KeyHasher, MultiProofTargets, Nibbles,
 };
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::{borrow::Cow, sync::Arc, vec::Vec};
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
@@ -709,6 +709,38 @@ impl HashedPostStateSorted {
     pub fn clear(&mut self) {
         self.accounts.clear();
         self.storages.clear();
+    }
+
+    /// Parallel batch-merge sorted hashed post states. Slice is **oldest to newest**.
+    ///
+    /// This is more efficient than sequential `extend_ref` calls when merging many states,
+    /// as it processes all states in parallel with tree reduction.
+    #[cfg(feature = "rayon")]
+    pub fn merge_parallel(states: &[Arc<Self>]) -> Self {
+        use rayon::prelude::*;
+
+        if states.is_empty() {
+            return Self::default();
+        }
+        if states.len() == 1 {
+            return (*states[0]).clone();
+        }
+
+        // Ordered parallel tree reduction: merge pairs in parallel, preserving order
+        // Input is oldest-to-newest, reverse for merge_batch which expects newest-first
+        let mut current: Vec<Self> = states
+            .par_chunks(2)
+            .map(|chunk| Self::merge_batch(chunk.iter().rev().map(|arc| arc.as_ref().clone())))
+            .collect();
+
+        while current.len() > 1 {
+            current = current
+                .par_chunks(2)
+                .map(|chunk| Self::merge_batch(chunk.iter().rev().cloned()))
+                .collect();
+        }
+
+        current.pop().unwrap_or_default()
     }
 }
 
