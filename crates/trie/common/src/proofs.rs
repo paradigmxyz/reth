@@ -388,17 +388,14 @@ impl DecodedMultiProof {
     /// proofs.
     pub fn extend(&mut self, other: Self) {
         self.account_subtree.extend_from(other.account_subtree);
-        self.branch_node_masks.reserve(other.branch_node_masks.len());
         self.branch_node_masks.extend(other.branch_node_masks);
 
-        self.storages.reserve(other.storages.len());
         for (hashed_address, storage) in other.storages {
             match self.storages.entry(hashed_address) {
                 hash_map::Entry::Occupied(mut entry) => {
                     debug_assert_eq!(entry.get().root, storage.root);
                     let entry = entry.get_mut();
                     entry.subtree.extend_from(storage.subtree);
-                    entry.branch_node_masks.reserve(storage.branch_node_masks.len());
                     entry.branch_node_masks.extend(storage.branch_node_masks);
                 }
                 hash_map::Entry::Vacant(entry) => {
@@ -406,20 +403,6 @@ impl DecodedMultiProof {
                 }
             }
         }
-    }
-
-    /// Extends this multiproof with another, using swap-extend heuristic for efficiency.
-    ///
-    /// When `other` has more entries than `self`, this swaps the contents first to avoid
-    /// rehashing the larger map. This is optimal when merging proofs of varying sizes.
-    pub fn extend_swap(&mut self, mut other: Self) {
-        // Swap if other is larger to minimize rehashing
-        if other.storages.len() > self.storages.len() {
-            core::mem::swap(&mut self.account_subtree, &mut other.account_subtree);
-            core::mem::swap(&mut self.branch_node_masks, &mut other.branch_node_masks);
-            core::mem::swap(&mut self.storages, &mut other.storages);
-        }
-        self.extend(other);
     }
 
     /// Extends this multiproof with multiple others.
