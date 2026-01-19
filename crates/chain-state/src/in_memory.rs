@@ -619,12 +619,21 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         &self,
         tx_hash: TxHash,
     ) -> Option<(N::SignedTx, TransactionMeta)> {
-        for block_state in self.canonical_chain() {
-            if let Some(indexed) = block_state.find_indexed(tx_hash) {
-                return Some((indexed.tx().clone(), indexed.meta()));
-            }
-        }
-        None
+        let (block_hash, tx_idx) = self.inner.tx_cache.get(&tx_hash).map(|r| *r)?;
+        let block_state = self.inner.in_memory_state.state_by_hash(block_hash)?;
+        let block = block_state.block_ref().recovered_block();
+        let tx = block.body().transactions().get(tx_idx)?.clone();
+
+        let meta = TransactionMeta {
+            tx_hash,
+            index: tx_idx as u64,
+            block_hash,
+            block_number: block.number(),
+            base_fee: block.base_fee_per_gas(),
+            excess_blob_gas: block.excess_blob_gas(),
+            timestamp: block.timestamp(),
+        };
+        Some((tx, meta))
     }
 }
 
