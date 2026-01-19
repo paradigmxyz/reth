@@ -1246,11 +1246,14 @@ impl<'a> RocksDBBatch<'a> {
             return Ok(());
         }
 
+        // Find the first shard that might contain blocks > keep_to.
+        // A shard is affected if it's the sentinel (u64::MAX) or its highest_block_number > keep_to
         let boundary_idx = shards.iter().position(|(key, _)| {
             key.sharded_key.highest_block_number == u64::MAX ||
                 key.sharded_key.highest_block_number > keep_to
         });
 
+        // Repair path: no shards affected means all blocks <= keep_to, just ensure sentinel exists
         let Some(boundary_idx) = boundary_idx else {
             let (last_key, last_value) = shards.last().expect("shards is non-empty");
             if last_key.sharded_key.highest_block_number != u64::MAX {
@@ -1263,6 +1266,7 @@ impl<'a> RocksDBBatch<'a> {
             return Ok(());
         };
 
+        // Delete all shards strictly after the boundary (they are entirely > keep_to)
         for (key, _) in shards.iter().skip(boundary_idx + 1) {
             self.delete::<tables::StoragesHistory>(key.clone())?;
         }
