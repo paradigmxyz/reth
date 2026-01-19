@@ -68,7 +68,7 @@ impl DeferredValueEncoder for AsyncAccountDeferredValueEncoder {
 }
 
 /// Implements the [`LeafValueEncoder`] trait for accounts using a [`CrossbeamSender`] to dispatch
-/// and compute storage roots asyncronously. Can also accept a set of already dispatched account
+/// and compute storage roots asynchronously. Can also accept a set of already dispatched account
 /// storage proofs, for cases where it's possible to determine some necessary accounts ahead of
 /// time.
 pub(crate) struct AsyncAccountValueEncoder {
