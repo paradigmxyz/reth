@@ -587,11 +587,11 @@ impl RocksDBProvider {
         Ok(result)
     }
 
-    /// Unwinds account history indices for the given (address, block_number) pairs.
+    /// Unwinds account history indices for the given `(address, block_number)` pairs.
     ///
     /// Groups addresses by their minimum block number and calls the appropriate unwind
-    /// operations. For each address, keeps only blocks < min_block (i.e., removes min_block
-    /// and all higher blocks).
+    /// operations. For each address, keeps only blocks less than the minimum block
+    /// (i.e., removes the minimum block and all higher blocks).
     ///
     /// Returns a `WriteBatchWithTransaction` that can be committed later.
     pub fn unwind_account_history_indices(
