@@ -20,7 +20,7 @@ reth-primitives-traits = { workspace = true, features = ["reth-codec", "secp256k
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
 reth-storage-api = { workspace = true, features = ["std", "db-api"] }
-reth-storage-bloom = { workspace = true, optional = true }
+reth-storage-bloom.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-prune-types.workspace = true
@@ -87,7 +87,6 @@ tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
 rocksdb = ["dep:rocksdb"]
-storage-bloom = ["dep:reth-storage-bloom"]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",

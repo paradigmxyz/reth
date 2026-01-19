@@ -35,16 +35,13 @@ use reth_primitives_traits::{
     AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
     SealedHeader, SignerRecoverable,
 };
-#[cfg(feature = "storage-bloom")]
-use reth_provider::providers::BloomStateProvider;
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader,
+    providers::{BloomStateProvider, OverlayStateProviderFactory},
+    BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
+    StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
 };
 use reth_revm::db::State;
-#[cfg(feature = "storage-bloom")]
 use reth_storage_bloom::StorageBloomFilter;
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
@@ -139,7 +136,6 @@ where
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
     /// Storage bloom filter for optimizing empty slot reads.
-    #[cfg(feature = "storage-bloom")]
     storage_bloom: Arc<StorageBloomFilter>,
 }
 
@@ -181,7 +177,6 @@ where
             precompile_cache_map.clone(),
         );
 
-        #[cfg(feature = "storage-bloom")]
         let storage_bloom =
             Arc::new(StorageBloomFilter::new(reth_storage_bloom::StorageBloomConfig::default()));
 
@@ -197,13 +192,11 @@ where
             metrics: EngineApiMetrics::default(),
             validator,
             changeset_cache,
-            #[cfg(feature = "storage-bloom")]
             storage_bloom,
         }
     }
 
     /// Returns a reference to the storage bloom filter.
-    #[cfg(feature = "storage-bloom")]
     pub const fn storage_bloom(&self) -> &Arc<StorageBloomFilter> {
         &self.storage_bloom
     }
@@ -476,7 +469,6 @@ where
         }
 
         // Wrap state provider with bloom filter to short-circuit empty slot reads.
-        #[cfg(feature = "storage-bloom")]
         let state_provider =
             Box::new(BloomStateProvider::new(state_provider, self.storage_bloom.clone()));
 
