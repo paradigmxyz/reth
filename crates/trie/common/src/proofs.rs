@@ -431,10 +431,8 @@ impl TryFrom<MultiProof> for DecodedMultiProof {
     }
 }
 
-/// V2 decoded multiproof with a simpler structure than the legacy format.
-///
-/// V2 multiproofs store proof nodes as vectors rather than hashmaps, which is simpler
-/// and more efficient for the leaf-only proof calculation approach used in V2.
+/// V2 decoded multiproof which contains the results of both account and storage V2 proof
+/// calculations.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct DecodedMultiProofV2 {
     /// Account trie proof nodes
