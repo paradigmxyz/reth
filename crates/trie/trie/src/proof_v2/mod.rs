@@ -317,14 +317,15 @@ where
     }
 
     /// Returns the path of the child on top of the `child_stack`, or the root path if the stack is
-    /// empty.
-    fn last_child_path(&self) -> Nibbles {
+    /// empty. Returns None if the current branch has not yet pushed a child (empty `state_mask`).
+    fn last_child_path(&self) -> Option<Nibbles> {
         // If there is no branch under construction then the top child must be the root child.
         let Some(branch) = self.branch_stack.last() else {
-            return Nibbles::new();
+            return Some(Nibbles::new());
         };
 
-        self.child_path_at(Self::highest_set_nibble(branch.state_mask))
+        (!branch.state_mask.is_empty())
+            .then(|| self.child_path_at(Self::highest_set_nibble(branch.state_mask)))
     }
 
     /// Calls [`Self::commit_child`] on the last child of `child_stack`, replacing it with a
@@ -340,7 +341,9 @@ where
         &mut self,
         targets: &mut TargetsCursor<'a>,
     ) -> Result<(), StateProofError> {
-        let Some(child) = self.child_stack.pop() else { return Ok(()) };
+        let Some(child_path) = self.last_child_path() else { return Ok(()) };
+        let child =
+            self.child_stack.pop().expect("child_stack can't be empty if there's a child path");
 
         // If the child is already an `RlpNode` then there is nothing to do, push it back on with no
         // changes.
@@ -348,17 +351,6 @@ where
             self.child_stack.push(child);
             return Ok(())
         }
-
-        // If state_mask is empty (e.g., cached branch), we can't compute child_path.
-        // Push the child back and defer processing.
-        if let Some(branch) = self.branch_stack.last() &&
-            branch.state_mask.is_empty()
-        {
-            self.child_stack.push(child);
-            return Ok(())
-        }
-
-        let child_path = self.last_child_path();
 
         // Only commit immediately if retained for the proof. Otherwise, defer conversion
         // to pop_branch() to give DeferredEncoder time for async work.
