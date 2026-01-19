@@ -2,6 +2,7 @@
 
 use clap::{ArgAction, Args};
 use reth_storage_api::StorageSettings;
+use std::fmt;
 
 /// Parameters for `RocksDB` table routing configuration.
 ///
@@ -60,7 +61,82 @@ impl RocksDbArgs {
     pub const fn has_overrides(&self) -> bool {
         self.tx_hash.is_some() || self.storages_history.is_some() || self.account_history.is_some()
     }
+
+    /// Validates that CLI overrides match the persisted storage settings.
+    ///
+    /// This should be called at startup after loading the persisted settings but before
+    /// the pipeline starts. If any CLI override differs from the persisted value,
+    /// returns an error since these are genesis-initialization-only settings.
+    ///
+    /// Returns `Ok(())` if:
+    /// - No CLI overrides are set (all `None`)
+    /// - All CLI overrides match the persisted values
+    ///
+    /// Returns `Err` if any CLI override differs from the persisted value.
+    pub fn validate_against_persisted(
+        &self,
+        persisted: &StorageSettings,
+    ) -> Result<(), RocksDbSettingsMismatchError> {
+        if let Some(cli_value) = self.tx_hash {
+            if cli_value != persisted.transaction_hash_numbers_in_rocksdb {
+                return Err(RocksDbSettingsMismatchError {
+                    flag_name: "--rocksdb.tx-hash",
+                    expected: persisted.transaction_hash_numbers_in_rocksdb,
+                    got: cli_value,
+                });
+            }
+        }
+
+        if let Some(cli_value) = self.storages_history {
+            if cli_value != persisted.storages_history_in_rocksdb {
+                return Err(RocksDbSettingsMismatchError {
+                    flag_name: "--rocksdb.storages-history",
+                    expected: persisted.storages_history_in_rocksdb,
+                    got: cli_value,
+                });
+            }
+        }
+
+        if let Some(cli_value) = self.account_history {
+            if cli_value != persisted.account_history_in_rocksdb {
+                return Err(RocksDbSettingsMismatchError {
+                    flag_name: "--rocksdb.account-history",
+                    expected: persisted.account_history_in_rocksdb,
+                    got: cli_value,
+                });
+            }
+        }
+
+        Ok(())
+    }
 }
+
+/// Error returned when a CLI RocksDB flag differs from the persisted storage settings.
+///
+/// These settings are genesis-initialization-only and cannot be changed after the node
+/// has been initialized.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RocksDbSettingsMismatchError {
+    /// The CLI flag name that mismatched.
+    pub flag_name: &'static str,
+    /// The expected value (from persisted settings).
+    pub expected: bool,
+    /// The value provided via CLI.
+    pub got: bool,
+}
+
+impl fmt::Display for RocksDbSettingsMismatchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "`{}` differs from initialized layout (expected {}, got {}). \
+             This setting is genesis-only; re-sync required (remove datadir or use a new datadir).",
+            self.flag_name, self.expected, self.got
+        )
+    }
+}
+
+impl std::error::Error for RocksDbSettingsMismatchError {}
 
 #[cfg(test)]
 mod tests {
@@ -154,5 +230,73 @@ mod tests {
         let (result, _) = args.apply_to_settings(base);
 
         assert!(result.receipts_in_static_files, "non-rocksdb settings preserved");
+    }
+
+    #[test]
+    fn test_validate_no_overrides_passes() {
+        let args = RocksDbArgs::default();
+        let persisted = StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true);
+        assert!(args.validate_against_persisted(&persisted).is_ok());
+    }
+
+    #[test]
+    fn test_validate_matching_overrides_passes() {
+        let args = RocksDbArgs {
+            tx_hash: Some(true),
+            storages_history: Some(false),
+            account_history: Some(false),
+        };
+        let persisted = StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true);
+        assert!(args.validate_against_persisted(&persisted).is_ok());
+    }
+
+    #[test]
+    fn test_validate_mismatched_tx_hash_fails() {
+        let args = RocksDbArgs { tx_hash: Some(true), ..Default::default() };
+        let persisted = StorageSettings::legacy();
+
+        let err = args.validate_against_persisted(&persisted).unwrap_err();
+        assert_eq!(err.flag_name, "--rocksdb.tx-hash");
+        assert!(!err.expected);
+        assert!(err.got);
+        assert!(err.to_string().contains("--rocksdb.tx-hash"));
+        assert!(err.to_string().contains("genesis-only"));
+    }
+
+    #[test]
+    fn test_validate_mismatched_storages_history_fails() {
+        let args = RocksDbArgs { storages_history: Some(false), ..Default::default() };
+        let persisted = StorageSettings::legacy().with_storages_history_in_rocksdb(true);
+
+        let err = args.validate_against_persisted(&persisted).unwrap_err();
+        assert_eq!(err.flag_name, "--rocksdb.storages-history");
+        assert!(err.expected);
+        assert!(!err.got);
+    }
+
+    #[test]
+    fn test_validate_mismatched_account_history_fails() {
+        let args = RocksDbArgs { account_history: Some(true), ..Default::default() };
+        let persisted = StorageSettings::legacy();
+
+        let err = args.validate_against_persisted(&persisted).unwrap_err();
+        assert_eq!(err.flag_name, "--rocksdb.account-history");
+        assert!(!err.expected);
+        assert!(err.got);
+    }
+
+    #[test]
+    fn test_error_message_format() {
+        let err = RocksDbSettingsMismatchError {
+            flag_name: "--rocksdb.tx-hash",
+            expected: false,
+            got: true,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("--rocksdb.tx-hash"));
+        assert!(msg.contains("expected false"));
+        assert!(msg.contains("got true"));
+        assert!(msg.contains("genesis-only"));
+        assert!(msg.contains("re-sync required"));
     }
 }

@@ -82,7 +82,7 @@ pub use static_files::{StaticFilesArgs, MINIMAL_BLOCKS_PER_FILE};
 
 /// `RocksDbArgs` for configuring RocksDB table routing.
 mod rocksdb;
-pub use rocksdb::RocksDbArgs;
+pub use rocksdb::{RocksDbArgs, RocksDbSettingsMismatchError};
 
 mod error;
 pub mod types;
