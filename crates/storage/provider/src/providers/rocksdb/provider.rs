@@ -25,7 +25,7 @@ use rocksdb::{
     OptimisticTransactionOptions, Options, Transaction, WriteBatchWithTransaction, WriteOptions,
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
@@ -585,6 +585,37 @@ impl RocksDBProvider {
         }
 
         Ok(result)
+    }
+
+    /// Unwinds account history indices for the given (address, block_number) pairs.
+    ///
+    /// Groups addresses by their minimum block number and calls the appropriate unwind
+    /// operations. For each address, keeps only blocks < min_block (i.e., removes min_block
+    /// and all higher blocks).
+    ///
+    /// Returns a `WriteBatchWithTransaction` that can be committed later.
+    pub fn unwind_account_history_indices(
+        &self,
+        last_indices: &[(Address, BlockNumber)],
+    ) -> ProviderResult<WriteBatchWithTransaction<true>> {
+        let mut address_min_block: HashMap<Address, BlockNumber> =
+            HashMap::with_capacity_and_hasher(last_indices.len(), Default::default());
+        for &(address, block_number) in last_indices {
+            address_min_block
+                .entry(address)
+                .and_modify(|min| *min = (*min).min(block_number))
+                .or_insert(block_number);
+        }
+
+        let mut batch = self.batch();
+        for (address, min_block) in address_min_block {
+            match min_block.checked_sub(1) {
+                Some(keep_to) => batch.unwind_account_history_to(address, keep_to)?,
+                None => batch.clear_account_history(address)?,
+            }
+        }
+
+        Ok(batch.into_inner())
     }
 
     /// Writes a batch of operations atomically.

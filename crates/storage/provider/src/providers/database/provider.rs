@@ -2977,33 +2977,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         if use_rocksdb {
             #[cfg(all(unix, feature = "rocksdb"))]
             {
-                // Group by address and find the minimum block number for each.
-                // We want to remove min_block and everything after, so keep_to = min_block - 1.
-                let mut address_min_block: HashMap<Address, BlockNumber> =
-                    HashMap::with_capacity_and_hasher(last_indices.len(), Default::default());
-                for &(address, block_number) in &last_indices {
-                    address_min_block
-                        .entry(address)
-                        .and_modify(|min| *min = (*min).min(block_number))
-                        .or_insert(block_number);
-                }
-
-                let mut batch = self.rocksdb_provider.batch();
-                for (address, min_block) in address_min_block {
-                    // keep_to is the last block to KEEP; use checked_sub to handle min_block == 0
-                    match min_block.checked_sub(1) {
-                        Some(keep_to) => batch.unwind_account_history_to(address, keep_to)?,
-                        None => batch.clear_account_history(address)?,
-                    }
-                }
-                self.pending_rocksdb_batches.lock().push(batch.into_inner());
+                let batch = self.rocksdb_provider.unwind_account_history_indices(&last_indices)?;
+                self.pending_rocksdb_batches.lock().push(batch);
             }
 
             #[cfg(not(all(unix, feature = "rocksdb")))]
             return Err(ProviderError::UnsupportedProvider);
-        }
-
-        if !use_rocksdb {
+        } else {
             // Unwind the account history index in MDBX.
             let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
             for &(address, rem_index) in &last_indices {
