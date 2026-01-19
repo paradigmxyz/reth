@@ -2977,24 +2977,24 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         if use_rocksdb {
             #[cfg(all(unix, feature = "rocksdb"))]
             {
-                // For RocksDB, we need to find the minimum block number per address
-                // (the unwind_to point) and call unwind_account_history_to for each.
-
-                // Group by address and find the minimum block number for each (unwind_to - 1)
-                let mut address_unwind_to: HashMap<Address, BlockNumber> = HashMap::new();
+                // Group by address and find the minimum block number for each.
+                // We want to remove min_block and everything after, so keep_to = min_block - 1.
+                let mut address_min_block: HashMap<Address, BlockNumber> =
+                    HashMap::with_capacity_and_hasher(last_indices.len(), Default::default());
                 for &(address, block_number) in &last_indices {
-                    address_unwind_to
+                    address_min_block
                         .entry(address)
                         .and_modify(|min| *min = (*min).min(block_number))
                         .or_insert(block_number);
                 }
 
                 let mut batch = self.rocksdb_provider.batch();
-                for (address, min_block) in address_unwind_to {
-                    // unwind_to is the last block to KEEP, so we pass min_block - 1
-                    // (we want to remove min_block and everything after)
-                    let unwind_to = min_block.saturating_sub(1);
-                    batch.unwind_account_history_to(address, unwind_to)?;
+                for (address, min_block) in address_min_block {
+                    // keep_to is the last block to KEEP; use checked_sub to handle min_block == 0
+                    match min_block.checked_sub(1) {
+                        Some(keep_to) => batch.unwind_account_history_to(address, keep_to)?,
+                        None => batch.clear_account_history(address)?,
+                    }
                 }
                 self.pending_rocksdb_batches.lock().push(batch.into_inner());
             }

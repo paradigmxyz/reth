@@ -945,34 +945,29 @@ impl<'a> RocksDBBatch<'a> {
         Ok(())
     }
 
-    /// Unwinds account history for the given address to the specified block number.
+    /// Unwinds account history for the given address, keeping only blocks <= `keep_to`.
     ///
-    /// Removes all block numbers greater than `unwind_to` from the address's shards.
-    /// Ensures the last remaining shard is keyed with `u64::MAX` (the sentinel key).
-    ///
-    /// This mirrors the MDBX `unwind_history_shards` behavior:
-    /// - Deletes shards entirely if all their blocks are > `unwind_to`
-    /// - Truncates boundary shards and re-keys them to `u64::MAX`
-    /// - Preserves shards entirely below `unwind_to`
+    /// Mirrors MDBX `unwind_history_shards` behavior:
+    /// - Deletes shards entirely above `keep_to`
+    /// - Truncates boundary shards and re-keys to `u64::MAX` sentinel
+    /// - Preserves shards entirely below `keep_to`
     pub fn unwind_account_history_to(
         &mut self,
         address: Address,
-        unwind_to: BlockNumber,
+        keep_to: BlockNumber,
     ) -> ProviderResult<()> {
         let shards = self.provider.account_history_shards(address)?;
         if shards.is_empty() {
             return Ok(());
         }
 
-        // Find the first shard that might contain blocks > unwind_to.
-        // A shard might be affected if:
-        // - It's the sentinel shard (highest_block_number == u64::MAX), OR
-        // - Its highest_block_number > unwind_to
+        // Find the first shard that might contain blocks > keep_to.
+        // A shard is affected if it's the sentinel (u64::MAX) or its highest_block_number > keep_to
         let boundary_idx = shards.iter().position(|(key, _)| {
-            key.highest_block_number == u64::MAX || key.highest_block_number > unwind_to
+            key.highest_block_number == u64::MAX || key.highest_block_number > keep_to
         });
 
-        // If no shard is affected, just ensure the last shard is keyed by u64::MAX (repair case)
+        // Repair path: no shards affected means all blocks <= keep_to, just ensure sentinel exists
         let Some(boundary_idx) = boundary_idx else {
             let (last_key, last_value) = shards.last().expect("shards is non-empty");
             if last_key.highest_block_number != u64::MAX {
@@ -985,21 +980,21 @@ impl<'a> RocksDBBatch<'a> {
             return Ok(());
         };
 
-        // Delete all shards strictly after the boundary (they are entirely > unwind_to)
+        // Delete all shards strictly after the boundary (they are entirely > keep_to)
         for (key, _) in shards.iter().skip(boundary_idx + 1) {
             self.delete::<tables::AccountsHistory>(key.clone())?;
         }
 
-        // Process the boundary shard: filter out blocks > unwind_to
+        // Process the boundary shard: filter out blocks > keep_to
         let (boundary_key, boundary_list) = &shards[boundary_idx];
-
-        // Keep only blocks <= unwind_to
-        let kept: Vec<u64> = boundary_list.iter().take_while(|&b| b <= unwind_to).collect();
 
         // Delete the boundary shard (we'll either drop it or rewrite at u64::MAX)
         self.delete::<tables::AccountsHistory>(boundary_key.clone())?;
 
-        if kept.is_empty() {
+        // Count how many blocks to keep (avoids intermediate Vec allocation)
+        let kept_count = boundary_list.iter().take_while(|&b| b <= keep_to).count();
+
+        if kept_count == 0 {
             // Boundary shard is now empty. Previous shard becomes the last and must be keyed
             // u64::MAX.
             if boundary_idx == 0 {
@@ -1018,10 +1013,22 @@ impl<'a> RocksDBBatch<'a> {
             return Ok(());
         }
 
-        // Write truncated shard with u64::MAX key (sentinel for last shard)
-        let new_last = BlockNumberList::new_pre_sorted(kept);
+        // Write truncated shard with u64::MAX key (passes iterator directly, no Vec)
+        let new_last =
+            BlockNumberList::new_pre_sorted(boundary_list.iter().take_while(|&b| b <= keep_to));
         self.put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &new_last)?;
 
+        Ok(())
+    }
+
+    /// Clears all account history shards for the given address.
+    ///
+    /// Used when unwinding from block 0 (i.e., removing all history).
+    pub fn clear_account_history(&mut self, address: Address) -> ProviderResult<()> {
+        let shards = self.provider.account_history_shards(address)?;
+        for (key, _) in shards {
+            self.delete::<tables::AccountsHistory>(key)?;
+        }
         Ok(())
     }
 }
@@ -2032,7 +2039,8 @@ mod tests {
         batch.commit().unwrap();
 
         // Unwind to block 0 (keep only block 0, remove 1-5)
-        // This simulates the caller doing: unwind_to = min_block.saturating_sub(1) where min_block = 1
+        // This simulates the caller doing: unwind_to = min_block.saturating_sub(1) where min_block
+        // = 1
         let mut batch = provider.batch();
         batch.unwind_account_history_to(address, 0).unwrap();
         batch.commit().unwrap();
@@ -2148,5 +2156,73 @@ mod tests {
         let non_existent = Address::from([0x99; 20]);
         let shards = provider.account_history_shards(non_existent).unwrap();
         assert!(shards.is_empty());
+    }
+
+    #[test]
+    fn test_clear_account_history() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        // Add blocks 0-10
+        let mut batch = provider.batch();
+        batch.append_account_history_shard(address, 0..=10).unwrap();
+        batch.commit().unwrap();
+
+        // Clear all history (simulates unwind from block 0)
+        let mut batch = provider.batch();
+        batch.clear_account_history(address).unwrap();
+        batch.commit().unwrap();
+
+        // Verify no data remains
+        let shards = provider.account_history_shards(address).unwrap();
+        assert!(shards.is_empty(), "All shards should be deleted");
+    }
+
+    #[test]
+    fn test_unwind_non_sentinel_boundary() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        // Create three shards with non-sentinel boundary
+        let mut batch = provider.batch();
+
+        // Shard 1: blocks 1-50, keyed by 50
+        let shard1 = BlockNumberList::new_pre_sorted(1..=50);
+        batch.put::<tables::AccountsHistory>(ShardedKey::new(address, 50), &shard1).unwrap();
+
+        // Shard 2: blocks 51-100, keyed by 100 (non-sentinel, will be boundary)
+        let shard2 = BlockNumberList::new_pre_sorted(51..=100);
+        batch.put::<tables::AccountsHistory>(ShardedKey::new(address, 100), &shard2).unwrap();
+
+        // Shard 3: blocks 101-150, keyed by MAX (will be deleted)
+        let shard3 = BlockNumberList::new_pre_sorted(101..=150);
+        batch.put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &shard3).unwrap();
+
+        batch.commit().unwrap();
+
+        // Verify 3 shards
+        let shards = provider.account_history_shards(address).unwrap();
+        assert_eq!(shards.len(), 3);
+
+        // Unwind to block 75 (truncates shard2, deletes shard3)
+        let mut batch = provider.batch();
+        batch.unwind_account_history_to(address, 75).unwrap();
+        batch.commit().unwrap();
+
+        // Verify: shard1 unchanged, shard2 truncated and re-keyed to MAX, shard3 deleted
+        let shards = provider.account_history_shards(address).unwrap();
+        assert_eq!(shards.len(), 2);
+
+        // First shard unchanged
+        assert_eq!(shards[0].0.highest_block_number, 50);
+        assert_eq!(shards[0].1.iter().collect::<Vec<_>>(), (1..=50).collect::<Vec<_>>());
+
+        // Second shard truncated and re-keyed to MAX
+        assert_eq!(shards[1].0.highest_block_number, u64::MAX);
+        assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), (51..=75).collect::<Vec<_>>());
     }
 }
