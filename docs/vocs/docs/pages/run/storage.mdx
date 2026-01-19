@@ -1,0 +1,94 @@
+---
+description: Configure RocksDB table routing for optimal performance.
+---
+
+# Storage Configuration
+
+Reth uses a hybrid storage approach with MDBX as the primary database and optional RocksDB for specific tables. This page documents the `--storage.*` CLI flags that control which tables are stored in RocksDB.
+
+## Overview
+
+By default, all tables are stored in MDBX. However, certain large tables can benefit from RocksDB's performance characteristics. The `--storage.*-in-rocksdb` flags allow you to route specific tables to RocksDB for improved performance on high-throughput workloads.
+
+:::warning
+These settings can only be configured at genesis initialization. Once the node has been initialized, changing these flags requires a full re-sync from scratch.
+:::
+
+## Available Flags
+
+### `--storage.tx-hash-in-rocksdb`
+
+Store the transaction hash to number mapping in RocksDB instead of MDBX.
+
+```bash
+reth node --storage.tx-hash-in-rocksdb=true
+```
+
+**Default:** `false` (stored in MDBX)
+
+**Use case:** This table maps transaction hashes to their sequential transaction IDs. Moving it to RocksDB can improve lookup performance for high-volume transaction queries.
+
+### `--storage.storages-history-in-rocksdb`
+
+Store storage history data in RocksDB instead of MDBX.
+
+```bash
+reth node --storage.storages-history-in-rocksdb=true
+```
+
+**Default:** `false` (stored in MDBX)
+
+**Use case:** Storage history tracks historical values of contract storage slots. This table can grow very large on archive nodes. RocksDB may provide better write performance for this workload.
+
+### `--storage.account-history-in-rocksdb`
+
+Store account history data in RocksDB instead of MDBX.
+
+```bash
+reth node --storage.account-history-in-rocksdb=true
+```
+
+**Default:** `false` (stored in MDBX)
+
+**Use case:** Account history tracks historical account states. Similar to storage history, this table grows significantly on archive nodes and may benefit from RocksDB's handling of large datasets.
+
+## Example Configuration
+
+To initialize a new node with transaction hash lookups and history tables in RocksDB:
+
+```bash
+reth node \
+    --storage.tx-hash-in-rocksdb=true \
+    --storage.storages-history-in-rocksdb=true \
+    --storage.account-history-in-rocksdb=true
+```
+
+## RocksDB Data Directory
+
+When using RocksDB tables, the data is stored in a separate directory. You can customize this location using:
+
+```bash
+reth node --datadir.rocksdb /path/to/rocksdb
+```
+
+If not specified, RocksDB data is stored in a subdirectory of your main data directory.
+
+## When to Use RocksDB Tables
+
+Consider enabling RocksDB for specific tables when:
+
+- Running an **archive node** with full historical data
+- Experiencing **write performance bottlenecks** with large history tables
+- Performing **high-volume transaction lookups** that stress the tx-hash table
+
+For most use cases, the default MDBX configuration provides excellent performance. Only enable RocksDB tables if you have measured performance issues with specific workloads.
+
+## Migration Notes
+
+Since these settings are genesis-only:
+
+1. **New nodes:** Set your desired configuration before first sync
+2. **Existing nodes:** Requires full re-sync to change storage settings
+3. **Backup:** Always backup your data before re-syncing
+
+The storage settings are persisted to ensure consistency across restarts. Attempting to start a node with different storage settings than what was used during initialization will result in an error.

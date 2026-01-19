@@ -101,6 +101,10 @@ export const sidebar: SidebarItem[] = [
                 link: "/run/configuration"
             },
             {
+                text: "Storage",
+                link: "/run/storage"
+            },
+            {
                 text: "Monitoring",
                 link: "/run/monitoring"
             },
