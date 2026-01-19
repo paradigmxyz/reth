@@ -738,7 +738,7 @@ mod tests {
             assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
         }
 
-        /// Test that unwind correctly removes block numbers from RocksDB when enabled.
+        /// Test that unwind correctly removes block numbers from `RocksDB` when enabled.
         #[tokio::test]
         async fn unwind_deletes_from_rocksdb_when_enabled() {
             let db = TestStageDB::default();
