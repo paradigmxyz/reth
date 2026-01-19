@@ -2970,7 +2970,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .into_iter()
             .map(|(index, account)| (account.address, *index))
             .collect::<Vec<_>>();
-        last_indices.sort_by_key(|(a, _)| *a);
+        last_indices.sort_unstable_by_key(|(a, _)| *a);
 
         let use_rocksdb = self.cached_storage_settings().account_history_in_rocksdb;
 

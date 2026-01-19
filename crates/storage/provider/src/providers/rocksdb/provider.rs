@@ -991,10 +991,11 @@ impl<'a> RocksDBBatch<'a> {
         // Delete the boundary shard (we'll either drop it or rewrite at u64::MAX)
         self.delete::<tables::AccountsHistory>(boundary_key.clone())?;
 
-        // Count how many blocks to keep (avoids intermediate Vec allocation)
-        let kept_count = boundary_list.iter().take_while(|&b| b <= keep_to).count();
+        // Build truncated list once; check emptiness directly (avoids double iteration)
+        let new_last =
+            BlockNumberList::new_pre_sorted(boundary_list.iter().take_while(|&b| b <= keep_to));
 
-        if kept_count == 0 {
+        if new_last.is_empty() {
             // Boundary shard is now empty. Previous shard becomes the last and must be keyed
             // u64::MAX.
             if boundary_idx == 0 {
@@ -1013,9 +1014,6 @@ impl<'a> RocksDBBatch<'a> {
             return Ok(());
         }
 
-        // Write truncated shard with u64::MAX key (passes iterator directly, no Vec)
-        let new_last =
-            BlockNumberList::new_pre_sorted(boundary_list.iter().take_while(|&b| b <= keep_to));
         self.put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &new_last)?;
 
         Ok(())
@@ -2039,8 +2037,7 @@ mod tests {
         batch.commit().unwrap();
 
         // Unwind to block 0 (keep only block 0, remove 1-5)
-        // This simulates the caller doing: unwind_to = min_block.saturating_sub(1) where min_block
-        // = 1
+        // This simulates the caller doing: unwind_to = min_block.checked_sub(1) where min_block = 1
         let mut batch = provider.batch();
         batch.unwind_account_history_to(address, 0).unwrap();
         batch.commit().unwrap();
