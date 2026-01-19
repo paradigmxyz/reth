@@ -19,7 +19,7 @@ use reth_node_builder::{
     Node, NodeComponents, NodeComponentsBuilder, NodeTypes, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
-    args::{DatabaseArgs, DatadirArgs, StaticFilesArgs},
+    args::{DatabaseArgs, DatadirArgs, StorageArgs},
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
@@ -63,9 +63,9 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     #[command(flatten)]
     pub db: DatabaseArgs,
 
-    /// All static files related arguments
+    /// All storage related arguments (static files + RocksDB tables)
     #[command(flatten)]
-    pub static_files: StaticFilesArgs,
+    pub storage: StorageArgs,
 }
 
 impl<C: ChainSpecParser> EnvironmentArgs<C> {
@@ -131,7 +131,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
-            init_genesis_with_settings(&provider_factory, self.static_files.to_settings())?;
+            init_genesis_with_settings(&provider_factory, self.storage.to_settings())?;
         }
 
         Ok(Environment { config, provider_factory, data_dir })

@@ -171,8 +171,10 @@ impl LaunchContext {
         toml_config.peers.trusted_nodes_only = config.network.trusted_only;
 
         // Merge static file CLI arguments with config file, giving priority to CLI
-        toml_config.static_files =
-            config.static_files.merge_with_config(toml_config.static_files, config.pruning.minimal);
+        toml_config.static_files = config
+            .storage
+            .static_files
+            .merge_with_config(toml_config.static_files, config.pruning.minimal);
 
         Ok(toml_config)
     }
@@ -678,7 +680,7 @@ where
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
         init_genesis_with_settings(
             self.provider_factory(),
-            self.node_config().static_files.to_settings(),
+            self.node_config().storage.to_settings(),
         )?;
         Ok(self)
     }
@@ -687,7 +689,7 @@ where
     pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
         init_genesis_with_settings(
             self.provider_factory(),
-            self.node_config().static_files.to_settings(),
+            self.node_config().storage.to_settings(),
         )
     }
 
