@@ -22,6 +22,9 @@ pub mod proof;
 
 pub mod proof_task;
 
+/// Async value encoder for V2 proofs.
+pub(crate) mod value_encoder;
+
 /// Parallel state root metrics.
 #[cfg(feature = "metrics")]
 pub mod metrics;
