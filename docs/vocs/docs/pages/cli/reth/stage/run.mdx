@@ -129,6 +129,21 @@ Static Files:
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
+      --storage.tx-hash-in-rocksdb
+          Store transaction hash -> number mapping in `RocksDB` instead of MDBX.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
+      --storage.storages-history-in-rocksdb
+          Store storages history in `RocksDB` instead of MDBX.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
+      --storage.account-history-in-rocksdb
+          Store account history in `RocksDB` instead of MDBX.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
       --metrics <SOCKET>
           Enable Prometheus metrics.
 
