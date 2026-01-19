@@ -2,8 +2,6 @@ use super::collect_account_history_indices;
 use crate::stages::utils::{collect_history_indices, load_account_history_via_writer};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
-#[cfg(not(all(unix, feature = "rocksdb")))]
-use reth_provider::ProviderError;
 use reth_provider::{
     DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
     RocksDBProviderFactory, StorageSettingsCache,
@@ -104,18 +102,10 @@ where
         let mut range = input.next_block_range();
         let first_sync = input.checkpoint().block_number == 0;
 
-        // Check if we're using RocksDB for account history
         let use_rocksdb = provider.cached_storage_settings().account_history_in_rocksdb;
 
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        if use_rocksdb {
-            return Err(StageError::Fatal(Box::new(ProviderError::other(
-                std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "account_history_in_rocksdb is enabled but this binary was built without the 'rocksdb' feature",
-                ),
-            ))));
-        }
+        // Validate that rocksdb feature is compiled if config requests it
+        provider.with_rocksdb_tx_if(use_rocksdb, "account_history_in_rocksdb", |_| Ok(()))?;
 
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
@@ -136,7 +126,6 @@ where
         info!(target: "sync::stages::index_account_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
 
         let collector = if provider.cached_storage_settings().account_changesets_in_static_files {
-            // Use the provider-based collection that can read from static files.
             collect_account_history_indices(provider, range.clone(), &self.etl_config)?
         } else {
             collect_history_indices::<_, tables::AccountChangeSets, tables::AccountsHistory, _>(
@@ -150,21 +139,11 @@ where
 
         info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
 
-        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb = provider.rocksdb_provider();
-        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_batch = rocksdb.batch();
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let rocksdb_batch = ();
-
         let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
-
         load_account_history_via_writer(collector, first_sync, &mut writer)?;
-
-        #[cfg(all(unix, feature = "rocksdb"))]
-        if let Some(batch) = writer.into_raw_rocksdb_batch() {
-            provider.set_pending_rocksdb_batch(batch);
-        }
+        writer.finish_into_provider(provider);
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
