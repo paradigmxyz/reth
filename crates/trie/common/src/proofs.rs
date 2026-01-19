@@ -270,7 +270,7 @@ impl MultiProof {
         let reserve = if self.storages.is_empty() {
             other.storages.len()
         } else {
-            (other.storages.len() + 1) / 2
+            other.storages.len().div_ceil(2)
         };
         self.storages.reserve(reserve);
         for (hashed_address, storage) in other.storages {
@@ -399,7 +399,7 @@ impl DecodedMultiProof {
         let reserve = if self.storages.is_empty() {
             other.storages.len()
         } else {
-            (other.storages.len() + 1) / 2
+            other.storages.len().div_ceil(2)
         };
         self.storages.reserve(reserve);
         for (hashed_address, storage) in other.storages {
