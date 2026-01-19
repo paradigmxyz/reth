@@ -267,6 +267,12 @@ impl MultiProof {
         self.account_subtree.extend_from(other.account_subtree);
         self.branch_node_masks.extend(other.branch_node_masks);
 
+        let reserve = if self.storages.is_empty() {
+            other.storages.len()
+        } else {
+            (other.storages.len() + 1) / 2
+        };
+        self.storages.reserve(reserve);
         for (hashed_address, storage) in other.storages {
             match self.storages.entry(hashed_address) {
                 hash_map::Entry::Occupied(mut entry) => {
@@ -390,6 +396,12 @@ impl DecodedMultiProof {
         self.account_subtree.extend_from(other.account_subtree);
         self.branch_node_masks.extend(other.branch_node_masks);
 
+        let reserve = if self.storages.is_empty() {
+            other.storages.len()
+        } else {
+            (other.storages.len() + 1) / 2
+        };
+        self.storages.reserve(reserve);
         for (hashed_address, storage) in other.storages {
             match self.storages.entry(hashed_address) {
                 hash_map::Entry::Occupied(mut entry) => {
