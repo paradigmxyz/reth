@@ -4,7 +4,7 @@ use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
 };
 use reth_provider::{
     DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
@@ -160,46 +160,7 @@ where
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        let use_rocksdb = provider.cached_storage_settings().storages_history_in_rocksdb;
-
-        if use_rocksdb {
-            #[cfg(all(unix, feature = "rocksdb"))]
-            {
-                use alloy_primitives::{Address, B256};
-                use reth_db_api::cursor::DbCursorRO;
-                use std::collections::HashMap;
-
-                let rocksdb = provider.rocksdb_provider();
-                let rocksdb_batch = rocksdb.batch();
-                let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
-
-                let changesets = provider
-                    .tx_ref()
-                    .cursor_dup_read::<tables::StorageChangeSets>()?
-                    .walk_range(BlockNumberAddress::range(range))?
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                let mut to_unwind: HashMap<(Address, B256), u64> = HashMap::new();
-                for (block_num_addr, storage) in changesets {
-                    let addr = block_num_addr.address();
-                    let bn = block_num_addr.block_number();
-                    to_unwind
-                        .entry((addr, storage.key))
-                        .and_modify(|min| *min = (*min).min(bn))
-                        .or_insert(bn);
-                }
-
-                for ((address, storage_key), rem_index) in to_unwind {
-                    writer.unwind_storage_history_shard(address, storage_key, rem_index)?;
-                }
-
-                if let Some(batch) = writer.into_raw_rocksdb_batch() {
-                    provider.set_pending_rocksdb_batch(batch);
-                }
-            }
-        } else {
-            provider.unwind_storage_history_indices_range(BlockNumberAddress::range(range))?;
-        }
+        provider.unwind_storage_history_indices_range(BlockNumberAddress::range(range))?;
 
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
     }
@@ -944,6 +905,73 @@ mod tests {
             assert!(result.is_some(), "RocksDB should have merged data");
             let blocks: Vec<u64> = result.unwrap().iter().collect();
             assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
+        }
+
+        /// Test multi-shard unwind correctly handles shards that span across unwind boundary.
+        #[tokio::test]
+        async fn unwind_multi_shard() {
+            use reth_db_api::models::sharded_key::NUM_OF_INDICES_IN_SHARD;
+
+            let db = TestStageDB::default();
+
+            db.factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+            );
+
+            let num_blocks = (NUM_OF_INDICES_IN_SHARD * 2 + 100) as u64;
+
+            db.commit(|tx| {
+                for block in 0..num_blocks {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                    tx.put::<tables::StorageChangeSets>(
+                        block_number_address(block),
+                        storage(STORAGE_KEY),
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+            let input = ExecInput { target: Some(num_blocks - 1), ..Default::default() };
+            let mut stage = IndexStorageHistoryStage::default();
+            let provider = db.factory.database_provider_rw().unwrap();
+            let out = stage.execute(&provider, input).unwrap();
+            assert_eq!(
+                out,
+                ExecOutput { checkpoint: StageCheckpoint::new(num_blocks - 1), done: true }
+            );
+            provider.commit().unwrap();
+
+            let rocksdb = db.factory.rocksdb_provider();
+            let shards = rocksdb.storage_history_shards(ADDRESS, STORAGE_KEY).unwrap();
+            assert!(shards.len() >= 2, "Should have at least 2 shards for {} blocks", num_blocks);
+
+            let unwind_to = NUM_OF_INDICES_IN_SHARD as u64 + 50;
+            let unwind_input = UnwindInput {
+                checkpoint: StageCheckpoint::new(num_blocks - 1),
+                unwind_to,
+                bad_block: None,
+            };
+            let provider = db.factory.database_provider_rw().unwrap();
+            let out = stage.unwind(&provider, unwind_input).unwrap();
+            assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
+            provider.commit().unwrap();
+
+            let rocksdb = db.factory.rocksdb_provider();
+            let shards_after = rocksdb.storage_history_shards(ADDRESS, STORAGE_KEY).unwrap();
+            assert!(!shards_after.is_empty(), "Should still have shards after unwind");
+
+            let all_blocks: Vec<u64> =
+                shards_after.iter().flat_map(|(_, list)| list.iter()).collect();
+            assert_eq!(
+                all_blocks,
+                (0..=unwind_to).collect::<Vec<_>>(),
+                "Should only have blocks 0 to {} after unwind",
+                unwind_to
+            );
         }
     }
 }
