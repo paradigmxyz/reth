@@ -24,6 +24,31 @@ use tokio::sync::{
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+/// Cached data for a transaction lookup.
+///
+/// Contains all the data needed to serve `eth_getTransactionByHash` and `eth_getTransactionReceipt`
+/// without hitting the database.
+#[derive(Debug, Clone)]
+pub struct CachedTransaction<B: Block, R> {
+    /// The block containing this transaction.
+    pub block: Arc<RecoveredBlock<B>>,
+    /// Index of the transaction within the block.
+    pub tx_index: usize,
+    /// Receipts for the block, if available.
+    pub receipts: Option<Arc<Vec<R>>>,
+}
+
+impl<B: Block, R> CachedTransaction<B, R> {
+    /// Creates a new cached transaction entry.
+    pub const fn new(
+        block: Arc<RecoveredBlock<B>>,
+        tx_index: usize,
+        receipts: Option<Arc<Vec<R>>>,
+    ) -> Self {
+        Self { block, tx_index, receipts }
+    }
+}
+
 pub mod config;
 pub mod db;
 pub mod metrics;
@@ -48,7 +73,7 @@ type HeaderResponseSender<H> = oneshot::Sender<ProviderResult<H>>;
 type CachedParentBlocksResponseSender<B> = oneshot::Sender<Vec<Arc<RecoveredBlock<B>>>>;
 
 /// The type that can send the response for a transaction hash lookup
-type TransactionHashResponseSender<B> = oneshot::Sender<Option<(Arc<RecoveredBlock<B>>, usize)>>;
+type TransactionHashResponseSender<B, R> = oneshot::Sender<Option<CachedTransaction<B, R>>>;
 
 type BlockLruCache<B, L> =
     MultiConsumerLruCache<B256, Arc<RecoveredBlock<B>>, L, BlockWithSendersResponseSender<B>>;
@@ -275,7 +300,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
     pub async fn get_transaction_by_hash(
         &self,
         tx_hash: TxHash,
-    ) -> Option<(Arc<RecoveredBlock<N::Block>>, usize)> {
+    ) -> Option<CachedTransaction<N::Block, N::Receipt>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetTransactionByHash { tx_hash, response_tx });
         rx.await.ok()?
@@ -648,10 +673,10 @@ where
                             let result =
                                 this.tx_hash_index.get(&tx_hash).and_then(|(block_hash, idx)| {
                                     // Try to get the block from cache
-                                    this.full_block_cache
-                                        .get(block_hash)
-                                        .cloned()
-                                        .map(|block| (block, *idx))
+                                    let block = this.full_block_cache.get(block_hash).cloned()?;
+                                    // Optionally get receipts if cached
+                                    let receipts = this.receipts_cache.get(block_hash).cloned();
+                                    Some(CachedTransaction::new(block, *idx, receipts))
                                 });
                             let _ = response_tx.send(result);
                         }
@@ -708,10 +733,10 @@ enum CacheAction<B: Block, R> {
         max_blocks: usize,
         response_tx: CachedParentBlocksResponseSender<B>,
     },
-    /// Look up a transaction's block and index by its hash
+    /// Look up a transaction's cached data by its hash
     GetTransactionByHash {
         tx_hash: TxHash,
-        response_tx: TransactionHashResponseSender<B>,
+        response_tx: TransactionHashResponseSender<B, R>,
     },
 }
 
