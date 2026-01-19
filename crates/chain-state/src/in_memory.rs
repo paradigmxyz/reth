@@ -608,7 +608,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns [`SignedTransaction`] type for the given `TxHash` if found.
     pub fn transaction_by_hash(&self, hash: TxHash) -> Option<N::SignedTx> {
-        // Use the tx cache for O(1) lookup
         let (block_hash, tx_idx) = self.inner.tx_cache.get(&hash).map(|r| *r)?;
         let block_state = self.inner.in_memory_state.state_by_hash(block_hash)?;
         block_state.block_ref().recovered_block().body().transactions().get(tx_idx).cloned()

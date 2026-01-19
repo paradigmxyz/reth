@@ -90,8 +90,3 @@ test-utils = [
 name = "canonical_hashes_range"
 harness = false
 required-features = ["test-utils"]
-
-[[bench]]
-name = "transaction_by_hash"
-harness = false
-required-features = ["test-utils"]
