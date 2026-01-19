@@ -16,6 +16,7 @@ use alloc::{
     format,
     string::{String, ToString},
     sync::Arc,
+    vec,
     vec::Vec,
 };
 use alloy_chains::{Chain, NamedChain};
@@ -43,9 +44,7 @@ use reth_network_peers::{
     holesky_nodes, hoodi_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, sepolia_nodes,
     NodeRecord,
 };
-use reth_primitives_traits::{
-    constants::MAX_TX_GAS_LIMIT_OSAKA, sync::LazyLock, BlockHeader, SealedHeader,
-};
+use reth_primitives_traits::{sync::LazyLock, BlockHeader, SealedHeader};
 
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
 pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
@@ -128,7 +127,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (mainnet::MAINNET_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (mainnet::MAINNET_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
-        evm_limit_params: EvmLimitParamsKind::default(),
+        evm_limit_params: EvmLimitParamsKind::ethereum(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -164,7 +163,7 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (sepolia::SEPOLIA_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (sepolia::SEPOLIA_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
-        evm_limit_params: EvmLimitParamsKind::default(),
+        evm_limit_params: EvmLimitParamsKind::ethereum(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -195,7 +194,7 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (holesky::HOLESKY_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (holesky::HOLESKY_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
-        evm_limit_params: EvmLimitParamsKind::default(),
+        evm_limit_params: EvmLimitParamsKind::ethereum(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -228,7 +227,7 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (hoodi::HOODI_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (hoodi::HOODI_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
-        evm_limit_params: EvmLimitParamsKind::default(),
+        evm_limit_params: EvmLimitParamsKind::ethereum(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -421,6 +420,17 @@ impl From<ForkEvmLimitParams> for EvmLimitParamsKind {
     }
 }
 
+impl EvmLimitParamsKind {
+    /// Returns EVM limit params configured for Ethereum mainnet.
+    /// Includes EIP-7825 tx gas limit cap for Osaka.
+    pub fn ethereum() -> Self {
+        Self::Variable(ForkEvmLimitParams(vec![(
+            Box::new(EthereumHardfork::Osaka),
+            EvmLimitParams::osaka(),
+        )]))
+    }
+}
+
 /// Fork-dependent EVM limit params, sorted by hardfork activation order.
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkEvmLimitParams(pub Vec<(Box<dyn Hardfork>, EvmLimitParams)>);
@@ -486,7 +496,7 @@ impl<H: BlockHeader> Default for ChainSpec<H> {
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
             blob_params: Default::default(),
-            evm_limit_params: EvmLimitParamsKind::default(),
+            evm_limit_params: EvmLimitParamsKind::ethereum(),
         }
     }
 }
@@ -587,7 +597,7 @@ impl<H: BlockHeader> ChainSpec<H> {
 
     /// Get the [`EvmLimitParams`] for the chain at the given timestamp.
     pub fn evm_limit_params_at_timestamp(&self, timestamp: u64) -> EvmLimitParams {
-        let params = match &self.evm_limit_params {
+        match &self.evm_limit_params {
             EvmLimitParamsKind::Constant(params) => *params,
             EvmLimitParamsKind::Variable(ForkEvmLimitParams(fork_params)) => fork_params
                 .iter()
@@ -597,13 +607,6 @@ impl<H: BlockHeader> ChainSpec<H> {
                 })
                 .map(|(_, params)| *params)
                 .unwrap_or_default(),
-        };
-
-        // EIP-7825: resolve tx gas limit cap for Osaka
-        if params.tx_gas_limit_cap.is_none() && self.is_osaka_active_at_timestamp(timestamp) {
-            EvmLimitParams { tx_gas_limit_cap: Some(MAX_TX_GAS_LIMIT_OSAKA), ..params }
-        } else {
-            params
         }
     }
 
@@ -1363,6 +1366,7 @@ mod tests {
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
     use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
+    use reth_primitives_traits::constants::MAX_TX_GAS_LIMIT_OSAKA;
     use std::{collections::HashMap, str::FromStr};
 
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
@@ -3033,11 +3037,11 @@ Post-merge hard forks (timestamp based):
             .with_fork(EthereumHardfork::Osaka, ForkCondition::Timestamp(1000))
             .build();
 
-        // Pre-Osaka: tx_gas_limit_cap remains None
+        // pre-Osaka
         let params = spec.evm_limit_params_at_timestamp(999);
         assert_eq!(params.tx_gas_limit_cap, None);
 
-        // Osaka: tx_gas_limit_cap resolved to EIP-7825 cap
+        // post-Osaka
         let params = spec.evm_limit_params_at_timestamp(1000);
         assert_eq!(params.tx_gas_limit_cap, Some(MAX_TX_GAS_LIMIT_OSAKA));
     }

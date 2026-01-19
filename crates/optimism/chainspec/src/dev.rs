@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 
 use alloy_chains::Chain;
 use alloy_primitives::U256;
-use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec};
+use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec, EvmLimitParamsKind};
 use reth_optimism_forks::DEV_HARDFORKS;
 use reth_primitives_traits::SealedHeader;
 
@@ -27,6 +27,7 @@ pub static OP_DEV: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
             paris_block_and_final_difficulty: Some((0, U256::from(0))),
             hardforks,
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+            evm_limit_params: EvmLimitParamsKind::default(),
             ..Default::default()
         },
     }

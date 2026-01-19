@@ -66,8 +66,8 @@ use alloy_primitives::{B256, U256};
 use derive_more::{Constructor, Deref, From, Into};
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
-    DisplayHardforks, EthChainSpec, EthereumHardforks, EvmLimitParams, ForkFilter, ForkId,
-    Hardforks, Head,
+    DisplayHardforks, EthChainSpec, EthereumHardforks, EvmLimitParams, EvmLimitParamsKind,
+    ForkFilter, ForkId, Hardforks, Head,
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 use reth_network_peers::NodeRecord;
@@ -437,6 +437,7 @@ impl From<Genesis> for OpChainSpec {
                 // zero
                 paris_block_and_final_difficulty: Some((0, U256::ZERO)),
                 base_fee_params: optimism_genesis_info.base_fee_params,
+                evm_limit_params: EvmLimitParamsKind::default(),
                 ..Default::default()
             },
         }
