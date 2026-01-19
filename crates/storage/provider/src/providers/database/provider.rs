@@ -552,17 +552,24 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                             if account.status.is_not_modified() {
                                 continue;
                             }
-                            if collect_account_history {
+                            // Only collect for account history if the account info actually changed
+                            // (not just storage). Changesets are only written when info !=
+                            // original_info.
+                            if collect_account_history && account.info != account.original_info {
                                 account_transitions.entry(*address).or_default().push(block_number);
                             }
                             // Collect storage changes for this account
                             if collect_storage_history {
-                                for (slot, _) in &account.storage {
-                                    let slot_key = B256::from(*slot);
-                                    storage_transitions
-                                        .entry((*address, slot_key))
-                                        .or_default()
-                                        .push(block_number);
+                                for (slot, value) in &account.storage {
+                                    // Only collect slots that were actually changed, not just
+                                    // accessed
+                                    if value.is_changed() {
+                                        let slot_key = B256::from(*slot);
+                                        storage_transitions
+                                            .entry((*address, slot_key))
+                                            .or_default()
+                                            .push(block_number);
+                                    }
                                 }
                             }
                         }
