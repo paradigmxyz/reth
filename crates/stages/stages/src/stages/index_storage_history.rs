@@ -103,7 +103,6 @@ where
         let mut range = input.next_block_range();
         let first_sync = input.checkpoint().block_number == 0;
 
-        // Check if we're using RocksDB for storage history
         let use_rocksdb = provider.cached_storage_settings().storages_history_in_rocksdb;
 
         // On first sync we might have history coming from genesis. We clear the table since it's
