@@ -201,7 +201,7 @@ where
 
     /// Returns a reference to the storage bloom filter.
     #[cfg(feature = "storage-bloom")]
-    pub fn storage_bloom(&self) -> &Arc<StorageBloomFilter> {
+    pub const fn storage_bloom(&self) -> &Arc<StorageBloomFilter> {
         &self.storage_bloom
     }
 
