@@ -288,14 +288,6 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         }
     }
 
-    /// Finishes this writer and registers any pending `RocksDB` batch with the provider.
-    ///
-    /// This is a convenience method that extracts the raw batch and registers it
-    /// for deferred commit, eliminating the need for cfg-gated code at callsites.
-    pub fn finish_into_provider<P: crate::RocksDBProviderFactory>(self, provider: &P) {
-        provider.register_raw_rocksdb_batch(self.into_raw_rocksdb_batch());
-    }
-
     /// Increment the block number.
     ///
     /// Relevant only for [`Self::StaticFile`]. It is a no-op for [`Self::Database`].

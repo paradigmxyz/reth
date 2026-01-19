@@ -104,9 +104,6 @@ where
 
         let use_rocksdb = provider.cached_storage_settings().account_history_in_rocksdb;
 
-        // Validate that rocksdb feature is compiled if config requests it
-        provider.with_rocksdb_tx_if(use_rocksdb, "account_history_in_rocksdb", |_| Ok(()))?;
-
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
         //
@@ -143,7 +140,7 @@ where
         let rocksdb_batch = rocksdb.batch();
         let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
         load_account_history_via_writer(collector, first_sync, &mut writer)?;
-        writer.finish_into_provider(provider);
+        provider.register_raw_rocksdb_batch(writer.into_raw_rocksdb_batch());
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
