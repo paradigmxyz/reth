@@ -1,14 +1,14 @@
 //! Async caching support for eth RPC
 
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::B256;
+use alloy_primitives::{map::HashMap, TxHash, B256};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
-use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{Block, BlockBody, NodePrimitives, RecoveredBlock};
 use reth_storage_api::{BlockReader, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use schnellru::{ByLength, Limiter};
@@ -46,6 +46,9 @@ type HeaderResponseSender<H> = oneshot::Sender<ProviderResult<H>>;
 
 /// The type that can send the response with a chain of cached blocks
 type CachedParentBlocksResponseSender<B> = oneshot::Sender<Vec<Arc<RecoveredBlock<B>>>>;
+
+/// The type that can send the response for a transaction hash lookup
+type TransactionHashResponseSender = oneshot::Sender<Option<(B256, usize)>>;
 
 type BlockLruCache<B, L> =
     MultiConsumerLruCache<B256, Arc<RecoveredBlock<B>>, L, BlockWithSendersResponseSender<B>>;
@@ -93,6 +96,8 @@ impl<N: NodePrimitives> EthStateCache<N> {
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
             rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_operations)),
+            tx_hash_index: HashMap::default(),
+            block_tx_hashes: HashMap::default(),
         };
         let cache = Self { to_service };
         (cache, service)
@@ -255,6 +260,20 @@ impl<N: NodePrimitives> EthStateCache<N> {
             Some(blocks)
         }
     }
+
+    /// Looks up a transaction by its hash in the cache index.
+    ///
+    /// Returns the block hash and transaction index if the transaction is in a cached block.
+    /// This provides O(1) lookup for transactions in recently cached blocks.
+    ///
+    /// Returns `None` if:
+    /// - The transaction is not in the cache index
+    /// - The cache service is unavailable
+    pub async fn get_transaction_by_hash(&self, tx_hash: TxHash) -> Option<(B256, usize)> {
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(CacheAction::GetTransactionByHash { tx_hash, response_tx });
+        rx.await.ok()?
+    }
 }
 /// Thrown when the cache service task dropped.
 #[derive(Debug, thiserror::Error)]
@@ -317,6 +336,11 @@ pub(crate) struct EthStateCacheService<
     ///
     /// This restricts the max concurrent fetch tasks at the same time.
     rate_limiter: Arc<Semaphore>,
+    /// Index mapping transaction hashes to their block hash and index within the block.
+    /// This enables O(1) transaction lookups for cached blocks.
+    tx_hash_index: HashMap<TxHash, (B256, usize)>,
+    /// Tracks which transaction hashes belong to each block, for cleanup when blocks are evicted.
+    block_tx_hashes: HashMap<B256, Vec<TxHash>>,
 }
 
 impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
@@ -324,6 +348,29 @@ where
     Provider: BlockReader + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
+    /// Indexes all transactions in a block for O(1) lookup by transaction hash.
+    fn index_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
+        let block_hash = block.hash();
+        let mut tx_hashes = Vec::with_capacity(block.body().transactions().len());
+
+        for (tx_idx, tx) in block.body().transactions().iter().enumerate() {
+            let tx_hash = *tx.tx_hash();
+            self.tx_hash_index.insert(tx_hash, (block_hash, tx_idx));
+            tx_hashes.push(tx_hash);
+        }
+
+        self.block_tx_hashes.insert(block_hash, tx_hashes);
+    }
+
+    /// Removes all transaction index entries for a block.
+    fn remove_block_transactions(&mut self, block_hash: &B256) {
+        if let Some(tx_hashes) = self.block_tx_hashes.remove(block_hash) {
+            for tx_hash in tx_hashes {
+                self.tx_hash_index.remove(&tx_hash);
+            }
+        }
+    }
+
     fn on_new_block(
         &mut self,
         block_hash: B256,
@@ -550,6 +597,8 @@ where
                         }
                         CacheAction::CacheNewCanonicalChain { chain_change } => {
                             for block in chain_change.blocks {
+                                // Index transactions before caching the block
+                                this.index_block_transactions(&block);
                                 this.on_new_block(block.hash(), Ok(Some(Arc::new(block))));
                             }
 
@@ -562,7 +611,10 @@ where
                         }
                         CacheAction::RemoveReorgedChain { chain_change } => {
                             for block in chain_change.blocks {
-                                this.on_reorg_block(block.hash(), Ok(Some(block)));
+                                // Remove transaction index entries for reorged blocks
+                                let block_hash = block.hash();
+                                this.remove_block_transactions(&block_hash);
+                                this.on_reorg_block(block_hash, Ok(Some(block)));
                             }
 
                             for block_receipts in chain_change.receipts {
@@ -595,6 +647,10 @@ where
                             }
 
                             let _ = response_tx.send(blocks);
+                        }
+                        CacheAction::GetTransactionByHash { tx_hash, response_tx } => {
+                            let result = this.tx_hash_index.get(&tx_hash).copied();
+                            let _ = response_tx.send(result);
                         }
                     };
                     this.update_cached_metrics();
@@ -648,6 +704,11 @@ enum CacheAction<B: Block, R> {
         block_hash: B256,
         max_blocks: usize,
         response_tx: CachedParentBlocksResponseSender<B>,
+    },
+    /// Look up a transaction's block hash and index by its hash
+    GetTransactionByHash {
+        tx_hash: TxHash,
+        response_tx: TransactionHashResponseSender,
     },
 }
 
