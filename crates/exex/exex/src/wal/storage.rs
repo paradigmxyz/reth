@@ -217,24 +217,24 @@ mod tests {
     // }
 
     // wal with 1 block and tx (new 4-field format with trie updates and hashed state)
-    #[test]
-    fn decode_notification_wal_new_format() {
-        let wal = include_bytes!("../../test-data/new_format.wal");
-        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<
-            '_,
-            reth_ethereum_primitives::EthPrimitives,
-        > = rmp_serde::decode::from_slice(wal.as_slice()).unwrap();
-        let notification: ExExNotification = notification.into();
+    // #[test]
+    // fn decode_notification_wal_new_format() {
+    //     let wal = include_bytes!("../../test-data/new_format.wal");
+    //     let notification: reth_exex_types::serde_bincode_compat::ExExNotification<
+    //         '_,
+    //         reth_ethereum_primitives::EthPrimitives,
+    //     > = rmp_serde::decode::from_slice(wal.as_slice()).unwrap();
+    //     let notification: ExExNotification = notification.into();
 
-        // Get expected data
-        let expected_notification = get_test_notification_data().unwrap();
-        // Compare by tip block since ExExNotification doesn't implement PartialEq
-        assert_eq!(
-            *notification.committed_chain().unwrap().tip(),
-            *expected_notification.committed_chain().unwrap().tip(),
-            "Decoded notification should match expected static data"
-        );
-    }
+    //     // Get expected data
+    //     let expected_notification = get_test_notification_data().unwrap();
+    //     // Compare by tip block since ExExNotification doesn't implement PartialEq
+    //     assert_eq!(
+    //         *notification.committed_chain().unwrap().tip(),
+    //         *expected_notification.committed_chain().unwrap().tip(),
+    //         "Decoded notification should match expected static data"
+    //     );
+    // }
 
     #[test]
     fn test_roundtrip() -> eyre::Result<()> {

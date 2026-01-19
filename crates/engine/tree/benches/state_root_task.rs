@@ -88,7 +88,6 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
                     status: AccountStatus::Touched,
                     original_info: Box::new(AccountInfo::default()),
                     transaction_id: 0,
-                    ..Default::default()
                 }
             };
 
