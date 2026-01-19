@@ -1014,6 +1014,16 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> NodePrimitivesProvider
     type Primitives = T;
 }
 
+impl<T: NodePrimitives, ChainSpec: Send + Sync> reth_storage_api::CloneProvider
+    for MockEthProvider<T, ChainSpec>
+where
+    T::Block: Clone,
+{
+    fn clone_provider(&self) -> Result<Self, reth_db_api::DatabaseError> {
+        Ok(self.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

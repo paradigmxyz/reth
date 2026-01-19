@@ -36,12 +36,13 @@ use reth_primitives_traits::{
     SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::{CloneTx, OverlayStateProvider, OverlayStateProviderFactory},
+    providers::{OverlayStateProvider, OverlayStateProviderFactory},
     BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
     StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
 };
 use reth_revm::db::State;
+use reth_storage_api::CloneProvider;
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
@@ -145,7 +146,7 @@ where
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + BlockNumReader
-                          + CloneTx,
+                          + CloneProvider,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
         + BlockNumReader
@@ -500,15 +501,6 @@ where
         let root_time = Instant::now();
         let mut maybe_state_root = None;
 
-        // Create overlay provider once for state root computation (parallel/serial paths).
-        // The StateRootTask path doesn't need this since it uses the provider passed to spawn.
-        let mut overlay_provider_for_root = if matches!(strategy, StateRootStrategy::StateRootTask)
-        {
-            None
-        } else {
-            Some(ensure_ok_post_block!(overlay_factory.database_provider_ro(), block))
-        };
-
         match strategy {
             StateRootStrategy::StateRootTask => {
                 debug!(target: "engine::tree::payload_validator", "Using sparse trie state root algorithm");
@@ -535,9 +527,8 @@ where
             }
             StateRootStrategy::Parallel => {
                 debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
-                let overlay_provider = overlay_provider_for_root
-                    .take()
-                    .expect("overlay_provider_for_root is Some for Parallel strategy");
+                let overlay_provider =
+                    ensure_ok_post_block!(overlay_factory.database_provider_ro(), block);
                 match self.compute_state_root_parallel(overlay_provider, &hashed_state) {
                     Ok(result) => {
                         let elapsed = root_time.elapsed();
@@ -573,12 +564,8 @@ where
                 self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
             }
 
-            // For fallback, we need a provider. If we have one left (StateRootTask path or
-            // Synchronous path), reuse it. Otherwise create one now (Parallel path consumed it).
-            let overlay_provider = match overlay_provider_for_root.take() {
-                Some(p) => p,
-                None => ensure_ok_post_block!(overlay_factory.database_provider_ro(), block),
-            };
+            let overlay_provider =
+                ensure_ok_post_block!(overlay_factory.database_provider_ro(), block);
 
             let (root, updates) = ensure_ok_post_block!(
                 self.compute_state_root_serial(overlay_provider, &hashed_state),
@@ -914,14 +901,17 @@ where
                 let overlay_provider = overlay_factory.database_provider_ro()?;
 
                 // Use the pre-computed overlay provider for multiproofs
-                let handle = self.payload_processor.spawn(
-                    env,
-                    txs,
-                    provider_builder,
-                    overlay_provider,
-                    &self.config,
-                    block_access_list,
-                );
+                let handle = self
+                    .payload_processor
+                    .spawn(
+                        env,
+                        txs,
+                        provider_builder,
+                        overlay_provider,
+                        &self.config,
+                        block_access_list,
+                    )
+                    .map_err(ProviderError::Database)?;
 
                 // record prewarming initialization duration
                 self.metrics
@@ -1262,7 +1252,7 @@ where
                           + PruneCheckpointReader
                           + ChangeSetReader
                           + BlockNumReader
-                          + CloneTx,
+                          + CloneProvider,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader

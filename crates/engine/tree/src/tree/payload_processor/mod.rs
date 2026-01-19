@@ -30,10 +30,10 @@ use reth_evm::{
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::CloneTx, BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory,
-    StateReader,
+    BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
+use reth_storage_api::CloneProvider;
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{proof_task::ProofWorkerHandle, root::ParallelStateRootError};
 use reth_trie_sparse::{
@@ -223,10 +223,10 @@ where
         multiproof_provider: Prov,
         config: &TreeConfig,
         bal: Option<Arc<BlockAccessList>>,
-    ) -> IteratorPayloadHandle<Evm, I, N>
+    ) -> Result<IteratorPayloadHandle<Evm, I, N>, reth_storage_errors::db::DatabaseError>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-        Prov: TrieCursorFactory + HashedCursorFactory + CloneTx + Send + 'static,
+        Prov: TrieCursorFactory + HashedCursorFactory + CloneProvider + Send + 'static,
     {
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx, transaction_count_hint) =
@@ -275,8 +275,7 @@ where
             storage_worker_count,
             account_worker_count,
             v2_proofs_enabled,
-        )
-        .expect("failed to create proof worker handle");
+        )?;
 
         let multi_proof_task = MultiProofTask::new(
             proof_handle.clone(),
@@ -309,13 +308,13 @@ where
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
         self.spawn_sparse_trie_task(sparse_trie_rx, proof_handle, state_root_tx);
 
-        PayloadHandle {
+        Ok(PayloadHandle {
             to_multi_proof: Some(to_multi_proof),
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
             _span: span,
-        }
+        })
     }
 
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
@@ -1146,17 +1145,19 @@ mod tests {
             OverlayStateProviderFactory::new(provider_factory.clone(), ChangesetCache::new());
         let overlay_provider = overlay_factory.database_provider_ro().unwrap();
 
-        let mut handle = payload_processor.spawn(
-            Default::default(),
-            (
-                Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
-                std::convert::identity,
-            ),
-            StateProviderBuilder::new(provider_factory, genesis_hash, None),
-            overlay_provider,
-            &TreeConfig::default(),
-            None, // No BAL for test
-        );
+        let mut handle = payload_processor
+            .spawn(
+                Default::default(),
+                (
+                    Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
+                    std::convert::identity,
+                ),
+                StateProviderBuilder::new(provider_factory, genesis_hash, None),
+                overlay_provider,
+                &TreeConfig::default(),
+                None, // No BAL for test
+            )
+            .expect("failed to spawn payload processor");
 
         let mut state_hook = handle.state_hook();
 

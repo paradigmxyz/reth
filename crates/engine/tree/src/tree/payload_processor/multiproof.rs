@@ -1326,9 +1326,10 @@ mod tests {
         DatabaseProviderROFactory, LatestStateProvider, PruneCheckpointReader,
         StageCheckpointReader, StateProviderBox,
     };
+    use reth_storage_api::CloneProvider;
     use reth_trie::MultiProof;
     use reth_trie_db::ChangesetCache;
-    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
+    use reth_trie_parallel::proof_task::ProofWorkerHandle;
     use revm_primitives::{B256, U256};
     use std::sync::{Arc, OnceLock};
     use tokio::runtime::{Handle, Runtime};
@@ -1352,7 +1353,7 @@ mod tests {
                               + PruneCheckpointReader
                               + ChangeSetReader
                               + BlockNumReader
-                              + Clone,
+                              + CloneProvider,
             > + Clone
             + Send
             + 'static,
@@ -1361,8 +1362,8 @@ mod tests {
         let changeset_cache = ChangesetCache::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
         let overlay_provider = overlay_factory.database_provider_ro().unwrap();
-        let task_ctx = ProofTaskCtx::new(overlay_provider);
-        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);
+        let proof_handle =
+            ProofWorkerHandle::new(rt_handle, overlay_provider, 1, 1, false).unwrap();
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();
 

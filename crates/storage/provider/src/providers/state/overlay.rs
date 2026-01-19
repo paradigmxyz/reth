@@ -8,7 +8,7 @@ use reth_metrics::Metrics;
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+    BlockNumReader, ChangeSetReader, CloneProvider, DBProvider, DatabaseProviderFactory,
     DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
 };
 use reth_trie::{
@@ -485,7 +485,7 @@ where
 /// This provider uses in-memory trie updates and hashed post state as an overlay
 /// on top of a database provider, implementing [`TrieCursorFactory`] and [`HashedCursorFactory`]
 /// using the in-memory overlay factories.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct OverlayStateProvider<Provider: DBProvider> {
     provider: Provider,
     trie_updates: Arc<TrieUpdatesSorted>,
@@ -517,25 +517,13 @@ where
     }
 }
 
-/// Trait for providers that can create deep clones with independent MVCC snapshots.
-///
-/// This is used for proof workers that need to read from the same database snapshot
-/// concurrently without sharing the same underlying transaction handle.
-pub trait CloneTx: Sized {
-    /// Creates a deep clone of this provider with a new MVCC snapshot.
-    ///
-    /// The cloned provider reads from the same database snapshot as the original
-    /// but has its own independent transaction handle.
-    fn clone_tx(&self) -> Result<Self, DatabaseError>;
-}
-
-impl<Provider> CloneTx for OverlayStateProvider<Provider>
+impl<Provider> CloneProvider for OverlayStateProvider<Provider>
 where
-    Provider: DBProvider + CloneTx,
+    Provider: DBProvider + CloneProvider,
 {
-    fn clone_tx(&self) -> Result<Self, DatabaseError> {
+    fn clone_provider(&self) -> Result<Self, DatabaseError> {
         Ok(Self {
-            provider: self.provider.clone_tx()?,
+            provider: self.provider.clone_provider()?,
             trie_updates: Arc::clone(&self.trie_updates),
             hashed_post_state: Arc::clone(&self.hashed_post_state),
         })

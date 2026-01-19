@@ -264,8 +264,8 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx, N: NodeTypes> crate::providers::state::overlay::CloneTx for DatabaseProvider<TX, N> {
-    fn clone_tx(&self) -> Result<Self, reth_db_api::DatabaseError> {
+impl<TX: DbTx, N: NodeTypes> reth_storage_api::CloneProvider for DatabaseProvider<TX, N> {
+    fn clone_provider(&self) -> Result<Self, reth_db_api::DatabaseError> {
         self.clone_tx()
     }
 }
