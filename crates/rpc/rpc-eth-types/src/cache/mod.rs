@@ -288,12 +288,8 @@ impl<N: NodePrimitives> EthStateCache<N> {
 
     /// Looks up a transaction by its hash in the cache index.
     ///
-    /// Returns the cached block and transaction index if the transaction is in a cached block.
-    ///
-    /// Returns `None` if:
-    /// - The transaction is not in the cache index
-    /// - The block is no longer in the cache
-    /// - The cache service is unavailable
+    /// Returns the cached block, transaction index, and optionally receipts if the transaction
+    /// is in a cached block.
     pub async fn get_transaction_by_hash(
         &self,
         tx_hash: TxHash,
