@@ -3001,7 +3001,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
 
             #[cfg(not(all(unix, feature = "rocksdb")))]
             return Err(ProviderError::UnsupportedProvider);
-        } else {
+        }
+
+        if !use_rocksdb {
             // Unwind the account history index in MDBX.
             let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
             for &(address, rem_index) in &last_indices {
