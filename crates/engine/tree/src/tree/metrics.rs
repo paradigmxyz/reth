@@ -239,7 +239,7 @@ impl ForkchoiceUpdatedMetrics {
     pub(crate) fn update_response_metrics(
         &self,
         start: Instant,
-        latest_new_payload_at: &mut Option<Instant>,
+        latest_new_payload_finish_for_fcu: &mut Option<Instant>,
         has_attrs: bool,
         result: &Result<TreeOutcome<OnForkChoiceUpdated>, ProviderError>,
     ) {
@@ -258,8 +258,9 @@ impl ForkchoiceUpdatedMetrics {
         }
         self.forkchoice_updated_latency.record(elapsed);
         self.forkchoice_updated_last.set(elapsed);
-        if let Some(latest_new_payload_at) = latest_new_payload_at.take() {
-            self.new_payload_forkchoice_updated_time_diff.record(start - latest_new_payload_at);
+        if let Some(latest_new_payload_finish_for_fcu) = latest_new_payload_finish_for_fcu.take() {
+            self.new_payload_forkchoice_updated_time_diff
+                .record(start - latest_new_payload_finish_for_fcu);
         }
     }
 }
@@ -271,6 +272,9 @@ pub(crate) struct NewPayloadStatusMetrics {
     /// Finish time of the latest new payload call.
     #[metric(skip)]
     pub(crate) latest_finish_at: Option<Instant>,
+    /// Finish time of the latest new payload call for forkchoice timing.
+    #[metric(skip)]
+    pub(crate) latest_finish_for_fcu: Option<Instant>,
     /// Start time of the latest new payload call.
     #[metric(skip)]
     pub(crate) latest_start_at: Option<Instant>,
@@ -325,6 +329,7 @@ impl NewPayloadStatusMetrics {
             self.new_payload_interval.record(start - prev_start);
         }
         self.latest_finish_at = Some(finish);
+        self.latest_finish_for_fcu = Some(finish);
         self.latest_start_at = Some(start);
         match result {
             Ok(outcome) => match outcome.outcome.status {
@@ -644,5 +649,33 @@ mod tests {
         }
 
         assert!(found_metrics, "Expected to find sync.execution metrics");
+    }
+
+    #[test]
+    fn test_new_payload_finish_not_cleared_by_forkchoice_metrics() {
+        let mut metrics = EngineApiMetrics::default();
+
+        let payload_status = PayloadStatus::from_status(PayloadStatusEnum::Valid);
+        let new_payload_result = Ok(TreeOutcome::new(payload_status));
+        metrics.engine.new_payload.update_response_metrics(Instant::now(), &new_payload_result, 0);
+
+        assert!(
+            metrics.engine.new_payload.latest_finish_at.is_some(),
+            "expected latest_finish_at to be set after new payload"
+        );
+
+        let fcu_payload_status = PayloadStatus::from_status(PayloadStatusEnum::Valid);
+        let fcu_result = Ok(TreeOutcome::new(OnForkChoiceUpdated::valid(fcu_payload_status)));
+        metrics.engine.forkchoice_updated.update_response_metrics(
+            Instant::now(),
+            &mut metrics.engine.new_payload.latest_finish_for_fcu,
+            false,
+            &fcu_result,
+        );
+
+        assert!(
+            metrics.engine.new_payload.latest_finish_at.is_some(),
+            "forkchoice metrics should not clear latest_finish_at"
+        );
     }
 }
