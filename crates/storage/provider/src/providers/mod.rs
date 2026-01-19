@@ -14,6 +14,9 @@ pub use static_file::{
 };
 
 mod state;
+#[cfg(feature = "storage-bloom")]
+#[allow(unused_imports)] // Not yet integrated into main code path
+pub(crate) use state::bloom::BloomStateProvider;
 pub use state::{
     historical::{
         compute_history_rank, history_info, needs_prev_shard_check, HistoricalStateProvider,
