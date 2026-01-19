@@ -14,66 +14,48 @@ By default, all tables are stored in MDBX. However, certain large tables can ben
 These settings can only be configured at genesis initialization. Once the node has been initialized, changing these settings requires a full re-sync from scratch.
 :::
 
-## Managing Storage Settings
+## RocksDB CLI Flags
 
-Storage settings are managed using the `reth db settings` command.
+### `--rocksdb.tx-hash`
 
-### Viewing Current Settings
-
-```bash
-reth db settings get
-```
-
-### Available Settings
-
-#### `transaction_hash_numbers`
-
-Store the transaction hash to number mapping in RocksDB instead of MDBX.
+Route the transaction hash to number mapping table to RocksDB instead of MDBX.
 
 ```bash
-reth db settings set transaction_hash_numbers true
+reth node --rocksdb.tx-hash=true
 ```
 
 **Default:** `false` (stored in MDBX)
 
 **Use case:** This table maps transaction hashes to their sequential transaction IDs. Moving it to RocksDB can improve lookup performance for high-volume transaction queries.
 
-#### `storages_history`
+### `--rocksdb.storages-history`
 
-Store storage history data in RocksDB instead of MDBX.
+Route storage history tables to RocksDB instead of MDBX.
 
 ```bash
-reth db settings set storages_history true
+reth node --rocksdb.storages-history=true
 ```
 
 **Default:** `false` (stored in MDBX)
 
 **Use case:** Storage history tracks historical values of contract storage slots. This table can grow very large on archive nodes. RocksDB may provide better write performance for this workload.
 
-#### `account_history`
+### `--rocksdb.account-history`
 
-Store account history data in RocksDB instead of MDBX.
+Route account history tables to RocksDB instead of MDBX.
 
 ```bash
-reth db settings set account_history true
+reth node --rocksdb.account-history=true
 ```
 
 **Default:** `false` (stored in MDBX)
 
 **Use case:** Account history tracks historical account states. Similar to storage history, this table grows significantly on archive nodes and may benefit from RocksDB's handling of large datasets.
 
-## Example Configuration
-
-To configure a new node with transaction hash lookups and history tables in RocksDB before first sync:
+## Example
 
 ```bash
-# Initialize the node first, then configure storage settings
-reth db settings set transaction_hash_numbers true
-reth db settings set storages_history true
-reth db settings set account_history true
-
-# Then start the node
-reth node
+reth node --rocksdb.tx-hash=true --rocksdb.storages-history=true --rocksdb.account-history=true
 ```
 
 ## RocksDB Data Directory
