@@ -35,6 +35,8 @@ use reth_primitives_traits::{
     AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
     SealedHeader, SignerRecoverable,
 };
+#[cfg(feature = "storage-bloom")]
+use reth_provider::providers::BloomStateProvider;
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
@@ -43,7 +45,7 @@ use reth_provider::{
 };
 use reth_revm::db::State;
 #[cfg(feature = "storage-bloom")]
-use reth_storage_bloom::{StorageBloomConfig, StorageBloomFilter};
+use reth_storage_bloom::StorageBloomFilter;
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
@@ -170,6 +172,7 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
+        #[cfg(feature = "storage-bloom")] storage_bloom: Arc<StorageBloomFilter>,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
@@ -178,9 +181,6 @@ where
             &config,
             precompile_cache_map.clone(),
         );
-
-        #[cfg(feature = "storage-bloom")]
-        let storage_bloom = Arc::new(StorageBloomFilter::new(StorageBloomConfig::default()));
 
         Self {
             provider,
@@ -471,6 +471,11 @@ where
         if self.config.state_provider_metrics() {
             state_provider = Box::new(InstrumentedStateProvider::new(state_provider, "engine"));
         }
+
+        // Wrap state provider with bloom filter to short-circuit empty slot reads.
+        #[cfg(feature = "storage-bloom")]
+        let state_provider =
+            Box::new(BloomStateProvider::new(state_provider, self.storage_bloom.clone()));
 
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally

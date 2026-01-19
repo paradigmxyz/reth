@@ -19,11 +19,8 @@
 //!
 //! - **Memory**: ~2-3GB for mainnet scale with acceptable false positive rate
 //! - **Write amplification**: Every storage write must update the bloom
-//! - **Persistence**: Must persist to disk to avoid rebuild on restart
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
-use serde as _;
 
 mod bloom;
 mod metrics;
