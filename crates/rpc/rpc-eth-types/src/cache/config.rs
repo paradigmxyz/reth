@@ -27,7 +27,7 @@ pub struct EthStateCacheConfig {
     ///
     /// Default is 512.
     pub max_concurrent_db_requests: usize,
-    /// Maximum number of transaction hashes to cache for `eth_getTransactionByHash` lookups.
+    /// Maximum number of transaction hashes to cache for transaction lookups.
     pub max_cached_tx_hashes: u32,
 }
 

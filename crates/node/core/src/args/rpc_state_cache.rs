@@ -37,7 +37,7 @@ pub struct RpcStateCacheArgs {
     )]
     pub max_concurrent_db_requests: usize,
 
-    /// Maximum number of transaction hashes to cache for `eth_getTransactionByHash` lookups.
+    /// Maximum number of transaction hashes to cache for transaction lookups.
     #[arg(
         long = "rpc-cache.max-cached-tx-hashes",
         default_value_t = DEFAULT_MAX_CACHED_TX_HASHES,

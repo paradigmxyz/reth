@@ -25,9 +25,6 @@ use tokio::sync::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// Cached data for a transaction lookup.
-///
-/// Contains all the data needed to serve `eth_getTransactionByHash` and `eth_getTransactionReceipt`
-/// without hitting the database.
 #[derive(Debug, Clone)]
 pub struct CachedTransaction<B: Block, R> {
     /// The block containing this transaction.
@@ -376,7 +373,7 @@ where
     Provider: BlockReader + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
-    /// Indexes all transactions in a block for O(1) lookup by transaction hash.
+    /// Indexes all transactions in a block by transaction hash.
     fn index_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
         let block_hash = block.hash();
         for (tx_idx, tx) in block.body().transactions().iter().enumerate() {
