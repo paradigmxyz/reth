@@ -165,4 +165,21 @@ mod tests {
         };
         assert!(with_all.has_overrides());
     }
+
+    #[test]
+    fn test_bare_flag_requires_value() {
+        let result = CommandParser::<RocksDbArgs>::try_parse_from(["reth", "--rocksdb.tx-hash"]);
+        assert!(result.is_err(), "bare flag without value should require a value");
+    }
+
+    #[test]
+    fn test_space_separated_value() {
+        let args =
+            CommandParser::<RocksDbArgs>::parse_from(["reth", "--rocksdb.tx-hash", "true"]).args;
+        assert_eq!(args.tx_hash, Some(true));
+
+        let args =
+            CommandParser::<RocksDbArgs>::parse_from(["reth", "--rocksdb.tx-hash", "false"]).args;
+        assert_eq!(args.tx_hash, Some(false));
+    }
 }
