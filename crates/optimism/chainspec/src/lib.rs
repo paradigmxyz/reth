@@ -1351,7 +1351,6 @@ mod tests {
         }
     }
 
-    /// Demonstrates Variable EVM limits with a custom hardfork on an existing OpChainSpec.
     #[test]
     fn test_variable_evm_limits_with_custom_hardfork() {
         use reth_chainspec::{
@@ -1367,21 +1366,22 @@ mod tests {
             tx_gas_limit_cap: Some(30_000_000),
         };
 
-        let mut op_spec = OpChainSpecBuilder::base_mainnet().build();
-        op_spec.inner.hardforks.insert(CustomFork::ExpandedLimits, ForkCondition::Timestamp(1000));
+        let mut op_spec = OpChainSpecBuilder::base_mainnet()
+            .with_fork(CustomFork::ExpandedLimits, ForkCondition::Timestamp(1000))
+            .build();
         op_spec.inner.evm_limit_params = EvmLimitParamsKind::Variable(ForkEvmLimitParams(vec![
             (OpHardfork::Bedrock.boxed(), default_limits),
             (CustomFork::ExpandedLimits.boxed(), expanded_limits),
         ]));
 
         // Before custom fork: default limits
-        let before = op_spec.inner.evm_limit_params_at_timestamp(999);
+        let before = op_spec.evm_limit_params_at_timestamp(999);
         assert_eq!(before.max_code_size, default_limits.max_code_size);
         assert_eq!(before.max_initcode_size, default_limits.max_initcode_size);
         assert_eq!(before.tx_gas_limit_cap, None);
 
         // After custom fork: expanded limits
-        let after = op_spec.inner.evm_limit_params_at_timestamp(1000);
+        let after = op_spec.evm_limit_params_at_timestamp(1000);
         assert_eq!(after.max_code_size, expanded_limits.max_code_size);
         assert_eq!(after.max_initcode_size, expanded_limits.max_initcode_size);
         assert_eq!(after.tx_gas_limit_cap, expanded_limits.tx_gas_limit_cap);
