@@ -84,7 +84,7 @@ pub(crate) struct AsyncAccountValueEncoder {
 }
 
 impl AsyncAccountValueEncoder {
-    /// Initializes a [`Self`] using a [`ProofWorkerHandle`] which will be used to calculate storage
+    /// Initializes a [`Self`] using a `ProofWorkerHandle` which will be used to calculate storage
     /// roots asynchronously.
     #[expect(dead_code)]
     pub(crate) fn new(
