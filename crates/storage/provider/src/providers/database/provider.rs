@@ -3027,25 +3027,60 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .collect::<Vec<_>>();
         storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
 
-        let mut cursor = self.tx.cursor_write::<tables::StoragesHistory>()?;
-        for &(address, storage_key, rem_index) in &storage_changesets {
-            let partial_shard = unwind_history_shards::<_, tables::StoragesHistory, _>(
-                &mut cursor,
-                StorageShardedKey::last(address, storage_key),
-                rem_index,
-                |storage_sharded_key| {
-                    storage_sharded_key.address == address &&
-                        storage_sharded_key.sharded_key.key == storage_key
-                },
-            )?;
+        let use_rocksdb = self.cached_storage_settings().storages_history_in_rocksdb;
 
-            // Check the last returned partial shard.
-            // If it's not empty, the shard needs to be reinserted.
-            if !partial_shard.is_empty() {
-                cursor.insert(
+        if use_rocksdb {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let mut key_min_block: alloy_primitives::map::HashMap<
+                    (Address, B256),
+                    BlockNumber,
+                > = alloy_primitives::map::HashMap::with_capacity_and_hasher(
+                    storage_changesets.len(),
+                    Default::default(),
+                );
+                for &(address, storage_key, block_number) in &storage_changesets {
+                    key_min_block
+                        .entry((address, storage_key))
+                        .and_modify(|min| *min = (*min).min(block_number))
+                        .or_insert(block_number);
+                }
+
+                let mut batch = self.rocksdb_provider.batch();
+                for ((address, storage_key), min_block) in key_min_block {
+                    match min_block.checked_sub(1) {
+                        Some(keep_to) => {
+                            batch.unwind_storage_history_to(address, storage_key, keep_to)?
+                        }
+                        None => batch.clear_storage_history(address, storage_key)?,
+                    }
+                }
+                self.pending_rocksdb_batches.lock().push(batch.into_inner());
+            }
+
+            #[cfg(not(all(unix, feature = "rocksdb")))]
+            return Err(ProviderError::UnsupportedProvider);
+        }
+
+        if !use_rocksdb {
+            let mut cursor = self.tx.cursor_write::<tables::StoragesHistory>()?;
+            for &(address, storage_key, rem_index) in &storage_changesets {
+                let partial_shard = unwind_history_shards::<_, tables::StoragesHistory, _>(
+                    &mut cursor,
                     StorageShardedKey::last(address, storage_key),
-                    &BlockNumberList::new_pre_sorted(partial_shard),
+                    rem_index,
+                    |storage_sharded_key| {
+                        storage_sharded_key.address == address &&
+                            storage_sharded_key.sharded_key.key == storage_key
+                    },
                 )?;
+
+                if !partial_shard.is_empty() {
+                    cursor.insert(
+                        StorageShardedKey::last(address, storage_key),
+                        &BlockNumberList::new_pre_sorted(partial_shard),
+                    )?;
+                }
             }
         }
 

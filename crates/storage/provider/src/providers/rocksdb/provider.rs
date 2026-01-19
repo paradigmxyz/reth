@@ -534,6 +534,53 @@ impl RocksDBProvider {
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
     }
 
+    /// Returns all storage history shards for the given `(address, storage_key)` pair.
+    ///
+    /// Iterates through all shards in ascending `highest_block_number` order until
+    /// a different `(address, storage_key)` is encountered.
+    pub fn storage_history_shards(
+        &self,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
+        let cf = self.get_cf_handle::<tables::StoragesHistory>()?;
+
+        let start_key = StorageShardedKey::new(address, storage_key, 0u64);
+        let start_bytes = start_key.encode();
+
+        let iter = self
+            .0
+            .db
+            .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
+
+        let mut result = Vec::new();
+        for item in iter {
+            match item {
+                Ok((key_bytes, value_bytes)) => {
+                    let key = StorageShardedKey::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                    if key.address != address || key.sharded_key.key != storage_key {
+                        break;
+                    }
+
+                    let value = BlockNumberList::decompress(&value_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                    result.push((key, value));
+                }
+                Err(e) => {
+                    return Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })));
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
     /// Writes a batch of operations atomically.
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
@@ -889,6 +936,92 @@ impl<'a> RocksDBBatch<'a> {
             )?;
         }
 
+        Ok(())
+    }
+
+    /// Unwinds storage history to keep only blocks `<= keep_to`.
+    ///
+    /// Handles multi-shard scenarios by:
+    /// 1. Loading all shards for the `(address, storage_key)` pair
+    /// 2. Finding the boundary shard containing `keep_to`
+    /// 3. Deleting all shards after the boundary
+    /// 4. Truncating the boundary shard to keep only indices `<= keep_to`
+    /// 5. Ensuring the last shard is keyed with `u64::MAX`
+    pub fn unwind_storage_history_to(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        keep_to: BlockNumber,
+    ) -> ProviderResult<()> {
+        let shards = self.provider.storage_history_shards(address, storage_key)?;
+        if shards.is_empty() {
+            return Ok(());
+        }
+
+        let boundary_idx = shards.iter().position(|(key, _)| {
+            key.sharded_key.highest_block_number == u64::MAX ||
+                key.sharded_key.highest_block_number > keep_to
+        });
+
+        let Some(boundary_idx) = boundary_idx else {
+            let (last_key, last_value) = shards.last().expect("shards is non-empty");
+            if last_key.sharded_key.highest_block_number != u64::MAX {
+                self.delete::<tables::StoragesHistory>(last_key.clone())?;
+                self.put::<tables::StoragesHistory>(
+                    StorageShardedKey::last(address, storage_key),
+                    last_value,
+                )?;
+            }
+            return Ok(());
+        };
+
+        for (key, _) in shards.iter().skip(boundary_idx + 1) {
+            self.delete::<tables::StoragesHistory>(key.clone())?;
+        }
+
+        let (boundary_key, boundary_list) = &shards[boundary_idx];
+        self.delete::<tables::StoragesHistory>(boundary_key.clone())?;
+
+        let kept_count = boundary_list.iter().take_while(|&b| b <= keep_to).count();
+
+        if kept_count == 0 {
+            if boundary_idx == 0 {
+                return Ok(());
+            }
+
+            let (prev_key, prev_value) = &shards[boundary_idx - 1];
+            if prev_key.sharded_key.highest_block_number != u64::MAX {
+                self.delete::<tables::StoragesHistory>(prev_key.clone())?;
+                self.put::<tables::StoragesHistory>(
+                    StorageShardedKey::last(address, storage_key),
+                    prev_value,
+                )?;
+            }
+            return Ok(());
+        }
+
+        let new_last =
+            BlockNumberList::new_pre_sorted(boundary_list.iter().take_while(|&b| b <= keep_to));
+        self.put::<tables::StoragesHistory>(
+            StorageShardedKey::last(address, storage_key),
+            &new_last,
+        )?;
+
+        Ok(())
+    }
+
+    /// Clears all storage history shards for the given `(address, storage_key)` pair.
+    ///
+    /// Used when unwinding from block 0 (i.e., removing all history for this storage slot).
+    pub fn clear_storage_history(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<()> {
+        let shards = self.provider.storage_history_shards(address, storage_key)?;
+        for (key, _) in shards {
+            self.delete::<tables::StoragesHistory>(key)?;
+        }
         Ok(())
     }
 }
