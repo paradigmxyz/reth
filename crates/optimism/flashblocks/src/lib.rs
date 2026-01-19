@@ -24,11 +24,13 @@ mod sequence;
 pub use sequence::{FlashBlockCompleteSequence, FlashBlockPendingSequence};
 
 mod service;
-pub use service::{FlashBlockBuildInfo, FlashBlockService};
+pub use service::{CanonicalBlockNotification, FlashBlockBuildInfo, FlashBlockService};
 
 mod worker;
 
 mod cache;
+
+pub mod validation;
 
 #[cfg(test)]
 mod test_utils;
