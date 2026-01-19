@@ -328,7 +328,7 @@ where
             let workers = proof_handle_for_scaling.total_account_workers();
             let pressure = max_pending / workers.max(1);
 
-            const PRESSURE_THRESHOLD: usize = 8;
+            const PRESSURE_THRESHOLD: usize = 2;
             const SCALE_PERCENT: usize = 25;
 
             if pressure >= PRESSURE_THRESHOLD {
