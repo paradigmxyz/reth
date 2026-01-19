@@ -3,8 +3,6 @@
 //! This module provides a state provider wrapper that uses a bloom filter to
 //! short-circuit storage reads for empty slots.
 
-#![allow(dead_code)] // Not yet integrated into main code path
-
 use crate::StateProvider;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_primitives_traits::{Account, Bytecode};
@@ -27,6 +25,7 @@ use std::sync::Arc;
 /// - If the bloom filter says the slot is definitely empty, returns `None` without DB access
 /// - If the bloom filter says the slot might exist, proceeds with normal DB lookup
 #[derive(Debug)]
+#[allow(unreachable_pub)] // Will be used once integrated
 pub struct BloomStateProvider<P> {
     /// The underlying state provider.
     inner: P,
@@ -34,6 +33,7 @@ pub struct BloomStateProvider<P> {
     bloom: Arc<StorageBloomFilter>,
 }
 
+#[allow(dead_code, unreachable_pub)] // Not yet integrated into main code path
 impl<P> BloomStateProvider<P> {
     /// Create a new bloom-aware state provider.
     pub const fn new(inner: P, bloom: Arc<StorageBloomFilter>) -> Self {
