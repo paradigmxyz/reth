@@ -979,13 +979,21 @@ impl<'a> RocksDBBatch<'a> {
             self.delete::<tables::StoragesHistory>(key.clone())?;
         }
 
+        // Process the boundary shard: filter out blocks > keep_to
         let (boundary_key, boundary_list) = &shards[boundary_idx];
+
+        // Delete the boundary shard (we'll either drop it or rewrite at u64::MAX)
         self.delete::<tables::StoragesHistory>(boundary_key.clone())?;
 
-        let kept_count = boundary_list.iter().take_while(|&b| b <= keep_to).count();
+        // Build truncated list once; check emptiness directly (avoids double iteration)
+        let new_last =
+            BlockNumberList::new_pre_sorted(boundary_list.iter().take_while(|&b| b <= keep_to));
 
-        if kept_count == 0 {
+        if new_last.is_empty() {
+            // Boundary shard is now empty. Previous shard becomes the last and must be keyed
+            // u64::MAX.
             if boundary_idx == 0 {
+                // Nothing left for this (address, storage_key) pair
                 return Ok(());
             }
 
@@ -1000,8 +1008,6 @@ impl<'a> RocksDBBatch<'a> {
             return Ok(());
         }
 
-        let new_last =
-            BlockNumberList::new_pre_sorted(boundary_list.iter().take_while(|&b| b <= keep_to));
         self.put::<tables::StoragesHistory>(
             StorageShardedKey::last(address, storage_key),
             &new_last,
