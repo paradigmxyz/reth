@@ -662,12 +662,9 @@ where
                             let _ = response_tx.send(blocks);
                         }
                         CacheAction::GetTransactionByHash { tx_hash, response_tx } => {
-                            // Look up the block hash and tx index from the index
                             let result =
                                 this.tx_hash_index.get(&tx_hash).and_then(|(block_hash, idx)| {
-                                    // Try to get the block from cache
                                     let block = this.full_block_cache.get(block_hash).cloned()?;
-                                    // Optionally get receipts if cached
                                     let receipts = this.receipts_cache.get(block_hash).cloned();
                                     Some(CachedTransaction::new(block, *idx, receipts))
                                 });
