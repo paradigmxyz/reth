@@ -42,7 +42,7 @@ use {
     alloy_rpc_types_engine::ExecutionData,
     reth_chainspec::EthereumHardforks,
     reth_evm::{EvmEnvFor, ExecutionCtxFor},
-    reth_primitives_traits::{constants::MAX_TX_GAS_LIMIT_OSAKA, SignedTransaction, TxTy},
+    reth_primitives_traits::{SignedTransaction, TxTy},
     reth_storage_errors::any::AnyError,
     revm::context::CfgEnv,
     revm::context_interface::block::BlobExcessGasAndPrice,
@@ -160,7 +160,8 @@ where
             self.chain_spec(),
             self.chain_spec().chain().id(),
             self.chain_spec().blob_params_at_timestamp(header.timestamp),
-        ))
+        )
+        .with_limits(self.chain_spec().evm_limit_params_at_timestamp(header.timestamp)))
     }
 
     fn next_evm_env(
@@ -180,7 +181,8 @@ where
             self.chain_spec(),
             self.chain_spec().chain().id(),
             self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
-        ))
+        )
+        .with_limits(self.chain_spec().evm_limit_params_at_timestamp(attributes.timestamp)))
     }
 
     fn context_for_block<'a>(
@@ -248,10 +250,6 @@ where
             cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
         }
 
-        if self.chain_spec().is_osaka_active_at_timestamp(timestamp) {
-            cfg_env.tx_gas_limit_cap = Some(MAX_TX_GAS_LIMIT_OSAKA);
-        }
-
         // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
         // blobparams
         let blob_excess_gas_and_price =
@@ -275,7 +273,8 @@ where
             blob_excess_gas_and_price,
         };
 
-        Ok(EvmEnv { cfg_env, block_env })
+        Ok(EvmEnv { cfg_env, block_env }
+            .with_limits(self.chain_spec().evm_limit_params_at_timestamp(timestamp)))
     }
 
     fn context_for_payload<'a>(
@@ -313,38 +312,66 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_genesis::Genesis;
-    use reth_chainspec::{Chain, ChainSpec};
-    use reth_evm::{execute::ProviderError, EvmEnv};
+    use alloy_primitives::{Address, Bloom, B256};
+    use alloy_rpc_types_engine::{ExecutionPayloadSidecar, ExecutionPayloadV1};
+    use reth_chainspec::{Chain, ChainSpec, EvmLimitParams, EvmLimitParamsKind};
+    use reth_evm::{execute::ProviderError, EvmEnv, NextBlockEnvAttributes};
     use revm::{
         context::{BlockEnv, CfgEnv},
+        context_interface::Cfg,
         database::CacheDB,
         database_interface::EmptyDBTyped,
         inspector::NoOpInspector,
+        primitives::{eip170, eip3860},
     };
+
+    fn test_next_block_attributes() -> NextBlockEnvAttributes {
+        NextBlockEnvAttributes {
+            timestamp: 1,
+            suggested_fee_recipient: Address::ZERO,
+            prev_randao: B256::ZERO,
+            gas_limit: 30_000_000,
+            parent_beacon_block_root: Some(B256::ZERO),
+            withdrawals: None,
+            extra_data: Default::default(),
+        }
+    }
 
     #[test]
     fn test_fill_cfg_and_block_env() {
-        // Create a default header
         let header = Header::default();
+        let chain_spec = Arc::new(
+            ChainSpec::builder()
+                .chain(Chain::mainnet())
+                .genesis(Genesis::default())
+                .london_activated()
+                .paris_activated()
+                .shanghai_activated()
+                .build(),
+        );
+        let evm_config = EthEvmConfig::new(chain_spec.clone());
 
-        // Build the ChainSpec for Ethereum mainnet, activating London, Paris, and Shanghai
-        // hardforks
-        let chain_spec = ChainSpec::builder()
-            .chain(Chain::mainnet())
-            .genesis(Genesis::default())
-            .london_activated()
-            .paris_activated()
-            .shanghai_activated()
-            .build();
+        let EvmEnv { cfg_env, .. } = evm_config.evm_env(&header).unwrap();
+        let evm_limits = chain_spec.evm_limit_params_at_timestamp(header.timestamp);
+        assert_eq!(cfg_env.chain_id(), chain_spec.chain().id());
+        assert_eq!(cfg_env.max_code_size(), evm_limits.max_code_size);
+        assert_eq!(cfg_env.max_initcode_size(), evm_limits.max_initcode_size);
+        assert_eq!(cfg_env.tx_gas_limit_cap(), u64::MAX); // pre-Osaka default
 
-        // Use the `EthEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
-        // Header, and total difficulty
+        assert_eq!(cfg_env.max_code_size(), eip170::MAX_CODE_SIZE);
+        assert_eq!(cfg_env.max_initcode_size(), eip3860::MAX_INITCODE_SIZE);
+
+        let attributes = test_next_block_attributes();
         let EvmEnv { cfg_env, .. } =
-            EthEvmConfig::new(Arc::new(chain_spec.clone())).evm_env(&header).unwrap();
+            evm_config.next_evm_env(&Header::default(), &attributes).unwrap();
+        let evm_limits = chain_spec.evm_limit_params_at_timestamp(attributes.timestamp);
+        assert_eq!(cfg_env.chain_id(), chain_spec.chain().id());
+        assert_eq!(cfg_env.max_code_size(), evm_limits.max_code_size);
+        assert_eq!(cfg_env.max_initcode_size(), evm_limits.max_initcode_size);
+        assert_eq!(cfg_env.tx_gas_limit_cap(), u64::MAX); // pre-Osaka default
 
-        // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
-        // ChainSpec
-        assert_eq!(cfg_env.chain_id, chain_spec.chain().id());
+        assert_eq!(cfg_env.max_code_size(), eip170::MAX_CODE_SIZE);
+        assert_eq!(cfg_env.max_initcode_size(), eip3860::MAX_INITCODE_SIZE);
     }
 
     #[test]
@@ -488,5 +515,101 @@ mod tests {
         assert_eq!(evm.block, evm_env.block_env);
         assert_eq!(evm.cfg, evm_env.cfg_env);
         assert_eq!(evm.tx, Default::default());
+    }
+
+    #[test]
+    fn test_fill_cfg_and_block_env_custom_limits() {
+        let mut chain_spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .shanghai_activated()
+            .build();
+        chain_spec.evm_limit_params = EvmLimitParamsKind::Constant(EvmLimitParams {
+            max_code_size: 1234,
+            max_initcode_size: 5678,
+            tx_gas_limit_cap: Some(999_999),
+        });
+        let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
+
+        let evm_env = evm_config.evm_env(&Header::default()).unwrap();
+        assert_eq!(evm_env.cfg_env.max_code_size(), 1234);
+        assert_eq!(evm_env.cfg_env.max_initcode_size(), 5678);
+        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), 999_999);
+
+        let evm_env =
+            evm_config.next_evm_env(&Header::default(), &test_next_block_attributes()).unwrap();
+        assert_eq!(evm_env.cfg_env.max_code_size(), 1234);
+        assert_eq!(evm_env.cfg_env.max_initcode_size(), 5678);
+        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), 999_999);
+    }
+
+    fn test_execution_data(timestamp: u64) -> ExecutionData {
+        ExecutionData {
+            payload: ExecutionPayloadV1 {
+                parent_hash: B256::ZERO,
+                fee_recipient: Address::ZERO,
+                state_root: B256::ZERO,
+                receipts_root: B256::ZERO,
+                logs_bloom: Bloom::ZERO,
+                prev_randao: B256::ZERO,
+                block_number: 0,
+                gas_limit: 30_000_000,
+                gas_used: 0,
+                timestamp,
+                extra_data: Default::default(),
+                base_fee_per_gas: U256::ZERO,
+                block_hash: B256::ZERO,
+                transactions: vec![],
+            }
+            .into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        }
+    }
+
+    #[test]
+    fn test_fill_cfg_and_block_env_for_payload() {
+        let chain_spec = Arc::new(
+            ChainSpec::builder()
+                .chain(Chain::mainnet())
+                .genesis(Genesis::default())
+                .london_activated()
+                .paris_activated()
+                .shanghai_activated()
+                .build(),
+        );
+        let evm_config = EthEvmConfig::new(chain_spec.clone());
+        let payload = test_execution_data(1);
+
+        let evm_env = evm_config.evm_env_for_payload(&payload).unwrap();
+
+        let evm_limits = chain_spec.evm_limit_params_at_timestamp(payload.payload.timestamp());
+        assert_eq!(evm_env.cfg_env.chain_id, chain_spec.chain().id());
+        assert_eq!(evm_env.cfg_env.max_code_size(), evm_limits.max_code_size);
+        assert_eq!(evm_env.cfg_env.max_initcode_size(), evm_limits.max_initcode_size);
+        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), u64::MAX); // pre-Osaka default
+
+        assert_eq!(evm_env.cfg_env.max_code_size(), eip170::MAX_CODE_SIZE);
+        assert_eq!(evm_env.cfg_env.max_initcode_size(), eip3860::MAX_INITCODE_SIZE);
+    }
+
+    #[test]
+    fn test_fill_cfg_and_block_env_for_payload_custom_limits() {
+        let mut chain_spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .shanghai_activated()
+            .build();
+        chain_spec.evm_limit_params = EvmLimitParamsKind::Constant(EvmLimitParams {
+            max_code_size: 1234,
+            max_initcode_size: 5678,
+            tx_gas_limit_cap: Some(999_999),
+        });
+        let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
+        let payload = test_execution_data(1);
+
+        let evm_env = evm_config.evm_env_for_payload(&payload).unwrap();
+        assert_eq!(evm_env.cfg_env.max_code_size(), 1234);
+        assert_eq!(evm_env.cfg_env.max_initcode_size(), 5678);
+        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), 999_999);
     }
 }

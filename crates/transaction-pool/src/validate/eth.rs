@@ -8,7 +8,7 @@ use crate::{
     },
     metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
-    validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
+    validate::{ValidTransaction, ValidationTask},
     Address, BlobTransactionSidecarVariant, EthBlobTransactionSidecar, EthPoolTransaction,
     LocalTransactionConfig, TransactionValidationOutcome, TransactionValidationTaskExecutor,
     TransactionValidator,
@@ -27,8 +27,7 @@ use alloy_eips::{
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives_traits::{
-    constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Account, Block,
-    GotExpected, SealedBlock,
+    transaction::error::InvalidTransactionError, Account, Block, GotExpected, SealedBlock,
 };
 use reth_storage_api::{AccountInfoReader, BytecodeReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -178,7 +177,7 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx>
 where
-    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
+    Client: ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
 {
     /// Returns the current max gas limit
@@ -361,10 +360,14 @@ where
         }
 
         // Check whether the init code size has been exceeded.
-        if self.fork_tracker.is_shanghai_activated() &&
-            let Err(err) = transaction.ensure_max_init_code_size(MAX_INIT_CODE_BYTE_SIZE)
-        {
-            return Err(TransactionValidationOutcome::Invalid(transaction, err))
+        if self.fork_tracker.is_shanghai_activated() {
+            let max_initcode_size = self
+                .chain_spec()
+                .evm_limit_params_at_timestamp(self.fork_tracker.tip_timestamp())
+                .max_initcode_size;
+            if let Err(err) = transaction.ensure_max_init_code_size(max_initcode_size) {
+                return Err(TransactionValidationOutcome::Invalid(transaction, err))
+            }
         }
 
         // Checks for gas limit
@@ -506,9 +509,11 @@ where
             }
         }
 
-        // Osaka validation of max tx gas.
-        if self.fork_tracker.is_osaka_activated() &&
-            transaction.gas_limit() > MAX_TX_GAS_LIMIT_OSAKA
+        // Transaction gas limit validation (EIP-7825 for Osaka+)
+        let evm_limits =
+            self.chain_spec().evm_limit_params_at_timestamp(self.fork_tracker.tip_timestamp());
+        if let Some(tx_gas_cap) = evm_limits.tx_gas_limit_cap &&
+            transaction.gas_limit() > tx_gas_cap
         {
             return Err(TransactionValidationOutcome::Invalid(
                 transaction,
@@ -801,7 +806,7 @@ where
 
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
 where
-    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
+    Client: ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
 {
     type Transaction = Tx;
