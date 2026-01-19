@@ -5,10 +5,10 @@ use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_errors::RethError;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm};
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{
-    header::HeaderMut, AlloyBlockHeader, Block, BlockTy, HeaderTy, NodePrimitives, ReceiptTy,
-    Recovered, RecoveredBlock,
+    header::HeaderMut, Block, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered,
+    RecoveredBlock,
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
@@ -106,12 +106,8 @@ where
         let (execution, bundle_state) = builder.finish_no_state_root(&state_provider)?;
         let hashed_state = state_provider.hashed_post_state(&bundle_state);
 
-        let execution_outcome = ExecutionOutcome::new(
-            bundle_state,
-            vec![execution.execution_result.receipts],
-            execution.block.number(),
-            vec![execution.execution_result.requests],
-        );
+        let execution_outcome =
+            BlockExecutionOutput { state: bundle_state, result: execution.execution_result };
 
         let pending_block = PendingBlock::with_executed_block(
             Instant::now() + Duration::from_secs(1),

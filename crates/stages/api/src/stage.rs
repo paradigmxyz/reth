@@ -344,7 +344,6 @@ mod tests {
             create_test_rw_db(),
             MAINNET.clone(),
             StaticFileProviderBuilder::read_write(create_test_static_files_dir().0.keep())
-                .unwrap()
                 .with_blocks_per_file(1)
                 .build()
                 .unwrap(),

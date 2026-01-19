@@ -134,7 +134,9 @@ where
 mod tests {
     use super::*;
     use crate::eth::helpers::types::EthRpcConverter;
-    use alloy_consensus::{Block, Header, SidecarBuilder, SimpleCoder, Transaction};
+    use alloy_consensus::{
+        BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction,
+    };
     use alloy_primitives::{Address, U256};
     use alloy_rpc_types_eth::request::TransactionRequest;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
@@ -332,7 +334,9 @@ mod tests {
         let tx_req = TransactionRequest {
             from: Some(address),
             to: Some(Address::random().into()),
-            sidecar: Some(builder.build().unwrap().into()),
+            sidecar: Some(BlobTransactionSidecarVariant::from(
+                builder.build::<BlobTransactionSidecar>().unwrap(),
+            )),
             ..Default::default()
         };
 
@@ -370,7 +374,9 @@ mod tests {
             from: Some(address),
             to: Some(Address::random().into()),
             transaction_type: Some(3), // EIP-4844
-            sidecar: Some(builder.build().unwrap().into()),
+            sidecar: Some(BlobTransactionSidecarVariant::from(
+                builder.build::<BlobTransactionSidecar>().unwrap(),
+            )),
             max_fee_per_blob_gas: Some(provided_blob_fee), // Already set
             ..Default::default()
         };

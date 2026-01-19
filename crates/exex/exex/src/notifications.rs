@@ -460,6 +460,7 @@ mod tests {
         Chain, DBProvider, DatabaseProviderFactory,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
+    use std::collections::BTreeMap;
     use tokio::sync::mpsc;
 
     #[tokio::test]
@@ -499,7 +500,7 @@ mod tests {
                 )
                 .try_recover()?],
                 Default::default(),
-                None,
+                BTreeMap::new(),
             )),
         };
 
@@ -567,7 +568,7 @@ mod tests {
                 .seal_slow()
                 .try_recover()?],
                 Default::default(),
-                None,
+                BTreeMap::new(),
             )),
         };
 
@@ -634,7 +635,7 @@ mod tests {
             new: Arc::new(Chain::new(
                 vec![exex_head_block.clone().try_recover()?],
                 Default::default(),
-                None,
+                BTreeMap::new(),
             )),
         };
         wal.commit(&exex_head_notification)?;
@@ -648,7 +649,7 @@ mod tests {
                 )
                 .try_recover()?],
                 Default::default(),
-                None,
+                BTreeMap::new(),
             )),
         };
 
@@ -705,7 +706,7 @@ mod tests {
             new: Arc::new(Chain::new(
                 vec![exex_head_block.clone().try_recover()?],
                 Default::default(),
-                None,
+                BTreeMap::new(),
             )),
         };
         wal.commit(&exex_head_notification)?;
@@ -724,7 +725,7 @@ mod tests {
                 )
                 .try_recover()?],
                 Default::default(),
-                None,
+                BTreeMap::new(),
             )),
         };
 

@@ -18,7 +18,7 @@
 //!
 //! **Not for production use** - provides no security guarantees or consensus validation.
 
-use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
+use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use alloc::sync::Arc;
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
@@ -55,19 +55,17 @@ impl<H> HeaderValidator<H> for NoopConsensus {
 }
 
 impl<B: Block> Consensus<B> for NoopConsensus {
-    type Error = ConsensusError;
-
     /// Validates body against header (no-op implementation).
     fn validate_body_against_header(
         &self,
         _body: &B::Body,
         _header: &SealedHeader<B::Header>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), ConsensusError> {
         Ok(())
     }
 
     /// Validates block before execution (no-op implementation).
-    fn validate_block_pre_execution(&self, _block: &SealedBlock<B>) -> Result<(), Self::Error> {
+    fn validate_block_pre_execution(&self, _block: &SealedBlock<B>) -> Result<(), ConsensusError> {
         Ok(())
     }
 }
@@ -78,6 +76,7 @@ impl<N: NodePrimitives> FullConsensus<N> for NoopConsensus {
         &self,
         _block: &RecoveredBlock<N::Block>,
         _result: &BlockExecutionResult<N::Receipt>,
+        _receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError> {
         Ok(())
     }

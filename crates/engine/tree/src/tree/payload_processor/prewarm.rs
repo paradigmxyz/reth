@@ -29,12 +29,13 @@ use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
-use reth_execution_types::ExecutionOutcome;
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{AccountReader, BlockReader, StateProvider, StateProviderFactory, StateReader};
+use reth_provider::{
+    AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory,
+    StateReader,
+};
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_trie::MultiProofTargets;
 use std::{
@@ -260,7 +261,11 @@ where
     ///
     /// This method is called from `run()` only after all execution tasks are complete.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn save_cache(self, execution_outcome: Arc<ExecutionOutcome<N::Receipt>>) {
+    fn save_cache(
+        self,
+        execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
+        valid_block_rx: mpsc::Receiver<()>,
+    ) {
         let start = Instant::now();
 
         let Self { execution_cache, ctx: PrewarmContext { env, metrics, saved_cache, .. }, .. } =
@@ -278,7 +283,7 @@ where
 
                 // Insert state into cache while holding the lock
                 // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(execution_outcome.state()).is_err() {
+                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
                     // Clear the cache on error to prevent having a polluted cache
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on update error");
@@ -287,9 +292,11 @@ where
 
                 new_cache.update_metrics();
 
-                // Replace the shared cache with the new one; the previous cache (if any) is
-                // dropped.
-                *cached = Some(new_cache);
+                if valid_block_rx.recv().is_ok() {
+                    // Replace the shared cache with the new one; the previous cache (if any) is
+                    // dropped.
+                    *cached = Some(new_cache);
+                }
             });
 
             let elapsed = start.elapsed();
@@ -420,9 +427,10 @@ where
                     // completed executing a set of transactions
                     self.send_multi_proof_targets(proof_targets);
                 }
-                PrewarmTaskEvent::Terminate { execution_outcome } => {
+                PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx } => {
                     trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
-                    final_execution_outcome = Some(execution_outcome);
+                    final_execution_outcome =
+                        Some(execution_outcome.map(|outcome| (outcome, valid_block_rx)));
 
                     if finished_execution {
                         // all tasks are done, we can exit, which will save caches and exit
@@ -447,8 +455,8 @@ where
         debug!(target: "engine::tree::payload_processor::prewarm", "Completed prewarm execution");
 
         // save caches and finish using the shared ExecutionOutcome
-        if let Some(Some(execution_outcome)) = final_execution_outcome {
-            self.save_cache(execution_outcome);
+        if let Some(Some((execution_outcome, valid_block_rx))) = final_execution_outcome {
+            self.save_cache(execution_outcome, valid_block_rx);
         }
     }
 }
@@ -568,9 +576,14 @@ where
                 .entered();
             txs.recv()
         } {
-            let enter =
-                debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm tx", index, tx_hash=%tx.tx().tx_hash())
-                    .entered();
+            let enter = debug_span!(
+                target: "engine::tree::payload_processor::prewarm",
+                "prewarm tx",
+                index,
+                tx_hash = %tx.tx().tx_hash(),
+                is_success = tracing::field::Empty,
+            )
+            .entered();
 
             // create the tx env
             let start = Instant::now();
@@ -619,8 +632,7 @@ where
                 let _enter =
                     debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm outcome", index, tx_hash=%tx.tx().tx_hash())
                         .entered();
-                let targets = multiproof_targets_from_state(res.state);
-                let storage_targets = targets.storage_targets_count();
+                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
                 metrics.prefetch_storage_targets.record(storage_targets as f64);
                 let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
                 drop(_enter);
@@ -767,33 +779,37 @@ where
 
 /// Returns a set of [`MultiProofTargets`] and the total amount of storage targets, based on the
 /// given state.
-fn multiproof_targets_from_state(state: EvmState) -> MultiProofTargets {
-    state
-        .into_par_iter()
-        .filter_map(|(address, account)| {
-            // if the account was not touched, or if the account was selfdestructed, do not
-            // fetch proofs for it
-            //
-            // Since selfdestruct can only happen in the same transaction, we can skip
-            // prefetching proofs for selfdestructed accounts
-            //
-            // See: https://eips.ethereum.org/EIPS/eip-6780
-            if !account.is_touched() || account.is_selfdestructed() {
-                return None;
+fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) {
+    let mut targets = MultiProofTargets::with_capacity(state.len());
+    let mut storage_targets = 0;
+    for (addr, account) in state {
+        // if the account was not touched, or if the account was selfdestructed, do not
+        // fetch proofs for it
+        //
+        // Since selfdestruct can only happen in the same transaction, we can skip
+        // prefetching proofs for selfdestructed accounts
+        //
+        // See: https://eips.ethereum.org/EIPS/eip-6780
+        if !account.is_touched() || account.is_selfdestructed() {
+            continue
+        }
+
+        let mut storage_set =
+            B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
+        for (key, slot) in account.storage {
+            // do nothing if unchanged
+            if !slot.is_changed() {
+                continue
             }
 
-            let hashed_address = keccak256(address);
+            storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
+        }
 
-            let storage_set: B256Set = account
-                .storage
-                .into_iter()
-                .filter(|(_, slot)| slot.is_changed())
-                .map(|(key, _)| keccak256(B256::new(key.to_be_bytes())))
-                .collect();
+        storage_targets += storage_set.len();
+        targets.insert(keccak256(addr), storage_set);
+    }
 
-            Some((hashed_address, storage_set))
-        })
-        .collect()
+    (targets, storage_targets)
 }
 
 /// The events the pre-warm task can handle.
@@ -808,7 +824,12 @@ pub(super) enum PrewarmTaskEvent<R> {
     Terminate {
         /// The final execution outcome. Using `Arc` allows sharing with the main execution
         /// path without cloning the expensive `BundleState`.
-        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
+        execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
+        /// Receiver for the block validation result.
+        ///
+        /// Cache saving is racing the state root validation. We optimistically construct the
+        /// updated cache but only save it once we know the block is valid.
+        valid_block_rx: mpsc::Receiver<()>,
     },
     /// The outcome of a pre-warm task
     Outcome {
