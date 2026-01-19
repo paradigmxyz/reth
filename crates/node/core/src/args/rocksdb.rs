@@ -73,45 +73,45 @@ impl RocksDbArgs {
     /// - All CLI overrides match the persisted values
     ///
     /// Returns `Err` if any CLI override differs from the persisted value.
-    pub fn validate_against_persisted(
+    pub const fn validate_against_persisted(
         &self,
         persisted: &StorageSettings,
     ) -> Result<(), RocksDbSettingsMismatchError> {
-        if let Some(cli_value) = self.tx_hash {
-            if cli_value != persisted.transaction_hash_numbers_in_rocksdb {
-                return Err(RocksDbSettingsMismatchError {
-                    flag_name: "--rocksdb.tx-hash",
-                    expected: persisted.transaction_hash_numbers_in_rocksdb,
-                    got: cli_value,
-                });
-            }
+        if let Some(cli_value) = self.tx_hash &&
+            cli_value != persisted.transaction_hash_numbers_in_rocksdb
+        {
+            return Err(RocksDbSettingsMismatchError {
+                flag_name: "--rocksdb.tx-hash",
+                expected: persisted.transaction_hash_numbers_in_rocksdb,
+                got: cli_value,
+            });
         }
 
-        if let Some(cli_value) = self.storages_history {
-            if cli_value != persisted.storages_history_in_rocksdb {
-                return Err(RocksDbSettingsMismatchError {
-                    flag_name: "--rocksdb.storages-history",
-                    expected: persisted.storages_history_in_rocksdb,
-                    got: cli_value,
-                });
-            }
+        if let Some(cli_value) = self.storages_history &&
+            cli_value != persisted.storages_history_in_rocksdb
+        {
+            return Err(RocksDbSettingsMismatchError {
+                flag_name: "--rocksdb.storages-history",
+                expected: persisted.storages_history_in_rocksdb,
+                got: cli_value,
+            });
         }
 
-        if let Some(cli_value) = self.account_history {
-            if cli_value != persisted.account_history_in_rocksdb {
-                return Err(RocksDbSettingsMismatchError {
-                    flag_name: "--rocksdb.account-history",
-                    expected: persisted.account_history_in_rocksdb,
-                    got: cli_value,
-                });
-            }
+        if let Some(cli_value) = self.account_history &&
+            cli_value != persisted.account_history_in_rocksdb
+        {
+            return Err(RocksDbSettingsMismatchError {
+                flag_name: "--rocksdb.account-history",
+                expected: persisted.account_history_in_rocksdb,
+                got: cli_value,
+            });
         }
 
         Ok(())
     }
 }
 
-/// Error returned when a CLI RocksDB flag differs from the persisted storage settings.
+/// Error returned when a CLI `RocksDB` flag differs from the persisted storage settings.
 ///
 /// These settings are genesis-initialization-only and cannot be changed after the node
 /// has been initialized.
