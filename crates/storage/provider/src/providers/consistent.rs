@@ -953,13 +953,6 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
-        // First try the cache for O(1) lookup
-        if let Some(tx) = self.canonical_in_memory_state.transaction_by_hash(hash) {
-            return Ok(Some(tx))
-        }
-
-        // Fall back to head_block snapshot for consistency (in case block was persisted after
-        // snapshot but before cache lookup)
         if let Some(tx) = self.head_block.as_ref().and_then(|b| b.transaction_on_chain(hash)) {
             return Ok(Some(tx))
         }
@@ -971,15 +964,6 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         &self,
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
-        // First try the cache for O(1) lookup
-        if let Some((tx, meta)) =
-            self.canonical_in_memory_state.transaction_by_hash_with_meta(tx_hash)
-        {
-            return Ok(Some((tx, meta)))
-        }
-
-        // Fall back to head_block snapshot for consistency (in case block was persisted after
-        // snapshot but before cache lookup)
         if let Some((tx, meta)) =
             self.head_block.as_ref().and_then(|b| b.transaction_meta_on_chain(tx_hash))
         {

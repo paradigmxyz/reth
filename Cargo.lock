@@ -7784,7 +7784,6 @@ dependencies = [
  "alloy-signer",
  "alloy-signer-local",
  "codspeed-criterion-compat",
- "dashmap 6.1.0",
  "derive_more",
  "metrics",
  "parking_lot",
