@@ -60,7 +60,7 @@ impl StorageArgs {
             .with_account_history_in_rocksdb(account_history)
     }
 
-    /// Returns the overrides for RocksDB settings that were explicitly set via CLI.
+    /// Returns the overrides for `RocksDB` settings that were explicitly set via CLI.
     pub const fn to_overrides(&self) -> StorageSettingsOverrides {
         StorageSettingsOverrides {
             transaction_hash_numbers_in_rocksdb: self.tx_hash_in_rocksdb,

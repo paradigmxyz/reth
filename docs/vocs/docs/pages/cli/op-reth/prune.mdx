@@ -129,20 +129,26 @@ Static Files:
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-      --storage.tx-hash-in-rocksdb
+      --storage.tx-hash-in-rocksdb <TX_HASH_IN_ROCKSDB>
           Store transaction hash -> number mapping in `RocksDB` instead of MDBX.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-      --storage.storages-history-in-rocksdb
+          [possible values: true, false]
+
+      --storage.storages-history-in-rocksdb <STORAGES_HISTORY_IN_ROCKSDB>
           Store storages history in `RocksDB` instead of MDBX.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-      --storage.account-history-in-rocksdb
+          [possible values: true, false]
+
+      --storage.account-history-in-rocksdb <ACCOUNT_HISTORY_IN_ROCKSDB>
           Store account history in `RocksDB` instead of MDBX.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
+          [possible values: true, false]
 
 Logging:
       --log.stdout.format <FORMAT>
