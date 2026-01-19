@@ -45,17 +45,17 @@ impl StorageBloomConfig {
     /// Estimate memory usage in bytes.
     pub fn estimated_memory_bytes(&self) -> usize {
         // Bloom filter bits = -n * ln(p) / (ln(2)^2)
-        // For 800M items at 1% FPR: ~7.6 billion bits = ~950MB
+        // For 800M items at 1% false positive rate: ~7.6 billion bits = ~950MB
         // GrowableBloom adds some overhead, estimate ~1.2x
-        let bits =
-            (-1.0 * self.expected_items as f64 * self.false_positive_rate.ln() / (2.0_f64.ln().powi(2))) as usize;
+        let bits = (-(self.expected_items as f64) * self.false_positive_rate.ln() /
+            (2.0_f64.ln().powi(2))) as usize;
         (bits / 8) * 12 / 10 // bits to bytes with 20% overhead
     }
 }
 
 /// A bloom filter for detecting empty storage slots.
 ///
-/// This filter tracks which (address, storage_key) pairs have non-zero values.
+/// This filter tracks which (address, `storage_key`) pairs have non-zero values.
 /// It can definitively say "not present" but may have false positives for "maybe present".
 pub struct StorageBloomFilter {
     /// The underlying bloom filter.
@@ -74,7 +74,7 @@ impl StorageBloomFilter {
         info!(
             target: "storage::bloom",
             expected_items = config.expected_items,
-            fpr = config.false_positive_rate,
+            false_positive_rate = config.false_positive_rate,
             estimated_memory_mb = config.estimated_memory_bytes() / 1_000_000,
             "Created storage bloom filter"
         );
@@ -86,7 +86,8 @@ impl StorageBloomFilter {
     pub fn load_from_file(path: &Path, config: StorageBloomConfig) -> Result<Self, BloomError> {
         let file = File::open(path).map_err(BloomError::Io)?;
         let reader = BufReader::new(file);
-        let bloom: GrowableBloom = bincode::deserialize_from(reader).map_err(BloomError::Deserialize)?;
+        let bloom: GrowableBloom =
+            bincode::deserialize_from(reader).map_err(BloomError::Deserialize)?;
 
         info!(
             target: "storage::bloom",
@@ -125,7 +126,7 @@ impl StorageBloomFilter {
         }
 
         let key = Self::make_key(address, storage_key);
-        let result = self.bloom.read().contains(&key);
+        let result = self.bloom.read().contains(key);
 
         if result {
             self.metrics.bloom_misses.increment(1);
@@ -146,7 +147,7 @@ impl StorageBloomFilter {
         }
 
         let key = Self::make_key(address, storage_key);
-        self.bloom.write().insert(&key);
+        self.bloom.write().insert(key);
         self.metrics.bloom_inserts.increment(1);
     }
 
@@ -211,8 +212,7 @@ impl std::error::Error for BloomError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(e) => Some(e),
-            Self::Deserialize(e) => Some(e),
-            Self::Serialize(e) => Some(e),
+            Self::Deserialize(e) | Self::Serialize(e) => Some(e),
         }
     }
 }
@@ -224,7 +224,8 @@ mod tests {
 
     #[test]
     fn test_bloom_basic_operations() {
-        let config = StorageBloomConfig { expected_items: 1000, false_positive_rate: 0.01, enabled: true };
+        let config =
+            StorageBloomConfig { expected_items: 1000, false_positive_rate: 0.01, enabled: true };
 
         let bloom = StorageBloomFilter::new(config);
 
@@ -287,7 +288,7 @@ mod tests {
         let config = StorageBloomConfig::default();
         let memory_mb = config.estimated_memory_bytes() / 1_000_000;
 
-        // Should be in the ~1-2GB range for 800M items at 1% FPR
+        // Should be in the ~1-2GB range for 800M items at 1% false positive rate
         assert!(memory_mb > 500, "Expected >500MB, got {memory_mb}MB");
         assert!(memory_mb < 3000, "Expected <3000MB, got {memory_mb}MB");
     }

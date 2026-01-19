@@ -220,7 +220,11 @@ mod tests {
         fn block_hash(&self, _: u64) -> ProviderResult<Option<B256>> {
             Ok(None)
         }
-        fn canonical_hashes_range(&self, _: BlockNumber, _: BlockNumber) -> ProviderResult<Vec<B256>> {
+        fn canonical_hashes_range(
+            &self,
+            _: BlockNumber,
+            _: BlockNumber,
+        ) -> ProviderResult<Vec<B256>> {
             Ok(vec![])
         }
     }
@@ -238,10 +242,16 @@ mod tests {
         fn state_root_from_nodes(&self, _: TrieInput) -> ProviderResult<B256> {
             Ok(B256::ZERO)
         }
-        fn state_root_with_updates(&self, _: HashedPostState) -> ProviderResult<(B256, TrieUpdates)> {
+        fn state_root_with_updates(
+            &self,
+            _: HashedPostState,
+        ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::ZERO, TrieUpdates::default()))
         }
-        fn state_root_from_nodes_with_updates(&self, _: TrieInput) -> ProviderResult<(B256, TrieUpdates)> {
+        fn state_root_from_nodes_with_updates(
+            &self,
+            _: TrieInput,
+        ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::ZERO, TrieUpdates::default()))
         }
     }
@@ -250,10 +260,20 @@ mod tests {
         fn storage_root(&self, _: Address, _: HashedStorage) -> ProviderResult<B256> {
             Ok(B256::ZERO)
         }
-        fn storage_proof(&self, _: Address, _: B256, _: HashedStorage) -> ProviderResult<reth_trie::StorageProof> {
+        fn storage_proof(
+            &self,
+            _: Address,
+            _: B256,
+            _: HashedStorage,
+        ) -> ProviderResult<reth_trie::StorageProof> {
             unimplemented!()
         }
-        fn storage_multiproof(&self, _: Address, _: &[B256], _: HashedStorage) -> ProviderResult<StorageMultiProof> {
+        fn storage_multiproof(
+            &self,
+            _: Address,
+            _: &[B256],
+            _: HashedStorage,
+        ) -> ProviderResult<StorageMultiProof> {
             unimplemented!()
         }
     }
@@ -285,11 +305,8 @@ mod tests {
 
     #[test]
     fn test_bloom_skips_db_for_empty_slots() {
-        let config = StorageBloomConfig {
-            expected_items: 1000,
-            false_positive_rate: 0.01,
-            enabled: true,
-        };
+        let config =
+            StorageBloomConfig { expected_items: 1000, false_positive_rate: 0.01, enabled: true };
         let bloom = Arc::new(StorageBloomFilter::new(config));
         let mock = MockStateProvider::new();
         let provider = BloomStateProvider::new(mock, bloom);
@@ -305,11 +322,8 @@ mod tests {
 
     #[test]
     fn test_bloom_checks_db_for_maybe_present() {
-        let config = StorageBloomConfig {
-            expected_items: 1000,
-            false_positive_rate: 0.01,
-            enabled: true,
-        };
+        let config =
+            StorageBloomConfig { expected_items: 1000, false_positive_rate: 0.01, enabled: true };
         let bloom = Arc::new(StorageBloomFilter::new(config));
 
         let addr = Address::repeat_byte(0x42);

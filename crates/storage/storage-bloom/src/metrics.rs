@@ -11,7 +11,8 @@ pub(crate) struct StorageBloomMetrics {
     pub bloom_hits: Counter,
     /// Number of storage reads that passed bloom filter (maybe present, need DB read).
     pub bloom_misses: Counter,
-    /// Number of storage reads that were false positives (bloom said maybe, but DB returned empty).
+    /// Number of storage reads that were false positives (bloom said maybe, but DB returned
+    /// empty).
     pub bloom_false_positives: Counter,
     /// Number of storage slots inserted into bloom filter.
     pub bloom_inserts: Counter,
