@@ -1,28 +1,28 @@
-//! clap [Args](clap::Args) for RocksDB table routing configuration
+//! clap [Args](clap::Args) for `RocksDB` table routing configuration
 
 use clap::{ArgAction, Args};
 use reth_storage_api::StorageSettings;
 
-/// Parameters for RocksDB table routing configuration.
+/// Parameters for `RocksDB` table routing configuration.
 ///
-/// These flags control which database tables are stored in RocksDB instead of MDBX.
+/// These flags control which database tables are stored in `RocksDB` instead of MDBX.
 /// All flags are genesis-initialization-only: changing them after genesis requires a re-sync.
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
 #[command(next_help_heading = "RocksDB")]
 pub struct RocksDbArgs {
-    /// Route tx hash -> number table to RocksDB instead of MDBX.
+    /// Route tx hash -> number table to `RocksDB` instead of MDBX.
     ///
     /// Note: genesis-initialization-only, changing later requires re-sync.
     #[arg(long = "rocksdb.tx-hash", action = ArgAction::Set)]
     pub tx_hash: Option<bool>,
 
-    /// Route storages history tables to RocksDB instead of MDBX.
+    /// Route storages history tables to `RocksDB` instead of MDBX.
     ///
     /// Note: genesis-initialization-only, changing later requires re-sync.
     #[arg(long = "rocksdb.storages-history", action = ArgAction::Set)]
     pub storages_history: Option<bool>,
 
-    /// Route account history tables to RocksDB instead of MDBX.
+    /// Route account history tables to `RocksDB` instead of MDBX.
     ///
     /// Note: genesis-initialization-only, changing later requires re-sync.
     #[arg(long = "rocksdb.account-history", action = ArgAction::Set)]
@@ -34,7 +34,7 @@ impl RocksDbArgs {
     ///
     /// For each flag that is `Some`, the corresponding field in the defaults is overwritten.
     /// Flags that are `None` preserve the default value.
-    pub fn apply_to_settings(&self, mut defaults: StorageSettings) -> StorageSettings {
+    pub const fn apply_to_settings(&self, mut defaults: StorageSettings) -> StorageSettings {
         if let Some(value) = self.tx_hash {
             defaults.transaction_hash_numbers_in_rocksdb = value;
         }
@@ -47,7 +47,7 @@ impl RocksDbArgs {
         defaults
     }
 
-    /// Returns true if any RocksDB table routing flag was explicitly set.
+    /// Returns true if any `RocksDB` table routing flag was explicitly set.
     pub const fn has_overrides(&self) -> bool {
         self.tx_hash.is_some() || self.storages_history.is_some() || self.account_history.is_some()
     }

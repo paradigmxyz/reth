@@ -151,7 +151,7 @@ pub struct NodeConfig<ChainSpec> {
     /// All static files related arguments
     pub static_files: StaticFilesArgs,
 
-    /// All RocksDB table routing arguments
+    /// All `RocksDB` table routing arguments
     pub rocksdb: RocksDbArgs,
 }
 

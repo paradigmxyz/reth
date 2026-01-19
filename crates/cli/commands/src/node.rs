@@ -10,7 +10,8 @@ use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, MetricArgs,
-        NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, StaticFilesArgs, TxPoolArgs,
+        NetworkArgs, PayloadBuilderArgs, PruningArgs, RocksDbArgs, RpcServerArgs, StaticFilesArgs,
+        TxPoolArgs,
     },
     node_config::NodeConfig,
     version,
@@ -102,6 +103,10 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[command(flatten)]
     pub pruning: PruningArgs,
 
+    /// All `RocksDB` table routing arguments
+    #[command(flatten)]
+    pub rocksdb: RocksDbArgs,
+
     /// Engine cli arguments
     #[command(flatten, next_help_heading = "Engine")]
     pub engine: EngineArgs,
@@ -166,6 +171,7 @@ where
             db,
             dev,
             pruning,
+            rocksdb,
             engine,
             era,
             static_files,
@@ -187,6 +193,7 @@ where
             db,
             dev,
             pruning,
+            rocksdb,
             engine,
             era,
             static_files,
