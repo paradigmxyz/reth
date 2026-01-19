@@ -3,11 +3,6 @@
 use alloy_primitives::{Address, StorageKey};
 use growable_bloom_filter::GrowableBloom;
 use parking_lot::RwLock;
-use std::{
-    fs::File,
-    io::{BufReader, BufWriter},
-    path::Path,
-};
 use tracing::info;
 
 use crate::metrics::StorageBloomMetrics;
@@ -80,38 +75,6 @@ impl StorageBloomFilter {
         );
 
         Self { bloom: RwLock::new(bloom), config, metrics: StorageBloomMetrics::default() }
-    }
-
-    /// Create a bloom filter from a persisted file.
-    pub fn load_from_file(path: &Path, config: StorageBloomConfig) -> Result<Self, BloomError> {
-        let file = File::open(path).map_err(BloomError::Io)?;
-        let reader = BufReader::new(file);
-        let bloom: GrowableBloom =
-            bincode::deserialize_from(reader).map_err(BloomError::Deserialize)?;
-
-        info!(
-            target: "storage::bloom",
-            path = %path.display(),
-            "Loaded storage bloom filter from file"
-        );
-
-        Ok(Self { bloom: RwLock::new(bloom), config, metrics: StorageBloomMetrics::default() })
-    }
-
-    /// Persist the bloom filter to a file.
-    pub fn save_to_file(&self, path: &Path) -> Result<(), BloomError> {
-        let bloom = self.bloom.read();
-        let file = File::create(path).map_err(BloomError::Io)?;
-        let writer = BufWriter::new(file);
-        bincode::serialize_into(writer, &*bloom).map_err(BloomError::Serialize)?;
-
-        info!(
-            target: "storage::bloom",
-            path = %path.display(),
-            "Saved storage bloom filter to file"
-        );
-
-        Ok(())
     }
 
     /// Check if a storage slot might have a non-zero value.
@@ -187,36 +150,6 @@ impl std::fmt::Debug for StorageBloomFilter {
     }
 }
 
-/// Errors that can occur with bloom filter operations.
-#[derive(Debug)]
-pub enum BloomError {
-    /// I/O error reading/writing bloom filter file.
-    Io(std::io::Error),
-    /// Error deserializing bloom filter.
-    Deserialize(bincode::Error),
-    /// Error serializing bloom filter.
-    Serialize(bincode::Error),
-}
-
-impl std::fmt::Display for BloomError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(e) => write!(f, "bloom filter I/O error: {e}"),
-            Self::Deserialize(e) => write!(f, "bloom filter deserialize error: {e}"),
-            Self::Serialize(e) => write!(f, "bloom filter serialize error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for BloomError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(e) => Some(e),
-            Self::Deserialize(e) | Self::Serialize(e) => Some(e),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,31 +189,6 @@ mod tests {
 
         // When disabled, always returns true (check DB)
         assert!(bloom.maybe_contains(addr, slot));
-    }
-
-    #[test]
-    fn test_bloom_persistence() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let bloom_path = temp_dir.path().join("test_bloom.bin");
-
-        let config =
-            StorageBloomConfig { expected_items: 1000, false_positive_rate: 0.01, enabled: true };
-
-        let addr = Address::repeat_byte(0x42);
-        let slot = B256::repeat_byte(0x01);
-
-        // Create and populate bloom
-        {
-            let bloom = StorageBloomFilter::new(config.clone());
-            bloom.insert(addr, slot);
-            bloom.save_to_file(&bloom_path).unwrap();
-        }
-
-        // Load and verify
-        {
-            let bloom = StorageBloomFilter::load_from_file(&bloom_path, config).unwrap();
-            assert!(bloom.maybe_contains(addr, slot));
-        }
     }
 
     #[test]

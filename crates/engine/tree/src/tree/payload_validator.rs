@@ -42,6 +42,8 @@ use reth_provider::{
     StateProviderFactory, StateReader,
 };
 use reth_revm::db::State;
+#[cfg(feature = "storage-bloom")]
+use reth_storage_bloom::{StorageBloomConfig, StorageBloomFilter};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
@@ -134,6 +136,9 @@ where
     validator: V,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
+    /// Storage bloom filter for optimizing empty slot reads.
+    #[cfg(feature = "storage-bloom")]
+    storage_bloom: Arc<StorageBloomFilter>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -173,6 +178,10 @@ where
             &config,
             precompile_cache_map.clone(),
         );
+
+        #[cfg(feature = "storage-bloom")]
+        let storage_bloom = Arc::new(StorageBloomFilter::new(StorageBloomConfig::default()));
+
         Self {
             provider,
             consensus,
@@ -185,7 +194,15 @@ where
             metrics: EngineApiMetrics::default(),
             validator,
             changeset_cache,
+            #[cfg(feature = "storage-bloom")]
+            storage_bloom,
         }
+    }
+
+    /// Returns a reference to the storage bloom filter.
+    #[cfg(feature = "storage-bloom")]
+    pub fn storage_bloom(&self) -> &Arc<StorageBloomFilter> {
+        &self.storage_bloom
     }
 
     /// Converts a [`BlockOrPayload`] to a recovered block.

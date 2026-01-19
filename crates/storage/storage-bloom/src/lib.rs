@@ -29,5 +29,5 @@ mod bloom;
 mod metrics;
 mod provider;
 
-pub use bloom::{BloomError, StorageBloomConfig, StorageBloomFilter};
+pub use bloom::{StorageBloomConfig, StorageBloomFilter};
 pub use provider::StorageBloomProvider;

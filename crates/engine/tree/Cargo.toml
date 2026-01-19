@@ -36,6 +36,7 @@ reth-trie-sparse-parallel = { workspace = true, features = ["std"] }
 reth-trie.workspace = true
 reth-trie-common.workspace = true
 reth-trie-db.workspace = true
+reth-storage-bloom = { workspace = true, optional = true }
 
 # alloy
 alloy-evm.workspace = true
@@ -117,6 +118,7 @@ name = "state_root_task"
 harness = false
 
 [features]
+storage-bloom = ["reth-storage-bloom", "reth-provider/storage-bloom"]
 test-utils = [
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
