@@ -155,8 +155,8 @@ impl LazyOverlay {
 
             for block in blocks_iter {
                 let block_data = block.wait_cloned();
-                Arc::make_mut(&mut state).extend_ref(block_data.hashed_state.as_ref());
-                Arc::make_mut(&mut nodes).extend_ref(block_data.trie_updates.as_ref());
+                Arc::make_mut(&mut state).extend_ref_and_sort(block_data.hashed_state.as_ref());
+                Arc::make_mut(&mut nodes).extend_ref_and_sort(block_data.trie_updates.as_ref());
             }
 
             TrieInputSorted { state, nodes, prefix_sets: Default::default() }
