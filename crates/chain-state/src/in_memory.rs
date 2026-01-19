@@ -151,7 +151,7 @@ pub(crate) struct CanonicalInMemoryStateInner<N: NodePrimitives> {
     pub(crate) in_memory_state: InMemoryState<N>,
     /// A broadcast stream that emits events when the canonical chain is updated.
     pub(crate) canon_state_notification_sender: CanonStateNotificationSender<N>,
-    /// Cache mapping transaction hashes to (`block_hash`, `tx_index`) for O(1) lookups.
+    /// Cache mapping transaction hashes to (`block_hash`, `tx_index`).
     pub(crate) tx_cache: DashMap<TxHash, (B256, usize)>,
 }
 
