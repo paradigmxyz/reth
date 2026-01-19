@@ -56,11 +56,6 @@ impl RocksDBProvider {
     ) -> ProviderResult<Option<BlockNumber>> {
         Ok(None)
     }
-
-    /// Creates a new batch for atomic writes (stub implementation).
-    ///
-    /// Returns unit type since there is no `RocksDB` to write to.
-    pub const fn batch(&self) {}
 }
 
 /// A stub batch writer for `RocksDB`.
