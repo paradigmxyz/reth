@@ -163,9 +163,8 @@ where
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     ) -> Self {
-        let account_worker_max = std::thread::available_parallelism()
-            .map(|p| p.get().min(64))
-            .unwrap_or(64);
+        let account_worker_max =
+            std::thread::available_parallelism().map(|p| p.get().min(64)).unwrap_or(64);
 
         Self {
             executor,
@@ -323,11 +322,11 @@ where
             multi_proof_task.run(provider);
 
             // After block processing, check if we experienced queue pressure and adjust
-            // worker count for next block. Pressure = pending_tasks / workers.
+            // worker count for next block. Pressure = max_pending_tasks / workers.
             // If pressure was high (>= 8), scale up by 25% for next block.
-            let pending = proof_handle_for_scaling.pending_account_tasks();
+            let max_pending = proof_handle_for_scaling.max_pending_account_tasks();
             let workers = proof_handle_for_scaling.total_account_workers();
-            let pressure = pending / workers.max(1);
+            let pressure = max_pending / workers.max(1);
 
             const PRESSURE_THRESHOLD: usize = 8;
             const SCALE_PERCENT: usize = 25;
@@ -338,7 +337,7 @@ where
                 debug!(
                     target: "engine::payload",
                     workers,
-                    pending,
+                    max_pending,
                     pressure,
                     new_count,
                     "Scaling up account workers for next block due to queue pressure"

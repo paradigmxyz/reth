@@ -97,6 +97,9 @@ pub struct ProofWorkerHandle {
     /// Counter tracking available account workers. Workers decrement when starting work,
     /// increment when finishing. Used to determine whether to chunk multiproofs.
     account_available_workers: Arc<AtomicUsize>,
+    /// Tracks the maximum number of pending account tasks seen during execution.
+    /// Used for dynamic worker scaling decisions.
+    max_pending_account_tasks: Arc<AtomicUsize>,
     /// Total number of storage workers spawned
     storage_worker_count: usize,
     /// Total number of account workers spawned
@@ -238,6 +241,7 @@ impl ProofWorkerHandle {
             account_work_tx,
             storage_available_workers,
             account_available_workers,
+            max_pending_account_tasks: Arc::new(AtomicUsize::new(0)),
             storage_worker_count,
             account_worker_count,
             v2_proofs_enabled,
@@ -267,6 +271,12 @@ impl ProofWorkerHandle {
     /// Returns the number of pending account tasks in the queue.
     pub fn pending_account_tasks(&self) -> usize {
         self.account_work_tx.len()
+    }
+
+    /// Returns the maximum number of pending account tasks observed during execution.
+    /// This is used for dynamic worker scaling decisions.
+    pub fn max_pending_account_tasks(&self) -> usize {
+        self.max_pending_account_tasks.load(Ordering::Relaxed)
     }
 
     /// Returns the total number of storage workers in the pool.
@@ -326,34 +336,39 @@ impl ProofWorkerHandle {
         &self,
         input: AccountMultiproofInput,
     ) -> Result<(), ProviderError> {
-        self.account_work_tx
-            .send(AccountWorkerJob::AccountMultiproof { input: Box::new(input) })
-            .map_err(|err| {
-                let error =
-                    ProviderError::other(std::io::Error::other("account workers unavailable"));
+        let result = self
+            .account_work_tx
+            .send(AccountWorkerJob::AccountMultiproof { input: Box::new(input) });
 
-                if let AccountWorkerJob::AccountMultiproof { input } = err.0 {
-                    let AccountMultiproofInput {
-                        proof_result_sender:
-                            ProofResultContext {
-                                sender: result_tx,
-                                sequence_number: seq,
-                                state,
-                                start_time: start,
-                            },
-                        ..
-                    } = *input;
+        // Track peak pending for scaling decisions (do this after send to include this task)
+        let current_pending = self.account_work_tx.len();
+        self.max_pending_account_tasks.fetch_max(current_pending, Ordering::Relaxed);
 
-                    let _ = result_tx.send(ProofResultMessage {
-                        sequence_number: seq,
-                        result: Err(ParallelStateRootError::Provider(error.clone())),
-                        elapsed: start.elapsed(),
-                        state,
-                    });
-                }
+        result.map_err(|err| {
+            let error = ProviderError::other(std::io::Error::other("account workers unavailable"));
 
-                error
-            })
+            if let AccountWorkerJob::AccountMultiproof { input } = err.0 {
+                let AccountMultiproofInput {
+                    proof_result_sender:
+                        ProofResultContext {
+                            sender: result_tx,
+                            sequence_number: seq,
+                            state,
+                            start_time: start,
+                        },
+                    ..
+                } = *input;
+
+                let _ = result_tx.send(ProofResultMessage {
+                    sequence_number: seq,
+                    result: Err(ParallelStateRootError::Provider(error.clone())),
+                    elapsed: start.elapsed(),
+                    state,
+                });
+            }
+
+            error
+        })
     }
 
     /// Dispatch blinded storage node request to storage worker pool
