@@ -1,32 +1,112 @@
+use alloc::vec::Vec;
+use alloy_consensus::transaction::Either;
 use alloy_primitives::BlockNumber;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostStateSorted;
 use revm_database::{
     states::{PlainStateReverts, StateChangeset},
-    OriginalValuesKnown,
+    BundleState, OriginalValuesKnown,
 };
+
+/// A helper type used as input to [`StateWriter`] for writing execution outcome for one or many
+/// blocks.
+#[derive(Debug)]
+pub enum WriteStateInput<'a, R> {
+    /// A single block execution outcome.
+    Single {
+        /// The execution outcome.
+        outcome: &'a BlockExecutionOutput<R>,
+        /// Block number
+        block: BlockNumber,
+    },
+    /// Multiple block execution outcomes.
+    Multiple(&'a ExecutionOutcome<R>),
+}
+
+impl<'a, R> WriteStateInput<'a, R> {
+    /// Number of blocks in the execution outcome.
+    pub const fn len(&self) -> usize {
+        match self {
+            Self::Single { .. } => 1,
+            Self::Multiple(outcome) => outcome.len(),
+        }
+    }
+
+    /// Returns true if the execution outcome is empty.
+    pub const fn is_empty(&self) -> bool {
+        match self {
+            Self::Single { outcome, .. } => outcome.result.receipts.is_empty(),
+            Self::Multiple(outcome) => outcome.is_empty(),
+        }
+    }
+
+    /// Number of the first block.
+    pub const fn first_block(&self) -> BlockNumber {
+        match self {
+            Self::Single { block, .. } => *block,
+            Self::Multiple(outcome) => outcome.first_block(),
+        }
+    }
+
+    /// Number of the last block.
+    pub const fn last_block(&self) -> BlockNumber {
+        match self {
+            Self::Single { block, .. } => *block,
+            Self::Multiple(outcome) => outcome.last_block(),
+        }
+    }
+
+    /// Returns a reference to the [`BundleState`].
+    pub const fn state(&self) -> &BundleState {
+        match self {
+            Self::Single { outcome, .. } => &outcome.state,
+            Self::Multiple(outcome) => &outcome.bundle,
+        }
+    }
+
+    /// Returns an iterator over receipt sets for each block.
+    pub fn receipts(&self) -> impl Iterator<Item = &Vec<R>> {
+        match self {
+            Self::Single { outcome, .. } => {
+                Either::Left(core::iter::once(&outcome.result.receipts))
+            }
+            Self::Multiple(outcome) => Either::Right(outcome.receipts.iter()),
+        }
+    }
+}
+
+impl<'a, R> From<&'a ExecutionOutcome<R>> for WriteStateInput<'a, R> {
+    fn from(outcome: &'a ExecutionOutcome<R>) -> Self {
+        Self::Multiple(outcome)
+    }
+}
 
 /// A trait specifically for writing state changes or reverts
 pub trait StateWriter {
     /// Receipt type included into [`ExecutionOutcome`].
-    type Receipt;
+    type Receipt: 'static;
 
-    /// Write the state and receipts to the database or static files if `static_file_producer` is
-    /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
-    fn write_state(
+    /// Write the state and optionally receipts to the database.
+    ///
+    /// Use `config` to skip writing certain data types when they are written elsewhere.
+    fn write_state<'a>(
         &self,
-        execution_outcome: &ExecutionOutcome<Self::Receipt>,
+        execution_outcome: impl Into<WriteStateInput<'a, Self::Receipt>>,
         is_value_known: OriginalValuesKnown,
+        config: StateWriteConfig,
     ) -> ProviderResult<()>;
 
     /// Write state reverts to the database.
     ///
     /// NOTE: Reverts will delete all wiped storage from plain state.
+    ///
+    /// Use `config` to skip writing certain data types when they are written elsewhere.
     fn write_state_reverts(
         &self,
         reverts: PlainStateReverts,
         first_block: BlockNumber,
+        config: StateWriteConfig,
     ) -> ProviderResult<()>;
 
     /// Write state changes to the database.
@@ -45,4 +125,21 @@ pub trait StateWriter {
         &self,
         block: BlockNumber,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>>;
+}
+
+/// Configuration for what to write when calling [`StateWriter::write_state`].
+///
+/// Used to skip writing certain data types, when they are being written separately.
+#[derive(Debug, Clone, Copy)]
+pub struct StateWriteConfig {
+    /// Whether to write receipts.
+    pub write_receipts: bool,
+    /// Whether to write account changesets.
+    pub write_account_changesets: bool,
+}
+
+impl Default for StateWriteConfig {
+    fn default() -> Self {
+        Self { write_receipts: true, write_account_changesets: true }
+    }
 }
