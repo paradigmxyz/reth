@@ -172,7 +172,6 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
-        #[cfg(feature = "storage-bloom")] storage_bloom: Arc<StorageBloomFilter>,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
@@ -181,6 +180,10 @@ where
             &config,
             precompile_cache_map.clone(),
         );
+
+        #[cfg(feature = "storage-bloom")]
+        let storage_bloom =
+            Arc::new(StorageBloomFilter::new(reth_storage_bloom::StorageBloomConfig::default()));
 
         Self {
             provider,
