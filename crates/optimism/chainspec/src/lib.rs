@@ -1360,7 +1360,7 @@ mod tests {
         hardfork!(CustomFork { ExpandedLimits });
 
         let default_limits = EvmLimitParams::default();
-        let expanded_limits = EvmLimitParams {
+        let modified_limits = EvmLimitParams {
             max_code_size: default_limits.max_code_size * 2,
             max_initcode_size: default_limits.max_initcode_size * 2,
             tx_gas_limit_cap: Some(30_000_000),
@@ -1371,7 +1371,7 @@ mod tests {
             .build();
         op_spec.inner.evm_limit_params = EvmLimitParamsKind::Variable(ForkEvmLimitParams(vec![
             (OpHardfork::Bedrock.boxed(), default_limits),
-            (CustomFork::ExpandedLimits.boxed(), expanded_limits),
+            (CustomFork::ExpandedLimits.boxed(), modified_limits),
         ]));
 
         // Before custom fork: default limits
@@ -1380,10 +1380,10 @@ mod tests {
         assert_eq!(before.max_initcode_size, default_limits.max_initcode_size);
         assert_eq!(before.tx_gas_limit_cap, None);
 
-        // After custom fork: expanded limits
+        // After custom fork: modified limits
         let after = op_spec.evm_limit_params_at_timestamp(1000);
-        assert_eq!(after.max_code_size, expanded_limits.max_code_size);
-        assert_eq!(after.max_initcode_size, expanded_limits.max_initcode_size);
-        assert_eq!(after.tx_gas_limit_cap, expanded_limits.tx_gas_limit_cap);
+        assert_eq!(after.max_code_size, modified_limits.max_code_size);
+        assert_eq!(after.max_initcode_size, modified_limits.max_initcode_size);
+        assert_eq!(after.tx_gas_limit_cap, modified_limits.tx_gas_limit_cap);
     }
 }
