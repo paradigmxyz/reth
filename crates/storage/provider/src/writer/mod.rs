@@ -1153,4 +1153,173 @@ mod tests {
         let storage_root = StorageRoot::overlay_root(tx, address, updated_storage.clone()).unwrap();
         assert_eq!(storage_root, storage_root_prehashed(updated_storage.storage));
     }
+
+    /// Test that verifies the in-memory history index collection produces identical results
+    /// to the DB-scan approach. This ensures the optimization in `save_blocks` that derives
+    /// history indices from `ExecutionOutcome` matches what would have been produced by
+    /// scanning `AccountChangeSets` and `StorageChangeSets` tables.
+    #[test]
+    fn history_indices_in_memory_matches_db_scan() {
+        use crate::ChangeSetReader;
+
+        let provider_factory = create_test_provider_factory();
+        let provider_rw = provider_factory.provider_rw().unwrap();
+
+        // Create test addresses
+        let address_a = Address::with_last_byte(0xa);
+        let address_b = Address::with_last_byte(0xb);
+        let address_c = Address::with_last_byte(0xc);
+
+        // Create accounts with different modification patterns:
+        // - address_a: account info changes (balance change) -> should have account changeset
+        // - address_b: only storage changes -> should NOT have account changeset
+        // - address_c: both account and storage changes -> should have account changeset
+
+        let account_a = RevmAccountInfo {
+            balance: U256::from(100),
+            nonce: 1,
+            code_hash: B256::ZERO,
+            code: None,
+        };
+        let account_a_changed = RevmAccountInfo {
+            balance: U256::from(200), // balance changed
+            nonce: 1,
+            code_hash: B256::ZERO,
+            code: None,
+        };
+        let account_b = RevmAccountInfo {
+            balance: U256::from(50),
+            nonce: 0,
+            code_hash: B256::ZERO,
+            code: None,
+        };
+        let account_c = RevmAccountInfo {
+            balance: U256::from(75),
+            nonce: 2,
+            code_hash: B256::ZERO,
+            code: None,
+        };
+        let account_c_changed = RevmAccountInfo {
+            balance: U256::from(150), // balance changed
+            nonce: 3,                 // nonce changed
+            code_hash: B256::ZERO,
+            code: None,
+        };
+
+        // Build bundle state simulating block execution
+        let mut state = State::builder().with_bundle_update().build();
+        state.insert_account(address_a, account_a.clone());
+        state.insert_account(address_b, account_b.clone());
+        state.insert_account(address_c, account_c.clone());
+
+        // Apply changes
+        state.commit(HashMap::from_iter([
+            (
+                address_a,
+                RevmAccount {
+                    status: AccountStatus::Touched,
+                    info: account_a_changed.clone(),
+                    storage: HashMap::default(), // no storage changes
+                    transaction_id: 0,
+                },
+            ),
+            (
+                address_b,
+                RevmAccount {
+                    status: AccountStatus::Touched,
+                    info: account_b.clone(), // same info - no account change
+                    storage: HashMap::from_iter([(
+                        U256::from(1),
+                        EvmStorageSlot {
+                            present_value: U256::from(100),
+                            original_value: U256::ZERO, // storage changed
+                            ..Default::default()
+                        },
+                    )]),
+                    transaction_id: 0,
+                },
+            ),
+            (
+                address_c,
+                RevmAccount {
+                    status: AccountStatus::Touched,
+                    info: account_c_changed.clone(),
+                    storage: HashMap::from_iter([(
+                        U256::from(2),
+                        EvmStorageSlot {
+                            present_value: U256::from(999),
+                            original_value: U256::from(1), // storage changed
+                            ..Default::default()
+                        },
+                    )]),
+                    transaction_id: 0,
+                },
+            ),
+        ]));
+
+        state.merge_transitions(BundleRetention::Reverts);
+        let bundle = state.take_bundle();
+
+        // Now manually collect history indices using the in-memory approach
+        let mut in_memory_account_transitions: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+        let mut in_memory_storage_transitions: BTreeMap<(Address, B256), Vec<u64>> =
+            BTreeMap::new();
+        let block_number = 1u64;
+
+        for (address, account) in bundle.state() {
+            if account.status.is_not_modified() {
+                continue;
+            }
+            // Only collect for account history if the account info actually changed
+            if account.info != account.original_info {
+                in_memory_account_transitions.entry(*address).or_default().push(block_number);
+            }
+            // Collect storage changes
+            for (slot, value) in &account.storage {
+                if value.is_changed() {
+                    let slot_key = B256::from(*slot);
+                    in_memory_storage_transitions
+                        .entry((*address, slot_key))
+                        .or_default()
+                        .push(block_number);
+                }
+            }
+        }
+
+        // Write state to DB (this writes the changesets)
+        let outcome = ExecutionOutcome::new(bundle, Default::default(), 1, Vec::new());
+        provider_rw
+            .write_state(&outcome, OriginalValuesKnown::Yes, StateWriteConfig::default())
+            .expect("Could not write bundle state to DB");
+
+        // Now collect history indices using the DB-scan approach
+        let db_account_transitions = provider_rw
+            .changed_accounts_and_blocks_with_range(1..=1)
+            .expect("Could not get account transitions from DB");
+
+        let db_storage_transitions = provider_rw
+            .changed_storages_and_blocks_with_range(1..=1)
+            .expect("Could not get storage transitions from DB");
+
+        // Verify account history indices match
+        assert_eq!(
+            in_memory_account_transitions, db_account_transitions,
+            "Account history indices mismatch"
+        );
+
+        // Verify storage history indices match
+        assert_eq!(
+            in_memory_storage_transitions, db_storage_transitions,
+            "Storage history indices mismatch"
+        );
+
+        // Verify test setup: address_a and address_c have account changes, address_b does not
+        assert!(db_account_transitions.contains_key(&address_a));
+        assert!(!db_account_transitions.contains_key(&address_b));
+        assert!(db_account_transitions.contains_key(&address_c));
+
+        // Verify storage: address_b and address_c have storage changes
+        assert!(db_storage_transitions.contains_key(&(address_b, B256::from(U256::from(1)))));
+        assert!(db_storage_transitions.contains_key(&(address_c, B256::from(U256::from(2)))));
+    }
 }
