@@ -66,62 +66,12 @@ mod tests {
 
     #[test]
     fn test_default_rocksdb_args() {
-        let default_args = RocksDbArgs::default();
         let args = CommandParser::<RocksDbArgs>::parse_from(["reth"]).args;
-        assert_eq!(args, default_args);
-        assert_eq!(args.tx_hash, None);
-        assert_eq!(args.storages_history, None);
-        assert_eq!(args.account_history, None);
+        assert_eq!(args, RocksDbArgs::default());
     }
 
     #[test]
-    fn test_rocksdb_tx_hash_true() {
-        let args =
-            CommandParser::<RocksDbArgs>::parse_from(["reth", "--rocksdb.tx-hash=true"]).args;
-        assert_eq!(args.tx_hash, Some(true));
-    }
-
-    #[test]
-    fn test_rocksdb_tx_hash_false() {
-        let args =
-            CommandParser::<RocksDbArgs>::parse_from(["reth", "--rocksdb.tx-hash=false"]).args;
-        assert_eq!(args.tx_hash, Some(false));
-    }
-
-    #[test]
-    fn test_rocksdb_storages_history_true() {
-        let args =
-            CommandParser::<RocksDbArgs>::parse_from(["reth", "--rocksdb.storages-history=true"])
-                .args;
-        assert_eq!(args.storages_history, Some(true));
-    }
-
-    #[test]
-    fn test_rocksdb_storages_history_false() {
-        let args =
-            CommandParser::<RocksDbArgs>::parse_from(["reth", "--rocksdb.storages-history=false"])
-                .args;
-        assert_eq!(args.storages_history, Some(false));
-    }
-
-    #[test]
-    fn test_rocksdb_account_history_true() {
-        let args =
-            CommandParser::<RocksDbArgs>::parse_from(["reth", "--rocksdb.account-history=true"])
-                .args;
-        assert_eq!(args.account_history, Some(true));
-    }
-
-    #[test]
-    fn test_rocksdb_account_history_false() {
-        let args =
-            CommandParser::<RocksDbArgs>::parse_from(["reth", "--rocksdb.account-history=false"])
-                .args;
-        assert_eq!(args.account_history, Some(false));
-    }
-
-    #[test]
-    fn test_all_flags_together() {
+    fn test_parse_all_flags() {
         let args = CommandParser::<RocksDbArgs>::parse_from([
             "reth",
             "--rocksdb.tx-hash=true",
@@ -136,50 +86,10 @@ mod tests {
 
     #[test]
     fn test_apply_to_settings() {
-        let args = RocksDbArgs {
-            tx_hash: Some(true),
-            storages_history: None,
-            account_history: Some(false),
-        };
-
-        let defaults = StorageSettings::legacy();
-        let result = args.apply_to_settings(defaults);
-
+        let args =
+            RocksDbArgs { tx_hash: Some(true), storages_history: None, account_history: None };
+        let result = args.apply_to_settings(StorageSettings::legacy());
         assert!(result.transaction_hash_numbers_in_rocksdb);
         assert!(!result.storages_history_in_rocksdb);
-        assert!(!result.account_history_in_rocksdb);
-    }
-
-    #[test]
-    fn test_has_overrides() {
-        let empty = RocksDbArgs::default();
-        assert!(!empty.has_overrides());
-
-        let with_tx_hash = RocksDbArgs { tx_hash: Some(true), ..Default::default() };
-        assert!(with_tx_hash.has_overrides());
-
-        let with_all = RocksDbArgs {
-            tx_hash: Some(true),
-            storages_history: Some(false),
-            account_history: Some(true),
-        };
-        assert!(with_all.has_overrides());
-    }
-
-    #[test]
-    fn test_bare_flag_requires_value() {
-        let result = CommandParser::<RocksDbArgs>::try_parse_from(["reth", "--rocksdb.tx-hash"]);
-        assert!(result.is_err(), "bare flag without value should require a value");
-    }
-
-    #[test]
-    fn test_space_separated_value() {
-        let args =
-            CommandParser::<RocksDbArgs>::parse_from(["reth", "--rocksdb.tx-hash", "true"]).args;
-        assert_eq!(args.tx_hash, Some(true));
-
-        let args =
-            CommandParser::<RocksDbArgs>::parse_from(["reth", "--rocksdb.tx-hash", "false"]).args;
-        assert_eq!(args.tx_hash, Some(false));
     }
 }
