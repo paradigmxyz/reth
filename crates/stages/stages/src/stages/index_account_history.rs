@@ -175,16 +175,6 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        if provider.cached_storage_settings().account_history_in_rocksdb {
-            return Err(StageError::Fatal(Box::new(ProviderError::other(
-                std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "account_history_in_rocksdb is enabled but this binary was built without the 'rocksdb' feature",
-                ),
-            ))));
-        }
-
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
