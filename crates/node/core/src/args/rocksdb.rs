@@ -299,4 +299,39 @@ mod tests {
         assert!(msg.contains("genesis-only"));
         assert!(msg.contains("re-sync required"));
     }
+
+    #[test]
+    fn test_validate_matching_false_overrides_passes() {
+        // Test that explicitly setting false matches persisted false
+        let args = RocksDbArgs {
+            tx_hash: Some(false),
+            storages_history: Some(false),
+            account_history: Some(false),
+        };
+        let persisted = StorageSettings::legacy(); // All rocksdb flags are false
+        assert!(args.validate_against_persisted(&persisted).is_ok());
+    }
+
+    #[test]
+    fn test_validate_multiple_mismatches_returns_first() {
+        // When multiple fields mismatch, the first one (tx_hash) is reported
+        let args = RocksDbArgs {
+            tx_hash: Some(true),
+            storages_history: Some(true),
+            account_history: Some(true),
+        };
+        let persisted = StorageSettings::legacy(); // All false
+
+        let err = args.validate_against_persisted(&persisted).unwrap_err();
+        // Should report the first mismatch (tx_hash is checked first)
+        assert_eq!(err.flag_name, "--rocksdb.tx-hash");
+    }
+
+    #[test]
+    fn test_validate_partial_override_with_match() {
+        // Only one CLI override set, and it matches
+        let args = RocksDbArgs { storages_history: Some(true), ..Default::default() };
+        let persisted = StorageSettings::legacy().with_storages_history_in_rocksdb(true);
+        assert!(args.validate_against_persisted(&persisted).is_ok());
+    }
 }
