@@ -34,6 +34,11 @@ fn default_account_worker_count() -> usize {
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
 
+/// The size of proof targets chunk to spawn in one multiproof calculation when V2 proofs are
+/// enabled. This is 4x the default chunk size to take advantage of more efficient V2 proof
+/// computation.
+pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2: usize = DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE * 4;
+
 /// Default number of reserved CPU cores for non-reth processes.
 ///
 /// This will be deducted from the thread count of main reth global threadpool.
@@ -260,6 +265,17 @@ impl TreeConfig {
     /// Return the multiproof task chunk size.
     pub const fn multiproof_chunk_size(&self) -> usize {
         self.multiproof_chunk_size
+    }
+
+    /// Return the multiproof task chunk size, using the V2 default if V2 proofs are enabled
+    /// and the chunk size is at the default value.
+    pub const fn effective_multiproof_chunk_size(&self) -> usize {
+        if self.enable_proof_v2 && self.multiproof_chunk_size == DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE
+        {
+            DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2
+        } else {
+            self.multiproof_chunk_size
+        }
     }
 
     /// Return the number of reserved CPU cores for non-reth processes
