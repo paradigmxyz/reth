@@ -16,6 +16,8 @@ These settings can only be configured at genesis initialization. Once the node h
 
 ## RocksDB CLI Flags
 
+All RocksDB flags require an explicit boolean value (`true` or `false`). They cannot be used as bare flags.
+
 ### `--rocksdb.tx-hash`
 
 Route the transaction hash to number mapping table to RocksDB instead of MDBX.
