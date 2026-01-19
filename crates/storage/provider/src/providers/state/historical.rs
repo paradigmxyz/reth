@@ -291,7 +291,7 @@ impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StateRootProvider
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         let hashed_state_sorted = hashed_state.into_sorted();
-        revert_state.extend_ref(&hashed_state_sorted);
+        revert_state.extend_ref_and_sort(&hashed_state_sorted);
         Ok(StateRoot::overlay_root(self.tx(), &revert_state)?)
     }
 
@@ -306,7 +306,7 @@ impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StateRootProvider
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
         let hashed_state_sorted = hashed_state.into_sorted();
-        revert_state.extend_ref(&hashed_state_sorted);
+        revert_state.extend_ref_and_sort(&hashed_state_sorted);
         Ok(StateRoot::overlay_root_with_updates(self.tx(), &revert_state)?)
     }
 

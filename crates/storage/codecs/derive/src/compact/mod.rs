@@ -175,7 +175,7 @@ fn should_use_alt_impl(ftype: &str, segment: &syn::PathSegment) -> bool {
         let syn::PathArguments::AngleBracketed(ref args) = segment.arguments &&
         let Some(syn::GenericArgument::Type(syn::Type::Path(arg_path))) = args.args.last() &&
         let (Some(path), 1) = (arg_path.path.segments.first(), arg_path.path.segments.len()) &&
-        ["B256", "Address", "Address", "Bloom", "TxHash", "BlockHash", "CompactPlaceholder"]
+        ["B256", "Address", "Bloom", "TxHash", "BlockHash", "CompactPlaceholder"]
             .iter()
             .any(|&s| path.ident == s)
     {
