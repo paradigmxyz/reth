@@ -228,9 +228,6 @@ impl RocksDBBuilder {
 
     /// Sets read-only mode.
     ///
-    /// When enabled, uses `DB::open_cf_descriptors_read_only` which doesn't acquire an exclusive
-    /// lock, allowing multiple processes to read the database concurrently.
-    ///
     /// Note: Write operations on a read-only provider will panic at runtime.
     pub const fn with_read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
