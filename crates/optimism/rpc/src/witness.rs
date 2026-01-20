@@ -69,6 +69,7 @@ where
         + StateProviderFactory
         + ChainSpecProvider<ChainSpec: OpHardforks>
         + Clone
+        + Sync
         + 'static,
     EvmConfig: ConfigureEvm<
             Primitives = Provider::Primitives,

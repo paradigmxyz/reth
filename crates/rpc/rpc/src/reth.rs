@@ -38,7 +38,7 @@ impl<Provider> RethApi<Provider> {
 
 impl<Provider> RethApi<Provider>
 where
-    Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory + 'static,
+    Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory + Sync + 'static,
 {
     /// Executes the future on a new blocking task.
     async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
@@ -96,6 +96,7 @@ where
         + StateProviderFactory
         + CanonStateSubscriptions
         + PersistedBlockSubscriptions
+        + Sync
         + 'static,
 {
     /// Handler for `reth_getBalanceChangesInBlock`

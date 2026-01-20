@@ -218,6 +218,17 @@ where
         Database::new(self, name, 0)
     }
 
+    /// Opens a handle to an MDBX database with the given flags.
+    ///
+    /// This is similar to [`open_db`](Self::open_db), but allows specifying database flags.
+    /// The flags should match those used when the database was created.
+    ///
+    /// Note: This cannot be used to create a database. Use
+    /// [`Transaction::<RW>::create_db`] for that.
+    pub fn open_db_with_flags(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
+        Database::new(self, name, flags.bits())
+    }
+
     /// Gets the option flags for the given database in the transaction.
     pub fn db_flags(&self, dbi: ffi::MDBX_dbi) -> Result<DatabaseFlags> {
         let mut flags: c_uint = 0;
@@ -273,6 +284,34 @@ where
 {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
+    }
+}
+
+impl<K> Transaction<K>
+where
+    K: TransactionKind,
+{
+    /// Creates a deep clone of the transaction that reads the same MVCC snapshot.
+    ///
+    /// This uses the MDBX `mdbx_txn_clone` API to create a new transaction handle
+    /// that reads the same database snapshot as the original transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The transaction is a write transaction (only read-only transactions can be cloned)
+    /// - The MVCC snapshot is too old or there are no available reader slots
+    pub fn clone_tx(&self) -> Result<Self> {
+        if !K::IS_READ_ONLY {
+            return Err(Error::Access);
+        }
+        self.txn_execute(|txn| {
+            let mut clone_txn: *mut ffi::MDBX_txn = ptr::null_mut();
+            unsafe {
+                mdbx_result(ffi::mdbx_txn_clone(txn, &mut clone_txn, ptr::null_mut()))?;
+            }
+            Ok(Self::new_from_ptr(self.env().clone(), clone_txn))
+        })?
     }
 }
 
@@ -359,10 +398,6 @@ where
 }
 
 impl Transaction<RW> {
-    fn open_db_with_flags(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
-        Database::new(self, name, flags.bits())
-    }
-
     /// Opens a handle to an MDBX database, creating the database if necessary.
     ///
     /// If the database is already created, the given option flags will be added to it.

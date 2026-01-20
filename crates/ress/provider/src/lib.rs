@@ -192,7 +192,7 @@ where
 
 impl<P, E> RessProtocolProvider for RethRessProtocolProvider<P, E>
 where
-    P: BlockReader<Block = Block> + StateProviderFactory + Clone + 'static,
+    P: BlockReader<Block = Block> + StateProviderFactory + Clone + Sync + 'static,
     E: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 {
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>> {

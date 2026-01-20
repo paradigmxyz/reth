@@ -216,6 +216,60 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 }
 
+impl<TX: Clone, N: NodeTypes> Clone for DatabaseProvider<TX, N> {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            chain_spec: self.chain_spec.clone(),
+            static_file_provider: self.static_file_provider.clone(),
+            prune_modes: self.prune_modes.clone(),
+            storage: self.storage.clone(),
+            storage_settings: self.storage_settings.clone(),
+            rocksdb_provider: self.rocksdb_provider.clone(),
+            changeset_cache: self.changeset_cache.clone(),
+            pending_rocksdb_batches: self.pending_rocksdb_batches.clone(),
+            minimum_pruning_distance: self.minimum_pruning_distance,
+            metrics: self.metrics.clone(),
+        }
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Creates a deep clone of the database provider with a new MVCC snapshot.
+    ///
+    /// This creates a new database transaction that reads the same MVCC snapshot as the current
+    /// transaction. The new provider is independent and can be used in parallel with the original.
+    ///
+    /// This is primarily used for proof workers that need to read from the same database snapshot
+    /// concurrently without sharing the same transaction handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying transaction cannot be cloned (e.g., for write
+    /// transactions or if there are no available reader slots).
+    pub fn clone_tx(&self) -> Result<Self, reth_db_api::DatabaseError> {
+        Ok(Self {
+            tx: self.tx.clone_tx()?,
+            chain_spec: self.chain_spec.clone(),
+            static_file_provider: self.static_file_provider.clone(),
+            prune_modes: self.prune_modes.clone(),
+            storage: self.storage.clone(),
+            storage_settings: self.storage_settings.clone(),
+            rocksdb_provider: self.rocksdb_provider.clone(),
+            changeset_cache: self.changeset_cache.clone(),
+            pending_rocksdb_batches: self.pending_rocksdb_batches.clone(),
+            minimum_pruning_distance: self.minimum_pruning_distance,
+            metrics: self.metrics.clone(),
+        })
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> reth_storage_api::CloneProvider for DatabaseProvider<TX, N> {
+    fn clone_provider(&self) -> Result<Self, reth_db_api::DatabaseError> {
+        self.clone_tx()
+    }
+}
+
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// State provider for latest state
     pub fn latest<'a>(&'a self) -> Box<dyn StateProvider + 'a> {

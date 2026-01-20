@@ -114,7 +114,7 @@ where
 
 impl<P, Tx, ChainSpec, Types> PayloadValidator<Types> for OpEngineValidator<P, Tx, ChainSpec>
 where
-    P: StateProviderFactory + Unpin + 'static,
+    P: StateProviderFactory + Sync + Unpin + 'static,
     Tx: SignedTransaction + Unpin + 'static,
     ChainSpec: OpHardforks + Send + Sync + 'static,
     Types: PayloadTypes<ExecutionData = OpExecutionData>,
@@ -166,7 +166,7 @@ where
         ExecutionData = OpExecutionData,
         BuiltPayload: BuiltPayload<Primitives: NodePrimitives<SignedTx = Tx>>,
     >,
-    P: StateProviderFactory + Unpin + 'static,
+    P: StateProviderFactory + Sync + Unpin + 'static,
     Tx: SignedTransaction + Unpin + 'static,
     ChainSpec: OpHardforks + Send + Sync + 'static,
 {

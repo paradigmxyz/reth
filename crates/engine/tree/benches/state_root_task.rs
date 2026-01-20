@@ -22,7 +22,7 @@ use reth_primitives_traits::{Account as RethAccount, Recovered, StorageEntry};
 use reth_provider::{
     providers::{BlockchainProvider, OverlayStateProviderFactory},
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-    AccountReader, ChainSpecProvider, HashingWriter, ProviderFactory,
+    AccountReader, ChainSpecProvider, DatabaseProviderROFactory, HashingWriter, ProviderFactory,
 };
 use revm_primitives::{HashMap, U256};
 use revm_state::{Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
@@ -230,6 +230,11 @@ fn bench_state_root(c: &mut Criterion) {
                     },
                     |(genesis_hash, mut payload_processor, provider, state_updates)| {
                         black_box({
+                            let overlay_factory = OverlayStateProviderFactory::new(
+                                provider.clone(),
+                                reth_trie_db::ChangesetCache::new(),
+                            );
+                            let overlay_provider = overlay_factory.database_provider_ro().unwrap();
                             let mut handle = payload_processor.spawn(
                                 Default::default(),
                                 (
@@ -241,11 +246,8 @@ fn bench_state_root(c: &mut Criterion) {
                                     >::new(),
                                     std::convert::identity,
                                 ),
-                                StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-                                OverlayStateProviderFactory::new(
-                                    provider,
-                                    reth_trie_db::ChangesetCache::new(),
-                                ),
+                                StateProviderBuilder::new(provider, genesis_hash, None),
+                                overlay_provider,
                                 &TreeConfig::default(),
                                 None,
                             );

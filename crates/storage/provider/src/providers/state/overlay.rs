@@ -8,7 +8,7 @@ use reth_metrics::Metrics;
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+    BlockNumReader, ChangeSetReader, CloneProvider, DBProvider, DatabaseProviderFactory,
     DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
 };
 use reth_trie::{
@@ -26,6 +26,21 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, instrument};
+
+/// Helper to extend an `Option<Arc<HashedPostStateSorted>>` with additional state.
+///
+/// If `existing` is `Some`, extends it in place (using `Arc::make_mut` for COW semantics).
+/// If `existing` is `None`, wraps `other` in a new `Arc`.
+fn extend_hashed_state_overlay(
+    existing: &mut Option<Arc<HashedPostStateSorted>>,
+    other: HashedPostStateSorted,
+) {
+    if let Some(overlay) = existing.as_mut() {
+        Arc::make_mut(overlay).extend_ref(&other);
+    } else {
+        *existing = Some(Arc::new(other));
+    }
+}
 
 /// Metrics for overlay state provider operations.
 #[derive(Clone, Metrics)]
@@ -489,6 +504,29 @@ where
         hashed_post_state: Arc<HashedPostStateSorted>,
     ) -> Self {
         Self { provider, trie_updates, hashed_post_state }
+    }
+
+    /// Extends the existing hashed state overlay with the given [`HashedPostStateSorted`].
+    ///
+    /// Returns a new `OverlayStateProvider` with the extended hashed post state.
+    pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
+        let mut overlay = Some(self.hashed_post_state);
+        extend_hashed_state_overlay(&mut overlay, other);
+        self.hashed_post_state = overlay.expect("extend always produces Some");
+        self
+    }
+}
+
+impl<Provider> CloneProvider for OverlayStateProvider<Provider>
+where
+    Provider: DBProvider + CloneProvider,
+{
+    fn clone_provider(&self) -> Result<Self, DatabaseError> {
+        Ok(Self {
+            provider: self.provider.clone_provider()?,
+            trie_updates: Arc::clone(&self.trie_updates),
+            hashed_post_state: Arc::clone(&self.hashed_post_state),
+        })
     }
 }
 

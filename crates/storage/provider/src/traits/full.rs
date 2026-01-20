@@ -10,14 +10,18 @@ use reth_chain_state::{
     CanonStateSubscriptions, ForkChoiceSubscriptions, PersistedBlockSubscriptions,
 };
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
-use reth_storage_api::NodePrimitivesProvider;
+use reth_storage_api::{CloneProvider, NodePrimitivesProvider};
 use std::fmt::Debug;
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<N: NodeTypesWithDB>:
     DatabaseProviderFactory<
         DB = N::DB,
-        Provider: BlockReader + StageCheckpointReader + PruneCheckpointReader + ChangeSetReader,
+        Provider: BlockReader
+                      + StageCheckpointReader
+                      + PruneCheckpointReader
+                      + ChangeSetReader
+                      + CloneProvider,
     > + NodePrimitivesProvider<Primitives = N::Primitives>
     + StaticFileProviderFactory<Primitives = N::Primitives>
     + RocksDBProviderFactory
@@ -46,7 +50,11 @@ pub trait FullProvider<N: NodeTypesWithDB>:
 impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
     T: DatabaseProviderFactory<
             DB = N::DB,
-            Provider: BlockReader + StageCheckpointReader + PruneCheckpointReader + ChangeSetReader,
+            Provider: BlockReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + CloneProvider,
         > + NodePrimitivesProvider<Primitives = N::Primitives>
         + StaticFileProviderFactory<Primitives = N::Primitives>
         + RocksDBProviderFactory

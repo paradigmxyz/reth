@@ -1322,12 +1322,14 @@ mod tests {
     use alloy_primitives::Address;
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
-        BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
-        PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
+        BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+        DatabaseProviderROFactory, LatestStateProvider, PruneCheckpointReader,
+        StageCheckpointReader, StateProviderBox,
     };
+    use reth_storage_api::CloneProvider;
     use reth_trie::MultiProof;
     use reth_trie_db::ChangesetCache;
-    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
+    use reth_trie_parallel::proof_task::ProofWorkerHandle;
     use revm_primitives::{B256, U256};
     use std::sync::{Arc, OnceLock};
     use tokio::runtime::{Handle, Runtime};
@@ -1350,7 +1352,8 @@ mod tests {
                               + StageCheckpointReader
                               + PruneCheckpointReader
                               + ChangeSetReader
-                              + BlockNumReader,
+                              + BlockNumReader
+                              + CloneProvider,
             > + Clone
             + Send
             + 'static,
@@ -1358,8 +1361,9 @@ mod tests {
         let rt_handle = get_test_runtime_handle();
         let changeset_cache = ChangesetCache::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
-        let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);
+        let overlay_provider = overlay_factory.database_provider_ro().unwrap();
+        let proof_handle =
+            ProofWorkerHandle::new(rt_handle, overlay_provider, 1, 1, false).unwrap();
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();
 

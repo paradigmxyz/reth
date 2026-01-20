@@ -266,7 +266,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> OpEngineApiServer<EngineT>
     for OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + Sync + 'static,
     EngineT: EngineTypes<ExecutionData = OpExecutionData>,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,

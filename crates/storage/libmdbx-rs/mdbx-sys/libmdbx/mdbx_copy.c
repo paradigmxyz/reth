@@ -1,7 +1,7 @@
 /// \copyright SPDX-License-Identifier: Apache-2.0
 /// \note Please refer to the COPYRIGHT file for explanations license change,
 /// credits and acknowledgments.
-/// \author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2025
+/// \author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2026
 ///
 /// mdbx_copy.c - memory-mapped database backup tool
 ///
@@ -16,9 +16,9 @@
 
 #define xMDBX_TOOLS /* Avoid using internal eASSERT() */
 /// \copyright SPDX-License-Identifier: Apache-2.0
-/// \author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2025
+/// \author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2026
 
-#define MDBX_BUILD_SOURCERY 6b5df6869d2bf5419e3a8189d9cc849cc9911b9c8a951b9750ed0a261ce43724_v0_13_7_0_g566b0f93
+#define MDBX_BUILD_SOURCERY 504a6ecaae8fc599ed314a60e624c8d15df1d8bed9a4f417271a7c3e05b56467_v0_14_1_291_g8fcc05f8
 
 #define LIBMDBX_INTERNALS
 #define MDBX_DEPRECATED
@@ -67,7 +67,7 @@
 #if defined(_WIN32) || defined(_WIN64) || defined(_WINDOWS)
 
 #ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0601 /* Windows 7 */
+#define _WIN32_WINNT 0x0A00 /* Windows 10 */
 #endif                      /* _WIN32_WINNT */
 
 #if !defined(_CRT_SECURE_NO_WARNINGS)
@@ -450,6 +450,10 @@ __extern_C key_t ftok(const char *, int);
 #include <sys/time.h>
 #include <sys/uio.h>
 
+#if __GLIBC_PREREQ(2, 16) || __has_include(<sys/auxv.h>)
+#include <sys/auxv.h>
+#endif /* glibc >= 2.16 */
+
 #endif /*---------------------------------------------------------------------*/
 
 #if defined(__ANDROID_API__) || defined(ANDROID)
@@ -543,8 +547,10 @@ __extern_C key_t ftok(const char *, int);
 
 #if UINTPTR_MAX > 0xffffFFFFul || ULONG_MAX > 0xffffFFFFul || defined(_WIN64)
 #define MDBX_WORDBITS 64
+#define MDBX_WORDBITS_LN2 6
 #else
 #define MDBX_WORDBITS 32
+#define MDBX_WORDBITS_LN2 5
 #endif /* MDBX_WORDBITS */
 
 /*----------------------------------------------------------------------------*/
@@ -1149,6 +1155,14 @@ static inline void osal_free(void *ptr) { HeapFree(GetProcessHeap(), 0, ptr); }
 #define vsnprintf _vsnprintf /* ntdll */
 #endif
 
+#ifndef strcasecmp
+#define strcasecmp _stricmp /* ntdll */
+#endif
+
+#ifndef strncasecmp
+#define strncasecmp _strnicmp /* ntdll */
+#endif
+
 #else /*----------------------------------------------------------------------*/
 
 typedef pthread_t osal_thread_t;
@@ -1187,6 +1201,14 @@ typedef char pathchar_t;
 #define MDBX_PRIsPATH "s"
 #endif
 
+MDBX_MAYBE_UNUSED static inline bool osal_yield(void) {
+#if defined(_WIN32) || defined(_WIN64)
+  return SleepEx(0, true) == WAIT_IO_COMPLETION;
+#else
+  return sched_yield() != 0;
+#endif
+}
+
 typedef struct osal_mmap {
   union {
     void *base;
@@ -1205,6 +1227,8 @@ typedef struct osal_mmap {
 #if defined(_WIN32) || defined(_WIN64)
 
 #define MDBX_HAVE_PWRITEV 0
+
+MDBX_INTERNAL int osal_waitstatus2errcode(DWORD result);
 
 #elif defined(__ANDROID_API__)
 
@@ -1449,7 +1473,7 @@ enum osal_syncmode_bits {
 };
 
 MDBX_INTERNAL int osal_fsync(mdbx_filehandle_t fd, const enum osal_syncmode_bits mode_bits);
-MDBX_INTERNAL int osal_ftruncate(mdbx_filehandle_t fd, uint64_t length);
+MDBX_INTERNAL int osal_fsetsize(mdbx_filehandle_t fd, const uint64_t length);
 MDBX_INTERNAL int osal_fseek(mdbx_filehandle_t fd, uint64_t pos);
 MDBX_INTERNAL int osal_filesize(mdbx_filehandle_t fd, uint64_t *length);
 
@@ -1462,8 +1486,9 @@ enum osal_openfile_purpose {
   MDBX_OPEN_DXB_OVERLAPPED_DIRECT,
 #endif /* Windows */
   MDBX_OPEN_LCK,
-  MDBX_OPEN_COPY,
-  MDBX_OPEN_DELETE
+  MDBX_OPEN_DELETE,
+  MDBX_OPEN_COPY_EXCL,
+  MDBX_OPEN_COPY_OVERWRITE,
 };
 
 MDBX_MAYBE_UNUSED static inline bool osal_isdirsep(pathchar_t c) {
@@ -1474,6 +1499,7 @@ MDBX_MAYBE_UNUSED static inline bool osal_isdirsep(pathchar_t c) {
       c == '/';
 }
 
+MDBX_INTERNAL const char *osal_getenv(const char *name, bool secure);
 MDBX_INTERNAL bool osal_pathequal(const pathchar_t *l, const pathchar_t *r, size_t len);
 MDBX_INTERNAL pathchar_t *osal_fileext(const pathchar_t *pathname, size_t len);
 MDBX_INTERNAL int osal_fileexists(const pathchar_t *pathname);
@@ -1485,7 +1511,7 @@ MDBX_INTERNAL int osal_removedirectory(const pathchar_t *pathname);
 MDBX_INTERNAL int osal_is_pipe(mdbx_filehandle_t fd);
 MDBX_INTERNAL int osal_lockfile(mdbx_filehandle_t fd, bool wait);
 
-#define MMAP_OPTION_TRUNCATE 1
+#define MMAP_OPTION_SETLENGTH 1
 #define MMAP_OPTION_SEMAPHORE 2
 MDBX_INTERNAL int osal_mmap(const int flags, osal_mmap_t *map, size_t size, const size_t limit, const unsigned options,
                             const pathchar_t *pathname4logging);
@@ -1501,7 +1527,7 @@ typedef struct {
 MDBX_INTERNAL int osal_suspend_threads_before_remap(MDBX_env *env, mdbx_handle_array_t **array);
 MDBX_INTERNAL int osal_resume_threads_after_remap(mdbx_handle_array_t *array);
 #endif /* Windows */
-MDBX_INTERNAL int osal_msync(const osal_mmap_t *map, size_t offset, size_t length, enum osal_syncmode_bits mode_bits);
+MDBX_INTERNAL int osal_msync(const osal_mmap_t *map, size_t length, enum osal_syncmode_bits mode_bits);
 MDBX_INTERNAL int osal_check_fs_rdonly(mdbx_filehandle_t handle, const pathchar_t *pathname, int err);
 MDBX_INTERNAL int osal_check_fs_incore(mdbx_filehandle_t handle);
 MDBX_INTERNAL int osal_check_fs_local(mdbx_filehandle_t handle, int flags);
@@ -1786,7 +1812,7 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
 
 /** Avoid dependence from MSVC CRT and use ntdll.dll instead. */
 #ifndef MDBX_WITHOUT_MSVC_CRT
-#if defined(MDBX_BUILD_CXX) && !MDBX_BUILD_CXX
+#if defined(MDBX_BUILD_CXX) && !MDBX_BUILD_CXX && (defined(_WIN32) || defined(_WIN64))
 #define MDBX_WITHOUT_MSVC_CRT 1
 #else
 #define MDBX_WITHOUT_MSVC_CRT 0
@@ -1854,6 +1880,14 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
 #error MDBX_HAVE_BUILTIN_CPU_SUPPORTS must be defined as 0 or 1
 #endif /* MDBX_HAVE_BUILTIN_CPU_SUPPORTS */
 
+/** if enabled then treats the commit of pure (nothing changes) transactions as special
+ * cases and return \ref MDBX_RESULT_TRUE instead of \ref MDBX_SUCCESS. */
+#ifndef MDBX_NOSUCCESS_PURE_COMMIT
+#define MDBX_NOSUCCESS_PURE_COMMIT 0
+#elif !(MDBX_NOSUCCESS_PURE_COMMIT == 0 || MDBX_NOSUCCESS_PURE_COMMIT == 1)
+#error MDBX_NOSUCCESS_PURE_COMMIT must be defined as 0 or 1
+#endif /* MDBX_NOSUCCESS_PURE_COMMIT */
+
 /** if enabled then instead of the returned error `MDBX_REMOTE`, only a warning is issued, when
  * the database being opened in non-read-only mode is located in a file system exported via NFS. */
 #ifndef MDBX_ENABLE_NON_READONLY_EXPORT
@@ -1892,7 +1926,8 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
     ((defined(_POSIX_THREAD_ROBUST_PRIO_INHERIT) && _POSIX_THREAD_ROBUST_PRIO_INHERIT > 0) ||                          \
      (defined(_POSIX_THREAD_ROBUST_PRIO_PROTECT) && _POSIX_THREAD_ROBUST_PRIO_PROTECT > 0) ||                          \
      defined(PTHREAD_MUTEX_ROBUST) || defined(PTHREAD_MUTEX_ROBUST_NP)) &&                                             \
-    (!defined(__GLIBC__) || __GLIBC_PREREQ(2, 10) /* troubles with Robust mutexes before 2.10 */)
+    (!defined(__GLIBC__) || __GLIBC_PREREQ(2, 10) /* troubles with Robust mutexes before 2.10 */) &&                   \
+    !defined(__OHOS__) /* Harmony OS doesn't support robust mutexes at the end of 2025 */
 #define MDBX_LOCKING MDBX_LOCKING_POSIX2008
 #else
 #define MDBX_LOCKING MDBX_LOCKING_POSIX2001
@@ -1946,6 +1981,22 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
 #elif !(MDBX_USE_COPYFILERANGE == 0 || MDBX_USE_COPYFILERANGE == 1)
 #error MDBX_USE_COPYFILERANGE must be defined as 0 or 1
 #endif /* MDBX_USE_COPYFILERANGE */
+
+/** Advanced: Using posix_fallocate() or fcntl(F_PREALLOCATE) on OSX (autodetection by default). */
+#ifndef MDBX_USE_FALLOCATE
+#if defined(__APPLE__)
+#define MDBX_USE_FALLOCATE 0 /* Too slow and unclean, but not required to prevent SIGBUS */
+#elif (defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 200112L) || (__GLIBC_PREREQ(2, 10) && defined(_GNU_SOURCE))
+#define MDBX_USE_FALLOCATE 1
+#else
+#define MDBX_USE_FALLOCATE 0
+#endif
+#define MDBX_USE_FALLOCATE_CONFIG "AUTO=" MDBX_STRINGIFY(MDBX_USE_FALLOCATE)
+#elif !(MDBX_USE_FALLOCATE == 0 || MDBX_USE_FALLOCATE == 1)
+#error MDBX_USE_FALLOCATE must be defined as 0 or 1
+#else
+#define MDBX_USE_FALLOCATE_CONFIG MDBX_STRINGIFY(MDBX_USE_FALLOCATE)
+#endif /* MDBX_USE_FALLOCATE */
 
 //------------------------------------------------------------------------------
 
@@ -2380,6 +2431,8 @@ typedef enum page_type {
   P_SPILLED = 0x2000u /* spilled in parent txn */,
   P_LOOSE = 0x4000u /* page was dirtied then freed, can be reused */,
   P_FROZEN = 0x8000u /* used for retire page with known status */,
+  P_TYPE = (P_BRANCH | P_LEAF | P_LARGE | P_META | P_DUPFIX | P_SUBP),
+  P_FLAGS = (P_BAD | P_SPILLED | P_LOOSE | P_FROZEN),
   P_ILL_BITS = (uint16_t)~(P_BRANCH | P_LEAF | P_DUPFIX | P_LARGE | P_SPILLED),
 
   page_broken = 0,
@@ -2680,7 +2733,7 @@ typedef struct reader_slot {
 /* The header for the reader table (a memory-mapped lock file). */
 typedef struct shared_lck {
   /* Stamp identifying this as an MDBX file.
-   * It must be set to MDBX_MAGIC with with MDBX_LOCK_VERSION. */
+   * It must be set to MDBX_MAGIC with MDBX_LOCK_VERSION. */
   uint64_t magic_and_version;
 
   /* Format of this lock file. Must be set to MDBX_LOCK_FORMAT. */
@@ -2812,6 +2865,9 @@ union logger_union {
 struct libmdbx_globals {
   bin128_t bootid;
   unsigned sys_pagesize, sys_allocation_granularity;
+#ifdef AT_UCACHEBSIZE
+  unsigned sys_unified_cache_block;
+#endif /* AT_UCACHEBSIZE */
   uint8_t sys_pagesize_ln2;
   uint8_t runtime_flags;
   uint8_t loglevel;
@@ -2917,7 +2973,10 @@ MDBX_INTERNAL void debug_log_va(int level, const char *function, int line, const
 #if MDBX_DEBUG
 #define ASSERT_FAIL(env, msg, func, line) mdbx_assert_fail(env, msg, func, line)
 #else /* MDBX_DEBUG */
-MDBX_NORETURN __cold void assert_fail(const char *msg, const char *func, unsigned line);
+#if !((defined(_WIN32) || defined(_WIN64)) && defined(_DEBUG) && !MDBX_WITHOUT_MSVC_CRT)
+MDBX_NORETURN
+#endif
+__cold void assert_fail(const char *msg, const char *func, unsigned line);
 #define ASSERT_FAIL(env, msg, func, line)                                                                              \
   do {                                                                                                                 \
     (void)(env);                                                                                                       \
@@ -3044,6 +3103,8 @@ MDBX_NOTHROW_CONST_FUNCTION MDBX_MAYBE_UNUSED static inline size_t ceil_powerof2
 
 MDBX_NOTHROW_CONST_FUNCTION MDBX_MAYBE_UNUSED MDBX_INTERNAL unsigned log2n_powerof2(size_t value_uintptr);
 
+MDBX_NOTHROW_CONST_FUNCTION MDBX_MAYBE_UNUSED MDBX_INTERNAL unsigned ceil_log2n(size_t value_uintptr);
+
 MDBX_NOTHROW_CONST_FUNCTION MDBX_INTERNAL uint64_t rrxmrrxmsx_0(uint64_t v);
 
 struct monotime_cache {
@@ -3060,6 +3121,13 @@ MDBX_MAYBE_UNUSED static inline uint64_t monotime_since_cached(uint64_t begin_ti
   }
   return cache->value - begin_timestamp;
 }
+
+typedef struct ratio2digits_buffer {
+  char string[1 + 20 + 1 + 19 + 1];
+} ratio2digits_buffer_t;
+
+char *ratio2digits(const uint64_t v, const uint64_t d, ratio2digits_buffer_t *const buffer, int precision);
+char *ratio2percent(const uint64_t v, const uint64_t d, ratio2digits_buffer_t *const buffer);
 
 /* An PNL is an Page Number List, a sorted array of IDs.
  *
@@ -3082,48 +3150,36 @@ typedef const pgno_t *const_pnl_t;
 #define MDBX_PNL_GRANULATE (1 << MDBX_PNL_GRANULATE_LOG2)
 #define MDBX_PNL_INITIAL (MDBX_PNL_GRANULATE - 2 - MDBX_ASSUME_MALLOC_OVERHEAD / sizeof(pgno_t))
 
-#define MDBX_PNL_ALLOCLEN(pl) ((pl)[-1])
-#define MDBX_PNL_GETSIZE(pl) ((size_t)((pl)[0]))
-#define MDBX_PNL_SETSIZE(pl, size)                                                                                     \
-  do {                                                                                                                 \
-    const size_t __size = size;                                                                                        \
-    assert(__size < INT_MAX);                                                                                          \
-    (pl)[0] = (pgno_t)__size;                                                                                          \
-  } while (0)
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline size_t pnl_alloclen(const_pnl_t pnl) { return pnl[-1]; }
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline size_t pnl_size(const_pnl_t pnl) { return pnl[0]; }
+
+MDBX_MAYBE_UNUSED static inline void pnl_setsize(pnl_t pnl, size_t len) {
+  assert(len < INT_MAX);
+  pnl[0] = (pgno_t)len;
+}
+
 #define MDBX_PNL_FIRST(pl) ((pl)[1])
-#define MDBX_PNL_LAST(pl) ((pl)[MDBX_PNL_GETSIZE(pl)])
+#define MDBX_PNL_LAST(pl) ((pl)[pnl_size(pl)])
 #define MDBX_PNL_BEGIN(pl) (&(pl)[1])
-#define MDBX_PNL_END(pl) (&(pl)[MDBX_PNL_GETSIZE(pl) + 1])
+#define MDBX_PNL_END(pl) (&(pl)[pnl_size(pl) + 1])
 
 #if MDBX_PNL_ASCENDING
 #define MDBX_PNL_EDGE(pl) ((pl) + 1)
 #define MDBX_PNL_LEAST(pl) MDBX_PNL_FIRST(pl)
 #define MDBX_PNL_MOST(pl) MDBX_PNL_LAST(pl)
+#define MDBX_PNL_CONTIGUOUS(prev, next, span) ((next) - (prev)) == (span))
 #else
-#define MDBX_PNL_EDGE(pl) ((pl) + MDBX_PNL_GETSIZE(pl))
+#define MDBX_PNL_EDGE(pl) ((pl) + pnl_size(pl))
 #define MDBX_PNL_LEAST(pl) MDBX_PNL_LAST(pl)
 #define MDBX_PNL_MOST(pl) MDBX_PNL_FIRST(pl)
+#define MDBX_PNL_CONTIGUOUS(prev, next, span) (((prev) - (next)) == (span))
 #endif
 
-#define MDBX_PNL_SIZEOF(pl) ((MDBX_PNL_GETSIZE(pl) + 1) * sizeof(pgno_t))
-#define MDBX_PNL_IS_EMPTY(pl) (MDBX_PNL_GETSIZE(pl) == 0)
+#define MDBX_PNL_SIZEOF(pl) ((pnl_size(pl) + 1) * sizeof(pgno_t))
+#define MDBX_PNL_IS_EMPTY(pl) (pnl_size(pl) == 0)
 
-MDBX_MAYBE_UNUSED static inline size_t pnl_size2bytes(size_t size) {
-  assert(size > 0 && size <= PAGELIST_LIMIT);
-#if MDBX_PNL_PREALLOC_FOR_RADIXSORT
-
-  size += size;
-#endif /* MDBX_PNL_PREALLOC_FOR_RADIXSORT */
-  STATIC_ASSERT(MDBX_ASSUME_MALLOC_OVERHEAD +
-                    (PAGELIST_LIMIT * (MDBX_PNL_PREALLOC_FOR_RADIXSORT + 1) + MDBX_PNL_GRANULATE + 3) * sizeof(pgno_t) <
-                SIZE_MAX / 4 * 3);
-  size_t bytes =
-      ceil_powerof2(MDBX_ASSUME_MALLOC_OVERHEAD + sizeof(pgno_t) * (size + 3), MDBX_PNL_GRANULATE * sizeof(pgno_t)) -
-      MDBX_ASSUME_MALLOC_OVERHEAD;
-  return bytes;
-}
-
-MDBX_MAYBE_UNUSED static inline pgno_t pnl_bytes2size(const size_t bytes) {
+MDBX_NOTHROW_PURE_FUNCTION MDBX_MAYBE_UNUSED static inline pgno_t pnl_bytes2size(const size_t bytes) {
   size_t size = bytes / sizeof(pgno_t);
   assert(size > 3 && size <= PAGELIST_LIMIT + /* alignment gap */ 65536);
   size -= 3;
@@ -3133,27 +3189,52 @@ MDBX_MAYBE_UNUSED static inline pgno_t pnl_bytes2size(const size_t bytes) {
   return (pgno_t)size;
 }
 
+MDBX_NOTHROW_PURE_FUNCTION MDBX_MAYBE_UNUSED static inline size_t pnl_size2bytes(size_t wanna_size) {
+  size_t size = wanna_size;
+  assert(size > 0 && size <= PAGELIST_LIMIT);
+#if MDBX_PNL_PREALLOC_FOR_RADIXSORT
+  size += size;
+#endif /* MDBX_PNL_PREALLOC_FOR_RADIXSORT */
+  STATIC_ASSERT(MDBX_ASSUME_MALLOC_OVERHEAD +
+                    (PAGELIST_LIMIT * (MDBX_PNL_PREALLOC_FOR_RADIXSORT + 1) + MDBX_PNL_GRANULATE + 3) * sizeof(pgno_t) <
+                SIZE_MAX / 4 * 3);
+  size_t bytes =
+      ceil_powerof2(MDBX_ASSUME_MALLOC_OVERHEAD + sizeof(pgno_t) * (size + 3), MDBX_PNL_GRANULATE * sizeof(pgno_t)) -
+      MDBX_ASSUME_MALLOC_OVERHEAD;
+  assert(pnl_bytes2size(bytes) >= wanna_size);
+  return bytes;
+}
+
 MDBX_INTERNAL pnl_t pnl_alloc(size_t size);
 
 MDBX_INTERNAL void pnl_free(pnl_t pnl);
 
+MDBX_MAYBE_UNUSED MDBX_INTERNAL pnl_t pnl_clone(const pnl_t src);
+
 MDBX_INTERNAL int pnl_reserve(pnl_t __restrict *__restrict ppnl, const size_t wanna);
 
 MDBX_MAYBE_UNUSED static inline int __must_check_result pnl_need(pnl_t __restrict *__restrict ppnl, size_t num) {
-  assert(MDBX_PNL_GETSIZE(*ppnl) <= PAGELIST_LIMIT && MDBX_PNL_ALLOCLEN(*ppnl) >= MDBX_PNL_GETSIZE(*ppnl));
+  assert(pnl_size(*ppnl) <= PAGELIST_LIMIT && pnl_alloclen(*ppnl) >= pnl_size(*ppnl));
   assert(num <= PAGELIST_LIMIT);
-  const size_t wanna = MDBX_PNL_GETSIZE(*ppnl) + num;
-  return likely(MDBX_PNL_ALLOCLEN(*ppnl) >= wanna) ? MDBX_SUCCESS : pnl_reserve(ppnl, wanna);
+  const size_t wanna = pnl_size(*ppnl) + num;
+  return likely(pnl_alloclen(*ppnl) >= wanna) ? MDBX_SUCCESS : pnl_reserve(ppnl, wanna);
 }
 
 MDBX_MAYBE_UNUSED static inline void pnl_append_prereserved(__restrict pnl_t pnl, pgno_t pgno) {
-  assert(MDBX_PNL_GETSIZE(pnl) < MDBX_PNL_ALLOCLEN(pnl));
+  assert(pnl_size(pnl) < pnl_alloclen(pnl));
   if (AUDIT_ENABLED()) {
-    for (size_t i = MDBX_PNL_GETSIZE(pnl); i > 0; --i)
+    for (size_t i = pnl_size(pnl); i > 0; --i)
       assert(pgno != pnl[i]);
   }
   *pnl += 1;
   MDBX_PNL_LAST(pnl) = pgno;
+}
+
+MDBX_MAYBE_UNUSED static inline int __must_check_result pnl_append(__restrict pnl_t *ppnl, pgno_t pgno) {
+  int rc = pnl_need(ppnl, 1);
+  if (likely(rc == MDBX_SUCCESS))
+    pnl_append_prereserved(*ppnl, pgno);
+  return rc;
 }
 
 MDBX_INTERNAL void pnl_shrink(pnl_t __restrict *__restrict ppnl);
@@ -3164,14 +3245,14 @@ MDBX_INTERNAL int __must_check_result pnl_append_span(__restrict pnl_t *ppnl, pg
 
 MDBX_INTERNAL int __must_check_result pnl_insert_span(__restrict pnl_t *ppnl, pgno_t pgno, size_t n);
 
-MDBX_INTERNAL size_t pnl_search_nochk(const pnl_t pnl, pgno_t pgno);
+MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL size_t pnl_search_nochk(const pnl_t pnl, pgno_t pgno);
 
 MDBX_INTERNAL void pnl_sort_nochk(pnl_t pnl);
 
 MDBX_INTERNAL bool pnl_check(const const_pnl_t pnl, const size_t limit);
 
 MDBX_MAYBE_UNUSED static inline bool pnl_check_allocated(const const_pnl_t pnl, const size_t limit) {
-  return pnl == nullptr || (MDBX_PNL_ALLOCLEN(pnl) >= MDBX_PNL_GETSIZE(pnl) && pnl_check(pnl, limit));
+  return pnl == nullptr || (pnl_alloclen(pnl) >= pnl_size(pnl) && pnl_check(pnl, limit));
 }
 
 MDBX_MAYBE_UNUSED static inline void pnl_sort(pnl_t pnl, size_t limit4check) {
@@ -3180,7 +3261,8 @@ MDBX_MAYBE_UNUSED static inline void pnl_sort(pnl_t pnl, size_t limit4check) {
   (void)limit4check;
 }
 
-MDBX_MAYBE_UNUSED static inline size_t pnl_search(const pnl_t pnl, pgno_t pgno, size_t limit) {
+MDBX_NOTHROW_PURE_FUNCTION MDBX_MAYBE_UNUSED static inline size_t pnl_search(const pnl_t pnl, pgno_t pgno,
+                                                                             size_t limit) {
   assert(pnl_check_allocated(pnl, limit));
   if (MDBX_HAVE_CMOV) {
     /* cmov-ускоренный бинарный поиск может читать (но не использовать) один
@@ -3198,6 +3280,8 @@ MDBX_MAYBE_UNUSED static inline size_t pnl_search(const pnl_t pnl, pgno_t pgno, 
 }
 
 MDBX_INTERNAL size_t pnl_merge(pnl_t dst, const pnl_t src);
+
+MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION MDBX_INTERNAL size_t pnl_maxspan(const pnl_t pnl);
 
 #ifdef __cplusplus
 }
@@ -3339,6 +3423,7 @@ static void usage(const char *prog) {
           "  -V\t\tprint version and exit\n"
           "  -q\t\tbe quiet\n"
           "  -c\t\tenable compactification (skip unused pages)\n"
+          "  -f\t\tforce copying even the target file exists\n"
           "  -d\t\tenforce copy to be a dynamic size DB\n"
           "  -p\t\tusing transaction parking/ousting during copying MVCC-snapshot\n"
           "    \t\tto avoid stopping recycling and overflowing the DB\n"
@@ -3384,6 +3469,8 @@ int main(int argc, char *argv[]) {
       cpflags |= MDBX_CP_FORCE_DYNAMIC_SIZE;
     else if (argv[1][1] == 'p' && argv[1][2] == '\0')
       cpflags |= MDBX_CP_THROTTLE_MVCC;
+    else if (argv[1][1] == 'f' && argv[1][2] == '\0')
+      cpflags |= MDBX_CP_OVERWRITE;
     else if (argv[1][1] == 'q' && argv[1][2] == '\0')
       quiet = true;
     else if (argv[1][1] == 'u' && argv[1][2] == '\0')

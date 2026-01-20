@@ -104,7 +104,7 @@ where
 
 impl<P, E> ExExNotificationsStream<E::Primitives> for ExExNotifications<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + Sync + 'static,
     E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
 {
     fn set_without_head(&mut self) {
@@ -155,7 +155,7 @@ where
 
 impl<P, E> Stream for ExExNotifications<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + Sync + 'static,
     E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
 {
     type Item = eyre::Result<ExExNotification<E::Primitives>>;
@@ -299,7 +299,7 @@ where
 
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + Sync + 'static,
     E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
 {
     /// Checks if the ExEx head is on the canonical chain.
@@ -386,7 +386,7 @@ where
 
 impl<P, E> Stream for ExExNotificationsWithHead<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + Sync + 'static,
     E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
 {
     type Item = eyre::Result<ExExNotification<E::Primitives>>;

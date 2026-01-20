@@ -482,6 +482,7 @@ where
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + Clone
+        + Sync
         + 'static,
     E: ConfigureEvm + 'static,
     T: PayloadTypes<ExecutionData = ExecutionData>,

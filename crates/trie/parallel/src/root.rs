@@ -5,7 +5,8 @@ use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::{StateProofError, StorageRootError};
-use reth_provider::{DatabaseProviderROFactory, ProviderError};
+use reth_provider::ProviderError;
+use reth_storage_api::CloneProvider;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
@@ -36,9 +37,9 @@ use tracing::*;
 /// state root calculation. The sparse trie approach is more efficient as it avoids traversing
 /// the entire trie, only operating on the modified parts.
 #[derive(Debug)]
-pub struct ParallelStateRoot<Factory> {
-    /// Factory for creating state providers.
-    factory: Factory,
+pub struct ParallelStateRoot<Provider> {
+    /// Cloneable provider for trie and hashed cursor access.
+    provider: Provider,
     // Prefix sets indicating which portions of the trie need to be recomputed.
     prefix_sets: TriePrefixSets,
     /// Parallel state root metrics.
@@ -46,11 +47,11 @@ pub struct ParallelStateRoot<Factory> {
     metrics: ParallelStateRootMetrics,
 }
 
-impl<Factory> ParallelStateRoot<Factory> {
+impl<Provider> ParallelStateRoot<Provider> {
     /// Create new parallel state root calculator.
-    pub fn new(factory: Factory, prefix_sets: TriePrefixSets) -> Self {
+    pub fn new(provider: Provider, prefix_sets: TriePrefixSets) -> Self {
         Self {
-            factory,
+            provider,
             prefix_sets,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
@@ -58,12 +59,9 @@ impl<Factory> ParallelStateRoot<Factory> {
     }
 }
 
-impl<Factory> ParallelStateRoot<Factory>
+impl<Provider> ParallelStateRoot<Provider>
 where
-    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-        + Clone
-        + Send
-        + 'static,
+    Provider: TrieCursorFactory + HashedCursorFactory + CloneProvider + Send + 'static,
 {
     /// Calculate incremental state root in parallel.
     pub fn incremental_root(self) -> Result<B256, ParallelStateRootError> {
@@ -103,7 +101,7 @@ where
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
-            let factory = self.factory.clone();
+            let provider = self.provider.clone_provider()?;
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
@@ -112,7 +110,6 @@ where
             // Spawn a blocking task to calculate account's storage root from database I/O
             drop(handle.spawn_blocking(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
-                    let provider = factory.database_provider_ro()?;
                     Ok(StorageRoot::new_hashed(
                         &provider,
                         &provider,
@@ -131,7 +128,7 @@ where
         trace!(target: "trie::parallel_state_root", "calculating state root");
         let mut trie_updates = TrieUpdates::default();
 
-        let provider = self.factory.database_provider_ro()?;
+        let provider = &self.provider;
 
         let walker = TrieWalker::<_>::state_trie(
             provider.account_trie_cursor().map_err(ProviderError::Database)?,
@@ -255,6 +252,12 @@ impl From<alloy_rlp::Error> for ParallelStateRootError {
     }
 }
 
+impl From<DatabaseError> for ParallelStateRootError {
+    fn from(error: DatabaseError) -> Self {
+        Self::Provider(ProviderError::Database(error))
+    }
+}
+
 impl From<StateProofError> for ParallelStateRootError {
     fn from(error: StateProofError) -> Self {
         match error {
@@ -291,7 +294,9 @@ mod tests {
     use alloy_primitives::{keccak256, Address, U256};
     use rand::Rng;
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
+    use reth_provider::{
+        test_utils::create_test_provider_factory, DatabaseProviderROFactory, HashingWriter,
+    };
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
     use std::sync::Arc;
 
@@ -344,8 +349,10 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
+        // Create provider from factory for ParallelStateRoot
+        let overlay_provider = overlay_factory.database_provider_ro().unwrap();
         assert_eq!(
-            ParallelStateRoot::new(overlay_factory.clone(), Default::default())
+            ParallelStateRoot::new(overlay_provider, Default::default())
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state.clone())
@@ -380,8 +387,10 @@ mod tests {
         overlay_factory =
             overlay_factory.with_hashed_state_overlay(Some(Arc::new(hashed_state.into_sorted())));
 
+        // Create provider from factory with the updated overlay
+        let overlay_provider = overlay_factory.database_provider_ro().unwrap();
         assert_eq!(
-            ParallelStateRoot::new(overlay_factory, prefix_sets.freeze())
+            ParallelStateRoot::new(overlay_provider, prefix_sets.freeze())
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state)

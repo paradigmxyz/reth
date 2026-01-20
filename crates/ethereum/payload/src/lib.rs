@@ -79,7 +79,7 @@ impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
 impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> + Clone,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> + Clone + Sync,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = EthPayloadBuilderAttributes;

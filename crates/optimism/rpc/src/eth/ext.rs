@@ -107,7 +107,7 @@ where
 #[async_trait::async_trait]
 impl<Pool, Provider> L2EthApiExtServer for OpEthExtApi<Pool, Provider>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + Clone + 'static,
+    Provider: BlockReaderIdExt + StateProviderFactory + Clone + Sync + 'static,
     Pool: TransactionPool<Transaction: MaybeConditionalTransaction> + 'static,
 {
     async fn send_raw_transaction_conditional(

@@ -184,6 +184,7 @@ where
         + BlockReaderIdExt
         + HeaderProvider
         + Clone
+        + Sync
         + 'static,
     Pool: TransactionPool,
 {

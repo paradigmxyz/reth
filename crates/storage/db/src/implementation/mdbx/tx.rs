@@ -40,6 +40,11 @@ pub struct Tx<K: TransactionKind> {
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
+
+    /// Marker to make `Tx` `!Sync`. MDBX transactions are not thread-safe and should only be
+    /// accessed from the thread that created them. Use [`DbTx::clone_tx`] to create independent
+    /// transaction handles for use across threads.
+    _not_sync: PhantomData<std::cell::Cell<()>>,
 }
 
 impl<K: TransactionKind> Tx<K> {
@@ -59,7 +64,7 @@ impl<K: TransactionKind> Tx<K> {
                 Ok(handler)
             })
             .transpose()?;
-        Ok(Self { inner, dbis, metrics_handler })
+        Ok(Self { inner, dbis, metrics_handler, _not_sync: PhantomData })
     }
 
     /// Gets this transaction ID.
@@ -193,6 +198,24 @@ struct MetricsHandler<K: TransactionKind> {
     _marker: PhantomData<K>,
 }
 
+impl<K: TransactionKind> Clone for MetricsHandler<K> {
+    fn clone(&self) -> Self {
+        Self {
+            txn_id: self.txn_id,
+            start: self.start,
+            long_transaction_duration: self.long_transaction_duration,
+            // Mark clones as already having their close recorded to avoid double-counting
+            close_recorded: true,
+            record_backtrace: self.record_backtrace,
+            backtrace_recorded: AtomicBool::new(self.backtrace_recorded.load(Ordering::Relaxed)),
+            env_metrics: self.env_metrics.clone(),
+            #[cfg(debug_assertions)]
+            open_backtrace: Backtrace::disabled(),
+            _marker: PhantomData,
+        }
+    }
+}
+
 impl<K: TransactionKind> MetricsHandler<K> {
     fn new(txn_id: u64, env_metrics: Arc<DatabaseEnvMetrics>) -> Self {
         Self {
@@ -285,6 +308,16 @@ impl TableImporter for Tx<RW> {}
 impl<K: TransactionKind> DbTx for Tx<K> {
     type Cursor<T: Table> = Cursor<K, T>;
     type DupCursor<T: DupSort> = Cursor<K, T>;
+
+    fn clone_tx(&self) -> Result<Self, DatabaseError> {
+        let cloned_inner = self.inner.clone_tx().map_err(|e| DatabaseError::Open(e.into()))?;
+        Ok(Self {
+            inner: cloned_inner,
+            dbis: self.dbis.clone(),
+            metrics_handler: self.metrics_handler.clone(),
+            _not_sync: PhantomData,
+        })
+    }
 
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
         self.get_by_encoded_key::<T>(&key.encode())

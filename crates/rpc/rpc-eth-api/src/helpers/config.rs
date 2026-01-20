@@ -156,6 +156,7 @@ impl<Provider, Evm> EthConfigApiServer for EthConfigHandler<Provider, Evm>
 where
     Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>
         + BlockReaderIdExt<Header: HeaderMut>
+        + Sync
         + 'static,
     Evm: ConfigureEvm<Primitives: NodePrimitives<BlockHeader = Provider::Header>> + 'static,
 {
