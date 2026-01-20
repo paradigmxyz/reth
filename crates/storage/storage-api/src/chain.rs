@@ -11,7 +11,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use reth_db_models::{blocks::StoredBlockAccessList, StoredBlockWithdrawals};
+use reth_db_models::StoredBlockWithdrawals;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{
     Block, BlockBody, FullBlockHeader, NodePrimitives, SignedTransaction,

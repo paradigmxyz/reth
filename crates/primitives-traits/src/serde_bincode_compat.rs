@@ -146,7 +146,7 @@ mod block_bincode {
     use crate::serde_bincode_compat::SerdeBincodeCompat;
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_consensus::TxEip4844;
-    use alloy_eips::{eip4895::Withdrawals, eip7928::BlockAccessList};
+    use alloy_eips::eip4895::Withdrawals;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
