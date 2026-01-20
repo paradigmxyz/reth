@@ -6,6 +6,7 @@ use alloy_eips::{
     eip4895::Withdrawals,
     eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
     eip7685::Requests,
+    eip7928::BlockAccessList,
 };
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
@@ -42,6 +43,8 @@ pub struct EthBuiltPayload<N: NodePrimitives = EthPrimitives> {
     pub(crate) sidecars: BlobSidecars,
     /// The requests of the payload
     pub(crate) requests: Option<Requests>,
+    /// The block access list of the payload
+    pub(crate) block_access_list: Option<BlockAccessList>,
 }
 
 // === impl BuiltPayload ===
@@ -55,8 +58,9 @@ impl<N: NodePrimitives> EthBuiltPayload<N> {
         block: Arc<SealedBlock<N::Block>>,
         fees: U256,
         requests: Option<Requests>,
+        block_access_list: Option<BlockAccessList>,
     ) -> Self {
-        Self { id, block, fees, requests, sidecars: BlobSidecars::Empty }
+        Self { id, block, fees, requests, sidecars: BlobSidecars::Empty, block_access_list }
     }
 
     /// Returns the identifier of the payload.
@@ -164,7 +168,7 @@ impl EthBuiltPayload {
 
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV6`].
     pub fn try_into_v6(self) -> Result<ExecutionPayloadEnvelopeV6, BuiltPayloadConversionError> {
-        let Self { block, fees, sidecars, requests, .. } = self;
+        let Self { block, fees, sidecars, requests, block_access_list, .. } = self;
 
         let blobs_bundle = match sidecars {
             BlobSidecars::Empty => BlobsBundleV2::empty(),
@@ -175,9 +179,10 @@ impl EthBuiltPayload {
         };
 
         Ok(ExecutionPayloadEnvelopeV6 {
-            execution_payload: ExecutionPayloadV4::from_block_unchecked(
+            execution_payload: ExecutionPayloadV4::from_block_unchecked_with_bal(
                 block.hash(),
                 &Arc::unwrap_or_clone(block).into_block(),
+                block_access_list.unwrap_or_default(),
             ),
             block_value: fees,
             // From the engine API spec:

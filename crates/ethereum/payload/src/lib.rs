@@ -381,9 +381,19 @@ where
         }));
     }
 
-    let payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests)
-        // add blob sidecars from the executed txs
-        .with_sidecars(blob_sidecars);
+    let block_access_list = chain_spec
+        .is_amsterdam_active_at_timestamp(attributes.timestamp)
+        .then_some(execution_result.block_access_list);
+
+    let payload = EthBuiltPayload::new(
+        attributes.id,
+        sealed_block,
+        total_fees,
+        requests,
+        block_access_list.unwrap_or_default(),
+    )
+    // add blob sidecars from the executed txs
+    .with_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }
