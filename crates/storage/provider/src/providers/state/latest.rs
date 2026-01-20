@@ -4,7 +4,9 @@ use crate::{
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
-use reth_storage_api::{BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider};
+use reth_storage_api::{
+    BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider, StorageSettingsCache,
+};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     proof::{Proof, StorageProof},
@@ -35,11 +37,19 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
     }
 }
 
-impl<Provider: DBProvider> AccountReader for LatestStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider + StorageSettingsCache> AccountReader
+    for LatestStateProviderRef<'_, Provider>
+{
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        let hashed_address = alloy_primitives::keccak256(address);
-        self.tx().get_by_encoded_key::<tables::HashedAccounts>(&hashed_address).map_err(Into::into)
+        if self.0.cached_storage_settings().use_hashed_state {
+            let hashed_address = alloy_primitives::keccak256(address);
+            self.tx()
+                .get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)
+                .map_err(Into::into)
+        } else {
+            self.tx().get_by_encoded_key::<tables::PlainAccountState>(address).map_err(Into::into)
+        }
     }
 }
 
@@ -149,7 +159,7 @@ impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_
     }
 }
 
-impl<Provider: DBProvider + BlockHashReader> StateProvider
+impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvider
     for LatestStateProviderRef<'_, Provider>
 {
     /// Get storage.
@@ -158,13 +168,22 @@ impl<Provider: DBProvider + BlockHashReader> StateProvider
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        let hashed_address = alloy_primitives::keccak256(account);
-        let hashed_slot = alloy_primitives::keccak256(storage_key);
-        let mut cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
-        if let Some(entry) = cursor.seek_by_key_subkey(hashed_address, hashed_slot)? &&
-            entry.key == hashed_slot
-        {
-            return Ok(Some(entry.value))
+        if self.0.cached_storage_settings().use_hashed_state {
+            let hashed_address = alloy_primitives::keccak256(account);
+            let hashed_slot = alloy_primitives::keccak256(storage_key);
+            let mut cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
+            if let Some(entry) = cursor.seek_by_key_subkey(hashed_address, hashed_slot)? &&
+                entry.key == hashed_slot
+            {
+                return Ok(Some(entry.value));
+            }
+        } else {
+            let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+            if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? &&
+                entry.key == storage_key
+            {
+                return Ok(Some(entry.value));
+            }
         }
         Ok(None)
     }

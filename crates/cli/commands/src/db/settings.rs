@@ -183,9 +183,16 @@ impl Command {
                     println!("use_hashed_state is already set to {}", value);
                     return Ok(());
                 }
+                // Changing from true (hashed state) to false (plain state) requires resync
+                // because plain state tables won't have been populated.
+                // Changing from false to true is safe as hashing stages will populate hashed
+                // tables.
+                if settings.use_hashed_state && !value {
+                    println!("WARNING: Changing use_hashed_state from true to false requires re-syncing the database.");
+                    println!("The plain state tables are not populated when using hashed state.");
+                }
                 settings.use_hashed_state = value;
                 println!("Set use_hashed_state = {}", value);
-                println!("WARNING: Changing this setting requires re-syncing the database.");
             }
         }
 

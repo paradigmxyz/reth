@@ -45,13 +45,13 @@ use super::missing_static_data_error;
 ///
 /// For state access [`LatestStateProviderRef`] provides us latest state and history state
 /// For latest most recent state [`LatestStateProviderRef`] would need (Used for execution Stage):
-/// - [`tables::HashedAccounts`]
+/// - [`tables::PlainAccountState`]
 /// - [`tables::Bytecodes`]
-/// - [`tables::HashedStorages`]
+/// - [`tables::PlainStorageState`]
 ///
 /// Tables updated after state finishes execution:
-/// - [`tables::HashedAccounts`]
-/// - [`tables::HashedStorages`]
+/// - [`tables::PlainAccountState`]
+/// - [`tables::PlainStorageState`]
 /// - [`tables::Bytecodes`]
 /// - [`tables::AccountChangeSets`]
 /// - [`tables::StorageChangeSets`]
@@ -59,8 +59,8 @@ use super::missing_static_data_error;
 /// For unwinds we are accessing:
 /// - [`tables::BlockBodyIndices`] get tx index to know what needs to be unwinded
 /// - [`tables::AccountsHistory`] to remove change set and apply old values to
-/// - [`tables::HashedAccounts`] [`tables::StoragesHistory`] to remove change set and apply old
-///   values to [`tables::HashedStorages`]
+/// - [`tables::PlainAccountState`] [`tables::StoragesHistory`] to remove change set and apply old
+///   values to [`tables::PlainStorageState`]
 // false positive, we cannot derive it if !DB: Debug.
 #[derive(Debug)]
 pub struct ExecutionStage<E>
@@ -513,7 +513,7 @@ where
 
         // Unwind account and storage changesets, as well as receipts.
         //
-        // This also updates `HashedStorages` and `HashedAccounts`.
+        // This also updates `PlainStorageState` and `PlainAccountState`.
         let bundle_state_with_receipts = provider.take_state_above(unwind_to)?;
 
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
@@ -894,14 +894,14 @@ mod tests {
         let balance = U256::from(0x3635c9adc5dea00000u128);
         let code_hash = keccak256(code);
         db_tx
-            .put::<tables::HashedAccounts>(
-                keccak256(acc1),
+            .put::<tables::PlainAccountState>(
+                acc1,
                 Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
             )
             .unwrap();
         db_tx
-            .put::<tables::HashedAccounts>(
-                keccak256(acc2),
+            .put::<tables::PlainAccountState>(
+                acc2,
                 Account { nonce: 0, balance, bytecode_hash: None },
             )
             .unwrap();
@@ -981,11 +981,9 @@ mod tests {
             );
             // assert storage
             // Get on dupsort would return only first value. This is good enough for this test.
-            let hashed_account1 = keccak256(account1);
-            let hashed_slot = keccak256(B256::with_last_byte(1));
             assert!(matches!(
-                provider.tx_ref().get::<tables::HashedStorages>(hashed_account1),
-                Ok(Some(entry)) if entry.key == hashed_slot && entry.value == U256::from(2)
+                provider.tx_ref().get::<tables::PlainStorageState>(account1),
+                Ok(Some(entry)) if entry.key == B256::with_last_byte(1) && entry.value == U256::from(2)
             ));
 
             let mut provider = factory.database_provider_rw().unwrap();

@@ -15,6 +15,7 @@ use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
     StorageHashingCheckpoint, UnwindInput, UnwindOutput,
 };
+use reth_storage_api::StorageSettingsCache;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     fmt::Debug,
@@ -68,7 +69,11 @@ impl Default for StorageHashingStage {
 
 impl<Provider> Stage<Provider> for StorageHashingStage
 where
-    Provider: DBProvider<Tx: DbTxMut> + StorageReader + HashingWriter + StatsReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + StorageReader
+        + HashingWriter
+        + StatsReader
+        + StorageSettingsCache,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -76,29 +81,132 @@ where
     }
 
     /// Execute the stage.
-    ///
-    /// NOTE: This stage is now a no-op because the execution stage writes directly to
-    /// HashedStorages. This stage exists only for backwards compatibility with existing pipelines.
-    fn execute(
-        &mut self,
-        _provider: &Provider,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
-        // Since execution now writes directly to HashedStorages, this stage is a no-op.
-        // Just report that we're done up to the target block.
-        Ok(ExecOutput::done(input.checkpoint().with_block_number(input.target())))
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+        let tx = provider.tx_ref();
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
+        // If use_hashed_state is enabled, execution writes directly to HashedStorages,
+        // so this stage becomes a no-op.
+        if provider.cached_storage_settings().use_hashed_state {
+            return Ok(ExecOutput::done(input.checkpoint().with_block_number(input.target())));
+        }
+
+        let (from_block, to_block) = input.next_block_range().into_inner();
+
+        // if there are more blocks then threshold it is faster to go over Plain state and hash all
+        // account otherwise take changesets aggregate the sets and apply hashing to
+        // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
+        // genesis accounts are not in changeset, along with their storages.
+        if to_block - from_block > self.clean_threshold || from_block == 1 {
+            // clear table, load all accounts and hash it
+            tx.clear::<tables::HashedStorages>()?;
+
+            let mut storage_cursor = tx.cursor_read::<tables::PlainStorageState>()?;
+            let mut collector =
+                Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
+            let mut channels = Vec::with_capacity(MAXIMUM_CHANNELS);
+
+            for chunk in &storage_cursor.walk(None)?.chunks(WORKER_CHUNK_SIZE) {
+                // An _unordered_ channel to receive results from a rayon job
+                let (tx, rx) = mpsc::channel();
+                channels.push(rx);
+
+                let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+                // Spawn the hashing task onto the global rayon pool
+                rayon::spawn(move || {
+                    // Cache hashed address since PlainStorageState is sorted by address
+                    let (mut last_addr, mut hashed_addr) = (Address::ZERO, HASHED_ZERO_ADDRESS);
+                    for (address, slot) in chunk {
+                        if address != last_addr {
+                            last_addr = address;
+                            hashed_addr = keccak256(address);
+                        }
+                        let mut addr_key = Vec::with_capacity(64);
+                        addr_key.put_slice(hashed_addr.as_slice());
+                        addr_key.put_slice(keccak256(slot.key).as_slice());
+                        let _ = tx.send((addr_key, CompactU256::from(slot.value)));
+                    }
+                });
+
+                // Flush to ETL when channels length reaches MAXIMUM_CHANNELS
+                if !channels.is_empty() && channels.len().is_multiple_of(MAXIMUM_CHANNELS) {
+                    collect(&mut channels, &mut collector)?;
+                }
+            }
+
+            collect(&mut channels, &mut collector)?;
+
+            let total_hashes = collector.len();
+            let interval = (total_hashes / 10).max(1);
+            let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
+            for (index, item) in collector.iter()?.enumerate() {
+                if index > 0 && index.is_multiple_of(interval) {
+                    info!(
+                        target: "sync::stages::hashing_storage",
+                        progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                        "Inserting hashes"
+                    );
+                }
+
+                let (addr_key, value) = item?;
+                cursor.append_dup(
+                    B256::from_slice(&addr_key[..32]),
+                    StorageEntry {
+                        key: B256::from_slice(&addr_key[32..]),
+                        value: CompactU256::decompress_owned(value)?.into(),
+                    },
+                )?;
+            }
+        } else {
+            // Aggregate all changesets and make list of storages that have been
+            // changed.
+            let lists = provider.changed_storages_with_range(from_block..=to_block)?;
+            // iterate over plain state and get newest storage value.
+            // Assumption we are okay with is that plain state represent
+            // `previous_stage_progress` state.
+            let storages = provider.plain_state_storages(lists)?;
+            provider.insert_storage_for_hashing(storages)?;
+        }
+
+        // We finished the hashing stage, no future iterations is expected for the same block range,
+        // so no checkpoint is needed.
+        let checkpoint = StageCheckpoint::new(input.target())
+            .with_storage_hashing_stage_checkpoint(StorageHashingCheckpoint {
+                progress: stage_checkpoint_progress(provider)?,
+                ..Default::default()
+            });
+
+        Ok(ExecOutput { checkpoint, done: true })
     }
 
     /// Unwind the stage.
-    ///
-    /// NOTE: This stage is now a no-op because the execution stage manages HashedStorages directly.
     fn unwind(
         &mut self,
-        _provider: &Provider,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        // Since execution now manages HashedStorages directly during unwind, this is a no-op.
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        // If use_hashed_state is enabled, execution manages HashedStorages directly,
+        // so this stage becomes a no-op.
+        if provider.cached_storage_settings().use_hashed_state {
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) });
+        }
+
+        let (range, unwind_progress, _) =
+            input.unwind_block_range_with_threshold(self.commit_threshold);
+
+        provider.unwind_storage_hashing_range(BlockNumberAddress::range(range))?;
+
+        let mut stage_checkpoint =
+            input.checkpoint.storage_hashing_stage_checkpoint().unwrap_or_default();
+
+        stage_checkpoint.progress = stage_checkpoint_progress(provider)?;
+
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(unwind_progress)
+                .with_storage_hashing_stage_checkpoint(stage_checkpoint),
+        })
     }
 }
 
