@@ -12,7 +12,7 @@ crates/era-utils/           @mattsse
 crates/errors/              @mattsse
 crates/ethereum/            @mattsse @Rjected
 crates/etl/                 @joshieDo @shekhirin
-crates/evm/                 @rakita @mattsse @Rjected
+crates/evm/                 @rakita @mattsse @Rjected @klkvr
 crates/exex/                @shekhirin
 crates/fs-util/             @mattsse
 crates/metrics/             @mattsse
