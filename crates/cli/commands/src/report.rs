@@ -26,6 +26,8 @@ use tracing::info;
 ///
 /// This command collects diagnostic information including:
 /// - Database table statistics
+/// - Stage checkpoints (sync progress)
+/// - Prune checkpoints (pruning progress)
 /// - VersionHistory table dump
 /// - Log files
 /// - Invalid block hook outputs
@@ -108,6 +110,28 @@ struct VersionHistoryEntry {
     build_timestamp: String,
 }
 
+/// Stage checkpoint entry for serialization
+#[derive(Debug, Serialize)]
+struct StageCheckpointEntry {
+    /// Stage name
+    stage: String,
+    /// Block number
+    block_number: u64,
+}
+
+/// Prune checkpoint entry for serialization
+#[derive(Debug, Serialize)]
+struct PruneCheckpointEntry {
+    /// Prune segment name
+    segment: String,
+    /// Highest pruned block number
+    block_number: Option<u64>,
+    /// Highest pruned transaction number
+    tx_number: Option<u64>,
+    /// Prune mode
+    prune_mode: String,
+}
+
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `report` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
@@ -123,6 +147,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         println!("\nThis tool will collect the following information:");
         println!("  • Database table statistics");
+        println!("  • Stage checkpoints (sync progress)");
+        println!("  • Prune checkpoints (pruning progress)");
         println!("  • VersionHistory table (client version history)");
         if let Some(ref log_path) = log_dir {
             println!("  • Log files from: {}", log_path.display());
@@ -221,6 +247,38 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let db_stats = DbStats { latest_block, tables: tables_stats, checksums };
         add_json_to_archive(&mut archive, "db_stats.json", &db_stats, now_secs)?;
         info!(target: "reth::cli", "Database stats collected");
+
+        // Collect stage checkpoints
+        let mut stage_checkpoints = Vec::new();
+        provider_factory.db_ref().view(|tx| {
+            let mut cursor = tx.cursor_read::<tables::StageCheckpoints>()?;
+            while let Some((stage_id, checkpoint)) = cursor.next()? {
+                stage_checkpoints.push(StageCheckpointEntry {
+                    stage: stage_id.to_string(),
+                    block_number: checkpoint.block_number,
+                });
+            }
+            Ok::<(), eyre::Report>(())
+        })??;
+        add_json_to_archive(&mut archive, "stage_checkpoints.json", &stage_checkpoints, now_secs)?;
+        info!(target: "reth::cli", entries = stage_checkpoints.len(), "Stage checkpoints collected");
+
+        // Collect prune checkpoints
+        let mut prune_checkpoints = Vec::new();
+        provider_factory.db_ref().view(|tx| {
+            let mut cursor = tx.cursor_read::<tables::PruneCheckpoints>()?;
+            while let Some((segment, checkpoint)) = cursor.next()? {
+                prune_checkpoints.push(PruneCheckpointEntry {
+                    segment: segment.to_string(),
+                    block_number: checkpoint.block_number,
+                    tx_number: checkpoint.tx_number,
+                    prune_mode: format!("{:?}", checkpoint.prune_mode),
+                });
+            }
+            Ok::<(), eyre::Report>(())
+        })??;
+        add_json_to_archive(&mut archive, "prune_checkpoints.json", &prune_checkpoints, now_secs)?;
+        info!(target: "reth::cli", entries = prune_checkpoints.len(), "Prune checkpoints collected");
 
         // Collect VersionHistory
         let mut version_history = Vec::new();
