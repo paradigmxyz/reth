@@ -399,6 +399,7 @@ mod tests {
             receipts: vec![receipt],
             requests: Requests::default(),
             gas_used: GAS_USED,
+            block_access_list: None,
         };
 
         // validate blob, it should pass blob gas used validation
