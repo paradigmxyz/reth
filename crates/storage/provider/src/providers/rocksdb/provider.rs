@@ -419,6 +419,14 @@ impl RocksDBProviderInner {
 
     /// Returns statistics for all column families in the database.
     fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        match self {
+            Self::ReadWrite { db, .. } => Self::collect_cf_stats(db),
+            Self::ReadOnly { db, .. } => Self::collect_cf_stats(db),
+        }
+    }
+
+    /// Collects statistics for all column families from a database.
+    fn collect_cf_stats<D: rocksdb::DBAccess>(db: &D) -> Vec<RocksDBTableStats> {
         let cf_names = [
             tables::TransactionHashNumbers::NAME,
             tables::AccountsHistory::NAME,
@@ -428,52 +436,19 @@ impl RocksDBProviderInner {
         let mut stats = Vec::new();
 
         for cf_name in cf_names {
-            let (cf_handle, estimated_num_keys, estimated_size_bytes) = match self {
-                Self::ReadWrite { db, .. } => {
-                    let cf = db.cf_handle(cf_name);
-                    let num_keys = cf
-                        .and_then(|cf| {
-                            db.property_int_value_cf(cf, rocksdb::properties::ESTIMATE_NUM_KEYS)
-                                .ok()
-                                .flatten()
-                        })
-                        .unwrap_or(0);
-                    let size = cf
-                        .and_then(|cf| {
-                            db.property_int_value_cf(
-                                cf,
-                                rocksdb::properties::ESTIMATE_LIVE_DATA_SIZE,
-                            )
-                            .ok()
-                            .flatten()
-                        })
-                        .unwrap_or(0);
-                    (cf.is_some(), num_keys, size)
-                }
-                Self::ReadOnly { db, .. } => {
-                    let cf = db.cf_handle(cf_name);
-                    let num_keys = cf
-                        .and_then(|cf| {
-                            db.property_int_value_cf(cf, rocksdb::properties::ESTIMATE_NUM_KEYS)
-                                .ok()
-                                .flatten()
-                        })
-                        .unwrap_or(0);
-                    let size = cf
-                        .and_then(|cf| {
-                            db.property_int_value_cf(
-                                cf,
-                                rocksdb::properties::ESTIMATE_LIVE_DATA_SIZE,
-                            )
-                            .ok()
-                            .flatten()
-                        })
-                        .unwrap_or(0);
-                    (cf.is_some(), num_keys, size)
-                }
-            };
+            if let Some(cf) = db.cf_handle(cf_name) {
+                let estimated_num_keys = db
+                    .property_int_value_cf(cf, rocksdb::properties::ESTIMATE_NUM_KEYS)
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
 
-            if cf_handle {
+                let estimated_size_bytes = db
+                    .property_int_value_cf(cf, rocksdb::properties::ESTIMATE_LIVE_DATA_SIZE)
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+
                 stats.push(RocksDBTableStats {
                     name: cf_name.to_string(),
                     estimated_num_keys,
