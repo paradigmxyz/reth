@@ -277,13 +277,6 @@ impl RocksDBBuilder {
             Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadWrite { db, metrics })))
         }
     }
-
-    /// Builds a read-only [`RocksDBProvider`].
-    ///
-    /// This is a convenience method equivalent to `.with_read_only(true).build()`.
-    pub fn build_read_only(self) -> ProviderResult<RocksDBProvider> {
-        self.with_read_only(true).build()
-    }
 }
 
 /// Some types don't support compression (eg. B256), and we don't want to be copying them to the
@@ -321,38 +314,6 @@ enum RocksDBProviderInner {
         /// Metrics latency & operations.
         metrics: Option<RocksDBMetrics>,
     },
-}
-
-impl fmt::Debug for RocksDBProviderInner {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ReadWrite { metrics, .. } => f
-                .debug_struct("RocksDBProviderInner::ReadWrite")
-                .field("db", &"<OptimisticTransactionDB>")
-                .field("metrics", metrics)
-                .finish(),
-            Self::ReadOnly { metrics, .. } => f
-                .debug_struct("RocksDBProviderInner::ReadOnly")
-                .field("db", &"<DB (read-only)>")
-                .field("metrics", metrics)
-                .finish(),
-        }
-    }
-}
-
-impl Drop for RocksDBProviderInner {
-    fn drop(&mut self) {
-        match self {
-            Self::ReadWrite { db, .. } => db.cancel_all_background_work(true),
-            Self::ReadOnly { db, .. } => db.cancel_all_background_work(true),
-        }
-    }
-}
-
-impl Clone for RocksDBProvider {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
 }
 
 impl RocksDBProviderInner {
@@ -423,6 +384,38 @@ impl RocksDBProviderInner {
             Self::ReadWrite { db, .. } => RocksDBIterEnum::ReadWrite(db.iterator_cf(cf, mode)),
             Self::ReadOnly { db, .. } => RocksDBIterEnum::ReadOnly(db.iterator_cf(cf, mode)),
         }
+    }
+}
+
+impl fmt::Debug for RocksDBProviderInner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ReadWrite { metrics, .. } => f
+                .debug_struct("RocksDBProviderInner::ReadWrite")
+                .field("db", &"<OptimisticTransactionDB>")
+                .field("metrics", metrics)
+                .finish(),
+            Self::ReadOnly { metrics, .. } => f
+                .debug_struct("RocksDBProviderInner::ReadOnly")
+                .field("db", &"<DB (read-only)>")
+                .field("metrics", metrics)
+                .finish(),
+        }
+    }
+}
+
+impl Drop for RocksDBProviderInner {
+    fn drop(&mut self) {
+        match self {
+            Self::ReadWrite { db, .. } => db.cancel_all_background_work(true),
+            Self::ReadOnly { db, .. } => db.cancel_all_background_work(true),
+        }
+    }
+}
+
+impl Clone for RocksDBProvider {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 
