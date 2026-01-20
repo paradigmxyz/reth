@@ -529,5 +529,5 @@ test:
 pr:
 	make lint && \
 	make update-book-cli && \
-	cargo docs --document-private-items && \
+	cargo +nightly docs --document-private-items && \
 	make test

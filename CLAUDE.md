@@ -171,7 +171,7 @@ Before submitting changes, ensure:
 1. **Format Check**: `cargo +nightly fmt --all --check`
 2. **Clippy**: No warnings with `RUSTFLAGS="-D warnings"`
 3. **Tests Pass**: All unit and integration tests
-4. **Documentation**: Update relevant docs and add doc comments with `cargo docs --document-private-items`
+4. **Documentation**: Update relevant docs and add doc comments with `cargo +nightly docs --document-private-items`
 5. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
 
 
@@ -389,5 +389,5 @@ cargo build --release --features "jemalloc asm-keccak"
 cargo check --workspace --all-features
 
 # Check documentation
-cargo docs --document-private-items 
+cargo +nightly docs --document-private-items 
 ```

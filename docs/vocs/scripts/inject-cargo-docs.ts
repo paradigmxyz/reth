@@ -13,7 +13,7 @@ async function injectCargoDocs() {
     await fs.access(CARGO_DOCS_PATH);
   } catch {
     console.error(`Error: Cargo docs not found at ${CARGO_DOCS_PATH}`);
-    console.error("Please run: cargo doc --no-deps --workspace --exclude 'example-*'");
+    console.error("Please run: cargo +nightly doc --no-deps --workspace --exclude 'example-*'");
     process.exit(1);
   }
 
