@@ -317,14 +317,15 @@ where
     }
 
     /// Returns the path of the child on top of the `child_stack`, or the root path if the stack is
-    /// empty.
-    fn last_child_path(&self) -> Nibbles {
+    /// empty. Returns None if the current branch has not yet pushed a child (empty `state_mask`).
+    fn last_child_path(&self) -> Option<Nibbles> {
         // If there is no branch under construction then the top child must be the root child.
         let Some(branch) = self.branch_stack.last() else {
-            return Nibbles::new();
+            return Some(Nibbles::new());
         };
 
-        self.child_path_at(Self::highest_set_nibble(branch.state_mask))
+        (!branch.state_mask.is_empty())
+            .then(|| self.child_path_at(Self::highest_set_nibble(branch.state_mask)))
     }
 
     /// Calls [`Self::commit_child`] on the last child of `child_stack`, replacing it with a
@@ -340,7 +341,9 @@ where
         &mut self,
         targets: &mut TargetsCursor<'a>,
     ) -> Result<(), StateProofError> {
-        let Some(child) = self.child_stack.pop() else { return Ok(()) };
+        let Some(child_path) = self.last_child_path() else { return Ok(()) };
+        let child =
+            self.child_stack.pop().expect("child_stack can't be empty if there's a child path");
 
         // If the child is already an `RlpNode` then there is nothing to do, push it back on with no
         // changes.
@@ -349,14 +352,15 @@ where
             return Ok(())
         }
 
-        let child_path = self.last_child_path();
-        // TODO theoretically `commit_child` only needs to convert to an `RlpNode` if it's going to
-        // retain the proof, otherwise we could leave the child as-is on the stack and convert it
-        // when popping the branch, giving more time to the DeferredEncoder to do async work.
-        let child_rlp_node = self.commit_child(targets, child_path, child)?;
+        // Only commit immediately if retained for the proof. Otherwise, defer conversion
+        // to pop_branch() to give DeferredEncoder time for async work.
+        if self.should_retain(targets, &child_path, true) {
+            let child_rlp_node = self.commit_child(targets, child_path, child)?;
+            self.child_stack.push(ProofTrieBranchChild::RlpNode(child_rlp_node));
+        } else {
+            self.child_stack.push(child);
+        }
 
-        // Replace the child on the stack
-        self.child_stack.push(ProofTrieBranchChild::RlpNode(child_rlp_node));
         Ok(())
     }
 
@@ -499,15 +503,20 @@ where
             "Stack is missing necessary children ({num_children:?})"
         );
 
-        // Collect children into an `RlpNode` Vec by committing and pushing each of them.
-        for (idx, child) in
-            self.child_stack.drain(self.child_stack.len() - num_children..).enumerate()
-        {
-            let ProofTrieBranchChild::RlpNode(child_rlp_node) = child else {
-                panic!(
-                    "all branch children must have been committed, found {} at index {idx:?}",
-                    std::any::type_name_of_val(&child)
-                );
+        // Collect children into RlpNode Vec. Children are in lexicographic order.
+        for child in self.child_stack.drain(self.child_stack.len() - num_children..) {
+            let child_rlp_node = match child {
+                ProofTrieBranchChild::RlpNode(rlp_node) => rlp_node,
+                uncommitted_child => {
+                    // Convert uncommitted child (not retained for proof) to RlpNode now.
+                    self.rlp_encode_buf.clear();
+                    let (rlp_node, freed_buf) =
+                        uncommitted_child.into_rlp(&mut self.rlp_encode_buf)?;
+                    if let Some(buf) = freed_buf {
+                        self.rlp_nodes_bufs.push(buf);
+                    }
+                    rlp_node
+                }
             };
             rlp_nodes_buf.push(child_rlp_node);
         }
