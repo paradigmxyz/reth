@@ -16,10 +16,9 @@ pub struct CountingBuf {
 }
 
 impl CountingBuf {
-    /// Thread-local scratch buffer for `chunk_mut` and `as_mut`.
-    /// Must be large enough for any value that might call `buf.as_mut()[offset]` during counting.
-    /// Transactions with large calldata can exceed 128KB, so we use 256KB to be safe.
-    const SCRATCH_SIZE: usize = 256 * 1024;
+    /// Thread-local scratch buffer for `chunk_mut`.
+    /// Only needs to be large enough for a single `put_u128` or similar primitive write.
+    const SCRATCH_SIZE: usize = 16;
 
     /// Creates a new `CountingBuf`.
     #[inline]
@@ -90,14 +89,7 @@ unsafe impl BufMut for CountingBuf {
 impl AsMut<[u8]> for CountingBuf {
     #[inline]
     fn as_mut(&mut self) -> &mut [u8] {
-        SCRATCH.with(|scratch| {
-            // SAFETY: We return a mutable reference to the thread-local buffer.
-            // This allows code that writes back to earlier positions (e.g., flags bytes)
-            // to work during size counting. The writes are discarded.
-            // We slice to self.len to match what Vec::as_mut() would return.
-            debug_assert!(self.len <= Self::SCRATCH_SIZE, "CountingBuf overflow");
-            unsafe { &mut (&mut (*scratch.get()))[..self.len] }
-        })
+        &mut []
     }
 }
 
