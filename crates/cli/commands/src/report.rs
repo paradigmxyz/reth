@@ -4,14 +4,13 @@
 //! This command collects all necessary information for bug reports into a single `.tar.gz` archive.
 
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
-use alloy_consensus::BlockHeader;
 use clap::Parser;
 use flate2::{write::GzEncoder, Compression};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db_api::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx, Tables};
 use reth_node_core::dirs::logs_dir;
-use reth_provider::{BlockHashReader, BlockNumReader, HeaderProvider};
+use reth_provider::BlockNumReader;
 use serde::Serialize;
 use std::{
     fs::{self, File},
@@ -26,7 +25,6 @@ use tracing::info;
 /// Generate a debug report archive for bug reports.
 ///
 /// This command collects diagnostic information including:
-/// - Block header information (if --block is specified)
 /// - Database table statistics
 /// - VersionHistory table dump
 /// - Log files
@@ -37,11 +35,6 @@ use tracing::info;
 pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
     env: EnvironmentArgs<C>,
-
-    /// The block number to include in the report.
-    /// If not specified, only general database information will be collected.
-    #[arg(long)]
-    block: Option<u64>,
 
     /// Include checksum of all database tables.
     /// WARNING: This will take a very long time to run!
@@ -67,29 +60,8 @@ struct ReportMetadata {
     reth_version: String,
     /// Chain name
     chain: String,
-    /// Target block number (if specified)
-    target_block: Option<u64>,
     /// Data directory path
     data_dir: String,
-}
-
-/// Block information
-#[derive(Debug, Serialize)]
-struct BlockInfo {
-    /// Block number
-    number: u64,
-    /// Block hash
-    hash: String,
-    /// Parent hash
-    parent_hash: String,
-    /// State root from block header
-    state_root: String,
-    /// Transactions root
-    transactions_root: String,
-    /// Receipts root
-    receipts_root: String,
-    /// Timestamp
-    timestamp: u64,
 }
 
 /// Database statistics
@@ -160,10 +132,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             data_dir.invalid_block_hooks().display()
         );
 
-        if let Some(block) = self.block {
-            println!("  • Block header information for block #{block}");
-        }
-
         if self.checksum {
             println!("  • Database checksums (WARNING: This takes a long time!)");
         }
@@ -186,7 +154,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
         }
 
-        info!(target: "reth::cli", block = ?self.block, "Generating debug report archive");
+        info!(target: "reth::cli", "Generating debug report archive");
 
         // Capture current time once for consistent timestamps throughout the report
         let now = SystemTime::now();
@@ -213,38 +181,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             generated_at: humantime::format_rfc3339(now).to_string(),
             reth_version: env!("CARGO_PKG_VERSION").to_string(),
             chain: chain_spec.chain().to_string(),
-            target_block: self.block,
             data_dir: data_dir.data_dir().display().to_string(),
         };
         add_json_to_archive(&mut archive, "metadata.json", &metadata, now_secs)?;
-
-        // Collect block info if specified
-        if let Some(block) = self.block {
-            let provider = provider_factory.provider()?;
-
-            match provider.header_by_number(block) {
-                Ok(Some(header)) => {
-                    let hash = provider.block_hash(block)?.unwrap_or_default();
-                    let block_info = BlockInfo {
-                        number: block,
-                        hash: format!("{hash:?}"),
-                        parent_hash: format!("{:?}", header.parent_hash()),
-                        state_root: format!("{:?}", header.state_root()),
-                        transactions_root: format!("{:?}", header.transactions_root()),
-                        receipts_root: format!("{:?}", header.receipts_root()),
-                        timestamp: header.timestamp(),
-                    };
-                    add_json_to_archive(&mut archive, "block_info.json", &block_info, now_secs)?;
-                    info!(target: "reth::cli", block, "Block info collected");
-                }
-                Ok(None) => {
-                    eprintln!("Warning: Block {block} not found in database");
-                }
-                Err(e) => {
-                    eprintln!("Warning: Failed to collect block info: {e}");
-                }
-            }
-        }
 
         // Collect DB stats
         let provider = provider_factory.provider()?;
@@ -325,7 +264,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         println!("\nArchive saved to: {}", output_path.display());
 
         // Generate GitHub issue link
-        let issue_link = generate_github_issue_link(&metadata);
+        let issue_link = generate_github_issue_link();
         println!("\n📋 To create a GitHub issue, visit:");
         println!("{issue_link}");
         println!("\n⚠️  IMPORTANT:");
@@ -447,15 +386,9 @@ fn add_file_to_archive<W: Write>(
     Ok(())
 }
 
-fn generate_github_issue_link(metadata: &ReportMetadata) -> String {
-    let title = if let Some(block) = metadata.target_block {
-        format!("State Root Error at Block {block}")
-    } else {
-        "Debug Report".to_string()
-    };
-
+fn generate_github_issue_link() -> String {
     format!(
         "https://github.com/paradigmxyz/reth/issues/new?title={}&labels=C-bug",
-        urlencoding::encode(&title)
+        urlencoding::encode("Debug Report")
     )
 }
