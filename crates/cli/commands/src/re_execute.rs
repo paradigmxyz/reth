@@ -42,9 +42,9 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(long)]
     to: Option<u64>,
 
-    /// Number of tasks to run in parallel
-    #[arg(long, default_value = "10")]
-    num_tasks: u64,
+    /// Number of tasks to run in parallel. Defaults to the number of available CPUs.
+    #[arg(long)]
+    num_tasks: Option<u64>,
 
     /// Continues with execution when an invalid block is encountered and collects these blocks.
     #[arg(long)]
@@ -84,12 +84,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             }
         };
 
+        let num_tasks = self.num_tasks.unwrap_or_else(|| {
+            std::thread::available_parallelism().map(|n| n.get() as u64).unwrap_or(10)
+        });
+
         let total_blocks = max_block - min_block;
         let total_gas = calculate_gas_used_from_headers(
             &provider_factory.static_file_provider(),
             min_block..=max_block,
         )?;
-        let blocks_per_task = total_blocks / self.num_tasks;
+        let blocks_per_task = total_blocks / num_tasks;
 
         let db_at = {
             let provider_factory = provider_factory.clone();
@@ -107,10 +111,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let _guard = cancellation.drop_guard();
 
         let mut tasks = JoinSet::new();
-        for i in 0..self.num_tasks {
+        for i in 0..num_tasks {
             let start_block = min_block + i * blocks_per_task;
             let end_block =
-                if i == self.num_tasks - 1 { max_block } else { start_block + blocks_per_task };
+                if i == num_tasks - 1 { max_block } else { start_block + blocks_per_task };
 
             // Spawn thread executing blocks
             let provider_factory = provider_factory.clone();
@@ -148,7 +152,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     };
 
                     if let Err(err) = consensus
-                        .validate_block_post_execution(&block, &result)
+                        .validate_block_post_execution(&block, &result, None)
                         .wrap_err_with(|| {
                             format!("Failed to validate block {} {}", block.number(), block.hash())
                         })
