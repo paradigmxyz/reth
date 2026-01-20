@@ -677,7 +677,13 @@ where
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
         let base_settings = self.node_config().static_files.to_settings();
-        let settings = self.node_config().rocksdb.apply_to_settings(base_settings);
+        let (settings, grouped_enabled) =
+            self.node_config().rocksdb.apply_to_settings(base_settings);
+
+        if grouped_enabled {
+            info!(target: "reth::cli", "RocksDB routing enabled for all tables (tx-hash, storages-history, account-history). To disable specific tables, use --rocksdb.<table>=false");
+        }
+
         init_genesis_with_settings(self.provider_factory(), settings)?;
         Ok(self)
     }
@@ -685,7 +691,13 @@ where
     /// Write the genesis block and state if it has not already been written
     pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
         let base_settings = self.node_config().static_files.to_settings();
-        let settings = self.node_config().rocksdb.apply_to_settings(base_settings);
+        let (settings, grouped_enabled) =
+            self.node_config().rocksdb.apply_to_settings(base_settings);
+
+        if grouped_enabled {
+            info!(target: "reth::cli", "RocksDB routing enabled for all tables (tx-hash, storages-history, account-history). To disable specific tables, use --rocksdb.<table>=false");
+        }
+
         init_genesis_with_settings(self.provider_factory(), settings)
     }
 
