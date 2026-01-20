@@ -1735,7 +1735,7 @@ fn dispatch_v2_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
 
-    // Dispatch all proofs for targetted storage slots
+    // Dispatch all proofs for targeted storage slots
     for (hashed_address, targets) in storage_targets {
         // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
@@ -1752,7 +1752,7 @@ fn dispatch_v2_storage_proofs(
         storage_proof_receivers.insert(hashed_address, result_rx);
     }
 
-    // If there are any targetted accounts which did not have storage targets then we generate a
+    // If there are any targeted accounts which did not have storage targets then we generate a
     // single proof target for them so that we get their root.
     for target in account_targets {
         let hashed_address = target.key();
