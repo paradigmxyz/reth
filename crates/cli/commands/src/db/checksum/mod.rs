@@ -4,23 +4,15 @@ use crate::{
 };
 use alloy_primitives::map::foldhash::fast::FixedState;
 use clap::Parser;
-#[cfg(all(unix, feature = "edge"))]
-use clap::ValueEnum;
 use itertools::Itertools;
 use reth_chainspec::EthereumHardforks;
-#[cfg(all(unix, feature = "edge"))]
-use reth_db::tables;
 use reth_db::{static_file::iter_static_files, DatabaseEnv};
-#[cfg(all(unix, feature = "edge"))]
-use reth_db_api::table::{Compress, Encode};
 use reth_db_api::{
     cursor::DbCursorRO, table::Table, transaction::DbTx, RawKey, RawTable, RawValue, TableViewer,
     Tables,
 };
 use reth_db_common::DbTool;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
-#[cfg(all(unix, feature = "edge"))]
-use reth_provider::RocksDBProviderFactory;
 use reth_provider::{providers::ProviderNodeTypes, DBProvider, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
 use std::{
@@ -30,32 +22,11 @@ use std::{
 };
 use tracing::{info, warn};
 
+#[cfg(all(unix, feature = "edge"))]
+mod rocksdb;
+
 /// Interval for logging progress during checksum computation.
 const PROGRESS_LOG_INTERVAL: usize = 100_000;
-
-/// RocksDB tables that can be checksummed.
-#[cfg(all(unix, feature = "edge"))]
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum RocksDbTable {
-    /// Transaction hash to transaction number mapping
-    TransactionHashNumbers,
-    /// Account history indices
-    AccountsHistory,
-    /// Storage history indices
-    StoragesHistory,
-}
-
-#[cfg(all(unix, feature = "edge"))]
-impl RocksDbTable {
-    /// Returns the table name as a string
-    const fn name(&self) -> &'static str {
-        match self {
-            Self::TransactionHashNumbers => tables::TransactionHashNumbers::NAME,
-            Self::AccountsHistory => tables::AccountsHistory::NAME,
-            Self::StoragesHistory => tables::StoragesHistory::NAME,
-        }
-    }
-}
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db checksum` command
@@ -107,7 +78,7 @@ enum Subcommand {
     Rocksdb {
         /// The RocksDB table
         #[arg(value_enum)]
-        table: RocksDbTable,
+        table: rocksdb::RocksDbTable,
 
         /// The maximum number of records to checksum.
         #[arg(long)]
@@ -132,7 +103,7 @@ impl Command {
             }
             #[cfg(all(unix, feature = "edge"))]
             Subcommand::Rocksdb { table, limit } => {
-                checksum_rocksdb(tool, table, limit)?;
+                rocksdb::checksum_rocksdb(tool, table, limit)?;
             }
         }
 
@@ -227,84 +198,6 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
     );
 
     Ok(())
-}
-
-/// Computes a checksum for a RocksDB table.
-#[cfg(all(unix, feature = "edge"))]
-fn checksum_rocksdb<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
-    tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
-    table: RocksDbTable,
-    limit: Option<usize>,
-) -> eyre::Result<()> {
-    let rocksdb = tool.provider_factory.rocksdb_provider();
-
-    let start_time = Instant::now();
-    let limit = limit.unwrap_or(usize::MAX);
-
-    info!(
-        "Computing checksum for RocksDB table `{}`, limit={:?}",
-        table.name(),
-        if limit == usize::MAX { None } else { Some(limit) }
-    );
-
-    let (checksum, total) = match table {
-        RocksDbTable::TransactionHashNumbers => {
-            checksum_rocksdb_table::<tables::TransactionHashNumbers>(&rocksdb, limit)?
-        }
-        RocksDbTable::AccountsHistory => {
-            checksum_rocksdb_table::<tables::AccountsHistory>(&rocksdb, limit)?
-        }
-        RocksDbTable::StoragesHistory => {
-            checksum_rocksdb_table::<tables::StoragesHistory>(&rocksdb, limit)?
-        }
-    };
-
-    let elapsed = start_time.elapsed();
-
-    info!(
-        "Checksum for RocksDB table `{}`: {:#x} ({} entries, elapsed: {:?})",
-        table.name(),
-        checksum,
-        total,
-        elapsed
-    );
-
-    Ok(())
-}
-
-/// Computes checksum for a specific RocksDB table by iterating over all entries.
-#[cfg(all(unix, feature = "edge"))]
-fn checksum_rocksdb_table<T: Table>(
-    rocksdb: &reth_provider::providers::RocksDBProvider,
-    limit: usize,
-) -> eyre::Result<(u64, usize)> {
-    let iter = rocksdb.iter::<T>()?;
-    let mut hasher = checksum_hasher();
-    let mut total = 0usize;
-    let mut compress_buf = Vec::new();
-
-    for entry in iter {
-        let (key, value) = entry?;
-
-        let key_bytes = key.encode();
-        hasher.write(key_bytes.as_ref());
-
-        compress_buf.clear();
-        value.compress_to_buf(&mut compress_buf);
-        hasher.write(&compress_buf);
-
-        total += 1;
-
-        if total.is_multiple_of(PROGRESS_LOG_INTERVAL) {
-            info!("Hashed {total} entries.");
-        }
-
-        if total >= limit {
-            break;
-        }
-    }
-
-    Ok((hasher.finish(), total))
 }
 
 pub(crate) struct ChecksumViewer<'a, N: NodeTypesWithDB> {
