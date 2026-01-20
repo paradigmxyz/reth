@@ -22,6 +22,14 @@ use std::{
 };
 use tracing::{info, warn};
 
+/// Interval for logging progress during checksum computation.
+const PROGRESS_LOG_INTERVAL: usize = 100_000;
+
+/// Creates a new hasher with the standard seed used for checksum computation.
+fn checksum_hasher() -> impl Hasher {
+    FixedState::with_seed(u64::from_be_bytes(*b"RETHRETH")).build_hasher()
+}
+
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db checksum` command
 pub struct Command {
@@ -82,103 +90,100 @@ impl Command {
                 table.view(&ChecksumViewer { tool, start_key, end_key, limit })?;
             }
             Subcommand::StaticFile { segment, start_block, end_block, limit } => {
-                self.checksum_static_file(tool, segment, start_block, end_block, limit)?;
+                checksum_static_file(tool, segment, start_block, end_block, limit)?;
             }
         }
 
         Ok(())
     }
+}
 
-    fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
-        &self,
-        tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
-        segment: StaticFileSegment,
-        start_block: Option<u64>,
-        end_block: Option<u64>,
-        limit: Option<usize>,
-    ) -> eyre::Result<()> {
-        let static_file_provider = tool.provider_factory.static_file_provider();
-        if let Err(err) =
-            static_file_provider.check_consistency(&tool.provider_factory.provider()?)
-        {
-            warn!("Error checking consistency of static files: {err}");
+fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
+    tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+    segment: StaticFileSegment,
+    start_block: Option<u64>,
+    end_block: Option<u64>,
+    limit: Option<usize>,
+) -> eyre::Result<()> {
+    let static_file_provider = tool.provider_factory.static_file_provider();
+    if let Err(err) = static_file_provider.check_consistency(&tool.provider_factory.provider()?) {
+        warn!("Error checking consistency of static files: {err}");
+    }
+
+    let static_files = iter_static_files(static_file_provider.directory())?;
+
+    let ranges = static_files
+        .get(&segment)
+        .ok_or_else(|| eyre::eyre!("No static files found for segment: {}", segment))?;
+
+    let start_time = Instant::now();
+    let mut hasher = checksum_hasher();
+    let mut total = 0usize;
+    let limit = limit.unwrap_or(usize::MAX);
+
+    let start_block = start_block.unwrap_or(0);
+    let end_block = end_block.unwrap_or(u64::MAX);
+
+    info!(
+        "Computing checksum for {} static files, start_block={}, end_block={}, limit={:?}",
+        segment,
+        start_block,
+        end_block,
+        if limit == usize::MAX { None } else { Some(limit) }
+    );
+
+    for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
+        if block_range.end() < start_block || block_range.start() > end_block {
+            continue;
         }
 
-        let static_files = iter_static_files(static_file_provider.directory())?;
+        let fixed_block_range =
+            static_file_provider.find_fixed_range(segment, block_range.start());
+        let jar_provider = static_file_provider
+            .get_segment_provider_for_range(segment, || Some(fixed_block_range), None)?
+            .ok_or_else(|| {
+                eyre::eyre!(
+                    "Failed to get segment provider for segment {} at range {}",
+                    segment,
+                    block_range
+                )
+            })?;
 
-        let ranges = static_files
-            .get(&segment)
-            .ok_or_else(|| eyre::eyre!("No static files found for segment: {}", segment))?;
+        let mut cursor = jar_provider.cursor()?;
 
-        let start_time = Instant::now();
-        let mut hasher = FixedState::with_seed(u64::from_be_bytes(*b"RETHRETH")).build_hasher();
-        let mut total_rows = 0usize;
-        let limit = limit.unwrap_or(usize::MAX);
-
-        let start_block = start_block.unwrap_or(0);
-        let end_block = end_block.unwrap_or(u64::MAX);
-
-        info!(
-            "Computing checksum for {} static files, start_block={}, end_block={}, limit={:?}",
-            segment,
-            start_block,
-            end_block,
-            if limit == usize::MAX { None } else { Some(limit) }
-        );
-
-        for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
-            if block_range.end() < start_block || block_range.start() > end_block {
-                continue;
+        while let Ok(Some(row)) = cursor.next_row() {
+            for col_data in row.iter() {
+                hasher.write(col_data);
             }
 
-            let fixed_block_range =
-                static_file_provider.find_fixed_range(segment, block_range.start());
-            let jar_provider = static_file_provider
-                .get_segment_provider_for_range(segment, || Some(fixed_block_range), None)?
-                .ok_or_else(|| {
-                    eyre::eyre!(
-                        "Failed to get segment provider for segment {} at range {}",
-                        segment,
-                        block_range
-                    )
-                })?;
+            total += 1;
 
-            let mut cursor = jar_provider.cursor()?;
-
-            while let Ok(Some(row)) = cursor.next_row() {
-                for col_data in row.iter() {
-                    hasher.write(col_data);
-                }
-
-                total_rows += 1;
-
-                if total_rows.is_multiple_of(100_000) {
-                    info!("Hashed {total_rows} rows.");
-                }
-
-                if total_rows >= limit {
-                    break;
-                }
+            if total.is_multiple_of(PROGRESS_LOG_INTERVAL) {
+                info!("Hashed {total} entries.");
             }
 
-            drop(jar_provider);
-            static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
-
-            if total_rows >= limit {
+            if total >= limit {
                 break;
             }
         }
 
-        let checksum = hasher.finish();
-        let elapsed = start_time.elapsed();
+        drop(jar_provider);
+        static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
 
-        info!(
-            "Checksum for static file segment `{}`: {:#x} ({} rows, elapsed: {:?})",
-            segment, checksum, total_rows, elapsed
-        );
-
-        Ok(())
+        if total >= limit {
+            break;
+        }
     }
+
+    let checksum = hasher.finish();
+    let elapsed = start_time.elapsed();
+
+    info!(
+        "Checksum for static file segment `{}`: {:#x} ({} entries, elapsed: {:?})",
+        segment, checksum, total, elapsed
+    );
+
+    Ok(())
 }
 
 pub(crate) struct ChecksumViewer<'a, N: NodeTypesWithDB> {
@@ -226,7 +231,7 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
         };
 
         let start_time = Instant::now();
-        let mut hasher = FixedState::with_seed(u64::from_be_bytes(*b"RETHRETH")).build_hasher();
+        let mut hasher = checksum_hasher();
         let mut total = 0;
 
         let limit = self.limit.unwrap_or(usize::MAX);
@@ -235,7 +240,7 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
         for (index, entry) in walker.enumerate() {
             let (k, v): (RawKey<T::Key>, RawValue<T::Value>) = entry?;
 
-            if index.is_multiple_of(100_000) {
+            if index.is_multiple_of(PROGRESS_LOG_INTERVAL) {
                 info!("Hashed {index} entries.");
             }
 
