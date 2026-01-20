@@ -27,7 +27,7 @@ pub type CursorRW<T> = Cursor<RW, T>;
 pub struct Cursor<K: TransactionKind, T: Table> {
     /// Inner `libmdbx` cursor.
     pub(crate) inner: reth_libmdbx::Cursor<K>,
-    /// Cache buffer that receives compressed values.
+    /// Reusable buffer for value compression (writes) and key encoding (reads).
     buf: Vec<u8>,
     /// Reference to metric handles in the DB environment. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
@@ -86,6 +86,17 @@ macro_rules! compress_to_buf_or_ref {
             None
         }
     };
+}
+
+/// Encodes a key into the cursor's reusable buffer to avoid heap allocations.
+/// Only safe to use in read operations where buf is not used for value compression.
+macro_rules! encode_key_to_buf {
+    ($self:expr, $key:expr) => {{
+        $self.buf.clear();
+        let encoded = $key.encode();
+        $self.buf.extend_from_slice(encoded.as_ref());
+        &$self.buf
+    }};
 }
 
 impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
@@ -215,27 +226,36 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
     ) -> Result<DupWalker<'_, T, Self>, DatabaseError> {
         let start = match (key, subkey) {
             (Some(key), Some(subkey)) => {
-                // encode key and decode it after.
-                let key: Vec<u8> = key.encode().into();
-                self.inner
-                    .get_both_range(key.as_ref(), subkey.encode().as_ref())
-                    .map_err(|e| DatabaseError::Read(e.into()))?
-                    .map(|val| decoder::<T>((Cow::Owned(key), val)))
+                // Encode key to reusable buffer to avoid heap allocation
+                let key_bytes = encode_key_to_buf!(self, key);
+                let result = self
+                    .inner
+                    .get_both_range(key_bytes, subkey.encode().as_ref())
+                    .map_err(|e| DatabaseError::Read(e.into()))?;
+                // Clone the key bytes for the decoder since we need owned data for Cow::Owned
+                let key_owned = self.buf.clone();
+                result.map(|val| decoder::<T>((Cow::Owned(key_owned), val)))
             }
             (Some(key), None) => {
-                let key: Vec<u8> = key.encode().into();
-                self.inner
-                    .set(key.as_ref())
-                    .map_err(|e| DatabaseError::Read(e.into()))?
-                    .map(|val| decoder::<T>((Cow::Owned(key), val)))
+                // Encode key to reusable buffer to avoid heap allocation
+                let key_bytes = encode_key_to_buf!(self, key);
+                let result =
+                    self.inner.set(key_bytes).map_err(|e| DatabaseError::Read(e.into()))?;
+                // Clone the key bytes for the decoder since we need owned data for Cow::Owned
+                let key_owned = self.buf.clone();
+                result.map(|val| decoder::<T>((Cow::Owned(key_owned), val)))
             }
             (None, Some(subkey)) => {
                 if let Some((key, _)) = self.first()? {
-                    let key: Vec<u8> = key.encode().into();
-                    self.inner
-                        .get_both_range(key.as_ref(), subkey.encode().as_ref())
-                        .map_err(|e| DatabaseError::Read(e.into()))?
-                        .map(|val| decoder::<T>((Cow::Owned(key), val)))
+                    // Encode key to reusable buffer to avoid heap allocation
+                    let key_bytes = encode_key_to_buf!(self, key);
+                    let result = self
+                        .inner
+                        .get_both_range(key_bytes, subkey.encode().as_ref())
+                        .map_err(|e| DatabaseError::Read(e.into()))?;
+                    // Clone the key bytes for the decoder since we need owned data for Cow::Owned
+                    let key_owned = self.buf.clone();
+                    result.map(|val| decoder::<T>((Cow::Owned(key_owned), val)))
                 } else {
                     Some(Err(DatabaseError::Read(MDBXError::NotFound.into())))
                 }
