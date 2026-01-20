@@ -718,6 +718,15 @@ impl RocksDBProvider {
         self.0.table_stats()
     }
 
+    /// Creates a raw iterator over all entries in the specified table.
+    ///
+    /// Returns raw `(key_bytes, value_bytes)` pairs without decoding.
+    pub fn raw_iter<T: Table>(&self) -> ProviderResult<RocksDBRawIter<'_>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let iter = self.0.iterator_cf(cf, IteratorMode::Start);
+        Ok(RocksDBRawIter { inner: iter })
+    }
+
     /// Returns all account history shards for the given address in ascending key order.
     ///
     /// This is used for unwind operations where we need to scan all shards for an address
@@ -1576,6 +1585,33 @@ impl<T: Table> Iterator for RocksDBIter<'_, T> {
         };
 
         Some(Ok((key, value)))
+    }
+}
+
+/// Raw iterator over a `RocksDB` table (non-transactional).
+///
+/// Yields raw `(key_bytes, value_bytes)` pairs without decoding.
+pub struct RocksDBRawIter<'db> {
+    inner: RocksDBIterEnum<'db>,
+}
+
+impl fmt::Debug for RocksDBRawIter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBRawIter").finish_non_exhaustive()
+    }
+}
+
+impl Iterator for RocksDBRawIter<'_> {
+    type Item = ProviderResult<(Box<[u8]>, Box<[u8]>)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.inner.next()? {
+            Ok(kv) => Some(Ok(kv)),
+            Err(e) => Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            })))),
+        }
     }
 }
 

@@ -134,3 +134,7 @@ impl RocksDBBuilder {
 /// A stub transaction for `RocksDB`.
 #[derive(Debug)]
 pub struct RocksTx;
+
+/// A stub raw iterator for `RocksDB`.
+#[derive(Debug)]
+pub struct RocksDBRawIter;
