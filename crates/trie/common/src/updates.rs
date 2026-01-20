@@ -632,7 +632,7 @@ impl TrieUpdatesSorted {
     /// For small batches, uses `extend_ref_and_sort` loop.
     /// For large batches, uses k-way merge for O(n log k) complexity.
     pub fn merge_batch<T: AsRef<Self> + From<Self>>(iter: impl IntoIterator<Item = T>) -> T {
-        const THRESHOLD: usize = 64;
+        const THRESHOLD: usize = 30;
 
         let items: alloc::vec::Vec<_> = iter.into_iter().collect();
         let k = items.len();
