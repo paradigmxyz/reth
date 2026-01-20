@@ -9,8 +9,16 @@ use reth_provider::StorageSettings;
 /// 10000 blocks per static file allows us to prune all history every 10k blocks.
 pub const MINIMAL_BLOCKS_PER_FILE: u64 = 10000;
 
+/// Returns the default value for static file storage flags based on the build configuration.
+///
+/// When compiled with the `edge` feature, these default to `true` to enable all static file
+/// storage optimizations. Otherwise, they default to `false` for legacy compatibility.
+const fn default_static_file_flag() -> bool {
+    cfg!(feature = "edge")
+}
+
 /// Parameters for static files configuration
-#[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
+#[derive(Debug, Args, PartialEq, Eq, Clone, Copy)]
 #[command(next_help_heading = "Static Files")]
 pub struct StaticFilesArgs {
     /// Number of blocks per file for the headers segment.
@@ -39,7 +47,9 @@ pub struct StaticFilesArgs {
     ///
     /// Note: This setting can only be configured at genesis initialization. Once
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
-    #[arg(long = "static-files.receipts")]
+    ///
+    /// Defaults to `true` when compiled with the `edge` feature.
+    #[arg(long = "static-files.receipts", default_value_t = default_static_file_flag())]
     pub receipts: bool,
 
     /// Store transaction senders in static files instead of the database.
@@ -49,7 +59,9 @@ pub struct StaticFilesArgs {
     ///
     /// Note: This setting can only be configured at genesis initialization. Once
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
-    #[arg(long = "static-files.transaction-senders")]
+    ///
+    /// Defaults to `true` when compiled with the `edge` feature.
+    #[arg(long = "static-files.transaction-senders", default_value_t = default_static_file_flag())]
     pub transaction_senders: bool,
 
     /// Store account changesets in static files.
@@ -59,8 +71,25 @@ pub struct StaticFilesArgs {
     ///
     /// Note: This setting can only be configured at genesis initialization. Once
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
-    #[arg(long = "static-files.account-change-sets")]
+    ///
+    /// Defaults to `true` when compiled with the `edge` feature.
+    #[arg(long = "static-files.account-change-sets", default_value_t = default_static_file_flag())]
     pub account_changesets: bool,
+}
+
+impl Default for StaticFilesArgs {
+    fn default() -> Self {
+        Self {
+            blocks_per_file_headers: None,
+            blocks_per_file_transactions: None,
+            blocks_per_file_receipts: None,
+            blocks_per_file_transaction_senders: None,
+            blocks_per_file_account_change_sets: None,
+            receipts: default_static_file_flag(),
+            transaction_senders: default_static_file_flag(),
+            account_changesets: default_static_file_flag(),
+        }
+    }
 }
 
 impl StaticFilesArgs {
