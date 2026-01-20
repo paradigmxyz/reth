@@ -47,6 +47,53 @@ impl EngineCapabilities {
     pub const fn as_set(&self) -> &HashSet<String> {
         &self.inner
     }
+
+    /// Compares CL capabilities with this EL's capabilities and returns any mismatches.
+    ///
+    /// Called during `engine_exchangeCapabilities` to detect version mismatches
+    /// between the consensus layer and execution layer.
+    pub fn get_capability_mismatches(&self, cl_capabilities: &[String]) -> CapabilityMismatches {
+        let cl_set: HashSet<&str> = cl_capabilities.iter().map(String::as_str).collect();
+
+        // CL has methods EL doesn't support
+        let mut missing_in_el: Vec<_> = cl_capabilities
+            .iter()
+            .filter(|cap| !self.inner.contains(cap.as_str()))
+            .cloned()
+            .collect();
+        missing_in_el.sort();
+
+        // EL has methods CL doesn't support
+        let mut missing_in_cl: Vec<_> =
+            self.inner.iter().filter(|cap| !cl_set.contains(cap.as_str())).cloned().collect();
+        missing_in_cl.sort();
+
+        CapabilityMismatches { missing_in_el, missing_in_cl }
+    }
+
+    /// Logs warnings if CL and EL capabilities don't match.
+    ///
+    /// Called during `engine_exchangeCapabilities` to warn operators about
+    /// version mismatches between the consensus layer and execution layer.
+    pub fn log_capability_mismatches(&self, cl_capabilities: &[String]) {
+        let mismatches = self.get_capability_mismatches(cl_capabilities);
+
+        if !mismatches.missing_in_el.is_empty() {
+            warn!(
+                target: "rpc::engine",
+                missing = ?mismatches.missing_in_el,
+                "CL supports Engine API methods that Reth doesn't. Consider upgrading Reth."
+            );
+        }
+
+        if !mismatches.missing_in_cl.is_empty() {
+            warn!(
+                target: "rpc::engine",
+                missing = ?mismatches.missing_in_cl,
+                "Reth supports Engine API methods that CL doesn't. Consider upgrading your consensus client."
+            );
+        }
+    }
 }
 
 impl Default for EngineCapabilities {
@@ -55,38 +102,74 @@ impl Default for EngineCapabilities {
     }
 }
 
-/// Logs warnings if CL and EL capabilities don't match.
-///
-/// Called during `engine_exchangeCapabilities` to warn operators about
-/// version mismatches between the consensus layer and execution layer.
-pub fn log_capability_mismatches(cl_capabilities: &[String], el_capabilities: &EngineCapabilities) {
-    let el_set = el_capabilities.as_set();
-    let cl_set: HashSet<&str> = cl_capabilities.iter().map(String::as_str).collect();
+/// Result of comparing CL and EL capabilities.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct CapabilityMismatches {
+    /// Methods supported by CL but not by EL (Reth).
+    /// Operators should consider upgrading Reth.
+    pub missing_in_el: Vec<String>,
+    /// Methods supported by EL (Reth) but not by CL.
+    /// Operators should consider upgrading their consensus client.
+    pub missing_in_cl: Vec<String>,
+}
 
-    // CL has methods EL doesn't support
-    let mut el_missing: Vec<_> = cl_capabilities
-        .iter()
-        .filter(|cap| !el_set.contains(cap.as_str()))
-        .map(String::as_str)
-        .collect();
-    if !el_missing.is_empty() {
-        el_missing.sort();
-        warn!(
-            target: "rpc::engine",
-            missing = ?el_missing,
-            "CL supports Engine API methods that Reth doesn't. Consider upgrading Reth."
-        );
+impl CapabilityMismatches {
+    /// Returns `true` if there are no mismatches.
+    pub fn is_empty(&self) -> bool {
+        self.missing_in_el.is_empty() && self.missing_in_cl.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_no_mismatches() {
+        let el = EngineCapabilities::new(["method_a", "method_b"]);
+        let cl = vec!["method_a".to_string(), "method_b".to_string()];
+
+        let result = el.get_capability_mismatches(&cl);
+        assert!(result.is_empty());
     }
 
-    // EL has methods CL doesn't support
-    let mut cl_missing: Vec<_> =
-        el_set.iter().filter(|cap| !cl_set.contains(cap.as_str())).map(String::as_str).collect();
-    if !cl_missing.is_empty() {
-        cl_missing.sort();
-        warn!(
-            target: "rpc::engine",
-            missing = ?cl_missing,
-            "Reth supports Engine API methods that CL doesn't. Consider upgrading your consensus client."
-        );
+    #[test]
+    fn test_cl_has_extra_methods() {
+        let el = EngineCapabilities::new(["method_a"]);
+        let cl = vec!["method_a".to_string(), "method_b".to_string()];
+
+        let result = el.get_capability_mismatches(&cl);
+        assert_eq!(result.missing_in_el, vec!["method_b"]);
+        assert!(result.missing_in_cl.is_empty());
+    }
+
+    #[test]
+    fn test_el_has_extra_methods() {
+        let el = EngineCapabilities::new(["method_a", "method_b"]);
+        let cl = vec!["method_a".to_string()];
+
+        let result = el.get_capability_mismatches(&cl);
+        assert!(result.missing_in_el.is_empty());
+        assert_eq!(result.missing_in_cl, vec!["method_b"]);
+    }
+
+    #[test]
+    fn test_both_have_extra_methods() {
+        let el = EngineCapabilities::new(["method_a", "method_c"]);
+        let cl = vec!["method_a".to_string(), "method_b".to_string()];
+
+        let result = el.get_capability_mismatches(&cl);
+        assert_eq!(result.missing_in_el, vec!["method_b"]);
+        assert_eq!(result.missing_in_cl, vec!["method_c"]);
+    }
+
+    #[test]
+    fn test_results_are_sorted() {
+        let el = EngineCapabilities::new(["z_method", "a_method"]);
+        let cl = vec!["z_other".to_string(), "a_other".to_string()];
+
+        let result = el.get_capability_mismatches(&cl);
+        assert_eq!(result.missing_in_el, vec!["a_other", "z_other"]);
+        assert_eq!(result.missing_in_cl, vec!["a_method", "z_method"]);
     }
 }

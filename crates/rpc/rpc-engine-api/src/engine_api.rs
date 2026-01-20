@@ -1,7 +1,5 @@
 use crate::{
-    capabilities::{log_capability_mismatches, EngineCapabilities},
-    metrics::EngineApiMetrics,
-    EngineApiError, EngineApiResult,
+    capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
@@ -1086,7 +1084,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_exchangeCapabilities");
 
         let el_caps = self.capabilities();
-        log_capability_mismatches(&capabilities, el_caps);
+        el_caps.log_capability_mismatches(&capabilities);
 
         Ok(el_caps.list())
     }
