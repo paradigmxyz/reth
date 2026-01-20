@@ -4,14 +4,14 @@ use crate::{
 };
 use alloy_primitives::map::foldhash::fast::FixedState;
 use clap::Parser;
-#[cfg(all(unix, feature = "rocksdb"))]
+#[cfg(all(unix, feature = "edge"))]
 use clap::ValueEnum;
 use itertools::Itertools;
 use reth_chainspec::EthereumHardforks;
-#[cfg(all(unix, feature = "rocksdb"))]
+#[cfg(all(unix, feature = "edge"))]
 use reth_db::tables;
 use reth_db::{static_file::iter_static_files, DatabaseEnv};
-#[cfg(all(unix, feature = "rocksdb"))]
+#[cfg(all(unix, feature = "edge"))]
 use reth_db_api::table::{Compress, Encode};
 use reth_db_api::{
     cursor::DbCursorRO, table::Table, transaction::DbTx, RawKey, RawTable, RawValue, TableViewer,
@@ -19,7 +19,7 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
-#[cfg(all(unix, feature = "rocksdb"))]
+#[cfg(all(unix, feature = "edge"))]
 use reth_provider::RocksDBProviderFactory;
 use reth_provider::{providers::ProviderNodeTypes, DBProvider, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
@@ -34,7 +34,7 @@ use tracing::{info, warn};
 const PROGRESS_LOG_INTERVAL: usize = 100_000;
 
 /// RocksDB tables that can be checksummed.
-#[cfg(all(unix, feature = "rocksdb"))]
+#[cfg(all(unix, feature = "edge"))]
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum RocksDbTable {
     /// Transaction hash to transaction number mapping
@@ -45,7 +45,7 @@ pub enum RocksDbTable {
     StoragesHistory,
 }
 
-#[cfg(all(unix, feature = "rocksdb"))]
+#[cfg(all(unix, feature = "edge"))]
 impl RocksDbTable {
     /// Returns the table name as a string
     const fn name(&self) -> &'static str {
@@ -103,7 +103,7 @@ enum Subcommand {
         limit: Option<usize>,
     },
     /// Calculates the checksum of a RocksDB table
-    #[cfg(all(unix, feature = "rocksdb"))]
+    #[cfg(all(unix, feature = "edge"))]
     Rocksdb {
         /// The RocksDB table
         #[arg(value_enum)]
@@ -130,7 +130,7 @@ impl Command {
             Subcommand::StaticFile { segment, start_block, end_block, limit } => {
                 checksum_static_file(tool, segment, start_block, end_block, limit)?;
             }
-            #[cfg(all(unix, feature = "rocksdb"))]
+            #[cfg(all(unix, feature = "edge"))]
             Subcommand::Rocksdb { table, limit } => {
                 checksum_rocksdb(tool, table, limit)?;
             }
@@ -230,7 +230,7 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
 }
 
 /// Computes a checksum for a RocksDB table.
-#[cfg(all(unix, feature = "rocksdb"))]
+#[cfg(all(unix, feature = "edge"))]
 fn checksum_rocksdb<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
     tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
     table: RocksDbTable,
@@ -273,7 +273,7 @@ fn checksum_rocksdb<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
 }
 
 /// Computes checksum for a specific RocksDB table by iterating over all entries.
-#[cfg(all(unix, feature = "rocksdb"))]
+#[cfg(all(unix, feature = "edge"))]
 fn checksum_rocksdb_table<T: Table>(
     rocksdb: &reth_provider::providers::RocksDBProvider,
     limit: usize,
