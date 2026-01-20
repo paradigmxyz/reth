@@ -834,8 +834,8 @@ fn multiproof_targets_legacy_from_state(state: EvmState) -> (VersionedMultiProof
     (VersionedMultiProofTargets::Legacy(targets), storage_targets)
 }
 
-/// Returns V2 [`MultiProofTargetsV2`] and the total amount of storage targets, based on the
-/// given state.
+/// Returns V2 [`reth_trie_parallel::targets_v2::MultiProofTargetsV2`] and the total amount of
+/// storage targets, based on the given state.
 fn multiproof_targets_v2_from_state(state: EvmState) -> (VersionedMultiProofTargets, usize) {
     use reth_trie::proof_v2;
     use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
