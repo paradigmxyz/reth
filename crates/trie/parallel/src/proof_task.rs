@@ -1555,8 +1555,11 @@ fn dispatch_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(targets.len(), Default::default());
 
+    let mut sorted_targets: Vec<_> = targets.iter().collect();
+    sorted_targets.sort_unstable_by_key(|(addr, _)| *addr);
+
     // Dispatch all storage proofs to worker pool
-    for (hashed_address, target_slots) in targets.iter() {
+    for (hashed_address, target_slots) in sorted_targets {
         // Create channel for receiving ProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
