@@ -71,7 +71,7 @@ impl RocksDBProvider {
     /// Returns statistics for all column families in the database (stub implementation).
     ///
     /// Returns an empty vector since there is no `RocksDB` when the feature is disabled.
-    pub fn table_stats(&self) -> Vec<RocksDBTableStats> {
+    pub const fn table_stats(&self) -> Vec<RocksDBTableStats> {
         Vec::new()
     }
 }
