@@ -19,9 +19,9 @@ const STORAGE_SHARD_KEY_BYTES_SIZE: usize = 20 + 32 + 8;
 /// Stack-allocated encoded key for `StorageShardedKey`.
 ///
 /// This avoids heap allocation in hot database paths. The key layout is:
-/// - 20 bytes: Address
-/// - 32 bytes: B256 storage key
-/// - 8 bytes: BlockNumber (big-endian)
+/// - 20 bytes: `Address`
+/// - 32 bytes: `B256` storage key
+/// - 8 bytes: `BlockNumber` (big-endian)
 pub type StorageShardedKeyEncoded = [u8; STORAGE_SHARD_KEY_BYTES_SIZE];
 
 /// Sometimes data can be too big to be saved for a single key. This helps out by dividing the data

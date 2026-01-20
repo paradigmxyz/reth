@@ -49,8 +49,8 @@ impl<T> ShardedKey<T> {
 /// Stack-allocated encoded key for `ShardedKey<Address>`.
 ///
 /// This avoids heap allocation in hot database paths. The key layout is:
-/// - 20 bytes: Address
-/// - 8 bytes: BlockNumber (big-endian)
+/// - 20 bytes: `Address`
+/// - 8 bytes: `BlockNumber` (big-endian)
 pub type ShardedKeyAddressEncoded = [u8; 20 + BLOCK_NUMBER_SIZE];
 
 impl Encode for ShardedKey<Address> {
