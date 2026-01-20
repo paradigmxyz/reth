@@ -76,7 +76,7 @@ pub fn checksum_rocksdb<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
     Ok(())
 }
 
-/// Computes checksum for a specific RocksDB table by iterating over raw bytes.
+/// Computes checksum for a specific RocksDB table by iterating over rows.
 fn checksum_rocksdb_table<T: Table>(
     rocksdb: &reth_provider::providers::RocksDBProvider,
     limit: usize,
