@@ -23,6 +23,7 @@ use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, Transaction, WriteBatchWithTransaction, WriteOptions,
+    DB,
 };
 use std::{
     collections::BTreeMap,
@@ -253,7 +254,41 @@ impl RocksDBBuilder {
 
         let metrics = self.enable_metrics.then(RocksDBMetrics::default);
 
-        Ok(RocksDBProvider(Arc::new(RocksDBProviderInner { db, metrics })))
+        Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadWrite { db, metrics })))
+    }
+
+    /// Builds a read-only [`RocksDBProvider`].
+    ///
+    /// Uses `DB::open_cf_descriptors_read_only` which doesn't acquire an exclusive lock,
+    /// allowing multiple processes to read the database concurrently.
+    ///
+    /// Note: Write operations on this provider will panic at runtime.
+    pub fn build_read_only(self) -> ProviderResult<RocksDBProvider> {
+        let options =
+            Self::default_options(self.log_level, &self.block_cache, self.enable_statistics);
+
+        let cf_descriptors: Vec<ColumnFamilyDescriptor> = self
+            .column_families
+            .iter()
+            .map(|name| {
+                ColumnFamilyDescriptor::new(
+                    name.clone(),
+                    Self::default_column_family_options(&self.block_cache),
+                )
+            })
+            .collect();
+
+        let db = DB::open_cf_descriptors_read_only(&options, &self.path, cf_descriptors, false)
+            .map_err(|e| {
+                ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+
+        let metrics = self.enable_metrics.then(RocksDBMetrics::default);
+
+        Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadOnly { db, metrics })))
     }
 }
 
@@ -276,33 +311,139 @@ macro_rules! compress_to_buf_or_ref {
 pub struct RocksDBProvider(Arc<RocksDBProviderInner>);
 
 /// Inner state for `RocksDB` provider.
-struct RocksDBProviderInner {
-    /// `RocksDB` database instance with optimistic transaction support.
-    db: OptimisticTransactionDB,
-    /// Metrics latency & operations.
-    metrics: Option<RocksDBMetrics>,
+enum RocksDBProviderInner {
+    /// Read-write mode using `OptimisticTransactionDB`.
+    ReadWrite {
+        /// `RocksDB` database instance with optimistic transaction support.
+        db: OptimisticTransactionDB,
+        /// Metrics latency & operations.
+        metrics: Option<RocksDBMetrics>,
+    },
+    /// Read-only mode using `DB` opened with `open_cf_descriptors_read_only`.
+    /// This doesn't acquire an exclusive lock, allowing concurrent reads.
+    ReadOnly {
+        /// Read-only `RocksDB` database instance.
+        db: DB,
+        /// Metrics latency & operations.
+        metrics: Option<RocksDBMetrics>,
+    },
 }
 
 impl fmt::Debug for RocksDBProviderInner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RocksDBProviderInner")
-            .field("db", &"<OptimisticTransactionDB>")
-            .field("metrics", &self.metrics)
-            .finish()
+        match self {
+            Self::ReadWrite { metrics, .. } => f
+                .debug_struct("RocksDBProviderInner::ReadWrite")
+                .field("db", &"<OptimisticTransactionDB>")
+                .field("metrics", metrics)
+                .finish(),
+            Self::ReadOnly { metrics, .. } => f
+                .debug_struct("RocksDBProviderInner::ReadOnly")
+                .field("db", &"<DB (read-only)>")
+                .field("metrics", metrics)
+                .finish(),
+        }
     }
 }
 
 impl Drop for RocksDBProviderInner {
     fn drop(&mut self) {
-        // Cancel all background work (compaction, flush) before dropping.
-        // This prevents pthread lock errors during shutdown.
-        self.db.cancel_all_background_work(true);
+        match self {
+            Self::ReadWrite { db, .. } => db.cancel_all_background_work(true),
+            Self::ReadOnly { db, .. } => db.cancel_all_background_work(true),
+        }
     }
 }
 
 impl Clone for RocksDBProvider {
     fn clone(&self) -> Self {
         Self(self.0.clone())
+    }
+}
+
+impl RocksDBProviderInner {
+    /// Returns the metrics for this provider.
+    fn metrics(&self) -> Option<&RocksDBMetrics> {
+        match self {
+            Self::ReadWrite { metrics, .. } | Self::ReadOnly { metrics, .. } => metrics.as_ref(),
+        }
+    }
+
+    /// Returns the read-write database, panicking if in read-only mode.
+    fn db_rw(&self) -> &OptimisticTransactionDB {
+        match self {
+            Self::ReadWrite { db, .. } => db,
+            Self::ReadOnly { .. } => {
+                panic!("Cannot perform write operation on read-only RocksDB provider")
+            }
+        }
+    }
+
+    /// Gets the column family handle for a table.
+    fn cf_handle<T: Table>(&self) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
+        let cf = match self {
+            Self::ReadWrite { db, .. } => db.cf_handle(T::NAME),
+            Self::ReadOnly { db, .. } => db.cf_handle(T::NAME),
+        };
+        cf.ok_or_else(|| DatabaseError::Other(format!("Column family '{}' not found", T::NAME)))
+    }
+
+    /// Gets a value from a column family.
+    fn get_cf(
+        &self,
+        cf: &rocksdb::ColumnFamily,
+        key: impl AsRef<[u8]>,
+    ) -> Result<Option<Vec<u8>>, rocksdb::Error> {
+        match self {
+            Self::ReadWrite { db, .. } => db.get_cf(cf, key),
+            Self::ReadOnly { db, .. } => db.get_cf(cf, key),
+        }
+    }
+
+    /// Puts a value into a column family.
+    fn put_cf(
+        &self,
+        cf: &rocksdb::ColumnFamily,
+        key: impl AsRef<[u8]>,
+        value: impl AsRef<[u8]>,
+    ) -> Result<(), rocksdb::Error> {
+        self.db_rw().put_cf(cf, key, value)
+    }
+
+    /// Deletes a value from a column family.
+    fn delete_cf(
+        &self,
+        cf: &rocksdb::ColumnFamily,
+        key: impl AsRef<[u8]>,
+    ) -> Result<(), rocksdb::Error> {
+        self.db_rw().delete_cf(cf, key)
+    }
+
+    /// Returns an iterator over a column family.
+    fn iterator_cf(
+        &self,
+        cf: &rocksdb::ColumnFamily,
+        mode: IteratorMode<'_>,
+    ) -> rocksdb::DBIteratorWithThreadMode<'_, OptimisticTransactionDB> {
+        match self {
+            Self::ReadWrite { db, .. } => db.iterator_cf(cf, mode),
+            Self::ReadOnly { .. } => {
+                panic!("iterator_cf not directly supported on read-only DB, use raw_iterator_cf")
+            }
+        }
+    }
+
+    /// Returns a raw iterator over a column family.
+    fn raw_iterator_cf<'a>(
+        &'a self,
+        cf: &rocksdb::ColumnFamily,
+    ) -> DBRawIteratorWithThreadMode<'a, OptimisticTransactionDB> {
+        match self {
+            Self::ReadWrite { db, .. } => db.raw_iterator_cf(cf),
+            Self::ReadOnly { .. } => {
+                panic!("raw_iterator_cf requires type changes for read-only mode")
+            }
+        }
     }
 }
 
@@ -317,14 +458,22 @@ impl RocksDBProvider {
         RocksDBBuilder::new(path)
     }
 
+    /// Returns `true` if this provider is in read-only mode.
+    pub fn is_read_only(&self) -> bool {
+        matches!(self.0.as_ref(), RocksDBProviderInner::ReadOnly { .. })
+    }
+
     /// Creates a new transaction with MDBX-like semantics (read-your-writes, rollback).
     ///
     /// Note: With `OptimisticTransactionDB`, commits may fail if there are conflicts.
     /// Conflict detection happens at commit time, not at write time.
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
     pub fn tx(&self) -> RocksTx<'_> {
         let write_options = WriteOptions::default();
         let txn_options = OptimisticTransactionOptions::default();
-        let inner = self.0.db.transaction_opt(&write_options, &txn_options);
+        let inner = self.0.db_rw().transaction_opt(&write_options, &txn_options);
         RocksTx { inner, provider: self }
     }
 
@@ -332,6 +481,9 @@ impl RocksDBProvider {
     ///
     /// Use [`Self::write_batch`] for closure-based atomic writes.
     /// Use this method when the batch needs to be held by [`crate::EitherWriter`].
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode when attempting to commit.
     pub fn batch(&self) -> RocksDBBatch<'_> {
         RocksDBBatch {
             provider: self,
@@ -342,23 +494,20 @@ impl RocksDBProvider {
 
     /// Gets the column family handle for a table.
     fn get_cf_handle<T: Table>(&self) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
-        self.0
-            .db
-            .cf_handle(T::NAME)
-            .ok_or_else(|| DatabaseError::Other(format!("Column family '{}' not found", T::NAME)))
+        self.0.cf_handle::<T>()
     }
 
     /// Executes a function and records metrics with the given operation and table name.
-    fn execute_with_operation_metric<T>(
+    fn execute_with_operation_metric<R>(
         &self,
         operation: RocksDBOperation,
         table: &'static str,
-        f: impl FnOnce(&Self) -> T,
-    ) -> T {
-        let start = self.0.metrics.as_ref().map(|_| Instant::now());
+        f: impl FnOnce(&Self) -> R,
+    ) -> R {
+        let start = self.0.metrics().map(|_| Instant::now());
         let res = f(self);
 
-        if let (Some(start), Some(metrics)) = (start, &self.0.metrics) {
+        if let (Some(start), Some(metrics)) = (start, self.0.metrics()) {
             metrics.record_operation(operation, table, start.elapsed());
         }
 
@@ -376,25 +525,30 @@ impl RocksDBProvider {
         key: &<T::Key as Encode>::Encoded,
     ) -> ProviderResult<Option<T::Value>> {
         self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
-            let result =
-                this.0.db.get_cf(this.get_cf_handle::<T>()?, key.as_ref()).map_err(|e| {
-                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    }))
-                })?;
+            let result = this.0.get_cf(this.get_cf_handle::<T>()?, key.as_ref()).map_err(|e| {
+                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
 
             Ok(result.and_then(|value| T::Value::decompress(&value).ok()))
         })
     }
 
     /// Puts upsert a value into the specified table with the given key.
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
     pub fn put<T: Table>(&self, key: T::Key, value: &T::Value) -> ProviderResult<()> {
         let encoded_key = key.encode();
         self.put_encoded::<T>(&encoded_key, value)
     }
 
     /// Puts a value into the specified table using pre-encoded key.
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
     pub fn put_encoded<T: Table>(
         &self,
         key: &<T::Key as Encode>::Encoded,
@@ -407,7 +561,7 @@ impl RocksDBProvider {
             let mut buf = Vec::new();
             let value_bytes = compress_to_buf_or_ref!(buf, value).unwrap_or(&buf);
 
-            this.0.db.put_cf(this.get_cf_handle::<T>()?, key, value_bytes).map_err(|e| {
+            this.0.put_cf(this.get_cf_handle::<T>()?, key, value_bytes).map_err(|e| {
                 ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
                     info: DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
                     operation: DatabaseWriteOperation::PutUpsert,
@@ -419,9 +573,12 @@ impl RocksDBProvider {
     }
 
     /// Deletes a value from the specified table.
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
     pub fn delete<T: Table>(&self, key: T::Key) -> ProviderResult<()> {
         self.execute_with_operation_metric(RocksDBOperation::Delete, T::NAME, |this| {
-            this.0.db.delete_cf(this.get_cf_handle::<T>()?, key.encode().as_ref()).map_err(|e| {
+            this.0.delete_cf(this.get_cf_handle::<T>()?, key.encode().as_ref()).map_err(|e| {
                 ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
                     message: e.to_string().into(),
                     code: -1,
@@ -431,10 +588,12 @@ impl RocksDBProvider {
     }
 
     /// Gets the first (smallest key) entry from the specified table.
+    ///
+    /// Note: This method is only available in read-write mode.
     pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
         self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
             let cf = this.get_cf_handle::<T>()?;
-            let mut iter = this.0.db.iterator_cf(cf, IteratorMode::Start);
+            let mut iter = this.0.iterator_cf(cf, IteratorMode::Start);
 
             match iter.next() {
                 Some(Ok((key_bytes, value_bytes))) => {
@@ -456,10 +615,12 @@ impl RocksDBProvider {
     }
 
     /// Gets the last (largest key) entry from the specified table.
+    ///
+    /// Note: This method is only available in read-write mode.
     pub fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
         self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
             let cf = this.get_cf_handle::<T>()?;
-            let mut iter = this.0.db.iterator_cf(cf, IteratorMode::End);
+            let mut iter = this.0.iterator_cf(cf, IteratorMode::End);
 
             match iter.next() {
                 Some(Ok((key_bytes, value_bytes))) => {
@@ -483,9 +644,11 @@ impl RocksDBProvider {
     /// Creates an iterator over all entries in the specified table.
     ///
     /// Returns decoded `(Key, Value)` pairs in key order.
+    ///
+    /// Note: This method is only available in read-write mode.
     pub fn iter<T: Table>(&self) -> ProviderResult<RocksDBIter<'_, T>> {
         let cf = self.get_cf_handle::<T>()?;
-        let iter = self.0.db.iterator_cf(cf, IteratorMode::Start);
+        let iter = self.0.iterator_cf(cf, IteratorMode::Start);
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
     }
 
@@ -505,8 +668,11 @@ impl RocksDBProvider {
     ///
     /// This is used when the batch was extracted via [`RocksDBBatch::into_inner`]
     /// and needs to be committed at a later point (e.g., at provider commit time).
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
-        self.0.db.write_opt(batch, &WriteOptions::default()).map_err(|e| {
+        self.0.db_rw().write_opt(batch, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,

@@ -121,11 +121,17 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                 })
             }
         };
-        // TransactionDB only support read-write mode
-        let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
-            .with_default_tables()
-            .with_database_log_level(self.db.log_level)
-            .build()?;
+        let rocksdb_provider = if access.is_read_write() {
+            RocksDBProvider::builder(data_dir.rocksdb())
+                .with_default_tables()
+                .with_database_log_level(self.db.log_level)
+                .build()?
+        } else {
+            RocksDBProvider::builder(data_dir.rocksdb())
+                .with_default_tables()
+                .with_database_log_level(self.db.log_level)
+                .build_read_only()?
+        };
 
         let provider_factory =
             self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;

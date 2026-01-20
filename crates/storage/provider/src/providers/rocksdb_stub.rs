@@ -106,6 +106,11 @@ impl RocksDBBuilder {
     pub const fn build(self) -> ProviderResult<RocksDBProvider> {
         Ok(RocksDBProvider)
     }
+
+    /// Build a read-only `RocksDB` provider (stub implementation).
+    pub const fn build_read_only(self) -> ProviderResult<RocksDBProvider> {
+        Ok(RocksDBProvider)
+    }
 }
 
 /// A stub transaction for `RocksDB`.
