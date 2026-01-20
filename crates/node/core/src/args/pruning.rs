@@ -80,9 +80,9 @@ impl Default for DefaultPruningValues {
                 sender_recovery: Some(PruneMode::Full),
                 transaction_lookup: Some(PruneMode::Full),
                 receipts: Some(PruneMode::Full),
-                account_history: Some(PruneMode::Distance(10064)),
-                storage_history: Some(PruneMode::Distance(10064)),
-                bodies_history: Some(PruneMode::Distance(10064)),
+                account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                bodies_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                 receipts_log_filter: Default::default(),
             },
         }
