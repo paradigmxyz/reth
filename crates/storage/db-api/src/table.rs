@@ -185,7 +185,7 @@ pub trait Compress: Send + Sync + Sized + Debug {
 
     /// Returns the exact number of bytes that [`Compress::compress_to_buf`] will write.
     ///
-    /// This is used by [`mdbx::reserve`] to allocate the exact buffer size needed.
+    /// This is used by MDBX reserve operations to allocate the exact buffer size needed.
     /// The default implementation uses a [`CountingBuf`] to compute the size without allocating.
     ///
     /// # Important
