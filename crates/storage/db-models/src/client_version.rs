@@ -25,10 +25,7 @@ impl ClientVersion {
 
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for ClientVersion {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         let version_size = self.version.to_compact(buf);
         let git_sha_size = self.git_sha.to_compact(buf);
         let build_timestamp_size = self.build_timestamp.to_compact(buf);

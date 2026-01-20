@@ -34,10 +34,7 @@ pub(crate) struct TxEip2930 {
 }
 
 impl Compact for AlloyTxEip2930 {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         let tx = TxEip2930 {
             chain_id: self.chain_id,
             nonce: self.nonce,

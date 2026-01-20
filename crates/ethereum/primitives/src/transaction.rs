@@ -220,10 +220,7 @@ impl InMemorySize for Transaction {
 impl reth_codecs::Compact for Transaction {
     // Serializes the TxType to the buffer if necessary, returning 2 bits of the type as an
     // identifier instead of the length.
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: alloy_rlp::bytes::BufMut>(&self, buf: &mut B) -> usize {
         let identifier = self.tx_type().to_compact(buf);
         delegate!(self => tx.to_compact(buf));
         identifier
@@ -560,10 +557,7 @@ impl Decodable for TransactionSigned {
 
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for TransactionSigned {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: alloy_rlp::bytes::BufMut>(&self, buf: &mut B) -> usize {
         use alloy_consensus::Transaction;
 
         let start = buf.as_mut().len();

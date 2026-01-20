@@ -416,10 +416,7 @@ impl Hash for OpTransactionSigned {
 
 #[cfg(feature = "reth-codec")]
 impl reth_codecs::Compact for OpTransactionSigned {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         let start = buf.as_mut().len();
 
         // Placeholder for bitflags.

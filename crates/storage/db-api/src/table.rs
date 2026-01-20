@@ -77,18 +77,10 @@ unsafe impl BufMut for CountingBuf {
     }
 }
 
-impl AsMut<[u8]> for CountingBuf {
-    #[inline]
-    fn as_mut(&mut self) -> &mut [u8] {
-        &mut []
-    }
-}
-
 /// A [`BufMut`] that writes directly into a caller-provided `&mut [u8]`.
 ///
 /// Used to serialize values directly into MDBX-managed memory.
-/// Unlike a simple slice, this tracks the write position and provides
-/// access to the written portion via `AsMut<[u8]>`.
+/// This tracks the write position.
 #[derive(Debug)]
 pub struct SliceBuf<'a> {
     /// The full buffer.
@@ -142,24 +134,10 @@ unsafe impl BufMut for SliceBuf<'_> {
     }
 }
 
-impl AsMut<[u8]> for SliceBuf<'_> {
-    #[inline]
-    fn as_mut(&mut self) -> &mut [u8] {
-        &mut self.buf[..self.pos]
-    }
-}
-
 /// Trait that will transform the data to be saved in the DB in a (ideally) compressed format
 pub trait Compress: Send + Sync + Sized + Debug {
     /// Compressed type.
-    type Compressed: bytes::BufMut
-        + AsRef<[u8]>
-        + AsMut<[u8]>
-        + Into<Vec<u8>>
-        + Default
-        + Send
-        + Sync
-        + Debug;
+    type Compressed: bytes::BufMut + AsRef<[u8]> + Into<Vec<u8>> + Default + Send + Sync + Debug;
 
     /// If the type cannot be compressed, return its inner reference as `Some(self.as_ref())`
     fn uncompressable_ref(&self) -> Option<&[u8]> {
@@ -192,7 +170,7 @@ pub trait Compress: Send + Sync + Sized + Debug {
     }
 
     /// Compresses data to a given buffer.
-    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B);
+    fn compress_to_buf<B: bytes::BufMut>(&self, buf: &mut B);
 }
 
 /// Trait that will transform the data to be read from the DB.

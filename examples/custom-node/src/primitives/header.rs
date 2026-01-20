@@ -147,10 +147,7 @@ impl InMemorySize for CustomHeader {
 }
 
 impl reth_codecs::Compact for CustomHeader {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: alloy_rlp::bytes::BufMut>(&self, buf: &mut B) -> usize {
         let identifier = self.inner.to_compact(buf);
         self.extension.to_compact(buf);
 
@@ -167,7 +164,7 @@ impl reth_codecs::Compact for CustomHeader {
 impl reth_db_api::table::Compress for CustomHeader {
     type Compressed = Vec<u8>;
 
-    fn compress_to_buf<B: alloy_primitives::bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
+    fn compress_to_buf<B: alloy_primitives::bytes::BufMut>(&self, buf: &mut B) {
         let _ = Compact::to_compact(self, buf);
     }
 }

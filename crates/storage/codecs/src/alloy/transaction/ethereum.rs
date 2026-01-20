@@ -19,7 +19,7 @@ pub trait ToTxCompact {
     ///
     /// The written bytes do not contain signature and transaction type. This information be needs
     /// to be serialized extra if needed.
-    fn to_tx_compact(&self, buf: &mut (impl BufMut + AsMut<[u8]>));
+    fn to_tx_compact(&self, buf: &mut impl BufMut);
 }
 
 /// A trait for deserializing transaction without type and signature using [`Compact`] encoding.
@@ -46,7 +46,7 @@ pub trait FromTxCompact {
 }
 
 impl<Eip4844: Compact + Transaction> ToTxCompact for EthereumTxEnvelope<Eip4844> {
-    fn to_tx_compact(&self, buf: &mut (impl BufMut + AsMut<[u8]>)) {
+    fn to_tx_compact(&self, buf: &mut impl BufMut) {
         match self {
             Self::Legacy(tx) => tx.tx().to_compact(buf),
             Self::Eip2930(tx) => tx.tx().to_compact(buf),
@@ -115,9 +115,7 @@ impl<Eip4844: Compact + Transaction + RlpEcdsaEncodableTx> Envelope
 /// Compact serialization for transaction envelopes with compression and bitfield packing.
 pub trait CompactEnvelope: Sized {
     /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: BufMut + AsMut<[u8]>;
+    fn to_compact<B: BufMut>(&self, buf: &mut B) -> usize;
 
     /// Takes a buffer which can be read from. Returns the object and `buf` with its internal cursor
     /// advanced (eg.`.advance(len)`).
@@ -129,10 +127,7 @@ pub trait CompactEnvelope: Sized {
 }
 
 impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for T {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: BufMut>(&self, buf: &mut B) -> usize {
         // Track bytes written via remaining capacity change
         let start_remaining = buf.remaining_mut();
 
@@ -228,10 +223,7 @@ impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for 
 impl<Eip4844: Compact + RlpEcdsaEncodableTx + Transaction + Send + Sync> Compact
     for EthereumTxEnvelope<Eip4844>
 {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: BufMut>(&self, buf: &mut B) -> usize {
         <Self as CompactEnvelope>::to_compact(self, buf)
     }
 
