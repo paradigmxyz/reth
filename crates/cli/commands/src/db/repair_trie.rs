@@ -163,7 +163,10 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
 }
 
 /// Checks that the merkle stage has completed running up to the account and storage hashing stages.
-fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> {
+fn verify_checkpoints<P>(provider: &P) -> eyre::Result<()>
+where
+    P: StageCheckpointReader + ?Sized,
+{
     let account_hashing_checkpoint =
         provider.get_stage_checkpoint(StageId::AccountHashing)?.unwrap_or_default();
     let storage_hashing_checkpoint =
@@ -199,15 +202,16 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
 }
 
 fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
+    // Check that a pipeline sync isn't in progress using a read-only provider.
+    // This is done before getting the read-write provider to avoid Sync bound issues.
+    let provider_ro = tool.provider_factory.provider()?;
+    let finish_checkpoint = provider_ro.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
+    info!("Database block tip: {}", finish_checkpoint.block_number);
+    verify_checkpoints(&provider_ro)?;
+    drop(provider_ro);
+
     // Get a read-write database provider
     let mut provider_rw = tool.provider_factory.provider_rw()?;
-
-    // Log the database block tip from Finish stage checkpoint
-    let finish_checkpoint = provider_rw.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
-    info!("Database block tip: {}", finish_checkpoint.block_number);
-
-    // Check that a pipeline sync isn't in progress.
-    verify_checkpoints(provider_rw.as_ref())?;
 
     // Create cursors for making modifications with
     let tx = provider_rw.tx_mut();

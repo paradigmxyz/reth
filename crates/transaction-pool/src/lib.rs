@@ -412,8 +412,11 @@ where
 
 impl<Client, S> EthTransactionPool<Client, S>
 where
-    Client:
-        ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static,
+    Client: ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + StateProviderFactory
+        + Clone
+        + Sync
+        + 'static,
     S: BlobStore,
 {
     /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when

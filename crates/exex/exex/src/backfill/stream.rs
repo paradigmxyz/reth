@@ -119,7 +119,7 @@ where
 impl<E, P> Stream for StreamBackfillJob<E, P, SingleBlockStreamItem<E::Primitives>>
 where
     E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
-    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + Sync + 'static,
 {
     type Item = BackfillJobResult<SingleBlockStreamItem<E::Primitives>>;
 
@@ -152,7 +152,7 @@ where
 impl<E, P> Stream for StreamBackfillJob<E, P, BatchBlockStreamItem<E::Primitives>>
 where
     E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
-    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + Sync + 'static,
 {
     type Item = BackfillJobResult<BatchBlockStreamItem<E::Primitives>>;
 

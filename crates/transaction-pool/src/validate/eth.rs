@@ -801,7 +801,7 @@ where
 
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
 where
-    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
+    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Sync,
     Tx: EthPoolTransaction,
 {
     type Transaction = Tx;

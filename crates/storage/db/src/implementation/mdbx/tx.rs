@@ -40,6 +40,11 @@ pub struct Tx<K: TransactionKind> {
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
+
+    /// Marker to make `Tx` `!Sync`. MDBX transactions are not thread-safe and should only be
+    /// accessed from the thread that created them. Use [`DbTx::clone_tx`] to create independent
+    /// transaction handles for use across threads.
+    _not_sync: PhantomData<std::cell::Cell<()>>,
 }
 
 impl<K: TransactionKind> Tx<K> {
@@ -59,7 +64,7 @@ impl<K: TransactionKind> Tx<K> {
                 Ok(handler)
             })
             .transpose()?;
-        Ok(Self { inner, dbis, metrics_handler })
+        Ok(Self { inner, dbis, metrics_handler, _not_sync: PhantomData })
     }
 
     /// Gets this transaction ID.
@@ -310,6 +315,7 @@ impl<K: TransactionKind> DbTx for Tx<K> {
             inner: cloned_inner,
             dbis: self.dbis.clone(),
             metrics_handler: self.metrics_handler.clone(),
+            _not_sync: PhantomData,
         })
     }
 

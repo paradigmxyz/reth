@@ -239,7 +239,7 @@ impl<Pool, Client, Evm, N, Txs, Attrs> PayloadBuilder
     for OpPayloadBuilder<Pool, Client, Evm, Txs, Attrs>
 where
     N: OpPayloadPrimitives,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks> + Clone,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks> + Clone + Sync,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
     Evm: ConfigureEvm<
         Primitives = N,

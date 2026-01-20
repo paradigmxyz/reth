@@ -56,7 +56,7 @@ pub trait BlockNumReader: BlockHashReader + Send {
 /// The resulting block numbers can be converted to hashes using the underlying [`BlockNumReader`]
 /// methods, and vice versa.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockIdReader: BlockNumReader + Send + Sync {
+pub trait BlockIdReader: BlockNumReader + Send {
     /// Converts the `BlockNumberOrTag` variants to a block number.
     fn convert_block_number(&self, num: BlockNumberOrTag) -> ProviderResult<Option<BlockNumber>> {
         let num = match num {

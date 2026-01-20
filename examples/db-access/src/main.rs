@@ -39,8 +39,8 @@ fn main() -> eyre::Result<()> {
     txs_provider_example(&provider)?;
     receipts_provider_example(&provider)?;
 
-    state_provider_example(factory.latest()?, &provider, provider.best_block_number()?)?;
-    state_provider_example(factory.history_by_block_number(block_num)?, &provider, block_num)?;
+    state_provider_example(&factory.latest()?, &provider, provider.best_block_number()?)?;
+    state_provider_example(&factory.history_by_block_number(block_num)?, &provider, block_num)?;
 
     // Closes the RO transaction opened in the `factory.provider()` call. This is optional and
     // would happen anyway at the end of the function scope.
@@ -50,7 +50,7 @@ fn main() -> eyre::Result<()> {
 }
 
 /// The `HeaderProvider` allows querying the headers-related tables.
-fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre::Result<()> {
+fn header_provider_example(provider: &impl HeaderProvider, number: u64) -> eyre::Result<()> {
     // Can query the header by number
     let header = provider.header_by_number(number)?.ok_or(eyre::eyre!("header not found"))?;
 
@@ -71,8 +71,8 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
 }
 
 /// The `TransactionsProvider` allows querying transaction-related information
-fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>>(
-    provider: T,
+fn txs_provider_example(
+    provider: &impl TransactionsProvider<Transaction = TransactionSigned>,
 ) -> eyre::Result<()> {
     // Try the 5th tx
     let txid = 5;
@@ -104,8 +104,8 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
 }
 
 /// The `BlockReader` allows querying the headers-related tables.
-fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
-    provider: T,
+fn block_provider_example(
+    provider: &impl BlockReader<Block = reth_ethereum::Block>,
     number: u64,
 ) -> eyre::Result<()> {
     // Can query a block by number
@@ -144,12 +144,10 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
 }
 
 /// The `ReceiptProvider` allows querying the receipts tables.
-fn receipts_provider_example<
-    T: ReceiptProvider<Receipt = reth_ethereum::Receipt>
-        + TransactionsProvider<Transaction = TransactionSigned>
-        + HeaderProvider,
->(
-    provider: T,
+fn receipts_provider_example(
+    provider: &(impl ReceiptProvider<Receipt = reth_ethereum::Receipt>
+          + TransactionsProvider<Transaction = TransactionSigned>
+          + HeaderProvider),
 ) -> eyre::Result<()> {
     let txid = 5;
     let header_num = 100;
@@ -208,9 +206,9 @@ fn receipts_provider_example<
 }
 
 /// The `StateProvider` allows querying the state tables.
-fn state_provider_example<T: StateProvider + AccountReader, H: HeaderProvider>(
-    provider: T,
-    headers: &H,
+fn state_provider_example(
+    provider: &(impl StateProvider + AccountReader),
+    headers: &impl HeaderProvider,
     number: u64,
 ) -> eyre::Result<()> {
     let address = Address::random();

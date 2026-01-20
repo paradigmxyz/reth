@@ -354,7 +354,7 @@ pub struct CustomPayloadBuilder<Pool, Client> {
 
 impl<Pool, Client> PayloadBuilder for CustomPayloadBuilder<Pool, Client>
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone + Sync,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = CustomPayloadBuilderAttributes;
