@@ -182,7 +182,7 @@ impl EthBuiltPayload {
             execution_payload: ExecutionPayloadV4::from_block_unchecked_with_bal(
                 block.hash(),
                 &Arc::unwrap_or_clone(block).into_block(),
-                block_access_list.unwrap_or_default(),
+                alloy_rlp::encode(block_access_list.unwrap_or_default()).into(),
             ),
             block_value: fees,
             // From the engine API spec:

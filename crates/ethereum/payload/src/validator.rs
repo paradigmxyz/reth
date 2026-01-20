@@ -3,7 +3,7 @@
 use alloy_consensus::Block;
 use alloy_rpc_types_engine::{ExecutionData, PayloadError};
 use reth_chainspec::EthereumHardforks;
-use reth_payload_validator::{amsterdam, cancun, prague, shanghai};
+use reth_payload_validator::{cancun, prague, shanghai};
 use reth_primitives_traits::{Block as _, SealedBlock, SignedTransaction};
 use std::sync::Arc;
 
@@ -102,11 +102,6 @@ where
         sidecar.prague(),
         chain_spec.is_prague_active_at_timestamp(sealed_block.timestamp),
     )?;
-
-    // amsterdam::ensure_well_formed_fields(
-    //     sealed_block.body(),
-    //     chain_spec.is_amsterdam_active_at_timestamp(sealed_block.timestamp),
-    // )?;
 
     Ok(sealed_block)
 }
