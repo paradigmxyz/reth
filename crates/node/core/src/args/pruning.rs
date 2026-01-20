@@ -5,10 +5,7 @@ use alloy_primitives::{Address, BlockNumber};
 use clap::{builder::RangedU64ValueParser, Args};
 use reth_chainspec::EthereumHardforks;
 use reth_config::config::PruneConfig;
-use reth_prune_types::{
-    PruneMode, PruneModes, ReceiptsLogPruneConfig, MERKLE_CHANGESETS_RETENTION_BLOCKS,
-    MINIMUM_PRUNING_DISTANCE,
-};
+use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
 use std::{collections::BTreeMap, ops::Not};
 
 /// Parameters for pruning and full node
@@ -16,8 +13,17 @@ use std::{collections::BTreeMap, ops::Not};
 #[command(next_help_heading = "Pruning")]
 pub struct PruningArgs {
     /// Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored.
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, conflicts_with = "minimal")]
     pub full: bool,
+
+    /// Run minimal storage mode with maximum pruning and smaller static files.
+    ///
+    /// This mode configures the node to use minimal disk space by:
+    /// - Fully pruning sender recovery, transaction lookup, receipts
+    /// - Leaving 10,064 blocks for account, storage history and block bodies
+    /// - Using 10,000 blocks per static file segment
+    #[arg(long, default_value_t = false, conflicts_with = "full")]
+    pub minimal: bool,
 
     /// Minimum pruning interval measured in blocks.
     #[arg(long = "prune.block-interval", alias = "block-interval", value_parser = RangedU64ValueParser::<u64>::new().range(1..))]
@@ -134,7 +140,22 @@ impl PruningArgs {
                         .ethereum_fork_activation(EthereumHardfork::Paris)
                         .block_number()
                         .map(PruneMode::Before),
-                    merkle_changesets: PruneMode::Distance(MERKLE_CHANGESETS_RETENTION_BLOCKS),
+                    receipts_log_filter: Default::default(),
+                },
+            }
+        }
+
+        // If --minimal is set, use minimal storage mode with aggressive pruning.
+        if self.minimal {
+            config = PruneConfig {
+                block_interval: config.block_interval,
+                segments: PruneModes {
+                    sender_recovery: Some(PruneMode::Full),
+                    transaction_lookup: Some(PruneMode::Full),
+                    receipts: Some(PruneMode::Full),
+                    account_history: Some(PruneMode::Distance(10064)),
+                    storage_history: Some(PruneMode::Distance(10064)),
+                    bodies_history: Some(PruneMode::Distance(10064)),
                     receipts_log_filter: Default::default(),
                 },
             }

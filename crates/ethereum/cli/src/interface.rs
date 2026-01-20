@@ -19,7 +19,7 @@ use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
-    args::{LogArgs, OtlpInitStatus, TraceArgs},
+    args::{LogArgs, OtlpInitStatus, OtlpLogsStatus, TraceArgs},
     version::version_metadata,
 };
 use reth_node_metrics::recorder::install_prometheus_recorder;
@@ -223,16 +223,19 @@ impl<
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
     ///
-    /// If an OTLP endpoint is specified, it will export metrics to the configured collector.
+    /// If an OTLP endpoint is specified, it will export traces and logs to the configured
+    /// collector.
     pub fn init_tracing(
         &mut self,
         runner: &CliRunner,
         mut layers: Layers,
     ) -> eyre::Result<Option<FileWorkerGuard>> {
         let otlp_status = runner.block_on(self.traces.init_otlp_tracing(&mut layers))?;
+        let otlp_logs_status = runner.block_on(self.traces.init_otlp_logs(&mut layers))?;
 
         let guard = self.logs.init_tracing_with_layers(layers)?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
+
         match otlp_status {
             OtlpInitStatus::Started(endpoint) => {
                 info!(target: "reth::cli", "Started OTLP {:?} tracing export to {endpoint}", self.traces.protocol);
@@ -241,6 +244,16 @@ impl<
                 warn!(target: "reth::cli", "Provided OTLP tracing arguments do not have effect, compile with the `otlp` feature")
             }
             OtlpInitStatus::Disabled => {}
+        }
+
+        match otlp_logs_status {
+            OtlpLogsStatus::Started(endpoint) => {
+                info!(target: "reth::cli", "Started OTLP {:?} logs export to {endpoint}", self.traces.protocol);
+            }
+            OtlpLogsStatus::NoFeature => {
+                warn!(target: "reth::cli", "Provided OTLP logs arguments do not have effect, compile with the `otlp-logs` feature")
+            }
+            OtlpLogsStatus::Disabled => {}
         }
 
         Ok(guard)

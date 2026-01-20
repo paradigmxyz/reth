@@ -249,6 +249,14 @@ impl<T> ExecutionOutcome<T> {
         &self.receipts[index]
     }
 
+    /// Returns an iterator over receipt slices, one per block.
+    ///
+    /// This is a more ergonomic alternative to `receipts()` that yields slices
+    /// instead of requiring indexing into a nested `Vec<Vec<T>>`.
+    pub fn receipts_iter(&self) -> impl Iterator<Item = &[T]> + '_ {
+        self.receipts.iter().map(|v| v.as_slice())
+    }
+
     /// Is execution outcome empty.
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
@@ -934,10 +942,20 @@ mod tests {
         let address3 = Address::random();
 
         // Set up account info with some changes
-        let account_info1 =
-            AccountInfo { nonce: 1, balance: U256::from(100), code_hash: B256::ZERO, code: None };
-        let account_info2 =
-            AccountInfo { nonce: 2, balance: U256::from(200), code_hash: B256::ZERO, code: None };
+        let account_info1 = AccountInfo {
+            nonce: 1,
+            balance: U256::from(100),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        };
+        let account_info2 = AccountInfo {
+            nonce: 2,
+            balance: U256::from(200),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        };
 
         // Set up the bundle state with these accounts
         let mut bundle_state = BundleState::default();

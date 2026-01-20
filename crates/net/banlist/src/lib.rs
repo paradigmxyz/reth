@@ -106,7 +106,7 @@ impl BanList {
         self.banned_ips.contains_key(ip)
     }
 
-    /// checks the ban list to see if it contains the given ip
+    /// checks the ban list to see if it contains the given peer
     #[inline]
     pub fn is_banned_peer(&self, peer_id: &PeerId) -> bool {
         self.banned_peers.contains_key(peer_id)
@@ -117,7 +117,7 @@ impl BanList {
         self.banned_ips.remove(ip);
     }
 
-    /// Unbans the ip address
+    /// Unbans the peer
     pub fn unban_peer(&mut self, peer_id: &PeerId) {
         self.banned_peers.remove(peer_id);
     }

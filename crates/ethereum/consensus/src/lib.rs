@@ -15,7 +15,7 @@ use alloc::{fmt::Debug, sync::Arc};
 use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
+use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
     validate_against_parent_eip1559_base_fee, validate_against_parent_gas_limit,
@@ -74,8 +74,15 @@ where
         &self,
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
+        receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, &result.receipts, &result.requests)
+        validate_block_post_execution(
+            block,
+            &self.chain_spec,
+            &result.receipts,
+            &result.requests,
+            receipt_root_bloom,
+        )
     }
 }
 
@@ -226,10 +233,12 @@ mod tests {
         let parent = header_with_gas_limit(GAS_LIMIT_BOUND_DIVISOR * 10);
         let child = header_with_gas_limit((parent.gas_limit + 5) as u64);
 
-        assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
-            Ok(())
-        );
+        assert!(validate_against_parent_gas_limit(
+            &child,
+            &parent,
+            &ChainSpec::<Header>::default()
+        )
+        .is_ok());
     }
 
     #[test]
@@ -237,10 +246,11 @@ mod tests {
         let parent = header_with_gas_limit(MINIMUM_GAS_LIMIT);
         let child = header_with_gas_limit(MINIMUM_GAS_LIMIT - 1);
 
-        assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
-            Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit as u64 })
-        );
+        assert!(matches!(
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()).unwrap_err(),
+            ConsensusError::GasLimitInvalidMinimum { child_gas_limit }
+                if child_gas_limit == child.gas_limit as u64
+        ));
     }
 
     #[test]
@@ -250,13 +260,11 @@ mod tests {
             parent.gas_limit + parent.gas_limit / GAS_LIMIT_BOUND_DIVISOR + 1,
         );
 
-        assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
-            Err(ConsensusError::GasLimitInvalidIncrease {
-                parent_gas_limit: parent.gas_limit,
-                child_gas_limit: child.gas_limit,
-            })
-        );
+        assert!(matches!(
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()).unwrap_err(),
+            ConsensusError::GasLimitInvalidIncrease { parent_gas_limit, child_gas_limit }
+                if parent_gas_limit == parent.gas_limit && child_gas_limit == child.gas_limit
+        ));
     }
 
     #[test]
@@ -264,10 +272,12 @@ mod tests {
         let parent = header_with_gas_limit(GAS_LIMIT_BOUND_DIVISOR * 10);
         let child = header_with_gas_limit(parent.gas_limit - 5);
 
-        assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
-            Ok(())
-        );
+        assert!(validate_against_parent_gas_limit(
+            &child,
+            &parent,
+            &ChainSpec::<Header>::default()
+        )
+        .is_ok());
     }
 
     #[test]
@@ -277,13 +287,11 @@ mod tests {
             parent.gas_limit - parent.gas_limit / GAS_LIMIT_BOUND_DIVISOR - 1,
         );
 
-        assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()),
-            Err(ConsensusError::GasLimitInvalidDecrease {
-                parent_gas_limit: parent.gas_limit,
-                child_gas_limit: child.gas_limit,
-            })
-        );
+        assert!(matches!(
+            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::<Header>::default()).unwrap_err(),
+            ConsensusError::GasLimitInvalidDecrease { parent_gas_limit, child_gas_limit }
+                if parent_gas_limit == parent.gas_limit && child_gas_limit == child.gas_limit
+        ));
     }
 
     #[test]
@@ -298,9 +306,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(
-            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::seal_slow(header,)),
-            Ok(())
-        );
+        assert!(EthBeaconConsensus::new(chain_spec)
+            .validate_header(&SealedHeader::seal_slow(header,))
+            .is_ok());
     }
 }

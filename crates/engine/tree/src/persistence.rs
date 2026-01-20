@@ -7,7 +7,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
-    DBProvider, DatabaseProviderFactory, ProviderFactory,
+    DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
 };
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -151,7 +151,7 @@ where
         if last_block.is_some() {
             let provider_rw = self.provider.database_provider_rw()?;
 
-            provider_rw.save_blocks(blocks)?;
+            provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
             provider_rw.commit()?;
         }
 
@@ -159,6 +159,7 @@ where
 
         self.metrics.save_blocks_block_count.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
+
         Ok(last_block)
     }
 }

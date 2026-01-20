@@ -30,11 +30,13 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
-    BlockReader, DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StateProviderBox,
-    StateProviderFactory, StateReader, TransactionVariant, TrieReader,
+    BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader, ChangeSetReader,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
+    StateProviderBox, StateProviderFactory, StateReader, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
+use reth_trie_db::ChangesetCache;
 use revm::state::EvmState;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Instant};
@@ -271,6 +273,8 @@ where
     engine_kind: EngineApiKind,
     /// The EVM configuration.
     evm_config: C,
+    /// Changeset cache for in-memory trie changesets
+    changeset_cache: ChangesetCache,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -295,6 +299,7 @@ where
             .field("metrics", &self.metrics)
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
+            .field("changeset_cache", &self.changeset_cache)
             .finish()
     }
 }
@@ -307,11 +312,12 @@ where
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
         + HashedPostStateProvider
-        + TrieReader
         + Clone
         + 'static,
-    <P as DatabaseProviderFactory>::Provider:
-        BlockReader<Block = N::Block, Header = N::BlockHeader>,
+    <P as DatabaseProviderFactory>::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
+        + StageCheckpointReader
+        + ChangeSetReader
+        + BlockNumReader,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
     V: EngineValidator<T>,
@@ -331,6 +337,7 @@ where
         config: TreeConfig,
         engine_kind: EngineApiKind,
         evm_config: C,
+        changeset_cache: ChangesetCache,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -351,6 +358,7 @@ where
             incoming_tx,
             engine_kind,
             evm_config,
+            changeset_cache,
         }
     }
 
@@ -370,6 +378,7 @@ where
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
+        changeset_cache: ChangesetCache,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -401,6 +410,7 @@ where
             config,
             kind,
             evm_config,
+            changeset_cache,
         );
         let incoming = task.incoming_tx.clone();
         std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();
@@ -1365,6 +1375,21 @@ where
 
         debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
+
+        // Evict trie changesets for blocks below the finalized block, but keep at least 64 blocks
+        if let Some(finalized) = self.canonical_in_memory_state.get_finalized_num_hash() {
+            let min_threshold = last_persisted_block_number.saturating_sub(64);
+            let eviction_threshold = finalized.number.min(min_threshold);
+            debug!(
+                target: "engine::tree",
+                last_persisted = last_persisted_block_number,
+                finalized_number = finalized.number,
+                eviction_threshold,
+                "Evicting changesets below threshold"
+            );
+            self.changeset_cache.evict(eviction_threshold);
+        }
+
         self.on_new_persisted_block()?;
         Ok(())
     }
@@ -1453,7 +1478,7 @@ where
 
                                 self.metrics.engine.forkchoice_updated.update_response_metrics(
                                     start,
-                                    &mut self.metrics.engine.new_payload.latest_at,
+                                    &mut self.metrics.engine.new_payload.latest_finish_at,
                                     has_attrs,
                                     &output,
                                 );
@@ -1651,6 +1676,18 @@ where
                 )));
                 return Ok(());
             }
+        } else {
+            // We don't have the head block or any of its ancestors buffered. Request
+            // a download for the head block which will then trigger further sync.
+            debug!(
+                target: "engine::tree",
+                head_hash = %sync_target_state.head_block_hash,
+                "Backfill complete but head block not buffered, requesting download"
+            );
+            self.emit_event(EngineApiEvent::Download(DownloadRequest::single_block(
+                sync_target_state.head_block_hash,
+            )));
+            return Ok(());
         }
 
         // try to close the gap by executing buffered blocks that are child blocks of the new head
@@ -1818,6 +1855,7 @@ where
     /// or the database. If the required historical data (such as trie change sets) has been
     /// pruned for a given block, this operation will return an error. On archive nodes, it
     /// can retrieve any block.
+    #[instrument(level = "debug", target = "engine::tree", skip(self))]
     fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock<N>>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
@@ -1830,12 +1868,23 @@ where
             .sealed_block_with_senders(hash.into(), TransactionVariant::WithHash)?
             .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?
             .split_sealed();
-        let execution_output = self
+        let mut execution_output = self
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
         let hashed_state = self.provider.hashed_post_state(execution_output.state());
-        let trie_updates = self.provider.get_block_trie_updates(block.number())?;
+
+        debug!(
+            target: "engine::tree",
+            number = ?block.number(),
+            "computing block trie updates",
+        );
+        let db_provider = self.provider.database_provider_ro()?;
+        let trie_updates = reth_trie_db::compute_block_trie_updates(
+            &self.changeset_cache,
+            &db_provider,
+            block.number(),
+        )?;
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
@@ -1843,9 +1892,19 @@ where
         let trie_data =
             ComputedTrieData::without_trie_input(sorted_hashed_state, sorted_trie_updates);
 
+        let execution_output = Arc::new(BlockExecutionOutput {
+            state: execution_output.bundle,
+            result: BlockExecutionResult {
+                receipts: execution_output.receipts.pop().unwrap_or_default(),
+                requests: execution_output.requests.pop().unwrap_or_default(),
+                gas_used: block.gas_used(),
+                blob_gas_used: block.blob_gas_used().unwrap_or_default(),
+            },
+        });
+
         Ok(Some(ExecutedBlock::new(
             Arc::new(RecoveredBlock::new_sealed(block, senders)),
-            Arc::new(execution_output),
+            execution_output,
             trie_data,
         )))
     }
