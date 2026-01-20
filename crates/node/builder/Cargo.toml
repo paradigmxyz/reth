@@ -128,3 +128,4 @@ op = [
     "reth-evm/op",
     "reth-primitives-traits/op",
 ]
+edge = ["reth-db-common/edge"]

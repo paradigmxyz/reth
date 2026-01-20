@@ -42,7 +42,11 @@ use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_db_common::init::{init_genesis_with_settings, InitStorageError};
+#[cfg(feature = "edge")]
+use reth_db_common::init::init_genesis;
+#[cfg(not(feature = "edge"))]
+use reth_db_common::init::init_genesis_with_settings;
+use reth_db_common::init::InitStorageError;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
@@ -676,19 +680,29 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
-        init_genesis_with_settings(
-            self.provider_factory(),
-            self.node_config().static_files.to_settings(),
-        )?;
+        self.init_genesis()?;
         Ok(self)
     }
 
-    /// Write the genesis block and state if it has not already been written
+    /// Write the genesis block and state if it has not already been written.
+    ///
+    /// When compiled with the `edge` feature, this uses [`reth_db_common::init::init_genesis`]
+    /// which enables all static file storage optimizations (receipts, transaction senders,
+    /// and account changesets in static files).
+    ///
+    /// Otherwise, it uses the CLI-provided static file settings.
     pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
-        init_genesis_with_settings(
-            self.provider_factory(),
-            self.node_config().static_files.to_settings(),
-        )
+        #[cfg(feature = "edge")]
+        {
+            init_genesis(self.provider_factory())
+        }
+        #[cfg(not(feature = "edge"))]
+        {
+            init_genesis_with_settings(
+                self.provider_factory(),
+                self.node_config().static_files.to_settings(),
+            )
+        }
     }
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the
