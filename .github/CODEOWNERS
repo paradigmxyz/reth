@@ -45,7 +45,7 @@ crates/tracing/             @mattsse @shekhirin
 crates/tracing-otlp/        @mattsse
 crates/transaction-pool/    @mattsse @yongkangc
 crates/trie/                @Rjected @shekhirin @mediocregopher @yongkangc
-bin/reth/                   @mattsse @shekhirin
+bin/reth/                   @mattsse @shekhirin @Rjected 
 bin/reth-bench/             @mattsse @Rjected @shekhirin @yongkangc 
 bin/reth-bench-compare/     @mediocregopher @shekhirin @yongkangc
 etc/                        @Rjected @shekhirin
