@@ -16,7 +16,6 @@ use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    sync::Arc,
     time::SystemTime,
 };
 use tar::Builder;
@@ -184,8 +183,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         // Capture current time once for consistent timestamps throughout the report
         let now = SystemTime::now();
-        let now_secs =
-            now.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+        let now_secs = now.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
 
         // Determine output path (keep 'Z' suffix to indicate UTC timezone)
         let output_path = self.output.clone().unwrap_or_else(|| {
