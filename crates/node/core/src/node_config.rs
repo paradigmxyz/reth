@@ -414,6 +414,9 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             s = s.with_account_history_in_rocksdb(v);
         }
 
+        // Apply use_hashed_state from --db.use-hashed-state flag
+        s = s.with_use_hashed_state(self.db.use_hashed_state);
+
         s
     }
 

@@ -43,8 +43,9 @@ pub struct StorageSettings {
     /// - State reads come from hashed tables
     /// - `AccountHashingStage` and `StorageHashingStage` become no-ops
     ///
-    /// WARNING: This setting is only configurable at database creation; changing it later
-    /// requires re-syncing.
+    /// WARNING: This setting is only configurable at database creation. Changing from `true` to
+    /// `false` requires re-syncing. Changing from `false` to `true` also requires re-syncing
+    /// because the hashed state tables will be empty.
     #[serde(default)]
     pub use_hashed_state: bool,
 }
