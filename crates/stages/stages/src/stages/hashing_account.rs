@@ -145,7 +145,11 @@ where
     ///
     /// NOTE: This stage is now a no-op because the execution stage writes directly to
     /// HashedAccounts. This stage exists only for backwards compatibility with existing pipelines.
-    fn execute(&mut self, _provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        _provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError> {
         // Since execution now writes directly to HashedAccounts, this stage is a no-op.
         // Just report that we're done up to the target block.
         Ok(ExecOutput::done(input.checkpoint().with_block_number(input.target())))
