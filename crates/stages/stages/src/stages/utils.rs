@@ -553,7 +553,7 @@ where
 ///
 /// Uses `Option<(Address, B256)>` instead of default values as the sentinel to avoid
 /// incorrectly treating `(Address::ZERO, B256::ZERO)` as "no previous key".
-pub(crate) fn load_storage_history_via_writer<N, CURSOR>(
+pub(crate) fn load_storage_history<N, CURSOR>(
     mut collector: Collector<StorageShardedKey, BlockNumberList>,
     append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
@@ -564,6 +564,7 @@ where
         + DbCursorRO<reth_db_api::tables::StoragesHistory>,
 {
     let mut current_key: Option<(Address, B256)> = None;
+    // Accumulator for block numbers where the current (address, storage_key) changed.
     let mut current_list = Vec::<u64>::new();
 
     let total_entries = collector.len();
@@ -580,7 +581,9 @@ where
 
         let partial_key = (sharded_key.address, sharded_key.sharded_key.key);
 
+        // When (address, storage_key) changes, flush the previous key's shards and start fresh.
         if current_key != Some(partial_key) {
+            // Flush all remaining shards for the previous key (uses u64::MAX for last shard).
             if let Some((prev_addr, prev_storage_key)) = current_key {
                 flush_storage_history_shards(
                     prev_addr,
@@ -594,6 +597,8 @@ where
             current_key = Some(partial_key);
             current_list.clear();
 
+            // On incremental sync, merge with the existing last shard from the database.
+            // The last shard is stored with key (address, storage_key, u64::MAX) so we can find it.
             if !append_only &&
                 let Some(last_shard) =
                     writer.get_last_storage_history_shard(partial_key.0, partial_key.1)?
@@ -602,7 +607,10 @@ where
             }
         }
 
+        // Append new block numbers to the accumulator.
         current_list.extend(new_list.iter());
+
+        // Flush complete shards, keeping the last (partial) shard buffered.
         flush_storage_history_shards_partial(
             partial_key.0,
             partial_key.1,
@@ -612,6 +620,7 @@ where
         )?;
     }
 
+    // Flush the final key's remaining shard.
     if let Some((addr, storage_key)) = current_key {
         flush_storage_history_shards(addr, storage_key, &mut current_list, append_only, writer)?;
     }
@@ -622,7 +631,10 @@ where
 /// Flushes complete shards for storage history, keeping the trailing partial shard buffered.
 ///
 /// Only flushes when we have more than one shard's worth of data, keeping the last
-/// (possibly partial) shard for continued accumulation.
+/// (possibly partial) shard for continued accumulation. This avoids writing a shard
+/// that may need to be updated when more indices arrive.
+///
+/// Equivalent to [`load_indices`] with [`LoadMode::KeepLast`].
 fn flush_storage_history_shards_partial<N, CURSOR>(
     address: Address,
     storage_key: B256,
@@ -635,12 +647,15 @@ where
     CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
         + DbCursorRO<reth_db_api::tables::StoragesHistory>,
 {
+    // Nothing to flush if we haven't filled a complete shard yet.
     if list.len() <= NUM_OF_INDICES_IN_SHARD {
         return Ok(());
     }
 
     let num_full_shards = list.len() / NUM_OF_INDICES_IN_SHARD;
 
+    // Always keep at least one shard buffered for continued accumulation.
+    // If len is exact multiple of shard size, keep the last full shard.
     let shards_to_flush = if list.len().is_multiple_of(NUM_OF_INDICES_IN_SHARD) {
         num_full_shards - 1
     } else {
@@ -651,9 +666,11 @@ where
         return Ok(());
     }
 
+    // Split: flush the first N shards, keep the remainder buffered.
     let flush_len = shards_to_flush * NUM_OF_INDICES_IN_SHARD;
     let remainder = list.split_off(flush_len);
 
+    // Write each complete shard with its highest block number as the key.
     for chunk in list.chunks(NUM_OF_INDICES_IN_SHARD) {
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = StorageShardedKey::new(address, storage_key, highest);
@@ -666,6 +683,7 @@ where
         }
     }
 
+    // Keep the remaining indices for the next iteration.
     *list = remainder;
     Ok(())
 }
@@ -675,6 +693,8 @@ where
 /// The `u64::MAX` key for the final shard is an invariant that allows
 /// `seek_exact(address, storage_key, u64::MAX)` to find the last shard during incremental
 /// sync for merging with new indices.
+///
+/// Equivalent to [`load_indices`] with [`LoadMode::Flush`].
 fn flush_storage_history_shards<N, CURSOR>(
     address: Address,
     storage_key: B256,
@@ -695,6 +715,9 @@ where
 
     for (i, chunk) in list.chunks(NUM_OF_INDICES_IN_SHARD).enumerate() {
         let is_last = i == num_chunks - 1;
+
+        // Use u64::MAX for the final shard's key. This invariant allows incremental sync
+        // to find the last shard via seek_exact(address, storage_key, u64::MAX) for merging.
         let highest = if is_last { u64::MAX } else { *chunk.last().expect("chunk is non-empty") };
 
         let key = StorageShardedKey::new(address, storage_key, highest);
