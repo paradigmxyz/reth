@@ -88,16 +88,16 @@ mod tests {
         let block_num = 0x123456789ABCDEF0u64;
         let key = ShardedKey::new(addr, block_num);
 
-        let encoded = key.clone().encode();
+        let encoded = key.encode();
 
         // Verify it's stack-allocated (28 bytes)
         assert_eq!(encoded.len(), 28);
         assert_eq!(std::mem::size_of_val(&encoded), 28);
 
-        // Verify roundtrip
+        // Verify roundtrip (check against expected values since key was consumed)
         let decoded = ShardedKey::<Address>::decode(&encoded).unwrap();
-        assert_eq!(decoded.key, addr);
-        assert_eq!(decoded.highest_block_number, block_num);
+        assert_eq!(decoded.key, address!("0102030405060708091011121314151617181920"));
+        assert_eq!(decoded.highest_block_number, 0x123456789ABCDEF0u64);
     }
 
     #[test]
