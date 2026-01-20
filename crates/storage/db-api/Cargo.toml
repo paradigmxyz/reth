@@ -62,10 +62,6 @@ proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 criterion.workspace = true
 
-[[bench]]
-name = "sharded_key_encode"
-harness = false
-
 [features]
 test-utils = [
     "arbitrary",
