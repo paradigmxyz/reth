@@ -1134,8 +1134,13 @@ where
 
     /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
-    async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
-        Ok(self.capabilities().list())
+    async fn exchange_capabilities(&self, capabilities: Vec<String>) -> RpcResult<Vec<String>> {
+        trace!(target: "rpc::engine", "Serving engine_exchangeCapabilities");
+
+        let el_caps = self.capabilities();
+        el_caps.log_capability_mismatches(&capabilities);
+
+        Ok(el_caps.list())
     }
 
     async fn get_blobs_v1(
@@ -1160,6 +1165,33 @@ where
     ) -> RpcResult<Option<Vec<Option<BlobAndProofV2>>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV3");
         Ok(self.get_blobs_v3_metered(versioned_hashes)?)
+    }
+
+    /// Handler for `engine_getBALsByHashV1`
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    async fn get_bals_by_hash_v1(
+        &self,
+        _block_hashes: Vec<BlockHash>,
+    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
+        trace!(target: "rpc::engine", "Serving engine_getBALsByHashV1");
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))?
+    }
+
+    /// Handler for `engine_getBALsByRangeV1`
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    async fn get_bals_by_range_v1(
+        &self,
+        _start: U64,
+        _count: U64,
+    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
+        trace!(target: "rpc::engine", "Serving engine_getBALsByRangeV1");
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))?
     }
 }
 

@@ -621,7 +621,9 @@ impl HashedPostStateSorted {
 
     /// Extends this state with contents of another sorted state.
     /// Entries in `other` take precedence for duplicate keys.
-    pub fn extend_ref(&mut self, other: &Self) {
+    ///
+    /// Sorts the accounts after extending. Sorts the storage after extending, for each account.
+    pub fn extend_ref_and_sort(&mut self, other: &Self) {
         // Extend accounts
         extend_sorted_vec(&mut self.accounts, &other.accounts);
 
@@ -636,31 +638,44 @@ impl HashedPostStateSorted {
 
     /// Batch-merge sorted hashed post states. Iterator yields **newest to oldest**.
     ///
-    /// Uses k-way merge for O(n log k) complexity and one-pass accumulation for storages.
-    pub fn merge_batch<'a>(states: impl IntoIterator<Item = &'a Self>) -> Self {
-        let states: Vec<_> = states.into_iter().collect();
-        if states.is_empty() {
-            return Self::default();
+    /// For small batches, uses `extend_ref_and_sort` loop.
+    /// For large batches, uses k-way merge for O(n log k) complexity.
+    pub fn merge_batch<T: AsRef<Self> + From<Self>>(iter: impl IntoIterator<Item = T>) -> T {
+        const THRESHOLD: usize = 30;
+
+        let items: alloc::vec::Vec<_> = iter.into_iter().collect();
+        let k = items.len();
+
+        if k == 0 {
+            return Self::default().into();
+        }
+        if k == 1 {
+            return items.into_iter().next().expect("k == 1");
         }
 
-        let accounts = kway_merge_sorted(states.iter().map(|s| s.accounts.as_slice()));
+        if k < THRESHOLD {
+            // Small k: extend loop, oldest-to-newest so newer overrides older.
+            let mut iter = items.iter().rev();
+            let mut acc = iter.next().expect("k > 0").as_ref().clone();
+            for next in iter {
+                acc.extend_ref_and_sort(next.as_ref());
+            }
+            return acc.into();
+        }
+
+        // Large k: k-way merge.
+        let accounts = kway_merge_sorted(items.iter().map(|i| i.as_ref().accounts.as_slice()));
 
         struct StorageAcc<'a> {
-            /// Account storage was cleared (e.g., SELFDESTRUCT).
             wiped: bool,
-            /// Stop collecting older slices after seeing a wipe.
             sealed: bool,
-            /// Storage slot slices to merge, ordered newest to oldest.
             slices: Vec<&'a [(B256, U256)]>,
         }
 
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
 
-        // Accumulate storage slices per address from newest to oldest state.
-        // Once we see a `wiped` flag, the account was cleared at that point,
-        // so older storage slots are irrelevant - we "seal" and stop collecting.
-        for state in &states {
-            for (addr, storage) in &state.storages {
+        for item in &items {
+            for (addr, storage) in &item.as_ref().storages {
                 let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
                     wiped: false,
                     sealed: false,
@@ -687,7 +702,7 @@ impl HashedPostStateSorted {
             })
             .collect();
 
-        Self { accounts, storages }
+        Self { accounts, storages }.into()
     }
 
     /// Clears all accounts and storage data.
@@ -993,6 +1008,7 @@ mod tests {
             nonce: 42,
             code_hash: B256::random(),
             code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
+            account_id: None,
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -1037,6 +1053,7 @@ mod tests {
             nonce: 1,
             code_hash: B256::random(),
             code: None,
+            account_id: None,
         };
 
         // Create hashed accounts with addresses.
@@ -1414,7 +1431,7 @@ mod tests {
             storages: B256Map::default(),
         };
 
-        state1.extend_ref(&state2);
+        state1.extend_ref_and_sort(&state2);
 
         // Check accounts are merged and sorted
         assert_eq!(state1.accounts.len(), 6);

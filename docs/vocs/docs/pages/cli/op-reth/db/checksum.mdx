@@ -1,27 +1,19 @@
 # op-reth db checksum
 
-Calculates the content checksum of a table
+Calculates the content checksum of a table or static file segment
 
 ```bash
 $ op-reth db checksum --help
 ```
 ```txt
-Usage: op-reth db checksum [OPTIONS] <TABLE>
+Usage: op-reth db checksum [OPTIONS] <COMMAND>
 
-Arguments:
-  <TABLE>
-          The table name
+Commands:
+  mdbx         Calculates the checksum of a database table
+  static-file  Calculates the checksum of a static file segment
+  help         Print this message or the help of the given subcommand(s)
 
 Options:
-      --start-key <START_KEY>
-          The start of the range to checksum
-
-      --end-key <END_KEY>
-          The end of the range to checksum
-
-      --limit <LIMIT>
-          The maximum number of records that are queried and used to compute the checksum
-
   -h, --help
           Print help (see a summary with '-h')
 

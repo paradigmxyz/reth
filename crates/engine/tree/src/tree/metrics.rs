@@ -60,16 +60,22 @@ impl EngineApiMetrics {
     ///
     /// This method updates metrics for execution time, gas usage, and the number
     /// of accounts, storage slots and bytecodes loaded and updated.
-    pub(crate) fn execute_metered<E, DB>(
+    ///
+    /// The optional `on_receipt` callback is invoked after each transaction with the receipt
+    /// index and a reference to all receipts collected so far. This allows callers to stream
+    /// receipts to a background task for incremental receipt root computation.
+    pub(crate) fn execute_metered<E, DB, F>(
         &self,
         executor: E,
         mut transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
         transaction_count: usize,
         state_hook: Box<dyn OnStateHook>,
+        mut on_receipt: F,
     ) -> Result<(BlockExecutionOutput<E::Receipt>, Vec<Address>), BlockExecutionError>
     where
         DB: alloy_evm::Database,
         E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>, Transaction: SignedTransaction>,
+        F: FnMut(&[E::Receipt]),
     {
         // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
         // they are globally registered so that the data recorded in the hook will
@@ -95,13 +101,20 @@ impl EngineApiMetrics {
                 let tx = tx?;
                 senders.push(*tx.signer());
 
-                let span =
-                    debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
+                let span = debug_span!(
+                    target: "engine::tree",
+                    "execute tx",
+                    tx_hash = ?tx.tx().tx_hash(),
+                    gas_used = tracing::field::Empty,
+                );
                 let enter = span.entered();
                 trace!(target: "engine::tree", "Executing transaction");
                 let start = Instant::now();
                 let gas_used = executor.execute_transaction(tx)?;
                 self.executor.transaction_execution_histogram.record(start.elapsed());
+
+                // Invoke callback with the latest receipt
+                on_receipt(executor.receipts());
 
                 // record the tx gas used
                 enter.record("gas_used", gas_used);
@@ -257,7 +270,10 @@ impl ForkchoiceUpdatedMetrics {
 pub(crate) struct NewPayloadStatusMetrics {
     /// Finish time of the latest new payload call.
     #[metric(skip)]
-    pub(crate) latest_at: Option<Instant>,
+    pub(crate) latest_finish_at: Option<Instant>,
+    /// Start time of the latest new payload call.
+    #[metric(skip)]
+    pub(crate) latest_start_at: Option<Instant>,
     /// The total count of new payload messages received.
     pub(crate) new_payload_messages: Counter,
     /// The total count of new payload messages that we responded to with
@@ -285,6 +301,10 @@ pub(crate) struct NewPayloadStatusMetrics {
     pub(crate) new_payload_latency: Histogram,
     /// Latency for the last new payload call.
     pub(crate) new_payload_last: Gauge,
+    /// Time from previous payload finish to current payload start (idle time).
+    pub(crate) time_between_new_payloads: Histogram,
+    /// Time from previous payload start to current payload start (total interval).
+    pub(crate) new_payload_interval: Histogram,
 }
 
 impl NewPayloadStatusMetrics {
@@ -298,7 +318,14 @@ impl NewPayloadStatusMetrics {
         let finish = Instant::now();
         let elapsed = finish - start;
 
-        self.latest_at = Some(finish);
+        if let Some(prev_finish) = self.latest_finish_at {
+            self.time_between_new_payloads.record(start - prev_finish);
+        }
+        if let Some(prev_start) = self.latest_start_at {
+            self.new_payload_interval.record(start - prev_start);
+        }
+        self.latest_finish_at = Some(finish);
+        self.latest_start_at = Some(start);
         match result {
             Ok(outcome) => match outcome.outcome.status {
                 PayloadStatusEnum::Valid => {
@@ -334,10 +361,6 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_histogram: Histogram,
     /// Histogram of deferred trie computation duration.
     pub(crate) deferred_trie_compute_duration: Histogram,
-    /// Histogram of time spent waiting for deferred trie data to become available.
-    pub(crate) deferred_trie_wait_duration: Histogram,
-    /// Trie input computation duration
-    pub(crate) trie_input_duration: Histogram,
     /// Payload conversion and validation latency
     pub(crate) payload_validation_duration: Gauge,
     /// Histogram of payload validation latency
@@ -408,12 +431,13 @@ mod tests {
     /// A simple mock executor for testing that doesn't require complex EVM setup
     struct MockExecutor {
         state: EvmState,
+        receipts: Vec<Receipt>,
         hook: Option<Box<dyn OnStateHook>>,
     }
 
     impl MockExecutor {
         fn new(state: EvmState) -> Self {
-            Self { state, hook: None }
+            Self { state, receipts: vec![], hook: None }
         }
     }
 
@@ -495,12 +519,16 @@ mod tests {
             self.hook = hook;
         }
 
+        fn evm_mut(&mut self) -> &mut Self::Evm {
+            panic!("Mock executor evm_mut() not implemented")
+        }
+
         fn evm(&self) -> &Self::Evm {
             panic!("Mock executor evm() not implemented")
         }
 
-        fn evm_mut(&mut self) -> &mut Self::Evm {
-            panic!("Mock executor evm_mut() not implemented")
+        fn receipts(&self) -> &[Self::Receipt] {
+            &self.receipts
         }
     }
 
@@ -535,11 +563,12 @@ mod tests {
         let executor = MockExecutor::new(state);
 
         // This will fail to create the EVM but should still call the hook
-        let _result = metrics.execute_metered::<_, EmptyDB>(
+        let _result = metrics.execute_metered::<_, EmptyDB, _>(
             executor,
             input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
             input.transaction_count(),
             state_hook,
+            |_| {},
         );
 
         // Check if hook was called (it might not be if finish() fails early)
@@ -580,7 +609,9 @@ mod tests {
                         nonce: 10,
                         code_hash: B256::random(),
                         code: Default::default(),
+                        account_id: None,
                     },
+                    original_info: Box::new(AccountInfo::default()),
                     storage,
                     status: AccountStatus::default(),
                     transaction_id: 0,
@@ -592,11 +623,12 @@ mod tests {
         let executor = MockExecutor::new(state);
 
         // Execute (will fail but should still update some metrics)
-        let _result = metrics.execute_metered::<_, EmptyDB>(
+        let _result = metrics.execute_metered::<_, EmptyDB, _>(
             executor,
             input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
             input.transaction_count(),
             state_hook,
+            |_| {},
         );
 
         let snapshot = snapshotter.snapshot().into_vec();

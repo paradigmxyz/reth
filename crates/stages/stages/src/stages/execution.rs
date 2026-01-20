@@ -351,7 +351,7 @@ where
                 })
             })?;
 
-            if let Err(err) = self.consensus.validate_block_post_execution(&block, &result) {
+            if let Err(err) = self.consensus.validate_block_post_execution(&block, &result, None) {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),
@@ -422,7 +422,6 @@ where
             let previous_input = self.post_execute_commit_input.replace(Chain::new(
                 blocks,
                 state.clone(),
-                BTreeMap::new(),
                 BTreeMap::new(),
             ));
 
@@ -524,7 +523,6 @@ where
             let previous_input = self.post_unwind_commit_input.replace(Chain::new(
                 blocks,
                 bundle_state_with_receipts,
-                BTreeMap::new(),
                 BTreeMap::new(),
             ));
 

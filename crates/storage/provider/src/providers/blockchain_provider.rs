@@ -790,7 +790,9 @@ mod tests {
     use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
-    use reth_execution_types::{Chain, ExecutionOutcome};
+    use reth_execution_types::{
+        BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
+    };
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SignerRecoverable};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
@@ -909,8 +911,15 @@ mod tests {
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
                     let block_receipts = receipts.get(block.number as usize).unwrap().clone();
-                    let execution_outcome =
-                        ExecutionOutcome { receipts: vec![block_receipts], ..Default::default() };
+                    let execution_outcome = BlockExecutionOutput {
+                        result: BlockExecutionResult {
+                            receipts: block_receipts,
+                            requests: Default::default(),
+                            gas_used: 0,
+                            blob_gas_used: 0,
+                        },
+                        state: BundleState::default(),
+                    };
 
                     ExecutedBlock {
                         recovered_block: Arc::new(RecoveredBlock::new_sealed(
@@ -979,8 +988,7 @@ mod tests {
                     state.parent_state_chain().last().expect("qed").block();
                 let num_hash = lowest_memory_block.recovered_block().num_hash();
 
-                let mut execution_output = (*lowest_memory_block.execution_output).clone();
-                execution_output.first_block = lowest_memory_block.recovered_block().number;
+                let execution_output = (*lowest_memory_block.execution_output).clone();
                 lowest_memory_block.execution_output = Arc::new(execution_output);
 
                 // Push to disk
@@ -1340,12 +1348,7 @@ mod tests {
 
         // Send and receive commit notifications.
         let block_2 = test_block_builder.generate_random_block(1, block_hash_1).try_recover()?;
-        let chain = Chain::new(
-            vec![block_2],
-            ExecutionOutcome::default(),
-            BTreeMap::new(),
-            BTreeMap::new(),
-        );
+        let chain = Chain::new(vec![block_2], ExecutionOutcome::default(), BTreeMap::new());
         let commit = CanonStateNotification::Commit { new: Arc::new(chain.clone()) };
         in_memory_state.notify_canon_state(commit.clone());
         let (notification_1, notification_2) = tokio::join!(rx_1.recv(), rx_2.recv());
@@ -1355,12 +1358,8 @@ mod tests {
         // Send and receive re-org notifications.
         let block_3 = test_block_builder.generate_random_block(1, block_hash_1).try_recover()?;
         let block_4 = test_block_builder.generate_random_block(2, block_3.hash()).try_recover()?;
-        let new_chain = Chain::new(
-            vec![block_3, block_4],
-            ExecutionOutcome::default(),
-            BTreeMap::new(),
-            BTreeMap::new(),
-        );
+        let new_chain =
+            Chain::new(vec![block_3, block_4], ExecutionOutcome::default(), BTreeMap::new());
         let re_org =
             CanonStateNotification::Reorg { old: Arc::new(chain), new: Arc::new(new_chain) };
         in_memory_state.notify_canon_state(re_org.clone());
@@ -1708,8 +1707,8 @@ mod tests {
                             block.clone(),
                             senders,
                         )),
-                        execution_output: Arc::new(ExecutionOutcome {
-                            bundle: BundleState::new(
+                        execution_output: Arc::new(BlockExecutionOutput {
+                            state: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
                                     (address, None, Some(account.into()), Default::default())
                                 }),
@@ -1718,8 +1717,12 @@ mod tests {
                                 })],
                                 [],
                             ),
-                            first_block: first_in_memory_block,
-                            ..Default::default()
+                            result: BlockExecutionResult {
+                                receipts: Default::default(),
+                                requests: Default::default(),
+                                gas_used: 0,
+                                blob_gas_used: 0,
+                            },
                         }),
                         ..Default::default()
                     }

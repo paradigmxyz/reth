@@ -501,7 +501,6 @@ mod tests {
                 .try_recover()?],
                 Default::default(),
                 BTreeMap::new(),
-                BTreeMap::new(),
             )),
         };
 
@@ -570,7 +569,6 @@ mod tests {
                 .try_recover()?],
                 Default::default(),
                 BTreeMap::new(),
-                BTreeMap::new(),
             )),
         };
 
@@ -638,7 +636,6 @@ mod tests {
                 vec![exex_head_block.clone().try_recover()?],
                 Default::default(),
                 BTreeMap::new(),
-                BTreeMap::new(),
             )),
         };
         wal.commit(&exex_head_notification)?;
@@ -652,7 +649,6 @@ mod tests {
                 )
                 .try_recover()?],
                 Default::default(),
-                BTreeMap::new(),
                 BTreeMap::new(),
             )),
         };
@@ -711,7 +707,6 @@ mod tests {
                 vec![exex_head_block.clone().try_recover()?],
                 Default::default(),
                 BTreeMap::new(),
-                BTreeMap::new(),
             )),
         };
         wal.commit(&exex_head_notification)?;
@@ -730,7 +725,6 @@ mod tests {
                 )
                 .try_recover()?],
                 Default::default(),
-                BTreeMap::new(),
                 BTreeMap::new(),
             )),
         };
