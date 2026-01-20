@@ -715,9 +715,8 @@ pub(super) struct MultiProofTask {
     /// there are any active workers and force chunking across workers. This is to prevent tasks
     /// which are very long from hitting a single worker.
     max_targets_for_chunking: usize,
-    /// Whether or not V2 proof calculation is enabled. If enabled then
-    /// [`MultiProofTargetsV2`](reth_trie_parallel::targets_v2::MultiProofTargetsV2) will be
-    /// produced by state updates.
+    /// Whether or not V2 proof calculation is enabled. If enabled then [`MultiProofTargetsV2`]
+    /// will be produced by state updates.
     v2_proofs_enabled: bool,
 }
 
