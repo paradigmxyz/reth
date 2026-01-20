@@ -57,6 +57,24 @@ pub struct RocksDBTableStats {
     pub pending_compaction_bytes: u64,
 }
 
+/// Pending history writes that are accumulated across multiple `save_blocks()` calls
+/// and materialized into `RocksDB` shards at commit time.
+///
+/// This exists because [`RocksDBBatch::append_account_history_shard`] and
+/// [`RocksDBBatch::append_storage_history_shard`] read from committed state, not pending writes.
+/// By accumulating all history deltas in memory and materializing once at commit time, we ensure
+/// each key is written exactly once with all its indices.
+#[derive(Debug, Default)]
+pub(crate) struct PendingHistoryWrites {
+    /// Account history: address -> list of block numbers where the account was modified.
+    pub accounts: BTreeMap<Address, Vec<u64>>,
+    /// Storage history: (address, slot) -> list of block numbers where the storage was modified.
+    pub storages: BTreeMap<(Address, B256), Vec<u64>>,
+}
+
+/// Pending history writes type alias.
+pub(crate) type PendingHistory = Arc<Mutex<PendingHistoryWrites>>;
+
 /// Context for `RocksDB` block writes.
 #[derive(Clone)]
 pub(crate) struct RocksDBWriteCtx {
@@ -68,6 +86,9 @@ pub(crate) struct RocksDBWriteCtx {
     pub storage_settings: StorageSettings,
     /// Pending batches to push to after writing.
     pub pending_batches: PendingRocksDBBatches,
+    /// Pending history writes accumulated across `save_blocks()` calls.
+    /// Materialized into `RocksDB` shards at commit time.
+    pub pending_history: PendingHistory,
 }
 
 impl fmt::Debug for RocksDBWriteCtx {
@@ -77,6 +98,7 @@ impl fmt::Debug for RocksDBWriteCtx {
             .field("prune_tx_lookup", &self.prune_tx_lookup)
             .field("storage_settings", &self.storage_settings)
             .field("pending_batches", &"<pending batches>")
+            .field("pending_history", &"<pending history>")
             .finish()
     }
 }
@@ -1057,56 +1079,137 @@ impl RocksDBProvider {
         Ok(())
     }
 
-    /// Writes account history indices for the given blocks.
+    /// Accumulates account history indices for the given blocks.
+    ///
+    /// Unlike the old implementation, this does NOT create a `RocksDB` batch or call
+    /// [`RocksDBBatch::append_account_history_shard`]. Instead, it accumulates indices in memory
+    /// via `ctx.pending_history`. The actual `RocksDB` writes are deferred to commit time
+    /// by [`RocksDBProvider::commit_pending_history`].
+    ///
+    /// This fixes the read-your-writes issue: since we only materialize history shards once
+    /// at commit time (one call per key), [`RocksDBBatch::append_account_history_shard`] sees
+    /// committed state correctly.
+    ///
+    /// IMPORTANT: Only accounts with account-info changes (nonce, balance, `code_hash`) OR
+    /// lifecycle changes (created/destroyed) are included. Accounts that only had storage
+    /// changes are excluded to match the MDBX `AccountChangeSets` table behavior.
+    ///
+    /// This matches how MDBX writes `AccountChangeSets` via `to_plain_state_reverts()`:
+    /// - `AccountInfoRevert::RevertTo` -> account info changed -> included
+    /// - `AccountInfoRevert::DeleteIt` -> account destroyed -> included
+    /// - `AccountInfoRevert::DoNothing` -> only storage changed -> NOT included
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_account_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
-        let mut batch = self.batch();
-        let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+        let mut local: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
             let bundle = &block.execution_outcome().state;
-            for &address in bundle.state().keys() {
-                account_history.entry(address).or_default().push(block_number);
+            for (&address, account) in bundle.state() {
+                // Only include accounts where account-info changed OR lifecycle changed.
+                // This matches MDBX behavior which builds AccountChangeSets from reverts:
+                // - AccountInfoRevert::RevertTo -> info changed (nonce/balance/code_hash)
+                // - AccountInfoRevert::DeleteIt -> account was destroyed
+                // - AccountInfoRevert::DoNothing -> only storage changed, NOT in AccountChangeSets
+                //
+                // Accounts with only storage changes go to StoragesHistory, not AccountsHistory.
+                let info_changed = account.is_info_changed();
+                let was_destroyed = account.was_destroyed();
+
+                if info_changed || was_destroyed {
+                    local.entry(address).or_default().push(block_number);
+                }
             }
         }
 
-        // Write account history using proper shard append logic
-        for (address, indices) in account_history {
-            batch.append_account_history_shard(address, indices)?;
+        // Merge into pending history
+        let mut pending = ctx.pending_history.lock();
+        for (address, mut indices) in local {
+            pending.accounts.entry(address).or_default().append(&mut indices);
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
     }
 
-    /// Writes storage history indices for the given blocks.
+    /// Accumulates storage history indices for the given blocks.
+    ///
+    /// Unlike the old implementation, this does NOT create a `RocksDB` batch or call
+    /// [`RocksDBBatch::append_storage_history_shard`]. Instead, it accumulates indices in memory
+    /// via `ctx.pending_history`. The actual `RocksDB` writes are deferred to commit time
+    /// by [`RocksDBProvider::commit_pending_history`].
+    ///
+    /// This fixes the read-your-writes issue: since we only materialize history shards once
+    /// at commit time (one call per key), [`RocksDBBatch::append_storage_history_shard`] sees
+    /// committed state correctly.
+    ///
+    /// IMPORTANT: Only storage slots with actual value changes are included. Slots that were
+    /// merely read are excluded to match the MDBX changeset-based history indices.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_storage_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
-        let mut batch = self.batch();
-        let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+        let mut local: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
             let bundle = &block.execution_outcome().state;
             for (&address, account) in bundle.state() {
-                for &slot in account.storage.keys() {
-                    let key = B256::new(slot.to_be_bytes());
-                    storage_history.entry((address, key)).or_default().push(block_number);
+                for (&slot, storage_slot) in &account.storage {
+                    // Only include storage slots that actually changed value.
+                    // This matches MDBX behavior which builds history from StorageChangeSets.
+                    if storage_slot.is_changed() {
+                        let key = B256::new(slot.to_be_bytes());
+                        local.entry((address, key)).or_default().push(block_number);
+                    }
                 }
             }
         }
 
-        // Write storage history using proper shard append logic
-        for ((address, slot), indices) in storage_history {
+        // Merge into pending history
+        let mut pending = ctx.pending_history.lock();
+        for ((address, slot), mut indices) in local {
+            pending.storages.entry((address, slot)).or_default().append(&mut indices);
+        }
+        Ok(())
+    }
+
+    /// Materializes pending history writes into `RocksDB` shards and commits them.
+    ///
+    /// This is called at provider commit time, AFTER MDBX has committed. Each key is
+    /// written exactly once, ensuring [`RocksDBBatch::append_account_history_shard`] and
+    /// [`RocksDBBatch::append_storage_history_shard`] see committed state.
+    pub(crate) fn commit_pending_history(
+        &self,
+        history: PendingHistoryWrites,
+    ) -> ProviderResult<()> {
+        if history.accounts.is_empty() && history.storages.is_empty() {
+            return Ok(());
+        }
+
+        let mut batch = self.batch();
+
+        // Write account history shards
+        for (address, mut indices) in history.accounts {
+            // Sort and dedup in case of duplicate block numbers from multiple save_blocks calls
+            indices.sort_unstable();
+            indices.dedup();
+            batch.append_account_history_shard(address, indices)?;
+        }
+
+        // Write storage history shards
+        for ((address, slot), mut indices) in history.storages {
+            indices.sort_unstable();
+            indices.dedup();
             batch.append_storage_history_shard(address, slot, indices)?;
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
+
+        if !batch.is_empty() {
+            batch.commit()?;
+        }
+
         Ok(())
     }
 }
@@ -1700,15 +1803,15 @@ impl<'db> RocksTx<'db> {
     where
         T: Table<Value = BlockNumberList>,
     {
-        // History may be pruned if a lowest available block is set.
-        let is_maybe_pruned = lowest_available_block_number.is_some();
-        let fallback = || {
-            Ok(if is_maybe_pruned {
-                HistoryInfo::MaybeInPlainState
-            } else {
-                HistoryInfo::NotYetWritten
-            })
-        };
+        // When RocksDB can't find history for an address, we must fall back to plain state.
+        //
+        // This is critical for hybrid storage: RocksDB only contains history indices for blocks
+        // written AFTER it was enabled. Accounts modified before that exist only in MDBX.
+        // Returning `NotYetWritten` would incorrectly treat them as non-existent (nonce 0).
+        //
+        // Always return `MaybeInPlainState` to ensure we check plain state for accounts
+        // that RocksDB hasn't tracked yet.
+        let fallback = || Ok(HistoryInfo::MaybeInPlainState);
 
         let cf = self.provider.0.cf_handle_rw(T::NAME)?;
 
@@ -1757,11 +1860,24 @@ impl<'db> RocksTx<'db> {
             false
         };
 
-        Ok(HistoryInfo::from_lookup(
+        // For RocksDB, we must handle `is_before_first_write` specially.
+        //
+        // When RocksDB says the target block is before the first recorded write:
+        // - MDBX would return `NotYetWritten` (account doesn't exist) because MDBX has full history
+        // - RocksDB should return `MaybeInPlainState` because the account may exist in MDBX from
+        //   before RocksDB was enabled
+        //
+        // We use `from_lookup` but then override `NotYetWritten` -> `MaybeInPlainState`.
+        let result = HistoryInfo::from_lookup(
             found_block,
             is_before_first_write,
             lowest_available_block_number,
-        ))
+        );
+
+        Ok(match result {
+            HistoryInfo::NotYetWritten => HistoryInfo::MaybeInPlainState,
+            other => other,
+        })
     }
 
     /// Returns an error if the raw iterator is in an invalid state due to an I/O error.
