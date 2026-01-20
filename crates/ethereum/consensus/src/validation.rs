@@ -5,7 +5,7 @@ use alloy_primitives::{Bloom, Bytes, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
-    receipt::gas_spent_by_transactions, Block, BlockBody, GotExpected, Receipt, RecoveredBlock,
+    receipt::gas_spent_by_transactions, Block, GotExpected, Receipt, RecoveredBlock,
 };
 
 /// Validate a block with regard to execution results:
@@ -153,46 +153,46 @@ fn compare_receipts_root_and_logs_bloom(
     Ok(())
 }
 
-/// Validates that the block access list in the body matches the expected block access list.
-fn verify_bal(
-    body_bal: &BlockAccessList,
-    expected_bal: &BlockAccessList,
-) -> Result<(), ConsensusError> {
-    if body_bal == expected_bal {
-        return Ok(());
-    }
+// Validates that the block access list in the body matches the expected block access list.
+// fn verify_bal(
+//     body_bal: &BlockAccessList,
+//     expected_bal: &BlockAccessList,
+// ) -> Result<(), ConsensusError> {
+//     if body_bal == expected_bal {
+//         return Ok(());
+//     }
 
-    // Extract addresses
-    let body_addrs: Vec<_> = body_bal.iter().map(|a| a.address).collect();
-    let expected_addrs: Vec<_> = expected_bal.iter().map(|a| a.address).collect();
+//     // Extract addresses
+//     let body_addrs: Vec<_> = body_bal.iter().map(|a| a.address).collect();
+//     let expected_addrs: Vec<_> = expected_bal.iter().map(|a| a.address).collect();
 
-    // Missing accounts (expected but not found in body)
-    for addr in &expected_addrs {
-        if !body_addrs.contains(addr) {
-            tracing::debug!("Missing acc : computed bal {:?},body bal{:?}", expected_bal, body_bal);
-            tracing::debug!("Missing Address: {:?}", addr);
-            return Err(ConsensusError::InvalidBalMissingAccount);
-        }
-    }
+//     // Missing accounts (expected but not found in body)
+//     for addr in &expected_addrs {
+//         if !body_addrs.contains(addr) {
+//             tracing::debug!("Missing acc : computed bal {:?},body bal{:?}", expected_bal,
+// body_bal);             tracing::debug!("Missing Address: {:?}", addr);
+//             return Err(ConsensusError::InvalidBalMissingAccount);
+//         }
+//     }
 
-    // Extra accounts (body has accounts not in expected)
-    for addr in &body_addrs {
-        if !expected_addrs.contains(addr) {
-            tracing::debug!("Extra acc : computed bal {:?},body bal{:?}", expected_bal, body_bal);
-            tracing::debug!("Extra Address: {:?}", addr);
-            return Err(ConsensusError::InvalidBalExtraAccount);
-        }
-    }
+//     // Extra accounts (body has accounts not in expected)
+//     for addr in &body_addrs {
+//         if !expected_addrs.contains(addr) {
+//             tracing::debug!("Extra acc : computed bal {:?},body bal{:?}", expected_bal,
+// body_bal);             tracing::debug!("Extra Address: {:?}", addr);
+//             return Err(ConsensusError::InvalidBalExtraAccount);
+//         }
+//     }
 
-    tracing::debug!(
-        ?expected_bal,
-        ?body_bal,
-        "block access list in body does not match the provided block access list"
-    );
+//     tracing::debug!(
+//         ?expected_bal,
+//         ?body_bal,
+//         "block access list in body does not match the provided block access list"
+//     );
 
-    // Fallback: mismatched access lists
-    Err(ConsensusError::InvalidBlockAccessList)
-}
+//     // Fallback: mismatched access lists
+//     Err(ConsensusError::InvalidBlockAccessList)
+// }
 
 #[cfg(test)]
 mod tests {

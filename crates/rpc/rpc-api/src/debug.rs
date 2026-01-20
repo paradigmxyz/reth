@@ -23,12 +23,12 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "getRawBlock")]
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
-    /// Returns a Eip-7928 block access list.
-    #[method(name = "getBlockAccessList")]
-    async fn debug_get_block_access_list(
-        &self,
-        block_id: BlockId,
-    ) -> RpcResult<Option<BlockAccessList>>;
+    // Returns a Eip-7928 block access list.
+    // #[method(name = "getBlockAccessList")]
+    // async fn debug_get_block_access_list(
+    //     &self,
+    //     block_id: BlockId,
+    // ) -> RpcResult<Option<BlockAccessList>>;
 
     /// Returns a EIP-2718 binary-encoded transaction.
     ///

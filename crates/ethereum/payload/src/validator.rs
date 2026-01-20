@@ -103,10 +103,10 @@ where
         chain_spec.is_prague_active_at_timestamp(sealed_block.timestamp),
     )?;
 
-    amsterdam::ensure_well_formed_fields(
-        sealed_block.body(),
-        chain_spec.is_amsterdam_active_at_timestamp(sealed_block.timestamp),
-    )?;
+    // amsterdam::ensure_well_formed_fields(
+    //     sealed_block.body(),
+    //     chain_spec.is_amsterdam_active_at_timestamp(sealed_block.timestamp),
+    // )?;
 
     Ok(sealed_block)
 }

@@ -91,17 +91,17 @@ where
             };
         }
 
-        let (block_access_list_hash) =
-            if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
-                if let Some(bal) = block_access_list {
-                    let hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
-                    (Some(hash))
-                } else {
-                    None
-                }
+        let block_access_list_hash = if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp)
+        {
+            if let Some(bal) = block_access_list {
+                let hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
+                Some(hash)
             } else {
                 None
-            };
+            }
+        } else {
+            None
+        };
 
         let header = Header {
             parent_hash: ctx.parent_hash,
