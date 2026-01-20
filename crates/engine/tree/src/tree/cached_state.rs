@@ -31,6 +31,9 @@ pub(crate) struct CachedStateProvider<S> {
 
     /// Metrics for the cached state provider
     metrics: CachedStateMetrics,
+
+    /// If prewarm enabled we populate every cache miss
+    prewarm: bool,
 }
 
 impl<S> CachedStateProvider<S>
@@ -39,12 +42,32 @@ where
 {
     /// Creates a new [`CachedStateProvider`] from an [`ExecutionCache`], state provider, and
     /// [`CachedStateMetrics`].
-    pub(crate) const fn new_with_caches(
+    pub(crate) const fn new(
         state_provider: S,
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
     ) -> Self {
-        Self { state_provider, caches, metrics }
+        Self { state_provider, caches, metrics, prewarm: false }
+    }
+}
+
+impl<S> CachedStateProvider<S> {
+    /// Enables pre-warm mode so that every cache miss is populated.
+    ///
+    /// This is only relevant for pre-warm transaction execution with the intention to pre-populate
+    /// the cache with data for regular block execution. During regular block execution the
+    /// cache doesn't need to be populated because the actual EVM database
+    /// [`State`](revm::database::State) also caches internally during block execution and the cache
+    /// is then updated after the block with the entire [`BundleState`] output of that block which
+    /// contains all accessed accounts,code,storage. See also [`ExecutionCache::insert_state`].
+    pub(crate) const fn prewarm(mut self) -> Self {
+        self.prewarm = true;
+        self
+    }
+
+    /// Returns whether this provider should pre-warm cache misses.
+    const fn is_prewarm(&self) -> bool {
+        self.prewarm
     }
 }
 
@@ -123,7 +146,10 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
         self.metrics.account_cache_misses.increment(1);
 
         let res = self.state_provider.basic_account(address)?;
-        self.caches.account_cache.insert(*address, res);
+
+        if self.is_prewarm() {
+            self.caches.account_cache.insert(*address, res);
+        }
         Ok(res)
     }
 }
@@ -148,15 +174,19 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
         match self.caches.get_storage(&account, &storage_key) {
             (SlotStatus::NotCached, maybe_cache) => {
                 let final_res = self.state_provider.storage(account, storage_key)?;
-                let account_cache = maybe_cache.unwrap_or_default();
-                account_cache.insert_storage(storage_key, final_res);
-                // we always need to insert the value to update the weights.
-                // Note: there exists a race when the storage cache did not exist yet and two
-                // consumers looking up the a storage value for this account for the first time,
-                // however we can assume that this will only happen for the very first (mostlikely
-                // the same) value, and don't expect that this will accidentally
-                // replace an account storage cache with additional values.
-                self.caches.insert_storage_cache(account, account_cache);
+
+                if self.is_prewarm() {
+                    let account_cache = maybe_cache.unwrap_or_default();
+                    account_cache.insert_storage(storage_key, final_res);
+                    // we always need to insert the value to update the weights.
+                    // Note: there exists a race when the storage cache did not exist yet and two
+                    // consumers looking up the a storage value for this account for the first time,
+                    // however we can assume that this will only happen for the very first
+                    // (mostlikely the same) value, and don't expect that this
+                    // will accidentally replace an account storage cache with
+                    // additional values.
+                    self.caches.insert_storage_cache(account, account_cache);
+                }
 
                 self.metrics.storage_cache_misses.increment(1);
                 Ok(final_res)
@@ -183,7 +213,11 @@ impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
         self.metrics.code_cache_misses.increment(1);
 
         let final_res = self.state_provider.bytecode_by_hash(code_hash)?;
-        self.caches.code_cache.insert(*code_hash, final_res.clone());
+
+        if self.is_prewarm() {
+            self.caches.code_cache.insert(*code_hash, final_res.clone());
+        }
+
         Ok(final_res)
     }
 }
@@ -595,6 +629,11 @@ impl SavedCache {
         Arc::strong_count(&self.usage_guard) == 1
     }
 
+    /// Returns the current strong count of the usage guard.
+    pub(crate) fn usage_count(&self) -> usize {
+        Arc::strong_count(&self.usage_guard)
+    }
+
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
     pub(crate) const fn cache(&self) -> &ExecutionCache {
         &self.caches
@@ -785,7 +824,7 @@ mod tests {
 
         let caches = ExecutionCacheBuilder::default().build_caches(1000);
         let state_provider =
-            CachedStateProvider::new_with_caches(provider, caches, CachedStateMetrics::zeroed());
+            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
         // check that the storage is empty
         let res = state_provider.storage(address, storage_key);
@@ -808,7 +847,7 @@ mod tests {
 
         let caches = ExecutionCacheBuilder::default().build_caches(1000);
         let state_provider =
-            CachedStateProvider::new_with_caches(provider, caches, CachedStateMetrics::zeroed());
+            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
         // check that the storage returns the expected value
         let res = state_provider.storage(address, storage_key);

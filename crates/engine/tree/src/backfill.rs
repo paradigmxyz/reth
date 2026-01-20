@@ -47,7 +47,7 @@ impl BackfillSyncState {
 }
 
 /// Backfill sync mode functionality.
-pub trait BackfillSync: Send + Sync {
+pub trait BackfillSync: Send {
     /// Performs a backfill action.
     fn on_action(&mut self, action: BackfillAction);
 

@@ -25,7 +25,6 @@ pub enum StageId {
     TransactionLookup,
     IndexStorageHistory,
     IndexAccountHistory,
-    MerkleChangeSets,
     Prune,
     Finish,
     /// Other custom stage with a provided string identifier.
@@ -40,7 +39,7 @@ static ENCODED_STAGE_IDS: OnceLock<HashMap<StageId, Vec<u8>>> = OnceLock::new();
 
 impl StageId {
     /// All supported Stages
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 15] = [
         Self::Era,
         Self::Headers,
         Self::Bodies,
@@ -54,7 +53,6 @@ impl StageId {
         Self::TransactionLookup,
         Self::IndexStorageHistory,
         Self::IndexAccountHistory,
-        Self::MerkleChangeSets,
         Self::Prune,
         Self::Finish,
     ];
@@ -90,7 +88,6 @@ impl StageId {
             Self::TransactionLookup => "TransactionLookup",
             Self::IndexAccountHistory => "IndexAccountHistory",
             Self::IndexStorageHistory => "IndexStorageHistory",
-            Self::MerkleChangeSets => "MerkleChangeSets",
             Self::Prune => "Prune",
             Self::Finish => "Finish",
             Self::Other(s) => s,

@@ -70,10 +70,11 @@ impl<T> Clone for UnboundedMeteredSender<T> {
     }
 }
 
-/// A wrapper type around [Receiver](mpsc::UnboundedReceiver) that updates metrics on receive.
+/// A wrapper type around [`UnboundedReceiver`](mpsc::UnboundedReceiver) that updates metrics on
+/// receive.
 #[derive(Debug)]
 pub struct UnboundedMeteredReceiver<T> {
-    /// The [Receiver](mpsc::UnboundedReceiver) that this wraps around
+    /// The [`UnboundedReceiver`](mpsc::UnboundedReceiver) that this wraps around
     receiver: mpsc::UnboundedReceiver<T>,
     /// Holds metrics for this type
     metrics: MeteredReceiverMetrics,

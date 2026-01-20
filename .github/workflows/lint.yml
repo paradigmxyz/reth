@@ -245,12 +245,8 @@ jobs:
 
   # Checks that selected crates can compile with power set of features
   features:
-    name: features (${{ matrix.partition }}/${{ matrix.total_partitions }})
+    name: features
     runs-on: depot-ubuntu-latest
-    strategy:
-      matrix:
-        partition: [1, 2]
-        total_partitions: [2]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -268,7 +264,7 @@ jobs:
             --package reth-primitives-traits \
             --package reth-primitives \
             --feature-powerset \
-            --partition ${{ matrix.partition }}/${{ matrix.total_partitions }}
+            --depth 2
         env:
           RUSTFLAGS: -D warnings
 
@@ -281,7 +277,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: rui314/setup-mold@v1
-      - uses: taiki-e/cache-cargo-install-action@v2
+      - uses: taiki-e/cache-cargo-install-action@v3
         with:
           tool: zepter
       - name: Eagerly pull dependencies
@@ -289,7 +285,7 @@ jobs:
       - run: zepter run check
 
   deny:
-    uses: ithacaxyz/ci/.github/workflows/deny.yml@main
+    uses: tempoxyz/ci/.github/workflows/deny.yml@main
 
   lint-success:
     name: lint success

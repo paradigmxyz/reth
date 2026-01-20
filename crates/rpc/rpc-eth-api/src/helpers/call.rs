@@ -25,15 +25,19 @@ use reth_evm::{
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
-use reth_revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, db::State};
+use reth_revm::{
+    cancelled::CancelOnDrop,
+    database::StateProviderDatabase,
+    db::{bal::EvmDatabaseError, State},
+};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper,
-    error::FromEthApiError,
+    error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
+use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Transaction},
@@ -159,6 +163,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .context_for_next_block(&parent, this.next_env_attributes(&parent)?)
                         .map_err(RethError::other)
                         .map_err(Self::Error::from_eth_err)?;
+                    let map_err = |e: EthApiError| -> Self::Error {
+                        match e.as_simulate_error() {
+                            Some(sim_err) => Self::Error::from_eth_err(EthApiError::other(sim_err)),
+                            None => Self::Error::from_eth_err(e),
+                        }
+                    };
+
                     let (result, results) = if trace_transfers {
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs
@@ -173,7 +184,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             default_gas_limit,
                             chain_id,
                             this.converter(),
-                        )?
+                        )
+                        .map_err(map_err)?
                     } else {
                         let evm = this.evm_config().evm_with_env(&mut db, evm_env);
                         let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
@@ -183,7 +195,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             default_gas_limit,
                             chain_id,
                             this.converter(),
-                        )?
+                        )
+                        .map_err(map_err)?
                     };
 
                     parent = result.block.clone_sealed_header();
@@ -482,11 +495,11 @@ pub trait Call:
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
         R: Send + 'static,
-        F: FnOnce(Self, &dyn StateProvider) -> Result<R, Self::Error> + Send + 'static,
+        F: FnOnce(Self, StateProviderBox) -> Result<R, Self::Error> + Send + 'static,
     {
         self.spawn_blocking_io_fut(move |this| async move {
             let state = this.state_at_block_id(at).await?;
-            f(this, &state)
+            f(this, state)
         })
     }
 
@@ -499,7 +512,7 @@ pub trait Call:
         tx_env: TxEnvFor<Self::Evm>,
     ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
-        DB: Database<Error = ProviderError> + fmt::Debug,
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + fmt::Debug,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);
         let res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
@@ -517,7 +530,7 @@ pub trait Call:
         inspector: I,
     ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
-        DB: Database<Error = ProviderError> + fmt::Debug,
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + fmt::Debug,
         I: InspectorFor<Self::Evm, DB>,
     {
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
@@ -657,7 +670,7 @@ pub trait Call:
             };
             let (tx, tx_info) = transaction.split();
 
-            let (evm_env, _) = self.evm_env_at(block.hash().into()).await?;
+            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
@@ -694,7 +707,7 @@ pub trait Call:
         target_tx_hash: B256,
     ) -> Result<usize, Self::Error>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit + core::fmt::Debug,
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + DatabaseCommit + core::fmt::Debug,
         I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);

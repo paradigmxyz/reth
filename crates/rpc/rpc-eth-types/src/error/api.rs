@@ -1,10 +1,11 @@
 //! Helper traits to wrap generic l1 errors, in network specific error type configured in
 //! `reth_rpc_eth_api::EthApiTypes`.
 
-use crate::{EthApiError, RevertError};
+use crate::{simulate::EthSimulateError, EthApiError, RevertError};
 use alloy_primitives::Bytes;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, EvmErrorFor, HaltReasonFor};
+use reth_revm::db::bal::EvmDatabaseError;
 use revm::{context::result::ExecutionResult, context_interface::result::HaltReason};
 
 use super::RpcInvalidTransactionError;
@@ -74,6 +75,32 @@ pub trait AsEthApiError {
 
         false
     }
+
+    /// Returns [`EthSimulateError`] if this error maps to a simulate-specific error code.
+    fn as_simulate_error(&self) -> Option<EthSimulateError> {
+        let err = self.as_err()?;
+        match err {
+            EthApiError::InvalidTransaction(tx_err) => match tx_err {
+                RpcInvalidTransactionError::NonceTooLow { tx, state } => {
+                    Some(EthSimulateError::NonceTooLow { tx: *tx, state: *state })
+                }
+                RpcInvalidTransactionError::NonceTooHigh => Some(EthSimulateError::NonceTooHigh),
+                RpcInvalidTransactionError::FeeCapTooLow => {
+                    Some(EthSimulateError::BaseFeePerGasTooLow)
+                }
+                RpcInvalidTransactionError::GasTooLow => Some(EthSimulateError::IntrinsicGasTooLow),
+                RpcInvalidTransactionError::InsufficientFunds { cost, balance } => {
+                    Some(EthSimulateError::InsufficientFunds { cost: *cost, balance: *balance })
+                }
+                RpcInvalidTransactionError::SenderNoEOA => Some(EthSimulateError::SenderNotEOA),
+                RpcInvalidTransactionError::MaxInitCodeSizeExceeded => {
+                    Some(EthSimulateError::MaxInitCodeSizeExceeded)
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 impl AsEthApiError for EthApiError {
@@ -84,10 +111,12 @@ impl AsEthApiError for EthApiError {
 
 /// Helper trait to convert from revm errors.
 pub trait FromEvmError<Evm: ConfigureEvm>:
-    From<EvmErrorFor<Evm, ProviderError>> + FromEvmHalt<HaltReasonFor<Evm>> + FromRevert
+    From<EvmErrorFor<Evm, EvmDatabaseError<ProviderError>>>
+    + FromEvmHalt<HaltReasonFor<Evm>>
+    + FromRevert
 {
     /// Converts from EVM error to this type.
-    fn from_evm_err(err: EvmErrorFor<Evm, ProviderError>) -> Self {
+    fn from_evm_err(err: EvmErrorFor<Evm, EvmDatabaseError<ProviderError>>) -> Self {
         err.into()
     }
 
@@ -105,7 +134,9 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
 
 impl<T, Evm> FromEvmError<Evm> for T
 where
-    T: From<EvmErrorFor<Evm, ProviderError>> + FromEvmHalt<HaltReasonFor<Evm>> + FromRevert,
+    T: From<EvmErrorFor<Evm, EvmDatabaseError<ProviderError>>>
+        + FromEvmHalt<HaltReasonFor<Evm>>
+        + FromRevert,
     Evm: ConfigureEvm,
 {
 }

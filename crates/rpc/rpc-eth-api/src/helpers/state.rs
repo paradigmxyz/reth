@@ -11,6 +11,7 @@ use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
+use reth_primitives_traits::SealedHeaderFor;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
     error::FromEvmError, EthApiError, PendingBlockEnv, RpcInvalidTransactionError,
@@ -256,6 +257,17 @@ pub trait LoadState:
         }
     }
 
+    /// Returns the revm evm env for the given sealed header.
+    fn evm_env_for_header(
+        &self,
+        header: &SealedHeaderFor<Self::Primitives>,
+    ) -> Result<EvmEnvFor<Self::Evm>, Self::Error> {
+        self.evm_config()
+            .evm_env(header)
+            .map_err(RethError::other)
+            .map_err(Self::Error::from_eth_err)
+    }
+
     /// Returns the revm evm env for the requested [`BlockId`]
     ///
     /// If the [`BlockId`] this will return the [`BlockId`] of the block the env was configured
@@ -281,11 +293,7 @@ pub trait LoadState:
                     .sealed_header_by_id(at)
                     .map_err(Self::Error::from_eth_err)?
                     .ok_or_else(|| EthApiError::HeaderNotFound(at))?;
-                let evm_env = self
-                    .evm_config()
-                    .evm_env(&header)
-                    .map_err(RethError::other)
-                    .map_err(Self::Error::from_eth_err)?;
+                let evm_env = self.evm_env_for_header(&header)?;
 
                 Ok((evm_env, header.hash().into()))
             }

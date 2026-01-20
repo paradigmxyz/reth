@@ -2,6 +2,7 @@ use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
+use reth_cli_runner::CliContext;
 use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
 use reth_db_common::DbTool;
 use std::{
@@ -79,7 +80,10 @@ macro_rules! db_exec {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `db` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+        self,
+        ctx: CliContext,
+    ) -> eyre::Result<()> {
         let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
         let db_path = data_dir.db();
         let static_files_path = data_dir.static_files();
@@ -158,7 +162,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 let access_rights =
                     if command.dry_run { AccessRights::RO } else { AccessRights::RW };
                 db_exec!(self.env, tool, N, access_rights, {
-                    command.execute(&tool)?;
+                    command.execute(&tool, ctx.task_executor.clone(), &data_dir)?;
                 });
             }
             Subcommands::StaticFileHeader(command) => {

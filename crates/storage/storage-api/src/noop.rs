@@ -6,7 +6,7 @@ use crate::{
     HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider, TrieReader,
+    StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -35,9 +35,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
-    updates::{TrieUpdates, TrieUpdatesSorted},
-    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
-    StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -396,6 +395,17 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
     ) -> ProviderResult<Option<AccountBeforeTx>> {
         Ok(None)
     }
+
+    fn account_changesets_range(
+        &self,
+        _range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        Ok(Vec::default())
+    }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        Ok(0)
+    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> StateRootProvider for NoopProvider<C, N> {
@@ -628,23 +638,10 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<Chai
         &self.prune_modes
     }
 
-    fn commit(self) -> ProviderResult<bool> {
+    fn commit(self) -> ProviderResult<()> {
         use reth_db_api::transaction::DbTx;
 
         Ok(self.tx.commit()?)
-    }
-}
-
-impl<C: Send + Sync, N: NodePrimitives> TrieReader for NoopProvider<C, N> {
-    fn trie_reverts(&self, _from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
-        Ok(TrieUpdatesSorted::default())
-    }
-
-    fn get_block_trie_updates(
-        &self,
-        _block_number: BlockNumber,
-    ) -> ProviderResult<TrieUpdatesSorted> {
-        Ok(TrieUpdatesSorted::default())
     }
 }
 

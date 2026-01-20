@@ -126,12 +126,28 @@ export const opRethCliSidebar: SidebarItem = {
                             collapsed: true,
                             items: [
                                 {
-                                    text: "op-reth db settings set receipts_in_static_files",
-                                    link: "/cli/op-reth/db/settings/set/receipts_in_static_files"
+                                    text: "op-reth db settings set receipts",
+                                    link: "/cli/op-reth/db/settings/set/receipts"
                                 },
                                 {
-                                    text: "op-reth db settings set transaction_senders_in_static_files",
-                                    link: "/cli/op-reth/db/settings/set/transaction_senders_in_static_files"
+                                    text: "op-reth db settings set transaction_senders",
+                                    link: "/cli/op-reth/db/settings/set/transaction_senders"
+                                },
+                                {
+                                    text: "op-reth db settings set account_changesets",
+                                    link: "/cli/op-reth/db/settings/set/account_changesets"
+                                },
+                                {
+                                    text: "op-reth db settings set storages_history",
+                                    link: "/cli/op-reth/db/settings/set/storages_history"
+                                },
+                                {
+                                    text: "op-reth db settings set transaction_hash_numbers",
+                                    link: "/cli/op-reth/db/settings/set/transaction_hash_numbers"
+                                },
+                                {
+                                    text: "op-reth db settings set account_history",
+                                    link: "/cli/op-reth/db/settings/set/account_history"
                                 }
                             ]
                         }

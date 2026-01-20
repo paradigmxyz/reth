@@ -127,7 +127,7 @@ impl ConfigureEngineEvm<CustomExecutionData> for CustomEvmConfig {
         &self,
         payload: &CustomExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
-        let transactions = payload.inner.payload.transactions().clone().into_iter();
+        let transactions = payload.inner.payload.transactions().clone();
         let convert = |encoded: Bytes| {
             let tx = CustomTransaction::decode_2718_exact(encoded.as_ref())
                 .map_err(Into::into)

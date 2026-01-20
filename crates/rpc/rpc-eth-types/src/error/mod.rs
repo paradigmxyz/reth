@@ -11,6 +11,7 @@ pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
+use reth_revm::db::bal::EvmDatabaseError;
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
@@ -19,8 +20,11 @@ use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError,
 };
-use revm::context_interface::result::{
-    EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
+use revm::{
+    context_interface::result::{
+        EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
+    },
+    state::bal::BalError,
 };
 use revm_inspectors::tracing::{DebugInspectorError, MuxError};
 use std::convert::Infallible;
@@ -92,6 +96,14 @@ pub enum EthApiError {
     /// When an invalid block range is provided
     #[error("invalid block range")]
     InvalidBlockRange,
+    /// Requested block number is beyond the head block
+    #[error("request beyond head block: requested {requested}, head {head}")]
+    RequestBeyondHead {
+        /// The requested block number
+        requested: u64,
+        /// The current head block number
+        head: u64,
+    },
     /// Thrown when the target block for proof computation exceeds the maximum configured window.
     #[error("distance to target block exceeds maximum proof window")]
     ExceedsMaxProofWindow,
@@ -201,7 +213,7 @@ pub enum EthApiError {
 }
 
 impl EthApiError {
-    /// crates a new [`EthApiError::Other`] variant.
+    /// Creates a new [`EthApiError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
@@ -268,6 +280,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
             EthApiError::InvalidBlockRange |
+            EthApiError::RequestBeyondHead { .. } |
             EthApiError::ExceedsMaxProofWindow |
             EthApiError::ConflictingFeeFieldsInRequest |
             EthApiError::Signing(_) |
@@ -392,6 +405,24 @@ impl From<EthTxEnvError> for EthApiError {
             }
             EthTxEnvError::Input(err) => Self::TransactionInputError(err),
         }
+    }
+}
+
+impl<E> From<EvmDatabaseError<E>> for EthApiError
+where
+    E: Into<Self>,
+{
+    fn from(value: EvmDatabaseError<E>) -> Self {
+        match value {
+            EvmDatabaseError::Bal(err) => err.into(),
+            EvmDatabaseError::Database(err) => err.into(),
+        }
+    }
+}
+
+impl From<BalError> for EthApiError {
+    fn from(err: BalError) -> Self {
+        Self::EvmCustom(format!("bal error: {:?}", err))
     }
 }
 
@@ -654,7 +685,7 @@ pub enum RpcInvalidTransactionError {
     /// The transaction is before Spurious Dragon and has a chain ID
     #[error("transactions before Spurious Dragon should not have a chain ID")]
     OldLegacyChainId,
-    /// The transitions is before Berlin and has access list
+    /// The transaction is before Berlin and has access list
     #[error("transactions before Berlin should not have access list")]
     AccessListNotSupported,
     /// `max_fee_per_blob_gas` is not supported for blocks before the Cancun hardfork.
@@ -700,7 +731,7 @@ pub enum RpcInvalidTransactionError {
 }
 
 impl RpcInvalidTransactionError {
-    /// crates a new [`RpcInvalidTransactionError::Other`] variant.
+    /// Creates a new [`RpcInvalidTransactionError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
@@ -878,7 +909,7 @@ pub struct RevertError {
 impl RevertError {
     /// Wraps the output bytes
     ///
-    /// Note: this is intended to wrap an revm output
+    /// Note: this is intended to wrap a revm output
     pub fn new(output: Bytes) -> Self {
         if output.is_empty() {
             Self { output: None }

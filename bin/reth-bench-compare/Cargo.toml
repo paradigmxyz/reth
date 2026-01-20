@@ -25,7 +25,9 @@ reth-chainspec.workspace = true
 
 # alloy
 alloy-provider = { workspace = true, features = ["reqwest-rustls-tls"], default-features = false }
+alloy-rpc-client = { workspace = true, features = ["pubsub"] }
 alloy-rpc-types-eth.workspace = true
+alloy-transport-ws.workspace = true
 alloy-primitives.workspace = true
 
 # CLI and argument parsing
@@ -69,7 +71,11 @@ jemalloc = [
     "reth-node-core/jemalloc",
 ]
 jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
-tracy-allocator = ["reth-cli-util/tracy-allocator"]
+tracy-allocator = ["reth-cli-util/tracy-allocator", "tracy"]
+tracy = [
+    "reth-node-core/tracy",
+    "reth-tracing/tracy",
+]
 
 min-error-logs = [
     "tracing/release_max_level_error",

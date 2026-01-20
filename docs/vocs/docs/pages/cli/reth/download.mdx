@@ -27,6 +27,12 @@ Datadir:
       --datadir.static-files <PATH>
           The absolute path to store static files in.
 
+      --datadir.rocksdb <PATH>
+          The absolute path to store `RocksDB` database in.
+
+      --datadir.pprof-dumps <PATH>
+          The absolute path to store pprof dumps in.
+
       --config <FILE>
           The path to the configuration file to use
 
@@ -99,19 +105,38 @@ Static Files:
       --static-files.blocks-per-file.transaction-senders <BLOCKS_PER_FILE_TRANSACTION_SENDERS>
           Number of blocks per file for the transaction senders segment
 
-      --static-files.receipts
+      --static-files.blocks-per-file.account-change-sets <BLOCKS_PER_FILE_ACCOUNT_CHANGE_SETS>
+          Number of blocks per file for the account changesets segment
+
+      --static-files.receipts <RECEIPTS>
           Store receipts in static files instead of the database.
 
           When enabled, receipts will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-      --static-files.transaction-senders
+          [default: false]
+          [possible values: true, false]
+
+      --static-files.transaction-senders <TRANSACTION_SENDERS>
           Store transaction senders in static files instead of the database.
 
           When enabled, transaction senders will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
+          [default: false]
+          [possible values: true, false]
+
+      --static-files.account-change-sets <ACCOUNT_CHANGESETS>
+          Store account changesets in static files.
+
+          When enabled, account changesets will be written to static files on disk instead of the database.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
+          [default: false]
+          [possible values: true, false]
 
   -u, --url <URL>
           Specify a snapshot URL or let the command propose a default one.
@@ -121,7 +146,9 @@ Static Files:
           - https://publicnode.com/snapshots (full nodes & testnets)
 
           If no URL is provided, the latest mainnet archive snapshot
-          will be proposed for download from https://downloads.merkle.io
+          will be proposed for download from https://downloads.merkle.io.
+
+          Local file:// URLs are also supported for extracting snapshots from disk.
 
 Logging:
       --log.stdout.format <FORMAT>
@@ -192,6 +219,24 @@ Logging:
 
           [default: always]
 
+      --logs-otlp[=<URL>]
+          Enable `Opentelemetry` logs export to an OTLP endpoint.
+
+          If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/logs` - gRPC: `http://localhost:4317`
+
+          Example: --logs-otlp=http://collector:4318/v1/logs
+
+          [env: OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=]
+
+      --logs-otlp.filter <FILTER>
+          Set a filter directive for the OTLP logs exporter. This controls the verbosity of logs sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
+
+          Example: --logs-otlp.filter=info,reth=debug
+
+          Defaults to INFO if not specified.
+
+          [default: info]
+
 Display:
   -v, --verbosity...
           Set the minimum log level.
@@ -216,9 +261,9 @@ Tracing:
           [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
 
       --tracing-otlp-protocol <PROTOCOL>
-          OTLP transport protocol to use for exporting traces.
+          OTLP transport protocol to use for exporting traces and logs.
 
-          - `http`: expects endpoint path to end with `/v1/traces` - `grpc`: expects endpoint without a path
+          - `http`: expects endpoint path to end with `/v1/traces` or `/v1/logs` - `grpc`: expects endpoint without a path
 
           Defaults to HTTP if not specified.
 

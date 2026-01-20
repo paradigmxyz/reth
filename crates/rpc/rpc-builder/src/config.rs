@@ -139,7 +139,7 @@ impl RethRpcServerConfig for RpcServerArgs {
 
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
         let mut config = TransportRpcModuleConfig::default()
-            .with_config(RpcModuleConfig::new(self.eth_config(), self.flashbots_config()));
+            .with_config(RpcModuleConfig::new(self.eth_config()));
 
         if self.http {
             config = config.with_http(

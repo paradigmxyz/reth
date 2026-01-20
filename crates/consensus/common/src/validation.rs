@@ -279,18 +279,26 @@ pub fn validate_against_parent_hash_number<H: BlockHeader>(
     header: &H,
     parent: &SealedHeader<H>,
 ) -> Result<(), ConsensusError> {
-    // Parent number is consistent.
-    if parent.number() + 1 != header.number() {
-        return Err(ConsensusError::ParentBlockNumberMismatch {
-            parent_block_number: parent.number(),
-            block_number: header.number(),
-        })
-    }
-
     if parent.hash() != header.parent_hash() {
         return Err(ConsensusError::ParentHashMismatch(
             GotExpected { got: header.parent_hash(), expected: parent.hash() }.into(),
         ))
+    }
+
+    let Some(parent_number) = parent.number().checked_add(1) else {
+        // parent block already reached the maximum
+        return Err(ConsensusError::ParentBlockNumberMismatch {
+            parent_block_number: parent.number(),
+            block_number: u64::MAX,
+        })
+    };
+
+    // Parent number is consistent.
+    if parent_number != header.number() {
+        return Err(ConsensusError::ParentBlockNumberMismatch {
+            parent_block_number: parent.number(),
+            block_number: header.number(),
+        })
     }
 
     Ok(())
@@ -492,13 +500,11 @@ mod tests {
         let expected_blob_gas_used = 10 * DATA_GAS_PER_BLOB;
 
         // validate blob, it should fail blob gas used validation
-        assert_eq!(
-            validate_block_pre_execution(&block, &chain_spec),
-            Err(ConsensusError::BlobGasUsedDiff(GotExpected {
-                got: 1,
-                expected: expected_blob_gas_used
-            }))
-        );
+        assert!(matches!(
+            validate_block_pre_execution(&block, &chain_spec).unwrap_err(),
+            ConsensusError::BlobGasUsedDiff(diff)
+                if diff.got == 1 && diff.expected == expected_blob_gas_used
+        ));
     }
 
     #[test]
@@ -509,10 +515,10 @@ mod tests {
 
         // Test exceeding default - should fail
         let header_33 = Header { extra_data: Bytes::from(vec![0; 33]), ..Default::default() };
-        assert_eq!(
-            validate_header_extra_data(&header_33, 32),
-            Err(ConsensusError::ExtraDataExceedsMax { len: 33 })
-        );
+        assert!(matches!(
+            validate_header_extra_data(&header_33, 32).unwrap_err(),
+            ConsensusError::ExtraDataExceedsMax { len } if len == 33
+        ));
 
         // Test with custom larger limit - should pass
         assert!(validate_header_extra_data(&header_33, 64).is_ok());
