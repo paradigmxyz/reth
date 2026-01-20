@@ -2939,25 +2939,33 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .into_iter()
             .map(|(index, account)| (account.address, *index))
             .collect::<Vec<_>>();
-        last_indices.sort_by_key(|(a, _)| *a);
+        last_indices.sort_unstable_by_key(|(a, _)| *a);
 
-        // Unwind the account history index.
-        let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
-        for &(address, rem_index) in &last_indices {
-            let partial_shard = unwind_history_shards::<_, tables::AccountsHistory, _>(
-                &mut cursor,
-                ShardedKey::last(address),
-                rem_index,
-                |sharded_key| sharded_key.key == address,
-            )?;
-
-            // Check the last returned partial shard.
-            // If it's not empty, the shard needs to be reinserted.
-            if !partial_shard.is_empty() {
-                cursor.insert(
+        if self.cached_storage_settings().account_history_in_rocksdb {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let batch = self.rocksdb_provider.unwind_account_history_indices(&last_indices)?;
+                self.pending_rocksdb_batches.lock().push(batch);
+            }
+        } else {
+            // Unwind the account history index in MDBX.
+            let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
+            for &(address, rem_index) in &last_indices {
+                let partial_shard = unwind_history_shards::<_, tables::AccountsHistory, _>(
+                    &mut cursor,
                     ShardedKey::last(address),
-                    &BlockNumberList::new_pre_sorted(partial_shard),
+                    rem_index,
+                    |sharded_key| sharded_key.key == address,
                 )?;
+
+                // Check the last returned partial shard.
+                // If it's not empty, the shard needs to be reinserted.
+                if !partial_shard.is_empty() {
+                    cursor.insert(
+                        ShardedKey::last(address),
+                        &BlockNumberList::new_pre_sorted(partial_shard),
+                    )?;
+                }
             }
         }
 
