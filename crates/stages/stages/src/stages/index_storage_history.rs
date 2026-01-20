@@ -131,21 +131,12 @@ where
 
         info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
 
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb = provider.rocksdb_provider();
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_batch = rocksdb.batch();
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let rocksdb_batch = ();
-
-        let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
-
-        load_storage_history(collector, first_sync, &mut writer)?;
-
-        #[cfg(all(unix, feature = "rocksdb"))]
-        if let Some(batch) = writer.into_raw_rocksdb_batch() {
-            provider.set_pending_rocksdb_batch(batch);
-        }
+        provider.with_rocksdb_batch(|rocksdb_batch| {
+            let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
+            load_storage_history(collector, first_sync, &mut writer)
+                .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
+            Ok(((), writer.into_raw_rocksdb_batch()))
+        })?;
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
