@@ -68,7 +68,7 @@ use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
     ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
-    StaticFileProviderFactory, StorageSettings,
+    StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -674,37 +674,18 @@ where
         Ok(())
     }
 
-    /// Computes storage settings from CLI args and logs `RocksDB` routing if enabled.
-    fn storage_settings_with_logging(&self) -> StorageSettings {
-        let base_settings = self.node_config().static_files.to_settings();
-        let (settings, grouped_enabled) =
-            self.node_config().rocksdb.apply_to_settings(base_settings);
-
-        if grouped_enabled {
-            let enabled: Vec<&str> = [
-                settings.transaction_hash_numbers_in_rocksdb.then_some("tx-hash"),
-                settings.storages_history_in_rocksdb.then_some("storages-history"),
-                settings.account_history_in_rocksdb.then_some("account-history"),
-            ]
-            .into_iter()
-            .flatten()
-            .collect();
-            info!(target: "reth::cli", "RocksDB routing enabled for tables: {}", enabled.join(", "));
-        }
-
-        settings
-    }
-
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
-        let settings = self.storage_settings_with_logging();
+        let base_settings = self.node_config().static_files.to_settings();
+        let (settings, _) = self.node_config().rocksdb.apply_to_settings(base_settings);
         init_genesis_with_settings(self.provider_factory(), settings)?;
         Ok(self)
     }
 
     /// Write the genesis block and state if it has not already been written
     pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
-        let settings = self.storage_settings_with_logging();
+        let base_settings = self.node_config().static_files.to_settings();
+        let (settings, _) = self.node_config().rocksdb.apply_to_settings(base_settings);
         init_genesis_with_settings(self.provider_factory(), settings)
     }
 
