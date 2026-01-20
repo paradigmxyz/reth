@@ -4,6 +4,10 @@ use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Block, RecoveredBlock};
 use std::time::Instant;
+use tracing::warn;
+
+/// Threshold in milliseconds for slow block logging (default: 1000ms).
+const SLOW_BLOCK_THRESHOLD_MS: u64 = 1000;
 
 /// Executor metrics.
 #[derive(Metrics, Clone)]
@@ -63,6 +67,51 @@ impl ExecutorMetrics {
         self.execution_duration.set(execution_duration);
 
         output
+    }
+
+    /// Logs slow block execution in JSON format for cross-client performance analysis.
+    ///
+    /// This method outputs a standardized JSON log entry when block execution
+    /// exceeds the slow block threshold, following the cross-client execution
+    /// metrics specification.
+    pub fn log_slow_block(
+        &self,
+        block_number: u64,
+        block_hash: &str,
+        gas_used: u64,
+        tx_count: usize,
+        execution_ms: u64,
+        accounts_loaded: usize,
+        storage_slots_loaded: usize,
+        bytecodes_loaded: usize,
+        accounts_updated: usize,
+        storage_slots_updated: usize,
+    ) {
+        if execution_ms > SLOW_BLOCK_THRESHOLD_MS {
+            let mgas_per_sec = if execution_ms > 0 {
+                (gas_used as f64 / 1_000_000.0) / (execution_ms as f64 / 1000.0)
+            } else {
+                0.0
+            };
+
+            // Output as structured JSON log for cross-client analysis
+            warn!(
+                target: "reth::slow_block",
+                message = "Slow block",
+                block.number = block_number,
+                block.hash = block_hash,
+                block.gas_used = gas_used,
+                block.tx_count = tx_count,
+                timing.execution_ms = execution_ms,
+                timing.total_ms = execution_ms,
+                throughput.mgas_per_sec = format!("{:.2}", mgas_per_sec),
+                state_reads.accounts = accounts_loaded,
+                state_reads.storage_slots = storage_slots_loaded,
+                state_reads.bytecodes = bytecodes_loaded,
+                state_writes.accounts = accounts_updated,
+                state_writes.storage_slots = storage_slots_updated,
+            );
+        }
     }
 
     /// Execute a block and update basic gas/timing metrics.
