@@ -336,11 +336,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         Ok(())
     }
-
-    /// Returns the chain spec if available
-    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
-        Some(&self.env.chain)
-    }
 }
 
 fn collect_checksums<DB: Database>(
