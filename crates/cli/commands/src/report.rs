@@ -188,16 +188,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         info!(target: "reth::cli", block = ?self.block, "Generating debug report archive");
 
-        // Determine output path
+        // Capture current time once for consistent timestamps throughout the report
+        let now = SystemTime::now();
+        let now_secs =
+            now.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+
+        // Determine output path (keep 'Z' suffix to indicate UTC timezone)
         let output_path = self.output.clone().unwrap_or_else(|| {
-            let timestamp = humantime::format_rfc3339_seconds(SystemTime::now())
+            let timestamp = humantime::format_rfc3339_seconds(now)
                 .to_string()
                 .replace([':', '-'], "")
-                .replace('T', "_")
-                .split('Z')
-                .next()
-                .unwrap_or("unknown")
-                .to_string();
+                .replace('T', "_");
             PathBuf::from(format!("reth_report_{timestamp}.tar.gz"))
         });
 
@@ -209,13 +210,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         // Collect and add metadata
         let chain_spec = provider_factory.chain_spec();
         let metadata = ReportMetadata {
-            generated_at: humantime::format_rfc3339(SystemTime::now()).to_string(),
+            generated_at: humantime::format_rfc3339(now).to_string(),
             reth_version: env!("CARGO_PKG_VERSION").to_string(),
             chain: chain_spec.chain().to_string(),
             target_block: self.block,
             data_dir: data_dir.data_dir().display().to_string(),
         };
-        add_json_to_archive(&mut archive, "metadata.json", &metadata)?;
+        add_json_to_archive(&mut archive, "metadata.json", &metadata, now_secs)?;
 
         // Collect block info if specified
         if let Some(block) = self.block {
@@ -233,7 +234,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                         receipts_root: format!("{:?}", header.receipts_root()),
                         timestamp: header.timestamp(),
                     };
-                    add_json_to_archive(&mut archive, "block_info.json", &block_info)?;
+                    add_json_to_archive(&mut archive, "block_info.json", &block_info, now_secs)?;
                     info!(target: "reth::cli", block, "Block info collected");
                 }
                 Ok(None) => {
@@ -279,7 +280,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         };
 
         let db_stats = DbStats { latest_block, tables: tables_stats, checksums };
-        add_json_to_archive(&mut archive, "db_stats.json", &db_stats)?;
+        add_json_to_archive(&mut archive, "db_stats.json", &db_stats, now_secs)?;
         info!(target: "reth::cli", "Database stats collected");
 
         // Collect VersionHistory
@@ -296,7 +297,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             Ok::<(), eyre::Report>(())
         })??;
-        add_json_to_archive(&mut archive, "version_history.json", &version_history)?;
+        add_json_to_archive(&mut archive, "version_history.json", &version_history, now_secs)?;
         info!(target: "reth::cli", entries = version_history.len(), "Version history collected");
 
         // Collect log files (from cache directory)
@@ -434,6 +435,7 @@ fn add_json_to_archive<W: Write, T: Serialize>(
     archive: &mut Builder<W>,
     name: &str,
     data: &T,
+    mtime: u64,
 ) -> eyre::Result<()> {
     let json = serde_json::to_string_pretty(data)?;
     let bytes = json.as_bytes();
@@ -442,9 +444,7 @@ fn add_json_to_archive<W: Write, T: Serialize>(
     header.set_path(name)?;
     header.set_size(bytes.len() as u64);
     header.set_mode(0o644);
-    header.set_mtime(
-        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs(),
-    );
+    header.set_mtime(mtime);
     header.set_cksum();
 
     archive.append(&header, bytes)?;
