@@ -220,7 +220,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             // already resolved
             let cached = ResolveEntryResult { entry: Some(Ok(entry)), link, hash, kind };
             self.on_resolved_entry(cached);
-            return
+            return;
         }
         self.queries.resolve_entry(link, hash, kind)
     }
@@ -298,7 +298,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
         loop {
             // drain buffered events first
             if let Some(event) = self.queued_events.pop_front() {
-                return Poll::Ready(event)
+                return Poll::Ready(event);
             }
 
             // process all incoming commands
@@ -351,7 +351,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             }
 
             if !progress && self.queued_events.is_empty() {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -393,16 +393,24 @@ pub enum DnsDiscoveryEvent {
 
 /// Converts an [Enr] into a [`NodeRecord`]
 fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
+    let id = pk2id(&enr.public_key());
+
     let node_record = NodeRecord {
         address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
         tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
         udp_port: enr.udp4().or_else(|| enr.udp6())?,
-        id: pk2id(&enr.public_key()),
+        id,
     }
     .into_ipv4_mapped();
 
-    let fork_id =
-        enr.get_decodable::<EnrForkIdEntry>(b"eth").transpose().ok().flatten().map(Into::into);
+    let fork_id = match enr.get_decodable::<EnrForkIdEntry>(b"eth").transpose() {
+        Ok(Some(entry)) => Some(entry.into()),
+        Ok(None) => None,
+        Err(err) => {
+            trace!(?err, ?id, "invalid fork id entry in ENR");
+            None
+        }
+    };
 
     Some(DnsNodeRecordUpdate { node_record, fork_id, enr: enr.clone() })
 }
@@ -414,6 +422,7 @@ mod tests {
     use alloy_chains::Chain;
     use alloy_rlp::{Decodable, Encodable};
     use enr::EnrKey;
+    use rand::{rngs::StdRng, RngCore, SeedableRng};
     use reth_chainspec::MAINNET;
     use reth_ethereum_forks::{EthereumHardfork, ForkHash};
     use secp256k1::rand::thread_rng;
@@ -446,12 +455,16 @@ mod tests {
         // rig
 
         let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let mut rng = StdRng::seed_from_u64(1);
+        let mut fork_hash = [0u8; 4];
+        rng.fill_bytes(&mut fork_hash);
+        let next = rng.next_u64();
         let enr = Enr::builder()
             .ip("127.0.0.1".parse().unwrap())
             .udp4(9000)
             .tcp4(30303)
             .add_value(b"eth", &EnrForkIdEntry::from(MAINNET.latest_fork_id()))
-            .add_value(b"opstack", &ForkId { hash: ForkHash(rand::random()), next: rand::random() })
+            .add_value(b"opstack", &ForkId { hash: ForkHash(fork_hash), next })
             .build(&secret_key)
             .unwrap();
 

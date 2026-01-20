@@ -1,6 +1,5 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
-
 use alloy_consensus::{Header, SignableTransaction, Transaction as _, TxLegacy};
 use alloy_eips::{
     eip1898::BlockWithParent,
@@ -344,7 +343,7 @@ where
                 let old = if entry.value.is_zero() {
                     let old = storage.remove(&entry.key);
                     if matches!(old, Some(U256::ZERO)) {
-                        return None
+                        return None;
                     }
                     old
                 } else {
@@ -441,7 +440,7 @@ pub fn random_contract_account_range<R: Rng>(
     for _ in acc_range {
         let (address, eoa_account) = random_eoa_account(rng);
         // todo: can a non-eoa account have a nonce > 0?
-        let account = Account { bytecode_hash: Some(rng.gen()), ..eoa_account };
+        let account = Account { bytecode_hash: Some(rng.random()), ..eoa_account };
         accounts.push((address, account))
     }
     accounts
@@ -476,7 +475,7 @@ pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: O
     let topics_count = topics_count.unwrap_or_else(|| rng.random()) as usize;
     Log::new_unchecked(
         address.unwrap_or_else(|| Address::random()),
-        std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
+        std::iter::repeat_with(|| rng.random()).take(topics_count).collect(),
         std::iter::repeat_with(|| rng.random()).take(data_byte_count).collect::<Vec<_>>().into(),
     )
 }
