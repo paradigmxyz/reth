@@ -417,38 +417,43 @@ impl Hash for OpTransactionSigned {
 #[cfg(feature = "reth-codec")]
 impl reth_codecs::Compact for OpTransactionSigned {
     fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
-        let start = buf.as_mut().len();
+        use bytes::BufMut;
 
-        // Placeholder for bitflags.
-        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
-        buf.put_u8(0);
+        let start_remaining = buf.remaining_mut();
 
-        let sig_bit = self.signature.to_compact(buf) as u8;
+        // Compute all flag bits upfront to avoid needing random access to patch the header byte.
+        let sig_bit = self.signature.v() as u8;
         let zstd_bit = self.transaction.input().len() >= 32;
+        let tx_bits = {
+            let mut dummy = [0u8; 1];
+            self.transaction.to_compact(&mut dummy.as_mut_slice()) as u8
+        };
 
-        let tx_bits = if zstd_bit {
+        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
+        let flags = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
+        buf.put_u8(flags);
+
+        // Write signature (r, s only - v is encoded in flags)
+        buf.put_slice(&self.signature.r().as_le_bytes());
+        buf.put_slice(&self.signature.s().as_le_bytes());
+
+        if zstd_bit {
             let mut tmp = Vec::with_capacity(256);
+            let _ = self.transaction.to_compact(&mut tmp);
             if cfg!(feature = "std") {
                 reth_zstd_compressors::TRANSACTION_COMPRESSOR.with(|compressor| {
                     let mut compressor = compressor.borrow_mut();
-                    let tx_bits = self.transaction.to_compact(&mut tmp);
                     buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
-                    tx_bits as u8
                 })
             } else {
                 let mut compressor = reth_zstd_compressors::create_tx_compressor();
-                let tx_bits = self.transaction.to_compact(&mut tmp);
                 buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
-                tx_bits as u8
             }
         } else {
-            self.transaction.to_compact(buf) as u8
-        };
+            self.transaction.to_compact(buf);
+        }
 
-        // Replace bitflags with the actual values
-        buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
-
-        buf.as_mut().len() - start
+        start_remaining - buf.remaining_mut()
     }
 
     fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
