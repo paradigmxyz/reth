@@ -123,7 +123,13 @@ pub fn install() {
         let mut alt_stack: libc::stack_t = mem::zeroed();
         // Both SysV AMD64 ABI and aarch64 ABI require 16 bytes alignment. We are going to be
         // generous here and just use a size of a page.
-        let page_sz = libc::sysconf(libc::_SC_PAGESIZE) as usize;
+        let raw_page_sz = libc::sysconf(libc::_SC_PAGESIZE);
+        let page_sz = if raw_page_sz == -1 {
+            // Fallback alignment in case sysconf fails.
+            4096_usize
+        } else {
+            raw_page_sz as usize
+        };
         alt_stack.ss_sp = alloc(Layout::from_size_align(alt_stack_size, page_sz).unwrap()).cast();
         alt_stack.ss_size = alt_stack_size;
         libc::sigaltstack(&raw const alt_stack, ptr::null_mut());
