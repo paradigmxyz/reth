@@ -2,7 +2,7 @@
 crates/chain-state/         @fgimenez @mattsse
 crates/chainspec/           @Rjected @joshieDo @mattsse
 crates/cli/                 @mattsse
-crates/config/              @shekhirin @mattsse
+crates/config/              @shekhirin @mattsse @Rjected 
 crates/consensus/           @mattsse @Rjected
 crates/e2e-test-utils/      @mattsse @Rjected @klkvr @fgimenez
 crates/engine/              @mattsse @Rjected @fgimenez @mediocregopher @yongkangc
