@@ -10,6 +10,13 @@ use reth_storage_api::StorageSettings;
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
 #[command(next_help_heading = "RocksDB")]
 pub struct RocksDbArgs {
+    /// Route all supported tables to `RocksDB` instead of MDBX.
+    ///
+    /// This enables RocksDB for tx-hash, storages-history, and account-history tables.
+    /// Cannot be combined with individual flags set to false.
+    #[arg(long = "rocksdb.all", action = ArgAction::SetTrue)]
+    pub all: bool,
+
     /// Route tx hash -> number table to `RocksDB` instead of MDBX.
     #[arg(long = "rocksdb.tx-hash", action = ArgAction::Set)]
     pub tx_hash: Option<bool>,
@@ -24,42 +31,46 @@ pub struct RocksDbArgs {
 }
 
 impl RocksDbArgs {
-    /// Applies CLI overrides to the given defaults, returning the resulting settings.
+    /// Validates the RocksDB arguments.
     ///
-    /// If any flag is set to `true`, all `RocksDB` tables are enabled by default, then explicit
-    /// `false` overrides are applied. This grouped behavior ensures users get the full `RocksDB`
-    /// benefit without needing to specify all flags.
-    ///
-    /// Returns `(settings, grouped_enabled)` where `grouped_enabled` is true if the grouped
-    /// behavior was triggered (any flag was true, enabling all tables).
-    pub fn apply_to_settings(&self, mut settings: StorageSettings) -> (StorageSettings, bool) {
-        let any_true = self.tx_hash == Some(true) ||
-            self.storages_history == Some(true) ||
-            self.account_history == Some(true);
-
-        if any_true {
-            settings.transaction_hash_numbers_in_rocksdb = true;
-            settings.storages_history_in_rocksdb = true;
-            settings.account_history_in_rocksdb = true;
+    /// Returns an error if `--rocksdb.all` is used with any individual flag set to `false`.
+    pub fn validate(&self) -> Result<(), RocksDbArgsError> {
+        if self.all {
+            if self.tx_hash == Some(false) {
+                return Err(RocksDbArgsError::ConflictingFlags("tx-hash"));
+            }
+            if self.storages_history == Some(false) {
+                return Err(RocksDbArgsError::ConflictingFlags("storages-history"));
+            }
+            if self.account_history == Some(false) {
+                return Err(RocksDbArgsError::ConflictingFlags("account-history"));
+            }
         }
-
-        if let Some(value) = self.tx_hash {
-            settings.transaction_hash_numbers_in_rocksdb = value;
-        }
-        if let Some(value) = self.storages_history {
-            settings.storages_history_in_rocksdb = value;
-        }
-        if let Some(value) = self.account_history {
-            settings.account_history_in_rocksdb = value;
-        }
-
-        (settings, any_true)
+        Ok(())
     }
 
-    /// Returns true if any `RocksDB` table routing flag was explicitly set.
-    pub const fn has_overrides(&self) -> bool {
-        self.tx_hash.is_some() || self.storages_history.is_some() || self.account_history.is_some()
+    /// Returns `StorageSettings` with `RocksDB` table routing flags applied.
+    ///
+    /// If `--rocksdb.all` is set, all tables are enabled. Otherwise, each flag is applied
+    /// independently.
+    pub fn to_settings(&self) -> StorageSettings {
+        let tx_hash = self.all || self.tx_hash.unwrap_or(false);
+        let storages_history = self.all || self.storages_history.unwrap_or(false);
+        let account_history = self.all || self.account_history.unwrap_or(false);
+
+        StorageSettings::default()
+            .with_transaction_hash_numbers_in_rocksdb(tx_hash)
+            .with_storages_history_in_rocksdb(storages_history)
+            .with_account_history_in_rocksdb(account_history)
     }
+}
+
+/// Error type for RocksDB argument validation.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RocksDbArgsError {
+    /// `--rocksdb.all` cannot be combined with an individual flag set to false.
+    #[error("--rocksdb.all cannot be combined with --rocksdb.{0}=false")]
+    ConflictingFlags(&'static str),
 }
 
 #[cfg(test)]
@@ -80,7 +91,14 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_all_flags() {
+    fn test_parse_all_flag() {
+        let args = CommandParser::<RocksDbArgs>::parse_from(["reth", "--rocksdb.all"]).args;
+        assert!(args.all);
+        assert_eq!(args.tx_hash, None);
+    }
+
+    #[test]
+    fn test_parse_individual_flags() {
         let args = CommandParser::<RocksDbArgs>::parse_from([
             "reth",
             "--rocksdb.tx-hash=true",
@@ -88,71 +106,73 @@ mod tests {
             "--rocksdb.account-history=true",
         ])
         .args;
+        assert!(!args.all);
         assert_eq!(args.tx_hash, Some(true));
         assert_eq!(args.storages_history, Some(false));
         assert_eq!(args.account_history, Some(true));
     }
 
     #[test]
-    fn test_apply_to_settings_grouped_enable() {
-        let args =
-            RocksDbArgs { tx_hash: Some(true), storages_history: None, account_history: None };
-        let (result, grouped) = args.apply_to_settings(StorageSettings::legacy());
-
-        assert!(grouped, "should trigger grouped behavior when any flag is true");
-        assert!(result.transaction_hash_numbers_in_rocksdb);
-        assert!(result.storages_history_in_rocksdb, "grouped: all tables enabled");
-        assert!(result.account_history_in_rocksdb, "grouped: all tables enabled");
+    fn test_validate_all_alone_ok() {
+        let args = RocksDbArgs { all: true, ..Default::default() };
+        assert!(args.validate().is_ok());
     }
 
     #[test]
-    fn test_apply_to_settings_explicit_disable() {
-        let args = RocksDbArgs {
-            tx_hash: Some(true),
-            storages_history: Some(false),
-            account_history: None,
-        };
-        let (result, grouped) = args.apply_to_settings(StorageSettings::legacy());
+    fn test_validate_all_with_true_ok() {
+        let args = RocksDbArgs { all: true, tx_hash: Some(true), ..Default::default() };
+        assert!(args.validate().is_ok());
+    }
 
-        assert!(grouped);
+    #[test]
+    fn test_validate_all_with_false_errors() {
+        let args = RocksDbArgs { all: true, tx_hash: Some(false), ..Default::default() };
+        assert_eq!(args.validate(), Err(RocksDbArgsError::ConflictingFlags("tx-hash")));
+
+        let args = RocksDbArgs { all: true, storages_history: Some(false), ..Default::default() };
+        assert_eq!(args.validate(), Err(RocksDbArgsError::ConflictingFlags("storages-history")));
+
+        let args = RocksDbArgs { all: true, account_history: Some(false), ..Default::default() };
+        assert_eq!(args.validate(), Err(RocksDbArgsError::ConflictingFlags("account-history")));
+    }
+
+    #[test]
+    fn test_to_settings_with_all() {
+        let args = RocksDbArgs { all: true, ..Default::default() };
+        let result = args.to_settings();
+
         assert!(result.transaction_hash_numbers_in_rocksdb);
-        assert!(!result.storages_history_in_rocksdb, "explicit false overrides grouped enable");
+        assert!(result.storages_history_in_rocksdb);
         assert!(result.account_history_in_rocksdb);
     }
 
     #[test]
-    fn test_apply_to_settings_no_grouped_when_all_none() {
+    fn test_to_settings_single_flag() {
+        let args = RocksDbArgs { tx_hash: Some(true), ..Default::default() };
+        let result = args.to_settings();
+
+        assert!(result.transaction_hash_numbers_in_rocksdb);
+        assert!(!result.storages_history_in_rocksdb);
+        assert!(!result.account_history_in_rocksdb);
+    }
+
+    #[test]
+    fn test_to_settings_default() {
         let args = RocksDbArgs::default();
-        let (result, grouped) = args.apply_to_settings(StorageSettings::legacy());
+        let result = args.to_settings();
 
-        assert!(!grouped, "no grouped behavior when no flags set");
         assert!(!result.transaction_hash_numbers_in_rocksdb);
         assert!(!result.storages_history_in_rocksdb);
         assert!(!result.account_history_in_rocksdb);
     }
 
     #[test]
-    fn test_apply_to_settings_all_explicit_false() {
-        let args = RocksDbArgs {
-            tx_hash: Some(false),
-            storages_history: Some(false),
-            account_history: Some(false),
-        };
-        let (result, grouped) = args.apply_to_settings(StorageSettings::legacy());
-
-        assert!(!grouped, "no grouped when all explicit false");
-        assert!(!result.transaction_hash_numbers_in_rocksdb);
-        assert!(!result.storages_history_in_rocksdb);
-        assert!(!result.account_history_in_rocksdb);
-    }
-
-    #[test]
-    fn test_apply_to_settings_preserves_non_rocksdb_fields() {
+    fn test_merge_preserves_non_rocksdb_fields() {
         let base = StorageSettings::legacy().with_receipts_in_static_files(true);
-        let args =
-            RocksDbArgs { tx_hash: Some(true), storages_history: None, account_history: None };
-        let (result, _) = args.apply_to_settings(base);
+        let args = RocksDbArgs { tx_hash: Some(true), ..Default::default() };
+        let result = base.merge(args.to_settings());
 
         assert!(result.receipts_in_static_files, "non-rocksdb settings preserved");
+        assert!(result.transaction_hash_numbers_in_rocksdb);
     }
 }

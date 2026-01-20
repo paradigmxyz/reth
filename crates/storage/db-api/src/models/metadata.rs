@@ -108,4 +108,15 @@ impl StorageSettings {
             self.account_history_in_rocksdb ||
             self.storages_history_in_rocksdb
     }
+
+    /// Merges another `StorageSettings` into this one.
+    ///
+    /// The `RocksDB` flags from `other` override the corresponding flags in `self`.
+    /// Static file settings are preserved from `self`.
+    pub const fn merge(mut self, other: Self) -> Self {
+        self.storages_history_in_rocksdb = other.storages_history_in_rocksdb;
+        self.transaction_hash_numbers_in_rocksdb = other.transaction_hash_numbers_in_rocksdb;
+        self.account_history_in_rocksdb = other.account_history_in_rocksdb;
+        self
+    }
 }

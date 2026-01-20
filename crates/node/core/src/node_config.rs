@@ -360,9 +360,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     /// Returns the effective storage settings derived from static-file settings plus
     /// `RocksDB` table-routing overrides.
     pub fn storage_settings(&self) -> StorageSettings {
-        let base = self.static_files.to_settings();
-        let (settings, _) = self.rocksdb.apply_to_settings(base);
-        settings
+        self.static_files.to_settings().merge(self.rocksdb.to_settings())
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if
