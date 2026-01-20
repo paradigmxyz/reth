@@ -5,25 +5,31 @@ use crate::{
 };
 use bytes::BufMut;
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
+use std::{fmt::Debug, mem::MaybeUninit};
 
 /// A [`BufMut`] that only counts bytes written without allocating.
 ///
 /// Used to compute the size of a value before serializing it.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct CountingBuf {
     len: usize,
+    /// Scratch buffer for `chunk_mut`.
+    /// Only needs to be large enough for a single `put_u128` or similar primitive write.
+    scratch: [MaybeUninit<u8>; 16],
+}
+
+impl Default for CountingBuf {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CountingBuf {
-    /// Thread-local scratch buffer for `chunk_mut`.
-    /// Only needs to be large enough for a single `put_u128` or similar primitive write.
-    const SCRATCH_SIZE: usize = 16;
-
     /// Creates a new `CountingBuf`.
     #[inline]
     pub const fn new() -> Self {
-        Self { len: 0 }
+        Self { len: 0, scratch: [MaybeUninit::uninit(); 16] }
     }
 
     /// Returns the number of bytes written.
@@ -39,12 +45,6 @@ impl CountingBuf {
     }
 }
 
-std::thread_local! {
-    /// Thread-local scratch buffer for [`CountingBuf::chunk_mut`].
-    static SCRATCH: std::cell::UnsafeCell<[u8; CountingBuf::SCRATCH_SIZE]> =
-        const { std::cell::UnsafeCell::new([0u8; CountingBuf::SCRATCH_SIZE]) };
-}
-
 unsafe impl BufMut for CountingBuf {
     #[inline]
     fn remaining_mut(&self) -> usize {
@@ -58,16 +58,7 @@ unsafe impl BufMut for CountingBuf {
 
     #[inline]
     fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
-        SCRATCH.with(|scratch| {
-            // SAFETY: We return a mutable reference to the thread-local buffer.
-            // This is safe because CountingBuf is not Sync and chunk_mut takes &mut self.
-            unsafe {
-                bytes::buf::UninitSlice::from_raw_parts_mut(
-                    (*scratch.get()).as_mut_ptr(),
-                    Self::SCRATCH_SIZE,
-                )
-            }
-        })
+        bytes::buf::UninitSlice::uninit(&mut self.scratch)
     }
 
     #[inline]
