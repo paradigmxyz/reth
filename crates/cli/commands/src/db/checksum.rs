@@ -25,11 +25,6 @@ use tracing::{info, warn};
 /// Interval for logging progress during checksum computation.
 const PROGRESS_LOG_INTERVAL: usize = 100_000;
 
-/// Creates a new hasher with the standard seed used for checksum computation.
-fn checksum_hasher() -> impl Hasher {
-    FixedState::with_seed(u64::from_be_bytes(*b"RETHRETH")).build_hasher()
-}
-
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db checksum` command
 pub struct Command {
@@ -98,6 +93,11 @@ impl Command {
     }
 }
 
+/// Creates a new hasher with the standard seed used for checksum computation.
+fn checksum_hasher() -> impl Hasher {
+    FixedState::with_seed(u64::from_be_bytes(*b"RETHRETH")).build_hasher()
+}
+
 fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
     tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
     segment: StaticFileSegment,
@@ -132,7 +132,7 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         if limit == usize::MAX { None } else { Some(limit) }
     );
 
-    for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
+    'outer: for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
         if block_range.end() < start_block || block_range.start() > end_block {
             continue;
         }
@@ -162,16 +162,13 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
             }
 
             if total >= limit {
-                break;
+                break 'outer;
             }
         }
 
+        // Explicitly drop provider before removing from cache to avoid deadlock
         drop(jar_provider);
         static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
-
-        if total >= limit {
-            break;
-        }
     }
 
     let checksum = hasher.finish();
@@ -269,5 +266,51 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
         info!("Checksum for table `{}`: {:#x} (elapsed: {:?})", T::NAME, checksum, elapsed);
 
         Ok((checksum, elapsed))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_checksum_mdbx_command() {
+        use clap::Parser;
+        let cmd = Command::try_parse_from(["checksum", "mdbx", "PlainAccountState"]).unwrap();
+        assert!(matches!(cmd.subcommand, Subcommand::Mdbx { .. }));
+    }
+
+    #[test]
+    fn parse_checksum_static_file_command() {
+        use clap::Parser;
+        let cmd = Command::try_parse_from(["checksum", "static-file", "headers"]).unwrap();
+        assert!(matches!(cmd.subcommand, Subcommand::StaticFile { .. }));
+    }
+
+    #[test]
+    fn parse_checksum_static_file_with_options() {
+        use clap::Parser;
+        let cmd = Command::try_parse_from([
+            "checksum",
+            "static-file",
+            "transactions",
+            "--start-block",
+            "100",
+            "--end-block",
+            "1000",
+            "--limit",
+            "500",
+        ])
+        .unwrap();
+
+        match cmd.subcommand {
+            Subcommand::StaticFile { segment, start_block, end_block, limit } => {
+                assert_eq!(segment, StaticFileSegment::Transactions);
+                assert_eq!(start_block, Some(100));
+                assert_eq!(end_block, Some(1000));
+                assert_eq!(limit, Some(500));
+            }
+            _ => panic!("Expected StaticFile subcommand"),
+        }
     }
 }
