@@ -30,8 +30,11 @@
 //! ```
 
 use crate::{
-    root::ParallelStateRootError, stats::ParallelTrieTracker, targets_v2::MultiProofTargetsV2,
-    value_encoder::AsyncAccountValueEncoder, StorageRootTargets,
+    root::ParallelStateRootError,
+    stats::{ParallelTrieStats, ParallelTrieTracker},
+    targets_v2::MultiProofTargetsV2,
+    value_encoder::AsyncAccountValueEncoder,
+    StorageRootTargets,
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -603,7 +606,7 @@ impl TrieNodeProvider for ProofTaskTrieNodeProvider {
 #[derive(Debug)]
 pub enum ProofResult {
     /// Legacy multiproof calculation result.
-    Legacy(DecodedMultiProof),
+    Legacy(DecodedMultiProof, ParallelTrieStats),
     /// V2 multiproof calculation result.
     V2(DecodedMultiProofV2),
 }
@@ -617,14 +620,15 @@ impl ProofResult {
         if v2_enabled {
             Self::V2(DecodedMultiProofV2::default())
         } else {
-            Self::Legacy(DecodedMultiProof::default())
+            let stats = ParallelTrieTracker::default().finish();
+            Self::Legacy(DecodedMultiProof::default(), stats)
         }
     }
 
     /// Returns true if the result contains no proofs
     pub fn is_empty(&self) -> bool {
         match self {
-            Self::Legacy(proof) => proof.is_empty(),
+            Self::Legacy(proof, _) => proof.is_empty(),
             Self::V2(proof) => proof.is_empty(),
         }
     }
@@ -636,7 +640,7 @@ impl ProofResult {
     /// This method panics if the two [`ProofResult`]s are not the same variant.
     pub fn extend(&mut self, other: Self) {
         match (self, other) {
-            (Self::Legacy(proof), Self::Legacy(other)) => proof.extend(other),
+            (Self::Legacy(proof, _), Self::Legacy(other, _)) => proof.extend(other),
             (Self::V2(proof), Self::V2(other)) => proof.extend(other),
             _ => panic!("mismatched ProofResults, cannot extend one with the other"),
         }
@@ -645,7 +649,7 @@ impl ProofResult {
     /// Returns the number of account proofs.
     pub fn account_proofs_len(&self) -> usize {
         match self {
-            Self::Legacy(proof) => proof.account_subtree.len(),
+            Self::Legacy(proof, _) => proof.account_subtree.len(),
             Self::V2(proof) => proof.account_proofs.len(),
         }
     }
@@ -653,7 +657,9 @@ impl ProofResult {
     /// Returns the total number of storage proofs
     pub fn storage_proofs_len(&self) -> usize {
         match self {
-            Self::Legacy(proof) => proof.storages.values().map(|p| p.subtree.len()).sum::<usize>(),
+            Self::Legacy(proof, _) => {
+                proof.storages.values().map(|p| p.subtree.len()).sum::<usize>()
+            }
             Self::V2(proof) => proof.storage_proofs.values().map(|p| p.len()).sum::<usize>(),
         }
     }
@@ -1294,7 +1300,8 @@ where
             proof_cursor_metrics,
         );
 
-        result.map(ProofResult::Legacy)
+        let stats = tracker.finish();
+        result.map(|proof| ProofResult::Legacy(proof, stats))
     }
 
     fn compute_v2_account_multiproof<Provider>(
