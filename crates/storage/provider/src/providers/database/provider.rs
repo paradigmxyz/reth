@@ -2972,20 +2972,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .collect::<Vec<_>>();
         last_indices.sort_unstable_by_key(|(a, _)| *a);
 
-        let use_rocksdb = self.cached_storage_settings().account_history_in_rocksdb;
-
-        if use_rocksdb {
+        if self.cached_storage_settings().account_history_in_rocksdb {
             #[cfg(all(unix, feature = "rocksdb"))]
             {
                 let batch = self.rocksdb_provider.unwind_account_history_indices(&last_indices)?;
                 self.pending_rocksdb_batches.lock().push(batch);
             }
-
-            #[cfg(not(all(unix, feature = "rocksdb")))]
-            return Err(ProviderError::UnsupportedProvider);
-        }
-
-        if !use_rocksdb {
+        } else {
             // Unwind the account history index in MDBX.
             let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
             for &(address, rem_index) in &last_indices {
