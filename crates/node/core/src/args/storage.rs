@@ -50,15 +50,15 @@ pub struct StorageArgs {
     #[arg(long = "storage.account-changesets-in-static-files")]
     pub account_changesets_in_static_files: Option<bool>,
 
-    /// Store storage history in RocksDB instead of MDBX.
+    /// Store storage history in `RocksDB` instead of MDBX.
     #[arg(long = "storage.storages-history-in-rocksdb")]
     pub storages_history_in_rocksdb: Option<bool>,
 
-    /// Store transaction hash to number mapping in RocksDB instead of MDBX.
+    /// Store transaction hash to number mapping in `RocksDB` instead of MDBX.
     #[arg(long = "storage.transaction-hash-numbers-in-rocksdb")]
     pub transaction_hash_numbers_in_rocksdb: Option<bool>,
 
-    /// Store account history in RocksDB instead of MDBX.
+    /// Store account history in `RocksDB` instead of MDBX.
     #[arg(long = "storage.account-history-in-rocksdb")]
     pub account_history_in_rocksdb: Option<bool>,
 }
@@ -68,7 +68,7 @@ impl StorageArgs {
     ///
     /// Fields that are `None` in the CLI args will use the base settings value.
     /// Fields that are `Some` will override the base settings.
-    pub fn apply_to(&self, mut base: StorageSettings) -> StorageSettings {
+    pub const fn apply_to(&self, mut base: StorageSettings) -> StorageSettings {
         if let Some(v) = self.receipts_in_static_files {
             base.receipts_in_static_files = v;
         }
@@ -94,7 +94,7 @@ impl StorageArgs {
     /// Returns the default storage settings for new nodes, with CLI overrides applied.
     ///
     /// Uses v2 settings if `--storage.v2` is set, otherwise uses v1 settings.
-    pub fn storage_settings(&self) -> StorageSettings {
+    pub const fn storage_settings(&self) -> StorageSettings {
         let base = if self.v2 { StorageSettings::v2() } else { StorageSettings::v1() };
         self.apply_to(base)
     }
