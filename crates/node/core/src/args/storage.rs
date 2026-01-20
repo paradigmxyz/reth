@@ -69,8 +69,6 @@ impl StorageArgs {
     /// Fields that are `None` in the CLI args will use the base settings value.
     /// Fields that are `Some` will override the base settings.
     pub fn apply_to(&self, mut base: StorageSettings) -> StorageSettings {
-        base.use_hashed_state = self.use_hashed_state;
-
         if let Some(v) = self.receipts_in_static_files {
             base.receipts_in_static_files = v;
         }
@@ -120,7 +118,6 @@ mod tests {
         let args = CommandParser::<StorageArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
         assert!(!args.v2);
-        assert!(!args.use_hashed_state);
     }
 
     #[test]
@@ -130,17 +127,9 @@ mod tests {
     }
 
     #[test]
-    fn test_use_hashed_state_flag() {
-        let args =
-            CommandParser::<StorageArgs>::parse_from(["reth", "--storage.use-hashed-state"]).args;
-        assert!(args.use_hashed_state);
-    }
-
-    #[test]
     fn test_storage_settings_override() {
         let args = CommandParser::<StorageArgs>::parse_from([
             "reth",
-            "--storage.use-hashed-state",
             "--storage.receipts-in-static-files",
             "true",
         ])
@@ -148,7 +137,6 @@ mod tests {
 
         let settings = args.storage_settings();
 
-        assert!(settings.use_hashed_state);
         assert!(settings.receipts_in_static_files);
         assert!(!settings.transaction_senders_in_static_files);
     }
@@ -157,7 +145,6 @@ mod tests {
     fn test_all_storage_flags() {
         let args = CommandParser::<StorageArgs>::parse_from([
             "reth",
-            "--storage.use-hashed-state",
             "--storage.receipts-in-static-files",
             "true",
             "--storage.transaction-senders-in-static-files",
@@ -175,7 +162,6 @@ mod tests {
 
         let settings = args.apply_to(StorageSettings::default());
 
-        assert!(settings.use_hashed_state);
         assert!(settings.receipts_in_static_files);
         assert!(settings.transaction_senders_in_static_files);
         assert!(settings.account_changesets_in_static_files);
