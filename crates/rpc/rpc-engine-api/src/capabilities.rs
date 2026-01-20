@@ -116,7 +116,7 @@ pub struct CapabilityMismatches {
 
 impl CapabilityMismatches {
     /// Returns `true` if there are no mismatches.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.missing_in_el.is_empty() && self.missing_in_cl.is_empty()
     }
 }
