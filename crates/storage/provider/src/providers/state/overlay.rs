@@ -178,6 +178,10 @@ impl<F> OverlayStateProviderFactory<F> {
                 });
             }
         }
+        // Clear the overlay cache since the overlay source has been modified.
+        // The cache is keyed by db_tip_block and doesn't account for extensions,
+        // so cached entries would return stale overlays without the extended state.
+        self.overlay_cache.write().clear();
         self
     }
 }
