@@ -64,6 +64,7 @@ parking_lot.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
+rand.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
@@ -84,6 +85,7 @@ serde = [
     "revm-state/serde",
     "parking_lot/serde",
     "reth-ethereum-primitives/serde",
+    "rand/serde",
 ]
 test-utils = [
     "triehash",

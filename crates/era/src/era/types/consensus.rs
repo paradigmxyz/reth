@@ -59,10 +59,35 @@
 //!     Ok(())
 //! }
 //! ```
-
 use crate::e2s::{error::E2sError, types::Entry};
 use snap::{read::FrameDecoder, write::FrameEncoder};
 use std::io::{Read, Write};
+
+/// Maximum allowed decompressed size for a signed beacon block SSZ payload.
+const MAX_DECOMPRESSED_SIGNED_BEACON_BLOCK_BYTES: usize = 256 * 1024 * 1024; // 256 MiB
+
+/// Maximum allowed decompressed size for a beacon state SSZ payload.
+const MAX_DECOMPRESSED_BEACON_STATE_BYTES: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
+
+fn decompress_snappy_bounded(
+    compressed: &[u8],
+    max_decompressed_bytes: usize,
+    what: &str,
+) -> Result<Vec<u8>, E2sError> {
+    let mut decoder = FrameDecoder::new(compressed).take(max_decompressed_bytes as u64);
+    let mut decompressed = Vec::new();
+
+    Read::read_to_end(&mut decoder, &mut decompressed)
+        .map_err(|e| E2sError::SnappyDecompression(format!("Failed to decompress {what}: {e}")))?;
+
+    if decompressed.len() >= max_decompressed_bytes {
+        return Err(E2sError::SnappyDecompression(format!(
+            "Failed to decompress {what}: decompressed data exceeded limit of {max_decompressed_bytes} bytes"
+        )));
+    }
+
+    Ok(decompressed)
+}
 
 /// `CompressedSignedBeaconBlock` record type: [0x01, 0x00]
 pub const COMPRESSED_SIGNED_BEACON_BLOCK: [u8; 2] = [0x01, 0x00];
@@ -104,13 +129,11 @@ impl CompressedSignedBeaconBlock {
 
     /// Decompress to get the original ssz-encoded signed beacon block
     pub fn decompress(&self) -> Result<Vec<u8>, E2sError> {
-        let mut decoder = FrameDecoder::new(self.data.as_slice());
-        let mut decompressed = Vec::new();
-        Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress signed beacon block: {e}"))
-        })?;
-
-        Ok(decompressed)
+        decompress_snappy_bounded(
+            self.data.as_slice(),
+            MAX_DECOMPRESSED_SIGNED_BEACON_BLOCK_BYTES,
+            "signed beacon block",
+        )
     }
 
     /// Convert to an [`Entry`]
@@ -168,13 +191,11 @@ impl CompressedBeaconState {
 
     /// Decompress to get the original ssz-encoded beacon state
     pub fn decompress(&self) -> Result<Vec<u8>, E2sError> {
-        let mut decoder = FrameDecoder::new(self.data.as_slice());
-        let mut decompressed = Vec::new();
-        Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress beacon state: {e}"))
-        })?;
-
-        Ok(decompressed)
+        decompress_snappy_bounded(
+            self.data.as_slice(),
+            MAX_DECOMPRESSED_BEACON_STATE_BYTES,
+            "beacon state",
+        )
     }
 
     /// Convert to an [`Entry`]
@@ -259,5 +280,16 @@ mod tests {
 
         let result = CompressedBeaconState::from_entry(&invalid_entry);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bounded_decompression_rejects_oversized_output() {
+        let ssz_data = vec![42u8; 1024];
+        let compressed = CompressedBeaconState::from_ssz(&ssz_data).unwrap();
+
+        let err =
+            decompress_snappy_bounded(compressed.data.as_slice(), 100, "beacon state").unwrap_err();
+
+        assert!(format!("{err:?}").contains("exceeded limit"));
     }
 }

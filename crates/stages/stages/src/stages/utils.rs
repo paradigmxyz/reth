@@ -1,20 +1,21 @@
 //! Utils for `stages`.
-use alloy_primitives::{BlockNumber, TxNumber};
+use alloy_primitives::{Address, BlockNumber, TxNumber};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    models::sharded_key::NUM_OF_INDICES_IN_SHARD,
+    models::{sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey},
     table::{Decompress, Table},
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
 use reth_etl::Collector;
 use reth_provider::{
-    providers::StaticFileProvider, BlockReader, DBProvider, ProviderError,
+    providers::StaticFileProvider, to_range, BlockReader, DBProvider, ProviderError,
     StaticFileProviderFactory,
 };
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
+use reth_storage_api::ChangeSetReader;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
 
@@ -56,12 +57,12 @@ where
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
     let mut cache: HashMap<P, Vec<u64>> = HashMap::default();
 
-    let mut collect = |cache: &HashMap<P, Vec<u64>>| {
-        for (key, indices) in cache {
-            let last = indices.last().expect("qed");
+    let mut collect = |cache: &mut HashMap<P, Vec<u64>>| {
+        for (key, indices) in cache.drain() {
+            let last = *indices.last().expect("qed");
             collector.insert(
-                sharded_key_factory(*key, *last),
-                BlockNumberList::new_pre_sorted(indices.iter().copied()),
+                sharded_key_factory(key, last),
+                BlockNumberList::new_pre_sorted(indices.into_iter()),
             )?;
         }
         Ok::<(), StageError>(())
@@ -86,13 +87,85 @@ where
             current_block_number = block_number;
             flush_counter += 1;
             if flush_counter > DEFAULT_CACHE_THRESHOLD {
-                collect(&cache)?;
-                cache.clear();
+                collect(&mut cache)?;
                 flush_counter = 0;
             }
         }
     }
-    collect(&cache)?;
+    collect(&mut cache)?;
+
+    Ok(collector)
+}
+
+/// Allows collecting indices from a cache with a custom insert fn
+fn collect_indices<F>(
+    cache: impl Iterator<Item = (Address, Vec<u64>)>,
+    mut insert_fn: F,
+) -> Result<(), StageError>
+where
+    F: FnMut(Address, Vec<u64>) -> Result<(), StageError>,
+{
+    for (address, indices) in cache {
+        insert_fn(address, indices)?
+    }
+    Ok::<(), StageError>(())
+}
+
+/// Collects account history indices using a provider that implements `ChangeSetReader`.
+pub(crate) fn collect_account_history_indices<Provider>(
+    provider: &Provider,
+    range: impl RangeBounds<BlockNumber>,
+    etl_config: &EtlConfig,
+) -> Result<Collector<ShardedKey<Address>, BlockNumberList>, StageError>
+where
+    Provider: DBProvider + ChangeSetReader + StaticFileProviderFactory,
+{
+    let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
+    let mut cache: HashMap<Address, Vec<u64>> = HashMap::default();
+
+    let mut insert_fn = |address: Address, indices: Vec<u64>| {
+        let last = indices.last().expect("qed");
+        collector.insert(
+            ShardedKey::new(address, *last),
+            BlockNumberList::new_pre_sorted(indices.into_iter()),
+        )?;
+        Ok::<(), StageError>(())
+    };
+
+    // Convert range bounds to concrete range
+    let range = to_range(range);
+
+    // Use the new walker for lazy iteration over static file changesets
+    let static_file_provider = provider.static_file_provider();
+
+    // Get total count for progress reporting
+    let total_changesets = static_file_provider.account_changeset_count()?;
+    let interval = (total_changesets / 1000).max(1);
+
+    let walker = static_file_provider.walk_account_changeset_range(range);
+
+    let mut flush_counter = 0;
+    let mut current_block_number = u64::MAX;
+
+    for (idx, changeset_result) in walker.enumerate() {
+        let (block_number, AccountBeforeTx { address, .. }) = changeset_result?;
+        cache.entry(address).or_default().push(block_number);
+
+        if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
+        }
+
+        if block_number != current_block_number {
+            current_block_number = block_number;
+            flush_counter += 1;
+        }
+
+        if flush_counter > DEFAULT_CACHE_THRESHOLD {
+            collect_indices(cache.drain(), &mut insert_fn)?;
+            flush_counter = 0;
+        }
+    }
+    collect_indices(cache.into_iter(), insert_fn)?;
 
     Ok(collector)
 }

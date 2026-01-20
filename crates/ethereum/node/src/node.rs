@@ -118,13 +118,14 @@ impl EthereumNode {
     /// use reth_chainspec::ChainSpecBuilder;
     /// use reth_db::open_db_read_only;
     /// use reth_node_ethereum::EthereumNode;
-    /// use reth_provider::providers::StaticFileProvider;
+    /// use reth_provider::providers::{RocksDBProvider, StaticFileProvider};
     /// use std::sync::Arc;
     ///
     /// let factory = EthereumNode::provider_factory_builder()
     ///     .db(Arc::new(open_db_read_only("db", Default::default()).unwrap()))
     ///     .chainspec(ChainSpecBuilder::mainnet().build().into())
     ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
+    ///     .rocksdb_provider(RocksDBProvider::builder("db/rocksdb").build().unwrap())
     ///     .build_provider_factory();
     /// ```
     pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
@@ -302,6 +303,8 @@ where
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
 
+        let testing_skip_invalid_transactions = ctx.config.rpc.testing_skip_invalid_transactions;
+
         self.inner
             .launch_add_ons_with(ctx, move |container| {
                 container.modules.merge_if_module_configured(
@@ -315,14 +318,16 @@ where
 
                 // testing_buildBlockV1: only wire when the hidden testing module is explicitly
                 // requested on any transport. Default stays disabled to honor security guidance.
-                let testing_api = TestingApi::new(
+                let mut testing_api = TestingApi::new(
                     container.registry.eth_api().clone(),
                     container.registry.evm_config().clone(),
-                )
-                .into_rpc();
+                );
+                if testing_skip_invalid_transactions {
+                    testing_api = testing_api.with_skip_invalid_transactions();
+                }
                 container
                     .modules
-                    .merge_if_module_configured(RethRpcModule::Testing, testing_api)?;
+                    .merge_if_module_configured(RethRpcModule::Testing, testing_api.into_rpc())?;
 
                 Ok(())
             })

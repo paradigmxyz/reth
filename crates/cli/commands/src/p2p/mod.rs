@@ -72,7 +72,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 .split();
                 if result.len() != 1 {
                     eyre::bail!(
-                        "Invalid number of headers received. Expected: 1. Received: {}",
+                        "Invalid number of bodies received. Expected: 1. Received: {}",
                         result.len()
                     )
                 }
@@ -189,7 +189,7 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
 
         let net = NetworkConfigBuilder::<N::NetworkPrimitives>::new(p2p_secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(None))
-            .external_ip_resolver(self.network.nat)
+            .external_ip_resolver(self.network.nat.clone())
             .network_id(self.network.network_id)
             .boot_nodes(boot_nodes.clone())
             .apply(|builder| {

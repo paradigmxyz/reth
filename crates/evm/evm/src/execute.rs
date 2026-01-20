@@ -741,6 +741,7 @@ mod tests {
             nonce,
             code_hash: KECCAK_EMPTY,
             code: None,
+            account_id: None,
         };
         state.insert_account(addr, account_info);
         state
@@ -777,8 +778,13 @@ mod tests {
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 
-        let account2 =
-            AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
+        let account2 = AccountInfo {
+            balance: U256::from(200),
+            nonce: 1,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+            account_id: None,
+        };
         state.insert_account(addr2, account2);
 
         let mut increments = HashMap::default();
@@ -799,8 +805,13 @@ mod tests {
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 
-        let account2 =
-            AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
+        let account2 = AccountInfo {
+            balance: U256::from(200),
+            nonce: 1,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+            account_id: None,
+        };
         state.insert_account(addr2, account2);
 
         let mut increments = HashMap::default();
