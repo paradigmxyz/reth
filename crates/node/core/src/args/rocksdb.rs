@@ -26,34 +26,34 @@ pub struct RocksDbArgs {
 impl RocksDbArgs {
     /// Applies CLI overrides to the given defaults, returning the resulting settings.
     ///
-    /// If any flag is set to `true`, all RocksDB tables are enabled by default, then explicit
-    /// `false` overrides are applied. This grouped behavior ensures users get the full RocksDB
+    /// If any flag is set to `true`, all `RocksDB` tables are enabled by default, then explicit
+    /// `false` overrides are applied. This grouped behavior ensures users get the full `RocksDB`
     /// benefit without needing to specify all flags.
     ///
     /// Returns `(settings, grouped_enabled)` where `grouped_enabled` is true if the grouped
     /// behavior was triggered (any flag was true, enabling all tables).
-    pub fn apply_to_settings(&self, mut defaults: StorageSettings) -> (StorageSettings, bool) {
+    pub fn apply_to_settings(&self, mut settings: StorageSettings) -> (StorageSettings, bool) {
         let any_true = self.tx_hash == Some(true) ||
             self.storages_history == Some(true) ||
             self.account_history == Some(true);
 
         if any_true {
-            defaults.transaction_hash_numbers_in_rocksdb = true;
-            defaults.storages_history_in_rocksdb = true;
-            defaults.account_history_in_rocksdb = true;
+            settings.transaction_hash_numbers_in_rocksdb = true;
+            settings.storages_history_in_rocksdb = true;
+            settings.account_history_in_rocksdb = true;
         }
 
         if let Some(value) = self.tx_hash {
-            defaults.transaction_hash_numbers_in_rocksdb = value;
+            settings.transaction_hash_numbers_in_rocksdb = value;
         }
         if let Some(value) = self.storages_history {
-            defaults.storages_history_in_rocksdb = value;
+            settings.storages_history_in_rocksdb = value;
         }
         if let Some(value) = self.account_history {
-            defaults.account_history_in_rocksdb = value;
+            settings.account_history_in_rocksdb = value;
         }
 
-        (defaults, any_true)
+        (settings, any_true)
     }
 
     /// Returns true if any `RocksDB` table routing flag was explicitly set.
@@ -129,5 +129,30 @@ mod tests {
         assert!(!result.transaction_hash_numbers_in_rocksdb);
         assert!(!result.storages_history_in_rocksdb);
         assert!(!result.account_history_in_rocksdb);
+    }
+
+    #[test]
+    fn test_apply_to_settings_all_explicit_false() {
+        let args = RocksDbArgs {
+            tx_hash: Some(false),
+            storages_history: Some(false),
+            account_history: Some(false),
+        };
+        let (result, grouped) = args.apply_to_settings(StorageSettings::legacy());
+
+        assert!(!grouped, "no grouped when all explicit false");
+        assert!(!result.transaction_hash_numbers_in_rocksdb);
+        assert!(!result.storages_history_in_rocksdb);
+        assert!(!result.account_history_in_rocksdb);
+    }
+
+    #[test]
+    fn test_apply_to_settings_preserves_non_rocksdb_fields() {
+        let base = StorageSettings::legacy().with_receipts_in_static_files(true);
+        let args =
+            RocksDbArgs { tx_hash: Some(true), storages_history: None, account_history: None };
+        let (result, _) = args.apply_to_settings(base);
+
+        assert!(result.receipts_in_static_files, "non-rocksdb settings preserved");
     }
 }
