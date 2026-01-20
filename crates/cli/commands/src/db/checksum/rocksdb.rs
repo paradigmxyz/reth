@@ -5,7 +5,7 @@ use crate::common::CliNodeTypes;
 use clap::ValueEnum;
 use reth_chainspec::EthereumHardforks;
 use reth_db::{tables, DatabaseEnv};
-use reth_db_api::table::{Compress, Encode, Table};
+use reth_db_api::table::Table;
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDBAdapter;
 use reth_provider::RocksDBProviderFactory;
@@ -76,25 +76,20 @@ pub fn checksum_rocksdb<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
     Ok(())
 }
 
-/// Computes checksum for a specific RocksDB table by iterating over all entries.
+/// Computes checksum for a specific RocksDB table by iterating over raw bytes.
 fn checksum_rocksdb_table<T: Table>(
     rocksdb: &reth_provider::providers::RocksDBProvider,
     limit: usize,
 ) -> eyre::Result<(u64, usize)> {
-    let iter = rocksdb.iter::<T>()?;
+    let iter = rocksdb.raw_iter::<T>()?;
     let mut hasher = checksum_hasher();
     let mut total = 0usize;
-    let mut compress_buf = Vec::new();
 
     for entry in iter {
-        let (key, value) = entry?;
+        let (key_bytes, value_bytes) = entry?;
 
-        let key_bytes = key.encode();
-        hasher.write(key_bytes.as_ref());
-
-        compress_buf.clear();
-        value.compress_to_buf(&mut compress_buf);
-        hasher.write(&compress_buf);
+        hasher.write(&key_bytes);
+        hasher.write(&value_bytes);
 
         total += 1;
 
