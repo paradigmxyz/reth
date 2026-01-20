@@ -1161,6 +1161,33 @@ where
         trace!(target: "rpc::engine", "Serving engine_getBlobsV3");
         Ok(self.get_blobs_v3_metered(versioned_hashes)?)
     }
+
+    /// Handler for `engine_getBALsByHashV1`
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    async fn get_bals_by_hash_v1(
+        &self,
+        _block_hashes: Vec<BlockHash>,
+    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
+        trace!(target: "rpc::engine", "Serving engine_getBALsByHashV1");
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))?
+    }
+
+    /// Handler for `engine_getBALsByRangeV1`
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    async fn get_bals_by_range_v1(
+        &self,
+        _start: U64,
+        _count: U64,
+    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
+        trace!(target: "rpc::engine", "Serving engine_getBALsByRangeV1");
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))?
+    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
