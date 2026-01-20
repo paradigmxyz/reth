@@ -1,4 +1,7 @@
-use crate::{either_writer::RocksTxRefArg, providers::RocksDBProvider};
+use crate::{
+    either_writer::{RawRocksDBBatch, RocksBatchArg, RocksTxRefArg},
+    providers::RocksDBProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
 
 /// `RocksDB` provider factory.
@@ -30,5 +33,29 @@ pub trait RocksDBProviderFactory {
         }
         #[cfg(not(all(unix, feature = "rocksdb")))]
         f(())
+    }
+
+    /// Executes a closure with a `RocksDB` batch, automatically registering it for commit.
+    ///
+    /// This helper encapsulates all the cfg-gated `RocksDB` batch handling.
+    fn with_rocksdb_batch<F, R>(&self, f: F) -> ProviderResult<R>
+    where
+        F: FnOnce(RocksBatchArg<'_>) -> ProviderResult<(R, Option<RawRocksDBBatch>)>,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        {
+            let rocksdb = self.rocksdb_provider();
+            let batch = rocksdb.batch();
+            let (result, raw_batch) = f(batch)?;
+            if let Some(b) = raw_batch {
+                self.set_pending_rocksdb_batch(b);
+            }
+            Ok(result)
+        }
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        {
+            let (result, _) = f(())?;
+            Ok(result)
+        }
     }
 }

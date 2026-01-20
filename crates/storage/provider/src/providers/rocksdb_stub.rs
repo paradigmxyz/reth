@@ -102,6 +102,11 @@ impl RocksDBBuilder {
         self
     }
 
+    /// Sets read-only mode (stub implementation).
+    pub const fn with_read_only(self, _read_only: bool) -> Self {
+        self
+    }
+
     /// Build the `RocksDB` provider (stub implementation).
     pub const fn build(self) -> ProviderResult<RocksDBProvider> {
         Ok(RocksDBProvider)
@@ -111,3 +116,7 @@ impl RocksDBBuilder {
 /// A stub transaction for `RocksDB`.
 #[derive(Debug)]
 pub struct RocksTx;
+
+/// A stub raw iterator for `RocksDB`.
+#[derive(Debug)]
+pub struct RocksDBRawIter;
