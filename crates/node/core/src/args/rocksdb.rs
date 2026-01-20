@@ -11,7 +11,7 @@ use clap::{ArgAction, Args};
 pub struct RocksDbArgs {
     /// Route all supported tables to `RocksDB` instead of MDBX.
     ///
-    /// This enables `RocksDB` for tx-hash, storages-history, and account-history tables.
+    /// This enables `RocksDB` for `tx-hash`, `storages-history`, and `account-history` tables.
     /// Cannot be combined with individual flags set to false.
     #[arg(long = "rocksdb.all", action = ArgAction::SetTrue)]
     pub all: bool,
