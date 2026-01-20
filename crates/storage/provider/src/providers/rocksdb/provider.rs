@@ -90,6 +90,7 @@ pub struct RocksDBBuilder {
     enable_statistics: bool,
     log_level: rocksdb::LogLevel,
     block_cache: Cache,
+    read_only: bool,
 }
 
 impl fmt::Debug for RocksDBBuilder {
@@ -113,6 +114,7 @@ impl RocksDBBuilder {
             enable_statistics: false,
             log_level: rocksdb::LogLevel::Info,
             block_cache: cache,
+            read_only: false,
         }
     }
 
@@ -224,7 +226,22 @@ impl RocksDBBuilder {
         self
     }
 
+    /// Sets read-only mode.
+    ///
+    /// When enabled, uses `DB::open_cf_descriptors_read_only` which doesn't acquire an exclusive
+    /// lock, allowing multiple processes to read the database concurrently.
+    ///
+    /// Note: Write operations on a read-only provider will panic at runtime.
+    pub const fn with_read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
+    }
+
     /// Builds the [`RocksDBProvider`].
+    ///
+    /// If `with_read_only(true)` was called, opens in read-only mode using
+    /// `DB::open_cf_descriptors_read_only` which doesn't acquire an exclusive lock.
+    /// Otherwise, opens in read-write mode using `OptimisticTransactionDB`.
     pub fn build(self) -> ProviderResult<RocksDBProvider> {
         let options =
             Self::default_options(self.log_level, &self.block_cache, self.enable_statistics);
@@ -240,55 +257,39 @@ impl RocksDBBuilder {
             })
             .collect();
 
-        // Use OptimisticTransactionDB for MDBX-like transaction semantics (read-your-writes,
-        // rollback) OptimisticTransactionDB uses optimistic concurrency control (conflict
-        // detection at commit) and is backed by DBCommon, giving us access to
-        // cancel_all_background_work for clean shutdown.
-        let db = OptimisticTransactionDB::open_cf_descriptors(&options, &self.path, cf_descriptors)
-            .map_err(|e| {
-                ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })?;
-
         let metrics = self.enable_metrics.then(RocksDBMetrics::default);
 
-        Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadWrite { db, metrics })))
+        if self.read_only {
+            let db = DB::open_cf_descriptors_read_only(&options, &self.path, cf_descriptors, false)
+                .map_err(|e| {
+                    ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })?;
+            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadOnly { db, metrics })))
+        } else {
+            // Use OptimisticTransactionDB for MDBX-like transaction semantics (read-your-writes,
+            // rollback) OptimisticTransactionDB uses optimistic concurrency control (conflict
+            // detection at commit) and is backed by DBCommon, giving us access to
+            // cancel_all_background_work for clean shutdown.
+            let db =
+                OptimisticTransactionDB::open_cf_descriptors(&options, &self.path, cf_descriptors)
+                    .map_err(|e| {
+                        ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
+                            message: e.to_string().into(),
+                            code: -1,
+                        }))
+                    })?;
+            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadWrite { db, metrics })))
+        }
     }
 
     /// Builds a read-only [`RocksDBProvider`].
     ///
-    /// Uses `DB::open_cf_descriptors_read_only` which doesn't acquire an exclusive lock,
-    /// allowing multiple processes to read the database concurrently.
-    ///
-    /// Note: Write operations on this provider will panic at runtime.
+    /// This is a convenience method equivalent to `.with_read_only(true).build()`.
     pub fn build_read_only(self) -> ProviderResult<RocksDBProvider> {
-        let options =
-            Self::default_options(self.log_level, &self.block_cache, self.enable_statistics);
-
-        let cf_descriptors: Vec<ColumnFamilyDescriptor> = self
-            .column_families
-            .iter()
-            .map(|name| {
-                ColumnFamilyDescriptor::new(
-                    name.clone(),
-                    Self::default_column_family_options(&self.block_cache),
-                )
-            })
-            .collect();
-
-        let db = DB::open_cf_descriptors_read_only(&options, &self.path, cf_descriptors, false)
-            .map_err(|e| {
-                ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })?;
-
-        let metrics = self.enable_metrics.then(RocksDBMetrics::default);
-
-        Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadOnly { db, metrics })))
+        self.with_read_only(true).build()
     }
 }
 
