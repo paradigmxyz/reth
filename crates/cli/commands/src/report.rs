@@ -10,6 +10,7 @@ use flate2::{write::GzEncoder, Compression};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db_api::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx, Tables};
+use reth_node_core::dirs::logs_dir;
 use reth_provider::{BlockHashReader, BlockNumReader, HeaderProvider};
 use serde::Serialize;
 use std::{
@@ -145,10 +146,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         println!("\n{}", "=".repeat(70));
         println!("RETH DEBUG REPORT GENERATOR");
         println!("{}", "=".repeat(70));
+        // Get log directory path (logs are in cache dir, not data dir)
+        let log_dir = logs_dir();
+
         println!("\nThis tool will collect the following information:");
         println!("  • Database table statistics");
         println!("  • VersionHistory table (client version history)");
-        println!("  • Log files from: {}", data_dir.data_dir().join("logs").display());
+        if let Some(ref log_path) = log_dir {
+            println!("  • Log files from: {}", log_path.display());
+        }
         println!(
             "  • Invalid block hook outputs from: {}",
             data_dir.invalid_block_hooks().display()
@@ -293,8 +299,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         add_json_to_archive(&mut archive, "version_history.json", &version_history)?;
         info!(target: "reth::cli", entries = version_history.len(), "Version history collected");
 
-        // Collect log files
-        let logs_collected = collect_logs(&data_dir.data_dir().join("logs"), &mut archive)?;
+        // Collect log files (from cache directory)
+        let logs_collected = if let Some(ref log_path) = log_dir {
+            collect_logs(log_path, &mut archive)?
+        } else {
+            0
+        };
         info!(target: "reth::cli", files = logs_collected, "Log files collected");
 
         // Collect invalid_block_hooks directory
