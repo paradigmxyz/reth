@@ -87,7 +87,7 @@ where
 
     // This reverts all changes from db tip back to just after block-1 was processed
     let mut cumulative_state_revert_prev = cumulative_state_revert.clone();
-    cumulative_state_revert_prev.extend_ref(&individual_state_revert);
+    cumulative_state_revert_prev.extend_ref_and_sort(&individual_state_revert);
 
     // Step 2: Calculate cumulative trie updates revert for block-1
     // This gives us the trie state as it was after block-1 was processed
@@ -469,7 +469,7 @@ impl ChangesetCache {
             // Since we iterate newest to oldest, older values are added last
             // and overwrite any conflicting newer values (oldest changeset values take
             // precedence).
-            accumulated_reverts.extend_ref(&changesets);
+            accumulated_reverts.extend_ref_and_sort(&changesets);
         }
 
         let elapsed = timer.elapsed();

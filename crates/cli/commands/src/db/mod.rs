@@ -39,7 +39,7 @@ pub enum Subcommands {
     Stats(stats::Command),
     /// Lists the contents of a table
     List(list::Command),
-    /// Calculates the content checksum of a table
+    /// Calculates the content checksum of a table or static file segment
     Checksum(checksum::Command),
     /// Create a diff between two database tables or two entire databases.
     Diff(diff::Command),

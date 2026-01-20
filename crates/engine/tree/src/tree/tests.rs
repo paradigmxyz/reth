@@ -27,7 +27,7 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
-use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
+use reth_provider::test_utils::MockEthProvider;
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -838,7 +838,7 @@ fn test_tree_state_on_new_head_deep_fork() {
     for block in &chain_a {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
             Arc::new(block.clone()),
-            Arc::new(ExecutionOutcome::default()),
+            Arc::new(BlockExecutionOutput::default()),
             empty_trie_data(),
         ));
     }
@@ -847,7 +847,7 @@ fn test_tree_state_on_new_head_deep_fork() {
     for block in &chain_b {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
             Arc::new(block.clone()),
-            Arc::new(ExecutionOutcome::default()),
+            Arc::new(BlockExecutionOutput::default()),
             empty_trie_data(),
         ));
     }
@@ -1000,6 +1000,15 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     test_harness.provider.add_block(backfill_tip_block.hash(), backfill_tip_block.into_block());
     let _ = test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
 
+    let event = test_harness.from_tree_rx.recv().await.unwrap();
+    match event {
+        EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
+            assert_eq!(hash_set, HashSet::from_iter([main_chain_last_hash]));
+        }
+        _ => panic!("Unexpected event: {event:#?}"),
+    }
+
+    // After backfill completes with head not buffered, we also request head download
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
         EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {

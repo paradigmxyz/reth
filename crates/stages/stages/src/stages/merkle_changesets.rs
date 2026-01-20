@@ -217,7 +217,7 @@ impl MerkleChangeSets {
         let compute_cumulative_state_revert = |block_number: BlockNumber| -> HashedPostStateSorted {
             let mut cumulative_revert = HashedPostStateSorted::default();
             for n in (block_number..target_end).rev() {
-                cumulative_revert.extend_ref(get_block_state_revert(n))
+                cumulative_revert.extend_ref_and_sort(get_block_state_revert(n))
             }
             cumulative_revert
         };
@@ -270,7 +270,7 @@ impl MerkleChangeSets {
 
             let trie_overlay = Arc::clone(&nodes);
             let mut nodes_mut = Arc::unwrap_or_clone(nodes);
-            nodes_mut.extend_ref(&this_trie_updates);
+            nodes_mut.extend_ref_and_sort(&this_trie_updates);
             nodes = Arc::new(nodes_mut);
 
             // Write the changesets to the DB using the trie updates produced by the block, and the

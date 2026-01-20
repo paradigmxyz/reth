@@ -108,26 +108,35 @@ Static Files:
       --static-files.blocks-per-file.account-change-sets <BLOCKS_PER_FILE_ACCOUNT_CHANGE_SETS>
           Number of blocks per file for the account changesets segment
 
-      --static-files.receipts
+      --static-files.receipts <RECEIPTS>
           Store receipts in static files instead of the database.
 
           When enabled, receipts will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-      --static-files.transaction-senders
+          [default: false]
+          [possible values: true, false]
+
+      --static-files.transaction-senders <TRANSACTION_SENDERS>
           Store transaction senders in static files instead of the database.
 
           When enabled, transaction senders will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-      --static-files.account-change-sets
+          [default: false]
+          [possible values: true, false]
+
+      --static-files.account-change-sets <ACCOUNT_CHANGESETS>
           Store account changesets in static files.
 
           When enabled, account changesets will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
+          [default: false]
+          [possible values: true, false]
 
       --metrics <SOCKET>
           Enable Prometheus metrics.

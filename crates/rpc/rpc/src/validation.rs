@@ -201,7 +201,7 @@ where
         // update the cached reads
         self.update_cached_reads(parent_header_hash, request_cache).await;
 
-        self.consensus.validate_block_post_execution(&block, &output)?;
+        self.consensus.validate_block_post_execution(&block, &output, None)?;
 
         self.ensure_payment(&block, &output, &message)?;
 
