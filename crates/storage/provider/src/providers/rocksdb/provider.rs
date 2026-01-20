@@ -235,10 +235,6 @@ impl RocksDBBuilder {
     }
 
     /// Builds the [`RocksDBProvider`].
-    ///
-    /// If `with_read_only(true)` was called, opens in read-only mode using
-    /// `DB::open_cf_descriptors_read_only` which doesn't acquire an exclusive lock.
-    /// Otherwise, opens in read-write mode using `OptimisticTransactionDB`.
     pub fn build(self) -> ProviderResult<RocksDBProvider> {
         let options =
             Self::default_options(self.log_level, &self.block_cache, self.enable_statistics);
