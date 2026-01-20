@@ -356,7 +356,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Set the storage args for the node
-    pub fn with_storage(mut self, storage: StorageArgs) -> Self {
+    pub const fn with_storage(mut self, storage: StorageArgs) -> Self {
         self.storage = storage;
         self
     }
