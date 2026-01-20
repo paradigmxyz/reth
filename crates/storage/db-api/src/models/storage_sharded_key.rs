@@ -16,6 +16,14 @@ pub const NUM_OF_INDICES_IN_SHARD: usize = 2_000;
 /// The fields are: 20-byte address, 32-byte key, and 8-byte block number
 const STORAGE_SHARD_KEY_BYTES_SIZE: usize = 20 + 32 + 8;
 
+/// Stack-allocated encoded key for `StorageShardedKey`.
+///
+/// This avoids heap allocation in hot database paths. The key layout is:
+/// - 20 bytes: Address
+/// - 32 bytes: B256 storage key
+/// - 8 bytes: BlockNumber (big-endian)
+pub type StorageShardedKeyEncoded = [u8; STORAGE_SHARD_KEY_BYTES_SIZE];
+
 /// Sometimes data can be too big to be saved for a single key. This helps out by dividing the data
 /// into different shards. Example:
 ///
@@ -54,13 +62,14 @@ impl StorageShardedKey {
 }
 
 impl Encode for StorageShardedKey {
-    type Encoded = Vec<u8>;
+    type Encoded = StorageShardedKeyEncoded;
 
+    #[inline]
     fn encode(self) -> Self::Encoded {
-        let mut buf: Vec<u8> = Vec::with_capacity(STORAGE_SHARD_KEY_BYTES_SIZE);
-        buf.extend_from_slice(&Encode::encode(self.address));
-        buf.extend_from_slice(&Encode::encode(self.sharded_key.key));
-        buf.extend_from_slice(&self.sharded_key.highest_block_number.to_be_bytes());
+        let mut buf = [0u8; STORAGE_SHARD_KEY_BYTES_SIZE];
+        buf[..20].copy_from_slice(self.address.as_slice());
+        buf[20..52].copy_from_slice(self.sharded_key.key.as_slice());
+        buf[52..].copy_from_slice(&self.sharded_key.highest_block_number.to_be_bytes());
         buf
     }
 }
@@ -79,5 +88,43 @@ impl Decode for StorageShardedKey {
         let storage_key = B256::decode(&value[20..52])?;
 
         Ok(Self { address, sharded_key: ShardedKey::new(storage_key, highest_block_number) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{address, b256};
+
+    #[test]
+    fn storage_sharded_key_encode_decode_roundtrip() {
+        let addr = address!("0102030405060708091011121314151617181920");
+        let storage_key = b256!("0001020304050607080910111213141516171819202122232425262728293031");
+        let block_num = 0x123456789ABCDEFu64;
+        let key = StorageShardedKey::new(addr, storage_key, block_num);
+
+        let encoded = key.clone().encode();
+
+        // Verify it's stack-allocated (60 bytes)
+        assert_eq!(encoded.len(), 60);
+        assert_eq!(std::mem::size_of_val(&encoded), 60);
+
+        // Verify roundtrip
+        let decoded = StorageShardedKey::decode(&encoded).unwrap();
+        assert_eq!(decoded.address, addr);
+        assert_eq!(decoded.sharded_key.key, storage_key);
+        assert_eq!(decoded.sharded_key.highest_block_number, block_num);
+    }
+
+    #[test]
+    fn storage_sharded_key_last_works() {
+        let addr = address!("0102030405060708091011121314151617181920");
+        let storage_key = b256!("0001020304050607080910111213141516171819202122232425262728293031");
+        let key = StorageShardedKey::last(addr, storage_key);
+        assert_eq!(key.sharded_key.highest_block_number, u64::MAX);
+
+        let encoded = key.encode();
+        let decoded = StorageShardedKey::decode(&encoded).unwrap();
+        assert_eq!(decoded.sharded_key.highest_block_number, u64::MAX);
     }
 }

@@ -8099,6 +8099,7 @@ dependencies = [
  "alloy-primitives",
  "arbitrary",
  "bytes",
+ "codspeed-criterion-compat",
  "derive_more",
  "metrics",
  "modular-bitfield",
