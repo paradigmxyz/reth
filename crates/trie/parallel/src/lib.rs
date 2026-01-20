@@ -22,6 +22,9 @@ pub mod proof;
 
 pub mod proof_task;
 
+/// V2 multiproof targets and chunking.
+pub mod targets_v2;
+
 /// Parallel state root metrics.
 #[cfg(feature = "metrics")]
 pub mod metrics;
