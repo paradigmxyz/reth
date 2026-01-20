@@ -318,7 +318,7 @@ enum RocksDBProviderInner {
 
 impl RocksDBProviderInner {
     /// Returns the metrics for this provider.
-    fn metrics(&self) -> Option<&RocksDBMetrics> {
+    const fn metrics(&self) -> Option<&RocksDBMetrics> {
         match self {
             Self::ReadWrite { metrics, .. } | Self::ReadOnly { metrics, .. } => metrics.as_ref(),
         }
@@ -1250,7 +1250,7 @@ impl<'db> RocksTx<'db> {
     }
 }
 
-/// Wrapper enum for RocksDB iterators that works in both read-write and read-only modes.
+/// Wrapper enum for `RocksDB` iterators that works in both read-write and read-only modes.
 enum RocksDBIterEnum<'db> {
     /// Iterator from read-write `OptimisticTransactionDB`.
     ReadWrite(rocksdb::DBIteratorWithThreadMode<'db, OptimisticTransactionDB>),
