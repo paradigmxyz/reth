@@ -432,31 +432,12 @@ impl RocksDBProvider {
 
     /// Clears all entries from the specified table.
     ///
-    /// `RocksDB`'s `delete_range` uses an exclusive end bound `[start, end)`. To include the
-    /// last key, we compute `last_key || 0x00` which is the minimal key strictly greater
-    /// than `last_key` under bytewise comparison.
+    /// Uses a fixed range from empty key to max key (64 bytes of 0xFF) which covers
+    /// any key size we use. This avoids an expensive seek to find the last key.
     pub fn clear<T: Table>(&self) -> ProviderResult<()> {
         let cf = self.get_cf_handle::<T>()?;
 
-        let mut iter = self.0.db.raw_iterator_cf(cf);
-        iter.seek_to_last();
-
-        if !iter.valid() {
-            return Ok(());
-        }
-
-        let last_key = iter.key().ok_or_else(|| {
-            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                message: "invalid iterator key".into(),
-                code: -1,
-            }))
-        })?;
-
-        // Compute exclusive end bound: `last_key || 0x00` is the smallest key > last_key
-        // under bytewise ordering (avoids 0xFF carry issues of increment-last-byte approach)
-        let end_key = Self::exclusive_end_after(last_key);
-
-        self.0.db.delete_range_cf(cf, &[] as &[u8], &end_key).map_err(|e| {
+        self.0.db.delete_range_cf(cf, &[] as &[u8], &[0xFF; 64]).map_err(|e| {
             ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -464,15 +445,6 @@ impl RocksDBProvider {
         })?;
 
         Ok(())
-    }
-
-    /// Returns the smallest key strictly greater than `key` under bytewise comparison.
-    #[inline]
-    fn exclusive_end_after(key: &[u8]) -> Vec<u8> {
-        let mut end = Vec::with_capacity(key.len() + 1);
-        end.extend_from_slice(key);
-        end.push(0x00);
-        end
     }
 
     /// Gets the first (smallest key) entry from the specified table.
