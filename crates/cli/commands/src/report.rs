@@ -302,7 +302,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         // Collect log files (from cache directory)
         let logs_collected = if let Some(ref log_path) = log_dir {
-            collect_logs(log_path, &mut archive)?
+            collect_directory_recursive(&mut archive, log_path, "logs")?
         } else {
             0
         };
@@ -368,31 +368,6 @@ fn collect_checksums<DB: Database>(
     }
 
     Ok(checksums)
-}
-
-fn collect_logs<W: Write>(log_dir: &Path, archive: &mut Builder<W>) -> eyre::Result<usize> {
-    let mut count = 0;
-
-    if !log_dir.exists() {
-        eprintln!("Warning: Log directory not found at {}", log_dir.display());
-        return Ok(0);
-    }
-
-    // Collect all reth.log* files
-    for entry in fs::read_dir(log_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) &&
-            name.starts_with("reth.log")
-        {
-            let archive_path = format!("logs/{name}");
-            add_file_to_archive(archive, &path, &archive_path)?;
-            count += 1;
-        }
-    }
-
-    Ok(count)
 }
 
 fn collect_directory_recursive<W: Write>(
