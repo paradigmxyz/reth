@@ -312,8 +312,8 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_genesis::Genesis;
-    use alloy_primitives::{Address, Bloom, B256};
-    use alloy_rpc_types_engine::{ExecutionPayloadSidecar, ExecutionPayloadV1};
+    use alloy_primitives::{Address, B256};
+    use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload};
     use reth_chainspec::{Chain, ChainSpec, EvmLimitParams, EvmLimitParamsKind};
     use reth_evm::{execute::ProviderError, EvmEnv, NextBlockEnvAttributes};
     use revm::{
@@ -543,29 +543,6 @@ mod tests {
         assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), 999_999);
     }
 
-    fn test_execution_data(timestamp: u64) -> ExecutionData {
-        ExecutionData {
-            payload: ExecutionPayloadV1 {
-                parent_hash: B256::ZERO,
-                fee_recipient: Address::ZERO,
-                state_root: B256::ZERO,
-                receipts_root: B256::ZERO,
-                logs_bloom: Bloom::ZERO,
-                prev_randao: B256::ZERO,
-                block_number: 0,
-                gas_limit: 30_000_000,
-                gas_used: 0,
-                timestamp,
-                extra_data: Default::default(),
-                base_fee_per_gas: U256::ZERO,
-                block_hash: B256::ZERO,
-                transactions: vec![],
-            }
-            .into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        }
-    }
-
     #[test]
     fn test_fill_cfg_and_block_env_for_payload() {
         let chain_spec = Arc::new(
@@ -578,7 +555,8 @@ mod tests {
                 .build(),
         );
         let evm_config = EthEvmConfig::new(chain_spec.clone());
-        let payload = test_execution_data(1);
+        let (payload, sidecar) = ExecutionPayload::from_block_slow(&Block::default());
+        let payload = ExecutionData::new(payload, sidecar);
 
         let evm_env = evm_config.evm_env_for_payload(&payload).unwrap();
 
@@ -605,7 +583,8 @@ mod tests {
             tx_gas_limit_cap: Some(999_999),
         });
         let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
-        let payload = test_execution_data(1);
+        let (payload, sidecar) = ExecutionPayload::from_block_slow(&Block::default());
+        let payload = ExecutionData::new(payload, sidecar);
 
         let evm_env = evm_config.evm_env_for_payload(&payload).unwrap();
         assert_eq!(evm_env.cfg_env.max_code_size(), 1234);
