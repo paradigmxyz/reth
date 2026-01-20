@@ -824,9 +824,7 @@ impl<'a> RocksDBBatch<'a> {
     /// Gets a value from the database.
     ///
     /// **Important constraint:** This reads only committed state, not pending writes in this
-    /// batch or other pending batches in `pending_rocksdb_batches`. This is acceptable for the
-    /// current use case (merging with previously persisted shards at the start of processing
-    /// an address), but callers must not rely on read-your-writes semantics within a batch.
+    /// batch or other pending batches in `pending_rocksdb_batches`.
     pub fn get<T: Table>(&self, key: T::Key) -> ProviderResult<Option<T::Value>> {
         self.provider.get::<T>(key)
     }
