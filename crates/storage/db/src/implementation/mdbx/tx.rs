@@ -424,7 +424,7 @@ impl Tx<RW> {
             let dbi = self.get_dbi::<T>()?;
 
             let buf = tx
-                .reserve_with_dbi(dbi, key.as_ref(), value_size, flags)
+                .reserve(dbi, key.as_ref(), value_size, flags)
                 .map_err(|e| make_error(e, key.as_ref().to_vec()))?;
 
             let mut slice_buf = SliceBuf::new(buf);

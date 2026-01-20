@@ -60,7 +60,12 @@ unsafe impl BufMut for CountingBuf {
         SCRATCH.with(|scratch| {
             // SAFETY: We return a mutable reference to the thread-local buffer.
             // This is safe because CountingBuf is not Sync and chunk_mut takes &mut self.
-            unsafe { bytes::buf::UninitSlice::from_raw_parts_mut((*scratch.get()).as_mut_ptr(), Self::SCRATCH_SIZE) }
+            unsafe {
+                bytes::buf::UninitSlice::from_raw_parts_mut(
+                    (*scratch.get()).as_mut_ptr(),
+                    Self::SCRATCH_SIZE,
+                )
+            }
         })
     }
 

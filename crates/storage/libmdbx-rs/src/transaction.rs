@@ -416,22 +416,6 @@ impl Transaction<RW> {
         len: usize,
         flags: WriteFlags,
     ) -> Result<&mut [u8]> {
-        self.reserve_with_dbi(db.dbi(), key, len, flags)
-    }
-
-    /// Returns a buffer which can be used to write a value into the item at the
-    /// given key and with the given length. The buffer must be completely
-    /// filled by the caller.
-    ///
-    /// This variant takes a raw DBI handle instead of a [`Database`] reference.
-    #[allow(clippy::mut_from_ref)]
-    pub fn reserve_with_dbi(
-        &self,
-        dbi: ffi::MDBX_dbi,
-        key: impl AsRef<[u8]>,
-        len: usize,
-        flags: WriteFlags,
-    ) -> Result<&mut [u8]> {
         let key = key.as_ref();
         let key_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
