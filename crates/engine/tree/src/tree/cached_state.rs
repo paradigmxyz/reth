@@ -21,7 +21,7 @@ use revm_primitives::eip7907::MAX_CODE_SIZE;
 use std::{
     mem::size_of,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -123,7 +123,10 @@ impl<S> CachedStateProvider<S> {
     }
 }
 
-/// Metrics for the cached state provider, showing hits / misses for each cache
+/// Metrics for the cached state provider, showing hits / misses / size for each cache.
+///
+/// This struct combines both the provider-level metrics (hits/misses tracked by the provider)
+/// and the fixed-cache internal stats (collisions, size, capacity).
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
 pub(crate) struct CachedStateMetrics {
@@ -133,17 +136,44 @@ pub(crate) struct CachedStateMetrics {
     /// Code cache misses
     code_cache_misses: Gauge,
 
+    /// Code cache size (number of entries)
+    code_cache_size: Gauge,
+
+    /// Code cache capacity (maximum entries)
+    code_cache_capacity: Gauge,
+
+    /// Code cache collisions (hash collisions causing eviction)
+    code_cache_collisions: Gauge,
+
     /// Storage cache hits
     storage_cache_hits: Gauge,
 
     /// Storage cache misses
     storage_cache_misses: Gauge,
 
+    /// Storage cache size (number of entries)
+    storage_cache_size: Gauge,
+
+    /// Storage cache capacity (maximum entries)
+    storage_cache_capacity: Gauge,
+
+    /// Storage cache collisions (hash collisions causing eviction)
+    storage_cache_collisions: Gauge,
+
     /// Account cache hits
     account_cache_hits: Gauge,
 
     /// Account cache misses
     account_cache_misses: Gauge,
+
+    /// Account cache size (number of entries)
+    account_cache_size: Gauge,
+
+    /// Account cache capacity (maximum entries)
+    account_cache_capacity: Gauge,
+
+    /// Account cache collisions (hash collisions causing eviction)
+    account_cache_collisions: Gauge,
 }
 
 impl CachedStateMetrics {
@@ -152,14 +182,17 @@ impl CachedStateMetrics {
         // code cache
         self.code_cache_hits.set(0);
         self.code_cache_misses.set(0);
+        self.code_cache_collisions.set(0);
 
         // storage cache
         self.storage_cache_hits.set(0);
         self.storage_cache_misses.set(0);
+        self.storage_cache_collisions.set(0);
 
         // account cache
         self.account_cache_hits.set(0);
         self.account_cache_misses.set(0);
+        self.account_cache_collisions.set(0);
     }
 
     /// Returns a new zeroed-out instance of [`CachedStateMetrics`].
@@ -170,84 +203,38 @@ impl CachedStateMetrics {
     }
 }
 
-/// Metrics for fixed-cache internal stats (hits/misses/collisions tracked by the cache itself).
-#[derive(Metrics, Clone)]
-#[metrics(scope = "sync.caching.fixed_cache")]
-pub(crate) struct FixedCacheMetrics {
-    /// Code cache hits
-    code_hits: Gauge,
-
-    /// Code cache misses
-    code_misses: Gauge,
-
-    /// Code cache collisions
-    code_collisions: Gauge,
-
-    /// Storage cache hits
-    storage_hits: Gauge,
-
-    /// Storage cache misses
-    storage_misses: Gauge,
-
-    /// Storage cache collisions
-    storage_collisions: Gauge,
-
-    /// Account cache hits
-    account_hits: Gauge,
-
-    /// Account cache misses
-    account_misses: Gauge,
-
-    /// Account cache collisions
-    account_collisions: Gauge,
-}
-
-impl FixedCacheMetrics {
-    /// Returns a new zeroed-out instance of [`FixedCacheMetrics`].
-    pub(crate) fn zeroed() -> Self {
-        let zeroed = Self::default();
-        zeroed.reset();
-        zeroed
-    }
-
-    /// Sets all values to zero.
-    pub(crate) fn reset(&self) {
-        self.code_hits.set(0);
-        self.code_misses.set(0);
-        self.code_collisions.set(0);
-
-        self.storage_hits.set(0);
-        self.storage_misses.set(0);
-        self.storage_collisions.set(0);
-
-        self.account_hits.set(0);
-        self.account_misses.set(0);
-        self.account_collisions.set(0);
-    }
-}
-
-/// A generic stats handler for fixed-cache that tracks hits, misses, and collisions.
+/// A stats handler for fixed-cache that tracks collisions and approximate size.
+///
+/// Note: Hits and misses are tracked directly by the [`CachedStateProvider`] via
+/// [`CachedStateMetrics`], not here. The stats handler is used for:
+/// - Collision detection (hash collisions causing eviction)
+/// - Approximate size tracking
+///
+/// ## Size Tracking
+///
+/// Size tracking is approximate. fixed-cache is a direct-mapped cache where each key hashes to
+/// exactly one bucket. When inserting, the bucket may be empty (size +1) or occupied (eviction,
+/// size unchanged). The cache API doesn't expose this distinction for direct `insert()` calls.
+///
+/// We handle this by:
+/// - Incrementing size on every insert
+/// - Decrementing on `on_collision` callback (called during get-before-insert in
+///   `get_or_try_insert_with`, indicating the subsequent insert will evict)
+/// - Capping size at capacity to prevent over-counting
+///
+/// This may slightly over-count for direct `insert()` calls that evict, but the cap ensures
+/// size never exceeds capacity, making it useful for observability ("is cache filling up?").
 #[derive(Debug)]
 pub(crate) struct CacheStatsHandler {
-    hits: AtomicU64,
-    misses: AtomicU64,
     collisions: AtomicU64,
+    size: AtomicUsize,
+    capacity: usize,
 }
 
 impl CacheStatsHandler {
     /// Creates a new stats handler with all counters initialized to zero.
-    pub(crate) const fn new() -> Self {
-        Self { hits: AtomicU64::new(0), misses: AtomicU64::new(0), collisions: AtomicU64::new(0) }
-    }
-
-    /// Returns the number of cache hits.
-    pub(crate) fn hits(&self) -> u64 {
-        self.hits.load(Ordering::Relaxed)
-    }
-
-    /// Returns the number of cache misses.
-    pub(crate) fn misses(&self) -> u64 {
-        self.misses.load(Ordering::Relaxed)
+    pub(crate) const fn new(capacity: usize) -> Self {
+        Self { collisions: AtomicU64::new(0), size: AtomicUsize::new(0), capacity }
     }
 
     /// Returns the number of cache collisions.
@@ -255,25 +242,46 @@ impl CacheStatsHandler {
         self.collisions.load(Ordering::Relaxed)
     }
 
-    /// Resets all counters to zero.
-    pub(crate) fn reset(&self) {
-        self.hits.store(0, Ordering::Relaxed);
-        self.misses.store(0, Ordering::Relaxed);
+    /// Returns the current size (number of entries).
+    pub(crate) fn size(&self) -> usize {
+        self.size.load(Ordering::Relaxed)
+    }
+
+    /// Returns the capacity (maximum number of entries).
+    pub(crate) const fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    /// Increments the size counter. Called on cache insert.
+    pub(crate) fn increment_size(&self) {
+        let _ = self.size.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |s| {
+            Some(s.saturating_add(1).min(self.capacity))
+        });
+    }
+
+    /// Resets size to zero. Called on cache clear.
+    pub(crate) fn reset_size(&self) {
+        self.size.store(0, Ordering::Relaxed);
+    }
+
+    /// Resets collision counter to zero (but not size).
+    pub(crate) fn reset_stats(&self) {
         self.collisions.store(0, Ordering::Relaxed);
     }
 }
 
 impl<K, V> StatsHandler<K, V> for CacheStatsHandler {
-    fn on_hit(&self, _key: &K, _value: &V) {
-        self.hits.fetch_add(1, Ordering::Relaxed);
-    }
+    fn on_hit(&self, _key: &K, _value: &V) {}
 
-    fn on_miss(&self, _key: AnyRef<'_>) {
-        self.misses.fetch_add(1, Ordering::Relaxed);
-    }
+    fn on_miss(&self, _key: AnyRef<'_>) {}
 
     fn on_collision(&self, _new_key: AnyRef<'_>, _existing_key: &K, _existing_value: &V) {
         self.collisions.fetch_add(1, Ordering::Relaxed);
+        // Collision means we're replacing an existing entry, not adding a new one.
+        // Since we increment size before the insert, we need to decrement here to compensate.
+        let _ = self
+            .size
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |s| Some(s.saturating_sub(1)));
     }
 }
 
@@ -523,31 +531,26 @@ impl ExecutionCache {
         let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
         let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
 
-        let code_stats = Arc::new(CacheStatsHandler::new());
-        let storage_stats = Arc::new(CacheStatsHandler::new());
-        let account_stats = Arc::new(CacheStatsHandler::new());
+        let code_capacity = Self::bytes_to_entries(code_cache_size, CODE_CACHE_ENTRY_SIZE);
+        let storage_capacity = Self::bytes_to_entries(storage_cache_size, STORAGE_CACHE_ENTRY_SIZE);
+        let account_capacity = Self::bytes_to_entries(account_cache_size, ACCOUNT_CACHE_ENTRY_SIZE);
+
+        let code_stats = Arc::new(CacheStatsHandler::new(code_capacity));
+        let storage_stats = Arc::new(CacheStatsHandler::new(storage_capacity));
+        let account_stats = Arc::new(CacheStatsHandler::new(account_capacity));
 
         Self {
             code_cache: Arc::new(
-                FixedCache::new(
-                    Self::bytes_to_entries(code_cache_size, CODE_CACHE_ENTRY_SIZE),
-                    FbBuildHasher::<32>::default(),
-                )
-                .with_stats(Some(Stats::new(code_stats.clone()))),
+                FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
+                    .with_stats(Some(Stats::new(code_stats.clone()))),
             ),
             storage_cache: Arc::new(
-                FixedCache::new(
-                    Self::bytes_to_entries(storage_cache_size, STORAGE_CACHE_ENTRY_SIZE),
-                    DefaultHashBuilder::default(),
-                )
-                .with_stats(Some(Stats::new(storage_stats.clone()))),
+                FixedCache::new(storage_capacity, DefaultHashBuilder::default())
+                    .with_stats(Some(Stats::new(storage_stats.clone()))),
             ),
             account_cache: Arc::new(
-                FixedCache::new(
-                    Self::bytes_to_entries(account_cache_size, ACCOUNT_CACHE_ENTRY_SIZE),
-                    FbBuildHasher::<20>::default(),
-                )
-                .with_stats(Some(Stats::new(account_stats.clone()))),
+                FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
+                    .with_stats(Some(Stats::new(account_stats.clone()))),
             ),
             code_stats,
             storage_stats,
@@ -567,7 +570,12 @@ impl ExecutionCache {
             f()
         })?;
 
-        Ok(if miss { CachedStatus::NotCached(result) } else { CachedStatus::Cached(result) })
+        if miss {
+            self.code_stats.increment_size();
+            Ok(CachedStatus::NotCached(result))
+        } else {
+            Ok(CachedStatus::Cached(result))
+        }
     }
 
     /// Gets storage from cache, or inserts using the provided function.
@@ -583,7 +591,12 @@ impl ExecutionCache {
             f()
         })?;
 
-        Ok(if miss { CachedStatus::NotCached(result) } else { CachedStatus::Cached(result) })
+        if miss {
+            self.storage_stats.increment_size();
+            Ok(CachedStatus::NotCached(result))
+        } else {
+            Ok(CachedStatus::Cached(result))
+        }
     }
 
     /// Gets account from cache, or inserts using the provided function.
@@ -598,7 +611,12 @@ impl ExecutionCache {
             f()
         })?;
 
-        Ok(if miss { CachedStatus::NotCached(result) } else { CachedStatus::Cached(result) })
+        if miss {
+            self.account_stats.increment_size();
+            Ok(CachedStatus::NotCached(result))
+        } else {
+            Ok(CachedStatus::Cached(result))
+        }
     }
 
     /// Insert storage value into cache.
@@ -609,6 +627,19 @@ impl ExecutionCache {
         value: Option<StorageValue>,
     ) {
         self.storage_cache.insert((address, key), value.unwrap_or_default());
+        self.storage_stats.increment_size();
+    }
+
+    /// Insert code into cache.
+    fn insert_code(&self, hash: B256, code: Option<Bytecode>) {
+        self.code_cache.insert(hash, code);
+        self.code_stats.increment_size();
+    }
+
+    /// Insert account into cache.
+    fn insert_account(&self, address: Address, account: Option<Account>) {
+        self.account_cache.insert(address, account);
+        self.account_stats.increment_size();
     }
 
     /// Inserts the post-execution state changes into the cache.
@@ -636,7 +667,7 @@ impl ExecutionCache {
                 .entered();
         // Insert bytecodes
         for (code_hash, bytecode) in &state_updates.contracts {
-            self.code_cache.insert(*code_hash, Some(Bytecode(bytecode.clone())));
+            self.insert_code(*code_hash, Some(Bytecode(bytecode.clone())));
         }
         drop(_enter);
 
@@ -685,7 +716,7 @@ impl ExecutionCache {
 
             // Insert will update if present, so we just use the new account info as the new value
             // for the account cache
-            self.account_cache.insert(*addr, Some(Account::from(account_info)));
+            self.insert_account(*addr, Some(Account::from(account_info)));
         }
 
         Ok(())
@@ -696,25 +727,29 @@ impl ExecutionCache {
         self.code_cache.clear();
         self.storage_cache.clear();
         self.account_cache.clear();
+
+        self.code_stats.reset_size();
+        self.storage_stats.reset_size();
+        self.account_stats.reset_size();
     }
 
     /// Updates the provided metrics with the current stats from the cache's stats handlers,
-    /// and resets the stats counters.
-    pub(crate) fn update_metrics(&self, metrics: &FixedCacheMetrics) {
-        metrics.code_hits.set(self.code_stats.hits() as f64);
-        metrics.code_misses.set(self.code_stats.misses() as f64);
-        metrics.code_collisions.set(self.code_stats.collisions() as f64);
-        self.code_stats.reset();
+    /// and resets the hit/miss/collision counters.
+    pub(crate) fn update_metrics(&self, metrics: &CachedStateMetrics) {
+        metrics.code_cache_size.set(self.code_stats.size() as f64);
+        metrics.code_cache_capacity.set(self.code_stats.capacity() as f64);
+        metrics.code_cache_collisions.set(self.code_stats.collisions() as f64);
+        self.code_stats.reset_stats();
 
-        metrics.storage_hits.set(self.storage_stats.hits() as f64);
-        metrics.storage_misses.set(self.storage_stats.misses() as f64);
-        metrics.storage_collisions.set(self.storage_stats.collisions() as f64);
-        self.storage_stats.reset();
+        metrics.storage_cache_size.set(self.storage_stats.size() as f64);
+        metrics.storage_cache_capacity.set(self.storage_stats.capacity() as f64);
+        metrics.storage_cache_collisions.set(self.storage_stats.collisions() as f64);
+        self.storage_stats.reset_stats();
 
-        metrics.account_hits.set(self.account_stats.hits() as f64);
-        metrics.account_misses.set(self.account_stats.misses() as f64);
-        metrics.account_collisions.set(self.account_stats.collisions() as f64);
-        self.account_stats.reset();
+        metrics.account_cache_size.set(self.account_stats.size() as f64);
+        metrics.account_cache_capacity.set(self.account_stats.capacity() as f64);
+        metrics.account_cache_collisions.set(self.account_stats.collisions() as f64);
+        self.account_stats.reset_stats();
     }
 }
 
@@ -728,11 +763,8 @@ pub(crate) struct SavedCache {
     /// The caches used for the provider.
     caches: ExecutionCache,
 
-    /// Metrics for the cached state provider
+    /// Metrics for the cached state provider (includes size/capacity/collisions from fixed-cache)
     metrics: CachedStateMetrics,
-
-    /// Metrics for fixed-cache internal stats
-    fixed_cache_metrics: FixedCacheMetrics,
 
     /// A guard to track in-flight usage of this cache.
     /// The cache is considered available if the strong count is 1.
@@ -744,20 +776,8 @@ pub(crate) struct SavedCache {
 
 impl SavedCache {
     /// Creates a new instance with the internals
-    pub(super) fn new(
-        hash: B256,
-        caches: ExecutionCache,
-        metrics: CachedStateMetrics,
-        fixed_cache_metrics: FixedCacheMetrics,
-    ) -> Self {
-        Self {
-            hash,
-            caches,
-            metrics,
-            fixed_cache_metrics,
-            usage_guard: Arc::new(()),
-            disable_cache_metrics: false,
-        }
+    pub(super) fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
+        Self { hash, caches, metrics, usage_guard: Arc::new(()), disable_cache_metrics: false }
     }
 
     /// Sets whether to disable cache metrics recording.
@@ -771,12 +791,9 @@ impl SavedCache {
         self.hash
     }
 
-    /// Splits the cache into its caches, metrics, fixed cache metrics, and `disable_cache_metrics`
-    /// flag, consuming it.
-    pub(crate) fn split(
-        self,
-    ) -> (ExecutionCache, CachedStateMetrics, FixedCacheMetrics, bool) {
-        (self.caches, self.metrics, self.fixed_cache_metrics, self.disable_cache_metrics)
+    /// Splits the cache into its caches, metrics, and `disable_cache_metrics` flag, consuming it.
+    pub(crate) fn split(self) -> (ExecutionCache, CachedStateMetrics, bool) {
+        (self.caches, self.metrics, self.disable_cache_metrics)
     }
 
     /// Returns true if the cache is available for use (no other tasks are currently using it).
@@ -799,15 +816,15 @@ impl SavedCache {
         &self.metrics
     }
 
-    /// Updates the fixed-cache metrics from the stats handlers.
+    /// Updates the cache metrics (size/capacity/collisions) from the stats handlers.
     ///
     /// Note: This can be expensive with large cached state. Use
     /// `with_disable_cache_metrics(true)` to skip.
     pub(crate) fn update_metrics(&self) {
         if self.disable_cache_metrics {
-            return;
+            return
         }
-        self.caches.update_metrics(&self.fixed_cache_metrics);
+        self.caches.update_metrics(&self.metrics);
     }
 
     /// Clears all caches, resetting them to empty state.
@@ -897,12 +914,7 @@ mod tests {
     #[test]
     fn test_saved_cache_is_available() {
         let execution_cache = ExecutionCache::new(1000);
-        let cache = SavedCache::new(
-            B256::ZERO,
-            execution_cache,
-            CachedStateMetrics::zeroed(),
-            FixedCacheMetrics::zeroed(),
-        );
+        let cache = SavedCache::new(B256::ZERO, execution_cache, CachedStateMetrics::zeroed());
 
         assert!(cache.is_available(), "Cache should be available initially");
 
@@ -914,12 +926,8 @@ mod tests {
     #[test]
     fn test_saved_cache_multiple_references() {
         let execution_cache = ExecutionCache::new(1000);
-        let cache = SavedCache::new(
-            B256::from([2u8; 32]),
-            execution_cache,
-            CachedStateMetrics::zeroed(),
-            FixedCacheMetrics::zeroed(),
-        );
+        let cache =
+            SavedCache::new(B256::from([2u8; 32]), execution_cache, CachedStateMetrics::zeroed());
 
         let guard1 = cache.clone_guard_for_test();
         let guard2 = cache.clone_guard_for_test();

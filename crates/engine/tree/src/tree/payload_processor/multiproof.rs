@@ -852,8 +852,8 @@ impl MultiProofTask {
                 // Batch consecutive prefetch messages up to limits.
                 // EmptyProof messages are handled inline since they're very fast (~100ns)
                 // and shouldn't interrupt batching.
-                while accumulated_count < PREFETCH_MAX_BATCH_TARGETS &&
-                    ctx.accumulated_prefetch_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
+                while accumulated_count < PREFETCH_MAX_BATCH_TARGETS
+                    && ctx.accumulated_prefetch_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
                 {
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
@@ -1260,8 +1260,8 @@ fn get_proof_targets(
             .storage
             .keys()
             .filter(|slot| {
-                !fetched.is_some_and(|f| f.contains(*slot)) ||
-                    storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
+                !fetched.is_some_and(|f| f.contains(*slot))
+                    || storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
             })
             .peekable();
 
@@ -1294,13 +1294,13 @@ fn dispatch_with_chunking<T, I>(
 where
     I: IntoIterator<Item = T>,
 {
-    let should_chunk = chunking_len > max_targets_for_chunking ||
-        available_account_workers > 1 ||
-        available_storage_workers > 1;
+    let should_chunk = chunking_len > max_targets_for_chunking
+        || available_account_workers > 1
+        || available_storage_workers > 1;
 
-    if should_chunk &&
-        let Some(chunk_size) = chunk_size &&
-        chunking_len > chunk_size
+    if should_chunk
+        && let Some(chunk_size) = chunk_size
+        && chunking_len > chunk_size
     {
         let mut num_chunks = 0usize;
         for chunk in chunker(items, chunk_size) {

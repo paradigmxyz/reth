@@ -99,7 +99,7 @@ impl<N: NodePrimitives> TreeState<N> {
         let block_number = executed.recovered_block().number();
 
         if self.blocks_by_hash.contains_key(&hash) {
-            return;
+            return
         }
 
         self.blocks_by_hash.insert(hash, executed.clone());

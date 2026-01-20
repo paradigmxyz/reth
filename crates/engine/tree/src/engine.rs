@@ -96,7 +96,7 @@ where
                                 Poll::Ready(HandlerEvent::Event(ev))
                             }
                             HandlerEvent::FatalError => Poll::Ready(HandlerEvent::FatalError),
-                        }
+                        };
                     }
                     RequestHandlerEvent::Download(req) => {
                         // delegate download request to the downloader

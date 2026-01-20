@@ -3,8 +3,7 @@
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{
-        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache,
-        FixedCacheMetrics, SavedCache,
+        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache, SavedCache,
     },
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
@@ -303,7 +302,7 @@ where
             // Build a state provider for the multiproof task
             let provider = provider_builder.build().expect("failed to build provider");
             let provider = if let Some(saved_cache) = saved_cache {
-                let (cache, metrics, _) = saved_cache.split();
+                let (cache, metrics, _disable_metrics) = saved_cache.split();
                 Box::new(CachedStateProvider::new(provider, cache, metrics))
                     as Box<dyn StateProvider>
             } else {
@@ -394,8 +393,8 @@ where
                     let _ = execute_tx.send(tx);
                     next_for_execution += 1;
 
-                    while let Some(entry) = queue.first_entry() &&
-                        *entry.key() == next_for_execution
+                    while let Some(entry) = queue.first_entry()
+                        && *entry.key() == next_for_execution
                     {
                         let _ = execute_tx.send(entry.remove());
                         next_for_execution += 1;
@@ -479,13 +478,8 @@ where
         } else {
             debug!("creating new execution cache on cache miss");
             let cache = crate::tree::cached_state::ExecutionCache::new(self.cross_block_cache_size);
-            SavedCache::new(
-                parent_hash,
-                cache,
-                CachedStateMetrics::zeroed(),
-                FixedCacheMetrics::zeroed(),
-            )
-            .with_disable_cache_metrics(self.disable_cache_metrics)
+            SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
+                .with_disable_cache_metrics(self.disable_cache_metrics)
         }
     }
 
@@ -575,32 +569,27 @@ where
                     parent_hash = %block_with_parent.parent,
                     "Cannot find cache for parent hash, skip updating cache with new state for inserted executed block",
                 );
-                return;
+                return
             }
 
             // Take existing cache (if any) or create fresh caches
-            let (caches, cache_metrics, fixed_cache_metrics, _) = match cached.take() {
+            let (caches, cache_metrics, _) = match cached.take() {
                 Some(existing) => existing.split(),
                 None => (
                     crate::tree::cached_state::ExecutionCache::new(self.cross_block_cache_size),
                     CachedStateMetrics::zeroed(),
-                    FixedCacheMetrics::zeroed(),
                     false,
                 ),
             };
 
             // Insert the block's bundle state into cache
-            let new_cache = SavedCache::new(
-                block_with_parent.block.hash,
-                caches,
-                cache_metrics,
-                fixed_cache_metrics,
-            )
-            .with_disable_cache_metrics(disable_cache_metrics);
+            let new_cache =
+                SavedCache::new(block_with_parent.block.hash, caches, cache_metrics)
+                    .with_disable_cache_metrics(disable_cache_metrics);
             if new_cache.cache().insert_state(bundle_state).is_err() {
                 *cached = None;
                 debug!(target: "engine::caching", "cleared execution cache on update error");
-                return;
+                return
             }
             new_cache.update_metrics();
 
@@ -828,7 +817,7 @@ impl ExecutionCache {
                 if !hash_matches {
                     c.clear();
                 }
-                return Some(c.clone());
+                return Some(c.clone())
             }
         } else {
             debug!(target: "engine::caching", %parent_hash, "No cache found");
@@ -893,7 +882,7 @@ where
 mod tests {
     use super::ExecutionCache;
     use crate::tree::{
-        cached_state::{CachedStateMetrics, FixedCacheMetrics, SavedCache},
+        cached_state::{CachedStateMetrics, SavedCache},
         payload_processor::{
             evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
         },
@@ -924,12 +913,7 @@ mod tests {
 
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = crate::tree::cached_state::ExecutionCache::new(1_000);
-        SavedCache::new(
-            hash,
-            execution_cache,
-            CachedStateMetrics::zeroed(),
-            FixedCacheMetrics::zeroed(),
-        )
+        SavedCache::new(hash, execution_cache, CachedStateMetrics::zeroed())
     }
 
     #[test]
@@ -978,7 +962,7 @@ mod tests {
         // When the parent hash doesn't match, the cache is cleared and returned for reuse
         let different_hash = B256::from([4u8; 32]);
         let cache = execution_cache.get_cache_for(different_hash);
-        assert!(cache.is_some(), "cache should be returned for reuse after clearing");
+        assert!(cache.is_some(), "cache should be returned for reuse after clearing")
     }
 
     #[test]

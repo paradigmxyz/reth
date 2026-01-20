@@ -172,8 +172,8 @@ where
 
     /// Sets the metrics for the active downloads
     fn update_block_download_metrics(&self) {
-        let blocks = self.inflight_full_block_requests.len() +
-            self.inflight_block_range_requests.iter().map(|r| r.count() as usize).sum::<usize>();
+        let blocks = self.inflight_full_block_requests.len()
+            + self.inflight_block_range_requests.iter().map(|r| r.count() as usize).sum::<usize>();
         self.metrics.active_block_downloads.set(blocks as f64);
     }
 
@@ -206,7 +206,7 @@ where
     /// Advances the download process.
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<DownloadOutcome<B>> {
         if let Some(pending_event) = self.pop_pending_event() {
-            return Poll::Ready(pending_event);
+            return Poll::Ready(pending_event)
         }
 
         // advance all full block requests
@@ -237,7 +237,7 @@ where
         self.update_block_download_metrics();
 
         if self.set_buffered_blocks.is_empty() {
-            return Poll::Pending;
+            return Poll::Pending
         }
 
         // drain all unique element of the block buffer if there are any

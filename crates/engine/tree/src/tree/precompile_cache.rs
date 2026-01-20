@@ -24,7 +24,7 @@ where
     pub(crate) fn cache_for_address(&self, address: Address) -> PrecompileCache<S> {
         // Try just using `.get` first to avoid acquiring a write lock.
         if let Some(cache) = self.0.get(&address) {
-            return cache.clone();
+            return cache.clone()
         }
         // Otherwise, fallback to `.entry` and initialize the cache.
         //

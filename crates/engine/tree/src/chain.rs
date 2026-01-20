@@ -86,7 +86,7 @@ where
                     BackfillEvent::Started(_) => {
                         // notify handler that backfill sync started
                         this.handler.on_event(FromOrchestrator::BackfillSyncStarted);
-                        return Poll::Ready(ChainEvent::BackfillSyncStarted);
+                        return Poll::Ready(ChainEvent::BackfillSyncStarted)
                     }
                     BackfillEvent::Finished(res) => {
                         return match res {
@@ -104,7 +104,7 @@ where
                     }
                     BackfillEvent::TaskDropped(err) => {
                         tracing::error!( %err, "backfill sync task dropped");
-                        return Poll::Ready(ChainEvent::FatalError);
+                        return Poll::Ready(ChainEvent::FatalError)
                     }
                 },
                 Poll::Pending => {}
@@ -120,7 +120,7 @@ where
                         }
                         HandlerEvent::Event(ev) => {
                             // bubble up the event
-                            return Poll::Ready(ChainEvent::Handler(ev));
+                            return Poll::Ready(ChainEvent::Handler(ev))
                         }
                         HandlerEvent::FatalError => {
                             error!(target: "engine::tree", "Fatal error");

@@ -189,7 +189,7 @@ where
                         target: "engine::tree::payload_processor::prewarm",
                         "Termination requested, stopping transaction distribution"
                     );
-                    break;
+                    break
                 }
 
                 let indexed_tx = IndexedTransaction { index: tx_index, tx };
@@ -278,11 +278,9 @@ where
             execution_cache.update_with_guard(|cached| {
                 // consumes the `SavedCache` held by the prewarming task, which releases its usage
                 // guard
-                let (caches, cache_metrics, fixed_cache_metrics, disable_cache_metrics) =
-                    saved_cache.split();
-                let new_cache =
-                    SavedCache::new(hash, caches, cache_metrics, fixed_cache_metrics)
-                        .with_disable_cache_metrics(disable_cache_metrics);
+                let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
+                let new_cache = SavedCache::new(hash, caches, cache_metrics)
+                    .with_disable_cache_metrics(disable_cache_metrics);
 
                 // Insert state into cache while holding the lock
                 // Access the BundleState through the shared ExecutionOutcome
@@ -290,7 +288,7 @@ where
                     // Clear the cache on error to prevent having a polluted cache
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return;
+                    return
                 }
 
                 new_cache.update_metrics();
@@ -327,7 +325,7 @@ where
             );
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
-            return;
+            return
         }
 
         let total_slots = total_slots(&bal);
@@ -343,7 +341,7 @@ where
             // No slots to prefetch, signal completion immediately
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
-            return;
+            return
         }
 
         let (done_tx, done_rx) = mpsc::channel();
@@ -572,7 +570,7 @@ where
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
-        let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
+        let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return }
 
         while let Ok(IndexedTransaction { index, tx }) = {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", "recv tx")
@@ -738,7 +736,7 @@ where
                     "Failed to build state provider in BAL prewarm thread"
                 );
                 let _ = done_tx.send(());
-                return;
+                return
             }
         };
 
