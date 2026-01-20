@@ -11,7 +11,10 @@ use reth_db_common::DbTool;
 use reth_fs_util as fs;
 use reth_node_builder::{NodePrimitives, NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_provider::providers::{ProviderNodeTypes, StaticFileProvider};
+use reth_provider::{
+    providers::{ProviderNodeTypes, StaticFileProvider},
+    RocksDBProviderFactory,
+};
 use reth_static_file_types::SegmentRangeInclusive;
 use std::{sync::Arc, time::Duration};
 
@@ -60,6 +63,11 @@ impl Command {
 
         let db_stats_table = self.db_stats_table(tool)?;
         println!("{db_stats_table}");
+
+        println!("\n");
+
+        let rocksdb_stats_table = self.rocksdb_stats_table(tool);
+        println!("{rocksdb_stats_table}");
 
         Ok(())
     }
@@ -146,6 +154,41 @@ impl Command {
         })??;
 
         Ok(table)
+    }
+
+    fn rocksdb_stats_table<N: NodeTypesWithDB>(&self, tool: &DbTool<N>) -> ComfyTable {
+        let mut table = ComfyTable::new();
+        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+        table.set_header(["RocksDB Table Name", "# Entries (est.)", "Total Size (est.)"]);
+
+        let stats = tool.provider_factory.rocksdb_provider().table_stats();
+        let mut total_size: u64 = 0;
+
+        for stat in &stats {
+            total_size += stat.estimated_size_bytes;
+            let mut row = Row::new();
+            row.add_cell(Cell::new(&stat.name))
+                .add_cell(Cell::new(stat.estimated_num_keys))
+                .add_cell(Cell::new(human_bytes(stat.estimated_size_bytes as f64)));
+            table.add_row(row);
+        }
+
+        if !stats.is_empty() {
+            let max_widths = table.column_max_content_widths();
+            let mut separator = Row::new();
+            for width in max_widths {
+                separator.add_cell(Cell::new("-".repeat(width as usize)));
+            }
+            table.add_row(separator);
+
+            let mut row = Row::new();
+            row.add_cell(Cell::new("RocksDB Total"))
+                .add_cell(Cell::new(""))
+                .add_cell(Cell::new(human_bytes(total_size as f64)));
+            table.add_row(row);
+        }
+
+        table
     }
 
     fn static_files_stats_table<N: NodePrimitives>(

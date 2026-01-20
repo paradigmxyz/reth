@@ -38,6 +38,17 @@ use tracing::instrument;
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
 
+/// Statistics for a single `RocksDB` table (column family).
+#[derive(Debug, Clone)]
+pub struct RocksDBTableStats {
+    /// Name of the table/column family.
+    pub name: String,
+    /// Estimated number of keys in the table.
+    pub estimated_num_keys: u64,
+    /// Estimated size of live data in bytes.
+    pub estimated_size_bytes: u64,
+}
+
 /// Context for `RocksDB` block writes.
 #[derive(Clone)]
 pub(crate) struct RocksDBWriteCtx {
@@ -405,6 +416,49 @@ impl RocksDBProviderInner {
             Self::ReadOnly { db, .. } => RocksDBIterEnum::ReadOnly(db.iterator_cf(cf, mode)),
         }
     }
+
+    /// Returns statistics for all column families in the database.
+    fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        match self {
+            Self::ReadWrite { db, .. } => Self::collect_cf_stats(db),
+            Self::ReadOnly { db, .. } => Self::collect_cf_stats(db),
+        }
+    }
+
+    /// Collects statistics for all column families from a DB implementing `DBAccess`.
+    fn collect_cf_stats<D: rocksdb::DBAccess>(db: &D) -> Vec<RocksDBTableStats> {
+        let mut stats = Vec::new();
+
+        // Get the list of column family names by iterating through what RocksDB knows.
+        // We use the property API for each CF.
+        for cf_name in [
+            tables::TransactionHashNumbers::NAME,
+            tables::AccountsHistory::NAME,
+            tables::StoragesHistory::NAME,
+        ] {
+            if let Some(cf) = db.cf_handle(cf_name) {
+                let estimated_num_keys = db
+                    .property_int_value_cf(cf, rocksdb::properties::ESTIMATE_NUM_KEYS)
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+
+                let estimated_size_bytes = db
+                    .property_int_value_cf(cf, rocksdb::properties::ESTIMATE_LIVE_DATA_SIZE)
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+
+                stats.push(RocksDBTableStats {
+                    name: cf_name.to_string(),
+                    estimated_num_keys,
+                    estimated_size_bytes,
+                });
+            }
+        }
+
+        stats
+    }
 }
 
 impl fmt::Debug for RocksDBProviderInner {
@@ -654,6 +708,13 @@ impl RocksDBProvider {
         let cf = self.get_cf_handle::<T>()?;
         let iter = self.0.iterator_cf(cf, IteratorMode::Start);
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
+    /// Returns statistics for all column families in the database.
+    ///
+    /// Returns a vector of (table_name, estimated_keys, estimated_size_bytes) tuples.
+    pub fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        self.0.table_stats()
     }
 
     /// Returns all account history shards for the given address in ascending key order.

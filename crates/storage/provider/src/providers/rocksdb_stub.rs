@@ -14,6 +14,17 @@ use std::{path::Path, sync::Arc};
 /// Pending `RocksDB` batches type alias (stub - uses unit type).
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<()>>>;
 
+/// Statistics for a single `RocksDB` table (column family) - stub.
+#[derive(Debug, Clone)]
+pub struct RocksDBTableStats {
+    /// Name of the table/column family.
+    pub name: String,
+    /// Estimated number of keys in the table.
+    pub estimated_num_keys: u64,
+    /// Estimated size of live data in bytes.
+    pub estimated_size_bytes: u64,
+}
+
 /// Context for `RocksDB` block writes (stub).
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -55,6 +66,13 @@ impl RocksDBProvider {
         _provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>> {
         Ok(None)
+    }
+
+    /// Returns statistics for all column families in the database (stub implementation).
+    ///
+    /// Returns an empty vector since there is no `RocksDB` when the feature is disabled.
+    pub fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        Vec::new()
     }
 }
 
