@@ -11,7 +11,6 @@ use std::{
 };
 mod account_storage;
 mod checksum;
-mod checksum_static_file;
 mod clear;
 mod diff;
 mod get;
@@ -40,10 +39,8 @@ pub enum Subcommands {
     Stats(stats::Command),
     /// Lists the contents of a table
     List(list::Command),
-    /// Calculates the content checksum of a table
+    /// Calculates the content checksum of a table or static file segment
     Checksum(checksum::Command),
-    /// Calculates the content checksum of a static file segment
-    ChecksumStaticFile(checksum_static_file::Command),
     /// Create a diff between two database tables or two entire databases.
     Diff(diff::Command),
     /// Gets the content of a table for the given key
@@ -120,11 +117,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 });
             }
             Subcommands::Checksum(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
-                    command.execute(&tool)?;
-                });
-            }
-            Subcommands::ChecksumStaticFile(command) => {
                 db_exec!(self.env, tool, N, AccessRights::RO, {
                     command.execute(&tool)?;
                 });
