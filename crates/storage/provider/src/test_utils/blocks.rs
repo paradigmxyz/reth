@@ -41,7 +41,8 @@ pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
     assert_eq!(tx.table::<tables::TransactionBlocks>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::TransactionHashNumbers>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::Receipts>().unwrap(), vec![]);
-
+    assert_eq!(tx.table::<tables::PlainAccountState>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::PlainStorageState>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::AccountsHistory>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::StoragesHistory>().unwrap(), vec![]);
     // Reorged bytecodes are not reverted per https://github.com/paradigmxyz/reth/issues/1588
