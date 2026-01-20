@@ -42,16 +42,6 @@ pub struct Tx<K: TransactionKind> {
     metrics_handler: Option<MetricsHandler<K>>,
 }
 
-impl<K: TransactionKind> Clone for Tx<K> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            dbis: self.dbis.clone(),
-            metrics_handler: self.metrics_handler.clone(),
-        }
-    }
-}
-
 impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
     #[inline]

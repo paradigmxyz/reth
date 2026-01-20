@@ -18,7 +18,7 @@ pub type CursorMutTy<TX, T> = <TX as DbTxMut>::CursorMut<T>;
 pub type DupCursorMutTy<TX, T> = <TX as DbTxMut>::DupCursorMut<T>;
 
 /// Read only transaction
-pub trait DbTx: Clone + Debug + Send {
+pub trait DbTx: Debug + Send {
     /// Cursor type for this read-only transaction
     type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
     /// `DupCursor` type for this read-only transaction
