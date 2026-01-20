@@ -659,7 +659,6 @@ impl RocksDBProvider {
     /// Creates a raw iterator over all entries in the specified table.
     ///
     /// Returns raw `(key_bytes, value_bytes)` pairs without decoding.
-    /// This is more efficient when you need to process raw bytes directly.
     pub fn raw_iter<T: Table>(&self) -> ProviderResult<RocksDBRawIter<'_>> {
         let cf = self.get_cf_handle::<T>()?;
         let iter = self.0.iterator_cf(cf, IteratorMode::Start);
