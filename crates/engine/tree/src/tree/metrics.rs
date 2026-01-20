@@ -238,9 +238,11 @@ pub(crate) struct ForkchoiceUpdatedMetrics {
     pub(crate) forkchoice_updated_last: Gauge,
     /// Time diff between new payload call response and the next forkchoice updated call request.
     pub(crate) new_payload_forkchoice_updated_time_diff: Histogram,
-    /// Time from previous forkchoice updated finish to current forkchoice updated start (idle time).
+    /// Time from previous forkchoice updated finish to current forkchoice updated start (idle
+    /// time).
     pub(crate) time_between_forkchoice_updated: Histogram,
-    /// Time from previous forkchoice updated start to current forkchoice updated start (total interval).
+    /// Time from previous forkchoice updated start to current forkchoice updated start (total
+    /// interval).
     pub(crate) forkchoice_updated_interval: Histogram,
 }
 
