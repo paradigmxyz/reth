@@ -19,6 +19,11 @@ impl Target {
         Self { key, min_len: 0 }
     }
 
+    /// Returns the key the target was initialized with.
+    pub fn key(&self) -> B256 {
+        B256::from_slice(&self.key.pack())
+    }
+
     /// Only match trie nodes whose path is at least this long.
     ///
     /// # Panics
