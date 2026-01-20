@@ -36,7 +36,7 @@ impl IndexStorageHistoryStage {
         etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,
     ) -> Self {
-        Self { commit_threshold: config.commit_threshold, prune_mode, etl_config }
+        Self { commit_threshold: config.commit_threshold, etl_config, prune_mode }
     }
 }
 
@@ -49,9 +49,9 @@ impl Default for IndexStorageHistoryStage {
 impl<Provider> Stage<Provider> for IndexStorageHistoryStage
 where
     Provider: DBProvider<Tx: DbTxMut>
-        + PruneCheckpointWriter
         + HistoryWriter
         + PruneCheckpointReader
+        + PruneCheckpointWriter
         + StorageSettingsCache
         + RocksDBProviderFactory
         + reth_provider::NodePrimitivesProvider,
@@ -102,13 +102,16 @@ where
 
         let mut range = input.next_block_range();
         let first_sync = input.checkpoint().block_number == 0;
-
         let use_rocksdb = provider.cached_storage_settings().storages_history_in_rocksdb;
 
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
         if first_sync {
             if use_rocksdb {
+                // Note: RocksDB clear() executes immediately (not deferred to commit like MDBX),
+                // but this is safe for first_sync because if we crash before commit, the
+                // checkpoint stays at 0 and we'll just clear and rebuild again on restart. The
+                // source data (changesets) is intact.
                 #[cfg(all(unix, feature = "rocksdb"))]
                 provider.rocksdb_provider().clear::<tables::StoragesHistory>()?;
             } else {
@@ -393,12 +396,12 @@ mod tests {
     async fn insert_index_second_half_shard() {
         // init
         let db = TestStageDB::default();
-        let mut close_full_list = (1..=LAST_BLOCK_IN_FULL_SHARD - 1).collect::<Vec<_>>();
+        let mut almost_full_list = (1..=LAST_BLOCK_IN_FULL_SHARD - 1).collect::<Vec<_>>();
 
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&close_full_list)).unwrap();
+            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&almost_full_list)).unwrap();
             Ok(())
         })
         .unwrap();
@@ -407,12 +410,12 @@ mod tests {
         run(&db, LAST_BLOCK_IN_FULL_SHARD + 1, Some(LAST_BLOCK_IN_FULL_SHARD - 1));
 
         // verify
-        close_full_list.push(LAST_BLOCK_IN_FULL_SHARD);
+        almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD);
         let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(
             table,
             BTreeMap::from([
-                (shard(LAST_BLOCK_IN_FULL_SHARD), close_full_list.clone()),
+                (shard(LAST_BLOCK_IN_FULL_SHARD), almost_full_list.clone()),
                 (shard(u64::MAX), vec![LAST_BLOCK_IN_FULL_SHARD + 1])
             ])
         );
@@ -421,9 +424,9 @@ mod tests {
         unwind(&db, LAST_BLOCK_IN_FULL_SHARD, LAST_BLOCK_IN_FULL_SHARD - 1);
 
         // verify initial state
-        close_full_list.pop();
+        almost_full_list.pop();
         let table = cast(db.table::<tables::StoragesHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list)]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), almost_full_list)]));
     }
 
     #[tokio::test]
@@ -728,9 +731,9 @@ mod tests {
             assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
         }
 
-        /// Test that unwind correctly removes block numbers from `RocksDB` when enabled.
+        /// Test that unwind works correctly when `storages_history_in_rocksdb` is enabled.
         #[tokio::test]
-        async fn unwind_deletes_from_rocksdb_when_enabled() {
+        async fn unwind_works_when_rocksdb_enabled() {
             let db = TestStageDB::default();
 
             db.factory.set_storage_settings_cache(
