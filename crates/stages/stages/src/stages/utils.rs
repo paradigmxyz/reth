@@ -8,8 +8,8 @@ use reth_db_api::{
         AccountBeforeTx, ShardedKey,
     },
     table::{Decode, Decompress, Table},
-    transaction::{DbTx, DbTxMut},
-    BlockNumberList, DatabaseError,
+    transaction::DbTx,
+    BlockNumberList,
 };
 use reth_etl::Collector;
 use reth_primitives_traits::NodePrimitives;
@@ -174,164 +174,9 @@ where
     Ok(collector)
 }
 
-/// Given a [`Collector`] created by [`collect_history_indices`] it iterates all entries, loading
-/// the indices into the database in shards.
-///
-///  ## Process
-/// Iterates over elements, grouping indices by their partial keys (e.g., `Address` or
-/// `Address.StorageKey`). It flushes indices to disk when reaching a shard's max length
-/// (`NUM_OF_INDICES_IN_SHARD`) or when the partial key changes, ensuring the last previous partial
-/// key shard is stored.
-pub(crate) fn load_history_indices<Provider, H, P>(
-    provider: &Provider,
-    mut collector: Collector<H::Key, H::Value>,
-    append_only: bool,
-    sharded_key_factory: impl Clone + Fn(P, u64) -> <H as Table>::Key,
-    decode_key: impl Fn(Vec<u8>) -> Result<<H as Table>::Key, DatabaseError>,
-    get_partial: impl Fn(<H as Table>::Key) -> P,
-) -> Result<(), StageError>
-where
-    Provider: DBProvider<Tx: DbTxMut>,
-    H: Table<Value = BlockNumberList>,
-    P: Copy + Default + Eq,
-{
-    let mut write_cursor = provider.tx_ref().cursor_write::<H>()?;
-    let mut current_partial = None;
-    let mut current_list = Vec::<u64>::new();
-
-    // observability
-    let total_entries = collector.len();
-    let interval = (total_entries / 10).max(1);
-
-    for (index, element) in collector.iter()?.enumerate() {
-        let (k, v) = element?;
-        let sharded_key = decode_key(k)?;
-        let new_list = BlockNumberList::decompress_owned(v)?;
-
-        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
-        }
-
-        // AccountsHistory: `Address`.
-        // StorageHistory: `Address.StorageKey`.
-        let partial_key = get_partial(sharded_key);
-
-        if current_partial != Some(partial_key) {
-            // We have reached the end of this subset of keys so
-            // we need to flush its last indice shard.
-            if let Some(current) = current_partial {
-                load_indices(
-                    &mut write_cursor,
-                    current,
-                    &mut current_list,
-                    &sharded_key_factory,
-                    append_only,
-                    LoadMode::Flush,
-                )?;
-            }
-
-            current_partial = Some(partial_key);
-            current_list.clear();
-
-            // If it's not the first sync, there might an existing shard already, so we need to
-            // merge it with the one coming from the collector
-            if !append_only &&
-                let Some((_, last_database_shard)) =
-                    write_cursor.seek_exact(sharded_key_factory(partial_key, u64::MAX))?
-            {
-                current_list.extend(last_database_shard.iter());
-            }
-        }
-
-        current_list.extend(new_list.iter());
-        load_indices(
-            &mut write_cursor,
-            partial_key,
-            &mut current_list,
-            &sharded_key_factory,
-            append_only,
-            LoadMode::KeepLast,
-        )?;
-    }
-
-    // There will be one remaining shard that needs to be flushed to DB.
-    if let Some(current) = current_partial {
-        load_indices(
-            &mut write_cursor,
-            current,
-            &mut current_list,
-            &sharded_key_factory,
-            append_only,
-            LoadMode::Flush,
-        )?;
-    }
-
-    Ok(())
-}
-
-/// Shard and insert the indices list according to [`LoadMode`] and its length.
-pub(crate) fn load_indices<H, C, P>(
-    cursor: &mut C,
-    partial_key: P,
-    list: &mut Vec<BlockNumber>,
-    sharded_key_factory: &impl Fn(P, BlockNumber) -> <H as Table>::Key,
-    append_only: bool,
-    mode: LoadMode,
-) -> Result<(), StageError>
-where
-    C: DbCursorRO<H> + DbCursorRW<H>,
-    H: Table<Value = BlockNumberList>,
-    P: Copy,
-{
-    if list.len() > NUM_OF_INDICES_IN_SHARD || mode.is_flush() {
-        let chunks = list
-            .chunks(NUM_OF_INDICES_IN_SHARD)
-            .map(|chunks| chunks.to_vec())
-            .collect::<Vec<Vec<u64>>>();
-
-        let mut iter = chunks.into_iter().peekable();
-        while let Some(chunk) = iter.next() {
-            let mut highest = *chunk.last().expect("at least one index");
-
-            if !mode.is_flush() && iter.peek().is_none() {
-                *list = chunk;
-            } else {
-                if iter.peek().is_none() {
-                    highest = u64::MAX;
-                }
-                let key = sharded_key_factory(partial_key, highest);
-                let value = BlockNumberList::new_pre_sorted(chunk);
-
-                if append_only {
-                    cursor.append(key, &value)?;
-                } else {
-                    cursor.upsert(key, &value)?;
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Mode on how to load index shards into the database.
-pub(crate) enum LoadMode {
-    /// Keep the last shard in memory and don't flush it to the database.
-    KeepLast,
-    /// Flush all shards into the database.
-    Flush,
-}
-
-impl LoadMode {
-    const fn is_flush(&self) -> bool {
-        matches!(self, Self::Flush)
-    }
-}
-
 /// Loads account history indices into the database via `EitherWriter`.
 ///
-/// Similar to [`load_history_indices`] but works with [`EitherWriter`] to support
-/// both MDBX and `RocksDB` backends.
+/// Works with [`EitherWriter`] to support both MDBX and `RocksDB` backends.
 ///
 /// ## Process
 /// Iterates over elements, grouping indices by their address. It flushes indices to disk
@@ -543,8 +388,7 @@ where
 
 /// Loads storage history indices into the database via `EitherWriter`.
 ///
-/// Similar to [`load_history_indices`] but works with [`EitherWriter`] to support
-/// both MDBX and `RocksDB` backends.
+/// Works with [`EitherWriter`] to support both MDBX and `RocksDB` backends.
 ///
 /// ## Process
 /// Iterates over elements, grouping indices by their (address, `storage_key`) pairs. It flushes

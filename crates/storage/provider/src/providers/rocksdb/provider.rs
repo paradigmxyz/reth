@@ -724,7 +724,6 @@ impl RocksDBProvider {
 
         let iter = self
             .0
-            .db
             .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
 
         let mut result = Vec::new();
