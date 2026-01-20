@@ -12,7 +12,7 @@ use reth_storage_api::StorageSettings;
 pub struct RocksDbArgs {
     /// Route all supported tables to `RocksDB` instead of MDBX.
     ///
-    /// This enables RocksDB for tx-hash, storages-history, and account-history tables.
+    /// This enables `RocksDB` for tx-hash, storages-history, and account-history tables.
     /// Cannot be combined with individual flags set to false.
     #[arg(long = "rocksdb.all", action = ArgAction::SetTrue)]
     pub all: bool,
@@ -31,7 +31,7 @@ pub struct RocksDbArgs {
 }
 
 impl RocksDbArgs {
-    /// Validates the RocksDB arguments.
+    /// Validates the `RocksDB` arguments.
     ///
     /// Returns an error if `--rocksdb.all` is used with any individual flag set to `false`.
     pub fn validate(&self) -> Result<(), RocksDbArgsError> {
@@ -65,7 +65,7 @@ impl RocksDbArgs {
     }
 }
 
-/// Error type for RocksDB argument validation.
+/// Error type for `RocksDB` argument validation.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RocksDbArgsError {
     /// `--rocksdb.all` cannot be combined with an individual flag set to false.
