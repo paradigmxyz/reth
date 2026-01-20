@@ -384,6 +384,16 @@ impl RocksDBProviderInner {
         self.db_rw().delete_cf(cf, key)
     }
 
+    /// Deletes a range of values from a column family.
+    fn delete_range_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &rocksdb::ColumnFamily,
+        from: K,
+        to: K,
+    ) -> Result<(), rocksdb::Error> {
+        self.db_rw().delete_range_cf(cf, from, to)
+    }
+
     /// Returns an iterator over a column family.
     fn iterator_cf(
         &self,
@@ -577,7 +587,7 @@ impl RocksDBProvider {
     pub fn clear<T: Table>(&self) -> ProviderResult<()> {
         let cf = self.get_cf_handle::<T>()?;
 
-        self.0.db.delete_range_cf(cf, &[] as &[u8], &[0xFF; 256]).map_err(|e| {
+        self.0.delete_range_cf(cf, &[] as &[u8], &[0xFF; 256]).map_err(|e| {
             ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -665,7 +675,6 @@ impl RocksDBProvider {
         // Create a forward iterator starting from our seek position.
         let iter = self
             .0
-            .db
             .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
 
         let mut result = Vec::new();
