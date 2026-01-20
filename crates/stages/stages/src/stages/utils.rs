@@ -333,7 +333,7 @@ impl LoadMode {
 ///
 /// Uses `Option<Address>` instead of `Address::default()` as the sentinel to avoid
 /// incorrectly treating `Address::ZERO` as "no previous address".
-pub(crate) fn load_account_history_via_writer<N, CURSOR>(
+pub(crate) fn load_account_history<N, CURSOR>(
     mut collector: Collector<ShardedKey<Address>, BlockNumberList>,
     append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,

@@ -1,5 +1,5 @@
 use super::collect_account_history_indices;
-use crate::stages::utils::{collect_history_indices, load_account_history_via_writer};
+use crate::stages::utils::{collect_history_indices, load_account_history};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
 use reth_provider::{
@@ -138,7 +138,7 @@ where
 
         provider.with_rocksdb_batch(|rocksdb_batch| {
             let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
-            load_account_history_via_writer(collector, first_sync, &mut writer)
+            load_account_history(collector, first_sync, &mut writer)
                 .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
             Ok(((), writer.into_raw_rocksdb_batch()))
         })?;
