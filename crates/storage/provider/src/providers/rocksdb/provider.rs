@@ -343,6 +343,16 @@ impl RocksDBProviderInner {
         cf.ok_or_else(|| DatabaseError::Other(format!("Column family '{}' not found", T::NAME)))
     }
 
+    /// Gets the column family handle for a table from the read-write database.
+    ///
+    /// # Panics
+    /// Panics if in read-only mode.
+    fn cf_handle_rw(&self, name: &str) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
+        self.db_rw()
+            .cf_handle(name)
+            .ok_or_else(|| DatabaseError::Other(format!("Column family '{}' not found", name)))
+    }
+
     /// Gets a value from a column family.
     fn get_cf(
         &self,
@@ -820,8 +830,11 @@ impl<'a> RocksDBBatch<'a> {
     /// Commits the batch to the database.
     ///
     /// This consumes the batch and writes all operations atomically to `RocksDB`.
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
     pub fn commit(self) -> ProviderResult<()> {
-        self.provider.0.db.write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
+        self.provider.0.db_rw().write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -1170,12 +1183,7 @@ impl<'db> RocksTx<'db> {
             })
         };
 
-        let cf = self.provider.0.db.cf_handle(T::NAME).ok_or_else(|| {
-            ProviderError::Database(DatabaseError::Other(format!(
-                "column family not found: {}",
-                T::NAME
-            )))
-        })?;
+        let cf = self.provider.0.cf_handle_rw(T::NAME)?;
 
         // Create a raw iterator to access key bytes directly.
         let mut iter: DBRawIteratorWithThreadMode<'_, Transaction<'_, OptimisticTransactionDB>> =
