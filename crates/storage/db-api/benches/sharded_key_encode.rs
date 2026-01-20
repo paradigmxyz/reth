@@ -1,7 +1,7 @@
-//! Benchmarks for ShardedKey and StorageShardedKey encoding.
+//! Benchmarks for `ShardedKey` and `StorageShardedKey` encoding.
 //!
 //! These benchmarks measure the performance of stack-allocated vs heap-allocated key encoding,
-//! inspired by Anza Labs' PR #3603 which saved ~20k allocations/sec by moving RocksDB keys
+//! inspired by Anza Labs' PR #3603 which saved ~20k allocations/sec by moving `RocksDB` keys
 //! from heap to stack.
 //!
 //! Run with: `cargo bench -p reth-db-api --bench sharded_key_encode`
