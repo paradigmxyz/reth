@@ -1,7 +1,6 @@
 //! clap [Args](clap::Args) for `RocksDB` table routing configuration
 
 use clap::{ArgAction, Args};
-use reth_storage_api::StorageSettings;
 
 /// Parameters for `RocksDB` table routing configuration.
 ///
@@ -47,21 +46,6 @@ impl RocksDbArgs {
             }
         }
         Ok(())
-    }
-
-    /// Returns `StorageSettings` with `RocksDB` table routing flags applied.
-    ///
-    /// If `--rocksdb.all` is set, all tables are enabled. Otherwise, each flag is applied
-    /// independently.
-    pub fn to_settings(&self) -> StorageSettings {
-        let tx_hash = self.all || self.tx_hash.unwrap_or(false);
-        let storages_history = self.all || self.storages_history.unwrap_or(false);
-        let account_history = self.all || self.account_history.unwrap_or(false);
-
-        StorageSettings::default()
-            .with_transaction_hash_numbers_in_rocksdb(tx_hash)
-            .with_storages_history_in_rocksdb(storages_history)
-            .with_account_history_in_rocksdb(account_history)
     }
 }
 
@@ -134,45 +118,5 @@ mod tests {
 
         let args = RocksDbArgs { all: true, account_history: Some(false), ..Default::default() };
         assert_eq!(args.validate(), Err(RocksDbArgsError::ConflictingFlags("account-history")));
-    }
-
-    #[test]
-    fn test_to_settings_with_all() {
-        let args = RocksDbArgs { all: true, ..Default::default() };
-        let result = args.to_settings();
-
-        assert!(result.transaction_hash_numbers_in_rocksdb);
-        assert!(result.storages_history_in_rocksdb);
-        assert!(result.account_history_in_rocksdb);
-    }
-
-    #[test]
-    fn test_to_settings_single_flag() {
-        let args = RocksDbArgs { tx_hash: Some(true), ..Default::default() };
-        let result = args.to_settings();
-
-        assert!(result.transaction_hash_numbers_in_rocksdb);
-        assert!(!result.storages_history_in_rocksdb);
-        assert!(!result.account_history_in_rocksdb);
-    }
-
-    #[test]
-    fn test_to_settings_default() {
-        let args = RocksDbArgs::default();
-        let result = args.to_settings();
-
-        assert!(!result.transaction_hash_numbers_in_rocksdb);
-        assert!(!result.storages_history_in_rocksdb);
-        assert!(!result.account_history_in_rocksdb);
-    }
-
-    #[test]
-    fn test_merge_preserves_non_rocksdb_fields() {
-        let base = StorageSettings::legacy().with_receipts_in_static_files(true);
-        let args = RocksDbArgs { tx_hash: Some(true), ..Default::default() };
-        let result = base.merge(args.to_settings());
-
-        assert!(result.receipts_in_static_files, "non-rocksdb settings preserved");
-        assert!(result.transaction_hash_numbers_in_rocksdb);
     }
 }
