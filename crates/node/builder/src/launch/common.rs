@@ -66,9 +66,9 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
-    ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
-    StaticFileProviderFactory,
+    BlockHashReader, BlockNumReader, DatabaseProviderFactory, MetadataProvider, ProviderError,
+    ProviderFactory, ProviderResult, RocksDBProviderFactory, StageCheckpointReader,
+    StaticFileProviderBuilder, StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -676,17 +676,27 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
-        let base_settings = self.node_config().static_files.to_settings();
-        let (settings, _) = self.node_config().rocksdb.apply_to_settings(base_settings);
-        init_genesis_with_settings(self.provider_factory(), settings)?;
+        self.init_genesis()?;
         Ok(self)
     }
 
-    /// Write the genesis block and state if it has not already been written
+    /// Write the genesis block and state if it has not already been written.
+    ///
+    /// After initialization, validates that any CLI `RocksDB` overrides match the persisted
+    /// storage settings. These settings are genesis-initialization-only and cannot be changed.
     pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
         let base_settings = self.node_config().static_files.to_settings();
         let (settings, _) = self.node_config().rocksdb.apply_to_settings(base_settings);
-        init_genesis_with_settings(self.provider_factory(), settings)
+        let hash = init_genesis_with_settings(self.provider_factory(), settings)?;
+
+        // Validate CLI overrides match persisted settings
+        if let Some(persisted) = self.provider_factory().storage_settings()?
+            && let Err(e) = self.node_config().rocksdb.validate_against_persisted(&persisted)
+        {
+            return Err(InitStorageError::RocksDbSettingsMismatch(e.to_string()));
+        }
+
+        Ok(hash)
     }
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the

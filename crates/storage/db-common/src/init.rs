@@ -75,6 +75,9 @@ pub enum InitStorageError {
     /// State root doesn't match the expected one.
     #[error("state root mismatch: {_0}")]
     StateRootMismatch(GotExpected<B256>),
+    /// `RocksDB` CLI flag differs from persisted storage settings.
+    #[error("{_0}")]
+    RocksDbSettingsMismatch(String),
 }
 
 impl From<DatabaseError> for InitStorageError {
