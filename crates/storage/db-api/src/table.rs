@@ -16,8 +16,10 @@ pub struct CountingBuf {
 }
 
 impl CountingBuf {
-    /// Thread-local scratch buffer for `chunk_mut`. Sized to hold any primitive (u128 = 16 bytes).
-    const SCRATCH_SIZE: usize = 16;
+    /// Thread-local scratch buffer for `chunk_mut` and `as_mut`.
+    /// Must be large enough for any value that might call `buf.as_mut()[offset]` during counting.
+    /// Transactions with large calldata can exceed 128KB, so we use 256KB to be safe.
+    const SCRATCH_SIZE: usize = 256 * 1024;
 
     /// Creates a new `CountingBuf`.
     #[inline]
@@ -88,63 +90,79 @@ unsafe impl BufMut for CountingBuf {
 impl AsMut<[u8]> for CountingBuf {
     #[inline]
     fn as_mut(&mut self) -> &mut [u8] {
-        &mut []
+        SCRATCH.with(|scratch| {
+            // SAFETY: We return a mutable reference to the thread-local buffer.
+            // This allows code that writes back to earlier positions (e.g., flags bytes)
+            // to work during size counting. The writes are discarded.
+            // We slice to self.len to match what Vec::as_mut() would return.
+            debug_assert!(self.len <= Self::SCRATCH_SIZE, "CountingBuf overflow");
+            unsafe { &mut (&mut (*scratch.get()))[..self.len] }
+        })
     }
 }
 
 /// A [`BufMut`] that writes directly into a caller-provided `&mut [u8]`.
 ///
 /// Used to serialize values directly into MDBX-managed memory.
+/// Unlike a simple slice, this tracks the write position and provides
+/// access to the written portion via `AsMut<[u8]>`.
 #[derive(Debug)]
 pub struct SliceBuf<'a> {
-    /// The remaining unwritten portion of the buffer.
+    /// The full buffer.
     buf: &'a mut [u8],
-    /// The initial length of the buffer (used to compute bytes written).
-    initial_len: usize,
+    /// Current write position.
+    pos: usize,
 }
 
 impl<'a> SliceBuf<'a> {
     /// Creates a new `SliceBuf` wrapping the given slice.
     #[inline]
     pub const fn new(buf: &'a mut [u8]) -> Self {
-        let initial_len = buf.len();
-        Self { buf, initial_len }
+        Self { buf, pos: 0 }
     }
 
     /// Returns the number of bytes written.
     #[inline]
     pub const fn written(&self) -> usize {
-        self.initial_len - self.buf.len()
+        self.pos
     }
 }
 
 unsafe impl BufMut for SliceBuf<'_> {
     #[inline]
     fn remaining_mut(&self) -> usize {
-        self.buf.remaining_mut()
+        self.buf.len() - self.pos
     }
 
     #[inline]
     unsafe fn advance_mut(&mut self, cnt: usize) {
-        // SAFETY: The caller guarantees that cnt <= remaining_mut().
-        unsafe { self.buf.advance_mut(cnt) };
+        debug_assert!(self.pos + cnt <= self.buf.len());
+        self.pos += cnt;
     }
 
     #[inline]
     fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
-        self.buf.chunk_mut()
+        // SAFETY: We're returning a slice of uninitialized memory that BufMut can write to.
+        unsafe {
+            bytes::buf::UninitSlice::from_raw_parts_mut(
+                self.buf.as_mut_ptr().add(self.pos),
+                self.buf.len() - self.pos,
+            )
+        }
     }
 
     #[inline]
     fn put_slice(&mut self, src: &[u8]) {
-        self.buf.put_slice(src);
+        debug_assert!(self.remaining_mut() >= src.len());
+        self.buf[self.pos..self.pos + src.len()].copy_from_slice(src);
+        self.pos += src.len();
     }
 }
 
 impl AsMut<[u8]> for SliceBuf<'_> {
     #[inline]
     fn as_mut(&mut self) -> &mut [u8] {
-        self.buf
+        &mut self.buf[..self.pos]
     }
 }
 
