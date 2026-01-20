@@ -15,7 +15,7 @@ crates/etl/                 @joshieDo @shekhirin
 crates/evm/                 @rakita @mattsse @Rjected @klkvr
 crates/exex/                @shekhirin
 crates/fs-util/             @mattsse
-crates/metrics/             @mattsse
+crates/metrics/             @mattsse @Rjected 
 crates/net/                 @mattsse @Rjected
 crates/net/downloaders/     @Rjected
 crates/node/                @mattsse @Rjected @klkvr
