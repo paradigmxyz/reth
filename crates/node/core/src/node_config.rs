@@ -21,6 +21,7 @@ use reth_primitives_traits::SealedHeader;
 use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockHashReader, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
+    StorageSettings,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_transaction_pool::TransactionPool;
@@ -354,6 +355,14 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         ChainSpec: EthereumHardforks,
     {
         self.pruning.prune_config(&self.chain)
+    }
+
+    /// Returns the effective storage settings derived from static-file settings plus
+    /// RocksDB table-routing overrides.
+    pub fn storage_settings(&self) -> StorageSettings {
+        let base = self.static_files.to_settings();
+        let (settings, _) = self.rocksdb.apply_to_settings(base);
+        settings
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if
