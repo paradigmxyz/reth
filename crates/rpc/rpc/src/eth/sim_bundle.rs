@@ -62,9 +62,6 @@ pub struct FlattenedBundleItem<T> {
     pub refund_percent: Option<u64>,
     /// Optional refund configs for the bundle item
     pub refund_configs: Option<Vec<RefundConfig>>,
-    /// Path from root bundle to this item, represented as indices at each nesting level.
-    /// For example, `[1, 0]` means `bundle.bundle_body[1].bundle.bundle_body[0]`.
-    pub bundle_path: Vec<usize>,
 }
 
 /// `Eth` sim bundle implementation.
@@ -159,13 +156,13 @@ where
     ) -> Result<Vec<FlattenedBundleItem<ProviderTx<Eth::Provider>>>, EthApiError> {
         let mut items = Vec::new();
 
-        // Stack for processing bundles: (bundle, index, depth, parent_path)
-        let mut stack: Vec<(&MevSendBundle, usize, usize, Vec<usize>)> = Vec::new();
+        // Stack for processing bundles: (bundle, index, depth)
+        let mut stack: Vec<(&MevSendBundle, usize, usize)> = Vec::new();
 
-        // Start with initial bundle, index 0, depth 1, and empty path
-        stack.push((request, 0, 1, Vec::new()));
+        // Start with initial bundle, index 0, and depth 1
+        stack.push((request, 0, 1));
 
-        while let Some((current_bundle, mut idx, depth, parent_path)) = stack.pop() {
+        while let Some((current_bundle, mut idx, depth)) = stack.pop() {
             // Check max depth
             if depth > MAX_NESTED_BUNDLE_DEPTH {
                 return Err(EthApiError::InvalidParams(EthSimBundleError::MaxDepth.to_string()));
@@ -251,9 +248,6 @@ where
                         let refund_configs =
                             validity.as_ref().and_then(|v| v.refund_config.clone());
 
-                        let mut bundle_path = parent_path.clone();
-                        bundle_path.push(idx);
-
                         // Create FlattenedBundleItem with current inclusion, validity, and privacy
                         let flattened_item = FlattenedBundleItem {
                             tx,
@@ -264,21 +258,17 @@ where
                             privacy: privacy.clone(),
                             refund_percent,
                             refund_configs,
-                            bundle_path,
                         };
 
                         items.push(flattened_item);
                         idx += 1;
                     }
                     BundleItem::Bundle { bundle } => {
-                        let mut nested_path = parent_path.clone();
-                        nested_path.push(idx);
-
                         // Push the current bundle and next index onto the stack to resume later
-                        stack.push((current_bundle, idx + 1, depth, parent_path.clone()));
+                        stack.push((current_bundle, idx + 1, depth));
 
                         // process the nested bundle next
-                        stack.push((bundle, 0, depth + 1, nested_path));
+                        stack.push((bundle, 0, depth + 1));
                         break;
                     }
                     BundleItem::Hash { hash: _ } => {
