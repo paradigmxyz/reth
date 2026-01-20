@@ -473,6 +473,7 @@ mod tests {
             storage_worker_count: Some(16),
             account_worker_count: Some(8),
             enable_proof_v2: false,
+            cache_metrics_disabled: true,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -503,6 +504,7 @@ mod tests {
             "16",
             "--engine.account-worker-count",
             "8",
+            "--engine.disable-cache-metrics",
         ])
         .args;
 
