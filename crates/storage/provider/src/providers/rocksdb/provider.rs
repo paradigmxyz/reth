@@ -432,12 +432,13 @@ impl RocksDBProvider {
 
     /// Clears all entries from the specified table.
     ///
-    /// Uses a fixed range from empty key to max key (64 bytes of 0xFF) which covers
-    /// any key size we use. This avoids an expensive seek to find the last key.
+    /// Uses `delete_range_cf` from empty key to a max key (256 bytes of 0xFF).
+    /// This end key must exceed the maximum encoded key size for any table.
+    /// Current max is ~60 bytes (`StorageShardedKey` = 20 + 32 + 8).
     pub fn clear<T: Table>(&self) -> ProviderResult<()> {
         let cf = self.get_cf_handle::<T>()?;
 
-        self.0.db.delete_range_cf(cf, &[] as &[u8], &[0xFF; 64]).map_err(|e| {
+        self.0.db.delete_range_cf(cf, &[] as &[u8], &[0xFF; 256]).map_err(|e| {
             ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -820,7 +821,12 @@ impl<'a> RocksDBBatch<'a> {
         self.inner
     }
 
-    /// Gets a value from the database (reads committed state, not pending batch writes).
+    /// Gets a value from the database.
+    ///
+    /// **Important constraint:** This reads only committed state, not pending writes in this
+    /// batch or other pending batches in `pending_rocksdb_batches`. This is acceptable for the
+    /// current use case (merging with previously persisted shards at the start of processing
+    /// an address), but callers must not rely on read-your-writes semantics within a batch.
     pub fn get<T: Table>(&self, key: T::Key) -> ProviderResult<Option<T::Value>> {
         self.provider.get::<T>(key)
     }
