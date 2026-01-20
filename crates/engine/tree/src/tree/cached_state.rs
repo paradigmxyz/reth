@@ -606,12 +606,21 @@ pub(crate) struct SavedCache {
     /// A guard to track in-flight usage of this cache.
     /// The cache is considered available if the strong count is 1.
     usage_guard: Arc<()>,
+
+    /// Whether to skip cache metrics recording (can be expensive with large cached state).
+    disable_cache_metrics: bool,
 }
 
 impl SavedCache {
     /// Creates a new instance with the internals
     pub(super) fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
-        Self { hash, caches, metrics, usage_guard: Arc::new(()) }
+        Self { hash, caches, metrics, usage_guard: Arc::new(()), disable_cache_metrics: false }
+    }
+
+    /// Sets whether to disable cache metrics recording.
+    pub(super) const fn with_disable_cache_metrics(mut self, disable: bool) -> Self {
+        self.disable_cache_metrics = disable;
+        self
     }
 
     /// Returns the hash for this cache
@@ -619,9 +628,9 @@ impl SavedCache {
         self.hash
     }
 
-    /// Splits the cache into its caches and metrics, consuming it.
-    pub(crate) fn split(self) -> (ExecutionCache, CachedStateMetrics) {
-        (self.caches, self.metrics)
+    /// Splits the cache into its caches, metrics, and disable_cache_metrics flag, consuming it.
+    pub(crate) fn split(self) -> (ExecutionCache, CachedStateMetrics, bool) {
+        (self.caches, self.metrics, self.disable_cache_metrics)
     }
 
     /// Returns true if the cache is available for use (no other tasks are currently using it).
@@ -645,7 +654,13 @@ impl SavedCache {
     }
 
     /// Updates the metrics for the [`ExecutionCache`].
+    ///
+    /// Note: This can be expensive with large cached state as it iterates over
+    /// all storage entries. Use `with_disable_cache_metrics(true)` to skip.
     pub(crate) fn update_metrics(&self) {
+        if self.disable_cache_metrics {
+            return;
+        }
         self.metrics.storage_cache_size.set(self.caches.total_storage_slots() as f64);
         self.metrics.account_cache_size.set(self.caches.account_cache.entry_count() as f64);
         self.metrics.code_cache_size.set(self.caches.code_cache.entry_count() as f64);
