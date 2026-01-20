@@ -13,8 +13,7 @@ use crate::{
     bench::{
         context::BenchContext,
         output::{
-            CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow, COMBINED_OUTPUT_SUFFIX,
-            GAS_OUTPUT_SUFFIX,
+            write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
         },
     },
     valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload},
@@ -27,7 +26,6 @@ use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_transport_ws::WsConnect;
 use clap::Parser;
-use csv::Writer;
 use eyre::{Context, OptionExt};
 use futures::StreamExt;
 use humantime::parse_duration;
@@ -123,6 +121,7 @@ impl Command {
             auth_provider,
             mut next_block,
             is_optimism,
+            ..
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let buffer_size = self.rpc_block_buffer_size;
@@ -188,6 +187,7 @@ impl Command {
             result
         } {
             let gas_used = block.header.gas_used;
+            let gas_limit = block.header.gas_limit;
             let block_number = block.header.number;
             let transaction_count = block.transactions.len() as u64;
 
@@ -211,6 +211,7 @@ impl Command {
             let fcu_latency = total_latency - new_payload_result.latency;
             let combined_result = CombinedResult {
                 block_number,
+                gas_limit,
                 transaction_count,
                 new_payload_result,
                 fcu_latency,
@@ -240,28 +241,11 @@ impl Command {
         // since the benchmark goal is measuring Ggas/s of newPayload/FCU, not persistence.
         drop(waiter);
 
-        let (gas_output_results, combined_results): (_, Vec<CombinedResult>) =
+        let (gas_output_results, combined_results): (Vec<TotalGasRow>, Vec<CombinedResult>) =
             results.into_iter().unzip();
 
-        // Write CSV output files
         if let Some(ref path) = self.benchmark.output {
-            let output_path = path.join(COMBINED_OUTPUT_SUFFIX);
-            info!("Writing engine api call latency output to file: {:?}", output_path);
-            let mut writer = Writer::from_path(&output_path)?;
-            for result in combined_results {
-                writer.serialize(result)?;
-            }
-            writer.flush()?;
-
-            let output_path = path.join(GAS_OUTPUT_SUFFIX);
-            info!("Writing total gas output to file: {:?}", output_path);
-            let mut writer = Writer::from_path(&output_path)?;
-            for row in &gas_output_results {
-                writer.serialize(row)?;
-            }
-            writer.flush()?;
-
-            info!("Finished writing benchmark output files to {:?}.", path);
+            write_benchmark_results(path, &gas_output_results, combined_results)?;
         }
 
         let gas_output = TotalGasOutput::new(gas_output_results)?;

@@ -1525,7 +1525,7 @@ impl TransportRpcModuleConfig {
         self
     }
 
-    /// Sets the [`RpcModuleSelection`] for the http transport.
+    /// Sets the [`RpcModuleSelection`] for the ipc transport.
     pub fn with_ipc(mut self, ipc: impl Into<RpcModuleSelection>) -> Self {
         self.ipc = Some(ipc.into());
         self

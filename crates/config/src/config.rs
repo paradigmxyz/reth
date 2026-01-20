@@ -2,9 +2,8 @@
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use reth_stages_types::ExecutionStageThresholds;
-use reth_static_file_types::StaticFileSegment;
+use reth_static_file_types::{StaticFileMap, StaticFileSegment};
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -473,8 +472,8 @@ impl StaticFilesConfig {
         Ok(())
     }
 
-    /// Converts the blocks per file configuration into a [`HashMap`] per segment.
-    pub fn as_blocks_per_file_map(&self) -> HashMap<StaticFileSegment, u64> {
+    /// Converts the blocks per file configuration into a [`StaticFileMap`].
+    pub fn as_blocks_per_file_map(&self) -> StaticFileMap<u64> {
         let BlocksPerFileConfig {
             headers,
             transactions,
@@ -483,7 +482,7 @@ impl StaticFilesConfig {
             account_change_sets,
         } = self.blocks_per_file;
 
-        let mut map = HashMap::new();
+        let mut map = StaticFileMap::default();
         // Iterating over all possible segments allows us to do an exhaustive match here,
         // to not forget to configure new segments in the future.
         for segment in StaticFileSegment::iter() {
@@ -551,7 +550,6 @@ impl PruneConfig {
     /// - `Option<PruneMode>` fields: set from `other` only if `self` is `None`.
     /// - `block_interval`: set from `other` only if `self.block_interval ==
     ///   DEFAULT_BLOCK_INTERVAL`.
-    /// - `merkle_changesets`: always set from `other`.
     /// - `receipts_log_filter`: set from `other` only if `self` is empty and `other` is non-empty.
     pub fn merge(&mut self, other: Self) {
         let Self {
@@ -564,7 +562,6 @@ impl PruneConfig {
                     account_history,
                     storage_history,
                     bodies_history,
-                    merkle_changesets,
                     receipts_log_filter,
                 },
         } = other;
@@ -581,8 +578,6 @@ impl PruneConfig {
         self.segments.account_history = self.segments.account_history.or(account_history);
         self.segments.storage_history = self.segments.storage_history.or(storage_history);
         self.segments.bodies_history = self.segments.bodies_history.or(bodies_history);
-        // Merkle changesets is not optional; always take the value from `other`
-        self.segments.merkle_changesets = merkle_changesets;
 
         if self.segments.receipts_log_filter.0.is_empty() && !receipts_log_filter.0.is_empty() {
             self.segments.receipts_log_filter = receipts_log_filter;
@@ -1079,18 +1074,6 @@ transaction_lookup = 'full'
 receipts = { distance = 16384 }
 #";
         let _conf: Config = toml::from_str(s).unwrap();
-
-        let s = r"#
-[prune]
-block_interval = 5
-
-[prune.segments]
-sender_recovery = { distance = 16384 }
-transaction_lookup = 'full'
-receipts = 'full'
-#";
-        let err = toml::from_str::<Config>(s).unwrap_err().to_string();
-        assert!(err.contains("invalid value: string \"full\""), "{}", err);
     }
 
     #[test]
@@ -1104,7 +1087,6 @@ receipts = 'full'
                 account_history: None,
                 storage_history: Some(PruneMode::Before(5000)),
                 bodies_history: None,
-                merkle_changesets: PruneMode::Before(0),
                 receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([(
                     Address::random(),
                     PruneMode::Full,
@@ -1121,7 +1103,6 @@ receipts = 'full'
                 account_history: Some(PruneMode::Distance(2000)),
                 storage_history: Some(PruneMode::Distance(3000)),
                 bodies_history: None,
-                merkle_changesets: PruneMode::Distance(10000),
                 receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([
                     (Address::random(), PruneMode::Distance(1000)),
                     (Address::random(), PruneMode::Before(2000)),
@@ -1140,7 +1121,6 @@ receipts = 'full'
         assert_eq!(config1.segments.receipts, Some(PruneMode::Distance(1000)));
         assert_eq!(config1.segments.account_history, Some(PruneMode::Distance(2000)));
         assert_eq!(config1.segments.storage_history, Some(PruneMode::Before(5000)));
-        assert_eq!(config1.segments.merkle_changesets, PruneMode::Distance(10000));
         assert_eq!(config1.segments.receipts_log_filter, original_filter);
     }
 

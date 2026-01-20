@@ -26,6 +26,7 @@ use reth_provider::{
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
 use reth_tasks::TaskSpawner;
+use reth_trie_db::ChangesetCache;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -84,6 +85,7 @@ where
         tree_config: TreeConfig,
         sync_metrics_tx: MetricEventsSender,
         evm_config: C,
+        changeset_cache: ChangesetCache,
     ) -> Self
     where
         V: EngineValidator<N::Payload>,
@@ -109,6 +111,7 @@ where
             tree_config,
             engine_kind,
             evm_config,
+            changeset_cache,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
@@ -156,6 +159,7 @@ mod tests {
     };
     use reth_prune::Pruner;
     use reth_tasks::TokioTaskExecutor;
+    use reth_trie_db::ChangesetCache;
     use std::sync::Arc;
     use tokio::sync::{mpsc::unbounded_channel, watch};
     use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -188,6 +192,8 @@ mod tests {
         let pruner = Pruner::new_with_factory(provider_factory.clone(), vec![], 0, 0, None, rx);
         let evm_config = EthEvmConfig::new(chain_spec.clone());
 
+        let changeset_cache = ChangesetCache::new();
+
         let engine_validator = BasicEngineValidator::new(
             blockchain_db.clone(),
             consensus.clone(),
@@ -195,6 +201,7 @@ mod tests {
             engine_payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
+            changeset_cache.clone(),
         );
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
@@ -214,6 +221,7 @@ mod tests {
             TreeConfig::default(),
             sync_metrics_tx,
             evm_config,
+            changeset_cache,
         );
     }
 }

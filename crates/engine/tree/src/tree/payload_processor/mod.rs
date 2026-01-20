@@ -28,10 +28,10 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
     TxEnvFor,
 };
-use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockReader, DatabaseProviderROFactory, StateProvider, StateProviderFactory, StateReader,
+    BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProvider,
+    StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
@@ -61,6 +61,7 @@ mod configured_sparse_trie;
 pub mod executor;
 pub mod multiproof;
 pub mod prewarm;
+pub mod receipt_root_task;
 pub mod sparse_trie;
 
 use configured_sparse_trie::ConfiguredSparseTrie;
@@ -491,37 +492,39 @@ where
         BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
         BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
     {
-        // Reuse a stored SparseStateTrie, or create a new one using the desired configuration if
-        // there's none to reuse.
         let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
-        let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
-            let default_trie = SparseTrie::blind_from(if self.disable_parallel_sparse_trie {
-                ConfiguredSparseTrie::Serial(Default::default())
-            } else {
-                ConfiguredSparseTrie::Parallel(Box::new(
-                    ParallelSparseTrie::default()
-                        .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
-                ))
-            });
-            ClearedSparseStateTrie::from_state_trie(
-                SparseStateTrie::new()
-                    .with_accounts_trie(default_trie.clone())
-                    .with_default_storage_trie(default_trie)
-                    .with_updates(true),
-            )
-        });
-
-        let task =
-            SparseTrieTask::<_, ConfiguredSparseTrie, ConfiguredSparseTrie>::new_with_cleared_trie(
-                sparse_trie_rx,
-                proof_worker_handle,
-                self.trie_metrics.clone(),
-                sparse_state_trie,
-            );
-
+        let disable_parallel_sparse_trie = self.disable_parallel_sparse_trie;
+        let trie_metrics = self.trie_metrics.clone();
         let span = Span::current();
+
         self.executor.spawn_blocking(move || {
             let _enter = span.entered();
+
+            // Reuse a stored SparseStateTrie, or create a new one using the desired configuration
+            // if there's none to reuse.
+            let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
+                let default_trie = SparseTrie::blind_from(if disable_parallel_sparse_trie {
+                    ConfiguredSparseTrie::Serial(Default::default())
+                } else {
+                    ConfiguredSparseTrie::Parallel(Box::new(
+                        ParallelSparseTrie::default()
+                            .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
+                    ))
+                });
+                ClearedSparseStateTrie::from_state_trie(
+                    SparseStateTrie::new()
+                        .with_accounts_trie(default_trie.clone())
+                        .with_default_storage_trie(default_trie)
+                        .with_updates(true),
+                )
+            });
+
+            let task = SparseTrieTask::<_, ConfiguredSparseTrie, ConfiguredSparseTrie>::new_with_cleared_trie(
+                sparse_trie_rx,
+                proof_worker_handle,
+                trie_metrics,
+                sparse_state_trie,
+            );
 
             let (result, trie) = task.run();
             // Send state root computation result
@@ -663,13 +666,15 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Terminates the entire caching task.
     ///
-    /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
+    /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` allows sharing with the main execution
     /// path without cloning the expensive `BundleState`.
+    ///
+    /// Returns a sender for the channel that should be notified on block validation success.
     pub(super) fn terminate_caching(
         &mut self,
-        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
-    ) {
+        execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
+    ) -> Option<mpsc::Sender<()>> {
         self.prewarm_handle.terminate_caching(execution_outcome)
     }
 
@@ -705,15 +710,21 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
 
     /// Terminates the entire pre-warming task.
     ///
-    /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
+    /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive `BundleState`.
+    #[must_use = "sender must be used and notified on block validation success"]
     pub(super) fn terminate_caching(
         &mut self,
-        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
-    ) {
+        execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
+    ) -> Option<mpsc::Sender<()>> {
         if let Some(tx) = self.to_prewarm_task.take() {
-            let event = PrewarmTaskEvent::Terminate { execution_outcome };
+            let (valid_block_tx, valid_block_rx) = mpsc::channel();
+            let event = PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx };
             let _ = tx.send(event);
+
+            Some(valid_block_tx)
+        } else {
+            None
         }
     }
 }
@@ -722,7 +733,10 @@ impl<R> Drop for CacheTaskHandle<R> {
     fn drop(&mut self) {
         // Ensure we always terminate on drop - send None without needing Send + Sync bounds
         if let Some(tx) = self.to_prewarm_task.take() {
-            let _ = tx.send(PrewarmTaskEvent::Terminate { execution_outcome: None });
+            let _ = tx.send(PrewarmTaskEvent::Terminate {
+                execution_outcome: None,
+                valid_block_rx: mpsc::channel().1,
+            });
         }
     }
 }
@@ -884,6 +898,7 @@ mod tests {
     use reth_revm::db::BundleState;
     use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState};
+    use reth_trie_db::ChangesetCache;
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
     use std::sync::Arc;
@@ -1056,7 +1071,9 @@ mod tests {
                         nonce: rng.random::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
+                        account_id: None,
                     },
+                    original_info: Box::new(AccountInfo::default()),
                     storage,
                     status: AccountStatus::Touched,
                     transaction_id: 0,
@@ -1139,7 +1156,7 @@ mod tests {
                 std::convert::identity,
             ),
             StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-            OverlayStateProviderFactory::new(provider_factory),
+            OverlayStateProviderFactory::new(provider_factory, ChangesetCache::new()),
             &TreeConfig::default(),
             None, // No BAL for test
         );
