@@ -74,7 +74,9 @@ pub enum SetCommand {
     /// When enabled, execution writes directly to hashed tables, eliminating need for
     /// separate hashing stages. State reads come from hashed tables.
     ///
-    /// WARNING: Changing this setting requires re-syncing the database.
+    /// WARNING: Changing this setting in either direction requires re-syncing the database.
+    /// Enabling on an existing plain-state database leaves hashed tables empty.
+    /// Disabling on an existing hashed-state database leaves plain tables empty.
     UseHashedState {
         #[clap(action(ArgAction::Set))]
         value: bool,

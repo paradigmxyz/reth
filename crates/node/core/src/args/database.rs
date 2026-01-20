@@ -21,6 +21,19 @@ pub struct DatabaseArgs {
     /// Database logging level. Levels higher than "notice" require a debug build.
     #[arg(long = "db.log-level", value_parser = LogLevelValueParser::default())]
     pub log_level: Option<LogLevel>,
+    /// Use hashed state tables (`HashedAccounts`/`HashedStorages`) as the canonical state
+    /// representation instead of plain state tables (`PlainAccountState`/`PlainStorageState`).
+    ///
+    /// When enabled:
+    /// - Execution writes directly to hashed tables, eliminating need for separate hashing stages
+    /// - State reads come from hashed tables
+    /// - `AccountHashingStage` and `StorageHashingStage` become no-ops
+    ///
+    /// WARNING: This setting is only configurable at database creation. Enabling it on an
+    /// existing database that was created without it requires re-syncing. Disabling it on a
+    /// database that was created with it also requires re-syncing.
+    #[arg(long = "db.use-hashed-state", default_value_t = false)]
+    pub use_hashed_state: bool,
     /// Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an
     /// NFS volume.
     #[arg(long = "db.exclusive")]

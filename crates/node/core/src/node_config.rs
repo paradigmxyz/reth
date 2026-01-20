@@ -382,6 +382,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             transaction_hash_numbers_in_rocksdb: tx_hash,
             storages_history_in_rocksdb: storages_history,
             account_history_in_rocksdb: account_history,
+            use_hashed_state: self.db.use_hashed_state,
         }
     }
 
