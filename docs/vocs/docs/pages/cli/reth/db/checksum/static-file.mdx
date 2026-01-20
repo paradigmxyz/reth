@@ -1,19 +1,34 @@
-# reth db checksum
+# reth db checksum static-file
 
-Calculates the content checksum of a table or static file segment
+Calculates the checksum of a static file segment
 
 ```bash
-$ reth db checksum --help
+$ reth db checksum static-file --help
 ```
 ```txt
-Usage: reth db checksum [OPTIONS] <COMMAND>
+Usage: reth db checksum static-file [OPTIONS] <SEGMENT>
 
-Commands:
-  mdbx         Calculates the checksum of a database table
-  static-file  Calculates the checksum of a static file segment
-  help         Print this message or the help of the given subcommand(s)
+Arguments:
+  <SEGMENT>
+          The static file segment
+
+          Possible values:
+          - headers:             Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
+          - transactions:        Static File segment responsible for the `Transactions` table
+          - receipts:            Static File segment responsible for the `Receipts` table
+          - transaction-senders: Static File segment responsible for the `TransactionSenders` table
+          - account-change-sets: Static File segment responsible for the `AccountChangeSets` table
 
 Options:
+      --start-block <START_BLOCK>
+          The block number to start from (inclusive)
+
+      --end-block <END_BLOCK>
+          The block number to end at (inclusive)
+
+      --limit <LIMIT>
+          The maximum number of rows to checksum
+
   -h, --help
           Print help (see a summary with '-h')
 

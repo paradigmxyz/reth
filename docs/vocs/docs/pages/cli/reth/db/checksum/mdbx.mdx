@@ -1,19 +1,27 @@
-# reth db checksum
+# reth db checksum mdbx
 
-Calculates the content checksum of a table or static file segment
+Calculates the checksum of a database table
 
 ```bash
-$ reth db checksum --help
+$ reth db checksum mdbx --help
 ```
 ```txt
-Usage: reth db checksum [OPTIONS] <COMMAND>
+Usage: reth db checksum mdbx [OPTIONS] <TABLE>
 
-Commands:
-  mdbx         Calculates the checksum of a database table
-  static-file  Calculates the checksum of a static file segment
-  help         Print this message or the help of the given subcommand(s)
+Arguments:
+  <TABLE>
+          The table name
 
 Options:
+      --start-key <START_KEY>
+          The start of the range to checksum
+
+      --end-key <END_KEY>
+          The end of the range to checksum
+
+      --limit <LIMIT>
+          The maximum number of records that are queried and used to compute the checksum
+
   -h, --help
           Print help (see a summary with '-h')
 
