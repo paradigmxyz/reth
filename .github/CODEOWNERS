@@ -42,7 +42,7 @@ crates/storage/storage-api/ @joshieDo
 crates/tasks/               @mattsse
 crates/tokio-util/          @fgimenez
 crates/tracing/             @mattsse @shekhirin
-crates/tracing-otlp/        @mattsse
+crates/tracing-otlp/        @mattsse @Rjected 
 crates/transaction-pool/    @mattsse @yongkangc
 crates/trie/                @Rjected @shekhirin @mediocregopher @yongkangc
 bin/reth/                   @mattsse @shekhirin @Rjected 
