@@ -3005,42 +3005,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .collect::<Vec<_>>();
         storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
 
-        let use_rocksdb = self.cached_storage_settings().storages_history_in_rocksdb;
-
-        if use_rocksdb {
+        if self.cached_storage_settings().storages_history_in_rocksdb {
             #[cfg(all(unix, feature = "rocksdb"))]
             {
-                let mut key_min_block: alloy_primitives::map::HashMap<
-                    (Address, B256),
-                    BlockNumber,
-                > = alloy_primitives::map::HashMap::with_capacity_and_hasher(
-                    storage_changesets.len(),
-                    Default::default(),
-                );
-                for &(address, storage_key, block_number) in &storage_changesets {
-                    key_min_block
-                        .entry((address, storage_key))
-                        .and_modify(|min| *min = (*min).min(block_number))
-                        .or_insert(block_number);
-                }
-
-                let mut batch = self.rocksdb_provider.batch();
-                for ((address, storage_key), min_block) in key_min_block {
-                    match min_block.checked_sub(1) {
-                        Some(keep_to) => {
-                            batch.unwind_storage_history_to(address, storage_key, keep_to)?
-                        }
-                        None => batch.clear_storage_history(address, storage_key)?,
-                    }
-                }
-                self.pending_rocksdb_batches.lock().push(batch.into_inner());
+                let batch =
+                    self.rocksdb_provider.unwind_storage_history_indices(&storage_changesets)?;
+                self.pending_rocksdb_batches.lock().push(batch);
             }
-
-            #[cfg(not(all(unix, feature = "rocksdb")))]
-            return Err(ProviderError::UnsupportedProvider);
-        }
-
-        if !use_rocksdb {
+        } else {
+            // Unwind the storage history index in MDBX.
             let mut cursor = self.tx.cursor_write::<tables::StoragesHistory>()?;
             for &(address, storage_key, rem_index) in &storage_changesets {
                 let partial_shard = unwind_history_shards::<_, tables::StoragesHistory, _>(
@@ -3053,6 +3026,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
                     },
                 )?;
 
+                // Check the last returned partial shard.
+                // If it's not empty, the shard needs to be reinserted.
                 if !partial_shard.is_empty() {
                     cursor.insert(
                         StorageShardedKey::last(address, storage_key),

@@ -785,6 +785,37 @@ impl RocksDBProvider {
         Ok(batch.into_inner())
     }
 
+    /// Unwinds storage history indices for the given `(address, storage_key, block_number)` tuples.
+    ///
+    /// Groups by `(address, storage_key)` and finds the minimum block number for each.
+    /// For each key, keeps only blocks less than the minimum block
+    /// (i.e., removes the minimum block and all higher blocks).
+    ///
+    /// Returns a `WriteBatchWithTransaction` that can be committed later.
+    pub fn unwind_storage_history_indices(
+        &self,
+        storage_changesets: &[(Address, B256, BlockNumber)],
+    ) -> ProviderResult<WriteBatchWithTransaction<true>> {
+        let mut key_min_block: HashMap<(Address, B256), BlockNumber> =
+            HashMap::with_capacity_and_hasher(storage_changesets.len(), Default::default());
+        for &(address, storage_key, block_number) in storage_changesets {
+            key_min_block
+                .entry((address, storage_key))
+                .and_modify(|min| *min = (*min).min(block_number))
+                .or_insert(block_number);
+        }
+
+        let mut batch = self.batch();
+        for ((address, storage_key), min_block) in key_min_block {
+            match min_block.checked_sub(1) {
+                Some(keep_to) => batch.unwind_storage_history_to(address, storage_key, keep_to)?,
+                None => batch.clear_storage_history(address, storage_key)?,
+            }
+        }
+
+        Ok(batch.into_inner())
+    }
+
     /// Writes a batch of operations atomically.
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
