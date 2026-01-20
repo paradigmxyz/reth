@@ -681,7 +681,15 @@ where
             self.node_config().rocksdb.apply_to_settings(base_settings);
 
         if grouped_enabled {
-            info!(target: "reth::cli", "RocksDB routing enabled for all tables (tx-hash, storages-history, account-history). To disable specific tables, use --rocksdb.<table>=false");
+            let enabled: Vec<&str> = [
+                settings.transaction_hash_numbers_in_rocksdb.then_some("tx-hash"),
+                settings.storages_history_in_rocksdb.then_some("storages-history"),
+                settings.account_history_in_rocksdb.then_some("account-history"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            info!(target: "reth::cli", "RocksDB routing enabled for tables: {}", enabled.join(", "));
         }
 
         init_genesis_with_settings(self.provider_factory(), settings)?;
@@ -695,7 +703,15 @@ where
             self.node_config().rocksdb.apply_to_settings(base_settings);
 
         if grouped_enabled {
-            info!(target: "reth::cli", "RocksDB routing enabled for all tables (tx-hash, storages-history, account-history). To disable specific tables, use --rocksdb.<table>=false");
+            let enabled: Vec<&str> = [
+                settings.transaction_hash_numbers_in_rocksdb.then_some("tx-hash"),
+                settings.storages_history_in_rocksdb.then_some("storages-history"),
+                settings.account_history_in_rocksdb.then_some("account-history"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            info!(target: "reth::cli", "RocksDB routing enabled for tables: {}", enabled.join(", "));
         }
 
         init_genesis_with_settings(self.provider_factory(), settings)
