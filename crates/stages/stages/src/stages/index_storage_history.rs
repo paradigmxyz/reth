@@ -1,5 +1,5 @@
 use super::collect_history_indices;
-use crate::{stages::utils::load_storage_history_via_writer, StageCheckpoint, StageId};
+use crate::{stages::utils::load_storage_history, StageCheckpoint, StageId};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
@@ -15,7 +15,7 @@ use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, Unw
 use std::fmt::Debug;
 use tracing::info;
 
-/// Stage is indexing history the account changesets generated in
+/// Stage is indexing history the storage changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
 /// on index sharding take a look at [`tables::StoragesHistory`].
 #[derive(Debug)]
@@ -140,7 +140,7 @@ where
 
         let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
 
-        load_storage_history_via_writer(collector, first_sync, &mut writer)?;
+        load_storage_history(collector, first_sync, &mut writer)?;
 
         #[cfg(all(unix, feature = "rocksdb"))]
         if let Some(batch) = writer.into_raw_rocksdb_batch() {
