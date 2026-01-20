@@ -897,6 +897,27 @@ Pruning:
       --prune.bodies.before <BLOCK_NUMBER>
           Prune storage history before the specified block number. The specified block number is not pruned
 
+RocksDB:
+      --rocksdb.all
+          Route all supported tables to `RocksDB` instead of MDBX.
+
+          This enables `RocksDB` for `tx-hash`, `storages-history`, and `account-history` tables. Cannot be combined with individual flags set to false.
+
+      --rocksdb.tx-hash <TX_HASH>
+          Route tx hash -> number table to `RocksDB` instead of MDBX
+
+          [possible values: true, false]
+
+      --rocksdb.storages-history <STORAGES_HISTORY>
+          Route storages history tables to `RocksDB` instead of MDBX
+
+          [possible values: true, false]
+
+      --rocksdb.account-history <ACCOUNT_HISTORY>
+          Route account history tables to `RocksDB` instead of MDBX
+
+          [possible values: true, false]
+
 Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for the engine. This determines how many canonical blocks must be in-memory, ahead of the last persisted block, before flushing canonical blocks to disk again.
