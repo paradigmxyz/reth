@@ -14,6 +14,8 @@ use reth_trie::{
     added_removed_keys::MultiAddedRemovedKeys, proof_v2, HashedPostState, HashedStorage,
     MultiProofTargets,
 };
+#[cfg(test)]
+use reth_trie_parallel::stats::ParallelTrieTracker;
 use reth_trie_parallel::{
     proof::ParallelProof,
     proof_task::{
@@ -82,9 +84,10 @@ impl SparseTrieUpdate {
     /// Construct update from multiproof.
     #[cfg(test)]
     pub(super) fn from_multiproof(multiproof: reth_trie::MultiProof) -> alloy_rlp::Result<Self> {
+        let stats = ParallelTrieTracker::default().finish();
         Ok(Self {
             state: HashedPostState::default(),
-            multiproof: ProofResult::Legacy(multiproof.try_into()?),
+            multiproof: ProofResult::Legacy(multiproof.try_into()?, stats),
         })
     }
 
@@ -262,7 +265,7 @@ pub(super) enum VersionedMultiProofTargets {
 }
 
 impl VersionedMultiProofTargets {
-    /// Returns true if ther are no account or storage targets.
+    /// Returns true if there are no account or storage targets.
     fn is_empty(&self) -> bool {
         match self {
             Self::Legacy(targets) => targets.is_empty(),

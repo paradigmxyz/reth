@@ -158,7 +158,7 @@ where
 
     // Reveal new accounts and storage slots.
     match multiproof {
-        ProofResult::Legacy(decoded) => {
+        ProofResult::Legacy(decoded, _) => {
             trie.reveal_decoded_multiproof(decoded)?;
         }
         ProofResult::V2(decoded_v2) => {
