@@ -628,7 +628,7 @@ impl SavedCache {
         self.hash
     }
 
-    /// Splits the cache into its caches, metrics, and disable_cache_metrics flag, consuming it.
+    /// Splits the cache into its caches, metrics, and `disable_cache_metrics` flag, consuming it.
     pub(crate) fn split(self) -> (ExecutionCache, CachedStateMetrics, bool) {
         (self.caches, self.metrics, self.disable_cache_metrics)
     }
