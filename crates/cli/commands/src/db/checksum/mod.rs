@@ -22,6 +22,9 @@ use std::{
 };
 use tracing::{info, warn};
 
+#[cfg(all(unix, feature = "edge"))]
+mod rocksdb;
+
 /// Interval for logging progress during checksum computation.
 const PROGRESS_LOG_INTERVAL: usize = 100_000;
 
@@ -70,6 +73,17 @@ enum Subcommand {
         #[arg(long)]
         limit: Option<usize>,
     },
+    /// Calculates the checksum of a RocksDB table
+    #[cfg(all(unix, feature = "edge"))]
+    Rocksdb {
+        /// The RocksDB table
+        #[arg(value_enum)]
+        table: rocksdb::RocksDbTable,
+
+        /// The maximum number of records to checksum.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
 }
 
 impl Command {
@@ -86,6 +100,10 @@ impl Command {
             }
             Subcommand::StaticFile { segment, start_block, end_block, limit } => {
                 checksum_static_file(tool, segment, start_block, end_block, limit)?;
+            }
+            #[cfg(all(unix, feature = "edge"))]
+            Subcommand::Rocksdb { table, limit } => {
+                rocksdb::checksum_rocksdb(tool, table, limit)?;
             }
         }
 
