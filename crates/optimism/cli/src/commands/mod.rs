@@ -88,7 +88,7 @@ impl<
             #[cfg(feature = "dev")]
             Self::TestVectors(_) => None,
             Self::ReExecute(cmd) => cmd.chain_spec(),
-            Self::Report(cmd) => cmd.chain_spec(),
+            Self::Report(_) => None,
         }
     }
 }
