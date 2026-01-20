@@ -425,25 +425,10 @@ impl RocksDBProviderInner {
         &self,
         cf: &rocksdb::ColumnFamily,
         mode: IteratorMode<'_>,
-    ) -> rocksdb::DBIteratorWithThreadMode<'_, OptimisticTransactionDB> {
+    ) -> RocksDBIterEnum<'_> {
         match self {
-            Self::ReadWrite { db, .. } => db.iterator_cf(cf, mode),
-            Self::ReadOnly { .. } => {
-                panic!("iterator_cf not directly supported on read-only DB, use raw_iterator_cf")
-            }
-        }
-    }
-
-    /// Returns a raw iterator over a column family.
-    fn raw_iterator_cf<'a>(
-        &'a self,
-        cf: &rocksdb::ColumnFamily,
-    ) -> DBRawIteratorWithThreadMode<'a, OptimisticTransactionDB> {
-        match self {
-            Self::ReadWrite { db, .. } => db.raw_iterator_cf(cf),
-            Self::ReadOnly { .. } => {
-                panic!("raw_iterator_cf requires type changes for read-only mode")
-            }
+            Self::ReadWrite { db, .. } => RocksDBIterEnum::ReadWrite(db.iterator_cf(cf, mode)),
+            Self::ReadOnly { db, .. } => RocksDBIterEnum::ReadOnly(db.iterator_cf(cf, mode)),
         }
     }
 }
@@ -589,8 +574,6 @@ impl RocksDBProvider {
     }
 
     /// Gets the first (smallest key) entry from the specified table.
-    ///
-    /// Note: This method is only available in read-write mode.
     pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
         self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
             let cf = this.get_cf_handle::<T>()?;
@@ -616,8 +599,6 @@ impl RocksDBProvider {
     }
 
     /// Gets the last (largest key) entry from the specified table.
-    ///
-    /// Note: This method is only available in read-write mode.
     pub fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
         self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
             let cf = this.get_cf_handle::<T>()?;
@@ -645,8 +626,6 @@ impl RocksDBProvider {
     /// Creates an iterator over all entries in the specified table.
     ///
     /// Returns decoded `(Key, Value)` pairs in key order.
-    ///
-    /// Note: This method is only available in read-write mode.
     pub fn iter<T: Table>(&self) -> ProviderResult<RocksDBIter<'_, T>> {
         let cf = self.get_cf_handle::<T>()?;
         let iter = self.0.iterator_cf(cf, IteratorMode::Start);
@@ -1277,11 +1256,30 @@ impl<'db> RocksTx<'db> {
     }
 }
 
+/// Wrapper enum for RocksDB iterators that works in both read-write and read-only modes.
+enum RocksDBIterEnum<'db> {
+    /// Iterator from read-write `OptimisticTransactionDB`.
+    ReadWrite(rocksdb::DBIteratorWithThreadMode<'db, OptimisticTransactionDB>),
+    /// Iterator from read-only `DB`.
+    ReadOnly(rocksdb::DBIteratorWithThreadMode<'db, DB>),
+}
+
+impl Iterator for RocksDBIterEnum<'_> {
+    type Item = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::ReadWrite(iter) => iter.next(),
+            Self::ReadOnly(iter) => iter.next(),
+        }
+    }
+}
+
 /// Iterator over a `RocksDB` table (non-transactional).
 ///
 /// Yields decoded `(Key, Value)` pairs in key order.
 pub struct RocksDBIter<'db, T: Table> {
-    inner: rocksdb::DBIteratorWithThreadMode<'db, OptimisticTransactionDB>,
+    inner: RocksDBIterEnum<'db>,
     _marker: std::marker::PhantomData<T>,
 }
 
