@@ -187,9 +187,6 @@ pub trait BlockBody:
         self.recover_signers_unchecked()
     }
 
-    /// Returns the block access list for the block body.
-    fn block_access_list(&self) -> Option<&BlockAccessList>;
-
     /// Recovers signers for all transactions in the block body and returns a vector of
     /// [`Recovered`].
     fn recover_transactions(&self) -> Result<Vec<Recovered<Self::Transaction>>, RecoveryError> {
@@ -270,10 +267,6 @@ where
 
     fn ommers(&self) -> Option<&[Self::OmmerHeader]> {
         Some(&self.ommers)
-    }
-
-    fn block_access_list(&self) -> Option<&BlockAccessList> {
-        self.block_access_list.as_ref()
     }
 }
 

@@ -557,7 +557,6 @@ mod tests {
             transactions: vec![tx_signed],
             ommers: vec![],
             withdrawals: Some(Default::default()),
-            block_access_list: None,
         };
 
         // Create the block
@@ -634,7 +633,6 @@ mod tests {
             transactions: vec![tx_signed],
             ommers: vec![],
             withdrawals: Some(Default::default()),
-            block_access_list: Some(Default::default()),
         };
 
         // Create the block

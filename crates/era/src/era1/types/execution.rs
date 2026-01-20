@@ -39,7 +39,6 @@
 //!     transactions: vec![Bytes::from(vec![1, 2, 3])],
 //!     ommers: vec![],
 //!     withdrawals: None,
-//!     block_access_list: None,
 //! };
 //! // Compress the body: rlp encoding and snappy compression
 //! let compressed_body = CompressedBody::from_body(&body)?;
@@ -582,12 +581,8 @@ mod tests {
 
     #[test]
     fn test_block_body_conversion() {
-        let block_body: BlockBody<Bytes> = BlockBody {
-            transactions: vec![],
-            ommers: vec![],
-            withdrawals: None,
-            block_access_list: None,
-        };
+        let block_body: BlockBody<Bytes> =
+            BlockBody { transactions: vec![], ommers: vec![], withdrawals: None };
 
         let compressed_body = CompressedBody::from_body(&block_body).unwrap();
 
@@ -642,8 +637,7 @@ mod tests {
 
         let withdrawals = Some(Withdrawals(vec![]));
 
-        let block_body =
-            BlockBody { transactions, ommers: vec![], withdrawals, block_access_list: None };
+        let block_body = BlockBody { transactions, ommers: vec![], withdrawals };
 
         let block = Block::new(header, block_body);
 

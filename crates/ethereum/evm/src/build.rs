@@ -91,16 +91,16 @@ where
             };
         }
 
-        let (built_block_access_list, block_access_list_hash) =
+        let (block_access_list_hash) =
             if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
                 if let Some(bal) = block_access_list {
                     let hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
-                    (Some(bal), Some(hash))
+                    (Some(hash))
                 } else {
-                    (None, None)
+                    None
                 }
             } else {
-                (None, None)
+                None
             };
 
         let header = Header {
@@ -130,12 +130,7 @@ where
 
         Ok(Block {
             header,
-            body: BlockBody {
-                transactions,
-                ommers: Default::default(),
-                withdrawals,
-                block_access_list: built_block_access_list.cloned(),
-            },
+            body: BlockBody { transactions, ommers: Default::default(), withdrawals },
         })
     }
 }

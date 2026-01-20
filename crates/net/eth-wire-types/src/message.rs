@@ -824,7 +824,6 @@ mod tests {
                     transactions: vec![],
                     ommers: vec![],
                     withdrawals: Some(Default::default()),
-                    block_access_list: None,
                 }]
                 .into(),
             }));

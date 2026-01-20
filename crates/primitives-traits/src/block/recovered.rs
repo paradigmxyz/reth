@@ -516,7 +516,6 @@ where
             transactions,
             ommers: block.body.ommers,
             withdrawals: block.body.withdrawals,
-            block_access_list: block.body.block_access_list,
         };
 
         let block = alloy_consensus::Block::new(header, body);
@@ -745,14 +744,12 @@ mod rpc_compat {
             let rlp_length = self.rlp_length();
             let header = self.clone_sealed_header();
             let withdrawals = self.body().withdrawals().cloned();
-            let block_access_list = self.body().block_access_list().cloned();
-
             let transactions = BlockTransactions::Hashes(transactions);
             let uncles =
                 self.body().ommers().unwrap_or(&[]).iter().map(|h| h.hash_slow()).collect();
             let header = header_builder(header, rlp_length)?;
 
-            Ok(Block { header, uncles, transactions, withdrawals, block_access_list })
+            Ok(Block { header, uncles, transactions, withdrawals })
         }
 
         /// Converts the block into an RPC [`Block`] with transaction hashes.
@@ -766,14 +763,13 @@ mod rpc_compat {
             let transactions = self.body().transaction_hashes_iter().copied().collect();
             let rlp_length = self.rlp_length();
             let (header, body) = self.into_sealed_block().split_sealed_header_body();
-            let BlockBody { ommers, withdrawals, block_access_list, .. } =
-                body.into_ethereum_body();
+            let BlockBody { ommers, withdrawals, .. } = body.into_ethereum_body();
 
             let transactions = BlockTransactions::Hashes(transactions);
             let uncles = ommers.into_iter().map(|h| h.hash_slow()).collect();
             let header = f(header, rlp_length)?;
 
-            Ok(Block { header, uncles, transactions, withdrawals, block_access_list })
+            Ok(Block { header, uncles, transactions, withdrawals })
         }
 
         /// Converts the block into an RPC [`Block`] with full transaction objects.
@@ -798,8 +794,7 @@ mod rpc_compat {
 
             let (block, senders) = self.split_sealed();
             let (header, body) = block.split_sealed_header_body();
-            let BlockBody { transactions, ommers, withdrawals, block_access_list } =
-                body.into_ethereum_body();
+            let BlockBody { transactions, ommers, withdrawals } = body.into_ethereum_body();
 
             let transactions = transactions
                 .into_iter()
@@ -822,7 +817,7 @@ mod rpc_compat {
             let uncles = ommers.into_iter().map(|h| h.hash_slow()).collect();
             let header = header_builder(header, block_length)?;
 
-            let block = Block { header, uncles, transactions, withdrawals, block_access_list };
+            let block = Block { header, uncles, transactions, withdrawals };
 
             Ok(block)
         }
@@ -1000,7 +995,6 @@ mod tests {
             transactions: vec![recovered_tx],
             ommers: vec![],
             withdrawals: None,
-            block_access_list: None,
         };
         let block_with_recovered = alloy_consensus::Block::new(header, body);
 

@@ -83,15 +83,16 @@ where
             return Err(ConsensusError::BlockAccessListHashMissing)
         };
         if let Some(bal) = block_access_list {
+            tracing::debug!("BAL : Block is {:?}", bal);
             let bal_hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
-            let block_bal = block.body().block_access_list();
-            tracing::debug!("Block Bal :{:?}", block_bal);
-            if let Some(body_bal) = block_bal {
-                if body_bal.is_empty() {
-                    tracing::debug!("Hit Empty BAL : Block is {:?}", block);
-                }
-                verify_bal(body_bal, bal)?;
-            }
+            // let block_bal = block.body().block_access_list();
+            // tracing::debug!("Block Bal :{:?}", block_bal);
+            // if let Some(body_bal) = block_bal {
+            //     if body_bal.is_empty() {
+            //         tracing::debug!("Hit Empty BAL : Block is {:?}", block);
+            //     }
+            //     verify_bal(body_bal, bal)?;
+            // }
 
             if bal_hash != header_block_access_list_hash {
                 tracing::debug!(

@@ -131,7 +131,6 @@ impl<ChainSpec: OpHardforks> OpBlockAssembler<ChainSpec> {
                     .chain_spec
                     .is_canyon_active_at_timestamp(timestamp)
                     .then(Default::default),
-                block_access_list: None,
             },
         ))
     }

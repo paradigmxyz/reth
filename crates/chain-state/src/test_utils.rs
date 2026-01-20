@@ -170,7 +170,6 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 transactions: transactions.into_iter().map(|tx| tx.into_inner()).collect(),
                 ommers: Vec::new(),
                 withdrawals: Some(vec![].into()),
-                block_access_list: None,
             },
         )
     }

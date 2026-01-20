@@ -211,12 +211,7 @@ where
                     .unwrap_or_default()
             };
             //  Handled block access list
-            bodies.push(alloy_consensus::BlockBody {
-                transactions,
-                ommers,
-                withdrawals,
-                block_access_list,
-            });
+            bodies.push(alloy_consensus::BlockBody { transactions, ommers, withdrawals });
         }
 
         Ok(bodies)
@@ -285,9 +280,6 @@ where
                     ommers: vec![], // Empty storage never has ommers
                     withdrawals: chain_spec
                         .is_shanghai_active_at_timestamp(header.timestamp())
-                        .then(Default::default),
-                    block_access_list: chain_spec
-                        .is_amsterdam_active_at_timestamp(header.timestamp())
                         .then(Default::default),
                 }
             })

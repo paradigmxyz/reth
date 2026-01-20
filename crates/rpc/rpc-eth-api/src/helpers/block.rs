@@ -267,7 +267,6 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                         header,
                         transactions: BlockTransactions::Uncle,
                         withdrawals: None,
-                        block_access_list: None,
                     })
                 })
                 .transpose()
