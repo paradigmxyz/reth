@@ -163,12 +163,12 @@ impl<F> OverlayStateProviderFactory<F> {
     pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
         match &mut self.overlay_source {
             Some(OverlaySource::Immediate { state, .. }) => {
-                Arc::make_mut(state).extend_ref(&other);
+                Arc::make_mut(state).extend_ref_and_sort(&other);
             }
             Some(OverlaySource::Lazy(lazy)) => {
                 // Resolve lazy overlay and convert to immediate with extension
                 let (trie, mut state) = lazy.as_overlay();
-                Arc::make_mut(&mut state).extend_ref(&other);
+                Arc::make_mut(&mut state).extend_ref_and_sort(&other);
                 self.overlay_source = Some(OverlaySource::Immediate { trie, state });
             }
             None => {
@@ -342,7 +342,7 @@ where
             let trie_updates = if trie_reverts.is_empty() {
                 overlay_trie
             } else if !overlay_trie.is_empty() {
-                trie_reverts.extend_ref(&overlay_trie);
+                trie_reverts.extend_ref_and_sort(&overlay_trie);
                 Arc::new(trie_reverts)
             } else {
                 Arc::new(trie_reverts)
@@ -351,7 +351,7 @@ where
             let hashed_state_updates = if hashed_state_reverts.is_empty() {
                 overlay_state
             } else if !overlay_state.is_empty() {
-                hashed_state_reverts.extend_ref(&overlay_state);
+                hashed_state_reverts.extend_ref_and_sort(&overlay_state);
                 Arc::new(hashed_state_reverts)
             } else {
                 Arc::new(hashed_state_reverts)
