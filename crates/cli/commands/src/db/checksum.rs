@@ -113,7 +113,7 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
     let static_files = iter_static_files(static_file_provider.directory())?;
 
     let ranges = static_files
-        .get(&segment)
+        .get(segment)
         .ok_or_else(|| eyre::eyre!("No static files found for segment: {}", segment))?;
 
     let start_time = Instant::now();
@@ -137,8 +137,7 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
             continue;
         }
 
-        let fixed_block_range =
-            static_file_provider.find_fixed_range(segment, block_range.start());
+        let fixed_block_range = static_file_provider.find_fixed_range(segment, block_range.start());
         let jar_provider = static_file_provider
             .get_segment_provider_for_range(segment, || Some(fixed_block_range), None)?
             .ok_or_else(|| {
