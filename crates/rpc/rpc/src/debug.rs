@@ -1,5 +1,5 @@
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eips::{eip2718::Encodable2718, eip7928::BlockAccessList, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
