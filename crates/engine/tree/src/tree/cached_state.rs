@@ -662,8 +662,9 @@ impl ExecutionCache {
             //
             // Note: Since EIP-6780, SELFDESTRUCT only works within the same transaction where the
             // contract was created. This means the destroyed account/storage won't be in the cache
-            // anyway (created and destroyed in the same tx), so this path is neveer hit in
-            // practice.
+            // anyway (created and destroyed in the same tx), so this path is never hit in
+            // live sync. It also will not be hit in pipeline sync, because we don't use execution
+            // cache there.
             if account.was_destroyed() {
                 self.clear();
                 return Ok(())
