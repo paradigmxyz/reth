@@ -252,8 +252,6 @@ where
 /// Only flushes when we have more than one shard's worth of data, keeping the last
 /// (possibly partial) shard for continued accumulation. This avoids writing a shard
 /// that may need to be updated when more indices arrive.
-///
-/// Equivalent to [`load_indices`] with [`LoadMode::KeepLast`].
 fn flush_account_history_shards_partial<N, CURSOR>(
     address: Address,
     list: &mut Vec<u64>,
@@ -310,8 +308,6 @@ where
 ///
 /// The `u64::MAX` key for the final shard is an invariant that allows `seek_exact(address,
 /// u64::MAX)` to find the last shard during incremental sync for merging with new indices.
-///
-/// Equivalent to [`load_indices`] with [`LoadMode::Flush`].
 fn flush_account_history_shards<N, CURSOR>(
     address: Address,
     list: &mut Vec<u64>,
@@ -477,8 +473,6 @@ where
 /// Only flushes when we have more than one shard's worth of data, keeping the last
 /// (possibly partial) shard for continued accumulation. This avoids writing a shard
 /// that may need to be updated when more indices arrive.
-///
-/// Equivalent to [`load_indices`] with [`LoadMode::KeepLast`].
 fn flush_storage_history_shards_partial<N, CURSOR>(
     address: Address,
     storage_key: B256,
@@ -537,8 +531,6 @@ where
 /// The `u64::MAX` key for the final shard is an invariant that allows
 /// `seek_exact(address, storage_key, u64::MAX)` to find the last shard during incremental
 /// sync for merging with new indices.
-///
-/// Equivalent to [`load_indices`] with [`LoadMode::Flush`].
 fn flush_storage_history_shards<N, CURSOR>(
     address: Address,
     storage_key: B256,
