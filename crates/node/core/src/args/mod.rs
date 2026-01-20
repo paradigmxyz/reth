@@ -80,5 +80,9 @@ pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
 mod static_files;
 pub use static_files::{StaticFilesArgs, MINIMAL_BLOCKS_PER_FILE};
 
+/// `RocksDbArgs` for configuring RocksDB table routing.
+mod rocksdb;
+pub use rocksdb::{RocksDbArgs, RocksDbArgsError};
+
 mod error;
 pub mod types;
