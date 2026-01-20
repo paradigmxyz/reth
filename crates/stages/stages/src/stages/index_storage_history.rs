@@ -102,13 +102,16 @@ where
 
         let mut range = input.next_block_range();
         let first_sync = input.checkpoint().block_number == 0;
-
         let use_rocksdb = provider.cached_storage_settings().storages_history_in_rocksdb;
 
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
         if first_sync {
             if use_rocksdb {
+                // Note: RocksDB clear() executes immediately (not deferred to commit like MDBX),
+                // but this is safe for first_sync because if we crash before commit, the
+                // checkpoint stays at 0 and we'll just clear and rebuild again on restart. The
+                // source data (changesets) is intact.
                 #[cfg(all(unix, feature = "rocksdb"))]
                 provider.rocksdb_provider().clear::<tables::StoragesHistory>()?;
             } else {
