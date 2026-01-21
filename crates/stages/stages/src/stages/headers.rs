@@ -259,6 +259,9 @@ where
                 Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
                     error!(target: "sync::stages::headers", %error, "Cannot attach header to head");
                     self.sync_gap = None;
+                    self.hash_collector.clear();
+                    self.header_collector.clear();
+                    self.is_etl_ready = false;
                     return Poll::Ready(Err(StageError::DetachedHead {
                         local_head: Box::new(local_head.block_with_parent()),
                         header: Box::new(header.block_with_parent()),
@@ -325,6 +328,9 @@ where
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         self.sync_gap.take();
+        self.hash_collector.clear();
+        self.header_collector.clear();
+        self.is_etl_ready = false;
 
         // First unwind the db tables, until the unwind_to block number. use the walker to unwind
         // HeaderNumbers based on the index in CanonicalHeaders
