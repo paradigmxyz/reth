@@ -1,4 +1,4 @@
-use super::metrics::{RocksDBMetrics, RocksDBOperation};
+use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
 use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
@@ -37,6 +37,23 @@ use tracing::instrument;
 
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
+
+/// Statistics for a single `RocksDB` table (column family).
+#[derive(Debug, Clone)]
+pub struct RocksDBTableStats {
+    /// Size of SST files on disk in bytes.
+    pub sst_size_bytes: u64,
+    /// Size of memtables in memory in bytes.
+    pub memtable_size_bytes: u64,
+    /// Name of the table/column family.
+    pub name: String,
+    /// Estimated number of keys in the table.
+    pub estimated_num_keys: u64,
+    /// Estimated size of live data in bytes (SST files + memtables).
+    pub estimated_size_bytes: u64,
+    /// Estimated bytes pending compaction (reclaimable space).
+    pub pending_compaction_bytes: u64,
+}
 
 /// Context for `RocksDB` block writes.
 #[derive(Clone)]
@@ -405,6 +422,65 @@ impl RocksDBProviderInner {
             Self::ReadOnly { db, .. } => RocksDBIterEnum::ReadOnly(db.iterator_cf(cf, mode)),
         }
     }
+
+    /// Returns statistics for all column families in the database.
+    fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        let mut stats = Vec::new();
+
+        macro_rules! collect_stats {
+            ($db:expr) => {
+                for cf_name in ROCKSDB_TABLES {
+                    if let Some(cf) = $db.cf_handle(cf_name) {
+                        let estimated_num_keys = $db
+                            .property_int_value_cf(cf, rocksdb::properties::ESTIMATE_NUM_KEYS)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        // SST files size (on-disk) + memtable size (in-memory)
+                        let sst_size = $db
+                            .property_int_value_cf(cf, rocksdb::properties::LIVE_SST_FILES_SIZE)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        let memtable_size = $db
+                            .property_int_value_cf(cf, rocksdb::properties::SIZE_ALL_MEM_TABLES)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        let estimated_size_bytes = sst_size + memtable_size;
+
+                        let pending_compaction_bytes = $db
+                            .property_int_value_cf(
+                                cf,
+                                rocksdb::properties::ESTIMATE_PENDING_COMPACTION_BYTES,
+                            )
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        stats.push(RocksDBTableStats {
+                            sst_size_bytes: sst_size,
+                            memtable_size_bytes: memtable_size,
+                            name: cf_name.to_string(),
+                            estimated_num_keys,
+                            estimated_size_bytes,
+                            pending_compaction_bytes,
+                        });
+                    }
+                }
+            };
+        }
+
+        match self {
+            Self::ReadWrite { db, .. } => collect_stats!(db),
+            Self::ReadOnly { db, .. } => collect_stats!(db),
+        }
+
+        stats
+    }
 }
 
 impl fmt::Debug for RocksDBProviderInner {
@@ -427,7 +503,21 @@ impl fmt::Debug for RocksDBProviderInner {
 impl Drop for RocksDBProviderInner {
     fn drop(&mut self) {
         match self {
-            Self::ReadWrite { db, .. } => db.cancel_all_background_work(true),
+            Self::ReadWrite { db, .. } => {
+                // Flush all memtables if possible. If not, they will be rebuilt from the WAL on
+                // restart
+                if let Err(e) = db.flush_wal(true) {
+                    tracing::warn!(target: "storage::rocksdb", ?e, "Failed to flush WAL on drop");
+                }
+                for cf_name in ROCKSDB_TABLES {
+                    if let Some(cf) = db.cf_handle(cf_name) &&
+                        let Err(e) = db.flush_cf(&cf)
+                    {
+                        tracing::warn!(target: "storage::rocksdb", cf = cf_name, ?e, "Failed to flush CF on drop");
+                    }
+                }
+                db.cancel_all_background_work(true);
+            }
             Self::ReadOnly { db, .. } => db.cancel_all_background_work(true),
         }
     }
@@ -654,6 +744,22 @@ impl RocksDBProvider {
         let cf = self.get_cf_handle::<T>()?;
         let iter = self.0.iterator_cf(cf, IteratorMode::Start);
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
+    /// Returns statistics for all column families in the database.
+    ///
+    /// Returns a vector of (`table_name`, `estimated_keys`, `estimated_size_bytes`) tuples.
+    pub fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        self.0.table_stats()
+    }
+
+    /// Creates a raw iterator over all entries in the specified table.
+    ///
+    /// Returns raw `(key_bytes, value_bytes)` pairs without decoding.
+    pub fn raw_iter<T: Table>(&self) -> ProviderResult<RocksDBRawIter<'_>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let iter = self.0.iterator_cf(cf, IteratorMode::Start);
+        Ok(RocksDBRawIter { inner: iter })
     }
 
     /// Returns all account history shards for the given address in ascending key order.
@@ -1514,6 +1620,33 @@ impl<T: Table> Iterator for RocksDBIter<'_, T> {
         };
 
         Some(Ok((key, value)))
+    }
+}
+
+/// Raw iterator over a `RocksDB` table (non-transactional).
+///
+/// Yields raw `(key_bytes, value_bytes)` pairs without decoding.
+pub struct RocksDBRawIter<'db> {
+    inner: RocksDBIterEnum<'db>,
+}
+
+impl fmt::Debug for RocksDBRawIter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBRawIter").finish_non_exhaustive()
+    }
+}
+
+impl Iterator for RocksDBRawIter<'_> {
+    type Item = ProviderResult<(Box<[u8]>, Box<[u8]>)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.inner.next()? {
+            Ok(kv) => Some(Ok(kv)),
+            Err(e) => Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            })))),
+        }
     }
 }
 
