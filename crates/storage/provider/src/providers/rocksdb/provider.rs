@@ -814,6 +814,52 @@ impl RocksDBProvider {
         Ok(result)
     }
 
+    /// Returns all storage history shards for the given `(address, storage_key)` pair.
+    ///
+    /// Iterates through all shards in ascending `highest_block_number` order until
+    /// a different `(address, storage_key)` is encountered.
+    pub fn storage_history_shards(
+        &self,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
+        let cf = self.get_cf_handle::<tables::StoragesHistory>()?;
+
+        let start_key = StorageShardedKey::new(address, storage_key, 0u64);
+        let start_bytes = start_key.encode();
+
+        let iter = self
+            .0
+            .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
+
+        let mut result = Vec::new();
+        for item in iter {
+            match item {
+                Ok((key_bytes, value_bytes)) => {
+                    let key = StorageShardedKey::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                    if key.address != address || key.sharded_key.key != storage_key {
+                        break;
+                    }
+
+                    let value = BlockNumberList::decompress(&value_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                    result.push((key, value));
+                }
+                Err(e) => {
+                    return Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })));
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
     /// Unwinds account history indices for the given `(address, block_number)` pairs.
     ///
     /// Groups addresses by their minimum block number and calls the appropriate unwind
@@ -840,6 +886,37 @@ impl RocksDBProvider {
             match min_block.checked_sub(1) {
                 Some(keep_to) => batch.unwind_account_history_to(address, keep_to)?,
                 None => batch.clear_account_history(address)?,
+            }
+        }
+
+        Ok(batch.into_inner())
+    }
+
+    /// Unwinds storage history indices for the given `(address, storage_key, block_number)` tuples.
+    ///
+    /// Groups by `(address, storage_key)` and finds the minimum block number for each.
+    /// For each key, keeps only blocks less than the minimum block
+    /// (i.e., removes the minimum block and all higher blocks).
+    ///
+    /// Returns a `WriteBatchWithTransaction` that can be committed later.
+    pub fn unwind_storage_history_indices(
+        &self,
+        storage_changesets: &[(Address, B256, BlockNumber)],
+    ) -> ProviderResult<WriteBatchWithTransaction<true>> {
+        let mut key_min_block: HashMap<(Address, B256), BlockNumber> =
+            HashMap::with_capacity_and_hasher(storage_changesets.len(), Default::default());
+        for &(address, storage_key, block_number) in storage_changesets {
+            key_min_block
+                .entry((address, storage_key))
+                .and_modify(|min| *min = (*min).min(block_number))
+                .or_insert(block_number);
+        }
+
+        let mut batch = self.batch();
+        for ((address, storage_key), min_block) in key_min_block {
+            match min_block.checked_sub(1) {
+                Some(keep_to) => batch.unwind_storage_history_to(address, storage_key, keep_to)?,
+                None => batch.clear_storage_history(address, storage_key)?,
             }
         }
 
@@ -1290,6 +1367,87 @@ impl<'a> RocksDBBatch<'a> {
         Ok(())
     }
 
+    /// Unwinds storage history to keep only blocks `<= keep_to`.
+    ///
+    /// Handles multi-shard scenarios by:
+    /// 1. Loading all shards for the `(address, storage_key)` pair
+    /// 2. Finding the boundary shard containing `keep_to`
+    /// 3. Deleting all shards after the boundary
+    /// 4. Truncating the boundary shard to keep only indices `<= keep_to`
+    /// 5. Ensuring the last shard is keyed with `u64::MAX`
+    pub fn unwind_storage_history_to(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        keep_to: BlockNumber,
+    ) -> ProviderResult<()> {
+        let shards = self.provider.storage_history_shards(address, storage_key)?;
+        if shards.is_empty() {
+            return Ok(());
+        }
+
+        // Find the first shard that might contain blocks > keep_to.
+        // A shard is affected if it's the sentinel (u64::MAX) or its highest_block_number > keep_to
+        let boundary_idx = shards.iter().position(|(key, _)| {
+            key.sharded_key.highest_block_number == u64::MAX ||
+                key.sharded_key.highest_block_number > keep_to
+        });
+
+        // Repair path: no shards affected means all blocks <= keep_to, just ensure sentinel exists
+        let Some(boundary_idx) = boundary_idx else {
+            let (last_key, last_value) = shards.last().expect("shards is non-empty");
+            if last_key.sharded_key.highest_block_number != u64::MAX {
+                self.delete::<tables::StoragesHistory>(last_key.clone())?;
+                self.put::<tables::StoragesHistory>(
+                    StorageShardedKey::last(address, storage_key),
+                    last_value,
+                )?;
+            }
+            return Ok(());
+        };
+
+        // Delete all shards strictly after the boundary (they are entirely > keep_to)
+        for (key, _) in shards.iter().skip(boundary_idx + 1) {
+            self.delete::<tables::StoragesHistory>(key.clone())?;
+        }
+
+        // Process the boundary shard: filter out blocks > keep_to
+        let (boundary_key, boundary_list) = &shards[boundary_idx];
+
+        // Delete the boundary shard (we'll either drop it or rewrite at u64::MAX)
+        self.delete::<tables::StoragesHistory>(boundary_key.clone())?;
+
+        // Build truncated list once; check emptiness directly (avoids double iteration)
+        let new_last =
+            BlockNumberList::new_pre_sorted(boundary_list.iter().take_while(|&b| b <= keep_to));
+
+        if new_last.is_empty() {
+            // Boundary shard is now empty. Previous shard becomes the last and must be keyed
+            // u64::MAX.
+            if boundary_idx == 0 {
+                // Nothing left for this (address, storage_key) pair
+                return Ok(());
+            }
+
+            let (prev_key, prev_value) = &shards[boundary_idx - 1];
+            if prev_key.sharded_key.highest_block_number != u64::MAX {
+                self.delete::<tables::StoragesHistory>(prev_key.clone())?;
+                self.put::<tables::StoragesHistory>(
+                    StorageShardedKey::last(address, storage_key),
+                    prev_value,
+                )?;
+            }
+            return Ok(());
+        }
+
+        self.put::<tables::StoragesHistory>(
+            StorageShardedKey::last(address, storage_key),
+            &new_last,
+        )?;
+
+        Ok(())
+    }
+
     /// Clears all account history shards for the given address.
     ///
     /// Used when unwinding from block 0 (i.e., removing all history).
@@ -1297,6 +1455,21 @@ impl<'a> RocksDBBatch<'a> {
         let shards = self.provider.account_history_shards(address)?;
         for (key, _) in shards {
             self.delete::<tables::AccountsHistory>(key)?;
+        }
+        Ok(())
+    }
+
+    /// Clears all storage history shards for the given `(address, storage_key)` pair.
+    ///
+    /// Used when unwinding from block 0 (i.e., removing all history for this storage slot).
+    pub fn clear_storage_history(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<()> {
+        let shards = self.provider.storage_history_shards(address, storage_key)?;
+        for (key, _) in shards {
+            self.delete::<tables::StoragesHistory>(key)?;
         }
         Ok(())
     }

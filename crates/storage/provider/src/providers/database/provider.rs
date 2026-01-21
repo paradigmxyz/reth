@@ -3005,25 +3005,35 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .collect::<Vec<_>>();
         storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
 
-        let mut cursor = self.tx.cursor_write::<tables::StoragesHistory>()?;
-        for &(address, storage_key, rem_index) in &storage_changesets {
-            let partial_shard = unwind_history_shards::<_, tables::StoragesHistory, _>(
-                &mut cursor,
-                StorageShardedKey::last(address, storage_key),
-                rem_index,
-                |storage_sharded_key| {
-                    storage_sharded_key.address == address &&
-                        storage_sharded_key.sharded_key.key == storage_key
-                },
-            )?;
-
-            // Check the last returned partial shard.
-            // If it's not empty, the shard needs to be reinserted.
-            if !partial_shard.is_empty() {
-                cursor.insert(
+        if self.cached_storage_settings().storages_history_in_rocksdb {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let batch =
+                    self.rocksdb_provider.unwind_storage_history_indices(&storage_changesets)?;
+                self.pending_rocksdb_batches.lock().push(batch);
+            }
+        } else {
+            // Unwind the storage history index in MDBX.
+            let mut cursor = self.tx.cursor_write::<tables::StoragesHistory>()?;
+            for &(address, storage_key, rem_index) in &storage_changesets {
+                let partial_shard = unwind_history_shards::<_, tables::StoragesHistory, _>(
+                    &mut cursor,
                     StorageShardedKey::last(address, storage_key),
-                    &BlockNumberList::new_pre_sorted(partial_shard),
+                    rem_index,
+                    |storage_sharded_key| {
+                        storage_sharded_key.address == address &&
+                            storage_sharded_key.sharded_key.key == storage_key
+                    },
                 )?;
+
+                // Check the last returned partial shard.
+                // If it's not empty, the shard needs to be reinserted.
+                if !partial_shard.is_empty() {
+                    cursor.insert(
+                        StorageShardedKey::last(address, storage_key),
+                        &BlockNumberList::new_pre_sorted(partial_shard),
+                    )?;
+                }
             }
         }
 
