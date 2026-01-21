@@ -55,6 +55,7 @@ pub use builder::{ProviderFactoryBuilder, ReadOnlyConfig};
 mod metrics;
 
 mod chain;
+use crate::providers::triedb::TrieDBProvider;
 pub use chain::*;
 
 /// A common provider that fetches data from a database or static file.
@@ -75,6 +76,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
+    /// `TrieDB` provider
+    triedb_provider: TrieDBProvider,
     /// Changeset cache for trie unwinding
     changeset_cache: ChangesetCache,
 }
@@ -93,6 +96,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        triedb_provider: TrieDBProvider,
     ) -> ProviderResult<Self> {
         // Load storage settings from database at init time. Creates a temporary provider
         // to read persisted settings, falling back to legacy defaults if none exist.
@@ -107,6 +111,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Default::default(),
             Arc::new(RwLock::new(legacy_settings)),
             rocksdb_provider.clone(),
+            triedb_provider.clone(),
             ChangesetCache::new(),
         )
         .storage_settings()?
@@ -120,6 +125,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             storage: Default::default(),
             storage_settings: Arc::new(RwLock::new(storage_settings)),
             rocksdb_provider,
+            triedb_provider,
             changeset_cache: ChangesetCache::new(),
         })
     }
@@ -171,6 +177,12 @@ impl<N: NodeTypesWithDB> RocksDBProviderFactory for ProviderFactory<N> {
     }
 }
 
+impl<N: NodeTypesWithDB> crate::TrieDBProviderFactory for ProviderFactory<N> {
+    fn triedb_provider(&self) -> &TrieDBProvider {
+        &self.triedb_provider
+    }
+}
+
 impl<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
@@ -180,12 +192,14 @@ impl<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        triedb_provider: TrieDBProvider,
     ) -> RethResult<Self> {
         Self::new(
             Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
             rocksdb_provider,
+            triedb_provider,
         )
         .map_err(RethError::Provider)
     }
@@ -208,6 +222,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage.clone(),
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
+            self.triedb_provider.clone(),
             self.changeset_cache.clone(),
         ))
     }
@@ -226,6 +241,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage.clone(),
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
+            self.triedb_provider.clone(),
             self.changeset_cache.clone(),
         )))
     }
@@ -234,7 +250,17 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     #[track_caller]
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProvider::new(self.database_provider_ro()?)))
+        #[cfg(feature = "triedb")]
+        {
+            Ok(Box::new(LatestStateProvider::new_with_triedb(
+                self.database_provider_ro()?,
+                self.triedb_provider.clone(),
+            )))
+        }
+        #[cfg(not(feature = "triedb"))]
+        {
+            Ok(Box::new(LatestStateProvider::new(self.database_provider_ro()?)))
+        }
     }
 
     /// Storage provider for state at that given block
@@ -636,6 +662,7 @@ where
             storage,
             storage_settings,
             rocksdb_provider,
+            triedb_provider,
             changeset_cache,
         } = self;
         f.debug_struct("ProviderFactory")
@@ -646,6 +673,7 @@ where
             .field("storage", &storage)
             .field("storage_settings", &*storage_settings.read())
             .field("rocksdb_provider", &rocksdb_provider)
+            .field("triedb_provider", &triedb_provider)
             .field("changeset_cache", &changeset_cache)
             .finish()
     }
@@ -661,6 +689,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             storage: self.storage.clone(),
             storage_settings: self.storage_settings.clone(),
             rocksdb_provider: self.rocksdb_provider.clone(),
+            triedb_provider: self.triedb_provider.clone(),
             changeset_cache: self.changeset_cache.clone(),
         }
     }
@@ -680,7 +709,10 @@ mod tests {
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
         mdbx::DatabaseArguments,
-        test_utils::{create_test_rocksdb_dir, create_test_static_files_dir, ERROR_TEMPDIR},
+        test_utils::{
+            create_test_rocksdb_dir, create_test_static_files_dir, create_test_triedb_dir,
+            ERROR_TEMPDIR,
+        },
     };
     use reth_db_api::tables;
     use reth_primitives_traits::SignerRecoverable;
@@ -720,12 +752,14 @@ mod tests {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
         let (_, rocksdb_path) = create_test_rocksdb_dir();
+        let (_, triedb_path) = create_test_triedb_dir();
         let factory = ProviderFactory::<MockNodeTypesWithDB<DatabaseEnv>>::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep(),
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
             RocksDBProvider::builder(&rocksdb_path).build().unwrap(),
+            TrieDBProvider::builder(&triedb_path).build().unwrap(),
         )
         .unwrap();
         let provider = factory.provider().unwrap();

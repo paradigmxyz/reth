@@ -29,6 +29,9 @@ workspace = true
 [features]
 default = ["jemalloc", "otlp", "reth-optimism-evm/portable", "js-tracer", "keccak-cache-global", "asm-keccak"]
 
+triedb = ["reth-optimism-node/triedb"]
+metrics = ["reth-optimism-node/metrics"]
+
 otlp = ["reth-optimism-cli/otlp"]
 
 js-tracer = [

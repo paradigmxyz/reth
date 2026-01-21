@@ -79,6 +79,9 @@ impl EngineNodeLauncher {
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
     {
         let Self { ctx, engine_tree_config } = self;
+
+        info!(target: "reth::cli", ?engine_tree_config, "Engine tree configuration");
+
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             components_builder,

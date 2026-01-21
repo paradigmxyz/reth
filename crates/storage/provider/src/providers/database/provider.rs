@@ -4,7 +4,7 @@ use crate::{
         database::{chain::ChainStorage, metrics},
         rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
         static_file::{StaticFileWriteCtx, StaticFileWriter},
-        NodeTypesForProvider, StaticFileProvider,
+        NodeTypesForProvider, StaticFileProvider,TrieDBProvider,
     },
     to_range,
     traits::{
@@ -83,6 +83,18 @@ use std::{
     time::Instant,
 };
 use tracing::{debug, instrument, trace};
+
+#[cfg(feature = "triedb")]
+use {
+    alloy_consensus::constants::KECCAK_EMPTY,
+    alloy_primitives::{StorageKey, StorageValue, U256},
+    alloy_trie::EMPTY_ROOT_HASH,
+    reth_storage_api::PlainPostState,
+    triedb::{
+        account::Account as TrieDBAccount,
+        path::{AddressPath, StoragePath},
+    },
+};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
@@ -181,6 +193,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
+    /// `TrieDB` provider
+    triedb_provider: TrieDBProvider,
     /// Changeset cache for trie unwinding
     changeset_cache: ChangesetCache,
     /// Pending `RocksDB` batches to be committed at provider commit time.
@@ -202,6 +216,8 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("storage", &self.storage)
             .field("storage_settings", &self.storage_settings)
             .field("rocksdb_provider", &self.rocksdb_provider)
+            .field("triedb_provider", &self.triedb_provider)
+            .field("rocksdb_provider", &self.rocksdb_provider)
             .field("changeset_cache", &self.changeset_cache)
             .field("pending_rocksdb_batches", &"<pending batches>")
             .field("minimum_pruning_distance", &self.minimum_pruning_distance)
@@ -214,13 +230,25 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
     }
+
+    /// Returns reference to TrieDB provider.
+    pub const fn triedb_provider(&self) -> &TrieDBProvider {
+        &self.triedb_provider
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// State provider for latest state
     pub fn latest<'a>(&'a self) -> Box<dyn StateProvider + 'a> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Box::new(LatestStateProviderRef::new(self))
+        #[cfg(feature = "triedb")]
+        {
+            Box::new(LatestStateProviderRef::new_with_triedb(self, &self.triedb_provider))
+        }
+        #[cfg(not(feature = "triedb"))]
+        {
+            Box::new(LatestStateProviderRef::new(self))
+        }
     }
 
     /// Storage provider for state at that given block hash
@@ -233,7 +261,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProviderRef::new(self)))
+            #[cfg(feature = "triedb")]
+            return Ok(Box::new(LatestStateProviderRef::new_with_triedb(self, &self.triedb_provider)));
+            #[cfg(not(feature = "triedb"))]
+            return Ok(Box::new(LatestStateProviderRef::new(self)));
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -325,6 +356,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
+        triedb_provider: TrieDBProvider,
         changeset_cache: ChangesetCache,
     ) -> Self {
         Self {
@@ -335,6 +367,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            triedb_provider,
             changeset_cache,
             pending_rocksdb_batches: Default::default(),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
@@ -522,8 +555,48 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
+            // TODO: Do performant / batched writes for each type of object
+            // instead of a loop over all blocks,
+            // meaning:
+            //  * blocks
+            //  * state
+            //  * hashed state
+            //  * trie updates (cannot naively extend, need helper)
+            //  * indices (already done basically)
+            // Insert the blocks and merge state changes for triedb
+            #[cfg(feature = "triedb")]
+            let mut merged_plain_state = PlainPostState::default();
+
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
+
+                #[cfg(feature = "triedb")]
+                {
+                    // Collect state changes for TrieDB batch write
+                    let bundle_state = &block.execution_outcome().state;
+                    for (address, bundle_account) in bundle_state.state() {
+                        let account =
+                            if bundle_account.was_destroyed() || bundle_account.info.is_none() {
+                                None
+                            } else {
+                                bundle_account
+                                    .info
+                                    .as_ref()
+                                    .map(|info| reth_primitives_traits::Account::from(info))
+                            };
+
+                        merged_plain_state.accounts.insert(*address, account);
+
+                        let storage_map = merged_plain_state
+                            .storages
+                            .entry(*address)
+                            .or_insert_with(HashMap::default);
+                        for (slot, storage_slot) in &bundle_account.storage {
+                            let slot_b256 = B256::from_slice(&slot.to_be_bytes::<32>());
+                            storage_map.insert(slot_b256, storage_slot.present_value);
+                        }
+                    }
+                }
 
                 let start = Instant::now();
                 self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
@@ -601,6 +674,96 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             timings.total = total_start.elapsed();
 
             self.metrics.record_save_blocks(&timings);
+
+            // Write merged state to triedb
+            #[cfg(feature = "triedb")]
+            {
+                let start = Instant::now();
+                let mut tx = self.triedb_provider.inner_db().begin_rw().map_err(|e| {
+                    ProviderError::TrieWitnessError(format!(
+                        "Failed to begin triedb transaction: {e:?}"
+                    ))
+                })?;
+
+                // First, write all storage slots for each address
+                for (address, storage) in &merged_plain_state.storages {
+                    let address_path = AddressPath::for_address(*address);
+
+                    for (storage_key, storage_value) in storage {
+                        let raw_slot = U256::from_be_slice(storage_key.as_slice());
+                        let storage_path = StoragePath::for_address_path_and_slot(
+                            address_path.clone(),
+                            StorageKey::from(raw_slot),
+                        );
+
+                        if storage_value.is_zero() {
+                            // Delete storage slot
+                            tx.set_storage_slot(storage_path, None).map_err(|e| {
+                                ProviderError::TrieWitnessError(format!(
+                                    "Failed to set triedb storage slot: {e:?}"
+                                ))
+                            })?;
+                        } else {
+                            // Set storage slot
+                            let storage_value_triedb = StorageValue::from_be_slice(
+                                storage_value.to_be_bytes::<32>().as_slice(),
+                            );
+                            tx.set_storage_slot(storage_path, Some(storage_value_triedb)).map_err(
+                                |e| {
+                                    ProviderError::TrieWitnessError(format!(
+                                        "Failed to set triedb storage slot: {e:?}"
+                                    ))
+                                },
+                            )?;
+                        }
+                    }
+                }
+
+                // Then, write accounts (storage roots will be computed automatically by triedb)
+                for (address, account_opt) in &merged_plain_state.accounts {
+                    let address_path = AddressPath::for_address(*address);
+
+                    if let Some(account) = account_opt {
+                        // Account exists or is being updated
+                        // Storage root will be computed from the storage we just wrote
+                        let trie_account = TrieDBAccount::new(
+                            account.nonce,
+                            account.balance,
+                            EMPTY_ROOT_HASH, // Will be computed from storage
+                            account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+                        );
+                        tx.set_account(address_path, Some(trie_account)).map_err(|e| {
+                            ProviderError::TrieWitnessError(format!(
+                                "Failed to set triedb account: {e:?}"
+                            ))
+                        })?;
+                    } else {
+                        // Account is being destroyed
+                        tx.set_account(address_path, None).map_err(|e| {
+                            ProviderError::TrieWitnessError(format!(
+                                "Failed to delete triedb account: {e:?}"
+                            ))
+                        })?;
+                    }
+                }
+
+                // Commit the triedb transaction
+                tx.commit().map_err(|e| {
+                    ProviderError::TrieWitnessError(format!(
+                        "Failed to commit triedb transaction: {e:?}"
+                    ))
+                })?;
+
+                let elapsed = start.elapsed().as_millis();
+                tracing::info!(
+                    target: "providers::db",
+                    elapsed_ms = elapsed,
+                    num_accounts = merged_plain_state.accounts.len(),
+                    num_storage_changes = merged_plain_state.storages.len(),
+                    "Saved merged state to TrieDB"
+                );
+            }
+
             debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
 
             Ok(())
@@ -756,7 +919,15 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         // if the block number is the same as the currently best block number on disk we can use the
         // latest state provider here
         if block_number == self.best_block_number().unwrap_or_default() {
-            return Ok(Box::new(LatestStateProvider::new(self)))
+            #[cfg(feature = "triedb")]
+            {
+                let triedb_provider = self.triedb_provider.clone();
+                return Ok(Box::new(LatestStateProvider::new_with_triedb(self, triedb_provider)))
+            }
+            #[cfg(not(feature = "triedb"))]
+            {
+                return Ok(Box::new(LatestStateProvider::new(self)))
+            }
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -767,6 +938,12 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
+        #[cfg(feature = "triedb")]
+        let mut state_provider = {
+            let triedb = self.triedb_provider.clone();
+            HistoricalStateProvider::new_with_triedb(self, block_number, &triedb)
+        };
+        #[cfg(not(feature = "triedb"))]
         let mut state_provider = HistoricalStateProvider::new(self, block_number);
 
         // If we pruned account or storage history, we can't return state on every historical block.
@@ -864,6 +1041,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
+        triedb_provider: TrieDBProvider,
         changeset_cache: ChangesetCache,
     ) -> Self {
         Self {
@@ -874,6 +1052,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            triedb_provider,
             changeset_cache,
             pending_rocksdb_batches: Default::default(),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,

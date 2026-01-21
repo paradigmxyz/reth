@@ -50,6 +50,7 @@ macro_rules! delegate_provider_impls {
                 fn state_root_from_nodes(&self, input: reth_trie::TrieInput) -> reth_storage_api::errors::provider::ProviderResult<alloy_primitives::B256>;
                 fn state_root_with_updates(&self, state: reth_trie::HashedPostState) -> reth_storage_api::errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates)>;
                 fn state_root_from_nodes_with_updates(&self, input: reth_trie::TrieInput) -> reth_storage_api::errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates)>;
+                fn state_root_with_updates_plain(&self, plain_state: reth_storage_api::PlainPostState) -> reth_storage_api::errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates)>;
             }
             StorageRootProvider $(where [$($generics)*])? {
                 fn storage_root(&self, address: alloy_primitives::Address, storage: reth_trie::HashedStorage) -> reth_storage_api::errors::provider::ProviderResult<alloy_primitives::B256>;
