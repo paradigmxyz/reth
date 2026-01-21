@@ -427,7 +427,16 @@ impl fmt::Debug for RocksDBProviderInner {
 impl Drop for RocksDBProviderInner {
     fn drop(&mut self) {
         match self {
-            Self::ReadWrite { db, .. } => db.cancel_all_background_work(true),
+            Self::ReadWrite { db, .. } => {
+                // Flush all memtables before shutdown to ensure data durability
+                if let Err(e) = db.flush_wal(true) {
+                    tracing::warn!(target: "storage::rocksdb", ?e, "Failed to flush WAL on drop");
+                }
+                if let Err(e) = db.flush() {
+                    tracing::warn!(target: "storage::rocksdb", ?e, "Failed to flush memtables on drop");
+                }
+                db.cancel_all_background_work(true);
+            }
             Self::ReadOnly { db, .. } => db.cancel_all_background_work(true),
         }
     }
