@@ -37,69 +37,25 @@ jobs:
           cache-on-failure: true
 
       - name: Apply alloy patches
-        env:
-          ALLOY_BRANCH: ${{ inputs.alloy_branch }}
-          ALLOY_EVM_BRANCH: ${{ inputs.alloy_evm_branch }}
-          OP_ALLOY_BRANCH: ${{ inputs.op_alloy_branch }}
         run: |
-          echo "" >> Cargo.toml
-
-          # Patch alloy-rs/alloy crates
-          if [ -n "$ALLOY_BRANCH" ]; then
-            echo "Patching alloy-rs/alloy with branch: $ALLOY_BRANCH"
-            cat >> Cargo.toml << EOF
-          # Patched by check-alloy workflow
-          alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-contract = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-eips = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-genesis = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-network = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-provider = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-serde = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-signer = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-transport = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
-          EOF
+          ARGS=""
+          if [ -n "${{ inputs.alloy_branch }}" ]; then
+            ARGS="$ARGS --alloy ${{ inputs.alloy_branch }}"
           fi
-
-          # Patch alloy-rs/evm crates
-          if [ -n "$ALLOY_EVM_BRANCH" ]; then
-            echo "Patching alloy-rs/evm with branch: $ALLOY_EVM_BRANCH"
-            cat >> Cargo.toml << EOF
-          alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "$ALLOY_EVM_BRANCH" }
-          alloy-op-evm = { git = "https://github.com/alloy-rs/evm", branch = "$ALLOY_EVM_BRANCH" }
-          EOF
+          if [ -n "${{ inputs.alloy_evm_branch }}" ]; then
+            ARGS="$ARGS --evm ${{ inputs.alloy_evm_branch }}"
           fi
-
-          # Patch alloy-rs/op-alloy crates
-          if [ -n "$OP_ALLOY_BRANCH" ]; then
-            echo "Patching alloy-rs/op-alloy with branch: $OP_ALLOY_BRANCH"
-            cat >> Cargo.toml << EOF
-          op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", branch = "$OP_ALLOY_BRANCH" }
-          op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", branch = "$OP_ALLOY_BRANCH" }
-          op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", branch = "$OP_ALLOY_BRANCH" }
-          op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", branch = "$OP_ALLOY_BRANCH" }
-          op-alloy-rpc-jsonrpsee = { git = "https://github.com/alloy-rs/op-alloy", branch = "$OP_ALLOY_BRANCH" }
-          EOF
+          if [ -n "${{ inputs.op_alloy_branch }}" ]; then
+            ARGS="$ARGS --op ${{ inputs.op_alloy_branch }}"
           fi
-
+          
+          if [ -z "$ARGS" ]; then
+            echo "No branches specified, nothing to patch"
+            exit 1
+          fi
+          
+          ./scripts/patch-alloy.sh $ARGS
+          
           echo "=== Final patch section ==="
           tail -50 Cargo.toml
 
