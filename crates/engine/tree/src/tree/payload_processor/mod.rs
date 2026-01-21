@@ -370,21 +370,8 @@ where
         &self,
         transactions: I,
     ) -> (
-        mpsc::Receiver<
-            WithTxEnv<
-                TxEnvFor<Evm>,
-                <I::Tx as ExecutableTxParts<TxEnvFor<Evm>, N::SignedTx>>::Recovered,
-            >,
-        >,
-        mpsc::Receiver<
-            Result<
-                WithTxEnv<
-                    TxEnvFor<Evm>,
-                    <I::Tx as ExecutableTxParts<TxEnvFor<Evm>, N::SignedTx>>::Recovered,
-                >,
-                I::Error,
-            >,
-        >,
+        mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
+        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
         usize,
     ) {
         let (transactions, convert) = transactions.into();
