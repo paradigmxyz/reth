@@ -3,9 +3,11 @@ use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
 use itertools::Itertools;
+use metrics::Label;
 use parking_lot::Mutex;
 use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
+    database_metrics::DatabaseMetrics,
     models::{
         sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
         StorageSettings,
@@ -526,6 +528,42 @@ impl Drop for RocksDBProviderInner {
 impl Clone for RocksDBProvider {
     fn clone(&self) -> Self {
         Self(self.0.clone())
+    }
+}
+
+impl DatabaseMetrics for RocksDBProvider {
+    fn gauge_metrics(&self) -> Vec<(&'static str, f64, Vec<Label>)> {
+        let mut metrics = Vec::new();
+
+        for stat in self.table_stats() {
+            metrics.push((
+                "rocksdb.table_size",
+                stat.estimated_size_bytes as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.table_entries",
+                stat.estimated_num_keys as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.pending_compaction_bytes",
+                stat.pending_compaction_bytes as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.sst_size",
+                stat.sst_size_bytes as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.memtable_size",
+                stat.memtable_size_bytes as f64,
+                vec![Label::new("table", stat.name)],
+            ));
+        }
+
+        metrics
     }
 }
 
