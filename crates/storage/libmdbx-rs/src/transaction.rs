@@ -223,7 +223,11 @@ where
         let mut flags: c_uint = 0;
         unsafe {
             self.txn_execute(|txn| {
-                mdbx_result(ffi::mdbx_dbi_flags_ex(txn, dbi, &mut flags, ptr::null_mut()))
+                // `mdbx_dbi_flags_ex` requires `status` to be a non-NULL ptr, otherwise it will
+                // return an EINVAL and panic below, so we just provide a placeholder variable
+                // which we discard immediately.
+                let mut _status: c_uint = 0;
+                mdbx_result(ffi::mdbx_dbi_flags_ex(txn, dbi, &mut flags, &mut _status))
             })??;
         }
 
