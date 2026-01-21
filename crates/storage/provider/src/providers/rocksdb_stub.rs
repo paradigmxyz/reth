@@ -5,8 +5,9 @@
 //! All method calls are cfg-guarded in the calling code, so only type definitions are needed here.
 
 use alloy_primitives::BlockNumber;
+use metrics::Label;
 use parking_lot::Mutex;
-use reth_db_api::models::StorageSettings;
+use reth_db_api::{database_metrics::DatabaseMetrics, models::StorageSettings};
 use reth_prune_types::PruneMode;
 use reth_storage_errors::{db::LogLevel, provider::ProviderResult};
 use std::{path::Path, sync::Arc};
@@ -75,6 +76,12 @@ impl RocksDBProvider {
     /// Returns an empty vector since there is no `RocksDB` when the feature is disabled.
     pub const fn table_stats(&self) -> Vec<RocksDBTableStats> {
         Vec::new()
+    }
+}
+
+impl DatabaseMetrics for RocksDBProvider {
+    fn gauge_metrics(&self) -> Vec<(&'static str, f64, Vec<Label>)> {
+        vec![]
     }
 }
 

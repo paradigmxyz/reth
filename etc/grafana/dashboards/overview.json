@@ -810,7 +810,20 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\"}) + sum(reth_db_freelist{$instance_label=\"$instance\"} * reth_db_page_size{$instance_label=\"$instance\"}) + sum(reth_static_files_segment_size{$instance_label=\"$instance\"})",
+          "expr": "sum(reth_rocksdb_table_size{$instance_label=\"$instance\"}) or vector(0)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "RocksDB",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\"}) + sum(reth_db_freelist{$instance_label=\"$instance\"} * reth_db_page_size{$instance_label=\"$instance\"}) + sum(reth_static_files_segment_size{$instance_label=\"$instance\"}) + (sum(reth_rocksdb_table_size{$instance_label=\"$instance\"}) or vector(0))",
           "hide": false,
           "instant": false,
           "legendFormat": "Total",
@@ -6070,6 +6083,583 @@
         "x": 0,
         "y": 185
       },
+      "id": 1008,
+      "panels": [],
+      "repeat": "instance",
+      "title": "RocksDB",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Size of each RocksDB table (SST files + memtables)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "mappings": [],
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 186
+      },
+      "id": 1009,
+      "options": {
+        "displayLabels": ["name"],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": ["value"]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "sort": "desc",
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_rocksdb_table_size{$instance_label=\"$instance\"}",
+          "legendFormat": "{{table}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "RocksDB Tables Size",
+      "type": "piechart"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "displayName",
+                "value": "Entries"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "table"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Table"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom.viz",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "instance"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom.viz",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "job"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom.viz",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "__name__"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom.viz",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 186
+      },
+      "id": 1010,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "reth_rocksdb_table_entries{$instance_label=\"$instance\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "RocksDB Entries per Table",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1073741824
+              },
+              {
+                "color": "red",
+                "value": 10737418240
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "displayName",
+                "value": "Pending Compaction"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "table"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Table"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom.viz",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "instance"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom.viz",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "job"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom.viz",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "__name__"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom.viz",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 186
+      },
+      "id": 1011,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "reth_rocksdb_pending_compaction_bytes{$instance_label=\"$instance\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "RocksDB Pending Compaction",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Size of RocksDB tables over time",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 4,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 194
+      },
+      "id": 1012,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (job) ( reth_rocksdb_table_size{$instance_label=\"$instance\"} )",
+          "legendFormat": "Size ({{job}})",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "RocksDB Growth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Bytes pending compaction over time (reclaimable space)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 194
+      },
+      "id": 1013,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_rocksdb_pending_compaction_bytes{$instance_label=\"$instance\"}",
+          "legendFormat": "{{table}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "RocksDB Pending Compaction Over Time",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 202
+      },
       "id": 203,
       "panels": [],
       "title": "Static Files",
@@ -6102,7 +6692,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 186
+        "y": 203
       },
       "id": 202,
       "options": {
@@ -6262,7 +6852,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 186
+        "y": 203
       },
       "id": 204,
       "options": {
@@ -6407,7 +6997,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 186
+        "y": 203
       },
       "id": 205,
       "options": {
@@ -6501,7 +7091,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 194
+        "y": 211
       },
       "id": 206,
       "options": {
@@ -6601,7 +7191,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 194
+        "y": 211
       },
       "id": 207,
       "options": {
@@ -6640,7 +7230,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 202
+        "y": 219
       },
       "id": 79,
       "panels": [],
@@ -6714,7 +7304,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 203
+        "y": 220
       },
       "id": 74,
       "options": {
@@ -6814,7 +7404,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 203
+        "y": 220
       },
       "id": 80,
       "options": {
@@ -6914,7 +7504,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 211
+        "y": 228
       },
       "id": 1002,
       "options": {
@@ -7014,7 +7604,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 211
+        "y": 228
       },
       "id": 190,
       "options": {
@@ -7054,7 +7644,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 219
+        "y": 236
       },
       "id": 108,
       "panels": [],
@@ -7153,7 +7743,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 220
+        "y": 237
       },
       "id": 109,
       "options": {
@@ -7216,7 +7806,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 220
+        "y": 237
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -7347,7 +7937,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 228
+        "y": 245
       },
       "id": 120,
       "options": {
@@ -7406,7 +7996,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 228
+        "y": 245
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -7573,7 +8163,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 236
+        "y": 253
       },
       "id": 198,
       "options": {
@@ -7796,7 +8386,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 236
+        "y": 253
       },
       "id": 246,
       "options": {
@@ -7836,7 +8426,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 244
+        "y": 261
       },
       "id": 24,
       "panels": [],
@@ -7934,7 +8524,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 245
+        "y": 262
       },
       "id": 26,
       "options": {
@@ -8071,7 +8661,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 245
+        "y": 262
       },
       "id": 33,
       "options": {
@@ -8194,7 +8784,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 253
+        "y": 270
       },
       "id": 36,
       "options": {
@@ -8245,7 +8835,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 261
+        "y": 278
       },
       "id": 32,
       "panels": [],
@@ -8353,7 +8943,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 262
+        "y": 279
       },
       "id": 30,
       "options": {
@@ -8522,7 +9112,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 262
+        "y": 279
       },
       "id": 28,
       "options": {
@@ -8645,7 +9235,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 270
+        "y": 287
       },
       "id": 35,
       "options": {
@@ -8774,7 +9364,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 270
+        "y": 287
       },
       "id": 73,
       "options": {
@@ -8904,7 +9494,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 278
+        "y": 295
       },
       "id": 102,
       "options": {
@@ -8969,7 +9559,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 286
+        "y": 303
       },
       "id": 226,
       "panels": [],
@@ -9068,7 +9658,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 287
+        "y": 304
       },
       "id": 225,
       "options": {
@@ -9199,7 +9789,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 287
+        "y": 304
       },
       "id": 227,
       "options": {
@@ -9330,7 +9920,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 295
+        "y": 312
       },
       "id": 235,
       "options": {
@@ -9461,7 +10051,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 295
+        "y": 312
       },
       "id": 234,
       "options": {
@@ -9506,7 +10096,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 303
+        "y": 320
       },
       "id": 68,
       "panels": [],
@@ -9580,7 +10170,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 304
+        "y": 321
       },
       "id": 60,
       "options": {
@@ -9679,7 +10269,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 304
+        "y": 321
       },
       "id": 62,
       "options": {
@@ -9778,7 +10368,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 312
+        "y": 329
       },
       "id": 64,
       "options": {
@@ -9817,7 +10407,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 320
+        "y": 337
       },
       "id": 105,
       "panels": [],
@@ -9891,7 +10481,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 321
+        "y": 338
       },
       "id": 106,
       "options": {
@@ -9992,7 +10582,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 321
+        "y": 338
       },
       "id": 107,
       "options": {
@@ -10092,7 +10682,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 329
+        "y": 346
       },
       "id": 217,
       "options": {
@@ -10133,7 +10723,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 337
+        "y": 354
       },
       "id": 97,
       "panels": [],
@@ -10219,7 +10809,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 338
+        "y": 355
       },
       "id": 98,
       "options": {
@@ -10385,7 +10975,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 338
+        "y": 355
       },
       "id": 101,
       "options": {
@@ -10486,7 +11076,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 346
+        "y": 363
       },
       "id": 99,
       "options": {
@@ -10587,7 +11177,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 346
+        "y": 363
       },
       "id": 100,
       "options": {
@@ -10688,7 +11278,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 354
+        "y": 371
       },
       "id": 248,
       "options": {
@@ -10803,7 +11393,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 354
+        "y": 371
       },
       "id": 247,
       "options": {
@@ -10936,7 +11526,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 362
+        "y": 379
       },
       "id": 1007,
       "options": {
@@ -10995,7 +11585,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 370
+        "y": 387
       },
       "id": 236,
       "panels": [
@@ -11062,7 +11652,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 370
+            "y": 387
           },
           "id": 237,
           "options": {
@@ -11158,7 +11748,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 370
+            "y": 387
           },
           "id": 238,
           "options": {
@@ -11254,7 +11844,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 378
+            "y": 395
           },
           "id": 239,
           "options": {
@@ -11362,7 +11952,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 378
+            "y": 395
           },
           "id": 219,
           "options": {
@@ -11427,7 +12017,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 386
+            "y": 403
           },
           "id": 220,
           "options": {
@@ -11473,7 +12063,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 371
+        "y": 388
       },
       "id": 241,
       "panels": [
@@ -11541,7 +12131,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 371
+            "y": 388
           },
           "id": 243,
           "options": {
@@ -11652,7 +12242,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 371
+            "y": 388
           },
           "id": 244,
           "options": {
@@ -11764,7 +12354,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 379
+            "y": 396
           },
           "id": 245,
           "options": {
