@@ -358,7 +358,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Returns the effective storage settings derived from static-file and `RocksDB` CLI args.
-    pub fn storage_settings(&self) -> StorageSettings {
+    pub const fn storage_settings(&self) -> StorageSettings {
         let tx_hash = self.rocksdb.all || self.rocksdb.tx_hash_with_default();
         let storages_history = self.rocksdb.all || self.rocksdb.storages_history_with_default();
         let account_history = self.rocksdb.all || self.rocksdb.account_history_with_default();
