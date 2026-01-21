@@ -15,6 +15,7 @@ pub use static_file::{
 
 mod state;
 pub use state::{
+    bloom::BloomStateProvider,
     historical::{
         compute_history_rank, history_info, needs_prev_shard_check, HistoricalStateProvider,
         HistoricalStateProviderRef, HistoryInfo, LowestAvailableBlocks,

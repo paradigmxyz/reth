@@ -36,12 +36,13 @@ use reth_primitives_traits::{
     SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader,
+    providers::{BloomStateProvider, OverlayStateProviderFactory},
+    BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
+    StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
 };
 use reth_revm::db::State;
+use reth_storage_bloom::StorageBloomFilter;
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
@@ -134,6 +135,8 @@ where
     validator: V,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
+    /// Storage bloom filter for optimizing empty slot reads.
+    storage_bloom: Arc<StorageBloomFilter>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -173,6 +176,10 @@ where
             &config,
             precompile_cache_map.clone(),
         );
+
+        let storage_bloom =
+            Arc::new(StorageBloomFilter::new(reth_storage_bloom::StorageBloomConfig::default()));
+
         Self {
             provider,
             consensus,
@@ -185,7 +192,13 @@ where
             metrics: EngineApiMetrics::default(),
             validator,
             changeset_cache,
+            storage_bloom,
         }
+    }
+
+    /// Returns a reference to the storage bloom filter.
+    pub const fn storage_bloom(&self) -> &Arc<StorageBloomFilter> {
+        &self.storage_bloom
     }
 
     /// Converts a [`BlockOrPayload`] to a recovered block.
@@ -454,6 +467,10 @@ where
         if self.config.state_provider_metrics() {
             state_provider = Box::new(InstrumentedStateProvider::new(state_provider, "engine"));
         }
+
+        // Wrap state provider with bloom filter to short-circuit empty slot reads.
+        let state_provider =
+            Box::new(BloomStateProvider::new(state_provider, self.storage_bloom.clone()));
 
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally

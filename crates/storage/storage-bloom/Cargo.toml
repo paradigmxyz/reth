@@ -1,0 +1,32 @@
+[package]
+name = "reth-storage-bloom"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Bloom filter for empty storage slot detection in Reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+alloy-primitives.workspace = true
+reth-metrics.workspace = true
+reth-storage-errors.workspace = true
+
+# bloom filter
+growable-bloom-filter = "2.1"
+
+# misc
+parking_lot.workspace = true
+tracing.workspace = true
+metrics.workspace = true
+
+[dev-dependencies]
+rand.workspace = true
+
+[features]
+default = []
