@@ -38,6 +38,19 @@ use tracing::instrument;
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
 
+/// Statistics for a single `RocksDB` table (column family).
+#[derive(Debug, Clone)]
+pub struct RocksDBTableStats {
+    /// Name of the table/column family.
+    pub name: String,
+    /// Estimated number of keys in the table.
+    pub estimated_num_keys: u64,
+    /// Estimated size of live data in bytes (SST files + memtables).
+    pub estimated_size_bytes: u64,
+    /// Estimated bytes pending compaction (reclaimable space).
+    pub pending_compaction_bytes: u64,
+}
+
 /// Context for `RocksDB` block writes.
 #[derive(Clone)]
 pub(crate) struct RocksDBWriteCtx {
@@ -405,6 +418,69 @@ impl RocksDBProviderInner {
             Self::ReadOnly { db, .. } => RocksDBIterEnum::ReadOnly(db.iterator_cf(cf, mode)),
         }
     }
+
+    /// Returns statistics for all column families in the database.
+    fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        let cf_names = [
+            tables::TransactionHashNumbers::NAME,
+            tables::AccountsHistory::NAME,
+            tables::StoragesHistory::NAME,
+        ];
+
+        let mut stats = Vec::new();
+
+        macro_rules! collect_stats {
+            ($db:expr) => {
+                for cf_name in cf_names {
+                    if let Some(cf) = $db.cf_handle(cf_name) {
+                        let estimated_num_keys = $db
+                            .property_int_value_cf(cf, rocksdb::properties::ESTIMATE_NUM_KEYS)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        // SST files size (on-disk) + memtable size (in-memory)
+                        let sst_size = $db
+                            .property_int_value_cf(cf, rocksdb::properties::LIVE_SST_FILES_SIZE)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        let memtable_size = $db
+                            .property_int_value_cf(cf, rocksdb::properties::SIZE_ALL_MEM_TABLES)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        let estimated_size_bytes = sst_size + memtable_size;
+
+                        let pending_compaction_bytes = $db
+                            .property_int_value_cf(
+                                cf,
+                                rocksdb::properties::ESTIMATE_PENDING_COMPACTION_BYTES,
+                            )
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        stats.push(RocksDBTableStats {
+                            name: cf_name.to_string(),
+                            estimated_num_keys,
+                            estimated_size_bytes,
+                            pending_compaction_bytes,
+                        });
+                    }
+                }
+            };
+        }
+
+        match self {
+            Self::ReadWrite { db, .. } => collect_stats!(db),
+            Self::ReadOnly { db, .. } => collect_stats!(db),
+        }
+
+        stats
+    }
 }
 
 impl fmt::Debug for RocksDBProviderInner {
@@ -664,6 +740,13 @@ impl RocksDBProvider {
         let cf = self.get_cf_handle::<T>()?;
         let iter = self.0.iterator_cf(cf, IteratorMode::Start);
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
+    /// Returns statistics for all column families in the database.
+    ///
+    /// Returns a vector of (`table_name`, `estimated_keys`, `estimated_size_bytes`) tuples.
+    pub fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        self.0.table_stats()
     }
 
     /// Creates a raw iterator over all entries in the specified table.
