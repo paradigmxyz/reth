@@ -286,8 +286,13 @@ mod tests {
 
     #[test]
     fn etl_hashes() {
-        let mut entries: Vec<_> =
-            (0..10_000).map(|id| (TxHash::random(), id as TxNumber)).collect();
+        let mut entries: Vec<_> = (0..10_000)
+            .map(|id| {
+                let mut bytes = [0u8; 32];
+                bytes[24..].copy_from_slice(&(id as u64).to_be_bytes());
+                (TxHash::new(bytes), id as TxNumber)
+            })
+            .collect();
 
         let mut collector = Collector::new(1024, None);
         assert!(collector.dir.is_none());
