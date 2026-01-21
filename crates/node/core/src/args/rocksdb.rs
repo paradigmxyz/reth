@@ -171,17 +171,17 @@ mod tests {
         // When edge feature is enabled, tx_hash should default to true
         // When edge feature is disabled, it should default to false
         let args = RocksDbArgs::default();
-        
+
         #[cfg(feature = "edge")]
         {
             assert!(args.tx_hash_with_default());
         }
-        
+
         #[cfg(not(feature = "edge"))]
         {
             assert!(!args.tx_hash_with_default());
         }
-        
+
         // storages_history and account_history always default to false
         assert!(!args.storages_history_with_default());
         assert!(!args.account_history_with_default());
@@ -195,18 +195,18 @@ mod tests {
             storages_history: Some(true),
             account_history: Some(true),
         };
-        
+
         assert!(args.tx_hash_with_default());
         assert!(args.storages_history_with_default());
         assert!(args.account_history_with_default());
-        
+
         let args = RocksDbArgs {
             all: false,
             tx_hash: Some(false),
             storages_history: Some(false),
             account_history: Some(false),
         };
-        
+
         assert!(!args.tx_hash_with_default());
         assert!(!args.storages_history_with_default());
         assert!(!args.account_history_with_default());
