@@ -11,7 +11,6 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
-use reth_db_api::database_metrics::DatabaseMetrics;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -19,19 +18,19 @@ use reth_downloaders::{
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
 use reth_network_p2p::HeadersClient;
+use reth_node_builder::common::metrics_hooks;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
     version::version_metadata,
 };
 use reth_node_metrics::{
     chain::ChainSpecInfo,
-    hooks::Hooks,
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
 use reth_provider::{
     ChainSpecProvider, DBProvider, DatabaseProviderFactory, StageCheckpointReader,
-    StageCheckpointWriter, StaticFileProviderFactory,
+    StageCheckpointWriter,
 };
 use reth_stages::{
     stages::{
@@ -139,20 +138,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 },
                 ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
                 ctx.task_executor,
-                Hooks::builder()
-                    .with_hook({
-                        let db = provider_factory.db_ref().clone();
-                        move || db.report_metrics()
-                    })
-                    .with_hook({
-                        let sfp = provider_factory.static_file_provider();
-                        move || {
-                            if let Err(error) = sfp.report_metrics() {
-                                error!(%error, "Failed to report metrics from static file provider");
-                            }
-                        }
-                    })
-                    .build(),
+                metrics_hooks(&provider_factory),
                 data_dir.pprof_dumps(),
             );
 

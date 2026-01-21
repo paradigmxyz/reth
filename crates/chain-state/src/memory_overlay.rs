@@ -163,7 +163,7 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
         let mut merged_state = PlainPostState::default();
 
         for block in self.in_memory.iter() {
-            let bundle_state = &block.execution_output.bundle;
+            let bundle_state = &block.execution_output.state;
             for (address, bundle_account) in bundle_state.state() {
                 let account = if bundle_account.was_destroyed() || bundle_account.info.is_none() {
                     None

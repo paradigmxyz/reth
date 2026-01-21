@@ -1,6 +1,7 @@
 mod manager;
 pub use manager::{
-    StaticFileAccess, StaticFileProvider, StaticFileProviderBuilder, StaticFileWriter,
+    StaticFileAccess, StaticFileProvider, StaticFileProviderBuilder, StaticFileWriteCtx,
+    StaticFileWriter,
 };
 
 mod jar;
@@ -43,6 +44,11 @@ impl LoadedJar {
 
     const fn segment(&self) -> StaticFileSegment {
         self.jar.user_header().segment()
+    }
+
+    /// Returns the total size of the data and offsets files (from the in-memory mmap).
+    fn size(&self) -> usize {
+        self.mmap_handle.size() + self.mmap_handle.offsets_size()
     }
 }
 

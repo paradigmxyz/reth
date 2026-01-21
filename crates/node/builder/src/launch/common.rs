@@ -82,9 +82,13 @@ use reth_stages::{
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{debug, error, info, warn};
+use reth_tracing::{
+    throttle,
+    tracing::{debug, error, info, warn},
+};
 use reth_transaction_pool::TransactionPool;
-use std::{sync::Arc, thread::available_parallelism};
+use reth_trie_db::ChangesetCache;
+use std::{sync::Arc, thread::available_parallelism, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
@@ -170,7 +174,8 @@ impl LaunchContext {
         toml_config.peers.trusted_nodes_only = config.network.trusted_only;
 
         // Merge static file CLI arguments with config file, giving priority to CLI
-        toml_config.static_files = config.static_files.merge_with_config(toml_config.static_files);
+        toml_config.static_files =
+            config.static_files.merge_with_config(toml_config.static_files, config.pruning.minimal);
 
         Ok(toml_config)
     }
@@ -469,7 +474,10 @@ where
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
-    pub async fn create_provider_factory<N, Evm>(&self) -> eyre::Result<ProviderFactory<N>>
+    pub async fn create_provider_factory<N, Evm>(
+        &self,
+        changeset_cache: ChangesetCache,
+    ) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
@@ -482,7 +490,7 @@ where
         let static_file_provider =
             StaticFileProviderBuilder::read_write(self.data_dir().static_files())
                 .with_metrics()
-                .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
+                .with_blocks_per_file_for_segments(&static_files_config.as_blocks_per_file_map())
                 .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
                 .build()?;
 
@@ -503,7 +511,8 @@ where
             rocksdb_provider,
             triedb_provider,
         )?
-        .with_prune_modes(self.prune_modes());
+        .with_prune_modes(self.prune_modes())
+        .with_changeset_cache(changeset_cache);
 
         // Keep MDBX, static files, and RocksDB aligned. If any check fails, unwind to the
         // earliest consistent block.
@@ -596,12 +605,13 @@ where
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
     pub async fn with_provider_factory<N, Evm>(
         self,
+        changeset_cache: ChangesetCache,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let factory = self.create_provider_factory::<N, Evm>().await?;
+        let factory = self.create_provider_factory::<N, Evm>(changeset_cache).await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
             attachment: self.attachment.map_right(|_| factory),
@@ -657,23 +667,13 @@ where
                 },
                 ChainSpecInfo { name: self.chain_id().to_string() },
                 self.task_executor().clone(),
-                Hooks::builder()
-                    .with_hook({
-                        let db = self.database().clone();
-                        move || db.report_metrics()
-                    })
-                    .with_hook({
-                        let sfp = self.static_file_provider();
-                        move || {
-                            if let Err(error) = sfp.report_metrics() {
-                                error!(%error, "Failed to report metrics for the static file provider");
-                            }
-                        }
-                    })
-                    .build(),
+                metrics_hooks(self.provider_factory()),
                 self.data_dir().pprof_dumps(),
             )
-            .with_push_gateway(self.node_config().metrics.push_gateway_url.clone(), self.node_config().metrics.push_gateway_interval);
+            .with_push_gateway(
+                self.node_config().metrics.push_gateway_url.clone(),
+                self.node_config().metrics.push_gateway_interval,
+            );
 
             MetricServer::new(config).serve().await?;
         }
@@ -959,7 +959,7 @@ where
                 error!(
                     "Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this. See also https://reth.rs/run/sync-op-mainnet.html?minimal-bootstrap-recommended"
                 );
-                return Err(ProviderError::BestBlockNotFound)
+                return Err(ProviderError::BestBlockNotFound);
             }
         }
 
@@ -1273,6 +1273,26 @@ where
     head: Head,
 }
 
+/// Returns the metrics hooks for the node.
+pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) -> Hooks {
+    Hooks::builder()
+        .with_hook({
+            let db = provider_factory.db_ref().clone();
+            move || throttle!(Duration::from_secs(5 * 60), || db.report_metrics())
+        })
+        .with_hook({
+            let sfp = provider_factory.static_file_provider();
+            move || {
+                throttle!(Duration::from_secs(5 * 60), || {
+                    if let Err(error) = sfp.report_metrics() {
+                        error!(%error, "Failed to report metrics from static file provider");
+                    }
+                })
+            }
+        })
+        .build()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{LaunchContext, NodeConfig};
@@ -1295,6 +1315,7 @@ mod tests {
             let node_config = NodeConfig {
                 pruning: PruningArgs {
                     full: true,
+                    minimal: false,
                     block_interval: None,
                     sender_recovery_full: false,
                     sender_recovery_distance: None,

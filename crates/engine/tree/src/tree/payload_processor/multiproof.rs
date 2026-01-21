@@ -20,6 +20,7 @@ use reth_trie_parallel::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
     },
 };
+use revm_primitives::map::{hash_map, B256Map};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
@@ -140,22 +141,27 @@ impl ProofSequencer {
     /// Adds a proof with the corresponding state update and returns all sequential proofs and state
     /// updates if we have a continuous sequence
     fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
-        if sequence >= self.next_to_deliver {
+        // Optimization: fast path for in-order delivery to avoid BTreeMap overhead.
+        // If this is the expected sequence, return it immediately without buffering.
+        if sequence == self.next_to_deliver {
+            let mut consecutive_proofs = Vec::with_capacity(1);
+            consecutive_proofs.push(update);
+            self.next_to_deliver += 1;
+
+            // Check if we have subsequent proofs in the pending buffer
+            while let Some(pending) = self.pending_proofs.remove(&self.next_to_deliver) {
+                consecutive_proofs.push(pending);
+                self.next_to_deliver += 1;
+            }
+
+            return consecutive_proofs;
+        }
+
+        if sequence > self.next_to_deliver {
             self.pending_proofs.insert(sequence, update);
         }
 
-        let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
-        let mut current_sequence = self.next_to_deliver;
-
-        // keep collecting proofs and state updates as long as we have consecutive sequence numbers
-        while let Some(pending) = self.pending_proofs.remove(&current_sequence) {
-            consecutive_proofs.push(pending);
-            current_sequence += 1;
-        }
-
-        self.next_to_deliver += consecutive_proofs.len() as u64;
-
-        consecutive_proofs
+        Vec::new()
     }
 
     /// Returns true if we still have pending proofs
@@ -609,7 +615,19 @@ impl MultiProofTask {
         self.multi_added_removed_keys.touch_accounts(targets.keys().copied());
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
+            account: self.multi_added_removed_keys.account.clone(),
+            storages: targets
+                .keys()
+                .filter_map(|account| {
+                    self.multi_added_removed_keys
+                        .storages
+                        .get(account)
+                        .cloned()
+                        .map(|keys| (*account, keys))
+                })
+                .collect(),
+        });
 
         self.metrics.prefetch_proof_targets_accounts_histogram.record(targets.len() as f64);
         self.metrics
@@ -705,7 +723,33 @@ impl MultiProofTask {
         }
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
+            account: self.multi_added_removed_keys.account.clone(),
+            storages: {
+                let mut storages = B256Map::with_capacity_and_hasher(
+                    not_fetched_state_update.storages.len(),
+                    Default::default(),
+                );
+
+                for account in not_fetched_state_update
+                    .storages
+                    .keys()
+                    .chain(not_fetched_state_update.accounts.keys())
+                {
+                    if let hash_map::Entry::Vacant(entry) = storages.entry(*account) {
+                        entry.insert(
+                            self.multi_added_removed_keys
+                                .storages
+                                .get(account)
+                                .cloned()
+                                .unwrap_or_default(),
+                        );
+                    }
+                }
+
+                storages
+            },
+        });
 
         let chunking_len = not_fetched_state_update.chunking_length();
         let mut spawned_proof_targets = MultiProofTargets::default();
@@ -1279,9 +1323,10 @@ mod tests {
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
-        PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TrieReader,
+        PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
     };
     use reth_trie::MultiProof;
+    use reth_trie_db::ChangesetCache;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
     use std::sync::{Arc, OnceLock};
@@ -1302,7 +1347,6 @@ mod tests {
     where
         F: DatabaseProviderFactory<
                 Provider: BlockReader
-                              + TrieReader
                               + StageCheckpointReader
                               + PruneCheckpointReader
                               + ChangeSetReader
@@ -1312,7 +1356,8 @@ mod tests {
             + 'static,
     {
         let rt_handle = get_test_runtime_handle();
-        let overlay_factory = OverlayStateProviderFactory::new(factory);
+        let changeset_cache = ChangesetCache::new();
+        let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
         let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
@@ -1324,7 +1369,7 @@ mod tests {
     fn create_cached_provider<F>(factory: F) -> CachedStateProvider<StateProviderBox>
     where
         F: DatabaseProviderFactory<
-                Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+                Provider: BlockReader + StageCheckpointReader + PruneCheckpointReader,
             > + Clone
             + Send
             + 'static,
@@ -1771,7 +1816,9 @@ mod tests {
                     nonce: 1,
                     code_hash: Default::default(),
                     code: Default::default(),
+                    account_id: None,
                 },
+                original_info: Box::new(revm_state::AccountInfo::default()),
                 transaction_id: Default::default(),
                 storage: Default::default(),
                 status: revm_state::AccountStatus::Touched,
@@ -1788,7 +1835,9 @@ mod tests {
                     nonce: 2,
                     code_hash: Default::default(),
                     code: Default::default(),
+                    account_id: None,
                 },
+                original_info: Box::new(revm_state::AccountInfo::default()),
                 transaction_id: Default::default(),
                 storage: Default::default(),
                 status: revm_state::AccountStatus::Touched,
@@ -1890,7 +1939,9 @@ mod tests {
                     nonce: 1,
                     code_hash: Default::default(),
                     code: Default::default(),
+                    account_id: None,
                 },
+                original_info: Box::new(revm_state::AccountInfo::default()),
                 transaction_id: Default::default(),
                 storage: Default::default(),
                 status: revm_state::AccountStatus::Touched,

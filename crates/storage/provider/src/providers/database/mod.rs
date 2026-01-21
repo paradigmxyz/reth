@@ -33,6 +33,7 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
+use reth_trie_db::ChangesetCache;
 use revm_database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -43,7 +44,7 @@ use std::{
 use tracing::trace;
 
 mod provider;
-pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, SaveBlocksMode};
 
 use super::ProviderNodeTypes;
 use reth_trie::KeccakKeyHasher;
@@ -77,6 +78,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     rocksdb_provider: RocksDBProvider,
     /// `TrieDB` provider
     triedb_provider: TrieDBProvider,
+    /// Changeset cache for trie unwinding
+    changeset_cache: ChangesetCache,
 }
 
 impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
@@ -109,6 +112,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Arc::new(RwLock::new(legacy_settings)),
             rocksdb_provider.clone(),
             triedb_provider.clone(),
+            ChangesetCache::new(),
         )
         .storage_settings()?
         .unwrap_or(legacy_settings);
@@ -122,6 +126,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             storage_settings: Arc::new(RwLock::new(storage_settings)),
             rocksdb_provider,
             triedb_provider,
+            changeset_cache: ChangesetCache::new(),
         })
     }
 }
@@ -130,6 +135,12 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// Sets the pruning configuration for an existing [`ProviderFactory`].
     pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
         self.prune_modes = prune_modes;
+        self
+    }
+
+    /// Sets the changeset cache for an existing [`ProviderFactory`].
+    pub fn with_changeset_cache(mut self, changeset_cache: ChangesetCache) -> Self {
+        self.changeset_cache = changeset_cache;
         self
     }
 
@@ -212,6 +223,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.triedb_provider.clone(),
+            self.changeset_cache.clone(),
         ))
     }
 
@@ -230,6 +242,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.triedb_provider.clone(),
+            self.changeset_cache.clone(),
         )))
     }
 
@@ -650,6 +663,7 @@ where
             storage_settings,
             rocksdb_provider,
             triedb_provider,
+            changeset_cache,
         } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
@@ -660,6 +674,7 @@ where
             .field("storage_settings", &*storage_settings.read())
             .field("rocksdb_provider", &rocksdb_provider)
             .field("triedb_provider", &triedb_provider)
+            .field("changeset_cache", &changeset_cache)
             .finish()
     }
 }
@@ -675,6 +690,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             storage_settings: self.storage_settings.clone(),
             rocksdb_provider: self.rocksdb_provider.clone(),
             triedb_provider: self.triedb_provider.clone(),
+            changeset_cache: self.changeset_cache.clone(),
         }
     }
 }

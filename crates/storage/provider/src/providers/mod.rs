@@ -10,14 +10,14 @@ pub use database::*;
 mod static_file;
 pub use static_file::{
     StaticFileAccess, StaticFileJarProvider, StaticFileProvider, StaticFileProviderBuilder,
-    StaticFileProviderRW, StaticFileProviderRWRefMut, StaticFileWriter,
+    StaticFileProviderRW, StaticFileProviderRWRefMut, StaticFileWriteCtx, StaticFileWriter,
 };
 
 mod state;
 pub use state::{
     historical::{
-        needs_prev_shard_check, HistoricalStateProvider, HistoricalStateProviderRef, HistoryInfo,
-        LowestAvailableBlocks,
+        compute_history_rank, history_info, needs_prev_shard_check, HistoricalStateProvider,
+        HistoricalStateProviderRef, HistoryInfo, LowestAvailableBlocks,
     },
     latest::{LatestStateProvider, LatestStateProviderRef},
     overlay::{OverlayStateProvider, OverlayStateProviderFactory},
@@ -37,11 +37,12 @@ pub use consistent::ConsistentProvider;
 #[cfg_attr(all(unix, feature = "rocksdb"), path = "rocksdb/mod.rs")]
 #[cfg_attr(not(all(unix, feature = "rocksdb")), path = "rocksdb_stub.rs")]
 pub(crate) mod rocksdb;
+
+pub use rocksdb::{RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksDBRawIter, RocksTx};
+
 #[cfg_attr(feature = "triedb", path = "triedb/mod.rs")]
 #[cfg_attr(not(feature = "triedb"), path = "triedb_stub.rs")]
 pub(crate) mod triedb;
-
-pub use rocksdb::{RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksTx};
 #[cfg(feature = "triedb")]
 pub use triedb::state_root_with_updates_triedb;
 pub use triedb::{TrieDBBatch, TrieDBBuilder, TrieDBProvider, TrieDBTx};

@@ -37,6 +37,7 @@ tracing.workspace = true
 
 [features]
 default = ["std"]
+edge = ["reth-db-api/edge"]
 std = [
     "reth-chainspec/std",
     "alloy-consensus/std",

@@ -31,8 +31,8 @@ reth-payload-validator.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
-revm.workspace = true
 alloy-rpc-types-engine.workspace = true
+revm.workspace = true
 
 # alloy
 alloy-eips.workspace = true

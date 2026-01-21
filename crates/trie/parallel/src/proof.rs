@@ -115,8 +115,11 @@ impl ParallelProof {
         target_slots: B256Set,
     ) -> Result<DecodedStorageMultiProof, ParallelStateRootError> {
         let total_targets = target_slots.len();
-        let prefix_set = PrefixSetMut::from(target_slots.iter().map(Nibbles::unpack));
-        let prefix_set = prefix_set.freeze();
+        let prefix_set = if self.v2_proofs_enabled {
+            PrefixSet::default()
+        } else {
+            PrefixSetMut::from(target_slots.iter().map(Nibbles::unpack)).freeze()
+        };
 
         trace!(
             target: "trie::parallel_proof",
@@ -319,7 +322,9 @@ mod tests {
 
         let rt = Runtime::new().unwrap();
 
-        let factory = reth_provider::providers::OverlayStateProviderFactory::new(factory);
+        let changeset_cache = reth_trie_db::ChangesetCache::new();
+        let factory =
+            reth_provider::providers::OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(factory);
         let proof_worker_handle =
             ProofWorkerHandle::new(rt.handle().clone(), task_ctx, 1, 1, false);

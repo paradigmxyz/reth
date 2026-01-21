@@ -28,10 +28,10 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
     TxEnvFor,
 };
-use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockReader, DatabaseProviderROFactory, StateProvider, StateProviderFactory, StateReader,
+    BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProvider,
+    StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
@@ -61,6 +61,7 @@ mod configured_sparse_trie;
 pub mod executor;
 pub mod multiproof;
 pub mod prewarm;
+pub mod receipt_root_task;
 pub mod sparse_trie;
 
 use configured_sparse_trie::ConfiguredSparseTrie;
@@ -138,6 +139,8 @@ where
     disable_parallel_sparse_trie: bool,
     /// Maximum concurrency for prewarm task.
     prewarm_max_concurrency: usize,
+    /// Whether to disable cache metrics recording.
+    disable_cache_metrics: bool,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -170,6 +173,7 @@ where
             sparse_state_trie: Arc::default(),
             disable_parallel_sparse_trie: config.disable_parallel_sparse_trie(),
             prewarm_max_concurrency: config.prewarm_max_concurrency(),
+            disable_cache_metrics: config.disable_cache_metrics(),
         }
     }
 }
@@ -299,7 +303,7 @@ where
             // Build a state provider for the multiproof task
             let provider = provider_builder.build().expect("failed to build provider");
             let provider = if let Some(saved_cache) = saved_cache {
-                let (cache, metrics) = saved_cache.split();
+                let (cache, metrics, _) = saved_cache.split();
                 Box::new(CachedStateProvider::new(provider, cache, metrics))
                     as Box<dyn StateProvider>
             } else {
@@ -476,6 +480,7 @@ where
             debug!("creating new execution cache on cache miss");
             let cache = ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
             SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
+                .with_disable_cache_metrics(self.disable_cache_metrics)
         }
     }
 
@@ -557,6 +562,7 @@ where
         block_with_parent: BlockWithParent,
         bundle_state: &BundleState,
     ) {
+        let disable_cache_metrics = self.disable_cache_metrics;
         self.execution_cache.update_with_guard(|cached| {
             if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
                 debug!(
@@ -570,7 +576,8 @@ where
             // Take existing cache (if any) or create fresh caches
             let (caches, cache_metrics) = match cached.take() {
                 Some(existing) => {
-                    existing.split()
+                    let (c, m, _) = existing.split();
+                    (c, m)
                 }
                 None => (
                     ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size),
@@ -579,7 +586,8 @@ where
             };
 
             // Insert the block's bundle state into cache
-            let new_cache = SavedCache::new(block_with_parent.block.hash, caches, cache_metrics);
+            let new_cache = SavedCache::new(block_with_parent.block.hash, caches, cache_metrics)
+                .with_disable_cache_metrics(disable_cache_metrics);
             if new_cache.cache().insert_state(bundle_state).is_err() {
                 *cached = None;
                 debug!(target: "engine::caching", "cleared execution cache on update error");
@@ -665,13 +673,15 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Terminates the entire caching task.
     ///
-    /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
+    /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` allows sharing with the main execution
     /// path without cloning the expensive `BundleState`.
+    ///
+    /// Returns a sender for the channel that should be notified on block validation success.
     pub(super) fn terminate_caching(
         &mut self,
-        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
-    ) {
+        execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
+    ) -> Option<mpsc::Sender<()>> {
         self.prewarm_handle.terminate_caching(execution_outcome)
     }
 
@@ -707,15 +717,21 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
 
     /// Terminates the entire pre-warming task.
     ///
-    /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
+    /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive `BundleState`.
+    #[must_use = "sender must be used and notified on block validation success"]
     pub(super) fn terminate_caching(
         &mut self,
-        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
-    ) {
+        execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
+    ) -> Option<mpsc::Sender<()>> {
         if let Some(tx) = self.to_prewarm_task.take() {
-            let event = PrewarmTaskEvent::Terminate { execution_outcome };
+            let (valid_block_tx, valid_block_rx) = mpsc::channel();
+            let event = PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx };
             let _ = tx.send(event);
+
+            Some(valid_block_tx)
+        } else {
+            None
         }
     }
 }
@@ -724,7 +740,10 @@ impl<R> Drop for CacheTaskHandle<R> {
     fn drop(&mut self) {
         // Ensure we always terminate on drop - send None without needing Send + Sync bounds
         if let Some(tx) = self.to_prewarm_task.take() {
-            let _ = tx.send(PrewarmTaskEvent::Terminate { execution_outcome: None });
+            let _ = tx.send(PrewarmTaskEvent::Terminate {
+                execution_outcome: None,
+                valid_block_rx: mpsc::channel().1,
+            });
         }
     }
 }
@@ -886,6 +905,7 @@ mod tests {
     use reth_revm::db::BundleState;
     use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState};
+    use reth_trie_db::ChangesetCache;
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
     use std::sync::Arc;
@@ -1058,7 +1078,9 @@ mod tests {
                         nonce: rng.random::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
+                        account_id: None,
                     },
+                    original_info: Box::new(AccountInfo::default()),
                     storage,
                     status: AccountStatus::Touched,
                     transaction_id: 0,
@@ -1141,7 +1163,7 @@ mod tests {
                 std::convert::identity,
             ),
             StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-            OverlayStateProviderFactory::new(provider_factory),
+            OverlayStateProviderFactory::new(provider_factory, ChangesetCache::new()),
             &TreeConfig::default(),
             None, // No BAL for test
         );
