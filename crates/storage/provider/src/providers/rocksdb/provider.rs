@@ -509,13 +509,13 @@ impl Drop for RocksDBProviderInner {
                 // Flush all memtables if possible. If not, they will be rebuilt from the WAL on
                 // restart
                 if let Err(e) = db.flush_wal(true) {
-                    tracing::warn!(target: "storage::rocksdb", ?e, "Failed to flush WAL on drop");
+                    tracing::warn!(target: "providers::rocksdb", ?e, "Failed to flush WAL on drop");
                 }
                 for cf_name in ROCKSDB_TABLES {
                     if let Some(cf) = db.cf_handle(cf_name) &&
                         let Err(e) = db.flush_cf(&cf)
                     {
-                        tracing::warn!(target: "storage::rocksdb", cf = cf_name, ?e, "Failed to flush CF on drop");
+                        tracing::warn!(target: "providers::rocksdb", cf = cf_name, ?e, "Failed to flush CF on drop");
                     }
                 }
                 db.cancel_all_background_work(true);
@@ -859,6 +859,7 @@ impl RocksDBProvider {
     /// (i.e., removes the minimum block and all higher blocks).
     ///
     /// Returns a `WriteBatchWithTransaction` that can be committed later.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn unwind_account_history_indices(
         &self,
         last_indices: &[(Address, BlockNumber)],
@@ -884,6 +885,7 @@ impl RocksDBProvider {
     }
 
     /// Writes a batch of operations atomically.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
         F: FnOnce(&mut RocksDBBatch<'_>) -> ProviderResult<()>,
@@ -902,6 +904,7 @@ impl RocksDBProvider {
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len(), batch_size = batch.size_in_bytes()))]
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
         self.0.db_rw().write_opt(batch, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
@@ -916,7 +919,7 @@ impl RocksDBProvider {
     /// This handles transaction hash numbers, account history, and storage history based on
     /// the provided storage settings. Each operation runs in parallel with its own batch,
     /// pushing to `ctx.pending_batches` for later commit.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(num_blocks = blocks.len(), first_block = ctx.first_block_number))]
     pub(crate) fn write_blocks_data<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -957,7 +960,7 @@ impl RocksDBProvider {
     }
 
     /// Writes transaction hash to number mappings for the given blocks.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_tx_hash_numbers<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -978,7 +981,7 @@ impl RocksDBProvider {
     }
 
     /// Writes account history indices for the given blocks.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_account_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -1003,7 +1006,7 @@ impl RocksDBProvider {
     }
 
     /// Writes storage history indices for the given blocks.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_storage_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -1088,6 +1091,7 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len(), batch_size = self.inner.size_in_bytes()))]
     pub fn commit(self) -> ProviderResult<()> {
         self.provider.0.db_rw().write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
@@ -1436,6 +1440,7 @@ impl<'db> RocksTx<'db> {
     }
 
     /// Commits the transaction, persisting all changes.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn commit(self) -> ProviderResult<()> {
         self.inner.commit().map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
@@ -1446,6 +1451,7 @@ impl<'db> RocksTx<'db> {
     }
 
     /// Rolls back the transaction, discarding all changes.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn rollback(self) -> ProviderResult<()> {
         self.inner.rollback().map_err(|e| {
             ProviderError::Database(DatabaseError::Other(format!("rollback failed: {e}")))
