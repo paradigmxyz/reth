@@ -86,6 +86,7 @@ pub(crate) struct AsyncAccountValueEncoder {
 impl AsyncAccountValueEncoder {
     /// Initializes a [`Self`] using a `ProofWorkerHandle` which will be used to calculate storage
     /// roots asynchronously.
+    #[expect(dead_code)]
     pub(crate) fn new(
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
@@ -105,6 +106,7 @@ impl AsyncAccountValueEncoder {
     ///
     /// This method panics if any deferred encoders produced by [`Self::deferred_encoder`] have not
     /// been dropped.
+    #[expect(dead_code)]
     pub(crate) fn into_storage_proofs(
         self,
     ) -> Result<B256Map<Vec<ProofTrieNode>>, StateProofError> {
