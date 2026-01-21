@@ -786,18 +786,12 @@ impl<R> Drop for CacheTaskHandle<R> {
 /// - Speculatively loads accounts/storage that might be used in transaction execution
 /// - Prepares data for state root proof computation
 /// - Runs concurrently but must not interfere with cache saves
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct ExecutionCache {
     /// Guarded cloneable cache identified by a block hash.
     inner: Arc<RwLock<Option<SavedCache>>>,
     /// Metrics for cache operations.
     metrics: ExecutionCacheMetrics,
-}
-
-impl Default for ExecutionCache {
-    fn default() -> Self {
-        Self { inner: Arc::new(RwLock::new(None)), metrics: ExecutionCacheMetrics::default() }
-    }
 }
 
 impl ExecutionCache {
