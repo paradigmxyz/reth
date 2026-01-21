@@ -1,4 +1,4 @@
-use super::metrics::{RocksDBMetrics, RocksDBOperation};
+use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
 use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
@@ -43,6 +43,10 @@ pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<
 /// Statistics for a single `RocksDB` table (column family).
 #[derive(Debug, Clone)]
 pub struct RocksDBTableStats {
+    /// Size of SST files on disk in bytes.
+    pub sst_size_bytes: u64,
+    /// Size of memtables in memory in bytes.
+    pub memtable_size_bytes: u64,
     /// Name of the table/column family.
     pub name: String,
     /// Estimated number of keys in the table.
@@ -423,17 +427,11 @@ impl RocksDBProviderInner {
 
     /// Returns statistics for all column families in the database.
     fn table_stats(&self) -> Vec<RocksDBTableStats> {
-        let cf_names = [
-            tables::TransactionHashNumbers::NAME,
-            tables::AccountsHistory::NAME,
-            tables::StoragesHistory::NAME,
-        ];
-
         let mut stats = Vec::new();
 
         macro_rules! collect_stats {
             ($db:expr) => {
-                for cf_name in cf_names {
+                for cf_name in ROCKSDB_TABLES {
                     if let Some(cf) = $db.cf_handle(cf_name) {
                         let estimated_num_keys = $db
                             .property_int_value_cf(cf, rocksdb::properties::ESTIMATE_NUM_KEYS)
@@ -466,6 +464,8 @@ impl RocksDBProviderInner {
                             .unwrap_or(0);
 
                         stats.push(RocksDBTableStats {
+                            sst_size_bytes: sst_size,
+                            memtable_size_bytes: memtable_size,
                             name: cf_name.to_string(),
                             estimated_num_keys,
                             estimated_size_bytes,
@@ -511,8 +511,12 @@ impl Drop for RocksDBProviderInner {
                 if let Err(e) = db.flush_wal(true) {
                     tracing::warn!(target: "storage::rocksdb", ?e, "Failed to flush WAL on drop");
                 }
-                if let Err(e) = db.flush() {
-                    tracing::warn!(target: "storage::rocksdb", ?e, "Failed to flush memtables on drop");
+                for cf_name in ROCKSDB_TABLES {
+                    if let Some(cf) = db.cf_handle(cf_name) &&
+                        let Err(e) = db.flush_cf(&cf)
+                    {
+                        tracing::warn!(target: "storage::rocksdb", cf = cf_name, ?e, "Failed to flush CF on drop");
+                    }
                 }
                 db.cancel_all_background_work(true);
             }

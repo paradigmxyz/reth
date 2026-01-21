@@ -18,6 +18,10 @@ pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<()>>>;
 /// Statistics for a single `RocksDB` table (column family) - stub.
 #[derive(Debug, Clone)]
 pub struct RocksDBTableStats {
+    /// Size of SST files on disk in bytes.
+    pub sst_size_bytes: u64,
+    /// Size of memtables in memory in bytes.
+    pub memtable_size_bytes: u64,
     /// Name of the table/column family.
     pub name: String,
     /// Estimated number of keys in the table.
