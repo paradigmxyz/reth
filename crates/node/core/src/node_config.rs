@@ -358,19 +358,14 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Returns the effective storage settings derived from static-file and `RocksDB` CLI args.
-    pub fn storage_settings(&self) -> StorageSettings {
-        let tx_hash = self.rocksdb.all || self.rocksdb.tx_hash.unwrap_or(false);
-        let storages_history = self.rocksdb.all || self.rocksdb.storages_history.unwrap_or(false);
-        let account_history = self.rocksdb.all || self.rocksdb.account_history.unwrap_or(false);
-
-        StorageSettings {
-            receipts_in_static_files: self.static_files.receipts,
-            transaction_senders_in_static_files: self.static_files.transaction_senders,
-            account_changesets_in_static_files: self.static_files.account_changesets,
-            transaction_hash_numbers_in_rocksdb: tx_hash,
-            storages_history_in_rocksdb: storages_history,
-            account_history_in_rocksdb: account_history,
-        }
+    pub const fn storage_settings(&self) -> StorageSettings {
+        StorageSettings::base()
+            .with_receipts_in_static_files(self.static_files.receipts)
+            .with_transaction_senders_in_static_files(self.static_files.transaction_senders)
+            .with_account_changesets_in_static_files(self.static_files.account_changesets)
+            .with_transaction_hash_numbers_in_rocksdb(self.rocksdb.all || self.rocksdb.tx_hash)
+            .with_storages_history_in_rocksdb(self.rocksdb.all || self.rocksdb.storages_history)
+            .with_account_history_in_rocksdb(self.rocksdb.all || self.rocksdb.account_history)
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if

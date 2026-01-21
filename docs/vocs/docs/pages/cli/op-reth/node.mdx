@@ -904,18 +904,27 @@ RocksDB:
           This enables `RocksDB` for `tx-hash`, `storages-history`, and `account-history` tables. Cannot be combined with individual flags set to false.
 
       --rocksdb.tx-hash <TX_HASH>
-          Route tx hash -> number table to `RocksDB` instead of MDBX
+          Route tx hash -> number table to `RocksDB` instead of MDBX.
 
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+
+          [default: false]
           [possible values: true, false]
 
       --rocksdb.storages-history <STORAGES_HISTORY>
-          Route storages history tables to `RocksDB` instead of MDBX
+          Route storages history tables to `RocksDB` instead of MDBX.
 
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+
+          [default: false]
           [possible values: true, false]
 
       --rocksdb.account-history <ACCOUNT_HISTORY>
-          Route account history tables to `RocksDB` instead of MDBX
+          Route account history tables to `RocksDB` instead of MDBX.
 
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+
+          [default: false]
           [possible values: true, false]
 
 Engine:
