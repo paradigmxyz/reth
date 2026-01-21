@@ -8,6 +8,11 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
+/// Maximum number of blocks that can be pending persistence before backpressure is applied.
+/// When this limit is reached, new block validation will block until persistence catches up.
+/// This prevents OOM when validation is faster than persistence (e.g., during benchmarks).
+pub const DEFAULT_MAX_PENDING_PERSISTENCE_BLOCKS: u64 = 128;
+
 /// Minimum number of workers we allow configuring explicitly.
 pub const MIN_WORKER_COUNT: usize = 32;
 
@@ -139,6 +144,10 @@ pub struct TreeConfig {
     enable_proof_v2: bool,
     /// Whether to disable cache metrics recording (can be expensive with large cached state).
     disable_cache_metrics: bool,
+    /// Maximum number of blocks that can be pending persistence before backpressure is applied.
+    /// When this limit is reached, new block validation will block until persistence catches up.
+    /// This prevents OOM when validation is faster than persistence (e.g., during benchmarks).
+    max_pending_persistence_blocks: u64,
 }
 
 impl Default for TreeConfig {
@@ -169,6 +178,7 @@ impl Default for TreeConfig {
             account_worker_count: default_account_worker_count(),
             enable_proof_v2: false,
             disable_cache_metrics: false,
+            max_pending_persistence_blocks: DEFAULT_MAX_PENDING_PERSISTENCE_BLOCKS,
         }
     }
 }
@@ -202,6 +212,7 @@ impl TreeConfig {
         account_worker_count: usize,
         enable_proof_v2: bool,
         disable_cache_metrics: bool,
+        max_pending_persistence_blocks: u64,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -229,6 +240,7 @@ impl TreeConfig {
             account_worker_count,
             enable_proof_v2,
             disable_cache_metrics,
+            max_pending_persistence_blocks,
         }
     }
 
@@ -530,6 +542,21 @@ impl TreeConfig {
     /// Setter for whether to disable cache metrics recording.
     pub const fn without_cache_metrics(mut self, disable_cache_metrics: bool) -> Self {
         self.disable_cache_metrics = disable_cache_metrics;
+        self
+    }
+
+    /// Returns the maximum number of blocks that can be pending persistence.
+    /// When this limit is reached, validation will block until persistence catches up.
+    pub const fn max_pending_persistence_blocks(&self) -> u64 {
+        self.max_pending_persistence_blocks
+    }
+
+    /// Setter for maximum pending persistence blocks (backpressure limit).
+    pub const fn with_max_pending_persistence_blocks(
+        mut self,
+        max_pending_persistence_blocks: u64,
+    ) -> Self {
+        self.max_pending_persistence_blocks = max_pending_persistence_blocks;
         self
     }
 }

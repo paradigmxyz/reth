@@ -204,6 +204,10 @@ pub(crate) struct EngineMetrics {
     pub(crate) failed_forkchoice_updated_response_deliveries: Counter,
     /// block insert duration
     pub(crate) block_insert_total_duration: Histogram,
+    /// Number of blocks currently pending persistence (for backpressure monitoring)
+    pub(crate) pending_persistence_blocks: Gauge,
+    /// Number of times backpressure was applied (validation blocked waiting for persistence)
+    pub(crate) backpressure_events: Counter,
 }
 
 /// Metrics for engine forkchoiceUpdated responses.

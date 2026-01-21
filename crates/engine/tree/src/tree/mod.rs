@@ -642,6 +642,13 @@ where
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
+        // Apply backpressure if too many blocks are pending persistence.
+        // This blocks until persistence catches up to prevent OOM.
+        if let Err(err) = self.wait_for_persistence_if_needed() {
+            error!(target: "engine::tree", %err, "Backpressure wait failed");
+            return Err(InsertBlockFatalError::Provider(ProviderError::other(err)))
+        }
+
         let block_hash = payload.block_hash();
         let num_hash = payload.num_hash();
         let parent_hash = payload.parent_hash();
@@ -1775,6 +1782,80 @@ where
         let min_block = self.persistence_state.last_persisted_block.number;
         self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
             self.config.persistence_threshold()
+    }
+
+    /// Returns the number of blocks that are pending persistence.
+    /// This is the number of canonical blocks in memory that are above the last persisted block.
+    pub fn pending_persistence_blocks(&self) -> u64 {
+        self.state
+            .tree_state
+            .canonical_block_number()
+            .saturating_sub(self.persistence_state.last_persisted_block.number)
+    }
+
+    /// Returns true if backpressure should be applied due to too many blocks pending persistence.
+    /// When true, validation should wait for persistence to catch up before processing more blocks.
+    pub fn should_apply_backpressure(&self) -> bool {
+        self.pending_persistence_blocks() >= self.config.max_pending_persistence_blocks()
+    }
+
+    /// Waits for persistence to complete if backpressure is needed.
+    ///
+    /// This blocks until the number of pending persistence blocks drops below the limit.
+    /// Used to prevent OOM when validation is faster than persistence.
+    fn wait_for_persistence_if_needed(&mut self) -> Result<(), AdvancePersistenceError> {
+        // Update pending blocks metric
+        self.metrics
+            .engine
+            .pending_persistence_blocks
+            .set(self.pending_persistence_blocks() as f64);
+
+        if !self.should_apply_backpressure() {
+            return Ok(());
+        }
+
+        // Record backpressure event
+        self.metrics.engine.backpressure_events.increment(1);
+
+        while self.should_apply_backpressure() {
+            if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
+                trace!(
+                    target: "engine::tree",
+                    pending = self.pending_persistence_blocks(),
+                    max = self.config.max_pending_persistence_blocks(),
+                    "Backpressure: waiting for persistence to complete"
+                );
+
+                match rx.recv() {
+                    Ok(result) => {
+                        self.on_persistence_complete(result, start_time)?;
+                    }
+                    Err(_) => {
+                        return Err(AdvancePersistenceError::ChannelClosed);
+                    }
+                }
+
+                // Update pending blocks metric after persistence completes
+                self.metrics
+                    .engine
+                    .pending_persistence_blocks
+                    .set(self.pending_persistence_blocks() as f64);
+
+                // Try to trigger more persistence if needed
+                self.advance_persistence()?;
+            } else {
+                // No persistence in progress but we still have too many blocks
+                // Trigger persistence and wait
+                self.advance_persistence()?;
+
+                // If no persistence was triggered, break to avoid infinite loop
+                if !self.persistence_state.in_progress() {
+                    break;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Returns a batch of consecutive canonical blocks to persist in the range
