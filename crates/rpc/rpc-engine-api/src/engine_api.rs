@@ -7,8 +7,9 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
+    BlockNumHash,
 };
-use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
@@ -154,12 +155,12 @@ where
         &self.inner.bal_cache
     }
 
-    /// Caches the BAL from the payload if the status is valid.
-    fn maybe_cache_bal(&self, payload: &PayloadT::ExecutionData, status: &PayloadStatus) {
+    /// Caches the BAL if the status is valid.
+    fn maybe_cache_bal(&self, num_hash: BlockNumHash, bal: Option<Bytes>, status: &PayloadStatus) {
         if status.is_valid() &&
-            let Some(bal) = payload.block_access_list()
+            let Some(bal) = bal
         {
-            self.inner.bal_cache.insert(payload.block_hash(), payload.block_number(), bal.clone());
+            self.inner.bal_cache.insert(num_hash.hash, num_hash.number, bal);
         }
     }
 
@@ -197,8 +198,10 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
 
-        let status = self.inner.beacon_consensus.new_payload(payload.clone()).await?;
-        self.maybe_cache_bal(&payload, &status);
+        let num_hash = payload.num_hash();
+        let bal = payload.block_access_list().cloned();
+        let status = self.inner.beacon_consensus.new_payload(payload).await?;
+        self.maybe_cache_bal(num_hash, bal, &status);
         Ok(status)
     }
 
@@ -228,8 +231,10 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V2, payload_or_attrs)?;
 
-        let status = self.inner.beacon_consensus.new_payload(payload.clone()).await?;
-        self.maybe_cache_bal(&payload, &status);
+        let num_hash = payload.num_hash();
+        let bal = payload.block_access_list().cloned();
+        let status = self.inner.beacon_consensus.new_payload(payload).await?;
+        self.maybe_cache_bal(num_hash, bal, &status);
         Ok(status)
     }
 
@@ -259,8 +264,10 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V3, payload_or_attrs)?;
 
-        let status = self.inner.beacon_consensus.new_payload(payload.clone()).await?;
-        self.maybe_cache_bal(&payload, &status);
+        let num_hash = payload.num_hash();
+        let bal = payload.block_access_list().cloned();
+        let status = self.inner.beacon_consensus.new_payload(payload).await?;
+        self.maybe_cache_bal(num_hash, bal, &status);
         Ok(status)
     }
 
@@ -291,8 +298,10 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
 
-        let status = self.inner.beacon_consensus.new_payload(payload.clone()).await?;
-        self.maybe_cache_bal(&payload, &status);
+        let num_hash = payload.num_hash();
+        let bal = payload.block_access_list().cloned();
+        let status = self.inner.beacon_consensus.new_payload(payload).await?;
+        self.maybe_cache_bal(num_hash, bal, &status);
         Ok(status)
     }
 
