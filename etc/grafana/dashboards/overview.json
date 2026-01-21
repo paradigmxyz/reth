@@ -12398,18 +12398,18 @@
         "hide": 2,
         "label": "Instance Label",
         "name": "instance_label",
-        "query": "instance",
+        "query": "${VAR_INSTANCE_LABEL}",
         "skipUrlSync": true,
         "type": "constant",
         "current": {
-          "value": "instance",
-          "text": "instance",
+          "value": "${VAR_INSTANCE_LABEL}",
+          "text": "${VAR_INSTANCE_LABEL}",
           "selected": false
         },
         "options": [
           {
-            "value": "instance",
-            "text": "instance",
+            "value": "${VAR_INSTANCE_LABEL}",
+            "text": "${VAR_INSTANCE_LABEL}",
             "selected": false
           }
         ]
