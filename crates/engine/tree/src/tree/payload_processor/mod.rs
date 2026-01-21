@@ -477,7 +477,7 @@ where
             cache
         } else {
             debug!("creating new execution cache on cache miss");
-            let cache = crate::tree::cached_state::ExecutionCache::new(self.cross_block_cache_size);
+            let cache = StateExecutionCache::new(self.cross_block_cache_size);
             SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
                 .with_disable_cache_metrics(self.disable_cache_metrics)
         }
@@ -576,7 +576,7 @@ where
             let (caches, cache_metrics, _) = match cached.take() {
                 Some(existing) => existing.split(),
                 None => (
-                    crate::tree::cached_state::ExecutionCache::new(self.cross_block_cache_size),
+                    StateExecutionCache::new(self.cross_block_cache_size),
                     CachedStateMetrics::zeroed(),
                     false,
                 ),
@@ -882,7 +882,7 @@ where
 mod tests {
     use super::ExecutionCache;
     use crate::tree::{
-        cached_state::{CachedStateMetrics, SavedCache},
+        cached_state::{CachedStateMetrics, ExecutionCache as StateExecutionCache, SavedCache},
         payload_processor::{
             evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
         },
@@ -912,7 +912,7 @@ mod tests {
     use std::sync::Arc;
 
     fn make_saved_cache(hash: B256) -> SavedCache {
-        let execution_cache = crate::tree::cached_state::ExecutionCache::new(1_000);
+        let execution_cache = StateExecutionCache::new(1_000);
         SavedCache::new(hash, execution_cache, CachedStateMetrics::zeroed())
     }
 
