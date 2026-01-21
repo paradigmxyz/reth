@@ -18,9 +18,9 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
+use revm_primitives::map::DefaultHashBuilder;
 use revm_primitives::eip7907::MAX_CODE_SIZE;
 use std::{
-    mem::size_of,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -129,6 +129,36 @@ impl<S> CachedStateProvider<S> {
 ///
 /// This struct combines both the provider-level metrics (hits/misses tracked by the provider)
 /// and the fixed-cache internal stats (collisions, size, capacity).
+#[derive(Debug, Default)]
+pub(crate) struct ReadableCacheStats {
+    /// Account cache hits (readable)
+    pub account_hits: AtomicU64,
+    /// Account cache misses (readable)
+    pub account_misses: AtomicU64,
+    /// Storage cache hits (readable)
+    pub storage_hits: AtomicU64,
+    /// Storage cache misses (readable)
+    pub storage_misses: AtomicU64,
+    /// Code cache hits (readable)
+    pub code_hits: AtomicU64,
+    /// Code cache misses (readable)
+    pub code_misses: AtomicU64,
+}
+
+impl Clone for ReadableCacheStats {
+    fn clone(&self) -> Self {
+        Self {
+            account_hits: AtomicU64::new(self.account_hits.load(Ordering::Relaxed)),
+            account_misses: AtomicU64::new(self.account_misses.load(Ordering::Relaxed)),
+            storage_hits: AtomicU64::new(self.storage_hits.load(Ordering::Relaxed)),
+            storage_misses: AtomicU64::new(self.storage_misses.load(Ordering::Relaxed)),
+            code_hits: AtomicU64::new(self.code_hits.load(Ordering::Relaxed)),
+            code_misses: AtomicU64::new(self.code_misses.load(Ordering::Relaxed)),
+        }
+    }
+}
+
+/// Metrics for the cached state provider, showing hits / misses for each cache
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
 pub(crate) struct CachedStateMetrics {
@@ -174,14 +204,15 @@ pub(crate) struct CachedStateMetrics {
     /// Account cache misses
     account_cache_misses: Gauge,
 
-    /// Account cache size (number of entries)
-    account_cache_size: Gauge,
-
     /// Account cache capacity (maximum entries)
     account_cache_capacity: Gauge,
 
     /// Account cache collisions (hash collisions causing eviction)
     account_cache_collisions: Gauge,
+
+    /// Readable cache statistics for runtime access (e.g., slow block logging)
+    #[metric(skip)]
+    readable_stats: Arc<ReadableCacheStats>,
 }
 
 impl CachedStateMetrics {
@@ -200,7 +231,14 @@ impl CachedStateMetrics {
         // account cache
         self.account_cache_hits.set(0);
         self.account_cache_misses.set(0);
-        self.account_cache_collisions.set(0);
+
+        // readable stats
+        self.readable_stats.account_hits.store(0, Ordering::Relaxed);
+        self.readable_stats.account_misses.store(0, Ordering::Relaxed);
+        self.readable_stats.storage_hits.store(0, Ordering::Relaxed);
+        self.readable_stats.storage_misses.store(0, Ordering::Relaxed);
+        self.readable_stats.code_hits.store(0, Ordering::Relaxed);
+        self.readable_stats.code_misses.store(0, Ordering::Relaxed);
     }
 
     /// Returns a new zeroed-out instance of [`CachedStateMetrics`].
@@ -308,6 +346,15 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
 
 impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        if let Some(res) = self.caches.account_cache.get(address) {
+            self.metrics.inc_account_hit();
+            return Ok(res)
+        }
+
+        self.metrics.inc_account_miss();
+
+        let res = self.state_provider.basic_account(address)?;
+
         if self.is_prewarm() {
             match self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
@@ -362,6 +409,17 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
                     // explicitly set to zero. We return `None` in both cases.
                     Ok(Some(value).filter(|v| !v.is_zero()))
                 }
+
+                self.metrics.inc_storage_miss();
+                Ok(final_res)
+            }
+            (SlotStatus::Empty, _) => {
+                self.metrics.inc_storage_hit();
+                Ok(None)
+            }
+            (SlotStatus::Value(value), _) => {
+                self.metrics.inc_storage_hit();
+                Ok(Some(value))
             }
         } else if let Some(value) = self.caches.storage_cache.get(&(account, storage_key)) {
             self.metrics.storage_cache_hits.increment(1);
@@ -375,6 +433,15 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
 
 impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        if let Some(res) = self.caches.code_cache.get(code_hash) {
+            self.metrics.inc_code_hit();
+            return Ok(res)
+        }
+
+        self.metrics.inc_code_miss();
+
+        let final_res = self.state_provider.bytecode_by_hash(code_hash)?;
+
         if self.is_prewarm() {
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)
