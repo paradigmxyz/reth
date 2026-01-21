@@ -684,6 +684,9 @@ mod tests {
     }
 
     /// Test that ETL collectors are cleared when unwind is called.
+    ///
+    /// This verifies the fix for ETL buffer pollution where collectors were not cleared
+    /// on error paths. The same cleanup pattern is used in the DetachedHead error handler.
     #[tokio::test]
     async fn unwind_clears_etl_collectors() {
         let runner = HeadersTestRunner::with_linear_downloader();
