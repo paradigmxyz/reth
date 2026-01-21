@@ -12,7 +12,7 @@ use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -24,6 +24,7 @@ use reth_stages_api::{
 use reth_static_file_types::StaticFileSegment;
 use std::{
     cmp::{max, Ordering},
+    collections::BTreeMap,
     ops::RangeInclusive,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -350,7 +351,7 @@ where
                 })
             })?;
 
-            if let Err(err) = self.consensus.validate_block_post_execution(&block, &result) {
+            if let Err(err) = self.consensus.validate_block_post_execution(&block, &result, None) {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),
@@ -418,8 +419,11 @@ where
         // Note: Since we only write to `blocks` if there are any ExExes, we don't need to perform
         // the `has_exexs` check here as well
         if !blocks.is_empty() {
-            let previous_input =
-                self.post_execute_commit_input.replace(Chain::new(blocks, state.clone(), None));
+            let previous_input = self.post_execute_commit_input.replace(Chain::new(
+                blocks,
+                state.clone(),
+                BTreeMap::new(),
+            ));
 
             if previous_input.is_some() {
                 // Not processing the previous post execute commit input is a critical error, as it
@@ -458,7 +462,7 @@ where
         }
 
         // write output
-        provider.write_state(&state, OriginalValuesKnown::Yes)?;
+        provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         let db_write_duration = time.elapsed();
         debug!(
@@ -519,7 +523,7 @@ where
             let previous_input = self.post_unwind_commit_input.replace(Chain::new(
                 blocks,
                 bundle_state_with_receipts,
-                None,
+                BTreeMap::new(),
             ));
 
             debug_assert!(

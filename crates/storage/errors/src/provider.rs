@@ -6,7 +6,8 @@ use derive_more::Display;
 use reth_primitives_traits::{transaction::signed::RecoveryError, GotExpected};
 use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
-use revm_database_interface::DBErrorMarker;
+use revm_database_interface::{bal::EvmDatabaseError, DBErrorMarker};
+use revm_state::bal::BalError;
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
@@ -17,9 +18,15 @@ pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
+    /// BAL error.
+    #[error("BAL error:{_0}")]
+    Bal(BalError),
     /// Pruning error.
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),
+    /// Static file writer error.
+    #[error(transparent)]
+    StaticFileWriter(#[from] StaticFileWriterError),
     /// RLP error.
     #[error("{_0}")]
     Rlp(alloy_rlp::Error),
@@ -183,7 +190,7 @@ impl ProviderError {
         other.downcast_ref()
     }
 
-    /// Returns true if the this type is a [`ProviderError::Other`] of that error
+    /// Returns true if this type is a [`ProviderError::Other`] of that error
     /// type. Returns false otherwise.
     pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
         self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
@@ -204,6 +211,12 @@ impl From<RecoveryError> for ProviderError {
     }
 }
 
+impl From<ProviderError> for EvmDatabaseError<ProviderError> {
+    fn from(error: ProviderError) -> Self {
+        Self::Database(error)
+    }
+}
+
 /// A root mismatch error at a given block height.
 #[derive(Clone, Debug, PartialEq, Eq, Display)]
 #[display("root mismatch at #{block_number} ({block_hash}): {root}")]
@@ -216,18 +229,24 @@ pub struct RootMismatch {
     pub block_hash: BlockHash,
 }
 
-/// A Static File Write Error.
-#[derive(Debug, thiserror::Error)]
-#[error("{message}")]
-pub struct StaticFileWriterError {
-    /// The error message.
-    pub message: String,
+/// A Static File Writer Error.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum StaticFileWriterError {
+    /// Cannot call `sync_all` or `finalize` when prune is queued.
+    #[error("cannot call sync_all or finalize when prune is queued, use commit() instead")]
+    FinalizeWithPruneQueued,
+    /// Thread panicked during execution.
+    #[error("thread panicked: {_0}")]
+    ThreadPanic(&'static str),
+    /// Other error with message.
+    #[error("{0}")]
+    Other(String),
 }
 
 impl StaticFileWriterError {
-    /// Creates a new [`StaticFileWriterError`] with the given message.
+    /// Creates a new [`StaticFileWriterError::Other`] with the given message.
     pub fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into() }
+        Self::Other(message.into())
     }
 }
 /// Consistent database view error.

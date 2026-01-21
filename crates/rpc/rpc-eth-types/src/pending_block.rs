@@ -99,9 +99,7 @@ impl<N: NodePrimitives> PendingBlock<N> {
     pub fn with_executed_block(expires_at: Instant, executed_block: ExecutedBlock<N>) -> Self {
         Self {
             expires_at,
-            receipts: Arc::new(
-                executed_block.execution_output.receipts.iter().flatten().cloned().collect(),
-            ),
+            receipts: Arc::new(executed_block.execution_output.receipts.clone()),
             executed_block,
         }
     }

@@ -115,8 +115,11 @@ impl ParallelProof {
         target_slots: B256Set,
     ) -> Result<DecodedStorageMultiProof, ParallelStateRootError> {
         let total_targets = target_slots.len();
-        let prefix_set = PrefixSetMut::from(target_slots.iter().map(Nibbles::unpack));
-        let prefix_set = prefix_set.freeze();
+        let prefix_set = if self.v2_proofs_enabled {
+            PrefixSet::default()
+        } else {
+            PrefixSetMut::from(target_slots.iter().map(Nibbles::unpack)).freeze()
+        };
 
         trace!(
             target: "trie::parallel_proof",
@@ -194,7 +197,7 @@ impl ParallelProof {
         let (result_tx, result_rx) = crossbeam_unbounded();
         let account_multiproof_start_time = Instant::now();
 
-        let input = AccountMultiproofInput {
+        let input = AccountMultiproofInput::Legacy {
             targets,
             prefix_sets,
             collect_branch_node_masks: self.collect_branch_node_masks,
@@ -205,7 +208,6 @@ impl ParallelProof {
                 HashedPostState::default(),
                 account_multiproof_start_time,
             ),
-            v2_proofs_enabled: self.v2_proofs_enabled,
         };
 
         self.proof_worker_handle
@@ -219,7 +221,9 @@ impl ParallelProof {
             )
         })?;
 
-        let ProofResult { proof: multiproof, stats } = proof_result_msg.result?;
+        let ProofResult::Legacy(multiproof, stats) = proof_result_msg.result? else {
+            panic!("AccountMultiproofInput::Legacy was submitted, expected legacy result")
+        };
 
         #[cfg(feature = "metrics")]
         self.metrics.record(stats);
@@ -232,7 +236,7 @@ impl ParallelProof {
             leaves_added = stats.leaves_added(),
             missed_leaves = stats.missed_leaves(),
             precomputed_storage_roots = stats.precomputed_storage_roots(),
-            "Calculated decoded proof"
+            "Calculated decoded proof",
         );
 
         Ok(multiproof)
@@ -319,7 +323,9 @@ mod tests {
 
         let rt = Runtime::new().unwrap();
 
-        let factory = reth_provider::providers::OverlayStateProviderFactory::new(factory);
+        let changeset_cache = reth_trie_db::ChangesetCache::new();
+        let factory =
+            reth_provider::providers::OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(factory);
         let proof_worker_handle =
             ProofWorkerHandle::new(rt.handle().clone(), task_ctx, 1, 1, false);

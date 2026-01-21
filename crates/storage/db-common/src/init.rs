@@ -16,8 +16,8 @@ use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
     BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
     HashingWriter, HeaderProvider, HistoryWriter, MetadataWriter, OriginalValuesKnown,
-    ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter, StateWriter,
-    StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
+    ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
+    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -104,7 +104,14 @@ where
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
-    init_genesis_with_settings(factory, StorageSettings::legacy())
+    #[cfg(feature = "edge")]
+    {
+        init_genesis_with_settings(factory, StorageSettings::edge())
+    }
+    #[cfg(not(feature = "edge"))]
+    {
+        init_genesis_with_settings(factory, StorageSettings::legacy())
+    }
 }
 
 /// Write the genesis block if it has not already been written with [`StorageSettings`].
@@ -216,6 +223,13 @@ where
         .user_header_mut()
         .set_block_range(genesis_block_number, genesis_block_number);
 
+    if genesis_storage_settings.transaction_senders_in_static_files {
+        static_file_provider
+            .get_writer(genesis_block_number, StaticFileSegment::TransactionSenders)?
+            .user_header_mut()
+            .set_block_range(genesis_block_number, genesis_block_number);
+    }
+
     // `commit_unwind`` will first commit the DB and then the static file provider, which is
     // necessary on `init_genesis`.
     provider_rw.commit()?;
@@ -320,7 +334,11 @@ where
         Vec::new(),
     );
 
-    provider.write_state(&execution_outcome, OriginalValuesKnown::Yes)?;
+    provider.write_state(
+        &execution_outcome,
+        OriginalValuesKnown::Yes,
+        StateWriteConfig::default(),
+    )?;
 
     trace!(target: "reth::cli", "Inserted state");
 
