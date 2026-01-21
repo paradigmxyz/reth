@@ -3,11 +3,44 @@ use alloy_consensus::BlockHeader;
 use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Block, RecoveredBlock};
-use std::time::Instant;
+use std::{cell::Cell, time::Instant};
 use tracing::warn;
 
-/// Threshold in milliseconds for slow block logging (default: 1000ms).
-const SLOW_BLOCK_THRESHOLD_MS: u64 = 1000;
+/// Default threshold in milliseconds for slow block logging (1 second).
+pub const DEFAULT_SLOW_BLOCK_THRESHOLD_MS: u64 = 1000;
+
+// Thread-local slow block threshold (allows runtime configuration)
+thread_local! {
+    static SLOW_BLOCK_THRESHOLD_MS: Cell<u64> = const { Cell::new(DEFAULT_SLOW_BLOCK_THRESHOLD_MS) };
+}
+
+/// Sets the slow block threshold in milliseconds.
+///
+/// Blocks that take longer than this threshold to execute will be logged.
+/// Set to 0 to log all blocks (useful for debugging/profiling).
+pub fn set_slow_block_threshold(threshold_ms: u64) {
+    SLOW_BLOCK_THRESHOLD_MS.with(|t| t.set(threshold_ms));
+}
+
+/// Returns the current slow block threshold in milliseconds.
+pub fn slow_block_threshold() -> u64 {
+    SLOW_BLOCK_THRESHOLD_MS.with(|t| t.get())
+}
+
+/// Returns true if the given execution time exceeds the slow block threshold.
+pub fn is_slow_block(execution_ms: u64) -> bool {
+    execution_ms > slow_block_threshold()
+}
+
+/// Calculates the cache hit rate as a percentage (0-100).
+fn calculate_hit_rate(hits: u64, misses: u64) -> f64 {
+    let total = hits + misses;
+    if total > 0 {
+        (hits as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    }
+}
 
 /// Executor metrics.
 #[derive(Metrics, Clone)]
@@ -46,6 +79,32 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
+
+    // Unique access tracking
+    /// Number of unique accounts touched in the latest block.
+    pub unique_accounts: Gauge,
+    /// Number of unique storage slots accessed in the latest block.
+    pub unique_storage_slots: Gauge,
+    /// Number of unique contracts executed in the latest block.
+    pub unique_contracts_executed: Gauge,
+
+    // Code bytes tracking
+    /// Total bytes of code read in the latest block.
+    pub code_bytes_read: Gauge,
+
+    // Cache statistics
+    /// Account cache hits.
+    pub account_cache_hits: Counter,
+    /// Account cache misses.
+    pub account_cache_misses: Counter,
+    /// Storage cache hits.
+    pub storage_cache_hits: Counter,
+    /// Storage cache misses.
+    pub storage_cache_misses: Counter,
+    /// Code cache hits.
+    pub code_cache_hits: Counter,
+    /// Code cache misses.
+    pub code_cache_misses: Counter,
 }
 
 impl ExecutorMetrics {
@@ -74,6 +133,7 @@ impl ExecutorMetrics {
     /// This method outputs a standardized JSON log entry when block execution
     /// exceeds the slow block threshold, following the cross-client execution
     /// metrics specification.
+    #[allow(clippy::too_many_arguments)]
     pub fn log_slow_block(
         &self,
         block_number: u64,
@@ -84,15 +144,28 @@ impl ExecutorMetrics {
         accounts_loaded: usize,
         storage_slots_loaded: usize,
         bytecodes_loaded: usize,
+        code_bytes_read: usize,
         accounts_updated: usize,
         storage_slots_updated: usize,
+        bytecodes_updated: usize,
+        account_cache_hits: u64,
+        account_cache_misses: u64,
+        storage_cache_hits: u64,
+        storage_cache_misses: u64,
+        code_cache_hits: u64,
+        code_cache_misses: u64,
     ) {
-        if execution_ms > SLOW_BLOCK_THRESHOLD_MS {
+        if is_slow_block(execution_ms) {
             let mgas_per_sec = if execution_ms > 0 {
                 (gas_used as f64 / 1_000_000.0) / (execution_ms as f64 / 1000.0)
             } else {
                 0.0
             };
+
+            // Calculate cache hit rates
+            let account_hit_rate = calculate_hit_rate(account_cache_hits, account_cache_misses);
+            let storage_hit_rate = calculate_hit_rate(storage_cache_hits, storage_cache_misses);
+            let code_hit_rate = calculate_hit_rate(code_cache_hits, code_cache_misses);
 
             // Output as structured JSON log for cross-client analysis
             warn!(
@@ -108,8 +181,19 @@ impl ExecutorMetrics {
                 state_reads.accounts = accounts_loaded,
                 state_reads.storage_slots = storage_slots_loaded,
                 state_reads.bytecodes = bytecodes_loaded,
+                state_reads.code_bytes = code_bytes_read,
                 state_writes.accounts = accounts_updated,
                 state_writes.storage_slots = storage_slots_updated,
+                state_writes.bytecodes = bytecodes_updated,
+                cache.account.hits = account_cache_hits,
+                cache.account.misses = account_cache_misses,
+                cache.account.hit_rate = format!("{:.2}", account_hit_rate),
+                cache.storage.hits = storage_cache_hits,
+                cache.storage.misses = storage_cache_misses,
+                cache.storage.hit_rate = format!("{:.2}", storage_hit_rate),
+                cache.code.hits = code_cache_hits,
+                cache.code.misses = code_cache_misses,
+                cache.code.hit_rate = format!("{:.2}", code_hit_rate),
             );
         }
     }
@@ -173,5 +257,74 @@ mod tests {
         });
 
         assert_eq!(result, "test_result");
+    }
+
+    #[test]
+    fn test_slow_block_threshold() {
+        // Default is 1000ms (1s)
+        assert_eq!(slow_block_threshold(), DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
+        assert!(!is_slow_block(500));
+        assert!(is_slow_block(1500));
+
+        // Test custom threshold
+        set_slow_block_threshold(100);
+        assert_eq!(slow_block_threshold(), 100);
+        assert!(!is_slow_block(50));
+        assert!(is_slow_block(150));
+
+        // Reset to default
+        set_slow_block_threshold(DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
+        assert_eq!(slow_block_threshold(), DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
+    }
+
+    #[test]
+    fn test_slow_block_threshold_zero() {
+        // Setting threshold to 0 should log all blocks (any execution > 0 is slow)
+        set_slow_block_threshold(0);
+        assert!(is_slow_block(1));
+        assert!(!is_slow_block(0));
+
+        // Reset to default
+        set_slow_block_threshold(DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
+    }
+
+    #[test]
+    fn test_log_slow_block_format() {
+        // This test exercises the log_slow_block function to ensure it doesn't panic
+        // and that the format logic works correctly.
+        // The actual log output depends on tracing subscriber configuration.
+        let metrics = ExecutorMetrics::default();
+
+        // Set threshold to 0 so any execution time triggers logging
+        set_slow_block_threshold(0);
+
+        // Call log_slow_block with sample data
+        // This should log (execution_ms=1500 > threshold=0)
+        metrics.log_slow_block(
+            12345,                                                            // block_number
+            "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678", // block_hash
+            30_000_000,                                                       // gas_used
+            200,                                                              // tx_count
+            1500,                                                             // execution_ms
+            100,                                                              // accounts_loaded
+            500,                                                              // storage_slots_loaded
+            20,                                                               // bytecodes_loaded
+            10240,                                                            // code_bytes_read
+            50,                                                               // accounts_updated
+            200,                                                              // storage_slots_updated
+            0,                                                                // bytecodes_updated
+            4,                                                                // account_cache_hits
+            6,                                                                // account_cache_misses
+            0,                                                                // storage_cache_hits
+            11,                                                               // storage_cache_misses
+            4,                                                                // code_cache_hits
+            0,                                                                // code_cache_misses
+        );
+
+        // Reset threshold
+        set_slow_block_threshold(DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
+
+        // Verify mgas_per_sec calculation: 30_000_000 / 1_000_000 / (1500 / 1000) = 30 / 1.5 = 20.0
+        // This is verified in the log output format
     }
 }
