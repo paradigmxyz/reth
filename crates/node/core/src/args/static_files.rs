@@ -81,7 +81,7 @@ pub struct StaticFilesArgs {
     ///
     /// Note: This setting can only be configured at genesis initialization. Once
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
-    #[arg(long = "static-files.storage-change-sets")]
+    #[arg(long = "static-files.storage-change-sets", default_value_t = default_static_file_flag(), action = clap::ArgAction::Set)]
     pub storage_changesets: bool,
 }
 
