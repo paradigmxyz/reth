@@ -88,6 +88,9 @@ fn generate_bindings(mdbx: &Path, out_file: &Path) {
                 "MDBX_TOO_LARGE" |
                 "MDBX_THREAD_MISMATCH" |
                 "MDBX_TXN_OVERLAPPING" |
+                "MDBX_OUSTED" |
+                "MDBX_MVCC_RETARDED" |
+                "MDBX_LAST_ADDED_ERRCODE" |
                 "MDBX_LAST_ERRCODE" => Some(IntKind::Int),
                 _ => Some(IntKind::UInt),
             }

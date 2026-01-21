@@ -7,9 +7,11 @@ use crate::{
 };
 use reth_db_api::{
     table::{Compress, DupSort, Encode, Table, TableImporter},
-    transaction::{DbTx, DbTxMut},
+    transaction::{CloneableDbTx, DbTx, DbTxMut},
 };
-use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
+use reth_libmdbx::{
+    ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RO, RW,
+};
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, trace, warn};
 use std::{
@@ -282,6 +284,31 @@ impl<K: TransactionKind> Drop for MetricsHandler<K> {
 
 impl TableImporter for Tx<RW> {}
 
+impl Tx<RO> {
+    /// Clones this read-only transaction, creating a new independent transaction that reads
+    /// the same MVCC snapshot of the database.
+    ///
+    /// This is useful when multiple threads need to read from the same database snapshot
+    /// without creating new transactions at the current (potentially different) database tip.
+    pub fn clone_snapshot(&self) -> Result<Self, DatabaseError> {
+        let cloned_inner =
+            self.inner.clone_snapshot().map_err(|e| DatabaseError::Open(e.into()))?;
+
+        Ok(Self {
+            inner: cloned_inner,
+            dbis: Arc::clone(&self.dbis),
+            metrics_handler: self.metrics_handler.as_ref().map(|h| {
+                let handler = MetricsHandler::<RO>::new(
+                    self.inner.id().unwrap_or(0),
+                    Arc::clone(&h.env_metrics),
+                );
+                handler.env_metrics.record_opened_transaction(handler.transaction_mode());
+                handler
+            }),
+        })
+    }
+}
+
 impl<K: TransactionKind> DbTx for Tx<K> {
     type Cursor<T: Table> = Cursor<K, T>;
     type DupCursor<T: DupSort> = Cursor<K, T>;
@@ -344,6 +371,14 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         }
 
         self.inner.disable_timeout();
+    }
+}
+
+impl CloneableDbTx for Tx<RO> {
+    type ClonedTx = Self;
+
+    fn clone_snapshot(&self) -> Result<Self::ClonedTx, DatabaseError> {
+        Self::clone_snapshot(self)
     }
 }
 

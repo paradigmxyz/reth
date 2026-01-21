@@ -1,8 +1,8 @@
-.\" Copyright 2015-2025 Leonid Yuriev <leo@yuriev.ru>.
+.\" Copyright 2015-2026 Leonid Yuriev <leo@yuriev.ru>.
 .\" Copyright 2015,2016 Peter-Service R&D LLC <http://billing.ru/>.
 .\" Copyright 2014-2015 Howard Chu, Symas Corp. All Rights Reserved.
 .\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
-.TH MDBX_DUMP 1 "2024-08-29" "MDBX 0.13"
+.TH MDBX_DUMP 1 "2025-01-14" "MDBX 0.14"
 .SH NAME
 mdbx_dump \- MDBX environment export tool
 .SH SYNOPSIS
@@ -11,6 +11,8 @@ mdbx_dump \- MDBX environment export tool
 .BR \-V ]
 [\c
 .BR \-q ]
+[\c
+.BR \-c ]
 [\c
 .BI \-f \ file\fR]
 [\c
@@ -40,6 +42,9 @@ Write the library version number to the standard output, and exit.
 .TP
 .BR \-q
 Be quiet.
+.TP
+.BR \-c
+Concise mode without repeating keys in a dump, but incompatible with Berkeley DB and LMDB.
 .TP
 .BR \-f \ file
 Write to the specified file instead of to the standard output.

@@ -1,6 +1,9 @@
 /**
 
-_libmdbx_ (aka MDBX) is an extremely fast, compact, powerful, embeddable,
+\file mdbx.h
+\brief The libmdbx C API header file.
+
+\details _libmdbx_ (aka MDBX) is an extremely fast, compact, powerful, embeddable,
 transactional [key-value
 store](https://en.wikipedia.org/wiki/Key-value_database), with [Apache 2.0
 license](./LICENSE). _MDBX_ has a specific set of properties and capabilities,
@@ -9,7 +12,7 @@ focused on creating unique lightweight solutions with extraordinary performance.
 _libmdbx_ is superior to [LMDB](https://bit.ly/26ts7tL) in terms of features
 and reliability, not inferior in performance. In comparison to LMDB, _libmdbx_
 makes many things just work perfectly, not silently and catastrophically
-break down. _libmdbx_ supports Linux, Windows, MacOS, OSX, iOS, Android,
+break down. _libmdbx_ supports Linux, Windows, MacOS, OSX, Harmony, iOS, Android,
 FreeBSD, DragonFly, Solaris, OpenSolaris, OpenIndiana, NetBSD, OpenBSD and other
 systems compliant with POSIX.1-2008.
 
@@ -18,24 +21,36 @@ C++ API description and links to the origin git repo with the source code.
 Questions, feedback and suggestions are welcome to the Telegram' group
 https://t.me/libmdbx.
 
-Donations are welcome to ETH `0xD104d8f8B2dC312aaD74899F83EBf3EEBDC1EA3A`.
+Donations are welcome to ETH `0xD104d8f8B2dC312aaD74899F83EBf3EEBDC1EA3A`,
+BTC `bc1qzvl9uegf2ea6cwlytnanrscyv8snwsvrc0xfsu`, SOL `FTCTgbHajoLVZGr8aEFWMzx3NDMyS5wXJgfeMTmJznRi`.
 Всё будет хорошо!
 
-\note The origin has been migrated to
-[GitFlic](https://gitflic.ru/project/erthink/libmdbx) since on 2022-04-15 the
-Github administration, without any warning nor explanation, deleted libmdbx
-along with a lot of other projects, simultaneously blocking access for many
-developers. For the same reason ~~Github~~ is blacklisted forever.
+The _libmdbx_ project has been completely relocated to the jurisdiction of the Russian Federation.
+\note _libmdbx_ is still open and provided with first-class free support.
 
 \section copyright LICENSE & COPYRIGHT
 \copyright SPDX-License-Identifier: Apache-2.0
-\note Please refer to the COPYRIGHT file for explanations license change,
-credits and acknowledgments.
-\author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2025
+Please refer to the COPYRIGHT file for explanations license change, credits and acknowledgments.
+\author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2026
 
 *******************************************************************************/
 
 #pragma once
+/*
+ * Tested with, since 2026:
+ *  - Elbrus LCC >= 1.28 (http://www.mcst.ru/lcc);
+ *  - GNU C >= 11.3;
+ *  - CLANG >= 14.0;
+ *  - MSVC >= 19.44 (Visual Studio 2022 toolchain v143),
+ * before 2026:
+ *  - Elbrus LCC >= 1.23 (http://www.mcst.ru/lcc);
+ *  - GNU C >= 4.8;
+ *  - CLANG >= 3.9;
+ *  - MSVC >= 14.0 (Visual Studio 2015),
+ *    but 19.2x could hang due optimizer bug;
+ *  - AppleClang.
+ */
+
 #ifndef LIBMDBX_H
 #define LIBMDBX_H
 
@@ -175,6 +190,8 @@ typedef mode_t mdbx_mode_t;
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
+
+#define MDBX_AMALGAMATED_SOURCE 1
 
 /** end of c_api @}
  *
@@ -353,7 +370,7 @@ typedef mode_t mdbx_mode_t;
 #else
 #define __dll_export
 #endif
-#elif defined(__GNUC__) || __has_attribute(__visibility__)
+#elif defined(__GNUC__) || defined(__clang__) || __has_attribute(__visibility__)
 #define __dll_export __attribute__((__visibility__("default")))
 #else
 #define __dll_export
@@ -579,9 +596,10 @@ typedef mode_t mdbx_mode_t;
 extern "C" {
 #endif
 
-/* MDBX version 0.13.x */
+/* MDBX version 0.14.x, but it is unstable/under-development yet. */
+#define MDBX_VERSION_UNSTABLE
 #define MDBX_VERSION_MAJOR 0
-#define MDBX_VERSION_MINOR 13
+#define MDBX_VERSION_MINOR 14
 
 #ifndef LIBMDBX_API
 #if defined(LIBMDBX_EXPORTS) || defined(DOXYGEN)
@@ -834,7 +852,9 @@ enum MDBX_constants {
 
 /** Log level
  * \note Levels detailed than (great than) \ref MDBX_LOG_NOTICE
- * requires build libmdbx with \ref MDBX_DEBUG option. */
+ * requires build libmdbx with \ref MDBX_DEBUG option.
+ *
+ * \see mdbx_setup_debug() \see MDBX_log_level_t */
 typedef enum MDBX_log_level {
   /** Critical conditions, i.e. assertion failures.
    * \note libmdbx always produces such messages regardless
@@ -891,24 +911,26 @@ typedef enum MDBX_log_level {
  *
  * \details `MDBX_DBG_DUMP` and `MDBX_DBG_LEGACY_MULTIOPEN` always have an
  * effect, but `MDBX_DBG_ASSERT`, `MDBX_DBG_AUDIT` and `MDBX_DBG_JITTER` only if
- * libmdbx built with \ref MDBX_DEBUG. */
+ * libmdbx built with \ref MDBX_DEBUG.
+ *
+ * \see mdbx_setup_debug() \see MDBX_debug_flags_t */
 typedef enum MDBX_debug_flags {
   MDBX_DBG_NONE = 0,
 
-  /** Enable assertion checks.
+  /** Enables assertion checks.
    * \note Always enabled for builds with `MDBX_FORCE_ASSERTIONS` option,
    * otherwise requires build with \ref MDBX_DEBUG > 0 */
   MDBX_DBG_ASSERT = 1,
 
-  /** Enable pages usage audit at commit transactions.
+  /** Enables pages usage audit at commit transactions.
    * \note Requires build with \ref MDBX_DEBUG > 0 */
   MDBX_DBG_AUDIT = 2,
 
-  /** Enable small random delays in critical points.
+  /** Enables small random delays in critical points.
    * \note Requires build with \ref MDBX_DEBUG > 0 */
   MDBX_DBG_JITTER = 4,
 
-  /** Include or not meta-pages in coredump files.
+  /** Controls including of a database(s) meta-pages in coredump files.
    * \note May affect performance in \ref MDBX_WRITEMAP mode */
   MDBX_DBG_DUMP = 8,
 
@@ -918,9 +940,8 @@ typedef enum MDBX_debug_flags {
   /** Allow read and write transactions overlapping for the same thread. */
   MDBX_DBG_LEGACY_OVERLAP = 32,
 
-  /** Don't auto-upgrade format signature.
-   * \note However a new write transactions will use and store
-   * the last signature regardless this flag */
+  /** Disables automatic updating of the database format signature, i.e. upgrade database format on a media.
+   * \note Nonetheless a new write transactions will use and store the last signature regardless this flag */
   MDBX_DBG_DONT_UPGRADE = 64,
 
 #ifdef ENABLE_UBSAN
@@ -955,7 +976,9 @@ typedef void MDBX_debug_func(MDBX_log_level_t loglevel, const char *function, in
 
 /** \brief Setup global log-level, debug options and debug logger.
  * \returns The previously `debug_flags` in the 0-15 bits
- *          and `log_level` in the 16-31 bits. */
+ *          and `log_level` in the 16-31 bits.
+ *
+ * \see MDBX_log_level_t \see MDBX_debug_flags_t */
 LIBMDBX_API int mdbx_setup_debug(MDBX_log_level_t log_level, MDBX_debug_flags_t debug_flags, MDBX_debug_func *logger);
 
 typedef void MDBX_debug_func_nofmt(MDBX_log_level_t loglevel, const char *function, int line, const char *msg,
@@ -1004,7 +1027,10 @@ MDBX_NORETURN LIBMDBX_API void mdbx_panic(const char *fmt, ...) MDBX_PRINTF_ARGS
 
 /** \brief Panics with asserton failed message and causes abnormal process
  * termination. */
-MDBX_NORETURN LIBMDBX_API void mdbx_assert_fail(const MDBX_env *env, const char *msg, const char *func, unsigned line);
+#if !((defined(_WIN32) || defined(_WIN64)) && !MDBX_WITHOUT_MSVC_CRT)
+MDBX_NORETURN
+#endif /* MDBX_WITHOUT_MSVC_CRT */
+LIBMDBX_API void mdbx_assert_fail(const MDBX_env *env, const char *msg, const char *func, unsigned line);
 /** end of c_debug @} */
 
 /** \brief Environment flags
@@ -1663,7 +1689,7 @@ DEFINE_ENUM_FLAG_OPERATORS(MDBX_put_flags)
 
 /** \brief Environment copy flags
  * \ingroup c_extra
- * \see mdbx_env_copy() \see mdbx_env_copy2fd() */
+ * \see mdbx_env_copy() \see mdbx_env_copy2fd() \see mdbx_txn_copy2pathname() */
 typedef enum MDBX_copy_flags {
   MDBX_CP_DEFAULTS = 0,
 
@@ -1688,7 +1714,11 @@ typedef enum MDBX_copy_flags {
   /** Enable renew/restart read transaction in case it use outdated
    * MVCC shapshot, otherwise the \ref MDBX_MVCC_RETARDED will be returned
    * \see mdbx_txn_copy2fd() \see mdbx_txn_copy2pathname() */
-  MDBX_CP_RENEW_TXN = 32u
+  MDBX_CP_RENEW_TXN = 32u,
+
+  /** Silently overwrite the target file, if it exists, instead of returning an error
+   * \see mdbx_txn_copy2pathname() \see mdbx_env_copy() */
+  MDBX_CP_OVERWRITE = 64u
 
 } MDBX_copy_flags_t;
 DEFINE_ENUM_FLAG_OPERATORS(MDBX_copy_flags)
@@ -1897,8 +1927,7 @@ typedef enum MDBX_error {
    *  - The table was dropped and recreated with different flags. */
   MDBX_INCOMPATIBLE = -30784,
 
-  /** Invalid reuse of reader locktable slot,
-   * e.g. read-transaction already run for current thread */
+  /** Reader locktable slot was unexpectly reused or cleared by an enemy thread */
   MDBX_BAD_RSLOT = -30783,
 
   /** Transaction is not valid for requested operation,
@@ -1990,7 +2019,7 @@ typedef enum MDBX_error {
   MDBX_EREMOTE = ERROR_REMOTE_STORAGE_MEDIA_ERROR,
   MDBX_EDEADLK = ERROR_POSSIBLE_DEADLOCK
 #else /* Windows */
-#ifdef ENODATA
+#if defined(ENODATA) || defined(DOXYGEN)
   MDBX_ENODATA = ENODATA,
 #else
   MDBX_ENODATA = 9919 /* for compatibility with LLVM's C++ libraries/headers */,
@@ -1999,7 +2028,11 @@ typedef enum MDBX_error {
   MDBX_EACCESS = EACCES,
   MDBX_ENOMEM = ENOMEM,
   MDBX_EROFS = EROFS,
+#if defined(ENOTSUP) || defined(DOXYGEN)
+  MDBX_ENOSYS = ENOTSUP,
+#else
   MDBX_ENOSYS = ENOSYS,
+#endif /* ENOTSUP */
   MDBX_EIO = EIO,
   MDBX_EPERM = EPERM,
   MDBX_EINTR = EINTR,
@@ -2525,8 +2558,7 @@ typedef enum MDBX_env_delete_mode {
   /** \brief Make sure that the environment is not being used by other
    * processes, or return an error otherwise. */
   MDBX_ENV_ENSURE_UNUSED = 1,
-  /** \brief Wait until other processes closes the environment before deletion.
-   */
+  /** \brief Wait until other processes closes the environment before deletion. */
   MDBX_ENV_WAIT_FOR_UNUSED = 2,
 } MDBX_env_delete_mode_t;
 
@@ -2772,10 +2804,10 @@ typedef struct MDBX_stat MDBX_stat;
  * Legacy mdbx_env_stat() correspond to calling \ref mdbx_env_stat_ex() with the
  * null `txn` argument.
  *
- * \param [in] env     An environment handle returned by \ref mdbx_env_create()
- * \param [in] txn     A transaction handle returned by \ref mdbx_txn_begin()
+ * \param [in] env     An environment handle returned by \ref mdbx_env_create().
+ * \param [in] txn     A transaction handle returned by \ref mdbx_txn_begin().
  * \param [out] stat   The address of an \ref MDBX_stat structure where
- *                     the statistics will be copied
+ *                     the statistics will be copied.
  * \param [in] bytes   The size of \ref MDBX_stat.
  *
  * \returns A non-zero error value on failure and 0 on success. */
@@ -2799,17 +2831,20 @@ struct MDBX_envinfo {
     uint64_t shrink;  /**< Shrink threshold for datafile */
     uint64_t grow;    /**< Growth step for datafile */
   } mi_geo;
-  uint64_t mi_mapsize;                  /**< Size of the data memory map */
+  uint64_t mi_mapsize;                  /**< Size of the database memory map */
+  uint64_t mi_dxb_fsize;                /**< Current database file size */
+  uint64_t mi_dxb_fallocated;           /**< Space allocated for the database file in a filesystem */
   uint64_t mi_last_pgno;                /**< Number of the last used page */
   uint64_t mi_recent_txnid;             /**< ID of the last committed transaction */
   uint64_t mi_latter_reader_txnid;      /**< ID of the last reader transaction */
-  uint64_t mi_self_latter_reader_txnid; /**< ID of the last reader transaction
-                                           of caller process */
+  uint64_t mi_self_latter_reader_txnid; /**< ID of the last reader transaction of this/current process */
   uint64_t mi_meta_txnid[3], mi_meta_sign[3];
   uint32_t mi_maxreaders;   /**< Total reader slots in the environment */
   uint32_t mi_numreaders;   /**< Max reader slots used in the environment */
   uint32_t mi_dxb_pagesize; /**< Database pagesize */
   uint32_t mi_sys_pagesize; /**< System pagesize */
+  uint32_t mi_sys_upcblk;   /**< System "Unified Page Cache" block size */
+  uint32_t mi_sys_ioblk;    /**< Filesystem I/O block size */
 
   /** \brief A mostly unique ID that is regenerated on each boot.
 
@@ -3847,11 +3882,11 @@ MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API void *mdbx_env_get_userctx(const MDBX_env
  * \param [in] flags   Special options for this transaction. This parameter
  *                     must be set to 0 or by bitwise OR'ing together one
  *                     or more of the values described here:
- *                      - \ref MDBX_RDONLY   This transaction will not perform
- *                                           any write operations.
+ *                      - \ref MDBX_TXN_RDONLY This transaction will not perform
+ *                                             any write operations.
  *
- *                      - \ref MDBX_TXN_TRY  Do not block when starting
- *                                           a write transaction.
+ *                      - \ref MDBX_TXN_TRY    Do not block when starting
+ *                                             a write transaction.
  *
  *                      - \ref MDBX_SAFE_NOSYNC, \ref MDBX_NOMETASYNC.
  *                        Do not sync data to disk corresponding
@@ -3939,6 +3974,59 @@ LIBMDBX_API int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flag
 LIBMDBX_INLINE_API(int, mdbx_txn_begin, (MDBX_env * env, MDBX_txn *parent, MDBX_txn_flags_t flags, MDBX_txn **txn)) {
   return mdbx_txn_begin_ex(env, parent, flags, txn, NULL);
 }
+
+/** \brief Starts a read-only clone of a given transaction.
+ * \ingroup c_transactions
+ *
+ * \note Cloning read-only transactions without \ref MDBX_NOSTICKYTHREADS mode is pointless and is not allowed.
+ *
+ * Cloning a read-only transaction generates a transaction reading the same MVCC snapshot of the database.
+ * However, cloning a read-write transaction is also explicitly allowed and generates a read transaction that
+ * reads the original MVCC-snapshot of the database without uncommitted changes. This feature is a specialized
+ * tool for implementing database compactification, data transformation, replication and other specific scenarios.
+ *
+ * In the non- \ref MDBX_NOSTICKYTHREADS operation mode, the cloned transaction becomes binded to the current thread.
+ * At the same time, it is clearly assumed that the origin transaction is linked to another thread.
+ *
+ * \warning It is required to ensure that the original transaction is not used, much less interrupted
+ *          or restarted by another thread, until this function done.
+ *
+ * When cloning read-only transactions, the parking state of original is preserved and inherited by cloned transaction.
+ * Cursors and other objects associated with the original transaction are not affected and are not copied into
+ * the cloned transaction.
+ *
+ * The function provides for both the creation of a new transaction handle
+ * and the reuse of a transaction previously stopped by \ref mdbx_txn_reset().
+ *
+ * \note Cloning of a write transactions with pending changes (aka dirtied) is prohibited to avoid confusion.
+ *
+ * \param [in] origin             An transaction handle returned by \ref mdbx_txn_begin_ex() or \ref mdbx_txn_begin().
+ *
+ * \param [in, out] in_out_clone  Address of the \ref MDBX_txn handle that wants to be reused, or where to store the
+ *                                handle of the new transaction. The handle passed by the pointer must be initialized
+ *                                at the input anycase. If the pointed handle at input is NULL, then a new transaction
+ *                                will be created and returned there, otherwise it must be a valid handle of read-only
+ *                                transaction for reuse.
+ *
+ * \param [in] context            A pointer to application context to be associated with started transaction and could
+ *                                be retrieved by \ref mdbx_txn_get_userctx() until transaction finished.
+ *                                Just use NULL if doubt.
+ * \returns A non-zero error value on failure and 0 on success,
+ *          some possible errors are:
+ * \retval MDBX_EINVAL        An invalid parameter was specified, i.e. the `in_out_clone` is NULL.
+ * \retval MDBX_BAD_TXN       Origin transaction is already finished or never began,
+ *                            or handle referenced by `in_out_clone` is invalid or not a read-only transaction.
+ *                            Cloning of a write transactions with pending changes (aka dirtied) is also
+ *                            prohibited to avoid confusion.
+ * \retval MDBX_EBADSIGN      Origin transaction object or reference by `in_out_clone`, has invalid signature,
+ *                            e.g. transaction was already terminated or memory was corrupted.
+ * \retval MDBX_OUSTED        Cloned was outed immediately for the sake of recycling old MVCC snapshots.
+ * \retval MDBX_MVCC_RETARDED The MVCC snapshot used by origin transaction was bygone.
+ * \retval MDBX_READERS_FULL  A read-only transaction was requested and
+ *                            the reader lock table is full.
+ *                            See \ref mdbx_env_set_maxreaders().
+ * \retval MDBX_ENOMEM        Out of memory during creating new transaction. */
+LIBMDBX_API int mdbx_txn_clone(const MDBX_txn *origin, MDBX_txn **in_out_clone, void *context);
 
 /** \brief Sets application information associated (a context pointer) with the
  * transaction.
@@ -4194,7 +4282,10 @@ LIBMDBX_API int mdbx_txn_commit_ex(MDBX_txn *txn, MDBX_commit_latency *latency);
  * \returns A non-zero error value on failure and 0 on success,
  *          some possible errors are:
  * \retval MDBX_RESULT_TRUE      Transaction was aborted since it should
- *                               be aborted due to previous errors.
+ *                               be aborted due to previous errors,
+ *                               either no changes were made during the transaction,
+ *                               and the build time option
+ *                               \ref MDBX_NOSUCCESS_PURE_COMMIT was enabled.
  * \retval MDBX_PANIC            A fatal error occurred earlier
  *                               and the environment must be shut down.
  * \retval MDBX_BAD_TXN          Transaction is already finished or never began.
@@ -4548,6 +4639,10 @@ typedef int(MDBX_cmp_func)(const MDBX_val *a, const MDBX_val *b) MDBX_CXX17_NOEX
  * \param [out] dbi     Address where the new \ref MDBX_dbi handle
  *                      will be stored.
  *
+ * The name in \ref mdbx_dbi_open() is a null terminated string. While
+ * \ref mdbx_dbi_open2() supports arbitrary length keys which are not
+ * truncated, for example to support a fixed width integer type.
+ *
  * For \ref mdbx_dbi_open_ex() additional arguments allow you to set custom
  * comparison functions for keys and values (for multimaps).
  * \see avoid_custom_comparators
@@ -4580,6 +4675,8 @@ LIBMDBX_API int mdbx_dbi_open2(MDBX_txn *txn, const MDBX_val *name, MDBX_db_flag
  * \param [in] name   The name of the table to open. If only a single
  *                    table is needed in the environment,
  *                    this value may be NULL.
+ *                    The name in \ref mdbx_dbi_open_ex() is null terminated,
+ *                    while \ref mdbx_dbi_open_ex2() supports an arbitrary length.
  * \param [in] flags  Special options for this table.
  * \param [in] keycmp  Optional custom key comparison function for a table.
  * \param [in] datacmp Optional custom data comparison function for a table.
@@ -4834,6 +4931,8 @@ LIBMDBX_API int mdbx_drop(MDBX_txn *txn, MDBX_dbi dbi, bool del);
  * \note Values returned from the table are valid only until a
  * subsequent update operation, or the end of the transaction.
  *
+ * \see mdbx_cache_get()
+ *
  * \param [in] txn       A transaction handle returned by \ref mdbx_txn_begin().
  * \param [in] dbi       A table handle returned by \ref mdbx_dbi_open().
  * \param [in] key       The key to search for in the table.
@@ -4908,6 +5007,180 @@ LIBMDBX_API int mdbx_get_ex(const MDBX_txn *txn, MDBX_dbi dbi, MDBX_val *key, MD
  * \retval MDBX_NOTFOUND      The key was not in the table.
  * \retval MDBX_EINVAL        An invalid parameter was specified. */
 LIBMDBX_API int mdbx_get_equal_or_great(const MDBX_txn *txn, MDBX_dbi dbi, MDBX_val *key, MDBX_val *data);
+
+/** \brief Lightweight transparent cache entry structure used by \ref mdbx_cache_get().
+ * \ingroup c_crud
+ *
+ * The approach of these caching is to preserve address of a value retrieved from the database with an extremely fast
+ * check of relevance it based on a transaction ID within an internal b-tree structures. Event a b-tree was modified
+ * then the search for the corresponding key from the root of the b-tree to leaf pages stops as soon as reaches a page
+ * that has not been modified after the last check of given cache entry. This way, the minimum actions is performed,
+ * which is no slower than a usual key search in the worst case, and at best, only a few lightweight checks will be do.
+ *
+ * \note The cache structure allows it to be placed in shared memory and used by multiple processes.
+ * However, such interaction and management are not provided by libmdbx in any way yet now.
+ *
+ * \note An each cache entry must be initialized by \ref mdbx_cache_init() before first use. */
+typedef struct MDBX_cache_entry {
+  uint64_t trunk_txnid;          /**< The transaction/MVCC-snapshot ID of a page or other internal DB structure
+                                  *   that hold the cached data or reflect it state. */
+  uint64_t last_confirmed_txnid; /**< The recent transaction/MVCC-snapshot ID wherein the cache entry
+                                  *   was checked and confirmed. */
+  size_t offset;                 /**< The offset of cached data value for a corresponding key.
+                                  *   The zero value means \ref MDBX_NOTFOUND. */
+  uint32_t length;               /**< The length of cached data value for a corresponding key. */
+} MDBX_cache_entry_t;
+
+/** \brief Initializes the cache entry before the first use.
+ * \ingroup c_crud
+ * \see MDBX_cache_entry
+ * \see mdbx_cache_get() */
+LIBMDBX_INLINE_API(void, mdbx_cache_init, (MDBX_cache_entry_t * entry)) {
+  entry->offset = 0;
+  entry->length = 0;
+  entry->trunk_txnid = 0;
+  entry->last_confirmed_txnid = 0;
+}
+
+/** \brief Cache entry status returned by \ref mdbx_cache_get().
+ * \ingroup c_crud
+ * \see MDBX_cache_entry
+ * \see mdbx_cache_init() */
+typedef enum MDBX_cache_status {
+  /** \brief The error other than \ref MDBX_NOTFOUND has occurred.
+   *  \details There is no correct result since an error has occurred that is not related
+   *  to the absence of the desired key-value pair.
+   *  The given cache entry has not been changed. */
+  MDBX_CACHE_ERROR = -3,
+
+  /** \brief The result was obtained by bypassing the cache, because
+   *  the transaction is too old to using the cache entry.
+   *  \details The cache entry reflects a newer version of the data that is unavailable within
+   *  an MVCC-snapshot used by current transaction.
+   *  The given cache entry has not been changed.
+   *  The result of getting a value is correct until the transaction end. */
+  MDBX_CACHE_BEHIND = -2,
+
+  /** \brief The result of getting a value is correct, but it cannot be cached since there
+   *  the ABA-like issue is in the data history, either other similar reason.
+   *  \details When a cache entry is used by different threads reading different MVCC snapshots,
+   *  there may be a situation in which the key and associated value are missing from the old
+   *  and new MVCC snapshots, but are present in one of the MVCC snapshots between ones.
+   *  In such circumstances the result from the cache may be false negative, therefore,
+   *  in order to avoid an incorrect result, a search is performed bypassing cache.
+   *  The given cache entry has not been changed.
+   *  The result of getting a value is correct until the transaction end. */
+  MDBX_CACHE_UNABLE = -1,
+
+  /** \brief The result was obtained by bypassing the cache, because
+   *  the given cache entry being updated by another thread.
+   *  \details When accessing the cache entry, a race condition was detected with its update by another thread.
+   *  Therefore, the result was obtained without using the cache entry and without affecting an operation of other
+   *  threads using it, including the ones performing an update. For a read transaction, the result is correct until
+   *  the transaction end. For a write transactions, the result is correct until the value is explicitly changed or
+   *  the transaction is completed. */
+  MDBX_CACHE_RACE = 0,
+
+  /** \brief The result of getting a value is correct, but it cannot be cached since
+   *  the changes have not been committed.
+   *  \details The requested value of a pair is in a dirty state itself or on a dirty page with other updated items.
+   *  This cache entry has not been changed because the corresponding data changes have not yet been committed
+   *  and could be aborted.
+   *  The result of the get operation and data value are valid within the current write transaction
+   *  until any next modification. */
+  MDBX_CACHE_DIRTY = 1,
+
+  /** \brief The result of getting a value is correct and was retrieved from the cache entry which is untouched.
+   *  \details There were no changes in the cached data after the last check.
+   *  The given cache entry was not altered as it is complete up-to-date.
+   *  For a read transaction, the result is correct until the transaction end.
+   *  For a write transactions, the result is correct until the value is explicitly changed
+   *  or the transaction is completed. */
+  MDBX_CACHE_HIT = 2,
+
+  /** \brief The result of getting a value is correct and has been retrieved from the cache, which has been
+   *  altered to reflect recently committed transactions.
+   *  \details There were no changes in the cached data after the last check.
+   *  The given cache entry has been slightly updated to reflect the relevance of the data for recent committed
+   * transaction(s). For a read transaction, the result is correct until the transaction end. For a write transactions,
+   * the result is correct until the value is explicitly changed or the transaction is completed. */
+  MDBX_CACHE_CONFIRMED = 3,
+
+  /** \brief The result of getting a value is correct and corresponds to the fresh data readed from the database,
+   *  which also putted into the cache entry.
+   *  \details After the last check, either the value of the requested pair itself changed,
+   *  or it was moved to a new page due to the updating of neighboring items.
+   *  The given cache entry has been completely updated to reflect the actual data.
+   *  For a read transaction, the result is correct until the transaction end.
+   *  For a write transactions, the result is correct until the value is explicitly changed
+   *  or the transaction is completed. */
+  MDBX_CACHE_REFRESHED = 4
+} MDBX_cache_status_t;
+
+/** \brief Pair of error code and cache status as a result of \ref mdbx_cache_get().
+ * \ingroup c_crud
+ * \see mdbx_cache_get()
+ * \see mdbx_cache_get_SingleThreaded() */
+typedef struct MDBX_cache_result {
+  /** The error code of getting data same as from \ref mdbx_get(). */
+  MDBX_error_t errcode;
+  /** The result of cache operation as the value of \ref MDBX_cache_status_t. */
+  MDBX_cache_status_t status;
+} MDBX_cache_result_t;
+
+/** \brief Gets items from a table using cache including multithreaded cases.
+ * \ingroup c_crud
+ * \details The essence of this "caching" is using a cached information to check as quickly as possible whether the data
+ * has changed or not, with early exit when searching though a DB. For this a petty version information is stored in
+ * a \ref MDBX_cache_entry_t structure, along with the offset to the "cached" data inside the memory-mapped database
+ * file. Instead of a full B-tree search it stops when reaches a DB page that has not been modified after the last
+ * check. Thus a minimum number of steps are performed which provides dramatic acceleration in many cases.
+ *
+ * \note This function is supports multi-threaded cases and automatically resolves collisions using lockfree approach,
+ * nonetheless \ref MDBX_NOSTICKYTHREADS mode is required to use it within a different threads.
+ *
+ * \see mdbx_cache_get_SingleThreaded()
+ * \see MDBX_cache_entry_t
+ * \see mdbx_cache_init()
+ * \see mdbx_get()
+ *
+ * \param [in] txn        A transaction handle returned by \ref mdbx_txn_begin().
+ * \param [in] dbi        A table handle returned by \ref mdbx_dbi_open().
+ * \param [in] key        The key to search for in the table.
+ * \param [in,out] data   The data corresponding to the key.
+ * \param [in,out] entry  The cache entry corresponding to the key.
+ *
+ * \returns The \ref MDBX_cache_result_t with a pair of the error codes for getting a data
+ * and the cache entry processing both. */
+LIBMDBX_API MDBX_cache_result_t mdbx_cache_get(const MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key, MDBX_val *data,
+                                               volatile MDBX_cache_entry_t *entry);
+
+/** \brief Gets items from a table using cache within single-thread cases only.
+ * \ingroup c_crud
+ * \details The essence of this "caching" is using a cached information to check as quickly as possible whether the data
+ * has changed or not, with early exit when searching though a DB. For this a petty version information is stored in
+ * a \ref MDBX_cache_entry_t structure, along with the offset to the "cached" data inside the memory-mapped database
+ * file. Instead of a full B-tree search it stops when reaches a DB page that has not been modified after the last
+ * check. Thus a minimum number of steps are performed which provides dramatic acceleration in many cases.
+ *
+ * \note This function is intended to be used with a given cache entry only in single-threaded cases, otherwise
+ * behaviour is undefined.
+ *
+ * \see mdbx_cache_get()
+ * \see MDBX_cache_entry_t
+ * \see mdbx_cache_init()
+ * \see mdbx_get()
+ *
+ * \param [in] txn        A transaction handle returned by \ref mdbx_txn_begin().
+ * \param [in] dbi        A table handle returned by \ref mdbx_dbi_open().
+ * \param [in] key        The key to search for in the table.
+ * \param [in,out] data   The data corresponding to the key.
+ * \param [in,out] entry  The cache entry corresponding to the key.
+ *
+ * \returns The \ref MDBX_cache_result_t with a pair of the error codes for getting a data
+ * and the cache entry processing both. */
+LIBMDBX_API MDBX_cache_result_t mdbx_cache_get_SingleThreaded(const MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key,
+                                                              MDBX_val *data, MDBX_cache_entry_t *entry);
 
 /** \brief Store items into a table.
  * \ingroup c_crud
@@ -4992,7 +5265,7 @@ LIBMDBX_API int mdbx_get_equal_or_great(const MDBX_txn *txn, MDBX_dbi dbi, MDBX_
  * \retval MDBX_EINVAL    An invalid parameter was specified. */
 LIBMDBX_API int mdbx_put(MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key, MDBX_val *data, MDBX_put_flags_t flags);
 
-/** \brief Replace items in a table.
+/** \brief Replaces item in a table.
  * \ingroup c_crud
  *
  * This function allows to update or delete an existing value at the same time
@@ -5032,13 +5305,70 @@ LIBMDBX_API int mdbx_put(MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key, MDBX_
  *                           combination for selection particular item from
  *                           multi-value/duplicates.
  *
+ * \see mdbx_replace_ex()
  * \see \ref c_crud_hints "Quick reference for Insert/Update/Delete operations"
  *
  * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_replace(MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key, MDBX_val *new_data, MDBX_val *old_data,
                              MDBX_put_flags_t flags);
 
+/** \brief A data preservation callback for using within \ref mdbx_replace_ex().
+ * \ingroup c_crud */
 typedef int (*MDBX_preserve_func)(void *context, MDBX_val *target, const void *src, size_t bytes);
+
+/** \brief Replaces item in a table using preservation callback for an original data.
+ * \ingroup c_crud
+ *
+ * This function allows to update or delete an existing value at the same time
+ * as the previous value is retrieved. If the argument new_data equal is NULL
+ * zero, the removal is performed, otherwise the update/insert.
+ *
+ * The current value may be in an already changed (aka dirty) page. In this
+ * case, the page will be overwritten during the update, and the old value will
+ * be lost. In such cases, the given preservation callback will be used to save
+ * the source data, that, at your discretion, can perform copying, other necessary
+ * actions, or return a special error code.
+ *
+ * If an original data needs to be saved then the passed preservation callback will be called
+ * with `old_data` as a `target` parameter, and `src` with `bytes` for original data.
+ * Such callback should check necessary conditions, perform appropriate action and return
+ * corresponding error code, which will be returned from function as is.
+ * For example, for behavior similar to \ref mdbx_replace(), the callback should check if there
+ * provided buffer size is enough, then either copy the data or return \ref MDBX_RESULT_TRUE.
+ *
+ * For tables with non-unique keys (i.e. with \ref MDBX_DUPSORT flag),
+ * another use case is also possible, when by old_data argument selects a
+ * specific item from multi-value/duplicates with the same key for deletion or
+ * update. To select this scenario in flags should simultaneously specify
+ * \ref MDBX_CURRENT and \ref MDBX_NOOVERWRITE. This combination is chosen
+ * because it makes no sense, and thus allows you to identify the request of
+ * such a scenario.
+ *
+ * \param [in] txn           A transaction handle returned
+ *                           by \ref mdbx_txn_begin().
+ * \param [in] dbi           A table handle returned by \ref mdbx_dbi_open().
+ * \param [in] key           The key to store in the table.
+ * \param [in] new_data      The data to store, if NULL then deletion will
+ *                           be performed.
+ * \param [in,out] old_data  The buffer for retrieve previous value as describe
+ *                           above.
+ * \param [in] flags         Special options for this operation.
+ *                           This parameter must be set to 0 or by bitwise
+ *                           OR'ing together one or more of the values
+ *                           described in \ref mdbx_put() description above,
+ *                           and additionally
+ *                           (\ref MDBX_CURRENT | \ref MDBX_NOOVERWRITE)
+ *                           combination for selection particular item from
+ *                           multi-value/duplicates.
+ * \param [in] preserver     The callback to preserve an original data in case
+ *                           it is on a dirty page and could be overwritten.
+ * \param [in] preserver_context The optional context pointer for use within the preserving callback.
+ *
+ * \see mdbx_replace_ex()
+ * \see MDBX_preserve_func
+ * \see \ref c_crud_hints "Quick reference for Insert/Update/Delete operations"
+ *
+ * \returns A non-zero error value on failure and 0 on success. */
 LIBMDBX_API int mdbx_replace_ex(MDBX_txn *txn, MDBX_dbi dbi, const MDBX_val *key, MDBX_val *new_data,
                                 MDBX_val *old_data, MDBX_put_flags_t flags, MDBX_preserve_func preserver,
                                 void *preserver_context);
@@ -5781,6 +6111,55 @@ LIBMDBX_API int mdbx_cursor_put(MDBX_cursor *cursor, const MDBX_val *key, MDBX_v
  * \retval MDBX_EINVAL        An invalid parameter was specified. */
 LIBMDBX_API int mdbx_cursor_del(MDBX_cursor *cursor, MDBX_put_flags_t flags);
 
+/** \brief Modes for deleting bunches of neighboring items with self-documenting names.
+ *
+ * The EXCLUDING and INCLUDING suffixes mean correspondingly
+ * excluding and including deletion items in the current cursor position, and so forth.
+ *
+ * \ingroup c_crud
+ * \see mdbx_cursor_bunch_delete() */
+typedef enum MDBX_bunch_action {
+  MDBX_DELETE_CURRENT_VALUE,
+  MDBX_DELETE_CURRENT_MULTIVAL_BEFORE_EXCLUDING,
+  MDBX_DELETE_CURRENT_MULTIVAL_BEFORE_INCLUDING,
+  MDBX_DELETE_CURRENT_MULTIVAL_AFTER_INCLUDING,
+  MDBX_DELETE_CURRENT_MULTIVAL_AFTER_EXCLUDING,
+  MDBX_DELETE_CURRENT_MULTIVAL_ALL,
+  MDBX_DELETE_BEFORE_EXCLUDING,
+  MDBX_DELETE_BEFORE_INCLUDING,
+  MDBX_DELETE_AFTER_INCLUDING,
+  MDBX_DELETE_AFTER_EXCLUDING,
+  MDBX_DELETE_WHOLE,
+} MDBX_bunch_action_t;
+
+/** \brief Quickly removes bunches of neighboring items.
+ * \ingroup c_crud
+ * \see MDBX_bunch_action_t
+ *
+ * The function performs massive deletion much faster by cutting whole pages and branches
+ * with will deleted elements from the B+tree structure.
+ *
+ * \note Currently, only a naive implementation of the function is available,
+ *       which will be replaced with a full-fledged one when ready.
+ *
+ * \param [in] cursor  A cursor handle returned by mdbx_cursor_open().
+ * \param [in] action  The requested deletion action as the one
+ *                     value of \ref MDBX_bunch_action_t.
+ * \param [out] number_of_affected  Address to store the result
+ *                                  number of removed items.
+ *
+ * \returns A non-zero error value on failure and 0 on success,
+ *          some possible errors are:
+ * \retval MDBX_THREAD_MISMATCH  Given transaction is not owned
+ *                               by current thread.
+ * \retval MDBX_MAP_FULL      The database is full,
+ *                            see \ref mdbx_env_set_mapsize().
+ * \retval MDBX_TXN_FULL      The transaction has too many dirty pages.
+ * \retval MDBX_EACCES        An attempt was made to write in a read-only
+ *                            transaction.
+ * \retval MDBX_EINVAL        An invalid parameter was specified. */
+LIBMDBX_API int mdbx_cursor_bunch_delete(MDBX_cursor *cursor, MDBX_bunch_action_t action, uint64_t *number_of_affected);
+
 /** \brief Return count values (aka duplicates) for current key.
  * \ingroup c_crud
  *
@@ -6029,11 +6408,10 @@ MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API int mdbx_is_dirty(const MDBX_txn *txn, co
 /** \brief Sequence generation for a table.
  * \ingroup c_crud
  *
- * The function allows to create a linear sequence of unique positive integers
- * for each table. The function can be called for a read transaction to
- * retrieve the current sequence value, and the increment must be zero.
- * Sequence changes become visible outside the current write transaction after
- * it is committed, and discarded on abort.
+ * The function provides a linear sequence of unique positive integers for each table with acquire/allocate semantics.
+ * The function can be called for a read transaction to retrieve the current sequence value while the increment must be
+ * zero. Sequence changes become visible outside the current write transaction after it is committed, and discarded on
+ * abort.
  *
  * \param [in] txn        A transaction handle returned
  *                        by \ref mdbx_txn_begin().
@@ -6046,7 +6424,7 @@ MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API int mdbx_is_dirty(const MDBX_txn *txn, co
  * \returns A non-zero error value on failure and 0 on success,
  *          some possible errors are:
  * \retval MDBX_RESULT_TRUE   Increasing the sequence has resulted in an
- *                            overflow and therefore cannot be executed. */
+ *                            overflow and therefore cannot be performed. */
 LIBMDBX_API int mdbx_dbi_sequence(MDBX_txn *txn, MDBX_dbi dbi, uint64_t *result, uint64_t increment);
 
 /** \brief Compare two keys according to a particular table.
@@ -6521,21 +6899,27 @@ typedef struct MDBX_chk_table {
 
   size_t payload_bytes, lost_bytes;
   struct {
-    size_t all, empty, other;
+    size_t all, empty, broken;
     size_t branch, leaf;
     size_t nested_branch, nested_leaf, nested_subleaf;
   } pages;
   struct {
     /// Tree deep histogram
-    struct MDBX_chk_histogram deep;
+    struct MDBX_chk_histogram height;
     /// Histogram of large/overflow pages length
     struct MDBX_chk_histogram large_pages;
     /// Histogram of nested trees height, span length for GC
-    struct MDBX_chk_histogram nested_tree;
+    struct MDBX_chk_histogram nested_height;
     /// Keys length histogram
     struct MDBX_chk_histogram key_len;
     /// Values length histogram
     struct MDBX_chk_histogram val_len;
+    /// Number of multi-values (aka duplicates) histogram
+    struct MDBX_chk_histogram multival;
+    /// Histogram of branch and leaf pages filling in percents
+    struct MDBX_chk_histogram tree_density;
+    /// Histogram of nested tree(s) branch and leaf pages filling in percents
+    struct MDBX_chk_histogram large_or_nested_density;
   } histogram;
 } MDBX_chk_table_t;
 
@@ -6641,6 +7025,11 @@ LIBMDBX_API int mdbx_env_chk(MDBX_env *env, const MDBX_chk_callbacks_t *cb, MDBX
  * \see MDBX_debug_func
  * \returns Нулевое значение в случае успеха, иначе код ошибки. */
 LIBMDBX_API int mdbx_env_chk_encount_problem(MDBX_chk_context_t *ctx);
+
+LIBMDBX_API const char *mdbx_ratio2digits(uint64_t numerator, uint64_t denominator, int precision, char *buffer,
+                                          size_t buffer_size);
+
+LIBMDBX_API const char *mdbx_ratio2percents(uint64_t value, uint64_t whole, char *buffer, size_t buffer_size);
 
 /** end of chk @} */
 
