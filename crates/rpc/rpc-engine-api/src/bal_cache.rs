@@ -48,7 +48,7 @@ struct BalCacheInner {
     /// LRU cache mapping block hash to BAL entry.
     entries: RwLock<LruMap<BlockHash, BalEntry>>,
     /// Index mapping block number to block hash for range queries.
-    /// Uses BTreeMap for efficient range iteration.
+    /// Uses `BTreeMap` for efficient range iteration.
     block_index: RwLock<BTreeMap<BlockNumber, BlockHash>>,
     /// Cache metrics.
     metrics: BalCacheMetrics,

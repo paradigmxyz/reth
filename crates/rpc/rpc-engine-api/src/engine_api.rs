@@ -156,14 +156,10 @@ where
 
     /// Caches the BAL from the payload if the status is valid.
     fn maybe_cache_bal(&self, payload: &PayloadT::ExecutionData, status: &PayloadStatus) {
-        if status.is_valid() {
-            if let Some(bal) = payload.block_access_list() {
-                self.inner.bal_cache.insert(
-                    payload.block_hash(),
-                    payload.block_number(),
-                    bal.clone(),
-                );
-            }
+        if status.is_valid() &&
+            let Some(bal) = payload.block_access_list()
+        {
+            self.inner.bal_cache.insert(payload.block_hash(), payload.block_number(), bal.clone());
         }
     }
 
