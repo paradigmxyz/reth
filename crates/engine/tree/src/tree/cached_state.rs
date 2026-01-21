@@ -812,7 +812,7 @@ mod tests {
         let provider = MockEthProvider::default();
         provider.extend_accounts(vec![(address, account)]);
 
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder.build_caches(1000);
         let state_provider =
             CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
@@ -835,7 +835,7 @@ mod tests {
         let provider = MockEthProvider::default();
         provider.extend_accounts(vec![(address, account)]);
 
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder.build_caches(1000);
         let state_provider =
             CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
@@ -853,7 +853,7 @@ mod tests {
         let storage_value = U256::from(1);
 
         // insert into caches directly
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder.build_caches(1000);
         caches.insert_storage(address, storage_key, Some(storage_value));
 
         // check that the storage returns the cached value
@@ -868,7 +868,7 @@ mod tests {
         let address = Address::random();
 
         // just create empty caches
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder.build_caches(1000);
 
         // check that the storage is not cached
         let (slot_status, _) = caches.get_storage(&address, &storage_key);
@@ -883,7 +883,7 @@ mod tests {
         let storage_key = StorageKey::random();
 
         // insert into caches directly
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder.build_caches(1000);
         caches.insert_storage(address, storage_key, None);
 
         // check that the storage is empty
@@ -894,7 +894,7 @@ mod tests {
     // Tests for SavedCache locking mechanism
     #[test]
     fn test_saved_cache_is_available() {
-        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let execution_cache = ExecutionCacheBuilder.build_caches(1000);
         let cache = SavedCache::new(B256::ZERO, execution_cache, CachedStateMetrics::zeroed());
 
         // Initially, the cache should be available (only one reference)
@@ -909,7 +909,7 @@ mod tests {
 
     #[test]
     fn test_saved_cache_multiple_references() {
-        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let execution_cache = ExecutionCacheBuilder.build_caches(1000);
         let cache =
             SavedCache::new(B256::from([2u8; 32]), execution_cache, CachedStateMetrics::zeroed());
 

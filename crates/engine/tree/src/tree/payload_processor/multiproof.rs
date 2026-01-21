@@ -1576,7 +1576,7 @@ mod tests {
     {
         let db_provider = factory.database_provider_ro().unwrap();
         let state_provider: StateProviderBox = Box::new(LatestStateProvider::new(db_provider));
-        let cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let cache = ExecutionCacheBuilder.build_caches(1000);
         CachedStateProvider::new(state_provider, cache, Default::default())
     }
 
