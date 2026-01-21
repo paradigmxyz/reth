@@ -947,7 +947,6 @@ impl SparseTrieInterface for SerialSparseTrie {
     }
 
     fn wipe(&mut self) {
-        // Clear existing allocations instead of creating new ones to preserve capacity
         self.nodes.clear();
         self.nodes.insert(Nibbles::default(), SparseNode::Empty);
         self.branch_node_masks.clear();
