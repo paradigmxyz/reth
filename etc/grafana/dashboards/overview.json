@@ -7065,8 +7065,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 0,
+        "w": 6,
+        "x": 12,
         "y": 211
       },
       "id": 1012,
@@ -7160,8 +7160,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 6,
+        "x": 18,
         "y": 211
       },
       "id": 1013,
@@ -12370,57 +12370,51 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Size of SST files on disk per RocksDB table",
+      "description": "SST file size and memtable size per RocksDB table",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
           },
           "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
           },
           "mappings": [],
-          "unit": "bytes"
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "decbytes"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 12,
         "x": 0,
-        "y": 219
+        "y": 211
       },
-      "id": 1015,
+      "id": 1017,
       "options": {
-        "displayLabels": [
-          "name"
-        ],
-        "legend": {
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true,
-          "values": [
-            "value"
-          ]
-        },
-        "pieType": "pie",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
           "fields": "",
-          "values": false
+          "reducer": [
+            "sum"
+          ],
+          "show": false
         },
-        "sort": "desc",
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
+        "showHeader": true
       },
       "pluginVersion": "12.2.1",
       "targets": [
@@ -12431,73 +12425,11 @@
           },
           "editorMode": "code",
           "expr": "reth_rocksdb_sst_size{$instance_label=\"$instance\"}",
-          "legendFormat": "{{table}}",
+          "format": "table",
+          "legendFormat": "__auto",
           "range": true,
           "refId": "A"
-        }
-      ],
-      "title": "RocksDB SST Size",
-      "type": "piechart"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "Size of memtables in memory per RocksDB table",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
-          "mappings": [],
-          "unit": "bytes"
         },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 219
-      },
-      "id": 1016,
-      "options": {
-        "displayLabels": [
-          "name"
-        ],
-        "legend": {
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true,
-          "values": [
-            "value"
-          ]
-        },
-        "pieType": "pie",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "sort": "desc",
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
         {
           "datasource": {
             "type": "prometheus",
@@ -12505,13 +12437,65 @@
           },
           "editorMode": "code",
           "expr": "reth_rocksdb_memtable_size{$instance_label=\"$instance\"}",
-          "legendFormat": "{{table}}",
+          "format": "table",
+          "legendFormat": "__auto",
           "range": true,
-          "refId": "A"
+          "refId": "B"
         }
       ],
-      "title": "RocksDB Memtable Size",
-      "type": "piechart"
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Value #A": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #B": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
+              "table": {
+                "aggregations": [],
+                "operation": "groupby"
+              }
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Value #A (lastNotNull)"
+              }
+            ]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "table": "Table",
+              "Value #A (lastNotNull)": "SST Size",
+              "Value #B (lastNotNull)": "Memtable Size"
+            }
+          }
+        }
+      ],
+      "title": "RocksDB Storage Breakdown",
+      "type": "table"
     }
   ],
   "refresh": "5s",
