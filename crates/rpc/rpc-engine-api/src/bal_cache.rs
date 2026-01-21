@@ -117,16 +117,24 @@ impl BalCache {
 
     /// Retrieves BALs for a range of blocks starting at `start` for `count` blocks.
     ///
-    /// Returns a vector of BALs in block number order. Missing blocks are not included.
+    /// Returns a vector of contiguous BALs in block number order, stopping at the first
+    /// missing block. This ensures the caller knows the returned BALs correspond to
+    /// blocks `[start, start + len)`.
     pub fn get_by_range(&self, start: BlockNumber, count: u64) -> Vec<Bytes> {
         let entries = self.inner.entries.read();
         let block_index = self.inner.block_index.read();
 
-        let end = start.saturating_add(count);
-        block_index
-            .range(start..end)
-            .filter_map(|(_, hash)| entries.peek(hash).map(|e| e.bal.clone()))
-            .collect()
+        let mut result = Vec::new();
+        for block_num in start..start.saturating_add(count) {
+            let Some(hash) = block_index.get(&block_num) else {
+                break;
+            };
+            let Some(entry) = entries.peek(hash) else {
+                break;
+            };
+            result.push(entry.bal.clone());
+        }
+        result
     }
 
     /// Returns the number of entries in the cache.
@@ -192,6 +200,26 @@ mod tests {
 
         let results = cache.get_by_range(2, 3);
         assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_get_by_range_stops_at_gap() {
+        let cache = BalCache::with_capacity(10);
+
+        // Insert blocks 1, 2, 4, 5 (missing block 3)
+        for i in [1, 2, 4, 5] {
+            let hash = B256::random();
+            let bal = Bytes::from(format!("bal{i}").into_bytes());
+            cache.insert(hash, i, bal);
+        }
+
+        // Requesting range starting at 1 should stop at the gap (block 3)
+        let results = cache.get_by_range(1, 5);
+        assert_eq!(results.len(), 2); // Only blocks 1 and 2
+
+        // Requesting range starting at 4 should return 4 and 5
+        let results = cache.get_by_range(4, 3);
+        assert_eq!(results.len(), 2);
     }
 
     #[test]
