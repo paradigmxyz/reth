@@ -815,7 +815,7 @@
           "instant": false,
           "legendFormat": "RocksDB",
           "range": true,
-          "refId": "E"
+          "refId": "D"
         },
         {
           "datasource": {
@@ -828,7 +828,7 @@
           "instant": false,
           "legendFormat": "Total",
           "range": true,
-          "refId": "D"
+          "refId": "E"
         }
       ],
       "title": "Storage size",
