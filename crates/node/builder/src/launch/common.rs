@@ -1277,6 +1277,10 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
                 })
             }
         })
+        .with_hook({
+            let rocksdb = provider_factory.rocksdb_provider();
+            move || throttle!(Duration::from_secs(5 * 60), || rocksdb.report_metrics())
+        })
         .build()
 }
 
