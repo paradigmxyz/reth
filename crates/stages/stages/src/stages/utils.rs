@@ -27,7 +27,7 @@ use tracing::info;
 ///
 /// This function implements the core shard-loading algorithm used by both account and storage
 /// history stages. It handles:
-/// - Grouping indices by their prefix key (address or address+storage_key)
+/// - Grouping indices by their prefix key (address or `address+storage_key`)
 /// - Flushing complete shards while buffering the trailing partial shard
 /// - Using `u64::MAX` for the final shard's key (incremental sync invariant)
 /// - Append vs upsert semantics based on `append_only` flag
@@ -387,7 +387,7 @@ where
         &mut collector,
         append_only,
         writer,
-        |address, highest_block| ShardedKey::new(address, highest_block),
+        ShardedKey::new,
         |key: &ShardedKey<Address>| key.key,
         |writer, address| writer.get_last_account_history_shard(address),
         |writer, key, value, append| {
