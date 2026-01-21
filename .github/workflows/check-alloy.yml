@@ -25,7 +25,7 @@ env:
 jobs:
   check:
     name: Check compilation with patched alloy
-    runs-on: ubuntu-latest-32
+    runs-on: depot-ubuntu-latest-16
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
