@@ -359,9 +359,9 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
 
     /// Returns the effective storage settings derived from static-file and `RocksDB` CLI args.
     pub fn storage_settings(&self) -> StorageSettings {
-        let tx_hash = self.rocksdb.all || self.rocksdb.tx_hash.unwrap_or(false);
-        let storages_history = self.rocksdb.all || self.rocksdb.storages_history.unwrap_or(false);
-        let account_history = self.rocksdb.all || self.rocksdb.account_history.unwrap_or(false);
+        let tx_hash = self.rocksdb.all || self.rocksdb.tx_hash_with_default();
+        let storages_history = self.rocksdb.all || self.rocksdb.storages_history_with_default();
+        let account_history = self.rocksdb.all || self.rocksdb.account_history_with_default();
 
         StorageSettings {
             receipts_in_static_files: self.static_files.receipts,
@@ -611,5 +611,60 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             static_files: self.static_files,
             rocksdb: self.rocksdb,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_storage_settings_default_with_edge_feature() {
+        // Test that storage settings respect edge feature defaults
+        let config = NodeConfig::default();
+        let settings = config.storage_settings();
+
+        // When edge feature is enabled, tx_hash should default to true
+        // When edge feature is disabled, it should default to false
+        #[cfg(feature = "edge")]
+        {
+            assert!(settings.transaction_hash_numbers_in_rocksdb);
+        }
+
+        #[cfg(not(feature = "edge"))]
+        {
+            assert!(!settings.transaction_hash_numbers_in_rocksdb);
+        }
+
+        // storages_history and account_history always default to false
+        assert!(!settings.storages_history_in_rocksdb);
+        assert!(!settings.account_history_in_rocksdb);
+    }
+
+    #[test]
+    fn test_storage_settings_with_explicit_rocksdb_args() {
+        let mut config = NodeConfig::default();
+        config.rocksdb.tx_hash = Some(true);
+        config.rocksdb.storages_history = Some(true);
+        config.rocksdb.account_history = Some(true);
+
+        let settings = config.storage_settings();
+
+        assert!(settings.transaction_hash_numbers_in_rocksdb);
+        assert!(settings.storages_history_in_rocksdb);
+        assert!(settings.account_history_in_rocksdb);
+    }
+
+    #[test]
+    fn test_storage_settings_with_rocksdb_all() {
+        let mut config = NodeConfig::default();
+        config.rocksdb.all = true;
+
+        let settings = config.storage_settings();
+
+        // When all is set, all RocksDB flags should be true
+        assert!(settings.transaction_hash_numbers_in_rocksdb);
+        assert!(settings.storages_history_in_rocksdb);
+        assert!(settings.account_history_in_rocksdb);
     }
 }

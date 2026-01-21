@@ -2,6 +2,28 @@
 
 use clap::{ArgAction, Args};
 
+/// Default value for `RocksDB` tx hash flag.
+///
+/// When the `edge` feature is enabled, defaults to `true` to store transaction hash numbers in
+/// `RocksDB`. Otherwise defaults to `false` for legacy behavior.
+const fn default_rocksdb_tx_hash_flag() -> bool {
+    cfg!(feature = "edge")
+}
+
+/// Default value for `RocksDB` storages history flag.
+///
+/// Always defaults to `false` as edge mode does not enable this.
+const fn default_rocksdb_storages_history_flag() -> bool {
+    false
+}
+
+/// Default value for `RocksDB` account history flag.
+///
+/// Always defaults to `false` as edge mode does not enable this.
+const fn default_rocksdb_account_history_flag() -> bool {
+    false
+}
+
 /// Parameters for `RocksDB` table routing configuration.
 ///
 /// These flags control which database tables are stored in `RocksDB` instead of MDBX.
@@ -46,6 +68,30 @@ impl RocksDbArgs {
             }
         }
         Ok(())
+    }
+
+    /// Returns the tx hash flag value with the appropriate default based on the `edge` feature.
+    pub const fn tx_hash_with_default(&self) -> bool {
+        match self.tx_hash {
+            Some(value) => value,
+            None => default_rocksdb_tx_hash_flag(),
+        }
+    }
+
+    /// Returns the storages history flag value with the appropriate default.
+    pub const fn storages_history_with_default(&self) -> bool {
+        match self.storages_history {
+            Some(value) => value,
+            None => default_rocksdb_storages_history_flag(),
+        }
+    }
+
+    /// Returns the account history flag value with the appropriate default.
+    pub const fn account_history_with_default(&self) -> bool {
+        match self.account_history {
+            Some(value) => value,
+            None => default_rocksdb_account_history_flag(),
+        }
     }
 }
 
@@ -118,5 +164,51 @@ mod tests {
 
         let args = RocksDbArgs { all: true, account_history: Some(false), ..Default::default() };
         assert_eq!(args.validate(), Err(RocksDbArgsError::ConflictingFlags("account-history")));
+    }
+
+    #[test]
+    fn test_default_values_with_edge_feature() {
+        // When edge feature is enabled, tx_hash should default to true
+        // When edge feature is disabled, it should default to false
+        let args = RocksDbArgs::default();
+        
+        #[cfg(feature = "edge")]
+        {
+            assert!(args.tx_hash_with_default());
+        }
+        
+        #[cfg(not(feature = "edge"))]
+        {
+            assert!(!args.tx_hash_with_default());
+        }
+        
+        // storages_history and account_history always default to false
+        assert!(!args.storages_history_with_default());
+        assert!(!args.account_history_with_default());
+    }
+
+    #[test]
+    fn test_explicit_values_override_defaults() {
+        let args = RocksDbArgs {
+            all: false,
+            tx_hash: Some(true),
+            storages_history: Some(true),
+            account_history: Some(true),
+        };
+        
+        assert!(args.tx_hash_with_default());
+        assert!(args.storages_history_with_default());
+        assert!(args.account_history_with_default());
+        
+        let args = RocksDbArgs {
+            all: false,
+            tx_hash: Some(false),
+            storages_history: Some(false),
+            account_history: Some(false),
+        };
+        
+        assert!(!args.tx_hash_with_default());
+        assert!(!args.storages_history_with_default());
+        assert!(!args.account_history_with_default());
     }
 }
