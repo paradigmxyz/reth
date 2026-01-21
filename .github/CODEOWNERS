@@ -33,7 +33,7 @@ crates/stateless/           @mattsse
 crates/storage/codecs/      @joshieDo
 crates/storage/db-api/      @joshieDo
 crates/storage/db-common/   @Rjected
-crates/storage/db/          @joshieDo @rakita
+crates/storage/db/          @joshieDo
 crates/storage/errors/      @rakita
 crates/storage/libmdbx-rs/  @rakita @shekhirin
 crates/storage/nippy-jar/   @joshieDo @shekhirin
