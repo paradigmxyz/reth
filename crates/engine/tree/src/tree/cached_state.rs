@@ -5,6 +5,7 @@ use alloy_primitives::{
 };
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::Gauge;
+use parking_lot::Once;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
@@ -25,7 +26,7 @@ use std::{
         Arc,
     },
 };
-use tracing::{debug_span, instrument, trace};
+use tracing::{debug_span, instrument, trace, warn};
 
 /// Alignment in bytes for entries in the fixed-cache.
 ///
@@ -505,6 +506,9 @@ pub(crate) struct ExecutionCache {
 
     /// Stats handler for the account cache.
     account_stats: Arc<CacheStatsHandler>,
+
+    /// One-time notification when SELFDESTRUCT is encountered
+    selfdestruct_encountered: Arc<Once>,
 }
 
 impl ExecutionCache {
@@ -558,6 +562,7 @@ impl ExecutionCache {
             code_stats,
             storage_stats,
             account_stats,
+            selfdestruct_encountered: Arc::default(),
         }
     }
 
@@ -700,6 +705,13 @@ impl ExecutionCache {
             // live sync. It also will not be hit in pipeline sync, because we don't use execution
             // cache there.
             if account.was_destroyed() {
+                self.selfdestruct_encountered.call_once(|| {
+                    warn!(
+                        target: "engine::caching",
+                        "Encountered an inter-transaction SELFDESTRUCT that reset the execution cache.
+                        Are you running a pre-Dencun network?"
+                    );
+                });
                 self.clear();
                 return Ok(())
             }
