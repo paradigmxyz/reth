@@ -40,7 +40,7 @@ crates/storage/nippy-jar/   @joshieDo @shekhirin
 crates/storage/provider/    @joshieDo @shekhirin
 crates/storage/storage-api/ @joshieDo
 crates/tasks/               @mattsse
-crates/tokio-util/          @fgimenez
+crates/tokio-util/          @mattsse 
 crates/tracing/             @mattsse @shekhirin
 crates/tracing-otlp/        @mattsse @Rjected 
 crates/transaction-pool/    @mattsse @yongkangc
