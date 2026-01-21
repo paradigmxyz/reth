@@ -616,7 +616,7 @@ impl RocksDBProvider {
         let write_options = WriteOptions::default();
         let txn_options = OptimisticTransactionOptions::default();
         let inner = self.0.db_rw().transaction_opt(&write_options, &txn_options);
-        RocksTx { inner, provider: self }
+        RocksTx { inner, provider: self, assume_history_complete: false }
     }
 
     /// Creates a new batch for atomic writes.
@@ -1628,6 +1628,10 @@ impl<'a> RocksDBBatch<'a> {
 pub struct RocksTx<'db> {
     inner: Transaction<'db, OptimisticTransactionDB>,
     provider: &'db RocksDBProvider,
+    /// When true, assume RocksDB has complete history (like MDBX) and return `NotYetWritten`
+    /// when querying before the first history entry. When false (default), return
+    /// `MaybeInPlainState` for hybrid storage safety.
+    assume_history_complete: bool,
 }
 
 impl fmt::Debug for RocksTx<'_> {
@@ -1637,6 +1641,16 @@ impl fmt::Debug for RocksTx<'_> {
 }
 
 impl<'db> RocksTx<'db> {
+    /// Sets the `assume_history_complete` flag to true.
+    ///
+    /// When enabled, history queries will return `NotYetWritten` (like MDBX) instead of
+    /// `MaybeInPlainState` when querying before the first history entry. Use this in tests
+    /// where RocksDB and MDBX have identical data.
+    pub fn with_assume_history_complete(mut self) -> Self {
+        self.assume_history_complete = true;
+        self
+    }
+
     /// Gets a value from the specified table. Sees uncommitted writes in this transaction.
     pub fn get<T: Table>(&self, key: T::Key) -> ProviderResult<Option<T::Value>> {
         let encoded_key = key.encode();
@@ -1809,9 +1823,15 @@ impl<'db> RocksTx<'db> {
         // written AFTER it was enabled. Accounts modified before that exist only in MDBX.
         // Returning `NotYetWritten` would incorrectly treat them as non-existent (nonce 0).
         //
-        // Always return `MaybeInPlainState` to ensure we check plain state for accounts
-        // that RocksDB hasn't tracked yet.
-        let fallback = || Ok(HistoryInfo::MaybeInPlainState);
+        // When `assume_history_complete` is true (for tests with identical data), return
+        // `NotYetWritten` to match MDBX semantics.
+        let fallback = || {
+            Ok(if self.assume_history_complete {
+                HistoryInfo::NotYetWritten
+            } else {
+                HistoryInfo::MaybeInPlainState
+            })
+        };
 
         let cf = self.provider.0.cf_handle_rw(T::NAME)?;
 
@@ -1867,7 +1887,8 @@ impl<'db> RocksTx<'db> {
         // - RocksDB should return `MaybeInPlainState` because the account may exist in MDBX from
         //   before RocksDB was enabled
         //
-        // We use `from_lookup` but then override `NotYetWritten` -> `MaybeInPlainState`.
+        // We use `from_lookup` but then override `NotYetWritten` -> `MaybeInPlainState`
+        // unless `assume_history_complete` is true (for tests with identical data).
         let result = HistoryInfo::from_lookup(
             found_block,
             is_before_first_write,
@@ -1875,7 +1896,9 @@ impl<'db> RocksTx<'db> {
         );
 
         Ok(match result {
-            HistoryInfo::NotYetWritten => HistoryInfo::MaybeInPlainState,
+            HistoryInfo::NotYetWritten if !self.assume_history_complete => {
+                HistoryInfo::MaybeInPlainState
+            }
             other => other,
         })
     }
