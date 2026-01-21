@@ -28,8 +28,8 @@ pub fn slow_block_threshold() -> u64 {
 }
 
 /// Returns true if the given execution time exceeds the slow block threshold.
-pub fn is_slow_block(execution_ms: u64) -> bool {
-    execution_ms > slow_block_threshold()
+pub fn is_slow_block(execution_ms: f64) -> bool {
+    execution_ms > slow_block_threshold() as f64
 }
 
 /// Calculates the cache hit rate as a percentage (0-100).
@@ -140,14 +140,19 @@ impl ExecutorMetrics {
         block_hash: &str,
         gas_used: u64,
         tx_count: usize,
-        execution_ms: u64,
+        execution_ms: f64,
+        state_read_ms: f64,
+        state_hash_ms: f64,
+        commit_ms: f64,
+        total_ms: f64,
         accounts_loaded: usize,
         storage_slots_loaded: usize,
-        bytecodes_loaded: usize,
+        code_loaded: usize,
         code_bytes_read: usize,
         accounts_updated: usize,
         storage_slots_updated: usize,
-        bytecodes_updated: usize,
+        code_updated: usize,
+        code_bytes_written: usize,
         account_cache_hits: u64,
         account_cache_misses: u64,
         storage_cache_hits: u64,
@@ -156,8 +161,8 @@ impl ExecutorMetrics {
         code_cache_misses: u64,
     ) {
         if is_slow_block(execution_ms) {
-            let mgas_per_sec = if execution_ms > 0 {
-                (gas_used as f64 / 1_000_000.0) / (execution_ms as f64 / 1000.0)
+            let mgas_per_sec = if execution_ms > 0.0 {
+                (gas_used as f64 / 1_000_000.0) / (execution_ms / 1000.0)
             } else {
                 0.0
             };
@@ -175,16 +180,20 @@ impl ExecutorMetrics {
                 block.hash = block_hash,
                 block.gas_used = gas_used,
                 block.tx_count = tx_count,
-                timing.execution_ms = execution_ms,
-                timing.total_ms = execution_ms,
+                timing.execution_ms = format!("{:.3}", execution_ms),
+                timing.state_read_ms = format!("{:.3}", state_read_ms),
+                timing.state_hash_ms = format!("{:.3}", state_hash_ms),
+                timing.commit_ms = format!("{:.3}", commit_ms),
+                timing.total_ms = format!("{:.3}", total_ms),
                 throughput.mgas_per_sec = format!("{:.2}", mgas_per_sec),
                 state_reads.accounts = accounts_loaded,
                 state_reads.storage_slots = storage_slots_loaded,
-                state_reads.bytecodes = bytecodes_loaded,
+                state_reads.code = code_loaded,
                 state_reads.code_bytes = code_bytes_read,
                 state_writes.accounts = accounts_updated,
                 state_writes.storage_slots = storage_slots_updated,
-                state_writes.bytecodes = bytecodes_updated,
+                state_writes.code = code_updated,
+                state_writes.code_bytes = code_bytes_written,
                 cache.account.hits = account_cache_hits,
                 cache.account.misses = account_cache_misses,
                 cache.account.hit_rate = format!("{:.2}", account_hit_rate),
@@ -263,14 +272,14 @@ mod tests {
     fn test_slow_block_threshold() {
         // Default is 1000ms (1s)
         assert_eq!(slow_block_threshold(), DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
-        assert!(!is_slow_block(500));
-        assert!(is_slow_block(1500));
+        assert!(!is_slow_block(500.0));
+        assert!(is_slow_block(1500.0));
 
         // Test custom threshold
         set_slow_block_threshold(100);
         assert_eq!(slow_block_threshold(), 100);
-        assert!(!is_slow_block(50));
-        assert!(is_slow_block(150));
+        assert!(!is_slow_block(50.0));
+        assert!(is_slow_block(150.0));
 
         // Reset to default
         set_slow_block_threshold(DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
@@ -281,8 +290,8 @@ mod tests {
     fn test_slow_block_threshold_zero() {
         // Setting threshold to 0 should log all blocks (any execution > 0 is slow)
         set_slow_block_threshold(0);
-        assert!(is_slow_block(1));
-        assert!(!is_slow_block(0));
+        assert!(is_slow_block(1.0));
+        assert!(!is_slow_block(0.0));
 
         // Reset to default
         set_slow_block_threshold(DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
@@ -299,20 +308,25 @@ mod tests {
         set_slow_block_threshold(0);
 
         // Call log_slow_block with sample data
-        // This should log (execution_ms=1500 > threshold=0)
+        // This should log (execution_ms=1500.0 > threshold=0)
         metrics.log_slow_block(
             12345,                                                              // block_number
             "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678", // block_hash
             30_000_000,                                                         // gas_used
             200,                                                                // tx_count
-            1500,                                                               // execution_ms
+            1500.0,                                                             // execution_ms (f64)
+            320.0,                                                              // state_read_ms (f64)
+            150.0,                                                              // state_hash_ms (f64)
+            75.0,                                                               // commit_ms (f64)
+            1545.0,                                                             // total_ms (f64)
             100,                                                                // accounts_loaded
             500,   // storage_slots_loaded
-            20,    // bytecodes_loaded
+            20,    // code_loaded
             10240, // code_bytes_read
             50,    // accounts_updated
             200,   // storage_slots_updated
-            0,     // bytecodes_updated
+            0,     // code_updated
+            0,     // code_bytes_written
             4,     // account_cache_hits
             6,     // account_cache_misses
             0,     // storage_cache_hits
