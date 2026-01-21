@@ -15,7 +15,7 @@ use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::{HashMap, HashSet},
     io,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     pin::Pin,
     str::FromStr,
     sync::Arc,
@@ -56,8 +56,13 @@ impl MockDiscovery {
         let id = pk2id(&pk);
         let socket = Arc::new(UdpSocket::bind(socket).await?);
         let local_addr = socket.local_addr()?;
+        let local_ip = match local_addr.ip() {
+            IpAddr::V4(v4) if v4.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(v6) if v6.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+            other => other,
+        };
         let local_enr = NodeRecord {
-            address: local_addr.ip(),
+            address: local_ip,
             tcp_port: local_addr.port(),
             udp_port: local_addr.port(),
             id,
@@ -245,8 +250,13 @@ pub async fn create_discv4_with_config(config: Discv4Config) -> (Discv4, Discv4S
     let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
     let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
     let id = pk2id(&pk);
+    let local_ip = match socket.ip() {
+        IpAddr::V4(v4) if v4.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(v6) if v6.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        other => other,
+    };
     let local_enr =
-        NodeRecord { address: socket.ip(), tcp_port: socket.port(), udp_port: socket.port(), id };
+        NodeRecord { address: local_ip, tcp_port: socket.port(), udp_port: socket.port(), id };
     Discv4::bind(socket, local_enr, secret_key, config).await.unwrap()
 }
 
