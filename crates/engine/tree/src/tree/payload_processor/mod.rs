@@ -19,6 +19,7 @@ use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
 use crossbeam_channel::Sender as CrossbeamSender;
 use executor::WorkloadExecutor;
+use metrics::Counter;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
@@ -28,6 +29,7 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
     TxEnvFor,
 };
+use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProvider,
@@ -788,6 +790,8 @@ impl<R> Drop for CacheTaskHandle<R> {
 struct ExecutionCache {
     /// Guarded cloneable cache identified by a block hash.
     inner: Arc<RwLock<Option<SavedCache>>>,
+    /// Metrics for cache operations.
+    metrics: ExecutionCacheMetrics,
 }
 
 impl ExecutionCache {
@@ -829,6 +833,10 @@ impl ExecutionCache {
             if hash_matches && available {
                 return Some(c.clone());
             }
+
+            if hash_matches && !available {
+                self.metrics.execution_cache_in_use.increment(1);
+            }
         } else {
             debug!(target: "engine::caching", %parent_hash, "No cache found");
         }
@@ -862,6 +870,15 @@ impl ExecutionCache {
         let mut guard = self.inner.write();
         update_fn(&mut guard);
     }
+}
+
+/// Metrics for execution cache operations.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "consensus.engine.beacon")]
+pub(crate) struct ExecutionCacheMetrics {
+    /// Counter for when the execution cache was unavailable because other threads
+    /// (e.g., prewarming) are still using it.
+    pub(crate) execution_cache_in_use: Counter,
 }
 
 /// EVM context required to execute a block.
