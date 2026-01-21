@@ -5,7 +5,7 @@ crates/cli/                 @mattsse
 crates/config/              @shekhirin @mattsse @Rjected 
 crates/consensus/           @mattsse @Rjected
 crates/e2e-test-utils/      @mattsse @Rjected @klkvr @fgimenez
-crates/engine/              @mattsse @Rjected @fgimenez @mediocregopher @yongkangc
+crates/engine/              @mattsse @Rjected @mediocregopher @yongkangc
 crates/era/                 @mattsse
 crates/era-downloader/      @mattsse
 crates/era-utils/           @mattsse
