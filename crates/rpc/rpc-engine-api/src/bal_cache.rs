@@ -143,7 +143,7 @@ impl BalCache {
 
     /// Returns the number of entries in the cache.
     #[cfg(test)]
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.inner.entries.read().len()
     }
 }
