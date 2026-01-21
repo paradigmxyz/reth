@@ -376,6 +376,11 @@ pub struct StaticFileProviderInner<N> {
     /// This additional tracker exists for more efficient lookups because the node must be aware of
     /// the expired height.
     earliest_history_height: AtomicU64,
+    /// Tracks the earliest available block number for receipts, separate from transactions.
+    ///
+    /// Receipts can be pruned independently from transactions, so this tracks the lowest
+    /// available block for the Receipts static file segment.
+    earliest_receipt_height: AtomicU64,
     /// Directory where `static_files` are located
     path: PathBuf,
     /// Maintains a writer set of [`StaticFileSegment`].
@@ -411,6 +416,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             indexes: Default::default(),
             writers: Default::default(),
             earliest_history_height: Default::default(),
+            earliest_receipt_height: Default::default(),
             path: path.as_ref().to_path_buf(),
             metrics: None,
             access,
@@ -1204,12 +1210,19 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         // If this is a re-initialization, we need to clear this as well
         self.map.clear();
 
-        // initialize the expired history height to the lowest static file block
+        // initialize the expired history height to the lowest static file block for transactions
         if let Some(lowest_range) =
             indexes.get(StaticFileSegment::Transactions).and_then(|index| index.min_block_range)
         {
-            // the earliest height is the lowest available block number
             self.earliest_history_height
+                .store(lowest_range.start(), std::sync::atomic::Ordering::Relaxed);
+        }
+
+        // initialize the expired receipt height to the lowest static file block for receipts
+        if let Some(lowest_range) =
+            indexes.get(StaticFileSegment::Receipts).and_then(|index| index.min_block_range)
+        {
+            self.earliest_receipt_height
                 .store(lowest_range.start(), std::sync::atomic::Ordering::Relaxed);
         }
 
@@ -1681,6 +1694,16 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Returns `0` if no history has been expired.
     pub fn earliest_history_height(&self) -> BlockNumber {
         self.earliest_history_height.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns the earliest available block number for receipts.
+    ///
+    /// Receipts can be pruned separately from transactions, so this tracks
+    /// the lowest block where receipts are still available.
+    ///
+    /// Returns `0` if no receipts have been expired.
+    pub fn earliest_receipt_height(&self) -> BlockNumber {
+        self.earliest_receipt_height.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Gets the lowest static file's block range if it exists for a static file segment.
