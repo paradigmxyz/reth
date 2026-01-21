@@ -1,5 +1,6 @@
 use crate::{
-    capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
+    bal_cache::BalCache, capabilities::EngineCapabilities, metrics::EngineApiMetrics,
+    EngineApiError, EngineApiResult,
 };
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
@@ -21,7 +22,7 @@ use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTy
 use reth_network_api::NetworkInfo;
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
+    validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload, MessageValidationKind,
     PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
@@ -97,6 +98,38 @@ where
         accept_execution_requests_hash: bool,
         network: impl NetworkInfo + 'static,
     ) -> Self {
+        Self::with_bal_cache(
+            provider,
+            chain_spec,
+            beacon_consensus,
+            payload_store,
+            tx_pool,
+            task_spawner,
+            client,
+            capabilities,
+            validator,
+            accept_execution_requests_hash,
+            network,
+            BalCache::new(),
+        )
+    }
+
+    /// Create new instance of [`EngineApi`] with a custom BAL cache.
+    #[expect(clippy::too_many_arguments)]
+    pub fn with_bal_cache(
+        provider: Provider,
+        chain_spec: Arc<ChainSpec>,
+        beacon_consensus: ConsensusEngineHandle<PayloadT>,
+        payload_store: PayloadStore<PayloadT>,
+        tx_pool: Pool,
+        task_spawner: Box<dyn TaskSpawner>,
+        client: ClientVersionV1,
+        capabilities: EngineCapabilities,
+        validator: Validator,
+        accept_execution_requests_hash: bool,
+        network: impl NetworkInfo + 'static,
+        bal_cache: BalCache,
+    ) -> Self {
         let is_syncing = Arc::new(move || network.is_syncing());
         let inner = Arc::new(EngineApiInner {
             provider,
@@ -111,8 +144,27 @@ where
             validator,
             accept_execution_requests_hash,
             is_syncing,
+            bal_cache,
         });
         Self { inner }
+    }
+
+    /// Returns a reference to the BAL cache.
+    pub fn bal_cache(&self) -> &BalCache {
+        &self.inner.bal_cache
+    }
+
+    /// Caches the BAL from the payload if the status is valid.
+    fn maybe_cache_bal(&self, payload: &PayloadT::ExecutionData, status: &PayloadStatus) {
+        if status.is_valid() {
+            if let Some(bal) = payload.block_access_list() {
+                self.inner.bal_cache.insert(
+                    payload.block_hash(),
+                    payload.block_number(),
+                    bal.clone(),
+                );
+            }
+        }
     }
 
     /// Fetches the client version.
@@ -149,7 +201,9 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let status = self.inner.beacon_consensus.new_payload(payload.clone()).await?;
+        self.maybe_cache_bal(&payload, &status);
+        Ok(status)
     }
 
     /// Metered version of `new_payload_v1`.
@@ -177,7 +231,10 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V2, payload_or_attrs)?;
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+
+        let status = self.inner.beacon_consensus.new_payload(payload.clone()).await?;
+        self.maybe_cache_bal(&payload, &status);
+        Ok(status)
     }
 
     /// Metered version of `new_payload_v2`.
@@ -206,7 +263,9 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V3, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let status = self.inner.beacon_consensus.new_payload(payload.clone()).await?;
+        self.maybe_cache_bal(&payload, &status);
+        Ok(status)
     }
 
     /// Metrics version of `new_payload_v3`
@@ -236,7 +295,9 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
 
-        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+        let status = self.inner.beacon_consensus.new_payload(payload.clone()).await?;
+        self.maybe_cache_bal(&payload, &status);
+        Ok(status)
     }
 
     /// Metrics version of `new_payload_v4`
@@ -881,6 +942,22 @@ where
 
         res
     }
+
+    /// Retrieves BALs for the given block hashes from the cache.
+    ///
+    /// Returns the RLP-encoded BALs for blocks found in the cache.
+    /// Missing blocks are returned as empty bytes.
+    pub fn get_bals_by_hash(&self, block_hashes: Vec<BlockHash>) -> Vec<alloy_primitives::Bytes> {
+        let results = self.inner.bal_cache.get_by_hashes(&block_hashes);
+        results.into_iter().map(|opt| opt.unwrap_or_default()).collect()
+    }
+
+    /// Retrieves BALs for a range of blocks from the cache.
+    ///
+    /// Returns the RLP-encoded BALs for blocks in the range `[start, start + count)`.
+    pub fn get_bals_by_range(&self, start: u64, count: u64) -> Vec<alloy_primitives::Bytes> {
+        self.inner.bal_cache.get_by_range(start, count)
+    }
 }
 
 // This is the concrete ethereum engine API implementation.
@@ -1172,12 +1249,10 @@ where
     /// See also <https://eips.ethereum.org/EIPS/eip-7928>
     async fn get_bals_by_hash_v1(
         &self,
-        _block_hashes: Vec<BlockHash>,
+        block_hashes: Vec<BlockHash>,
     ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
         trace!(target: "rpc::engine", "Serving engine_getBALsByHashV1");
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
+        Ok(self.get_bals_by_hash(block_hashes))
     }
 
     /// Handler for `engine_getBALsByRangeV1`
@@ -1185,13 +1260,11 @@ where
     /// See also <https://eips.ethereum.org/EIPS/eip-7928>
     async fn get_bals_by_range_v1(
         &self,
-        _start: U64,
-        _count: U64,
+        start: U64,
+        count: U64,
     ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
         trace!(target: "rpc::engine", "Serving engine_getBALsByRangeV1");
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
+        Ok(self.get_bals_by_range(start.to(), count.to()))
     }
 }
 
@@ -1251,6 +1324,8 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     accept_execution_requests_hash: bool,
     /// Returns `true` if the node is currently syncing.
     is_syncing: Arc<dyn Fn() -> bool + Send + Sync>,
+    /// Cache for Block Access Lists (BALs) per EIP-7928.
+    bal_cache: BalCache,
 }
 
 #[cfg(test)]
