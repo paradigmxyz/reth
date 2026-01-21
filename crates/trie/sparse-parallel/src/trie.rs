@@ -768,7 +768,14 @@ impl SparseTrieInterface for ParallelSparseTrie {
     }
 
     fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
-        self.subtrie_for_path(full_path).and_then(|subtrie| subtrie.inner.values.get(full_path))
+        // Values from update_leaf are stored in upper_subtrie.inner.values,
+        // but values from reveal_node are stored in the appropriate subtrie.
+        // Check upper first (where update_leaf stores them), then fall back to the subtrie.
+        self.upper_subtrie
+            .inner
+            .values
+            .get(full_path)
+            .or_else(|| self.subtrie_for_path(full_path)?.inner.values.get(full_path))
     }
 
     fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
@@ -6967,5 +6974,43 @@ mod tests {
         );
 
         assert_eq!(branch_0x3_update, &expected_branch);
+    }
+
+    #[test]
+    fn test_get_leaf_value_lower_subtrie() {
+        // This test demonstrates that get_leaf_value must look in the correct subtrie,
+        // not always in upper_subtrie.
+
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create a leaf node with path >= 2 nibbles (will go to lower subtrie)
+        let leaf_path = Nibbles::from_nibbles([0x1, 0x2]);
+        let leaf_key = Nibbles::from_nibbles([0x3, 0x4]);
+        let leaf_node = create_leaf_node(leaf_key.to_vec(), 42);
+
+        // Reveal the leaf node
+        trie.reveal_nodes(vec![ProofTrieNode { path: leaf_path, node: leaf_node, masks: None }])
+            .unwrap();
+
+        // The full path is leaf_path + leaf_key
+        let full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
+
+        // Verify the value is stored in the lower subtrie, not upper
+        let idx = path_subtrie_index_unchecked(&leaf_path);
+        let lower_subtrie = trie.lower_subtries[idx].as_revealed_ref().unwrap();
+        assert!(
+            lower_subtrie.inner.values.get(&full_path).is_some(),
+            "value should be in lower subtrie"
+        );
+        assert!(
+            trie.upper_subtrie.inner.values.get(&full_path).is_none(),
+            "value should NOT be in upper subtrie"
+        );
+
+        // get_leaf_value should find the value
+        assert!(
+            trie.get_leaf_value(&full_path).is_some(),
+            "get_leaf_value should find the value in lower subtrie"
+        );
     }
 }
