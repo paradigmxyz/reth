@@ -549,6 +549,16 @@ impl DatabaseMetrics for RocksDBProvider {
             metrics.push((
                 "rocksdb.pending_compaction_bytes",
                 stat.pending_compaction_bytes as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.sst_size",
+                stat.sst_size_bytes as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.memtable_size",
+                stat.memtable_size_bytes as f64,
                 vec![Label::new("table", stat.name)],
             ));
         }
