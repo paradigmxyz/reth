@@ -465,7 +465,9 @@ where
             StorageShardedKey::new(address, storage_key, highest_block)
         },
         |key: &StorageShardedKey| (key.address, key.sharded_key.key),
-        |writer, (address, storage_key)| writer.get_last_storage_history_shard(address, storage_key),
+        |writer, (address, storage_key)| {
+            writer.get_last_storage_history_shard(address, storage_key)
+        },
         |writer, key, value, append| {
             if append {
                 writer.append_storage_history(key, value)
