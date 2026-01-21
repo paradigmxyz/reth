@@ -86,6 +86,14 @@ where
         }
     }
 
+    /// Clear all ETL state. Called on error paths to prevent buffer pollution on retry.
+    fn clear_etl_state(&mut self) {
+        self.sync_gap = None;
+        self.hash_collector.clear();
+        self.header_collector.clear();
+        self.is_etl_ready = false;
+    }
+
     /// Write downloaded headers to storage from ETL.
     ///
     /// Writes to static files ( `Header | HeaderTD | HeaderHash` ) and [`tables::HeaderNumbers`]
@@ -258,10 +266,7 @@ where
                 }
                 Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
                     error!(target: "sync::stages::headers", %error, "Cannot attach header to head");
-                    self.sync_gap = None;
-                    self.hash_collector.clear();
-                    self.header_collector.clear();
-                    self.is_etl_ready = false;
+                    self.clear_etl_state();
                     return Poll::Ready(Err(StageError::DetachedHead {
                         local_head: Box::new(local_head.block_with_parent()),
                         header: Box::new(header.block_with_parent()),
@@ -269,7 +274,7 @@ where
                     }))
                 }
                 None => {
-                    self.sync_gap = None;
+                    self.clear_etl_state();
                     return Poll::Ready(Err(StageError::ChannelClosed))
                 }
             }
@@ -327,10 +332,7 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        self.sync_gap.take();
-        self.hash_collector.clear();
-        self.header_collector.clear();
-        self.is_etl_ready = false;
+        self.clear_etl_state();
 
         // First unwind the db tables, until the unwind_to block number. use the walker to unwind
         // HeaderNumbers based on the index in CanonicalHeaders
@@ -532,50 +534,6 @@ mod tests {
             }
         }
 
-        /// A downloader that yields some headers then returns DetachedHead error.
-        pub(crate) struct DetachedHeadDownloader {
-            headers: std::collections::VecDeque<SealedHeader>,
-        }
-
-        impl DetachedHeadDownloader {
-            pub(crate) fn new(headers: Vec<SealedHeader>) -> Self {
-                Self { headers: headers.into() }
-            }
-        }
-
-        impl HeaderDownloader for DetachedHeadDownloader {
-            type Header = alloy_consensus::Header;
-            fn update_local_head(&mut self, _: SealedHeader) {}
-            fn update_sync_target(&mut self, _: SyncTarget) {}
-            fn set_batch_size(&mut self, _: usize) {}
-        }
-
-        impl futures_util::Stream for DetachedHeadDownloader {
-            type Item = reth_network_p2p::headers::error::HeadersDownloaderResult<
-                Vec<SealedHeader>,
-                alloy_consensus::Header,
-            >;
-
-            fn poll_next(
-                mut self: std::pin::Pin<&mut Self>,
-                _: &mut Context<'_>,
-            ) -> Poll<Option<Self::Item>> {
-                use reth_consensus::ConsensusError;
-                use reth_network_p2p::headers::error::HeadersDownloaderError;
-
-                if let Some(h) = self.headers.pop_front() {
-                    Poll::Ready(Some(Ok(vec![h])))
-                } else {
-                    let h = random_header(&mut generators::rng(), 0, None);
-                    Poll::Ready(Some(Err(HeadersDownloaderError::DetachedHead {
-                        local_head: Box::new(h.clone()),
-                        header: Box::new(h),
-                        error: Box::new(ConsensusError::BaseFeeMissing),
-                    })))
-                }
-            }
-        }
-
         impl HeadersTestRunner<ReverseHeadersDownloader<TestHeadersClient>> {
             pub(crate) fn with_linear_downloader() -> Self {
                 let client = TestHeadersClient::default();
@@ -757,58 +715,39 @@ mod tests {
         assert!(!stage.is_etl_ready, "is_etl_ready should be false after unwind");
     }
 
-    /// Test that ETL collectors are cleared when DetachedHead error occurs.
+    /// Test that `clear_etl_state` properly clears all ETL state.
     ///
-    /// This test directly invokes the downloader loop that would run inside poll_execute_ready,
-    /// simulating the exact code path without needing full provider integration.
+    /// This method is called by DetachedHead, ChannelClosed, and unwind error paths.
     #[tokio::test]
-    async fn detached_head_clears_etl_collectors() {
-        use futures_util::StreamExt;
-        use reth_network_p2p::headers::error::HeadersDownloaderError;
-        use test_runner::DetachedHeadDownloader;
+    async fn clear_etl_state_clears_all_state() {
+        let runner = HeadersTestRunner::with_linear_downloader();
+        let mut stage = runner.stage();
 
+        // Populate all ETL state
+        stage.hash_collector.insert(B256::random(), 100).unwrap();
+        stage.hash_collector.insert(B256::random(), 101).unwrap();
+        stage.header_collector.insert(100, Bytes::from_static(b"h100")).unwrap();
+        stage.header_collector.insert(101, Bytes::from_static(b"h101")).unwrap();
+        stage.is_etl_ready = true;
         let mut rng = generators::rng();
-        let headers = vec![random_header(&mut rng, 103, None), random_header(&mut rng, 102, None)];
-        let mut downloader = DetachedHeadDownloader::new(headers);
-
-        // Simulate the ETL collectors that would exist in HeaderStage
-        let mut hash_collector: Collector<BlockHash, BlockNumber> =
-            Collector::new(EtlConfig::default().file_size, EtlConfig::default().dir.clone());
-        let mut header_collector: Collector<BlockNumber, Bytes> =
-            Collector::new(EtlConfig::default().file_size, EtlConfig::default().dir);
-        let mut is_etl_ready = false;
-        let mut sync_gap: Option<HeaderSyncGap> = Some(HeaderSyncGap {
+        stage.sync_gap = Some(HeaderSyncGap {
             local_head: random_header(&mut rng, 99, None),
             target: SyncTarget::Tip(B256::random()),
         });
 
-        // Simulate the download loop from poll_execute_ready
-        loop {
-            match downloader.next().await {
-                Some(Ok(headers)) => {
-                    for header in headers {
-                        hash_collector.insert(header.hash(), header.number()).unwrap();
-                        header_collector
-                            .insert(header.number(), Bytes::from_static(b"test"))
-                            .unwrap();
-                    }
-                }
-                Some(Err(HeadersDownloaderError::DetachedHead { .. })) => {
-                    // This is the fix we're testing - cleanup on DetachedHead
-                    sync_gap = None;
-                    hash_collector.clear();
-                    header_collector.clear();
-                    is_etl_ready = false;
-                    break;
-                }
-                _ => panic!("unexpected result"),
-            }
-        }
+        // Verify state is populated
+        assert_eq!(stage.hash_collector.len(), 2);
+        assert_eq!(stage.header_collector.len(), 2);
+        assert!(stage.is_etl_ready);
+        assert!(stage.sync_gap.is_some());
 
-        // Verify the cleanup happened
-        assert!(hash_collector.is_empty(), "hash_collector not cleared after DetachedHead");
-        assert!(header_collector.is_empty(), "header_collector not cleared after DetachedHead");
-        assert!(!is_etl_ready);
-        assert!(sync_gap.is_none());
+        // Call the method under test
+        stage.clear_etl_state();
+
+        // Verify all state is cleared
+        assert!(stage.hash_collector.is_empty());
+        assert!(stage.header_collector.is_empty());
+        assert!(!stage.is_etl_ready);
+        assert!(stage.sync_gap.is_none());
     }
 }
