@@ -773,7 +773,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\"})",
+          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\"}) or vector(0)",
           "legendFormat": "Database",
           "range": true,
           "refId": "A"
@@ -784,7 +784,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_freelist{$instance_label=\"$instance\"} * reth_db_page_size{$instance_label=\"$instance\"})",
+          "expr": "sum(reth_db_freelist{$instance_label=\"$instance\"} * reth_db_page_size{$instance_label=\"$instance\"}) or vector(0)",
           "hide": false,
           "instant": false,
           "legendFormat": "Freelist",
@@ -797,7 +797,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_static_files_segment_size{$instance_label=\"$instance\"})",
+          "expr": "sum(reth_static_files_segment_size{$instance_label=\"$instance\"}) or vector(0)",
           "hide": false,
           "instant": false,
           "legendFormat": "Static Files",
@@ -823,7 +823,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\"}) + sum(reth_db_freelist{$instance_label=\"$instance\"} * reth_db_page_size{$instance_label=\"$instance\"}) + sum(reth_static_files_segment_size{$instance_label=\"$instance\"}) + (sum(reth_rocksdb_table_size{$instance_label=\"$instance\"}) or vector(0))",
+          "expr": "(sum(reth_db_table_size{$instance_label=\"$instance\"}) or vector(0)) + (sum(reth_db_freelist{$instance_label=\"$instance\"} * reth_db_page_size{$instance_label=\"$instance\"}) or vector(0)) + (sum(reth_static_files_segment_size{$instance_label=\"$instance\"}) or vector(0)) + (sum(reth_rocksdb_table_size{$instance_label=\"$instance\"}) or vector(0))",
           "hide": false,
           "instant": false,
           "legendFormat": "Total",
