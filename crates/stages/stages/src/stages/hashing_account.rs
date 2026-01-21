@@ -9,7 +9,9 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_primitives_traits::Account;
-use reth_provider::{AccountExtReader, DBProvider, HashingWriter, StatsReader};
+use reth_provider::{
+    AccountExtReader, DBProvider, HashingWriter, StatsReader, StorageSettingsCache,
+};
 use reth_stages_api::{
     AccountHashingCheckpoint, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint,
     StageError, StageId, UnwindInput, UnwindOutput,
@@ -134,7 +136,11 @@ impl Default for AccountHashingStage {
 
 impl<Provider> Stage<Provider> for AccountHashingStage
 where
-    Provider: DBProvider<Tx: DbTxMut> + HashingWriter + AccountExtReader + StatsReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + HashingWriter
+        + AccountExtReader
+        + StatsReader
+        + StorageSettingsCache,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -142,9 +148,19 @@ where
     }
 
     /// Execute the stage.
+    ///
+    /// When `use_hashed_state` is enabled, this stage is a no-op because the execution stage
+    /// writes directly to HashedAccounts. Otherwise, it hashes plain state to populate hashed
+    /// tables.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
+        // If using hashed state as canonical, execution already writes to HashedAccounts,
+        // so this stage becomes a no-op.
+        if provider.cached_storage_settings().use_hashed_state {
+            return Ok(ExecOutput::done(input.checkpoint().with_block_number(input.target())));
         }
 
         let (from_block, to_block) = input.next_block_range().into_inner();
@@ -234,6 +250,12 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        // If use_hashed_state is enabled, execution manages HashedAccounts directly,
+        // so this stage becomes a no-op.
+        if provider.cached_storage_settings().use_hashed_state {
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) });
+        }
+
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 

@@ -69,6 +69,18 @@ pub enum SetCommand {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
+    /// Use hashed state tables (HashedAccounts/HashedStorages) as canonical state
+    ///
+    /// When enabled, execution writes directly to hashed tables, eliminating need for
+    /// separate hashing stages. State reads come from hashed tables.
+    ///
+    /// WARNING: Changing this setting in either direction requires re-syncing the database.
+    /// Enabling on an existing plain-state database leaves hashed tables empty.
+    /// Disabling on an existing hashed-state database leaves plain tables empty.
+    UseHashedState {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
 }
 
 impl Command {
@@ -115,6 +127,7 @@ impl Command {
             transaction_hash_numbers_in_rocksdb: _,
             account_history_in_rocksdb: _,
             account_changesets_in_static_files: _,
+            use_hashed_state: _,
         } = settings.unwrap_or_else(StorageSettings::legacy);
 
         // Update the setting based on the key
@@ -166,6 +179,22 @@ impl Command {
                 }
                 settings.account_history_in_rocksdb = value;
                 println!("Set account_history_in_rocksdb = {}", value);
+            }
+            SetCommand::UseHashedState { value } => {
+                if settings.use_hashed_state == value {
+                    println!("use_hashed_state is already set to {}", value);
+                    return Ok(());
+                }
+                // Changing from true (hashed state) to false (plain state) requires resync
+                // because plain state tables won't have been populated.
+                // Changing from false to true is safe as hashing stages will populate hashed
+                // tables.
+                if settings.use_hashed_state && !value {
+                    println!("WARNING: Changing use_hashed_state from true to false requires re-syncing the database.");
+                    println!("The plain state tables are not populated when using hashed state.");
+                }
+                settings.use_hashed_state = value;
+                println!("Set use_hashed_state = {}", value);
             }
         }
 

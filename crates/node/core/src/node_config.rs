@@ -3,7 +3,7 @@
 use crate::{
     args::{
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RocksDbArgs, RpcServerArgs, StaticFilesArgs, TxPoolArgs,
+        PruningArgs, RocksDbArgs, RpcServerArgs, StaticFilesArgs, StorageArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
     utils::get_single_header,
@@ -154,6 +154,9 @@ pub struct NodeConfig<ChainSpec> {
 
     /// All `RocksDB` table routing arguments
     pub rocksdb: RocksDbArgs,
+
+    /// All storage related arguments with --storage prefix
+    pub storage: StorageArgs,
 }
 
 impl NodeConfig<ChainSpec> {
@@ -186,6 +189,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             era: EraArgs::default(),
             static_files: StaticFilesArgs::default(),
             rocksdb: RocksDbArgs::default(),
+            storage: StorageArgs::default(),
         }
     }
 
@@ -261,6 +265,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             era,
             static_files,
             rocksdb,
+            storage,
             ..
         } = self;
         NodeConfig {
@@ -281,6 +286,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             era,
             static_files,
             rocksdb,
+            storage,
         }
     }
 
@@ -349,6 +355,12 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
+    /// Set the storage args for the node
+    pub const fn with_storage(mut self, storage: StorageArgs) -> Self {
+        self.storage = storage;
+        self
+    }
+
     /// Returns pruning configuration.
     pub fn prune_config(&self) -> Option<PruneConfig>
     where
@@ -370,6 +382,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             transaction_hash_numbers_in_rocksdb: tx_hash,
             storages_history_in_rocksdb: storages_history,
             account_history_in_rocksdb: account_history,
+            use_hashed_state: self.db.use_hashed_state,
         }
     }
 
@@ -568,6 +581,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             era: self.era,
             static_files: self.static_files,
             rocksdb: self.rocksdb,
+            storage: self.storage,
         }
     }
 
@@ -610,6 +624,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             era: self.era.clone(),
             static_files: self.static_files,
             rocksdb: self.rocksdb,
+            storage: self.storage,
         }
     }
 }
