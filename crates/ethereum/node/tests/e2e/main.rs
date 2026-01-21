@@ -2,6 +2,7 @@
 
 mod blobs;
 mod custom_genesis;
+mod debug;
 mod dev;
 mod eth;
 mod p2p;
