@@ -25,7 +25,7 @@ use reth_db::{
 };
 use reth_db_api::{
     cursor::DbCursorRO,
-    models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices},
+    models::{AccountBeforeTx, BlockNumberAddress, StorageBeforeTx, StoredBlockBodyIndices},
     table::{Decompress, Table, Value},
     tables,
     transaction::DbTx,
@@ -94,6 +94,8 @@ pub struct StaticFileWriteCtx {
     pub write_receipts: bool,
     /// Whether account changesets should be written to static files.
     pub write_account_changesets: bool,
+    /// Whether storage changesets should be written to static files.
+    pub write_storage_changesets: bool,
     /// The current chain tip block number (for pruning).
     pub tip: BlockNumber,
     /// The prune mode for receipts, if any.
@@ -624,6 +626,35 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(())
     }
 
+    /// Writes storage changesets for all blocks to the static file segment.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_storage_changesets(
+        w: &mut StaticFileProviderRWRefMut<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+    ) -> ProviderResult<()> {
+        for block in blocks {
+            let block_number = block.recovered_block().number();
+            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+
+            for storage_block_reverts in reverts.storage {
+                let changeset = storage_block_reverts
+                    .into_iter()
+                    .flat_map(|revert| {
+                        revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
+                            StorageBeforeTx {
+                                address: revert.address,
+                                key: B256::new(key.to_be_bytes()),
+                                value: revert_to_slot.to_previous_value(),
+                            }
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                w.append_storage_changeset(changeset, block_number)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Spawns a scoped thread that writes to a static file segment using the provided closure.
     ///
     /// The closure receives a mutable reference to the segment writer. After the closure completes,
@@ -699,6 +730,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 )
             });
 
+            let h_storage_changesets = ctx.write_storage_changesets.then(|| {
+                self.spawn_segment_writer(
+                    s,
+                    StaticFileSegment::StorageChangeSets,
+                    first_block_number,
+                    |w| Self::write_storage_changesets(w, blocks),
+                )
+            });
+
             h_headers.join().map_err(|_| StaticFileWriterError::ThreadPanic("headers"))??;
             h_txs.join().map_err(|_| StaticFileWriterError::ThreadPanic("transactions"))??;
             if let Some(h) = h_senders {
@@ -710,6 +750,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             if let Some(h) = h_account_changesets {
                 h.join()
                     .map_err(|_| StaticFileWriterError::ThreadPanic("account_changesets"))??;
+            }
+            if let Some(h) = h_storage_changesets {
+                h.join()
+                    .map_err(|_| StaticFileWriterError::ThreadPanic("storage_changesets"))??;
             }
             Ok(())
         })
