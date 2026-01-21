@@ -142,6 +142,8 @@ pub struct TreeConfig {
     account_worker_count: usize,
     /// Whether to enable V2 storage proofs.
     enable_proof_v2: bool,
+    /// Whether to disable cache metrics recording (can be expensive with large cached state).
+    disable_cache_metrics: bool,
 }
 
 impl Default for TreeConfig {
@@ -171,6 +173,7 @@ impl Default for TreeConfig {
             storage_worker_count: default_storage_worker_count(),
             account_worker_count: default_account_worker_count(),
             enable_proof_v2: false,
+            disable_cache_metrics: false,
         }
     }
 }
@@ -203,6 +206,7 @@ impl TreeConfig {
         storage_worker_count: usize,
         account_worker_count: usize,
         enable_proof_v2: bool,
+        disable_cache_metrics: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -229,6 +233,7 @@ impl TreeConfig {
             storage_worker_count,
             account_worker_count,
             enable_proof_v2,
+            disable_cache_metrics,
         }
     }
 
@@ -530,6 +535,17 @@ impl TreeConfig {
     /// Setter for whether to enable V2 storage proofs.
     pub const fn with_enable_proof_v2(mut self, enable_proof_v2: bool) -> Self {
         self.enable_proof_v2 = enable_proof_v2;
+        self
+    }
+
+    /// Returns whether cache metrics recording is disabled.
+    pub const fn disable_cache_metrics(&self) -> bool {
+        self.disable_cache_metrics
+    }
+
+    /// Setter for whether to disable cache metrics recording.
+    pub const fn without_cache_metrics(mut self, disable_cache_metrics: bool) -> Self {
+        self.disable_cache_metrics = disable_cache_metrics;
         self
     }
 }

@@ -14,6 +14,23 @@ use std::{path::Path, sync::Arc};
 /// Pending `RocksDB` batches type alias (stub - uses unit type).
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<()>>>;
 
+/// Statistics for a single `RocksDB` table (column family) - stub.
+#[derive(Debug, Clone)]
+pub struct RocksDBTableStats {
+    /// Size of SST files on disk in bytes.
+    pub sst_size_bytes: u64,
+    /// Size of memtables in memory in bytes.
+    pub memtable_size_bytes: u64,
+    /// Name of the table/column family.
+    pub name: String,
+    /// Estimated number of keys in the table.
+    pub estimated_num_keys: u64,
+    /// Estimated size of live data in bytes (SST files + memtables).
+    pub estimated_size_bytes: u64,
+    /// Estimated bytes pending compaction (reclaimable space).
+    pub pending_compaction_bytes: u64,
+}
+
 /// Context for `RocksDB` block writes (stub).
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -55,6 +72,13 @@ impl RocksDBProvider {
         _provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>> {
         Ok(None)
+    }
+
+    /// Returns statistics for all column families in the database (stub implementation).
+    ///
+    /// Returns an empty vector since there is no `RocksDB` when the feature is disabled.
+    pub const fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        Vec::new()
     }
 }
 
@@ -102,6 +126,11 @@ impl RocksDBBuilder {
         self
     }
 
+    /// Sets read-only mode (stub implementation).
+    pub const fn with_read_only(self, _read_only: bool) -> Self {
+        self
+    }
+
     /// Build the `RocksDB` provider (stub implementation).
     pub const fn build(self) -> ProviderResult<RocksDBProvider> {
         Ok(RocksDBProvider)
@@ -111,3 +140,7 @@ impl RocksDBBuilder {
 /// A stub transaction for `RocksDB`.
 #[derive(Debug)]
 pub struct RocksTx;
+
+/// A stub raw iterator for `RocksDB`.
+#[derive(Debug)]
+pub struct RocksDBRawIter;
