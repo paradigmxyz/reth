@@ -1786,16 +1786,17 @@ where
 
     /// Returns the number of blocks that are pending persistence.
     /// This is the number of canonical blocks in memory that are above the last persisted block.
-    pub fn pending_persistence_blocks(&self) -> u64 {
+    pub const fn pending_persistence_blocks(&self) -> u64 {
         self.state
             .tree_state
-            .canonical_block_number()
+            .current_canonical_head
+            .number
             .saturating_sub(self.persistence_state.last_persisted_block.number)
     }
 
     /// Returns true if backpressure should be applied due to too many blocks pending persistence.
     /// When true, validation should wait for persistence to catch up before processing more blocks.
-    pub fn should_apply_backpressure(&self) -> bool {
+    pub const fn should_apply_backpressure(&self) -> bool {
         self.pending_persistence_blocks() >= self.config.max_pending_persistence_blocks()
     }
 
