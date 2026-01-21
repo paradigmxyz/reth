@@ -31,7 +31,7 @@ crates/stages/              @shekhirin @mediocregopher
 crates/static-file/         @joshieDo @shekhirin
 crates/stateless/           @mattsse
 crates/storage/codecs/      @joshieDo
-crates/storage/db-api/      @joshieDo @rakita
+crates/storage/db-api/      @joshieDo
 crates/storage/db-common/   @Rjected
 crates/storage/db/          @joshieDo @rakita
 crates/storage/errors/      @rakita
