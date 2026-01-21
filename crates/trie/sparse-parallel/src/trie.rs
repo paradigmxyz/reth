@@ -7013,4 +7013,84 @@ mod tests {
             "get_leaf_value should find the value in lower subtrie"
         );
     }
+
+    /// Test that `get_leaf_value` correctly returns values stored via `update_leaf`
+    /// when the leaf node ends up in the upper subtrie (depth < 2).
+    ///
+    /// This can happen when the trie is sparse and the leaf is inserted at the root level.
+    /// Previously, `get_leaf_value` only checked the lower subtrie based on the full path,
+    /// missing values stored in `upper_subtrie.inner.values`.
+    #[test]
+    fn test_get_leaf_value_upper_subtrie_via_update_leaf() {
+        let provider = MockTrieNodeProvider::new();
+
+        // Create an empty trie with an empty root
+        let mut trie = ParallelSparseTrie::default()
+            .with_root(TrieNode::EmptyRoot, None, false)
+            .expect("root revealed");
+
+        // Create a full 64-nibble path (like a real account hash)
+        let full_path = pad_nibbles_right(Nibbles::from_nibbles([0x0, 0xA, 0xB, 0xC]));
+        let value = encode_account_value(42);
+
+        // Insert the leaf - since the trie is empty, the leaf node will be created
+        // at the root level (depth 0), which is in the upper subtrie
+        trie.update_leaf(full_path, value.clone(), &provider).unwrap();
+
+        // Verify the value is stored in upper_subtrie (where update_leaf puts it)
+        assert!(
+            trie.upper_subtrie.inner.values.get(&full_path).is_some(),
+            "value should be in upper subtrie after update_leaf"
+        );
+
+        // Verify the value can be retrieved via get_leaf_value
+        // Before the fix, this would return None because get_leaf_value only
+        // checked the lower subtrie based on the path length
+        let retrieved = trie.get_leaf_value(&full_path);
+        assert_eq!(retrieved, Some(&value));
+    }
+
+    /// Test that `get_leaf_value` works for values in both upper and lower subtries.
+    #[test]
+    fn test_get_leaf_value_upper_and_lower_subtries() {
+        let provider = MockTrieNodeProvider::new();
+
+        // Create an empty trie
+        let mut trie = ParallelSparseTrie::default()
+            .with_root(TrieNode::EmptyRoot, None, false)
+            .expect("root revealed");
+
+        // Insert first leaf - will be at root level (upper subtrie)
+        let path1 = pad_nibbles_right(Nibbles::from_nibbles([0x0, 0xA]));
+        let value1 = encode_account_value(1);
+        trie.update_leaf(path1, value1.clone(), &provider).unwrap();
+
+        // Insert second leaf with different prefix - creates a branch
+        let path2 = pad_nibbles_right(Nibbles::from_nibbles([0x1, 0xB]));
+        let value2 = encode_account_value(2);
+        trie.update_leaf(path2, value2.clone(), &provider).unwrap();
+
+        // Both values should be retrievable
+        assert_eq!(trie.get_leaf_value(&path1), Some(&value1));
+        assert_eq!(trie.get_leaf_value(&path2), Some(&value2));
+    }
+
+    /// Test that `get_leaf_value` works for storage tries which are often very sparse.
+    #[test]
+    fn test_get_leaf_value_sparse_storage_trie() {
+        let provider = MockTrieNodeProvider::new();
+
+        // Simulate a storage trie with a single slot
+        let mut trie = ParallelSparseTrie::default()
+            .with_root(TrieNode::EmptyRoot, None, false)
+            .expect("root revealed");
+
+        // Single storage slot - leaf will be at root (depth 0)
+        let slot_path = pad_nibbles_right(Nibbles::from_nibbles([0x2, 0x9]));
+        let slot_value = alloy_rlp::encode(U256::from(12345));
+        trie.update_leaf(slot_path, slot_value.clone(), &provider).unwrap();
+
+        // Value should be retrievable
+        assert_eq!(trie.get_leaf_value(&slot_path), Some(&slot_value));
+    }
 }
