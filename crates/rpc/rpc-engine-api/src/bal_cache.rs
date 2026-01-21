@@ -6,7 +6,7 @@
 //!
 //! According to EIP-7928, the EL MUST retain BALs for at least the duration of the
 //! weak subjectivity period (~3533 epochs) to support synchronization with re-execution.
-//! This initial implementation uses a simple in-memory LRU cache with configurable capacity.
+//! This initial implementation uses a simple in-memory cache with configurable capacity.
 
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
@@ -14,8 +14,10 @@ use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use schnellru::{ByLength, LruMap};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 /// Default capacity for the BAL cache.
 ///
@@ -23,19 +25,10 @@ use std::{collections::BTreeMap, sync::Arc};
 /// weak subjectivity period requirements (~3533 epochs ≈ 113,000 blocks).
 const DEFAULT_BAL_CACHE_CAPACITY: u32 = 1024;
 
-/// Cache entry storing a BAL with its block number for range queries.
-#[derive(Debug, Clone)]
-struct BalEntry {
-    /// The block number for range-based lookups.
-    block_number: BlockNumber,
-    /// The RLP-encoded block access list.
-    bal: Bytes,
-}
-
 /// In-memory cache for Block Access Lists (BALs).
 ///
 /// Provides O(1) lookups by block hash and O(log n) range queries by block number.
-/// Uses an LRU eviction policy when the cache exceeds capacity.
+/// Evicts the oldest (lowest) block numbers when capacity is exceeded.
 ///
 /// This type is cheaply cloneable as it wraps an `Arc` internally.
 #[derive(Debug, Clone)]
@@ -45,10 +38,12 @@ pub struct BalCache {
 
 #[derive(Debug)]
 struct BalCacheInner {
-    /// LRU cache mapping block hash to BAL entry.
-    entries: RwLock<LruMap<BlockHash, BalEntry>>,
+    /// Maximum number of entries to store.
+    capacity: u32,
+    /// Mapping from block hash to BAL bytes.
+    entries: RwLock<HashMap<BlockHash, Bytes>>,
     /// Index mapping block number to block hash for range queries.
-    /// Uses `BTreeMap` for efficient range iteration.
+    /// Uses `BTreeMap` for efficient range iteration and eviction of oldest blocks.
     block_index: RwLock<BTreeMap<BlockNumber, BlockHash>>,
     /// Cache metrics.
     metrics: BalCacheMetrics,
@@ -64,7 +59,8 @@ impl BalCache {
     pub fn with_capacity(capacity: u32) -> Self {
         Self {
             inner: Arc::new(BalCacheInner {
-                entries: RwLock::new(LruMap::new(ByLength::new(capacity))),
+                capacity,
+                entries: RwLock::new(HashMap::new()),
                 block_index: RwLock::new(BTreeMap::new()),
                 metrics: BalCacheMetrics::default(),
             }),
@@ -73,22 +69,30 @@ impl BalCache {
 
     /// Inserts a BAL into the cache.
     ///
-    /// If the cache is at capacity, the least recently used entry will be evicted.
+    /// If a different hash already exists for this block number (reorg), the old entry
+    /// is removed first. If the cache is at capacity, the oldest block number is evicted.
     pub fn insert(&self, block_hash: BlockHash, block_number: BlockNumber, bal: Bytes) {
-        let entry = BalEntry { block_number, bal };
-
         let mut entries = self.inner.entries.write();
         let mut block_index = self.inner.block_index.write();
 
-        // Check if we need to evict an old entry
-        if entries.len() as u32 >= entries.limiter().max_length() {
-            // Find and remove the oldest entry from block_index
-            if let Some((_, evicted_entry)) = entries.iter().next_back() {
-                block_index.remove(&evicted_entry.block_number);
-            }
+        // If this block number already has a different hash, remove the old entry
+        if let Some(old_hash) = block_index.get(&block_number) &&
+            *old_hash != block_hash
+        {
+            entries.remove(old_hash);
         }
 
-        entries.insert(block_hash, entry);
+        // Evict oldest block if at capacity and this is a new entry
+        if !entries.contains_key(&block_hash) &&
+            entries.len() as u32 >= self.inner.capacity &&
+            let Some((&oldest_num, &oldest_hash)) = block_index.first_key_value()
+        {
+            entries.remove(&oldest_hash);
+            block_index.remove(&oldest_num);
+        }
+
+        entries.insert(block_hash, bal);
+
         block_index.insert(block_number, block_hash);
 
         self.inner.metrics.inserts.increment(1);
@@ -100,11 +104,11 @@ impl BalCache {
     /// Returns a vector with the same length as `block_hashes`, where each element
     /// is `Some(bal)` if found or `None` if not in cache.
     pub fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> Vec<Option<Bytes>> {
-        let mut entries = self.inner.entries.write();
+        let entries = self.inner.entries.read();
         block_hashes
             .iter()
             .map(|hash| {
-                let result = entries.get(hash).map(|e| e.bal.clone());
+                let result = entries.get(hash).cloned();
                 if result.is_some() {
                     self.inner.metrics.hits.increment(1);
                 } else {
@@ -129,10 +133,10 @@ impl BalCache {
             let Some(hash) = block_index.get(&block_num) else {
                 break;
             };
-            let Some(entry) = entries.peek(hash) else {
+            let Some(bal) = entries.get(hash) else {
                 break;
             };
-            result.push(entry.bal.clone());
+            result.push(bal.clone());
         }
         result
     }
@@ -223,23 +227,48 @@ mod tests {
     }
 
     #[test]
-    fn test_lru_eviction() {
+    fn test_eviction_oldest_first() {
         let cache = BalCache::with_capacity(3);
 
-        let hashes: Vec<_> = (0..5).map(|_| B256::random()).collect();
-        for (i, hash) in hashes.iter().enumerate() {
-            cache.insert(*hash, i as u64, Bytes::from_static(b"bal"));
+        // Insert blocks 10, 20, 30
+        for i in [10, 20, 30] {
+            let hash = B256::random();
+            cache.insert(hash, i, Bytes::from_static(b"bal"));
         }
-
-        // Only the last 3 should be in cache
         assert_eq!(cache.len(), 3);
 
-        // First two should be evicted
-        let results = cache.get_by_hashes(&hashes[..2]);
-        assert!(results.iter().all(|r| r.is_none()));
+        // Insert block 40, should evict block 10 (oldest/lowest)
+        let hash40 = B256::random();
+        cache.insert(hash40, 40, Bytes::from_static(b"bal40"));
+        assert_eq!(cache.len(), 3);
 
-        // Last three should still be there
-        let results = cache.get_by_hashes(&hashes[2..]);
-        assert!(results.iter().all(|r| r.is_some()));
+        // Block 10 should be gone, block 20 should still be there
+        let results = cache.get_by_range(10, 1);
+        assert_eq!(results.len(), 0);
+
+        let results = cache.get_by_range(20, 1);
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_reorg_replaces_hash() {
+        let cache = BalCache::with_capacity(10);
+
+        let hash1 = B256::random();
+        let hash2 = B256::random();
+        let bal1 = Bytes::from_static(b"bal1");
+        let bal2 = Bytes::from_static(b"bal2");
+
+        // Insert block 100 with hash1
+        cache.insert(hash1, 100, bal1.clone());
+        assert_eq!(cache.get_by_hashes(&[hash1])[0], Some(bal1));
+
+        // Reorg: insert block 100 with hash2
+        cache.insert(hash2, 100, bal2.clone());
+
+        // hash1 should be gone, hash2 should be there
+        assert_eq!(cache.get_by_hashes(&[hash1])[0], None);
+        assert_eq!(cache.get_by_hashes(&[hash2])[0], Some(bal2));
+        assert_eq!(cache.len(), 1);
     }
 }

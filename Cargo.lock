@@ -10643,7 +10643,6 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-transaction-pool",
- "schnellru",
  "serde",
  "thiserror 2.0.18",
  "tokio",
