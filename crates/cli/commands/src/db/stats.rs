@@ -159,17 +159,20 @@ impl Command {
     fn rocksdb_stats_table<N: NodeTypesWithDB>(&self, tool: &DbTool<N>) -> ComfyTable {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-        table.set_header(["RocksDB Table Name", "# Entries (est.)", "Total Size (est.)"]);
+        table.set_header(["RocksDB Table Name", "# Entries", "Total Size", "Pending Compaction"]);
 
         let stats = tool.provider_factory.rocksdb_provider().table_stats();
         let mut total_size: u64 = 0;
+        let mut total_pending: u64 = 0;
 
         for stat in &stats {
             total_size += stat.estimated_size_bytes;
+            total_pending += stat.pending_compaction_bytes;
             let mut row = Row::new();
             row.add_cell(Cell::new(&stat.name))
                 .add_cell(Cell::new(stat.estimated_num_keys))
-                .add_cell(Cell::new(human_bytes(stat.estimated_size_bytes as f64)));
+                .add_cell(Cell::new(human_bytes(stat.estimated_size_bytes as f64)))
+                .add_cell(Cell::new(human_bytes(stat.pending_compaction_bytes as f64)));
             table.add_row(row);
         }
 
@@ -184,7 +187,8 @@ impl Command {
             let mut row = Row::new();
             row.add_cell(Cell::new("RocksDB Total"))
                 .add_cell(Cell::new(""))
-                .add_cell(Cell::new(human_bytes(total_size as f64)));
+                .add_cell(Cell::new(human_bytes(total_size as f64)))
+                .add_cell(Cell::new(human_bytes(total_pending as f64)));
             table.add_row(row);
         }
 

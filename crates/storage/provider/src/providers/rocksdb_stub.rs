@@ -21,8 +21,10 @@ pub struct RocksDBTableStats {
     pub name: String,
     /// Estimated number of keys in the table.
     pub estimated_num_keys: u64,
-    /// Estimated size of live data in bytes.
+    /// Estimated size of live data in bytes (SST files + memtables).
     pub estimated_size_bytes: u64,
+    /// Estimated bytes pending compaction (reclaimable space).
+    pub pending_compaction_bytes: u64,
 }
 
 /// Context for `RocksDB` block writes (stub).

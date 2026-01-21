@@ -45,8 +45,10 @@ pub struct RocksDBTableStats {
     pub name: String,
     /// Estimated number of keys in the table.
     pub estimated_num_keys: u64,
-    /// Estimated size of live data in bytes.
+    /// Estimated size of live data in bytes (SST files + memtables).
     pub estimated_size_bytes: u64,
+    /// Estimated bytes pending compaction (reclaimable space).
+    pub pending_compaction_bytes: u64,
 }
 
 /// Context for `RocksDB` block writes.
@@ -452,10 +454,20 @@ impl RocksDBProviderInner {
 
                         let estimated_size_bytes = sst_size + memtable_size;
 
+                        let pending_compaction_bytes = $db
+                            .property_int_value_cf(
+                                cf,
+                                rocksdb::properties::ESTIMATE_PENDING_COMPACTION_BYTES,
+                            )
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
                         stats.push(RocksDBTableStats {
                             name: cf_name.to_string(),
                             estimated_num_keys,
                             estimated_size_bytes,
+                            pending_compaction_bytes,
                         });
                     }
                 }
