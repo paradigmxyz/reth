@@ -300,6 +300,7 @@ pub fn create_chain_config(
         cancun_time: timestamp(EthereumHardfork::Cancun),
         prague_time: timestamp(EthereumHardfork::Prague),
         osaka_time: timestamp(EthereumHardfork::Osaka),
+        amsterdam_time: timestamp(EthereumHardfork::Amsterdam),
         bpo1_time: timestamp(EthereumHardfork::Bpo1),
         bpo2_time: timestamp(EthereumHardfork::Bpo2),
         bpo3_time: timestamp(EthereumHardfork::Bpo3),

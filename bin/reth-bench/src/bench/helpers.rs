@@ -69,6 +69,7 @@ pub(crate) fn prepare_payload_request(
             suggested_fee_recipient: Address::ZERO,
             withdrawals: shanghai_active.then(Vec::new),
             parent_beacon_block_root: cancun_active.then_some(B256::ZERO),
+            slot_number: None,
         },
         forkchoice_state: ForkchoiceState {
             head_block_hash: parent_hash,
