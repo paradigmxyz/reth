@@ -331,10 +331,14 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
             })? {
                 CachedStatus::NotCached(value) => {
                     self.metrics.storage_cache_misses.increment(1);
+                    // The slot that was never written to is indistinguishable from a slot
+                    // explicitly set to zero. We return `None` in both cases.
                     Ok(Some(value).filter(|v| !v.is_zero()))
                 }
                 CachedStatus::Cached(value) => {
                     self.metrics.storage_cache_hits.increment(1);
+                    // The slot that was never written to is indistinguishable from a slot
+                    // explicitly set to zero. We return `None` in both cases.
                     Ok(Some(value).filter(|v| !v.is_zero()))
                 }
             }
