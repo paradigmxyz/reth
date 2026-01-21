@@ -121,10 +121,10 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                 })
             }
         };
-        // TransactionDB only support read-write mode
         let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
             .with_default_tables()
             .with_database_log_level(self.db.log_level)
+            .with_read_only(!access.is_read_write())
             .build()?;
 
         let provider_factory =

@@ -897,6 +897,27 @@ Pruning:
       --prune.bodies.before <BLOCK_NUMBER>
           Prune storage history before the specified block number. The specified block number is not pruned
 
+RocksDB:
+      --rocksdb.all
+          Route all supported tables to `RocksDB` instead of MDBX.
+
+          This enables `RocksDB` for `tx-hash`, `storages-history`, and `account-history` tables. Cannot be combined with individual flags set to false.
+
+      --rocksdb.tx-hash <TX_HASH>
+          Route tx hash -> number table to `RocksDB` instead of MDBX
+
+          [possible values: true, false]
+
+      --rocksdb.storages-history <STORAGES_HISTORY>
+          Route storages history tables to `RocksDB` instead of MDBX
+
+          [possible values: true, false]
+
+      --rocksdb.account-history <ACCOUNT_HISTORY>
+          Route account history tables to `RocksDB` instead of MDBX
+
+          [possible values: true, false]
+
 Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for the engine. This determines how many canonical blocks must be in-memory, ahead of the last persisted block, before flushing canonical blocks to disk again.
@@ -972,6 +993,9 @@ Engine:
       --engine.enable-proof-v2
           Enable V2 storage proofs for state root calculations
 
+      --engine.disable-cache-metrics
+          Disable cache metrics recording, which can take up to 50ms with large cached state
+
 ERA:
       --era.enable
           Enable import from ERA1 files
@@ -1003,26 +1027,35 @@ Static Files:
       --static-files.blocks-per-file.account-change-sets <BLOCKS_PER_FILE_ACCOUNT_CHANGE_SETS>
           Number of blocks per file for the account changesets segment
 
-      --static-files.receipts
+      --static-files.receipts <RECEIPTS>
           Store receipts in static files instead of the database.
 
           When enabled, receipts will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-      --static-files.transaction-senders
+          [default: false]
+          [possible values: true, false]
+
+      --static-files.transaction-senders <TRANSACTION_SENDERS>
           Store transaction senders in static files instead of the database.
 
           When enabled, transaction senders will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-      --static-files.account-change-sets
+          [default: false]
+          [possible values: true, false]
+
+      --static-files.account-change-sets <ACCOUNT_CHANGESETS>
           Store account changesets in static files.
 
           When enabled, account changesets will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
+          [default: false]
+          [possible values: true, false]
 
 Rollup:
       --rollup.sequencer <SEQUENCER>

@@ -45,7 +45,7 @@ impl StorageSettings {
             transaction_senders_in_static_files: true,
             account_changesets_in_static_files: true,
             storages_history_in_rocksdb: false,
-            transaction_hash_numbers_in_rocksdb: false,
+            transaction_hash_numbers_in_rocksdb: true,
             account_history_in_rocksdb: false,
         }
     }
