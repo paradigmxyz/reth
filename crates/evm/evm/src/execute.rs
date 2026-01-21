@@ -6,8 +6,8 @@ use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
-    block::{CommitChanges, ExecutableTx},
-    Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
+    block::{CommitChanges, ExecutableTx, ExecutableTxParts},
+    Evm, EvmEnv, EvmFactory, RecoveredTx,
 };
 use alloy_primitives::{Address, B256};
 pub use reth_execution_errors::{
@@ -433,13 +433,13 @@ impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Trans
 impl<T, Executor> ExecutorTx<Executor>
     for WithTxEnv<<<Executor as BlockExecutor>::Evm as Evm>::Tx, T>
 where
-    T: ExecutorTx<Executor> + Clone,
+    T: ExecutorTx<Executor> + Clone + RecoveredTx<Executor::Transaction>,
     Executor: BlockExecutor,
     <<Executor as BlockExecutor>::Evm as Evm>::Tx: Clone,
     Self: RecoveredTx<Executor::Transaction>,
 {
     fn as_executable(&self) -> impl ExecutableTx<Executor> {
-        self
+        self.clone()
     }
 
     fn into_recovered(self) -> Recovered<Executor::Transaction> {
@@ -612,22 +612,28 @@ where
 /// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
 /// executor.
 pub trait ExecutableTxFor<Evm: ConfigureEvm>:
-    ToTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>>
+    ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
 }
 
 impl<T, Evm: ConfigureEvm> ExecutableTxFor<Evm> for T where
-    T: ToTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>>
+    T: ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
 }
 
 /// A container for a transaction and a transaction environment.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct WithTxEnv<TxEnv, T> {
     /// The transaction environment for EVM.
     pub tx_env: TxEnv,
     /// The recovered transaction.
     pub tx: Arc<T>,
+}
+
+impl<TxEnv: Clone, T> Clone for WithTxEnv<TxEnv, T> {
+    fn clone(&self) -> Self {
+        Self { tx_env: self.tx_env.clone(), tx: self.tx.clone() }
+    }
 }
 
 impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {
@@ -640,9 +646,11 @@ impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {
     }
 }
 
-impl<TxEnv: Clone, T> ToTxEnv<TxEnv> for WithTxEnv<TxEnv, T> {
-    fn to_tx_env(&self) -> TxEnv {
-        self.tx_env.clone()
+impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<TxEnv, T> {
+    type Recovered = Arc<T>;
+
+    fn into_parts(self) -> (TxEnv, Self::Recovered) {
+        (self.tx_env, self.tx)
     }
 }
 

@@ -29,7 +29,7 @@ use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
+use reth_evm::{ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor, execute::ExecutableTxFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
@@ -609,7 +609,8 @@ where
                 break
             }
 
-            let res = match evm.transact(&tx) {
+            let (tx_env, tx) = tx.into_parts();
+            let res = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
