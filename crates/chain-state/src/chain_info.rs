@@ -51,7 +51,7 @@ where
     /// Returns the [`ChainInfo`] for the canonical head.
     pub fn chain_info(&self) -> ChainInfo {
         let inner = self.inner.canonical_head.read();
-        ChainInfo { best_hash: inner.hash(), best_number: inner.number() }
+        ChainInfo { best_hash: inner.hash(), best_number: inner.number(), earliest_block: 0 }
     }
 
     /// Update the timestamp when we received a forkchoice update.

@@ -8,6 +8,11 @@ pub struct ChainInfo {
     pub best_hash: B256,
     /// The block number of the highest fully synced block.
     pub best_number: BlockNumber,
+    /// The block number of the earliest block we have available.
+    ///
+    /// This tracks the lowest block height still retained, useful for determining
+    /// what data has expired (e.g., due to pruning).
+    pub earliest_block: BlockNumber,
 }
 
 impl From<ChainInfo> for BlockNumHash {

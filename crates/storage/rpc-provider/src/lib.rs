@@ -264,7 +264,11 @@ where
                 .map_err(ProviderError::other)?
                 .ok_or(ProviderError::HeaderNotFound(0.into()))?;
 
-            Ok(ChainInfo { best_hash: block.header().hash(), best_number: block.header().number() })
+            Ok(ChainInfo {
+                best_hash: block.header().hash(),
+                best_number: block.header().number(),
+                earliest_block: 0,
+            })
         })
     }
 
@@ -1381,7 +1385,11 @@ where
                 .map_err(ProviderError::other)?
                 .ok_or(ProviderError::HeaderNotFound(0.into()))?;
 
-            Ok(ChainInfo { best_hash: block.header().hash(), best_number: block.header().number() })
+            Ok(ChainInfo {
+                best_hash: block.header().hash(),
+                best_number: block.header().number(),
+                earliest_block: 0,
+            })
         })
     }
 

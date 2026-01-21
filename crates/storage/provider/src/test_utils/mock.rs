@@ -573,7 +573,11 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BlockNumReader
         Ok(lock
             .iter()
             .find(|(_, header)| header.number() == best_block_number)
-            .map(|(hash, header)| ChainInfo { best_hash: *hash, best_number: header.number() })
+            .map(|(hash, header)| ChainInfo {
+                best_hash: *hash,
+                best_number: header.number(),
+                earliest_block: 0,
+            })
             .unwrap_or_default())
     }
 

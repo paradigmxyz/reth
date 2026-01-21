@@ -753,7 +753,11 @@ impl<N: ProviderNodeTypes> BlockHashReader for ConsistentProvider<N> {
 impl<N: ProviderNodeTypes> BlockNumReader for ConsistentProvider<N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         let best_number = self.best_block_number()?;
-        Ok(ChainInfo { best_hash: self.block_hash(best_number)?.unwrap_or_default(), best_number })
+        Ok(ChainInfo {
+            best_hash: self.block_hash(best_number)?.unwrap_or_default(),
+            best_number,
+            earliest_block: 0,
+        })
     }
 
     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
