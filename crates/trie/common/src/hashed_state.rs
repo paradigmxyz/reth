@@ -714,33 +714,31 @@ impl HashedPostStateSorted {
     /// Parallel batch-merge sorted hashed post states. Slice is **oldest to newest**.
     ///
     /// This is more efficient than sequential `extend_ref` calls when merging many states,
-    /// as it processes all states in parallel with tree reduction.
+    /// as it processes all states in parallel with tree reduction using divide-and-conquer.
     #[cfg(feature = "rayon")]
     pub fn merge_parallel(states: &[Arc<Self>]) -> Self {
-        use rayon::prelude::*;
-
-        if states.is_empty() {
-            return Self::default();
-        }
-        if states.len() == 1 {
-            return (*states[0]).clone();
-        }
-
-        // Ordered parallel tree reduction: merge pairs in parallel, preserving order
-        // Input is oldest-to-newest, reverse for merge_batch which expects newest-first
-        let mut current: Vec<Self> = states
-            .par_chunks(2)
-            .map(|chunk| Self::merge_batch(chunk.iter().rev().map(|arc| arc.as_ref().clone())))
-            .collect();
-
-        while current.len() > 1 {
-            current = current
-                .par_chunks(2)
-                .map(|chunk| Self::merge_batch(chunk.iter().rev().cloned()))
-                .collect();
+        fn parallel_merge_tree(states: &[Arc<HashedPostStateSorted>]) -> HashedPostStateSorted {
+            match states.len() {
+                0 => HashedPostStateSorted::default(),
+                1 => states[0].as_ref().clone(),
+                2 => {
+                    let mut acc = states[0].as_ref().clone();
+                    acc.extend_ref_and_sort(&states[1]);
+                    acc
+                }
+                n => {
+                    let mid = n / 2;
+                    let (mut left, right) = rayon::join(
+                        || parallel_merge_tree(&states[..mid]),
+                        || parallel_merge_tree(&states[mid..]),
+                    );
+                    left.extend_ref_and_sort(&right);
+                    left
+                }
+            }
         }
 
-        current.pop().unwrap_or_default()
+        parallel_merge_tree(states)
     }
 }
 

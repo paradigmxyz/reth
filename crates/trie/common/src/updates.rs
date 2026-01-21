@@ -702,33 +702,31 @@ impl TrieUpdatesSorted {
     /// Parallel batch-merge sorted trie updates. Slice is **oldest to newest**.
     ///
     /// This is more efficient than sequential `extend_ref` calls when merging many updates,
-    /// as it processes all updates in parallel with tree reduction.
+    /// as it processes all updates in parallel with tree reduction using divide-and-conquer.
     #[cfg(feature = "rayon")]
     pub fn merge_parallel(updates: &[Arc<Self>]) -> Self {
-        use rayon::prelude::*;
-
-        if updates.is_empty() {
-            return Self::default();
-        }
-        if updates.len() == 1 {
-            return (*updates[0]).clone();
-        }
-
-        // Ordered parallel tree reduction: merge pairs in parallel, preserving order
-        // Input is oldest-to-newest, reverse for merge_batch which expects newest-first
-        let mut current: Vec<Self> = updates
-            .par_chunks(2)
-            .map(|chunk| Self::merge_batch(chunk.iter().rev().map(|arc| arc.as_ref().clone())))
-            .collect();
-
-        while current.len() > 1 {
-            current = current
-                .par_chunks(2)
-                .map(|chunk| Self::merge_batch(chunk.iter().rev().cloned()))
-                .collect();
+        fn parallel_merge_tree(updates: &[Arc<TrieUpdatesSorted>]) -> TrieUpdatesSorted {
+            match updates.len() {
+                0 => TrieUpdatesSorted::default(),
+                1 => updates[0].as_ref().clone(),
+                2 => {
+                    let mut acc = updates[0].as_ref().clone();
+                    acc.extend_ref_and_sort(&updates[1]);
+                    acc
+                }
+                n => {
+                    let mid = n / 2;
+                    let (mut left, right) = rayon::join(
+                        || parallel_merge_tree(&updates[..mid]),
+                        || parallel_merge_tree(&updates[mid..]),
+                    );
+                    left.extend_ref_and_sort(&right);
+                    left
+                }
+            }
         }
 
-        current.pop().unwrap_or_default()
+        parallel_merge_tree(updates)
     }
 }
 
