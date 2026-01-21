@@ -437,11 +437,20 @@ impl RocksDBProviderInner {
                             .flatten()
                             .unwrap_or(0);
 
-                        let estimated_size_bytes = $db
-                            .property_int_value_cf(cf, rocksdb::properties::ESTIMATE_LIVE_DATA_SIZE)
+                        // SST files size (on-disk) + memtable size (in-memory)
+                        let sst_size = $db
+                            .property_int_value_cf(cf, rocksdb::properties::LIVE_SST_FILES_SIZE)
                             .ok()
                             .flatten()
                             .unwrap_or(0);
+
+                        let memtable_size = $db
+                            .property_int_value_cf(cf, rocksdb::properties::SIZE_ALL_MEM_TABLES)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        let estimated_size_bytes = sst_size + memtable_size;
 
                         stats.push(RocksDBTableStats {
                             name: cf_name.to_string(),
@@ -713,7 +722,7 @@ impl RocksDBProvider {
 
     /// Returns statistics for all column families in the database.
     ///
-    /// Returns a vector of (table_name, estimated_keys, estimated_size_bytes) tuples.
+    /// Returns a vector of (`table_name`, `estimated_keys`, `estimated_size_bytes`) tuples.
     pub fn table_stats(&self) -> Vec<RocksDBTableStats> {
         self.0.table_stats()
     }
