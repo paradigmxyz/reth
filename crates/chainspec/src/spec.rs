@@ -306,6 +306,7 @@ pub fn create_chain_config(
         bpo3_time: timestamp(EthereumHardfork::Bpo3),
         bpo4_time: timestamp(EthereumHardfork::Bpo4),
         bpo5_time: timestamp(EthereumHardfork::Bpo5),
+        amsterdam_time: None,
         terminal_total_difficulty,
         terminal_total_difficulty_passed,
         ethash: None,
