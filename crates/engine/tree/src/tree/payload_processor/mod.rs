@@ -15,7 +15,7 @@ use crate::tree::{
 };
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip1898::BlockWithParent;
-use alloy_evm::{block::StateChangeSource};
+use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::Sender as CrossbeamSender;
 use executor::WorkloadExecutor;

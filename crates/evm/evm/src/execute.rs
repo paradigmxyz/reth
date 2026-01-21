@@ -6,8 +6,8 @@ use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
-    block::{CommitChanges, ExecutableTx, ExecutableTxParts},
-    Evm, EvmEnv, EvmFactory, RecoveredTx,
+    block::{CommitChanges, ExecutableTxParts},
+    Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
 use alloy_primitives::{Address, B256};
 pub use reth_execution_errors::{
@@ -401,49 +401,31 @@ where
 
 /// Conversions for executable transactions.
 pub trait ExecutorTx<Executor: BlockExecutor> {
-    /// Converts the transaction into [`ExecutableTx`].
-    fn as_executable(&self) -> impl ExecutableTx<Executor>;
-
-    /// Converts the transaction into [`Recovered`].
-    fn into_recovered(self) -> Recovered<Executor::Transaction>;
+    /// Converts the transaction into a tuple of [`TxEnvFor`] and [`Recovered`].
+    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>);
 }
 
 impl<Executor: BlockExecutor> ExecutorTx<Executor>
     for WithEncoded<Recovered<Executor::Transaction>>
 {
-    fn as_executable(&self) -> impl ExecutableTx<Executor> {
-        self
-    }
-
-    fn into_recovered(self) -> Recovered<Executor::Transaction> {
-        self.1
+    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
+        (self.to_tx_env(), self.1)
     }
 }
 
 impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Transaction> {
-    fn as_executable(&self) -> impl ExecutableTx<Executor> {
-        self
-    }
-
-    fn into_recovered(self) -> Self {
-        self
+    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Self) {
+        (self.to_tx_env(), self)
     }
 }
 
-impl<T, Executor> ExecutorTx<Executor>
-    for WithTxEnv<<<Executor as BlockExecutor>::Evm as Evm>::Tx, T>
+impl<Executor> ExecutorTx<Executor>
+    for WithTxEnv<<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>>
 where
-    T: ExecutorTx<Executor> + Clone + RecoveredTx<Executor::Transaction>,
-    Executor: BlockExecutor,
-    <<Executor as BlockExecutor>::Evm as Evm>::Tx: Clone,
-    Self: RecoveredTx<Executor::Transaction>,
+    Executor: BlockExecutor<Transaction: Clone>,
 {
-    fn as_executable(&self) -> impl ExecutableTx<Executor> {
-        self.clone()
-    }
-
-    fn into_recovered(self) -> Recovered<Executor::Transaction> {
-        Arc::unwrap_or_clone(self.tx).into_recovered()
+    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
+        (self.tx_env, Arc::unwrap_or_clone(self.tx))
     }
 }
 
@@ -479,10 +461,11 @@ where
             &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
         ) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
+        let (tx_env, tx) = tx.into_parts();
         if let Some(gas_used) =
-            self.executor.execute_transaction_with_commit_condition(tx.as_executable(), f)?
+            self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
-            self.transactions.push(tx.into_recovered());
+            self.transactions.push(tx);
             Ok(Some(gas_used))
         } else {
             Ok(None)
