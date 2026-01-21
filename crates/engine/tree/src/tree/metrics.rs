@@ -53,12 +53,8 @@ impl EngineApiMetrics {
             output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
         let bytecodes = output.state.contracts.len();
         // Sum up total code bytes from all contracts
-        let code_bytes: usize = output
-            .state
-            .contracts
-            .values()
-            .map(|bytecode| bytecode.original_bytes().len())
-            .sum();
+        let code_bytes: usize =
+            output.state.contracts.values().map(|bytecode| bytecode.original_bytes().len()).sum();
 
         self.executor.accounts_updated_histogram.record(accounts as f64);
         self.executor.storage_slots_updated_histogram.record(storage_slots as f64);
