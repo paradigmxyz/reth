@@ -692,14 +692,8 @@ mod tests {
         // Insert some entries into both collectors
         stage.hash_collector.insert(B256::random(), 100).unwrap();
         stage.hash_collector.insert(B256::random(), 101).unwrap();
-        stage
-            .header_collector
-            .insert(100, Bytes::from_static(b"header100"))
-            .unwrap();
-        stage
-            .header_collector
-            .insert(101, Bytes::from_static(b"header101"))
-            .unwrap();
+        stage.header_collector.insert(100, Bytes::from_static(b"header100")).unwrap();
+        stage.header_collector.insert(101, Bytes::from_static(b"header101")).unwrap();
         stage.is_etl_ready = true;
 
         // Verify collectors have entries
@@ -709,19 +703,13 @@ mod tests {
 
         // Call unwind
         let provider = runner.db().factory.database_provider_rw().unwrap();
-        let unwind_input = UnwindInput {
-            checkpoint: StageCheckpoint::new(100),
-            unwind_to: 0,
-            bad_block: None,
-        };
+        let unwind_input =
+            UnwindInput { checkpoint: StageCheckpoint::new(100), unwind_to: 0, bad_block: None };
         let _ = stage.unwind(&provider, unwind_input);
 
         // Assert collectors are cleared after unwind
         assert!(stage.hash_collector.is_empty(), "hash_collector should be empty after unwind");
-        assert!(
-            stage.header_collector.is_empty(),
-            "header_collector should be empty after unwind"
-        );
+        assert!(stage.header_collector.is_empty(), "header_collector should be empty after unwind");
         assert!(!stage.is_etl_ready, "is_etl_ready should be false after unwind");
     }
 }
