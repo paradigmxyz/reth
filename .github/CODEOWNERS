@@ -34,7 +34,7 @@ crates/storage/codecs/      @joshieDo
 crates/storage/db-api/      @joshieDo
 crates/storage/db-common/   @Rjected
 crates/storage/db/          @joshieDo
-crates/storage/errors/      @rakita
+crates/storage/errors/      @joshieDo
 crates/storage/libmdbx-rs/  @shekhirin
 crates/storage/nippy-jar/   @joshieDo @shekhirin
 crates/storage/provider/    @joshieDo @shekhirin
