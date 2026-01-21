@@ -210,6 +210,12 @@ pub(crate) struct EngineMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "consensus.engine.beacon")]
 pub(crate) struct ForkchoiceUpdatedMetrics {
+    /// Finish time of the latest forkchoice updated call.
+    #[metric(skip)]
+    pub(crate) latest_finish_at: Option<Instant>,
+    /// Start time of the latest forkchoice updated call.
+    #[metric(skip)]
+    pub(crate) latest_start_at: Option<Instant>,
     /// The total count of forkchoice updated messages received.
     pub(crate) forkchoice_updated_messages: Counter,
     /// The total count of forkchoice updated messages with payload received.
@@ -232,18 +238,35 @@ pub(crate) struct ForkchoiceUpdatedMetrics {
     pub(crate) forkchoice_updated_last: Gauge,
     /// Time diff between new payload call response and the next forkchoice updated call request.
     pub(crate) new_payload_forkchoice_updated_time_diff: Histogram,
+    /// Time from previous forkchoice updated finish to current forkchoice updated start (idle
+    /// time).
+    pub(crate) time_between_forkchoice_updated: Histogram,
+    /// Time from previous forkchoice updated start to current forkchoice updated start (total
+    /// interval).
+    pub(crate) forkchoice_updated_interval: Histogram,
 }
 
 impl ForkchoiceUpdatedMetrics {
     /// Increment the forkchoiceUpdated counter based on the given result
     pub(crate) fn update_response_metrics(
-        &self,
+        &mut self,
         start: Instant,
         latest_new_payload_at: &mut Option<Instant>,
         has_attrs: bool,
         result: &Result<TreeOutcome<OnForkChoiceUpdated>, ProviderError>,
     ) {
-        let elapsed = start.elapsed();
+        let finish = Instant::now();
+        let elapsed = finish - start;
+
+        if let Some(prev_finish) = self.latest_finish_at {
+            self.time_between_forkchoice_updated.record(start - prev_finish);
+        }
+        if let Some(prev_start) = self.latest_start_at {
+            self.forkchoice_updated_interval.record(start - prev_start);
+        }
+        self.latest_finish_at = Some(finish);
+        self.latest_start_at = Some(start);
+
         match result {
             Ok(outcome) => match outcome.outcome.forkchoice_status() {
                 ForkchoiceStatus::Valid => self.forkchoice_updated_valid.increment(1),
