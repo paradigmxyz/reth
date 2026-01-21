@@ -165,6 +165,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             &self.receipts,
             &self.transaction_senders,
             &self.account_change_sets,
+            &self.storage_change_sets,
         ] {
             let mut writer = writer_lock.write();
             if let Some(writer) = writer.as_mut() {
