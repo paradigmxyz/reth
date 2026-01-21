@@ -6992,6 +6992,15 @@
               }
             ]
           }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "table": "Table",
+              "Value (lastNotNull)": "Pending Bytes"
+            }
+          }
         }
       ],
       "type": "table"
