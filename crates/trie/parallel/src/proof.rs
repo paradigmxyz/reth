@@ -322,7 +322,9 @@ mod tests {
 
         let rt = Runtime::new().unwrap();
 
-        let factory = reth_provider::providers::OverlayStateProviderFactory::new(factory);
+        let changeset_cache = reth_trie_db::ChangesetCache::new();
+        let factory =
+            reth_provider::providers::OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(factory);
         let proof_worker_handle =
             ProofWorkerHandle::new(rt.handle().clone(), task_ctx, 1, 1, false);

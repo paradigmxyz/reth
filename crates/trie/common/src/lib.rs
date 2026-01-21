@@ -11,6 +11,10 @@
 
 extern crate alloc;
 
+/// Lazy initialization wrapper for trie data.
+mod lazy;
+pub use lazy::{LazyTrieData, SortedTrieData};
+
 /// In-memory hashed state.
 mod hashed_state;
 pub use hashed_state::*;
@@ -54,6 +58,9 @@ pub use proofs::triehash;
 pub use proofs::*;
 
 pub mod root;
+
+/// Incremental ordered trie root computation.
+pub mod ordered_root;
 
 /// Buffer for trie updates.
 pub mod updates;

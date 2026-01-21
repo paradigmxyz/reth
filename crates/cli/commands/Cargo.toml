@@ -83,6 +83,7 @@ backon.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 tokio-stream.workspace = true
 reqwest.workspace = true
+url.workspace = true
 metrics.workspace = true
 
 # io
@@ -130,4 +131,4 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
 ]
 
-edge = ["reth-db-common/edge", "reth-stages/rocksdb"]
+edge = ["reth-db-common/edge", "reth-stages/rocksdb", "reth-provider/rocksdb"]

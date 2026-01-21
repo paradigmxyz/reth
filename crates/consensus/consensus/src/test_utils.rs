@@ -1,4 +1,4 @@
-use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
+use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use core::sync::atomic::{AtomicBool, Ordering};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
@@ -51,6 +51,7 @@ impl<N: NodePrimitives> FullConsensus<N> for TestConsensus {
         &self,
         _block: &RecoveredBlock<N::Block>,
         _result: &BlockExecutionResult<N::Receipt>,
+        _receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)

@@ -16,8 +16,8 @@ use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
     BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
     HashingWriter, HeaderProvider, HistoryWriter, MetadataWriter, OriginalValuesKnown,
-    ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter, StateWriter,
-    StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
+    ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
+    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -334,7 +334,11 @@ where
         Vec::new(),
     );
 
-    provider.write_state(&execution_outcome, OriginalValuesKnown::Yes)?;
+    provider.write_state(
+        &execution_outcome,
+        OriginalValuesKnown::Yes,
+        StateWriteConfig::default(),
+    )?;
 
     trace!(target: "reth::cli", "Inserted state");
 

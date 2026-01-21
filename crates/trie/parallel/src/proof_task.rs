@@ -41,7 +41,7 @@ use alloy_primitives::{
 use alloy_rlp::{BufMut, Encodable};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
-use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
+use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofError};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -305,17 +305,17 @@ impl ProofWorkerHandle {
         self.storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
             .map_err(|err| {
-                let error =
-                    ProviderError::other(std::io::Error::other("storage workers unavailable"));
-
                 if let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0 {
                     let _ = proof_result_sender.send(StorageProofResultMessage {
                         hashed_address,
-                        result: Err(ParallelStateRootError::Provider(error.clone())),
+                        result: Err(DatabaseError::Other(
+                            "storage workers unavailable".to_string(),
+                        )
+                        .into()),
                     });
                 }
 
-                error
+                ProviderError::other(std::io::Error::other("storage workers unavailable"))
             })
     }
 
@@ -432,7 +432,7 @@ where
         input: StorageProofInput,
         trie_cursor_metrics: &mut TrieCursorMetricsCache,
         hashed_cursor_metrics: &mut HashedCursorMetricsCache,
-    ) -> Result<StorageProofResult, ParallelStateRootError> {
+    ) -> Result<StorageProofResult, StateProofError> {
         // Consume the input so we can move large collections (e.g. target slots) without cloning.
         let StorageProofInput::Legacy {
             hashed_address,
@@ -469,20 +469,13 @@ where
                 .with_added_removed_keys(added_removed_keys)
                 .with_trie_cursor_metrics(trie_cursor_metrics)
                 .with_hashed_cursor_metrics(hashed_cursor_metrics)
-                .storage_multiproof(target_slots)
-                .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+                .storage_multiproof(target_slots);
         trie_cursor_metrics.record_span("trie_cursor");
         hashed_cursor_metrics.record_span("hashed_cursor");
 
         // Decode proof into DecodedStorageMultiProof
-        let decoded_result = raw_proof_result.and_then(|raw_proof| {
-            raw_proof.try_into().map_err(|e: alloy_rlp::Error| {
-                ParallelStateRootError::Other(format!(
-                    "Failed to decode storage proof for {}: {}",
-                    hashed_address, e
-                ))
-            })
-        })?;
+        let decoded_result =
+            raw_proof_result.and_then(|raw_proof| raw_proof.try_into().map_err(Into::into))?;
 
         trace!(
             target: "trie::proof_task",
@@ -502,7 +495,7 @@ where
             <Provider as TrieCursorFactory>::StorageTrieCursor<'_>,
             <Provider as HashedCursorFactory>::StorageCursor<'_>,
         >,
-    ) -> Result<StorageProofResult, ParallelStateRootError> {
+    ) -> Result<StorageProofResult, StateProofError> {
         let StorageProofInput::V2 { hashed_address, mut targets } = input else {
             panic!("compute_v2_storage_proof only accepts StorageProofInput::V2")
         };
@@ -717,12 +710,12 @@ pub struct StorageProofResultMessage {
     /// The hashed address this storage proof belongs to
     pub(crate) hashed_address: B256,
     /// The storage proof calculation result
-    pub(crate) result: Result<StorageProofResult, ParallelStateRootError>,
+    pub(crate) result: Result<StorageProofResult, StateProofError>,
 }
 
 /// Internal message for storage workers.
 #[derive(Debug)]
-enum StorageWorkerJob {
+pub(crate) enum StorageWorkerJob {
     /// Storage proof computation request
     StorageProof {
         /// Storage proof input parameters
@@ -1562,8 +1555,11 @@ fn dispatch_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(targets.len(), Default::default());
 
+    let mut sorted_targets: Vec<_> = targets.iter().collect();
+    sorted_targets.sort_unstable_by_key(|(addr, _)| *addr);
+
     // Dispatch all storage proofs to worker pool
-    for (hashed_address, target_slots) in targets.iter() {
+    for (hashed_address, target_slots) in sorted_targets {
         // Create channel for receiving ProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
@@ -1726,8 +1722,11 @@ mod tests {
         runtime.block_on(async {
             let handle = tokio::runtime::Handle::current();
             let provider_factory = create_test_provider_factory();
-            let factory =
-                reth_provider::providers::OverlayStateProviderFactory::new(provider_factory);
+            let changeset_cache = reth_trie_db::ChangesetCache::new();
+            let factory = reth_provider::providers::OverlayStateProviderFactory::new(
+                provider_factory,
+                changeset_cache,
+            );
             let ctx = test_ctx(factory);
 
             let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, false);

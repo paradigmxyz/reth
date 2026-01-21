@@ -605,7 +605,7 @@ pub struct RpcServerArgs {
     pub rpc_eth_proof_window: u64,
 
     /// Maximum number of concurrent getproof requests.
-    #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = constants::DEFAULT_PROOF_PERMITS)]
+    #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_proof_permits)]
     pub rpc_proof_permits: usize,
 
     /// Configures the pending block behavior for RPC responses.
@@ -640,6 +640,13 @@ pub struct RpcServerArgs {
         value_parser = parse_duration_from_secs_or_ms,
     )]
     pub rpc_send_raw_transaction_sync_timeout: Duration,
+
+    /// Skip invalid transactions in `testing_buildBlockV1` instead of failing.
+    ///
+    /// When enabled, transactions that fail execution will be skipped, and all subsequent
+    /// transactions from the same sender will also be skipped.
+    #[arg(long = "testing.skip-invalid-transactions", default_value_t = false)]
+    pub testing_skip_invalid_transactions: bool,
 }
 
 impl RpcServerArgs {
@@ -852,6 +859,7 @@ impl Default for RpcServerArgs {
             rpc_state_cache,
             gas_price_oracle,
             rpc_send_raw_transaction_sync_timeout,
+            testing_skip_invalid_transactions: false,
         }
     }
 }
@@ -1026,6 +1034,7 @@ mod tests {
                 default_suggested_fee: None,
             },
             rpc_send_raw_transaction_sync_timeout: std::time::Duration::from_secs(30),
+            testing_skip_invalid_transactions: true,
         };
 
         let parsed_args = CommandParser::<RpcServerArgs>::parse_from([
@@ -1114,6 +1123,7 @@ mod tests {
             "60",
             "--rpc.send-raw-transaction-sync-timeout",
             "30s",
+            "--testing.skip-invalid-transactions",
         ])
         .args;
 

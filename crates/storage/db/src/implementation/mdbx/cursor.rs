@@ -158,9 +158,23 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
 }
 
 impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
+    /// Returns the previous `(key, value)` pair of a DUPSORT table.
+    fn prev_dup(&mut self) -> PairResult<T> {
+        decode::<T>(self.inner.prev_dup())
+    }
+
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T> {
         decode::<T>(self.inner.next_dup())
+    }
+
+    /// Returns the last `value` of the current duplicate `key`.
+    fn last_dup(&mut self) -> ValueOnlyResult<T> {
+        self.inner
+            .last_dup()
+            .map_err(|e| DatabaseError::Read(e.into()))?
+            .map(decode_one::<T>)
+            .transpose()
     }
 
     /// Returns the next `(key, value)` pair skipping the duplicates.
@@ -201,27 +215,26 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
     ) -> Result<DupWalker<'_, T, Self>, DatabaseError> {
         let start = match (key, subkey) {
             (Some(key), Some(subkey)) => {
-                // encode key and decode it after.
-                let key: Vec<u8> = key.encode().into();
+                let encoded_key = key.encode();
                 self.inner
-                    .get_both_range(key.as_ref(), subkey.encode().as_ref())
+                    .get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
                     .map_err(|e| DatabaseError::Read(e.into()))?
-                    .map(|val| decoder::<T>((Cow::Owned(key), val)))
+                    .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
             }
             (Some(key), None) => {
-                let key: Vec<u8> = key.encode().into();
+                let encoded_key = key.encode();
                 self.inner
-                    .set(key.as_ref())
+                    .set(encoded_key.as_ref())
                     .map_err(|e| DatabaseError::Read(e.into()))?
-                    .map(|val| decoder::<T>((Cow::Owned(key), val)))
+                    .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
             }
             (None, Some(subkey)) => {
                 if let Some((key, _)) = self.first()? {
-                    let key: Vec<u8> = key.encode().into();
+                    let encoded_key = key.encode();
                     self.inner
-                        .get_both_range(key.as_ref(), subkey.encode().as_ref())
+                        .get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
                         .map_err(|e| DatabaseError::Read(e.into()))?
-                        .map(|val| decoder::<T>((Cow::Owned(key), val)))
+                        .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
                 } else {
                     Some(Err(DatabaseError::Read(MDBXError::NotFound.into())))
                 }
