@@ -43,8 +43,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v6
         with:
-          repository: ethereum/hive
-          ref: master
+          repository: fselmo/hive
+          ref: fix/update-bpo2-defaults
           path: hivetests
 
       - name: Get hive commit hash
@@ -226,8 +226,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v6
         with:
-          repository: ethereum/hive
-          ref: master
+          repository: fselmo/hive
+          ref: fix/update-bpo2-defaults
           path: hivetests
 
       - name: Run simulator
