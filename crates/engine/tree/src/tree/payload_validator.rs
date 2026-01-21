@@ -381,7 +381,7 @@ where
                 self.convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into());
+            .into())
         };
         let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
@@ -394,7 +394,7 @@ where
                 self.convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into());
+            .into())
         };
 
         let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm env")
@@ -588,7 +588,7 @@ where
                 )
                 .into(),
             )
-            .into());
+            .into())
         }
 
         if let Some(valid_block_tx) = valid_block_tx {
@@ -1038,7 +1038,7 @@ where
                 self.provider.clone(),
                 historical,
                 Some(blocks),
-            )));
+            )))
         }
 
         // Check if the block is persisted
@@ -1099,7 +1099,7 @@ where
 
         if blocks.is_empty() {
             debug!(target: "engine::tree::payload_validator", "Parent found on disk, no lazy overlay needed");
-            return (None, anchor_hash)
+            return (None, anchor_hash);
         }
 
         debug!(

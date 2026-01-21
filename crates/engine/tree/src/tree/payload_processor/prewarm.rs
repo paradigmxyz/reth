@@ -189,7 +189,7 @@ where
                         target: "engine::tree::payload_processor::prewarm",
                         "Termination requested, stopping transaction distribution"
                     );
-                    break
+                    break;
                 }
 
                 let indexed_tx = IndexedTransaction { index: tx_index, tx };
@@ -288,7 +288,7 @@ where
                     // Clear the cache on error to prevent having a polluted cache
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return
+                    return;
                 }
 
                 new_cache.update_metrics();
@@ -325,7 +325,7 @@ where
             );
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
-            return
+            return;
         }
 
         let total_slots = total_slots(&bal);
@@ -341,7 +341,7 @@ where
             // No slots to prefetch, signal completion immediately
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
-            return
+            return;
         }
 
         let (done_tx, done_rx) = mpsc::channel();
@@ -736,7 +736,7 @@ where
                     "Failed to build state provider in BAL prewarm thread"
                 );
                 let _ = done_tx.send(());
-                return
+                return;
             }
         };
 

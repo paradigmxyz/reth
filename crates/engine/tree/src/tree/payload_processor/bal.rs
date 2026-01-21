@@ -59,10 +59,10 @@ impl<'a> BALSlotIter<'a> {
                 let skip_slots = self.range.start - self.current_index;
                 self.slot_idx = skip_slots;
                 self.current_index = self.range.start;
-                break
+                break;
             } else {
                 // We're at or past range start
-                break
+                break;
             }
         }
     }
@@ -74,7 +74,7 @@ impl<'a> Iterator for BALSlotIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         // Check if we've exceeded the range
         if self.current_index >= self.range.end {
-            return None
+            return None;
         }
 
         // Find the next valid slot
@@ -98,10 +98,10 @@ impl<'a> Iterator for BALSlotIter<'a> {
 
                 // Check if we've reached the end of range
                 if self.current_index > self.range.end {
-                    return None
+                    return None;
                 }
 
-                return Some((address, StorageKey::from(slot)))
+                return Some((address, StorageKey::from(slot)));
             }
 
             // Move to next account
