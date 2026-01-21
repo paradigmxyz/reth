@@ -42,22 +42,23 @@ reth-ethereum-forks.workspace = true
 [features]
 default = ["std"]
 std = [
-    "dep:rayon",
-    "reth-primitives-traits/std",
-    "alloy-eips/std",
-    "alloy-primitives/std",
-    "alloy-consensus/std",
-    "revm/std",
-    "reth-ethereum-forks/std",
-    "alloy-evm/std",
-    "reth-execution-errors/std",
-    "reth-execution-types/std",
-    "reth-storage-errors/std",
-    "futures-util/std",
-    "derive_more/std",
-    "reth-storage-api/std",
-    "reth-trie-common/std",
-    "reth-ethereum-primitives/std",
+	"dep:rayon",
+	"reth-primitives-traits/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"alloy-consensus/std",
+	"revm/std",
+	"reth-ethereum-forks/std",
+	"alloy-evm/std",
+	"reth-execution-errors/std",
+	"reth-execution-types/std",
+	"reth-storage-errors/std",
+	"futures-util/std",
+	"derive_more/std",
+	"reth-storage-api/std",
+	"reth-trie-common/std",
+	"reth-ethereum-primitives/std",
+	"tracing?/std"
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics", "dep:tracing"]
 test-utils = [

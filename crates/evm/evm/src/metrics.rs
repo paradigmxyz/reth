@@ -301,24 +301,24 @@ mod tests {
         // Call log_slow_block with sample data
         // This should log (execution_ms=1500 > threshold=0)
         metrics.log_slow_block(
-            12345,                                                            // block_number
+            12345,                                                              // block_number
             "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678", // block_hash
-            30_000_000,                                                       // gas_used
-            200,                                                              // tx_count
-            1500,                                                             // execution_ms
-            100,                                                              // accounts_loaded
-            500,                                                              // storage_slots_loaded
-            20,                                                               // bytecodes_loaded
-            10240,                                                            // code_bytes_read
-            50,                                                               // accounts_updated
-            200,                                                              // storage_slots_updated
-            0,                                                                // bytecodes_updated
-            4,                                                                // account_cache_hits
-            6,                                                                // account_cache_misses
-            0,                                                                // storage_cache_hits
-            11,                                                               // storage_cache_misses
-            4,                                                                // code_cache_hits
-            0,                                                                // code_cache_misses
+            30_000_000,                                                         // gas_used
+            200,                                                                // tx_count
+            1500,                                                               // execution_ms
+            100,                                                                // accounts_loaded
+            500,   // storage_slots_loaded
+            20,    // bytecodes_loaded
+            10240, // code_bytes_read
+            50,    // accounts_updated
+            200,   // storage_slots_updated
+            0,     // bytecodes_updated
+            4,     // account_cache_hits
+            6,     // account_cache_misses
+            0,     // storage_cache_hits
+            11,    // storage_cache_misses
+            4,     // code_cache_hits
+            0,     // code_cache_misses
         );
 
         // Reset threshold
