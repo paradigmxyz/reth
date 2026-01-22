@@ -215,11 +215,10 @@ where
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.chunk_size);
 
-        // Auto-commits on threshold; consistency check heals any crash.
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb = provider.rocksdb_provider();
         #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_batch = rocksdb.batch_with_auto_commit();
+        let rocksdb_batch = rocksdb.batch();
         #[cfg(not(all(unix, feature = "rocksdb")))]
         let rocksdb_batch = ();
         let mut writer = EitherWriter::new_transaction_hash_numbers(provider, rocksdb_batch)?;
