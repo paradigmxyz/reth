@@ -6,6 +6,7 @@ use alloy_primitives::{
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
@@ -22,7 +23,7 @@ use revm_primitives::eip7907::MAX_CODE_SIZE;
 use std::{
     mem::size_of,
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -687,10 +688,10 @@ impl ExecutionCache {
         let _enter =
             debug_span!(target: "engine::tree", "contracts", len = state_updates.contracts.len())
                 .entered();
-        // Insert bytecodes
-        for (code_hash, bytecode) in &state_updates.contracts {
+        // Insert bytecodes in parallel
+        state_updates.contracts.par_iter().for_each(|(code_hash, bytecode)| {
             self.insert_code(*code_hash, Some(Bytecode(bytecode.clone())));
-        }
+        });
         drop(_enter);
 
         let _enter = debug_span!(
@@ -701,11 +702,16 @@ impl ExecutionCache {
                 state_updates.state.values().map(|account| account.storage.len()).sum::<usize>()
         )
         .entered();
-        for (addr, account) in &state_updates.state {
+
+        // Track if any account has invalid state (None info when modified but not destroyed)
+        let has_error = AtomicBool::new(false);
+
+        // Process accounts in parallel - each account's storage and info updates are independent
+        state_updates.state.par_iter().for_each(|(addr, account)| {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
             if account.status.is_not_modified() {
-                continue
+                return
             }
 
             // If the original account had code (was a contract), we must clear the entire cache
@@ -728,12 +734,12 @@ impl ExecutionCache {
                         );
                     });
                     self.clear();
-                    return Ok(())
+                    return
                 }
 
                 self.account_cache.remove(addr);
                 self.account_stats.decrement_size();
-                continue
+                return
             }
 
             // If we have an account that was modified, but it has a `None` account info, some wild
@@ -741,7 +747,8 @@ impl ExecutionCache {
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
                 trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-                return Err(())
+                has_error.store(true, Ordering::Relaxed);
+                return
             };
 
             // Now we iterate over all storage and make updates to the cached storage values
@@ -752,6 +759,10 @@ impl ExecutionCache {
             // Insert will update if present, so we just use the new account info as the new value
             // for the account cache
             self.insert_account(*addr, Some(Account::from(account_info)));
+        });
+
+        if has_error.load(Ordering::Relaxed) {
+            return Err(())
         }
 
         Ok(())
