@@ -91,11 +91,6 @@ impl LogLevelHandle {
         Self { inner: Some(Arc::new(handle)) }
     }
 
-    /// Creates a no-op handle (for when reloading is not available).
-    pub const fn noop() -> Self {
-        Self { inner: None }
-    }
-
     /// Returns true if this handle can actually reload filters.
     pub const fn is_available(&self) -> bool {
         self.inner.is_some()
@@ -384,7 +379,7 @@ impl Tracer for RethTracer {
                 &self.stdout.filters,
                 self.stdout.color,
             )?;
-            LogLevelHandle::noop()
+            LogLevelHandle::default()
         };
 
         if let Some(config) = self.journald {

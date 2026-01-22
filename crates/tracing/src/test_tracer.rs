@@ -23,6 +23,6 @@ impl Tracer for TestTracer {
             .with_env_filter(EnvFilter::from_default_env())
             .with_writer(std::io::stderr)
             .try_init();
-        Ok(TracingInitResult { file_guard: None, log_handle: LogLevelHandle::noop() })
+        Ok(TracingInitResult { file_guard: None, log_handle: LogLevelHandle::default() })
     }
 }

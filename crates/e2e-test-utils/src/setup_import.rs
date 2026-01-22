@@ -228,7 +228,7 @@ pub async fn setup_engine_with_chain_import(
                     builder.task_executor().clone(),
                     builder.config().datadir(),
                     tree_config.clone(),
-                    LogLevelHandle::noop(),
+                    LogLevelHandle::default(),
                 );
                 builder.launch_with(launcher)
             })

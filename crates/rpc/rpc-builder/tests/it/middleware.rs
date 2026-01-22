@@ -79,7 +79,7 @@ async fn test_rpc_middleware() {
         TransportRpcModuleConfig::set_http(RpcModuleSelection::All),
         eth_api,
         EventSender::new(1),
-        LogLevelHandle::noop(),
+        LogLevelHandle::default(),
     );
 
     let mylayer = MyMiddlewareLayer::default();

@@ -36,7 +36,7 @@ fn main() -> eyre::Result<()> {
 
     // Run until either exit or sigint or sigterm
     let runner = CliRunner::try_default_runtime()?;
-    runner.run_command_until_exit(LogLevelHandle::noop(), |ctx| {
+    runner.run_command_until_exit(LogLevelHandle::default(), |ctx| {
         BenchmarkCommand::parse().execute(ctx)
     })?;
 

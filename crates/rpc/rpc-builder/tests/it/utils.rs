@@ -69,7 +69,7 @@ pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHan
         TransportRpcModuleConfig::set_http(modules),
         eth_api,
         EventSender::new(1),
-        LogLevelHandle::noop(),
+        LogLevelHandle::default(),
     );
     RpcServerConfig::http(Default::default())
         .with_http_address(test_address())
@@ -86,7 +86,7 @@ pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandl
         TransportRpcModuleConfig::set_ws(modules),
         eth_api,
         EventSender::new(1),
-        LogLevelHandle::noop(),
+        LogLevelHandle::default(),
     );
     RpcServerConfig::ws(Default::default())
         .with_ws_address(test_address())
@@ -104,7 +104,7 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
         TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
         eth_api,
         EventSender::new(1),
-        LogLevelHandle::noop(),
+        LogLevelHandle::default(),
     );
     RpcServerConfig::ws(Default::default())
         .with_ws_address(test_address())
@@ -125,7 +125,7 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
         TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
         eth_api,
         EventSender::new(1),
-        LogLevelHandle::noop(),
+        LogLevelHandle::default(),
     );
     let addr = test_address();
     RpcServerConfig::ws(Default::default())

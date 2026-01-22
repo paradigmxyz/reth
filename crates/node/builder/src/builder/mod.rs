@@ -236,7 +236,7 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     ///
     /// This provides the task executor and the data directory for the node.
     ///
-    /// Use [`LogLevelHandle::noop()`] if runtime log level changes are not needed.
+    /// Use [`LogLevelHandle::default()`] if runtime log level changes are not needed.
     pub const fn with_launch_context(
         self,
         task_executor: TaskExecutor,
@@ -280,7 +280,7 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
         WithLaunchContext {
             builder: self.with_database(db),
             task_executor,
-            log_handle: LogLevelHandle::noop(),
+            log_handle: LogLevelHandle::default(),
         }
     }
 }

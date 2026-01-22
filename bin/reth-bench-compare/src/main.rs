@@ -42,5 +42,5 @@ fn main() -> Result<()> {
 
     // Run until either exit or sigint or sigterm
     let runner = CliRunner::try_default_runtime()?;
-    runner.run_command_until_exit(LogLevelHandle::noop(), |ctx| run_comparison(args, ctx))
+    runner.run_command_until_exit(LogLevelHandle::default(), |ctx| run_comparison(args, ctx))
 }

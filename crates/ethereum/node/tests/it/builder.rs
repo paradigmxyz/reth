@@ -53,7 +53,7 @@ async fn test_eth_launcher() {
     let _builder =
         NodeBuilder::new(config)
             .with_database(db)
-            .with_launch_context(tasks.executor(), LogLevelHandle::noop())
+            .with_launch_context(tasks.executor(), LogLevelHandle::default())
             .with_types_and_provider::<EthereumNode, BlockchainProvider<
                 NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
             >>()
@@ -68,7 +68,7 @@ async fn test_eth_launcher() {
                     tasks.executor(),
                     builder.config().datadir(),
                     Default::default(),
-                    LogLevelHandle::noop(),
+                    LogLevelHandle::default(),
                 );
                 builder.launch_with(launcher)
             });
@@ -89,7 +89,7 @@ fn test_eth_launcher_with_tokio_runtime() {
         let _builder =
             NodeBuilder::new(config)
                 .with_database(db)
-                .with_launch_context(tasks.executor(), LogLevelHandle::noop())
+                .with_launch_context(tasks.executor(), LogLevelHandle::default())
                 .with_types_and_provider::<EthereumNode, BlockchainProvider<
                     NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
                 >>()
@@ -106,7 +106,7 @@ fn test_eth_launcher_with_tokio_runtime() {
                         tasks.executor(),
                         builder.config().datadir(),
                         Default::default(),
-                        LogLevelHandle::noop(),
+                        LogLevelHandle::default(),
                     );
                     builder.launch_with(launcher)
                 });

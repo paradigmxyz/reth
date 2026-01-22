@@ -59,7 +59,7 @@ async fn test_op_node_custom_genesis_number() {
                 tasks.executor(),
                 builder.config.datadir(),
                 Default::default(),
-                LogLevelHandle::noop(),
+                LogLevelHandle::default(),
             );
             builder.launch_with(launcher)
         })

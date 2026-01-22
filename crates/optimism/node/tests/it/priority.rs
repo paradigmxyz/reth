@@ -143,7 +143,7 @@ async fn test_custom_block_priority_config() {
                 tasks.executor(),
                 builder.config.datadir(),
                 Default::default(),
-                LogLevelHandle::noop(),
+                LogLevelHandle::default(),
             );
             builder.launch_with(launcher)
         })
