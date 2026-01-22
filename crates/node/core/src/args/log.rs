@@ -134,15 +134,14 @@ impl LogArgs {
 
     /// Initializes tracing with the configured options from cli args.
     ///
-    /// When `enable_reload` is true, the returned [`TracingInitResult`] contains a
-    /// [`LogLevelHandle`](reth_tracing::LogLevelHandle) that can be used to change log levels
-    /// at runtime via RPC methods like `debug_verbosity` and `debug_vmodule`.
+    /// When `enable_reload` is true, a global log handle is installed that allows changing
+    /// log levels at runtime via RPC methods like `debug_verbosity` and `debug_vmodule`.
     ///
     /// # Arguments
     /// * `layers` - Pre-configured layers to include
     /// * `enable_reload` - If true, enables runtime log level changes
     ///
-    /// Returns the tracing result containing the file worker guard and log level handle.
+    /// Returns the tracing result containing the file worker guard.
     pub fn init_tracing_with_layers(
         &self,
         layers: Layers,
