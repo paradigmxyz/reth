@@ -99,6 +99,12 @@ pub async fn setup_engine_with_chain_import(
         // Set the datadir
         node_config.datadir.datadir =
             reth_node_core::dirs::MaybePlatformPath::from(datadir.clone());
+
+        // Explicitly set rocksdb args to match StorageSettings used by init_genesis().
+        // Both edge() and legacy() have storages_history_in_rocksdb=false and
+        // account_history_in_rocksdb=false, so we match that here.
+        node_config.rocksdb.storages_history = false;
+        node_config.rocksdb.account_history = false;
         debug!(target: "e2e::import", "Node {idx} datadir: {datadir:?}");
 
         let span = span!(Level::INFO, "node", idx);
@@ -128,7 +134,7 @@ pub async fn setup_engine_with_chain_import(
             reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path).build().unwrap(),
         )?;
 
-        // Initialize genesis if needed
+        // Initialize genesis
         reth_db_common::init::init_genesis(&provider_factory)?;
 
         // Import the chain data
