@@ -1824,10 +1824,12 @@ mod rocksdb_tests {
         );
     }
 
-    /// Test that `EitherReader::new_accounts_history` returns an error when
-    /// settings require `RocksDB` but no tx is provided (`None`).
+    /// Test that `EitherReader::new_accounts_history` panics when settings require
+    /// `RocksDB` but no tx is provided (`None`). This is an invariant violation that
+    /// indicates a bug - `with_rocksdb_tx` should always provide a tx when needed.
     #[test]
-    fn test_settings_mismatch_returns_error() {
+    #[should_panic(expected = "account_history_in_rocksdb requires rocksdb tx")]
+    fn test_settings_mismatch_panics() {
         let factory = create_test_provider_factory();
 
         factory.set_storage_settings_cache(
@@ -1835,13 +1837,6 @@ mod rocksdb_tests {
         );
 
         let provider = factory.database_provider_ro().unwrap();
-        let result = EitherReader::<(), ()>::new_accounts_history(&provider, None);
-
-        assert!(result.is_err(), "expected error when settings require RocksDB but tx is None");
-        let err_msg = result.unwrap_err().to_string();
-        assert!(
-            err_msg.contains("account_history_in_rocksdb requires rocksdb tx"),
-            "expected InvalidStorageSettings error, got: {err_msg}"
-        );
+        let _ = EitherReader::<(), ()>::new_accounts_history(&provider, None);
     }
 }
