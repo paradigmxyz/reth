@@ -40,7 +40,6 @@ pub(crate) mod rocksdb;
 
 pub use rocksdb::{
     RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksDBRawIter, RocksDBTableStats, RocksTx,
-    DEFAULT_BATCH_COMMIT_THRESHOLD_BYTES,
 };
 
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy

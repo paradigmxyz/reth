@@ -136,13 +136,10 @@ where
 
         info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
 
-        // Create RocksDB batch with auto-commit to prevent OOM
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb = provider.rocksdb_provider();
         #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_batch = rocksdb
-            .batch()
-            .with_auto_commit(reth_provider::providers::DEFAULT_BATCH_COMMIT_THRESHOLD_BYTES);
+        let rocksdb_batch = rocksdb.batch_with_auto_commit();
         #[cfg(not(all(unix, feature = "rocksdb")))]
         let rocksdb_batch = ();
 

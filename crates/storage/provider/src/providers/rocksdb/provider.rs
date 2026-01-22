@@ -633,19 +633,13 @@ impl RocksDBProvider {
         }
     }
 
-    /// Creates a new batch with auto-commit enabled.
-    ///
-    /// When the batch size exceeds the threshold, it automatically commits and resets.
-    /// This prevents OOM during large bulk writes (e.g., initial sync).
-    ///
-    /// # Panics
-    /// Panics if the provider is in read-only mode when attempting to commit.
-    pub fn batch_with_auto_commit(&self, threshold_bytes: usize) -> RocksDBBatch<'_> {
+    /// Creates a new batch with auto-commit enabled (1GB threshold).
+    pub fn batch_with_auto_commit(&self) -> RocksDBBatch<'_> {
         RocksDBBatch {
             provider: self,
             inner: WriteBatchWithTransaction::<true>::default(),
             buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
-            auto_commit_threshold: Some(threshold_bytes),
+            auto_commit_threshold: Some(1024 * 1024 * 1024),
         }
     }
 
@@ -1148,9 +1142,6 @@ impl RocksDBProvider {
     }
 }
 
-/// Default threshold for auto-committing batches to prevent OOM (1GB).
-pub const DEFAULT_BATCH_COMMIT_THRESHOLD_BYTES: usize = 1024 * 1024 * 1024;
-
 /// Handle for building a batch of operations atomically.
 ///
 /// Uses `WriteBatchWithTransaction` for atomic writes without full transaction overhead.
@@ -1276,14 +1267,6 @@ impl<'a> RocksDBBatch<'a> {
     /// Returns the size of the batch in bytes.
     pub fn size_in_bytes(&self) -> usize {
         self.inner.size_in_bytes()
-    }
-
-    /// Enables auto-commit mode with the given threshold.
-    ///
-    /// When enabled, the batch automatically commits and resets when size exceeds the threshold.
-    pub fn with_auto_commit(mut self, threshold_bytes: usize) -> Self {
-        self.auto_commit_threshold = Some(threshold_bytes);
-        self
     }
 
     /// Returns a reference to the underlying `RocksDB` provider.
