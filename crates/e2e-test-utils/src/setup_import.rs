@@ -134,7 +134,7 @@ pub async fn setup_engine_with_chain_import(
             reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path).build().unwrap(),
         )?;
 
-        // Initialize genesis
+        // Initialize genesis if needed
         reth_db_common::init::init_genesis(&provider_factory)?;
 
         // Import the chain data
