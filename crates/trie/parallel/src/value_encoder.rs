@@ -10,27 +10,39 @@ use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
-    proof_v2::{DeferredValueEncoder, LeafValueEncoder, Target},
+    hashed_cursor::HashedCursorFactory,
+    proof_v2::{self, DeferredValueEncoder, LeafValueEncoder, Target},
+    trie_cursor::TrieCursorFactory,
     ProofTrieNode,
 };
 use std::{rc::Rc, sync::Arc};
 
 /// Returned from [`AsyncAccountValueEncoder`], used to track an async storage root calculation.
-pub(crate) enum AsyncAccountDeferredValueEncoder {
+pub(crate) enum AsyncAccountDeferredValueEncoder<T, H> {
+    /// A storage proof job was dispatched to the worker pool.
     Dispatched {
         hashed_address: B256,
         account: Account,
         proof_result_rx: Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError>,
-        // None if results shouldn't be retained for this dispatched proof.
+        /// None if results shouldn't be retained for this dispatched proof.
         storage_proof_results: Option<Rc<RefCell<B256Map<Vec<ProofTrieNode>>>>>,
     },
-    FromCache {
+    /// The storage root was found in cache.
+    FromCache { account: Account, root: B256 },
+    /// Fall back to synchronous storage root computation when the worker pool is busy.
+    Sync {
+        trie_cursor_factory: Rc<T>,
+        hashed_cursor_factory: Rc<H>,
+        hashed_address: B256,
         account: Account,
-        root: B256,
     },
 }
 
-impl DeferredValueEncoder for AsyncAccountDeferredValueEncoder {
+impl<T, H> DeferredValueEncoder for AsyncAccountDeferredValueEncoder<T, H>
+where
+    T: TrieCursorFactory,
+    H: HashedCursorFactory,
+{
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
         let (account, root) = match self {
             Self::Dispatched {
@@ -59,6 +71,27 @@ impl DeferredValueEncoder for AsyncAccountDeferredValueEncoder {
                 (account, root)
             }
             Self::FromCache { account, root } => (account, root),
+            Self::Sync { trie_cursor_factory, hashed_cursor_factory, hashed_address, account } => {
+                let trie_cursor = trie_cursor_factory.storage_trie_cursor(hashed_address)?;
+                let hashed_cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
+
+                let mut storage_proof_calculator =
+                    proof_v2::ProofCalculator::new_storage(trie_cursor, hashed_cursor);
+
+                let storage_root = storage_proof_calculator
+                    .storage_proof(hashed_address, &mut [B256::ZERO.into()])
+                    .map(|nodes| {
+                        let root_node =
+                            nodes.first().expect("storage_proof always returns at least the root");
+                        root_node.node.encode(buf);
+
+                        let storage_root = alloy_primitives::keccak256(buf.as_slice());
+                        buf.clear();
+                        storage_root
+                    })?;
+
+                (account, storage_root)
+            }
         };
 
         let account = account.into_trie_account(root);
@@ -71,7 +104,10 @@ impl DeferredValueEncoder for AsyncAccountDeferredValueEncoder {
 /// and compute storage roots asynchronously. Can also accept a set of already dispatched account
 /// storage proofs, for cases where it's possible to determine some necessary accounts ahead of
 /// time.
-pub(crate) struct AsyncAccountValueEncoder {
+///
+/// When the worker pool is busy (channel is full), falls back to synchronous storage root
+/// computation using the provided cursor factories.
+pub(crate) struct AsyncAccountValueEncoder<T, H> {
     /// Storage proof jobs which were dispatched ahead of time.
     dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
     /// Storage roots which have already been computed. This can be used only if a storage proof
@@ -82,28 +118,39 @@ pub(crate) struct AsyncAccountValueEncoder {
     storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNode>>>>,
     /// Channel for dispatching on-demand storage root proofs during account iteration.
     /// This uses a separate worker pool to avoid blocking behind pre-dispatched target proofs.
+    /// The channel is bounded to the number of workers.
     account_storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+    /// Factory for creating trie cursors (for synchronous fallback).
+    trie_cursor_factory: Rc<T>,
+    /// Factory for creating hashed cursors (for synchronous fallback).
+    hashed_cursor_factory: Rc<H>,
 }
 
-impl AsyncAccountValueEncoder {
-    /// Initializes a [`Self`] using a `ProofWorkerHandle` which will be used to calculate storage
-    /// roots asynchronously.
+impl<T, H> AsyncAccountValueEncoder<T, H> {
+    /// Initializes a [`Self`] using cursor factories which will be used to calculate storage
+    /// roots synchronously when the worker pool is busy.
     ///
     /// # Parameters
     /// - `dispatched`: Pre-dispatched storage proof receivers for target accounts
     /// - `cached_storage_roots`: Shared cache of already-computed storage roots
-    /// - `account_storage_work_tx`: Channel for on-demand storage root proofs (uses separate worker
-    ///   pool to avoid blocking behind pre-dispatched target proofs)
+    /// - `account_storage_work_tx`: Bounded channel for on-demand storage root proofs (uses
+    ///   separate worker pool to avoid blocking behind pre-dispatched target proofs)
+    /// - `trie_cursor_factory`: Factory for creating trie cursors (for synchronous fallback)
+    /// - `hashed_cursor_factory`: Factory for creating hashed cursors (for synchronous fallback)
     pub(crate) fn new(
         dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
         account_storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+        trie_cursor_factory: Rc<T>,
+        hashed_cursor_factory: Rc<H>,
     ) -> Self {
         Self {
             dispatched,
             cached_storage_roots,
             storage_proof_results: Default::default(),
             account_storage_work_tx,
+            trie_cursor_factory,
+            hashed_cursor_factory,
         }
     }
 
@@ -142,9 +189,13 @@ impl AsyncAccountValueEncoder {
     }
 }
 
-impl LeafValueEncoder for AsyncAccountValueEncoder {
+impl<T, H> LeafValueEncoder for AsyncAccountValueEncoder<T, H>
+where
+    T: TrieCursorFactory,
+    H: HashedCursorFactory,
+{
     type Value = Account;
-    type DeferredEncoder = AsyncAccountDeferredValueEncoder;
+    type DeferredEncoder = AsyncAccountDeferredValueEncoder<T, H>;
 
     fn deferred_encoder(
         &mut self,
@@ -176,17 +227,38 @@ impl LeafValueEncoder for AsyncAccountValueEncoder {
         let input = StorageProofInput::new(hashed_address, vec![Target::new(B256::ZERO)]);
         let (tx, rx) = crossbeam_channel::bounded(1);
 
-        let proof_result_rx = self
+        // Try to dispatch to the worker pool. If the channel is full, fall back to synchronous
+        // computation to avoid blocking.
+        match self
             .account_storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: tx })
-            .map_err(|_| DatabaseError::Other("account storage workers unavailable".to_string()))
-            .map(|_| rx);
-
-        AsyncAccountDeferredValueEncoder::Dispatched {
-            hashed_address,
-            account,
-            proof_result_rx,
-            storage_proof_results: None,
+            .try_send(StorageWorkerJob::StorageProof { input, proof_result_sender: tx })
+        {
+            Ok(()) => AsyncAccountDeferredValueEncoder::Dispatched {
+                hashed_address,
+                account,
+                proof_result_rx: Ok(rx),
+                storage_proof_results: None,
+            },
+            Err(crossbeam_channel::TrySendError::Full(_)) => {
+                // Channel is full, fall back to synchronous computation
+                AsyncAccountDeferredValueEncoder::Sync {
+                    trie_cursor_factory: self.trie_cursor_factory.clone(),
+                    hashed_cursor_factory: self.hashed_cursor_factory.clone(),
+                    hashed_address,
+                    account,
+                }
+            }
+            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                // Workers are unavailable, return an error via the dispatched variant
+                AsyncAccountDeferredValueEncoder::Dispatched {
+                    hashed_address,
+                    account,
+                    proof_result_rx: Err(DatabaseError::Other(
+                        "account storage workers unavailable".to_string(),
+                    )),
+                    storage_proof_results: None,
+                }
+            }
         }
     }
 }

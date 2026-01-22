@@ -65,6 +65,7 @@ use reth_trie_common::{
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
+    rc::Rc,
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc::{channel, Receiver, Sender},
@@ -151,7 +152,8 @@ impl ProofWorkerHandle {
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
-        let (account_storage_work_tx, account_storage_work_rx) = unbounded::<StorageWorkerJob>();
+        let (account_storage_work_tx, account_storage_work_rx) =
+            crossbeam_channel::bounded::<StorageWorkerJob>(account_storage_worker_count);
 
         // Initialize availability counters at zero. Each worker will increment when it
         // successfully initializes, ensuring only healthy workers are counted.
@@ -651,15 +653,6 @@ where
         let storage_node_provider =
             ProofBlindedStorageProvider::new(&self.provider, &self.provider, account);
         storage_node_provider.trie_node(path)
-    }
-
-    /// Process a blinded account node request.
-    ///
-    /// Used by account workers to retrieve blinded account trie nodes for proof construction.
-    fn process_blinded_account_node(&self, path: &Nibbles) -> TrieNodeProviderResult {
-        let account_node_provider =
-            ProofBlindedAccountProvider::new(&self.provider, &self.provider);
-        account_node_provider.trie_node(path)
     }
 }
 impl TrieNodeProviderFactory for ProofWorkerHandle {
@@ -1279,9 +1272,9 @@ where
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        // Create provider from factory
-        let provider = self.task_ctx.factory.database_provider_ro()?;
-        let proof_tx = ProofTaskTx::new(provider, self.worker_id);
+        // Create provider from factory and wrap in Rc for sharing with AsyncAccountValueEncoder
+        let provider_rc: Rc<Factory::Provider> =
+            Rc::new(self.task_ctx.factory.database_provider_ro()?);
 
         trace!(
             target: "trie::proof_task",
@@ -1294,12 +1287,13 @@ where
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
         let mut v2_calculator = if self.v2_enabled {
-            let trie_cursor = proof_tx.provider.account_trie_cursor()?;
-            let hashed_cursor = proof_tx.provider.hashed_account_cursor()?;
-            Some(proof_v2::ProofCalculator::<_, _, AsyncAccountValueEncoder>::new(
-                trie_cursor,
-                hashed_cursor,
-            ))
+            let trie_cursor = provider_rc.account_trie_cursor()?;
+            let hashed_cursor = provider_rc.hashed_account_cursor()?;
+            Some(proof_v2::ProofCalculator::<
+                _,
+                _,
+                AsyncAccountValueEncoder<Factory::Provider, Factory::Provider>,
+            >::new(trie_cursor, hashed_cursor))
         } else {
             None
         };
@@ -1314,7 +1308,7 @@ where
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
                     self.process_account_multiproof(
-                        &proof_tx,
+                        &provider_rc,
                         v2_calculator.as_mut(),
                         *input,
                         &mut account_proofs_processed,
@@ -1325,7 +1319,7 @@ where
                 AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
                     Self::process_blinded_node(
                         self.worker_id,
-                        &proof_tx,
+                        &provider_rc,
                         path,
                         result_sender,
                         &mut account_nodes_processed,
@@ -1356,7 +1350,7 @@ where
 
     fn compute_legacy_account_multiproof<Provider>(
         &self,
-        proof_tx: &ProofTaskTx<Provider>,
+        provider: &Provider,
         targets: MultiProofTargets,
         mut prefix_sets: TriePrefixSets,
         collect_branch_node_masks: bool,
@@ -1408,7 +1402,7 @@ where
         };
 
         let result = build_account_multiproof_with_storage_roots(
-            &proof_tx.provider,
+            provider,
             ctx,
             &mut tracker,
             proof_cursor_metrics,
@@ -1423,8 +1417,9 @@ where
         v2_calculator: &mut proof_v2::ProofCalculator<
             <Provider as TrieCursorFactory>::AccountTrieCursor<'_>,
             <Provider as HashedCursorFactory>::AccountCursor<'_>,
-            AsyncAccountValueEncoder,
+            AsyncAccountValueEncoder<Provider, Provider>,
         >,
+        provider: &Rc<Provider>,
         targets: MultiProofTargetsV2,
     ) -> Result<ProofResult, ParallelStateRootError>
     where
@@ -1450,6 +1445,8 @@ where
             storage_proof_receivers,
             self.cached_storage_roots.clone(),
             self.account_storage_work_tx.clone(),
+            provider.clone(),
+            provider.clone(),
         );
 
         let proof = DecodedMultiProofV2 {
@@ -1463,12 +1460,12 @@ where
     /// Processes an account multiproof request.
     fn process_account_multiproof<Provider>(
         &self,
-        proof_tx: &ProofTaskTx<Provider>,
+        provider_rc: &Rc<Provider>,
         v2_calculator: Option<
             &mut proof_v2::ProofCalculator<
                 <Provider as TrieCursorFactory>::AccountTrieCursor<'_>,
                 <Provider as HashedCursorFactory>::AccountCursor<'_>,
-                AsyncAccountValueEncoder,
+                AsyncAccountValueEncoder<Provider, Provider>,
             >,
         >,
         input: AccountMultiproofInput,
@@ -1490,7 +1487,7 @@ where
             } => (
                 proof_result_sender,
                 self.compute_legacy_account_multiproof(
-                    proof_tx,
+                    provider_rc.as_ref(),
                     targets,
                     prefix_sets,
                     collect_branch_node_masks,
@@ -1502,6 +1499,7 @@ where
                 proof_result_sender,
                 self.compute_v2_account_multiproof::<Provider>(
                     v2_calculator.expect("v2 calculator provided"),
+                    provider_rc,
                     targets,
                 ),
             ),
@@ -1562,7 +1560,7 @@ where
     /// Processes a blinded account node lookup request.
     fn process_blinded_node<Provider>(
         worker_id: usize,
-        proof_tx: &ProofTaskTx<Provider>,
+        provider_rc: &Rc<Provider>,
         path: Nibbles,
         result_sender: Sender<TrieNodeProviderResult>,
         account_nodes_processed: &mut u64,
@@ -1583,7 +1581,9 @@ where
         );
 
         let start = Instant::now();
-        let result = proof_tx.process_blinded_account_node(&path);
+        let account_node_provider =
+            ProofBlindedAccountProvider::new(provider_rc.as_ref(), provider_rc.as_ref());
+        let result = account_node_provider.trie_node(&path);
         let elapsed = start.elapsed();
 
         *account_nodes_processed += 1;
