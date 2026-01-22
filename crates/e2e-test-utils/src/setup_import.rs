@@ -16,7 +16,6 @@ use reth_provider::{
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_stages_types::StageId;
 use reth_tasks::TaskManager;
-use reth_tracing::LogLevelHandle;
 use std::{path::Path, sync::Arc};
 use tempfile::TempDir;
 use tracing::{debug, info, span, Level};
@@ -228,7 +227,6 @@ pub async fn setup_engine_with_chain_import(
                     builder.task_executor().clone(),
                     builder.config().datadir(),
                     tree_config.clone(),
-                    LogLevelHandle::default(),
                 );
                 builder.launch_with(launcher)
             })

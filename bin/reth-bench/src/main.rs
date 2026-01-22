@@ -22,7 +22,6 @@ pub mod valid_payload;
 use bench::BenchmarkCommand;
 use clap::Parser;
 use reth_cli_runner::CliRunner;
-use reth_tracing::LogLevelHandle;
 
 fn main() -> eyre::Result<()> {
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
@@ -36,9 +35,7 @@ fn main() -> eyre::Result<()> {
 
     // Run until either exit or sigint or sigterm
     let runner = CliRunner::try_default_runtime()?;
-    runner.run_command_until_exit(LogLevelHandle::default(), |ctx| {
-        BenchmarkCommand::parse().execute(ctx)
-    })?;
+    runner.run_command_until_exit(|ctx| BenchmarkCommand::parse().execute(ctx))?;
 
     Ok(())
 }

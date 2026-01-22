@@ -24,7 +24,7 @@ use reth_node_core::{
 };
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
-use reth_tracing::{Layers, TracingInitResult};
+use reth_tracing::{FileWorkerGuard, Layers};
 use std::{ffi::OsString, fmt, future::Future, marker::PhantomData, sync::Arc};
 use tracing::{info, warn};
 
@@ -209,18 +209,13 @@ impl<
             self.logs.log_file_directory =
                 self.logs.log_file_directory.join(chain_spec.chain().to_string());
         }
-
-        // Enable reload support only when debug namespace is enabled
-        let enable_reload = self.command.debug_namespace_enabled();
-        let tracing_result = self.init_tracing(&runner, Layers::new(), enable_reload)?;
-        let _guard = tracing_result.file_guard;
-        let log_handle = tracing_result.log_handle;
+        let _guard = self.init_tracing(&runner, Layers::new())?;
 
         // Install the prometheus recorder to be sure to record all metrics
         install_prometheus_recorder();
 
         // Use the shared standalone function to avoid duplication
-        run_commands_with::<C, Ext, Rpc, N, SubCmd>(self, runner, log_handle, components, launcher)
+        run_commands_with::<C, Ext, Rpc, N, SubCmd>(self, runner, components, launcher)
     }
 
     /// Initializes tracing with the configured options.
@@ -230,20 +225,15 @@ impl<
     ///
     /// If an OTLP endpoint is specified, it will export traces and logs to the configured
     /// collector.
-    ///
-    /// If `enable_reload` is true, the returned [`TracingInitResult`] will contain a
-    /// [`LogLevelHandle`](reth_tracing::LogLevelHandle) that can be used to change log levels
-    /// at runtime via RPC methods like `debug_verbosity` and `debug_vmodule`.
     pub fn init_tracing(
         &mut self,
         runner: &CliRunner,
         mut layers: Layers,
-        enable_reload: bool,
-    ) -> eyre::Result<TracingInitResult> {
+    ) -> eyre::Result<Option<FileWorkerGuard>> {
         let otlp_status = runner.block_on(self.traces.init_otlp_tracing(&mut layers))?;
         let otlp_logs_status = runner.block_on(self.traces.init_otlp_logs(&mut layers))?;
 
-        let result = self.logs.init_tracing_with_layers(layers, enable_reload)?;
+        let guard = self.logs.init_tracing_with_layers(layers)?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
         match otlp_status {
@@ -266,7 +256,7 @@ impl<
             OtlpLogsStatus::Disabled => {}
         }
 
-        Ok(result)
+        Ok(guard)
     }
 }
 
@@ -343,16 +333,6 @@ impl crate::app::ExtendedCommand for NoSubCmd {
 impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, SubCmd: Subcommand + fmt::Debug>
     Commands<C, Ext, SubCmd>
 {
-    /// Returns `true` if the debug RPC namespace is enabled.
-    ///
-    /// This is only applicable to the `Node` command. For other commands, returns `false`.
-    pub fn debug_namespace_enabled(&self) -> bool {
-        match self {
-            Self::Node(cmd) => cmd.rpc.debug_namespace_enabled(),
-            _ => false,
-        }
-    }
-
     /// Returns the underlying chain being used for commands
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         match self {

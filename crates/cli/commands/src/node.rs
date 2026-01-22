@@ -16,7 +16,6 @@ use reth_node_core::{
     node_config::NodeConfig,
     version,
 };
-
 use std::{ffi::OsString, fmt, path::PathBuf, sync::Arc};
 
 /// Start the node
@@ -215,7 +214,7 @@ where
 
         let builder = NodeBuilder::new(node_config)
             .with_database(database)
-            .with_launch_context(ctx.task_executor, ctx.log_handle);
+            .with_launch_context(ctx.task_executor);
 
         launcher.entrypoint(builder, ext).await
     }

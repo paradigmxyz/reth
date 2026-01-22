@@ -15,7 +15,6 @@ use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TaskManager;
-use reth_tracing::LogLevelHandle;
 use std::sync::Arc;
 use tracing::{span, Instrument, Level};
 
@@ -152,7 +151,6 @@ where
                             builder.task_executor().clone(),
                             builder.config().datadir(),
                             tree_config.clone(),
-                            LogLevelHandle::default(),
                         );
                         builder.launch_with(launcher)
                     })

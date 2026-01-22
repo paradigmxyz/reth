@@ -3950,7 +3950,6 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "reth-ethereum",
- "reth-tracing",
  "tokio",
 ]
 
@@ -7930,7 +7929,6 @@ name = "reth-cli-runner"
 version = "1.10.2"
 dependencies = [
  "reth-tasks",
- "reth-tracing",
  "tokio",
  "tracing",
 ]
@@ -9337,7 +9335,6 @@ dependencies = [
  "reth-provider",
  "reth-tasks",
  "reth-tokio-util",
- "reth-tracing",
  "reth-transaction-pool",
 ]
 

@@ -980,14 +980,7 @@ where
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
         let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
-        let AddOnsContext {
-            node,
-            config,
-            beacon_engine_handle,
-            jwt_secret,
-            engine_events,
-            log_handle,
-        } = ctx;
+        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -1026,13 +1019,7 @@ where
             .with_executor(Box::new(node.task_executor().clone()))
             .with_evm_config(node.evm_config().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server(
-                module_config,
-                engine_api,
-                eth_api,
-                engine_events.clone(),
-                log_handle,
-            );
+            .build_with_auth_server(module_config, engine_api, eth_api, engine_events.clone());
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {

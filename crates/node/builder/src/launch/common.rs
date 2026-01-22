@@ -82,7 +82,6 @@ use reth_tasks::TaskExecutor;
 use reth_tracing::{
     throttle,
     tracing::{debug, error, info, warn},
-    LogLevelHandle,
 };
 use reth_transaction_pool::TransactionPool;
 use reth_trie_db::ChangesetCache;
@@ -120,18 +119,12 @@ pub struct LaunchContext {
     pub task_executor: TaskExecutor,
     /// The data directory for the node.
     pub data_dir: ChainPath<DataDirPath>,
-    /// Handle for runtime log level changes via debug RPC methods.
-    pub log_handle: LogLevelHandle,
 }
 
 impl LaunchContext {
     /// Create a new instance of the default node launcher.
-    pub const fn new(
-        task_executor: TaskExecutor,
-        data_dir: ChainPath<DataDirPath>,
-        log_handle: LogLevelHandle,
-    ) -> Self {
-        Self { task_executor, data_dir, log_handle }
+    pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
+        Self { task_executor, data_dir }
     }
 
     /// Create launch context with attachment.
@@ -286,11 +279,6 @@ impl<T> LaunchContextWith<T> {
     /// Returns the task executor.
     pub const fn task_executor(&self) -> &TaskExecutor {
         &self.inner.task_executor
-    }
-
-    /// Returns the log level handle for runtime log level changes.
-    pub fn log_handle(&self) -> LogLevelHandle {
-        self.inner.log_handle.clone()
     }
 
     /// Attaches another value to the launch context.

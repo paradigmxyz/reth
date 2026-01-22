@@ -755,35 +755,6 @@ impl RpcServerArgs {
         self
     }
 
-    /// Returns `true` if the debug RPC namespace is enabled on any interface.
-    ///
-    /// This checks HTTP, WS, and IPC (if IPC is not disabled) API configurations
-    /// for the presence of the `debug` module.
-    pub fn debug_namespace_enabled(&self) -> bool {
-        let debug_module = RethRpcModule::Debug;
-
-        // Check HTTP API
-        if self.http_api.as_ref().is_some_and(|api| api.contains(&debug_module)) {
-            return true;
-        }
-
-        // Check WS API
-        if self.ws_api.as_ref().is_some_and(|api| api.contains(&debug_module)) {
-            return true;
-        }
-
-        // Check IPC (default modules include debug if IPC is enabled)
-        // IPC is enabled by default unless ipcdisable is true
-        // When IPC is enabled without explicit API config, it uses all standard modules
-        if !self.ipcdisable {
-            // IPC with no explicit module config defaults to all standard modules
-            // which includes debug
-            return true;
-        }
-
-        false
-    }
-
     /// Apply a function to the args.
     pub fn apply<F>(self, f: F) -> Self
     where

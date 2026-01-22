@@ -36,7 +36,6 @@ use reth_storage_api::{
     StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner};
-use reth_tracing::LogLevelHandle;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::DatabaseCommit;
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
@@ -62,14 +61,12 @@ where
         blocking_task_guard: BlockingTaskGuard,
         executor: impl TaskSpawner,
         mut stream: impl Stream<Item = ConsensusEngineEvent<Eth::Primitives>> + Send + Unpin + 'static,
-        log_handle: LogLevelHandle,
     ) -> Self {
         let bad_block_store = BadBlockStore::default();
         let inner = Arc::new(DebugApiInner {
             eth_api,
             blocking_task_guard,
             bad_block_store: bad_block_store.clone(),
-            log_handle,
         });
 
         // Spawn a task caching bad blocks
@@ -1077,11 +1074,11 @@ where
     }
 
     async fn debug_verbosity(&self, level: usize) -> RpcResult<()> {
-        self.inner.log_handle.set_verbosity(level).map_err(internal_rpc_err)
+        reth_tracing::set_log_verbosity(level).map_err(internal_rpc_err)
     }
 
     async fn debug_vmodule(&self, pattern: String) -> RpcResult<()> {
-        self.inner.log_handle.set_vmodule(&pattern).map_err(internal_rpc_err)
+        reth_tracing::set_log_vmodule(&pattern).map_err(internal_rpc_err)
     }
 
     async fn debug_write_block_profile(&self, _file: String) -> RpcResult<()> {
@@ -1116,8 +1113,6 @@ struct DebugApiInner<Eth: RpcNodeCore> {
     blocking_task_guard: BlockingTaskGuard,
     /// Cache for bad blocks.
     bad_block_store: BadBlockStore<BlockTy<Eth::Primitives>>,
-    /// Handle for runtime log level changes.
-    log_handle: LogLevelHandle,
 }
 
 /// A bounded, deduplicating store of recently observed bad blocks.

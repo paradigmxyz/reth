@@ -1,6 +1,6 @@
 use tracing_subscriber::EnvFilter;
 
-use crate::{Layers, LogLevelHandle, Tracer, TracingInitResult};
+use crate::{Layers, Tracer, TracingInitResult};
 
 ///  Initializes a tracing subscriber for tests.
 ///
@@ -23,6 +23,6 @@ impl Tracer for TestTracer {
             .with_env_filter(EnvFilter::from_default_env())
             .with_writer(std::io::stderr)
             .try_init();
-        Ok(TracingInitResult { file_guard: None, log_handle: LogLevelHandle::default() })
+        Ok(TracingInitResult { file_guard: None })
     }
 }

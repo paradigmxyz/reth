@@ -14,7 +14,6 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
-use reth_tracing::LogLevelHandle;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{fmt::Debug, future::Future, marker::PhantomData};
 
@@ -116,8 +115,6 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     pub engine_events: EventSender<ConsensusEngineEvent<<N::Types as NodeTypes>::Primitives>>,
     /// JWT secret for the node.
     pub jwt_secret: JwtSecret,
-    /// Handle for runtime log level changes via debug RPC methods.
-    pub log_handle: LogLevelHandle,
 }
 
 /// Customizable node add-on types.

@@ -36,7 +36,6 @@ use reth_provider::{
     ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
-use reth_tracing::LogLevelHandle;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
 use secp256k1::SecretKey;
 use std::sync::Arc;
@@ -235,14 +234,8 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     /// Preconfigure the builder with the context to launch the node.
     ///
     /// This provides the task executor and the data directory for the node.
-    ///
-    /// Use [`LogLevelHandle::default()`] if runtime log level changes are not needed.
-    pub const fn with_launch_context(
-        self,
-        task_executor: TaskExecutor,
-        log_handle: LogLevelHandle,
-    ) -> WithLaunchContext<Self> {
-        WithLaunchContext { builder: self, task_executor, log_handle }
+    pub const fn with_launch_context(self, task_executor: TaskExecutor) -> WithLaunchContext<Self> {
+        WithLaunchContext { builder: self, task_executor }
     }
 
     /// Creates an _ephemeral_ preconfigured node for testing purposes.
@@ -277,11 +270,7 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
 
         let db = reth_db::test_utils::create_test_rw_db_with_path(data_dir.db());
 
-        WithLaunchContext {
-            builder: self.with_database(db),
-            task_executor,
-            log_handle: LogLevelHandle::default(),
-        }
+        WithLaunchContext { builder: self.with_database(db), task_executor }
     }
 }
 
@@ -330,7 +319,6 @@ where
 pub struct WithLaunchContext<Builder> {
     builder: Builder,
     task_executor: TaskExecutor,
-    log_handle: LogLevelHandle,
 }
 
 impl<Builder> WithLaunchContext<Builder> {
@@ -362,11 +350,7 @@ where
     where
         T: NodeTypesForProvider<ChainSpec = ChainSpec>,
     {
-        WithLaunchContext {
-            builder: self.builder.with_types(),
-            task_executor: self.task_executor,
-            log_handle: self.log_handle,
-        }
+        WithLaunchContext { builder: self.builder.with_types(), task_executor: self.task_executor }
     }
 
     /// Configures the types of the node and the provider type that will be used by the node.
@@ -380,7 +364,6 @@ where
         WithLaunchContext {
             builder: self.builder.with_types_and_provider(),
             task_executor: self.task_executor,
-            log_handle: self.log_handle,
         }
     }
 
@@ -440,7 +423,6 @@ impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
         WithLaunchContext {
             builder: self.builder.with_components(components_builder),
             task_executor: self.task_executor,
-            log_handle: self.log_handle,
         }
     }
 }
@@ -462,7 +444,6 @@ where
         WithLaunchContext {
             builder: self.builder.with_add_ons(add_ons),
             task_executor: self.task_executor,
-            log_handle: self.log_handle,
         }
     }
 }
@@ -541,7 +522,6 @@ where
         Self {
             builder: self.builder.on_component_initialized(hook),
             task_executor: self.task_executor,
-            log_handle: self.log_handle,
         }
     }
 
@@ -552,11 +532,7 @@ where
             + Send
             + 'static,
     {
-        Self {
-            builder: self.builder.on_node_started(hook),
-            task_executor: self.task_executor,
-            log_handle: self.log_handle,
-        }
+        Self { builder: self.builder.on_node_started(hook), task_executor: self.task_executor }
     }
 
     /// Modifies the addons with the given closure.
@@ -585,11 +561,7 @@ where
     where
         F: FnOnce(AO) -> AO,
     {
-        Self {
-            builder: self.builder.map_add_ons(f),
-            task_executor: self.task_executor,
-            log_handle: self.log_handle,
-        }
+        Self { builder: self.builder.map_add_ons(f), task_executor: self.task_executor }
     }
 
     /// Sets the hook that is run once the rpc server is started.
@@ -602,11 +574,7 @@ where
             + Send
             + 'static,
     {
-        Self {
-            builder: self.builder.on_rpc_started(hook),
-            task_executor: self.task_executor,
-            log_handle: self.log_handle,
-        }
+        Self { builder: self.builder.on_rpc_started(hook), task_executor: self.task_executor }
     }
 
     /// Sets the hook that is run to configure the rpc modules.
@@ -649,11 +617,7 @@ where
             + Send
             + 'static,
     {
-        Self {
-            builder: self.builder.extend_rpc_modules(hook),
-            task_executor: self.task_executor,
-            log_handle: self.log_handle,
-        }
+        Self { builder: self.builder.extend_rpc_modules(hook), task_executor: self.task_executor }
     }
 
     /// Installs an `ExEx` (Execution Extension) in the node.
@@ -670,7 +634,6 @@ where
         Self {
             builder: self.builder.install_exex(exex_id, exex),
             task_executor: self.task_executor,
-            log_handle: self.log_handle,
         }
     }
 
@@ -737,7 +700,7 @@ where
         T::Types: DebugNode<NodeAdapter<T, CB::Components>>,
         DebugNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
     {
-        let Self { builder, task_executor, log_handle } = self;
+        let Self { builder, task_executor } = self;
 
         let engine_tree_config = builder.config.engine.tree_config();
 
@@ -745,7 +708,6 @@ where
             task_executor,
             builder.config.datadir(),
             engine_tree_config,
-            log_handle,
         ));
         builder.launch_with(launcher)
     }
@@ -758,7 +720,6 @@ where
             self.task_executor.clone(),
             self.builder.config.datadir(),
             engine_tree_config,
-            self.log_handle.clone(),
         )
     }
 }

@@ -66,106 +66,96 @@ mod layers;
 mod test_tracer;
 mod throttle;
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
     layer::SubscriberExt, reload, util::SubscriberInitExt, EnvFilter, Registry,
 };
 
+/// Global log level handle for runtime filter changes.
+///
+/// This is set once during CLI initialization and can be accessed from anywhere
+/// (e.g., RPC endpoints) without needing to propagate the handle through the codebase.
+static GLOBAL_LOG_HANDLE: OnceLock<Arc<LogFilterReloadHandle>> = OnceLock::new();
+
 /// Type alias for the reload handle used to dynamically update log filters.
 pub type LogFilterReloadHandle = reload::Handle<EnvFilter, Registry>;
 
-/// Handle for dynamically reloading log filters at runtime.
+/// Installs the global log level handle.
 ///
-/// This handle is thread-safe and can be cloned to share across components.
-/// It allows changing log verbosity via RPC methods like `debug_verbosity` and `debug_vmodule`.
-#[derive(Clone, Default)]
-pub struct LogLevelHandle {
-    inner: Option<Arc<LogFilterReloadHandle>>,
+/// This should be called once during CLI initialization when reload support is enabled.
+/// Returns `true` if the handle was installed, `false` if one was already installed.
+pub fn install_log_handle(handle: LogFilterReloadHandle) -> bool {
+    GLOBAL_LOG_HANDLE.set(Arc::new(handle)).is_ok()
 }
 
-impl LogLevelHandle {
-    /// Creates a new handle wrapping the reload handle.
-    pub fn new(handle: LogFilterReloadHandle) -> Self {
-        Self { inner: Some(Arc::new(handle)) }
-    }
-
-    /// Returns true if this handle can actually reload filters.
-    pub const fn is_available(&self) -> bool {
-        self.inner.is_some()
-    }
-
-    /// Sets the global log verbosity level.
-    ///
-    /// - 0: OFF (silent)
-    /// - 1: ERROR
-    /// - 2: WARN
-    /// - 3: INFO
-    /// - 4: DEBUG
-    /// - 5+: TRACE
-    pub fn set_verbosity(&self, level: usize) -> Result<(), String> {
-        let Some(handle) = &self.inner else {
-            return Err("Log filter reload not available".to_string());
-        };
-
-        let level_filter = match level {
-            0 => LevelFilter::OFF,
-            1 => LevelFilter::ERROR,
-            2 => LevelFilter::WARN,
-            3 => LevelFilter::INFO,
-            4 => LevelFilter::DEBUG,
-            _ => LevelFilter::TRACE,
-        };
-
-        // Use parse_lossy to avoid reading from RUST_LOG env var
-        let filter =
-            EnvFilter::builder().with_default_directive(level_filter.into()).parse_lossy("");
-
-        handle.reload(filter).map_err(|e| e.to_string())
-    }
-
-    /// Sets module-specific log levels using a pattern string.
-    ///
-    /// Pattern format follows the `RUST_LOG` environment variable syntax:
-    /// - `module1=level1,module2=level2`
-    /// - Example: `reth::sync=debug,reth::net=trace`
-    /// - Example: `info,reth::stages=debug`
-    pub fn set_vmodule(&self, pattern: &str) -> Result<(), String> {
-        let Some(handle) = &self.inner else {
-            return Err("Log filter reload not available".to_string());
-        };
-
-        if pattern.trim().is_empty() {
-            return Err("Filter pattern cannot be empty".to_string());
-        }
-
-        let filter =
-            EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))?;
-
-        handle.reload(filter).map_err(|e| e.to_string())
-    }
+/// Returns `true` if a global log handle is available.
+pub fn log_handle_available() -> bool {
+    GLOBAL_LOG_HANDLE.get().is_some()
 }
 
-impl std::fmt::Debug for LogLevelHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LogLevelHandle").field("available", &self.is_available()).finish()
+/// Sets the global log verbosity level.
+///
+/// - 0: OFF (silent)
+/// - 1: ERROR
+/// - 2: WARN
+/// - 3: INFO
+/// - 4: DEBUG
+/// - 5+: TRACE
+///
+/// Returns an error if no log handle is installed or if the reload fails.
+pub fn set_log_verbosity(level: usize) -> Result<(), String> {
+    let Some(handle) = GLOBAL_LOG_HANDLE.get() else {
+        return Err("Log filter reload not available".to_string());
+    };
+
+    let level_filter = match level {
+        0 => LevelFilter::OFF,
+        1 => LevelFilter::ERROR,
+        2 => LevelFilter::WARN,
+        3 => LevelFilter::INFO,
+        4 => LevelFilter::DEBUG,
+        _ => LevelFilter::TRACE,
+    };
+
+    // Use parse_lossy to avoid reading from RUST_LOG env var
+    let filter = EnvFilter::builder().with_default_directive(level_filter.into()).parse_lossy("");
+
+    handle.reload(filter).map_err(|e| e.to_string())
+}
+
+/// Sets module-specific log levels using a pattern string.
+///
+/// Pattern format follows the `RUST_LOG` environment variable syntax:
+/// - `module1=level1,module2=level2`
+/// - Example: `reth::sync=debug,reth::net=trace`
+/// - Example: `info,reth::stages=debug`
+///
+/// Returns an error if no log handle is installed, the pattern is empty, or parsing fails.
+pub fn set_log_vmodule(pattern: &str) -> Result<(), String> {
+    let Some(handle) = GLOBAL_LOG_HANDLE.get() else {
+        return Err("Log filter reload not available".to_string());
+    };
+
+    if pattern.trim().is_empty() {
+        return Err("Filter pattern cannot be empty".to_string());
     }
+
+    let filter = EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))?;
+
+    handle.reload(filter).map_err(|e| e.to_string())
 }
 
 /// Result of initializing tracing.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TracingInitResult {
     /// File worker guard (keeps file logging alive).
     pub file_guard: Option<WorkerGuard>,
-    /// Handle for runtime log level changes (only available if reload was enabled).
-    pub log_handle: LogLevelHandle,
 }
 
 impl TracingInitResult {
-    /// Returns just the file guard, discarding the log handle.
-    ///
-    /// This is useful for backward compatibility with code that only cares about the guard.
+    /// Returns just the file guard.
     pub fn into_guard(self) -> Option<WorkerGuard> {
         self.file_guard
     }
@@ -359,24 +349,25 @@ impl Tracer for RethTracer {
     ///
     ///  # Arguments
     ///  * `layers` - Pre-configured `Layers` instance to use for initialization
-    ///  * `enable_reload` - If true, enables runtime log level changes via `LogLevelHandle`
+    ///  * `enable_reload` - If true, installs a global log handle for runtime changes
     ///
     ///  # Returns
-    ///  A [`TracingInitResult`] containing the file guard and log level handle.
+    ///  A [`TracingInitResult`] containing the file guard.
     fn init_with_layers_and_reload(
         self,
         mut layers: Layers,
         enable_reload: bool,
     ) -> eyre::Result<TracingInitResult> {
         // Configure stdout layer - reloadable if requested
-        let log_handle = if enable_reload {
+        if enable_reload {
             let handle = layers.stdout_reloadable(
                 self.stdout.format,
                 self.stdout.default_directive.parse()?,
                 &self.stdout.filters,
                 self.stdout.color,
             )?;
-            LogLevelHandle::new(handle)
+            // Install the global handle for RPC access
+            install_log_handle(handle);
         } else {
             layers.stdout(
                 self.stdout.format,
@@ -384,8 +375,7 @@ impl Tracer for RethTracer {
                 &self.stdout.filters,
                 self.stdout.color,
             )?;
-            LogLevelHandle::default()
-        };
+        }
 
         if let Some(config) = self.journald {
             layers.journald(&config)?;
@@ -410,7 +400,7 @@ impl Tracer for RethTracer {
         // so it's safe to ignore it
         let _ = tracing_subscriber::registry().with(layers.into_inner()).try_init();
 
-        Ok(TracingInitResult { file_guard, log_handle })
+        Ok(TracingInitResult { file_guard })
     }
 }
 

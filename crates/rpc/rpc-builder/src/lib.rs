@@ -59,7 +59,6 @@ use reth_storage_api::{
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_tokio_util::EventSender;
-use reth_tracing::LogLevelHandle;
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -332,7 +331,6 @@ where
         engine: impl IntoEngineApiRpcModule,
         eth: EthApi,
         engine_events: EventSender<ConsensusEngineEvent<N>>,
-        log_handle: LogLevelHandle,
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
@@ -343,7 +341,7 @@ where
     {
         let config = module_config.config.clone().unwrap_or_default();
 
-        let mut registry = self.into_registry(config, eth, engine_events, log_handle);
+        let mut registry = self.into_registry(config, eth, engine_events);
         let modules = registry.create_transport_rpc_modules(module_config);
         let auth_module = registry.create_auth_module(engine);
 
@@ -359,7 +357,6 @@ where
         config: RpcModuleConfig,
         eth: EthApi,
         engine_events: EventSender<ConsensusEngineEvent<N>>,
-        log_handle: LogLevelHandle,
     ) -> RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
@@ -375,7 +372,6 @@ where
             evm_config,
             eth,
             engine_events,
-            log_handle,
         )
     }
 
@@ -386,7 +382,6 @@ where
         module_config: TransportRpcModuleConfig,
         eth: EthApi,
         engine_events: EventSender<ConsensusEngineEvent<N>>,
-        log_handle: LogLevelHandle,
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
@@ -396,8 +391,7 @@ where
         if !module_config.is_empty() {
             let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
 
-            let mut registry =
-                self.into_registry(config.unwrap_or_default(), eth, engine_events, log_handle);
+            let mut registry = self.into_registry(config.unwrap_or_default(), eth, engine_events);
 
             modules.config = module_config;
             modules.http = registry.maybe_module(http.as_ref());
@@ -503,8 +497,6 @@ pub struct RpcRegistryInner<Provider, Pool, Network, EthApi: EthApiTypes, EvmCon
     /// Notification channel for engine API events
     engine_events:
         EventSender<ConsensusEngineEvent<<EthApi::RpcConvert as RpcConvert>::Primitives>>,
-    /// Handle for runtime log level changes via debug RPC methods
-    log_handle: LogLevelHandle,
 }
 
 // === impl RpcRegistryInner ===
@@ -538,7 +530,6 @@ where
         engine_events: EventSender<
             ConsensusEngineEvent<<EthApi::Provider as NodePrimitivesProvider>::Primitives>,
         >,
-        log_handle: LogLevelHandle,
     ) -> Self
     where
         EvmConfig: ConfigureEvm<Primitives = N>,
@@ -559,7 +550,6 @@ where
             eth_config: config.eth,
             evm_config,
             engine_events,
-            log_handle,
         }
     }
 }
@@ -827,7 +817,6 @@ where
             self.blocking_pool_guard.clone(),
             self.tasks(),
             self.engine_events.new_listener(),
-            self.log_handle.clone(),
         )
     }
 
@@ -952,7 +941,6 @@ where
                             self.blocking_pool_guard.clone(),
                             &*self.executor,
                             self.engine_events.new_listener(),
-                            self.log_handle.clone(),
                         )
                         .into_rpc()
                         .into(),
@@ -1046,7 +1034,6 @@ where
             modules: self.modules.clone(),
             eth_config: self.eth_config.clone(),
             engine_events: self.engine_events.clone(),
-            log_handle: self.log_handle.clone(),
         }
     }
 }
