@@ -103,7 +103,6 @@ impl LogLevelHandle {
 
     /// Sets the global log verbosity level.
     ///
-    /// Level mapping (geth-compatible):
     /// - 0: OFF (silent)
     /// - 1: ERROR
     /// - 2: WARN
