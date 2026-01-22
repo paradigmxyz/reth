@@ -146,6 +146,8 @@ impl ExecutorMetrics {
         storage_slots_updated: usize,
         code_updated: usize,
         code_bytes_written: usize,
+        eip7702_delegations_set: usize,
+        eip7702_delegations_cleared: usize,
         account_cache_hits: u64,
         account_cache_misses: u64,
         storage_cache_hits: u64,
@@ -187,6 +189,8 @@ impl ExecutorMetrics {
                 state_writes.storage_slots = storage_slots_updated,
                 state_writes.code = code_updated,
                 state_writes.code_bytes = code_bytes_written,
+                state_writes.eip7702_delegations_set = eip7702_delegations_set,
+                state_writes.eip7702_delegations_cleared = eip7702_delegations_cleared,
                 cache.account.hits = account_cache_hits,
                 cache.account.misses = account_cache_misses,
                 cache.account.hit_rate = format!("{:.2}", account_hit_rate),
@@ -320,6 +324,8 @@ mod tests {
             200,   // storage_slots_updated
             0,     // code_updated
             0,     // code_bytes_written
+            3,     // eip7702_delegations_set
+            1,     // eip7702_delegations_cleared
             4,     // account_cache_hits
             6,     // account_cache_misses
             0,     // storage_cache_hits
