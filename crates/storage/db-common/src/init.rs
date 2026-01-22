@@ -162,16 +162,14 @@ where
                     return Err(InitStorageError::UninitializedDatabase)
                 }
 
-                if factory.best_block_number()? > genesis_block_number {
-                    let stored = factory.storage_settings()?.unwrap_or(StorageSettings::legacy());
-                    if stored != genesis_storage_settings {
-                        warn!(
-                            target: "reth::storage",
-                            ?stored,
-                            requested = ?genesis_storage_settings,
-                            "Storage settings mismatch detected"
-                        );
-                    }
+                let stored = factory.storage_settings()?.unwrap_or(StorageSettings::legacy());
+                if stored != genesis_storage_settings {
+                    warn!(
+                        target: "reth::storage",
+                        ?stored,
+                        requested = ?genesis_storage_settings,
+                        "Storage settings mismatch detected"
+                    );
                 }
 
                 debug!("Genesis already written, skipping.");
@@ -914,13 +912,9 @@ mod tests {
     }
 
     #[test]
-    fn warn_storage_settings_mismatch_after_sync() {
+    fn warn_storage_settings_mismatch() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
         init_genesis_with_settings(&factory, StorageSettings::legacy()).unwrap();
-
-        let provider_rw = factory.database_provider_rw().unwrap();
-        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(100)).unwrap();
-        provider_rw.commit().unwrap();
 
         // Request different settings - should warn but succeed
         let result = init_genesis_with_settings(
@@ -933,27 +927,10 @@ mod tests {
     }
 
     #[test]
-    fn allow_storage_settings_change_at_genesis() {
-        let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        init_genesis_with_settings(&factory, StorageSettings::legacy()).unwrap();
-
-        let result = init_genesis_with_settings(
-            &factory,
-            StorageSettings::legacy().with_receipts_in_static_files(true),
-        );
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn allow_same_storage_settings_after_sync() {
+    fn allow_same_storage_settings() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
         let settings = StorageSettings::legacy().with_receipts_in_static_files(true);
         init_genesis_with_settings(&factory, settings).unwrap();
-
-        let provider_rw = factory.database_provider_rw().unwrap();
-        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(100)).unwrap();
-        provider_rw.commit().unwrap();
 
         let result = init_genesis_with_settings(&factory, settings);
 
