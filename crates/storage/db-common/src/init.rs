@@ -15,9 +15,10 @@ use reth_primitives_traits::{
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
     BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
-    HashingWriter, HeaderProvider, HistoryWriter, MetadataWriter, OriginalValuesKnown,
-    ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
-    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
+    HashingWriter, HeaderProvider, HistoryWriter, MetadataProvider, MetadataWriter,
+    OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter,
+    StateWriteConfig, StateWriter, StaticFileProviderFactory, StorageSettings,
+    StorageSettingsCache, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -66,6 +67,14 @@ pub enum InitStorageError {
         /// Actual genesis hash.
         storage_hash: B256,
     },
+    /// Storage settings changed after chain has progressed past genesis.
+    #[error("storage settings mismatch: stored {stored:?}, current {current:?}. Delete datadir to resync.")]
+    StorageSettingsMismatch {
+        /// Persisted storage settings.
+        stored: StorageSettings,
+        /// Current storage settings from CLI/config.
+        current: StorageSettings,
+    },
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
@@ -90,7 +99,8 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
         + ChainSpecProvider
         + StageCheckpointReader
-        + BlockHashReader
+        + BlockNumReader
+        + MetadataProvider
         + StorageSettingsCache,
     PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
         + StageCheckpointWriter
@@ -124,7 +134,8 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
         + ChainSpecProvider
         + StageCheckpointReader
-        + BlockHashReader
+        + BlockNumReader
+        + MetadataProvider
         + StorageSettingsCache,
     PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
         + StageCheckpointWriter
@@ -157,6 +168,16 @@ where
                 if factory.get_stage_checkpoint(StageId::Headers)?.is_none() {
                     error!(target: "reth::storage", "Genesis header found on static files, but database is uninitialized.");
                     return Err(InitStorageError::UninitializedDatabase)
+                }
+
+                if factory.best_block_number()? > genesis_block_number {
+                    let stored = factory.storage_settings()?.unwrap_or(StorageSettings::legacy());
+                    if stored != genesis_storage_settings {
+                        return Err(InitStorageError::StorageSettingsMismatch {
+                            stored,
+                            current: genesis_storage_settings,
+                        })
+                    }
                 }
 
                 debug!("Genesis already written, skipping.");
@@ -896,5 +917,50 @@ mod tests {
                 IntegerList::new([0]).unwrap()
             )],
         );
+    }
+
+    #[test]
+    fn fail_storage_settings_mismatch_after_sync() {
+        let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
+        init_genesis_with_settings(&factory, StorageSettings::legacy()).unwrap();
+
+        let provider_rw = factory.database_provider_rw().unwrap();
+        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(100)).unwrap();
+        provider_rw.commit().unwrap();
+
+        let result = init_genesis_with_settings(
+            &factory,
+            StorageSettings::legacy().with_receipts_in_static_files(true),
+        );
+
+        assert!(matches!(result.unwrap_err(), InitStorageError::StorageSettingsMismatch { .. }));
+    }
+
+    #[test]
+    fn allow_storage_settings_change_at_genesis() {
+        let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
+        init_genesis_with_settings(&factory, StorageSettings::legacy()).unwrap();
+
+        let result = init_genesis_with_settings(
+            &factory,
+            StorageSettings::legacy().with_receipts_in_static_files(true),
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn allow_same_storage_settings_after_sync() {
+        let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
+        let settings = StorageSettings::legacy().with_receipts_in_static_files(true);
+        init_genesis_with_settings(&factory, settings).unwrap();
+
+        let provider_rw = factory.database_provider_rw().unwrap();
+        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(100)).unwrap();
+        provider_rw.commit().unwrap();
+
+        let result = init_genesis_with_settings(&factory, settings);
+
+        assert!(result.is_ok());
     }
 }
