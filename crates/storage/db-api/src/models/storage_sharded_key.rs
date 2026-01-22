@@ -1,6 +1,6 @@
 //! Storage sharded key
 use crate::{
-    table::{Decode, Encode},
+    table::{Decode, Encode, EncodeInto},
     DatabaseError,
 };
 use alloy_primitives::{Address, BlockNumber, B256};
@@ -88,6 +88,20 @@ impl Decode for StorageShardedKey {
         let storage_key = B256::decode(&value[20..52])?;
 
         Ok(Self { address, sharded_key: ShardedKey::new(storage_key, highest_block_number) })
+    }
+}
+
+impl EncodeInto for StorageShardedKey {
+    #[inline]
+    fn encoded_len(&self) -> usize {
+        60
+    }
+
+    #[inline]
+    fn encode_into(&self, buf: &mut [u8]) {
+        buf[..20].copy_from_slice(self.address.as_slice());
+        buf[20..52].copy_from_slice(self.sharded_key.key.as_slice());
+        buf[52..60].copy_from_slice(&self.sharded_key.highest_block_number.to_be_bytes());
     }
 }
 

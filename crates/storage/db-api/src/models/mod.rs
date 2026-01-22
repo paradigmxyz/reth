@@ -1,7 +1,7 @@
 //! Implements data structures specific to the database
 
 use crate::{
-    table::{Compress, Decode, Decompress, Encode},
+    table::{Compress, Decode, Decompress, Encode, EncodeInto},
     DatabaseError,
 };
 use alloy_consensus::Header;
@@ -32,7 +32,7 @@ pub use reth_db_models::{
 };
 pub use sharded_key::ShardedKey;
 
-/// Macro that implements [`Encode`] and [`Decode`] for uint types.
+/// Macro that implements [`Encode`], [`Decode`], and [`EncodeInto`] for uint types.
 macro_rules! impl_uints {
     ($($name:tt),+) => {
         $(
@@ -51,6 +51,18 @@ macro_rules! impl_uints {
                             value.try_into().map_err(|_| $crate::DatabaseError::Decode)?
                         )
                     )
+                }
+            }
+
+            impl EncodeInto for $name {
+                #[inline]
+                fn encoded_len(&self) -> usize {
+                    std::mem::size_of::<$name>()
+                }
+
+                #[inline]
+                fn encode_into(&self, buf: &mut [u8]) {
+                    buf[..std::mem::size_of::<$name>()].copy_from_slice(&self.to_be_bytes());
                 }
             }
         )+
@@ -91,6 +103,18 @@ impl Decode for Address {
     }
 }
 
+impl EncodeInto for Address {
+    #[inline]
+    fn encoded_len(&self) -> usize {
+        20
+    }
+
+    #[inline]
+    fn encode_into(&self, buf: &mut [u8]) {
+        buf[..20].copy_from_slice(self.as_ref());
+    }
+}
+
 impl Encode for B256 {
     type Encoded = [u8; 32];
 
@@ -102,6 +126,18 @@ impl Encode for B256 {
 impl Decode for B256 {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
         Ok(Self::new(value.try_into().map_err(|_| DatabaseError::Decode)?))
+    }
+}
+
+impl EncodeInto for B256 {
+    #[inline]
+    fn encoded_len(&self) -> usize {
+        32
+    }
+
+    #[inline]
+    fn encode_into(&self, buf: &mut [u8]) {
+        buf[..32].copy_from_slice(self.as_ref());
     }
 }
 

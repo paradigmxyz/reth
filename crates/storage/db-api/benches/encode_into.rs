@@ -14,7 +14,15 @@ fn bench_encode_methods(c: &mut Criterion) {
         })
         .collect();
 
-    group.bench_function("Address::encode (returns array)", |b| {
+    let hashes: Vec<B256> = (0..10000u64)
+        .map(|i| {
+            let mut bytes = [0u8; 32];
+            bytes[24..32].copy_from_slice(&i.to_be_bytes());
+            B256::from(bytes)
+        })
+        .collect();
+
+    group.bench_function("Address::encode (returns array, consumes self)", |b| {
         b.iter(|| {
             for addr in &addresses {
                 let encoded = black_box((*addr).encode());
@@ -23,11 +31,30 @@ fn bench_encode_methods(c: &mut Criterion) {
         })
     });
 
-    group.bench_function("Address::encode_into (zero-copy)", |b| {
+    group.bench_function("Address::encode_into (zero-copy, borrows self)", |b| {
         let mut buf = [0u8; 20];
         b.iter(|| {
             for addr in &addresses {
                 addr.encode_into(&mut buf);
+                black_box(&buf);
+            }
+        })
+    });
+
+    group.bench_function("B256::encode (returns array, consumes self)", |b| {
+        b.iter(|| {
+            for hash in &hashes {
+                let encoded = black_box((*hash).encode());
+                black_box(encoded);
+            }
+        })
+    });
+
+    group.bench_function("B256::encode_into (zero-copy, borrows self)", |b| {
+        let mut buf = [0u8; 32];
+        b.iter(|| {
+            for hash in &hashes {
+                hash.encode_into(&mut buf);
                 black_box(&buf);
             }
         })

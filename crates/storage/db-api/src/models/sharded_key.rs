@@ -1,6 +1,6 @@
 //! Sharded key
 use crate::{
-    table::{Decode, Encode},
+    table::{Decode, Encode, EncodeInto},
     DatabaseError,
 };
 use alloy_primitives::{Address, BlockNumber};
@@ -74,6 +74,19 @@ impl Decode for ShardedKey<Address> {
         let highest_block_number =
             u64::from_be_bytes(value[20..].try_into().map_err(|_| DatabaseError::Decode)?);
         Ok(Self::new(key, highest_block_number))
+    }
+}
+
+impl EncodeInto for ShardedKey<Address> {
+    #[inline]
+    fn encoded_len(&self) -> usize {
+        28
+    }
+
+    #[inline]
+    fn encode_into(&self, buf: &mut [u8]) {
+        buf[..20].copy_from_slice(self.key.as_slice());
+        buf[20..28].copy_from_slice(&self.highest_block_number.to_be_bytes());
     }
 }
 
