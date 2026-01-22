@@ -1091,7 +1091,7 @@ impl RocksDBProvider {
     fn write_account_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
-        _ctx: &RocksDBWriteCtx,
+        ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut local: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
         for block in blocks {
@@ -1107,7 +1107,7 @@ impl RocksDBProvider {
             }
         }
 
-        let mut pending = _ctx.pending_history.lock();
+        let mut pending = ctx.pending_history.lock();
         for (address, mut indices) in local {
             pending.accounts.entry(address).or_default().append(&mut indices);
         }

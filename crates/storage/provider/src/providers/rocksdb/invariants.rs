@@ -1064,7 +1064,7 @@ mod tests {
         // This simulates a scenario where history tracking started but no shards were completed
         let key_sentinel_1 = StorageShardedKey::new(Address::ZERO, B256::ZERO, u64::MAX);
         let key_sentinel_2 = StorageShardedKey::new(Address::random(), B256::random(), u64::MAX);
-        // Use a checkpoint that matches the sentinel shard contents (max block = 30)
+        // Sentinel shards contain blocks [10, 20, 30], so max block in shard = 30
         let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
         rocksdb.put::<tables::StoragesHistory>(key_sentinel_1, &block_list).unwrap();
         rocksdb.put::<tables::StoragesHistory>(key_sentinel_2, &block_list).unwrap();
@@ -1078,8 +1078,8 @@ mod tests {
             StorageSettings::legacy().with_storages_history_in_rocksdb(true),
         );
 
-        // Set a checkpoint that matches the sentinel shard data (max block = 30)
-        // This is a normal scenario where sentinel shards exist and are in sync with checkpoint
+        // Checkpoint = 30 matches sentinel shard max block, simulating "consistent" state
+        // where indexing is complete through the checkpoint block
         {
             let provider = factory.database_provider_rw().unwrap();
             provider
@@ -1108,7 +1108,7 @@ mod tests {
         // Insert ONLY sentinel entries (highest_block_number = u64::MAX)
         let key_sentinel_1 = ShardedKey::new(Address::ZERO, u64::MAX);
         let key_sentinel_2 = ShardedKey::new(Address::random(), u64::MAX);
-        // Use a checkpoint that matches the sentinel shard contents (max block = 30)
+        // Sentinel shards contain blocks [10, 20, 30], so max block in shard = 30
         let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
         rocksdb.put::<tables::AccountsHistory>(key_sentinel_1, &block_list).unwrap();
         rocksdb.put::<tables::AccountsHistory>(key_sentinel_2, &block_list).unwrap();
@@ -1122,8 +1122,8 @@ mod tests {
             StorageSettings::legacy().with_account_history_in_rocksdb(true),
         );
 
-        // Set a checkpoint that matches the sentinel shard data (max block = 30)
-        // This is a normal scenario where sentinel shards exist and are in sync with checkpoint
+        // Checkpoint = 30 matches sentinel shard max block, simulating "consistent" state
+        // where indexing is complete through the checkpoint block
         {
             let provider = factory.database_provider_rw().unwrap();
             provider
