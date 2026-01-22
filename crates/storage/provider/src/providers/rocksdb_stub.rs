@@ -93,6 +93,13 @@ impl DatabaseMetrics for RocksDBProvider {
 #[derive(Debug)]
 pub struct RocksDBBatch;
 
+impl RocksDBBatch {
+    /// Clears all entries from the specified table (stub - no-op).
+    pub const fn clear<T>(&mut self) -> ProviderResult<()> {
+        Ok(())
+    }
+}
+
 /// A stub builder for `RocksDB`.
 #[derive(Debug)]
 pub struct RocksDBBuilder;
