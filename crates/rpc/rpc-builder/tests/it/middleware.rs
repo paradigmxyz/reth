@@ -10,6 +10,7 @@ use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
 use reth_rpc_eth_api::EthApiClient;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tokio_util::EventSender;
+use reth_tracing::LogLevelHandle;
 use std::{
     future::Future,
     sync::{
@@ -78,6 +79,7 @@ async fn test_rpc_middleware() {
         TransportRpcModuleConfig::set_http(RpcModuleSelection::All),
         eth_api,
         EventSender::new(1),
+        LogLevelHandle::noop(),
     );
 
     let mylayer = MyMiddlewareLayer::default();

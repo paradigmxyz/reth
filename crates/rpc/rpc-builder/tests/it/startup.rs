@@ -8,6 +8,7 @@ use reth_rpc_builder::{
 };
 use reth_rpc_server_types::RethRpcModule;
 use reth_tokio_util::EventSender;
+use reth_tracing::LogLevelHandle;
 
 use crate::utils::{
     launch_http, launch_http_ws_same_port, launch_ws, test_address, test_rpc_builder,
@@ -32,6 +33,7 @@ async fn test_http_addr_in_use() {
         TransportRpcModuleConfig::set_http(vec![RethRpcModule::Admin]),
         eth_api,
         EventSender::new(1),
+        LogLevelHandle::noop(),
     );
     let result =
         RpcServerConfig::http(Default::default()).with_http_address(addr).start(&server).await;
@@ -49,6 +51,7 @@ async fn test_ws_addr_in_use() {
         TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Admin]),
         eth_api,
         EventSender::new(1),
+        LogLevelHandle::noop(),
     );
     let result = RpcServerConfig::ws(Default::default()).with_ws_address(addr).start(&server).await;
     let err = result.unwrap_err();
@@ -72,6 +75,7 @@ async fn test_launch_same_port_different_modules() {
             .with_http(vec![RethRpcModule::Eth]),
         eth_api,
         EventSender::new(1),
+        LogLevelHandle::noop(),
     );
     let addr = test_address();
     let res = RpcServerConfig::ws(Default::default())
@@ -96,6 +100,7 @@ async fn test_launch_same_port_same_cors() {
             .with_http(vec![RethRpcModule::Eth]),
         eth_api,
         EventSender::new(1),
+        LogLevelHandle::noop(),
     );
     let addr = test_address();
     let res = RpcServerConfig::ws(Default::default())
@@ -118,6 +123,7 @@ async fn test_launch_same_port_different_cors() {
             .with_http(vec![RethRpcModule::Eth]),
         eth_api,
         EventSender::new(1),
+        LogLevelHandle::noop(),
     );
     let addr = test_address();
     let res = RpcServerConfig::ws(Default::default())

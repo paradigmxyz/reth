@@ -763,17 +763,13 @@ impl RpcServerArgs {
         let debug_module = RethRpcModule::Debug;
 
         // Check HTTP API
-        if let Some(ref http_api) = self.http_api {
-            if http_api.contains(&debug_module) {
-                return true;
-            }
+        if self.http_api.as_ref().is_some_and(|api| api.contains(&debug_module)) {
+            return true;
         }
 
         // Check WS API
-        if let Some(ref ws_api) = self.ws_api {
-            if ws_api.contains(&debug_module) {
-                return true;
-            }
+        if self.ws_api.as_ref().is_some_and(|api| api.contains(&debug_module)) {
+            return true;
         }
 
         // Check IPC (default modules include debug if IPC is enabled)
