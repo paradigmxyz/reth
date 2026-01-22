@@ -69,7 +69,7 @@ where
         if EitherWriter::account_changesets_destination(provider).is_static_file() {
             self.prune_static_files(provider, range, range_end, input.limiter)
         } else {
-            self.prune_database(provider, range, range_end, input.limiter)
+            self.prune_database(provider, input, range, range_end)
         }
     }
 }
@@ -159,17 +159,17 @@ impl AccountHistory {
     fn prune_database<Provider>(
         &self,
         provider: &Provider,
+        input: PruneInput,
         range: std::ops::RangeInclusive<BlockNumber>,
         range_end: BlockNumber,
-        limiter: PruneLimiter,
     ) -> Result<SegmentOutput, PrunerError>
     where
         Provider: DBProvider<Tx: DbTxMut>,
     {
-        let mut limiter = if let Some(limit) = limiter.deleted_entries_limit() {
-            limiter.set_deleted_entries_limit(limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE)
+        let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
+            input.limiter.set_deleted_entries_limit(limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE)
         } else {
-            limiter
+            input.limiter
         };
 
         if limiter.is_limit_reached() {
@@ -183,11 +183,11 @@ impl AccountHistory {
         // Deleted account changeset keys (account addresses) with the highest block number deleted
         // for that key.
         //
-        // The size of this map is limited by `prune_delete_limit * blocks_since_last_run /
-        // ACCOUNT_HISTORY_TABLES_TO_PRUNE`, and with current defaults it's usually `3500 * 5
-        // / 2`, so 8750 entries. Each entry is `160 bit + 64 bit`, so the total size should
-        // be up to ~0.25MB + some hashmap overhead. `blocks_since_last_run` is additionally
-        // limited by the `max_reorg_depth`, so no OOM is expected here.
+        // The size of this map it's limited by `prune_delete_limit * blocks_since_last_run /
+        // ACCOUNT_HISTORY_TABLES_TO_PRUNE`, and with current default it's usually `3500 * 5
+        // / 2`, so 8750 entries. Each entry is `160 bit + 256 bit + 64 bit`, so the total
+        // size should be up to 0.5MB + some hashmap overhead. `blocks_since_last_run` is
+        // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
         let mut highest_deleted_accounts = FxHashMap::default();
         let (pruned_changesets, done) =
             provider.tx_ref().prune_table_with_range::<tables::AccountChangeSets>(

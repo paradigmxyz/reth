@@ -1,6 +1,6 @@
 use crate::{
     db_ext::DbTxPruneExt,
-    segments::{user::history::prune_history_indices, PruneInput, Segment, SegmentOutput},
+    segments::{user::history::prune_history_indices, PruneInput, PruneLimiter, Segment},
     PrunerError,
 };
 use alloy_primitives::BlockNumber;
@@ -11,7 +11,9 @@ use reth_db_api::{
     transaction::DbTxMut,
 };
 use reth_provider::{DBProvider, EitherWriter, StaticFileProviderFactory};
-use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint};
+use reth_prune_types::{
+    PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
+};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
 use rustc_hash::FxHashMap;
@@ -65,7 +67,7 @@ where
         let range_end = *range.end();
 
         if EitherWriter::storage_changesets_destination(provider).is_static_file() {
-            self.prune_static_files(provider, input, range, range_end)
+            self.prune_static_files(provider, range, range_end, input.limiter)
         } else {
             self.prune_database(provider, input, range, range_end)
         }
@@ -77,40 +79,57 @@ impl StorageHistory {
     fn prune_static_files<Provider>(
         &self,
         provider: &Provider,
-        input: PruneInput,
         range: std::ops::RangeInclusive<BlockNumber>,
         range_end: BlockNumber,
+        limiter: PruneLimiter,
     ) -> Result<SegmentOutput, PrunerError>
     where
-        Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + StorageChangeSetReader,
+        Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
     {
-        let changesets = provider.storage_changesets_range(range)?;
+        let mut limiter = if let Some(limit) = limiter.deleted_entries_limit() {
+            limiter.set_deleted_entries_limit(limit / STORAGE_HISTORY_TABLES_TO_PRUNE)
+        } else {
+            limiter
+        };
 
-        if changesets.is_empty() {
-            trace!(target: "pruner", "No storage changesets found in range");
-            return Ok(SegmentOutput::done());
-        }
-
-        // Build map of highest deleted block per account address and storage key
-        let mut highest_deleted_storages = FxHashMap::default();
+        // The size of this map is limited by `prune_delete_limit * blocks_since_last_run /
+        // STORAGE_HISTORY_TABLES_TO_PRUNE`, and with current defaults it's usually `3500 * 5
+        // / 2`, so 8750 entries. Each entry is `160 bit + 256 bit + 64 bit`, so the total
+        // size should be up to ~0.5MB + some hashmap overhead. `blocks_since_last_run` is
+        // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
+        let mut highest_deleted_storages: FxHashMap<_, _> = FxHashMap::default();
         let mut last_changeset_pruned_block = None;
+        let mut pruned_changesets = 0;
+        let mut done = true;
 
-        for (block_address, entry) in &changesets {
+        let walker = provider.static_file_provider().walk_storage_changeset_range(range);
+        for result in walker {
+            if limiter.is_limit_reached() {
+                done = false;
+                break;
+            }
+            let (block_address, entry) = result?;
             let block_number = block_address.block_number();
             let address = block_address.address();
             highest_deleted_storages.insert((address, entry.key), block_number);
             last_changeset_pruned_block = Some(block_number);
+            pruned_changesets += 1;
+            limiter.increment_deleted_entries_count();
         }
 
-        let pruned_changesets = changesets.len();
-        trace!(target: "pruner", deleted = %pruned_changesets, "Pruned storage history (changesets from static files)");
+        // Delete static file jars below the pruned block
+        if let Some(last_block) = last_changeset_pruned_block {
+            provider
+                .static_file_provider()
+                .delete_segment_below_block(StaticFileSegment::StorageChangeSets, last_block + 1)?;
+        }
+        trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned storage history (changesets from static files)");
 
-        let last_changeset_pruned_block = last_changeset_pruned_block.unwrap_or(range_end);
-
-        provider.static_file_provider().delete_segment_below_block(
-            StaticFileSegment::StorageChangeSets,
-            last_changeset_pruned_block + 1,
-        )?;
+        let last_changeset_pruned_block = last_changeset_pruned_block
+            // If there's more storage changesets to prune, set the checkpoint block number to
+            // previous, so we could finish pruning its storage changesets on the next run.
+            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
+            .unwrap_or(range_end);
 
         // Sort highest deleted block numbers by account address and storage key and turn them into
         // sharded keys.
@@ -130,10 +149,12 @@ impl StorageHistory {
             highest_sharded_keys,
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
         )?;
-        trace!(target: "pruner", ?outcomes, "Pruned storage history (indices)");
+        trace!(target: "pruner", ?outcomes, %done, "Pruned storage history (indices)");
+
+        let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
-            progress: input.limiter.progress(true),
+            progress,
             pruned: pruned_changesets + outcomes.deleted,
             checkpoint: Some(SegmentOutputCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
@@ -503,7 +524,8 @@ mod tests {
                 .iter()
                 .enumerate()
                 .skip_while(|(i, (block_number, _, _))| {
-                    *i < deleted_entries_limit * run && *block_number <= to_block as usize
+                    *i < deleted_entries_limit / STORAGE_HISTORY_TABLES_TO_PRUNE * run &&
+                        *block_number <= to_block as usize
                 })
                 .next()
                 .map(|(i, _)| i)
@@ -552,7 +574,12 @@ mod tests {
             );
         };
 
-        test_prune(998, 1, (PruneProgress::Finished, 999));
-        test_prune(1200, 2, (PruneProgress::Finished, 202));
+        test_prune(
+            998,
+            1,
+            (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 500),
+        );
+        test_prune(998, 2, (PruneProgress::Finished, 500));
+        test_prune(1200, 3, (PruneProgress::Finished, 202));
     }
 }
