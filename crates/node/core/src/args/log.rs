@@ -4,7 +4,7 @@ use crate::dirs::{LogsDir, PlatformPath};
 use clap::{ArgAction, Args, ValueEnum};
 use reth_tracing::{
     tracing_subscriber::filter::Directive, FileInfo, FileWorkerGuard, LayerInfo, Layers, LogFormat,
-    RethTracer, Tracer,
+    RethTracer, Tracer, TracingInitResult,
 };
 use std::{fmt, fmt::Display};
 use tracing::{level_filters::LevelFilter, Level};
@@ -170,6 +170,43 @@ impl LogArgs {
 
         let guard = tracer.init_with_layers(layers)?;
         Ok(guard)
+    }
+
+    /// Initializes tracing with reload support for runtime log level changes.
+    ///
+    /// This is similar to [`Self::init_tracing_with_layers`] but returns a
+    /// [`TracingInitResult`] containing a handle that can be used to change
+    /// log levels at runtime via RPC methods like `debug_verbosity` and `debug_vmodule`.
+    ///
+    /// Returns the tracing init result containing the file worker guard and log level handle.
+    pub fn init_tracing_with_reload(&self, layers: Layers) -> eyre::Result<TracingInitResult> {
+        let mut tracer = RethTracer::new();
+
+        let stdout = self.layer_info(self.log_stdout_format, self.log_stdout_filter.clone(), true);
+        tracer = tracer.with_stdout(stdout);
+
+        if self.journald {
+            tracer = tracer.with_journald(self.journald_filter.clone());
+        }
+
+        if self.log_file_max_files > 0 {
+            let info = self.file_info();
+            let file = self.layer_info(self.log_file_format, self.log_file_filter.clone(), false);
+            tracer = tracer.with_file(file, info);
+        }
+
+        if self.samply {
+            let config = self.layer_info(LogFormat::Terminal, self.samply_filter.clone(), false);
+            tracer = tracer.with_samply(config);
+        }
+
+        #[cfg(feature = "tracy")]
+        if self.tracy {
+            let config = self.layer_info(LogFormat::Terminal, self.tracy_filter.clone(), false);
+            tracer = tracer.with_tracy(config);
+        }
+
+        tracer.init_with_reload(layers)
     }
 }
 
