@@ -1442,6 +1442,8 @@ where
             self.transactions_by_peers.insert(*tx.hash(), HashSet::from([peer_id]));
         }
 
+        // 3. import new transactions as a batch to minimize lock contention on the underlying
+        // pool
         if !new_txs.is_empty() {
             let pool = self.pool.clone();
             // update metrics
