@@ -74,19 +74,9 @@ where
     res.map_err(|e| DatabaseError::Read(e.into()))?.map(decoder::<T>).transpose()
 }
 
-/// Some types don't support compression (eg. B256), and we don't want to be copying them to the
-/// allocated buffer when we can just use their reference.
-macro_rules! compress_to_buf_or_ref {
-    ($self:expr, $value:expr) => {
-        if let Some(value) = $value.uncompressable_ref() {
-            Some(value)
-        } else {
-            $self.buf.clear();
-            $value.compress_to_buf(&mut $self.buf);
-            None
-        }
-    };
-}
+
+
+
 
 impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
     fn first(&mut self) -> PairResult<T> {
@@ -256,13 +246,46 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     /// found, before calling `upsert`.
     fn upsert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        let value = compress_to_buf_or_ref!(self, value);
+
+        // Check if we can use zero-copy reserve path
+        if let Some(value_ref) = value.uncompressable_ref() {
+            let value_len = value_ref.len();
+            return self.execute_with_operation_metric(
+                Operation::CursorUpsert,
+                Some(value_len),
+                |this| {
+                    // SAFETY: We fill the reserved buffer immediately and don't use it after
+                    unsafe {
+                        this.inner
+                            .reserve(key.as_ref(), value_len, WriteFlags::UPSERT)
+                            .map(|reserved| {
+                                reserved.copy_from_slice(value_ref);
+                            })
+                            .map_err(|e| {
+                                DatabaseWriteError {
+                                    info: e.into(),
+                                    operation: DatabaseWriteOperation::CursorUpsert,
+                                    table_name: T::NAME,
+                                    key: key.into_vec(),
+                                }
+                                .into()
+                            })
+                    }
+                },
+            );
+        }
+
+        // Fallback: compress to buffer then put
+        self.buf.clear();
+        value.compress_to_buf(&mut self.buf);
+        let value_len = self.buf.len();
+
         self.execute_with_operation_metric(
             Operation::CursorUpsert,
-            Some(value.unwrap_or(&self.buf).len()),
+            Some(value_len),
             |this| {
                 this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::UPSERT)
+                    .put(key.as_ref(), &this.buf, WriteFlags::UPSERT)
                     .map_err(|e| {
                         DatabaseWriteError {
                             info: e.into(),
@@ -278,13 +301,43 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
 
     fn insert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        let value = compress_to_buf_or_ref!(self, value);
+
+        if let Some(value_ref) = value.uncompressable_ref() {
+            let value_len = value_ref.len();
+            return self.execute_with_operation_metric(
+                Operation::CursorInsert,
+                Some(value_len),
+                |this| {
+                    unsafe {
+                        this.inner
+                            .reserve(key.as_ref(), value_len, WriteFlags::NO_OVERWRITE)
+                            .map(|reserved| {
+                                reserved.copy_from_slice(value_ref);
+                            })
+                            .map_err(|e| {
+                                DatabaseWriteError {
+                                    info: e.into(),
+                                    operation: DatabaseWriteOperation::CursorInsert,
+                                    table_name: T::NAME,
+                                    key: key.into_vec(),
+                                }
+                                .into()
+                            })
+                    }
+                },
+            );
+        }
+
+        self.buf.clear();
+        value.compress_to_buf(&mut self.buf);
+        let value_len = self.buf.len();
+
         self.execute_with_operation_metric(
             Operation::CursorInsert,
-            Some(value.unwrap_or(&self.buf).len()),
+            Some(value_len),
             |this| {
                 this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::NO_OVERWRITE)
+                    .put(key.as_ref(), &this.buf, WriteFlags::NO_OVERWRITE)
                     .map_err(|e| {
                         DatabaseWriteError {
                             info: e.into(),
@@ -302,13 +355,43 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     /// will fail if the inserted key is less than the last table key
     fn append(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        let value = compress_to_buf_or_ref!(self, value);
+
+        if let Some(value_ref) = value.uncompressable_ref() {
+            let value_len = value_ref.len();
+            return self.execute_with_operation_metric(
+                Operation::CursorAppend,
+                Some(value_len),
+                |this| {
+                    unsafe {
+                        this.inner
+                            .reserve(key.as_ref(), value_len, WriteFlags::APPEND)
+                            .map(|reserved| {
+                                reserved.copy_from_slice(value_ref);
+                            })
+                            .map_err(|e| {
+                                DatabaseWriteError {
+                                    info: e.into(),
+                                    operation: DatabaseWriteOperation::CursorAppend,
+                                    table_name: T::NAME,
+                                    key: key.into_vec(),
+                                }
+                                .into()
+                            })
+                    }
+                },
+            );
+        }
+
+        self.buf.clear();
+        value.compress_to_buf(&mut self.buf);
+        let value_len = self.buf.len();
+
         self.execute_with_operation_metric(
             Operation::CursorAppend,
-            Some(value.unwrap_or(&self.buf).len()),
+            Some(value_len),
             |this| {
                 this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND)
+                    .put(key.as_ref(), &this.buf, WriteFlags::APPEND)
                     .map_err(|e| {
                         DatabaseWriteError {
                             info: e.into(),
@@ -338,13 +421,43 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
 
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        let value = compress_to_buf_or_ref!(self, value);
+
+        if let Some(value_ref) = value.uncompressable_ref() {
+            let value_len = value_ref.len();
+            return self.execute_with_operation_metric(
+                Operation::CursorAppendDup,
+                Some(value_len),
+                |this| {
+                    unsafe {
+                        this.inner
+                            .reserve(key.as_ref(), value_len, WriteFlags::APPEND_DUP)
+                            .map(|reserved| {
+                                reserved.copy_from_slice(value_ref);
+                            })
+                            .map_err(|e| {
+                                DatabaseWriteError {
+                                    info: e.into(),
+                                    operation: DatabaseWriteOperation::CursorAppendDup,
+                                    table_name: T::NAME,
+                                    key: key.into_vec(),
+                                }
+                                .into()
+                            })
+                    }
+                },
+            );
+        }
+
+        self.buf.clear();
+        value.compress_to_buf(&mut self.buf);
+        let value_len = self.buf.len();
+
         self.execute_with_operation_metric(
             Operation::CursorAppendDup,
-            Some(value.unwrap_or(&self.buf).len()),
+            Some(value_len),
             |this| {
                 this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND_DUP)
+                    .put(key.as_ref(), &this.buf, WriteFlags::APPEND_DUP)
                     .map_err(|e| {
                         DatabaseWriteError {
                             info: e.into(),
