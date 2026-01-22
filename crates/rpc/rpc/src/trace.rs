@@ -573,6 +573,37 @@ where
         }))
     }
 
+    /// Returns traces for a range of transactions within a block.
+    ///
+    /// This is a paginated version of [`Self::trace_block`] that allows tracing a subset of
+    /// transactions. Transactions before `tx_index_start` are replayed without tracing.
+    pub async fn trace_block_range(
+        &self,
+        block_id: BlockId,
+        tx_index_start: u64,
+        tx_index_end: u64,
+    ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
+        let traces = self
+            .eth_api()
+            .trace_block_range(
+                block_id,
+                None,
+                tx_index_start,
+                tx_index_end,
+                TracingInspectorConfig::default_parity(),
+                |tx_info, mut ctx| {
+                    let traces = ctx
+                        .take_inspector()
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info);
+                    Ok(traces)
+                },
+            )
+            .await?;
+
+        Ok(traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>()))
+    }
+
     /// Returns all storage slots accessed during transaction execution along with their access
     /// counts.
     pub async fn trace_block_storage_access(
@@ -731,6 +762,19 @@ where
     async fn trace_block_opcode_gas(&self, block_id: BlockId) -> RpcResult<Option<BlockOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
         Ok(Self::trace_block_opcode_gas(self, block_id).await.map_err(Into::into)?)
+    }
+
+    /// Handler for `trace_blockRange`
+    async fn trace_block_range(
+        &self,
+        block_id: BlockId,
+        tx_index_start: u64,
+        tx_index_end: u64,
+    ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
+        let _permit = self.acquire_trace_permit().await;
+        Ok(Self::trace_block_range(self, block_id, tx_index_start, tx_index_end)
+            .await
+            .map_err(Into::into)?)
     }
 }
 

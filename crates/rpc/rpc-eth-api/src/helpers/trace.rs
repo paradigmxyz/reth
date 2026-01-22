@@ -231,6 +231,141 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         )
     }
 
+    /// Executes a range of transactions within a block.
+    ///
+    /// Transactions before `start_index` are replayed without tracing to build up state.
+    /// Transactions from `start_index` to `end_index` (exclusive) are traced.
+    ///
+    /// This is useful for paginated block tracing where full block traces would be too expensive.
+    fn trace_block_range<F, R>(
+        &self,
+        block_id: BlockId,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
+        start_index: u64,
+        end_index: u64,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
+    where
+        Self: LoadBlock,
+        F: Fn(
+                TransactionInfo,
+                TracingCtx<
+                    '_,
+                    Recovered<&ProviderTx<Self::Provider>>,
+                    EvmFor<Self::Evm, &mut StateCacheDb, TracingInspector>,
+                >,
+            ) -> Result<R, Self::Error>
+            + Send
+            + 'static,
+        R: Send + 'static,
+    {
+        self.trace_block_range_with_inspector(
+            block_id,
+            block,
+            start_index,
+            end_index,
+            move || TracingInspector::new(config),
+            f,
+        )
+    }
+
+    /// Executes a range of transactions within a block with a custom inspector.
+    ///
+    /// Transactions before `start_index` are replayed without tracing to build up state.
+    /// Transactions from `start_index` to `end_index` (exclusive) are traced.
+    fn trace_block_range_with_inspector<Setup, Insp, F, R>(
+        &self,
+        block_id: BlockId,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
+        start_index: u64,
+        end_index: u64,
+        mut inspector_setup: Setup,
+        f: F,
+    ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
+    where
+        Self: LoadBlock,
+        F: Fn(
+                TransactionInfo,
+                TracingCtx<
+                    '_,
+                    Recovered<&ProviderTx<Self::Provider>>,
+                    EvmFor<Self::Evm, &mut StateCacheDb, Insp>,
+                >,
+            ) -> Result<R, Self::Error>
+            + Send
+            + 'static,
+        Setup: FnMut() -> Insp + Send + 'static,
+        Insp: Clone + for<'a> InspectorFor<Self::Evm, &'a mut StateCacheDb>,
+        R: Send + 'static,
+    {
+        async move {
+            let block = async {
+                if block.is_some() {
+                    return Ok(block)
+                }
+                self.recovered_block(block_id).await
+            };
+
+            let ((evm_env, _), block) = futures::try_join!(self.evm_env_at(block_id), block)?;
+
+            let Some(block) = block else { return Ok(None) };
+
+            if block.body().transactions().is_empty() {
+                return Ok(Some(Vec::new()))
+            }
+
+            self.spawn_with_state_at_block(block.parent_hash(), move |this, mut db| {
+                let block_hash = block.hash();
+                let block_number = evm_env.block_env.number().saturating_to();
+                let base_fee = evm_env.block_env.basefee();
+
+                this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+
+                let transactions: Vec<_> = block.transactions_recovered().collect();
+                let total_txs = transactions.len() as u64;
+                let start = (start_index.min(total_txs)) as usize;
+                let end = (end_index.min(total_txs)) as usize;
+
+                if start >= end {
+                    return Ok(Some(Vec::new()))
+                }
+
+                // Replay transactions before start_index without tracing to build up state
+                {
+                    let mut evm = this.evm_config().evm_with_env(&mut db, evm_env.clone());
+                    for tx in transactions.iter().take(start) {
+                        let tx_env = this.evm_config().tx_env(*tx);
+                        evm.transact_commit(tx_env).map_err(Self::Error::from_evm_err)?;
+                    }
+                }
+
+                // Trace transactions in the requested range
+                let mut idx = start as u64;
+
+                let results = this
+                    .evm_config()
+                    .evm_factory()
+                    .create_tracer(&mut db, evm_env, inspector_setup())
+                    .try_trace_many(transactions[start..end].iter().copied(), |ctx| {
+                        let tx_info = TransactionInfo {
+                            hash: Some(*ctx.tx.tx_hash()),
+                            index: Some(idx),
+                            block_hash: Some(block_hash),
+                            block_number: Some(block_number),
+                            base_fee: Some(base_fee),
+                        };
+                        idx += 1;
+                        f(tx_info, ctx)
+                    })
+                    .collect::<Result<_, _>>()?;
+
+                Ok(Some(results))
+            })
+            .await
+        }
+    }
+
     /// Executes all transactions of a block.
     ///
     /// If a `highest_index` is given, this will only execute the first `highest_index`
