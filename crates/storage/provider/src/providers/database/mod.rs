@@ -112,6 +112,11 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         .storage_settings()?
         .unwrap_or(legacy_settings);
 
+        // Validate storage settings configuration
+        if let Err(e) = storage_settings.validate() {
+            return Err(ProviderError::InvalidStorageSettings(e));
+        }
+
         Ok(Self {
             db,
             chain_spec,
