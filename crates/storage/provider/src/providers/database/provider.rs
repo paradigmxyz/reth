@@ -28,7 +28,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, HashMap, HashSet},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -2856,20 +2856,26 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         &self,
         changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
-        // Aggregate all block changesets and make list of accounts that have been changed.
-        let mut hashed_storages = changesets
-            .into_iter()
-            .map(|(BlockNumberAddress((_, address)), storage_entry)| {
-                (keccak256(address), keccak256(storage_entry.key), storage_entry.value)
-            })
-            .collect::<Vec<_>>();
-        hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
+        // Deduplicate by (address, storage_key), keeping only the earliest "before" value.
+        // Changesets are ordered by block number ascending, so the first occurrence of each
+        // (address, key) pair contains the state before any of the blocks being unwound.
+        let mut storage_by_key: HashMap<(Address, B256), U256> = HashMap::default();
+        for (BlockNumberAddress((_, address)), entry) in changesets {
+            storage_by_key.entry((address, entry.key)).or_insert(entry.value);
+        }
 
-        // Apply values to HashedState, and remove the account if it's None.
+        // Hash in parallel and sort by (hashed_address, hashed_key) for sequential cursor access.
+        let mut hashed_storages: Vec<_> = storage_by_key
+            .into_par_iter()
+            .map(|((address, key), value)| (keccak256(address), keccak256(key), value))
+            .collect();
+        hashed_storages.sort_unstable_by_key(|(ha, hk, _)| (*ha, *hk));
+
+        // Apply values to HashedState.
         let mut hashed_storage_keys: HashMap<B256, BTreeSet<B256>> =
             HashMap::with_capacity_and_hasher(hashed_storages.len(), Default::default());
         let mut hashed_storage = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
-        for (hashed_address, key, value) in hashed_storages.into_iter().rev() {
+        for (hashed_address, key, value) in hashed_storages {
             hashed_storage_keys.entry(hashed_address).or_default().insert(key);
 
             if hashed_storage
