@@ -73,12 +73,21 @@ pub struct SparseTrieUpdate {
     pub(crate) state: HashedPostState,
     /// The calculated multiproof
     pub(crate) multiproof: ProofResult,
+    /// When true, only reveal the proof without applying state changes.
+    /// Used for out-of-order proof revelation optimization.
+    pub(crate) reveal_only: bool,
 }
 
 impl SparseTrieUpdate {
     /// Returns true if the update is empty.
     pub(super) fn is_empty(&self) -> bool {
         self.state.is_empty() && self.multiproof.is_empty()
+    }
+
+    /// Creates a reveal-only update that will only reveal the proof without applying state
+    /// changes. Used for out-of-order proof revelation.
+    pub(super) fn reveal_only(multiproof: ProofResult) -> Self {
+        Self { state: HashedPostState::default(), multiproof, reveal_only: true }
     }
 
     /// Construct update from multiproof.
@@ -88,6 +97,7 @@ impl SparseTrieUpdate {
         Ok(Self {
             state: HashedPostState::default(),
             multiproof: ProofResult::Legacy(multiproof.try_into()?, stats),
+            reveal_only: false,
         })
     }
 
@@ -95,6 +105,9 @@ impl SparseTrieUpdate {
     pub(super) fn extend(&mut self, other: Self) {
         self.state.extend(other.state);
         self.multiproof.extend(other.multiproof);
+        // If either update has reveal_only = false, the combined update should have reveal_only =
+        // false
+        self.reveal_only = self.reveal_only && other.reveal_only;
     }
 }
 
@@ -1032,6 +1045,7 @@ impl MultiProofTask {
                                 SparseTrieUpdate {
                                     state,
                                     multiproof: ProofResult::empty(self.v2_proofs_enabled),
+                                    reveal_only: false,
                                 },
                             ) {
                                 let _ = self.to_sparse_trie.send(combined_update);
@@ -1166,6 +1180,7 @@ impl MultiProofTask {
                     SparseTrieUpdate {
                         state,
                         multiproof: ProofResult::empty(self.v2_proofs_enabled),
+                        reveal_only: false,
                     },
                 ) {
                     let _ = self.to_sparse_trie.send(combined_update);
@@ -1267,11 +1282,30 @@ impl MultiProofTask {
                                         "Processing calculated proof from worker"
                                     );
 
-                                    let update = SparseTrieUpdate {
-                                        state: proof_result.state,
-                                        multiproof: proof_result_data,
+                                    // Send proof for immediate reveal (out of order)
+                                    // This allows the sparse trie to reveal nodes before
+                                    // sequenced state updates arrive.
+                                    // Skip sending if the proof is empty (no nodes to reveal).
+                                    // Take ownership of the proof data to avoid cloning - the
+                                    // sequenced update only needs state, not the proof again.
+                                    let multiproof_for_sequencer = if proof_result_data.is_empty()
+                                    {
+                                        proof_result_data
+                                    } else {
+                                        let _ =
+                                            self.to_sparse_trie.send(SparseTrieUpdate::reveal_only(
+                                                proof_result_data,
+                                            ));
+                                        ProofResult::empty(self.v2_proofs_enabled)
                                     };
 
+                                    let update = SparseTrieUpdate {
+                                        state: proof_result.state,
+                                        multiproof: multiproof_for_sequencer,
+                                        reveal_only: false,
+                                    };
+
+                                    // Then pass to sequencer for ordered state updates
                                     if let Some(combined_update) =
                                         self.on_proof(proof_result.sequence_number, update)
                                     {

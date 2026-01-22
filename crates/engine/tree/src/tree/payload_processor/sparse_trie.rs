@@ -143,7 +143,7 @@ pub struct StateRootComputeOutcome {
 #[instrument(level = "debug", target = "engine::tree::payload_processor::sparse_trie", skip_all)]
 pub(crate) fn update_sparse_trie<BPF, A, S>(
     trie: &mut SparseStateTrie<A, S>,
-    SparseTrieUpdate { mut state, multiproof }: SparseTrieUpdate,
+    SparseTrieUpdate { mut state, multiproof, reveal_only }: SparseTrieUpdate,
     blinded_provider_factory: &BPF,
 ) -> SparseStateTrieResult<Duration>
 where
@@ -153,7 +153,7 @@ where
     A: SparseTrieInterface + Send + Sync + Default,
     S: SparseTrieInterface + Send + Sync + Default + Clone,
 {
-    trace!(target: "engine::root::sparse", "Updating sparse trie");
+    trace!(target: "engine::root::sparse", reveal_only, "Updating sparse trie");
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
@@ -171,6 +171,11 @@ where
         ?reveal_multiproof_elapsed,
         "Done revealing multiproof"
     );
+
+    // If this is a reveal-only update, skip state application
+    if reveal_only {
+        return Ok(started_at.elapsed());
+    }
 
     // Update storage slots with new values and calculate storage roots.
     let span = tracing::Span::current();

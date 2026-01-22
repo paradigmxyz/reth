@@ -603,7 +603,7 @@ impl TrieNodeProvider for ProofTaskTrieNodeProvider {
 }
 
 /// Result of a multiproof calculation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ProofResult {
     /// Legacy multiproof calculation result.
     Legacy(DecodedMultiProof, ParallelTrieStats),
