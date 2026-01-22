@@ -2947,12 +2947,20 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     fn unwind_account_history_indices<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
-    ) -> ProviderResult<usize> {
-        let mut last_indices = changesets
-            .into_iter()
-            .map(|(index, account)| (account.address, *index))
-            .collect::<Vec<_>>();
-        last_indices.sort_unstable_by_key(|(a, _)| *a);
+    ) -> ProviderResult<()> {
+        // Deduplicate by address, keeping only the minimum block number per address.
+        // We only need to unwind from the earliest block for each address.
+        let mut min_block_by_address: HashMap<Address, BlockNumber> = HashMap::default();
+        for (block_number, entry) in changesets {
+            min_block_by_address
+                .entry(entry.address)
+                .and_modify(|min| *min = (*min).min(*block_number))
+                .or_insert(*block_number);
+        }
+
+        // Convert to sorted vec for sequential cursor access.
+        let mut last_indices: Vec<_> = min_block_by_address.into_iter().collect();
+        last_indices.sort_unstable_by_key(|(addr, _)| *addr);
 
         if self.cached_storage_settings().account_history_in_rocksdb {
             #[cfg(all(unix, feature = "rocksdb"))]
@@ -2982,14 +2990,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             }
         }
 
-        let changesets = last_indices.len();
-        Ok(changesets)
+        Ok(())
     }
 
     fn unwind_account_history_indices_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<usize> {
+    ) -> ProviderResult<()> {
         let changesets = self
             .tx
             .cursor_read::<tables::AccountChangeSets>()?

@@ -10,20 +10,16 @@ use reth_storage_errors::provider::ProviderResult;
 #[auto_impl(&, Box)]
 pub trait HistoryWriter: Send {
     /// Unwind and clear account history indices.
-    ///
-    /// Returns number of changesets walked.
     fn unwind_account_history_indices<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
-    ) -> ProviderResult<usize>;
+    ) -> ProviderResult<()>;
 
     /// Unwind and clear account history indices in a given block range.
-    ///
-    /// Returns number of changesets walked.
     fn unwind_account_history_indices_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<usize>;
+    ) -> ProviderResult<()>;
 
     /// Insert account change index to database. Used inside `AccountHistoryIndex` stage
     fn insert_account_history_index(
