@@ -262,7 +262,7 @@ impl RocksDBProvider {
                     let (key, value) = result?;
                     let highest = key.sharded_key.highest_block_number;
                     if highest == u64::MAX {
-                        if let Some(max_in_shard) = value.iter().max() &&
+                        if let Some(max_in_shard) = value.max() &&
                             max_in_shard > max_sentinel_block
                         {
                             max_sentinel_block = max_in_shard;
@@ -416,7 +416,7 @@ impl RocksDBProvider {
                     let highest = key.highest_block_number;
                     if highest == u64::MAX {
                         // Sentinel shard: check the actual max block number in the shard
-                        if let Some(max_in_shard) = value.iter().max() &&
+                        if let Some(max_in_shard) = value.max() &&
                             max_in_shard > max_sentinel_block
                         {
                             max_sentinel_block = max_in_shard;
@@ -1465,5 +1465,102 @@ mod tests {
             Some(50),
             "Should require unwind to block 50 to rebuild AccountsHistory"
         );
+    }
+
+    #[test]
+    fn test_prune_storages_history_sentinel_shard_rewrite() {
+        use reth_db_api::models::storage_sharded_key::StorageShardedKey;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+
+        let address = Address::random();
+        let storage_key = B256::random();
+
+        // Create a sentinel shard with blocks both above and below checkpoint 100
+        // Contains [10, 50, 150] - after pruning at checkpoint 100, should become [10, 50]
+        let sentinel_key = StorageShardedKey::new(address, storage_key, u64::MAX);
+        let block_list = BlockNumberList::new_pre_sorted([10, 50, 150]);
+        rocksdb.put::<tables::StoragesHistory>(sentinel_key.clone(), &block_list).unwrap();
+
+        // Create a test provider factory for MDBX
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+        );
+
+        // Set checkpoint to block 100
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(100))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        // Run consistency check - should prune the sentinel shard
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Should heal by pruning, no unwind needed");
+
+        // Verify the sentinel shard was rewritten (not deleted) with only [10, 50]
+        let rewritten = rocksdb.get::<tables::StoragesHistory>(sentinel_key).unwrap();
+        assert!(rewritten.is_some(), "Sentinel shard should be rewritten, not deleted");
+
+        let rewritten_list = rewritten.unwrap();
+        let blocks: Vec<u64> = rewritten_list.iter().collect();
+        assert_eq!(blocks, vec![10, 50], "Sentinel shard should contain only blocks <= 100");
+    }
+
+    #[test]
+    fn test_prune_accounts_history_sentinel_shard_rewrite() {
+        use reth_db_api::models::ShardedKey;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::AccountsHistory>()
+            .build()
+            .unwrap();
+
+        let address = Address::random();
+
+        // Create a sentinel shard with blocks both above and below checkpoint 100
+        // Contains [10, 50, 150] - after pruning at checkpoint 100, should become [10, 50]
+        let sentinel_key = ShardedKey::new(address, u64::MAX);
+        let block_list = BlockNumberList::new_pre_sorted([10, 50, 150]);
+        rocksdb.put::<tables::AccountsHistory>(sentinel_key.clone(), &block_list).unwrap();
+
+        // Create a test provider factory for MDBX
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+        );
+
+        // Set checkpoint to block 100
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(100))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        // Run consistency check - should prune the sentinel shard
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Should heal by pruning, no unwind needed");
+
+        // Verify the sentinel shard was rewritten (not deleted) with only [10, 50]
+        let rewritten = rocksdb.get::<tables::AccountsHistory>(sentinel_key).unwrap();
+        assert!(rewritten.is_some(), "Sentinel shard should be rewritten, not deleted");
+
+        let rewritten_list = rewritten.unwrap();
+        let blocks: Vec<u64> = rewritten_list.iter().collect();
+        assert_eq!(blocks, vec![10, 50], "Sentinel shard should contain only blocks <= 100");
     }
 }
