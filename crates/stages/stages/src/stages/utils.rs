@@ -105,17 +105,22 @@ fn load_sharded_history<H: HistoryShardWriter>(
 }
 
 /// Flushes complete shards, keeping at least one shard buffered for continued accumulation.
+///
+/// We buffer one shard because `flush_shards` uses `u64::MAX` as the final shard's key.
+/// If we flushed everything here, we'd write `u64::MAX` keys that get overwritten later.
 fn flush_shards_partial<H: HistoryShardWriter>(
     prefix: <H::TableKey as ShardedHistoryKey>::Prefix,
     list: &mut Vec<u64>,
     append_only: bool,
     writer: &mut H,
 ) -> Result<(), StageError> {
+    // Not enough to fill a shard yet
     if list.len() <= NUM_OF_INDICES_IN_SHARD {
         return Ok(());
     }
 
     let num_full_shards = list.len() / NUM_OF_INDICES_IN_SHARD;
+    // Keep one shard buffered: if exact multiple, keep last full shard for u64::MAX key later
     let shards_to_flush = if list.len().is_multiple_of(NUM_OF_INDICES_IN_SHARD) {
         num_full_shards - 1
     } else {
@@ -129,6 +134,7 @@ fn flush_shards_partial<H: HistoryShardWriter>(
     let flush_len = shards_to_flush * NUM_OF_INDICES_IN_SHARD;
     debug_assert!(flush_len <= list.len(), "flush_len exceeds list length");
 
+    // Write complete shards with their actual highest block number as key
     for chunk in list[..flush_len].chunks(NUM_OF_INDICES_IN_SHARD) {
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = H::TableKey::new_sharded(prefix, highest);
@@ -136,6 +142,7 @@ fn flush_shards_partial<H: HistoryShardWriter>(
         writer.write_shard(key, &value, append_only)?;
     }
 
+    // Shift remaining elements to front (avoids allocation vs split_off)
     list.copy_within(flush_len.., 0);
     list.truncate(list.len() - flush_len);
     Ok(())
