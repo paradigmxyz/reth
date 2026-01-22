@@ -93,9 +93,6 @@ const DEFAULT_MAX_BACKGROUND_JOBS: i32 = 6;
 /// Default bytes per sync for `RocksDB` WAL writes (1 MB).
 const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 
-/// Default bloom filter bits per key (~1% false positive rate).
-const DEFAULT_BLOOM_FILTER_BITS: f64 = 10.0;
-
 /// Default buffer capacity for compression in batches.
 /// 4 KiB matches common block/page sizes and comfortably holds typical history values,
 /// reducing the first few reallocations without over-allocating.
@@ -145,11 +142,6 @@ impl RocksDBBuilder {
         table_options.set_pin_l0_filter_and_index_blocks_in_cache(true);
         // Shared block cache for all column families.
         table_options.set_block_cache(cache);
-        // Bloom filter: 10 bits/key = ~1% false positive rate, full filter for better read
-        // performance. this setting is good trade off a little bit of memory for better
-        // point lookup performance. see https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#configuration-basics
-        table_options.set_bloom_filter(DEFAULT_BLOOM_FILTER_BITS, false);
-        table_options.set_optimize_filters_for_memory(true);
         table_options
     }
 
