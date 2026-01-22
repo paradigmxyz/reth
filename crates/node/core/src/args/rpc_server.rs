@@ -1158,3 +1158,4 @@ mod tests {
 
         assert_eq!(parsed_args, args);
     }
+}
