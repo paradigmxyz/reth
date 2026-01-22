@@ -219,6 +219,16 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
     }
+
+    /// Truncates pending `RocksDB` history writes for blocks >= `from`.
+    ///
+    /// This must be called during unwind operations to ensure pending history for unwound
+    /// blocks is not materialized at commit time. Without this, history entries accumulated
+    /// via `save_blocks()` would be written to `RocksDB` even though the blocks were unwound.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn truncate_pending_history_from(&self, from: BlockNumber) {
+        self.pending_rocksdb_history.lock().truncate_from(from);
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -684,6 +694,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// This includes calculating the resulted state root and comparing it with the parent block
     /// state root.
     pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
+        // Truncate pending RocksDB history for unwound blocks before processing.
+        // This prevents history entries accumulated via save_blocks() from being
+        // materialized at commit time for blocks that are being unwound.
+        #[cfg(all(unix, feature = "rocksdb"))]
+        self.truncate_pending_history_from(from);
+
         let changed_accounts = self
             .tx
             .cursor_read::<tables::AccountChangeSets>()?
@@ -2353,6 +2369,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             return Ok(());
         }
 
+        // Truncate pending RocksDB history for unwound blocks.
+        #[cfg(all(unix, feature = "rocksdb"))]
+        self.truncate_pending_history_from(*range.start());
+
         // We are not removing block meta as it is used to get block changesets.
         let block_bodies = self.block_body_indices_range(range.clone())?;
 
@@ -2452,6 +2472,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             return Ok(ExecutionOutcome::default())
         }
         let start_block_number = *range.start();
+
+        // Truncate pending RocksDB history for unwound blocks.
+        #[cfg(all(unix, feature = "rocksdb"))]
+        self.truncate_pending_history_from(start_block_number);
 
         // We are not removing block meta as it is used to get block changesets.
         let block_bodies = self.block_body_indices_range(range.clone())?;

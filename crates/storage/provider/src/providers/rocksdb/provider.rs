@@ -72,6 +72,25 @@ pub(crate) struct PendingHistoryWrites {
     pub storages: BTreeMap<(Address, B256), Vec<u64>>,
 }
 
+impl PendingHistoryWrites {
+    /// Removes all pending history entries with block numbers >= `from`.
+    ///
+    /// This must be called during unwind operations to ensure pending history for unwound
+    /// blocks is not materialized at commit time. Entries that become empty after truncation
+    /// are removed from the maps entirely.
+    pub(crate) fn truncate_from(&mut self, from: u64) {
+        self.accounts.retain(|_, blocks| {
+            blocks.retain(|&b| b < from);
+            !blocks.is_empty()
+        });
+
+        self.storages.retain(|_, blocks| {
+            blocks.retain(|&b| b < from);
+            !blocks.is_empty()
+        });
+    }
+}
+
 /// Pending history writes type alias.
 pub(crate) type PendingHistory = Arc<Mutex<PendingHistoryWrites>>;
 
@@ -2895,5 +2914,67 @@ mod tests {
         // Second shard truncated and re-keyed to MAX
         assert_eq!(shards[1].0.highest_block_number, u64::MAX);
         assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), (51..=75).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_pending_history_truncate_from() {
+        use super::PendingHistoryWrites;
+        use alloy_primitives::{Address, B256};
+
+        let mut pending = PendingHistoryWrites::default();
+
+        let addr1 = Address::repeat_byte(1);
+        let addr2 = Address::repeat_byte(2);
+        let slot = B256::repeat_byte(0xAB);
+
+        // Add account history entries
+        pending.accounts.insert(addr1, vec![10, 20, 30, 40, 50]);
+        pending.accounts.insert(addr2, vec![100, 200, 300]);
+
+        // Add storage history entries
+        pending.storages.insert((addr1, slot), vec![15, 25, 35, 45]);
+
+        // Truncate from block 30 (removes >= 30)
+        pending.truncate_from(30);
+
+        // addr1: should retain [10, 20], remove [30, 40, 50]
+        assert_eq!(pending.accounts.get(&addr1), Some(&vec![10, 20]));
+
+        // addr2: all entries (100, 200, 300) are >= 30, so the key should be removed entirely
+        assert!(pending.accounts.get(&addr2).is_none());
+
+        // storage: [15, 25] retained, [35, 45] removed
+        assert_eq!(pending.storages.get(&(addr1, slot)), Some(&vec![15, 25]));
+    }
+
+    #[test]
+    fn test_pending_history_truncate_from_boundary() {
+        use super::PendingHistoryWrites;
+        use alloy_primitives::Address;
+
+        let mut pending = PendingHistoryWrites::default();
+        let addr = Address::repeat_byte(1);
+
+        pending.accounts.insert(addr, vec![10, 20, 30]);
+
+        // Truncate exactly at 20 - should keep only [10]
+        pending.truncate_from(20);
+        assert_eq!(pending.accounts.get(&addr), Some(&vec![10]));
+
+        // Truncate at 5 - should remove everything
+        pending.truncate_from(5);
+        assert!(pending.accounts.get(&addr).is_none());
+    }
+
+    #[test]
+    fn test_pending_history_truncate_from_empty() {
+        use super::PendingHistoryWrites;
+
+        let mut pending = PendingHistoryWrites::default();
+
+        // Truncating empty pending writes should be a no-op
+        pending.truncate_from(100);
+        assert!(pending.accounts.is_empty());
+        assert!(pending.storages.is_empty());
     }
 }
