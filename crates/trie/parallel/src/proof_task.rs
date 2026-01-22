@@ -269,7 +269,8 @@ impl ProofWorkerHandle {
                             #[cfg(feature = "metrics")]
                             cursor_metrics,
                         )
-                        .with_v2_proofs(v2_proofs_enabled);
+                        .with_v2_proofs(v2_proofs_enabled)
+                        .as_account_storage_worker();
                         if let Err(error) = worker.run() {
                             error!(
                                 target: "trie::proof_task",
@@ -912,6 +913,8 @@ struct StorageProofWorker<Factory> {
     cursor_metrics: ProofTaskCursorMetrics,
     /// Set to true if V2 proofs are enabled.
     v2_enabled: bool,
+    /// Whether this is an account storage worker (for metrics differentiation).
+    is_account_storage_worker: bool,
 }
 
 impl<Factory> StorageProofWorker<Factory>
@@ -939,12 +942,19 @@ where
             #[cfg(feature = "metrics")]
             cursor_metrics,
             v2_enabled: false,
+            is_account_storage_worker: false,
         }
     }
 
     /// Changes whether or not V2 proofs are enabled.
     const fn with_v2_proofs(mut self, v2_enabled: bool) -> Self {
         self.v2_enabled = v2_enabled;
+        self
+    }
+
+    /// Marks this worker as an account storage worker (for metrics differentiation).
+    const fn as_account_storage_worker(mut self) -> Self {
+        self.is_account_storage_worker = true;
         self
     }
 
@@ -990,7 +1000,12 @@ where
         // Initially mark this worker as available.
         self.available_workers.fetch_add(1, Ordering::Relaxed);
 
+        let mut total_idle_time = Duration::ZERO;
+        let mut idle_start = Instant::now();
+
         while let Ok(job) = self.work_rx.recv() {
+            total_idle_time += idle_start.elapsed();
+
             // Mark worker as busy.
             self.available_workers.fetch_sub(1, Ordering::Relaxed);
 
@@ -1020,6 +1035,8 @@ where
 
             // Mark worker as available again.
             self.available_workers.fetch_add(1, Ordering::Relaxed);
+
+            idle_start = Instant::now();
         }
 
         trace!(
@@ -1027,12 +1044,18 @@ where
             worker_id = self.worker_id,
             storage_proofs_processed,
             storage_nodes_processed,
+            total_idle_time_us = total_idle_time.as_micros(),
             "Storage worker shutting down"
         );
 
         #[cfg(feature = "metrics")]
         {
             self.metrics.record_storage_nodes(storage_nodes_processed as usize);
+            if self.is_account_storage_worker {
+                self.metrics.record_account_storage_worker_idle_time(total_idle_time);
+            } else {
+                self.metrics.record_storage_worker_idle_time(total_idle_time);
+            }
             self.cursor_metrics.record(&mut cursor_metrics_cache);
         }
 
@@ -1301,19 +1324,25 @@ where
         // Count this worker as available only after successful initialization.
         self.available_workers.fetch_add(1, Ordering::Relaxed);
 
+        let mut total_idle_time = Duration::ZERO;
+        let mut idle_start = Instant::now();
+
         while let Ok(job) = self.work_rx.recv() {
+            total_idle_time += idle_start.elapsed();
+
             // Mark worker as busy.
             self.available_workers.fetch_sub(1, Ordering::Relaxed);
 
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
-                    self.process_account_multiproof(
+                    let storage_wait_time = self.process_account_multiproof(
                         &provider_rc,
                         v2_calculator.as_mut(),
                         *input,
                         &mut account_proofs_processed,
                         &mut cursor_metrics_cache,
                     );
+                    total_idle_time += storage_wait_time;
                 }
 
                 AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
@@ -1329,6 +1358,8 @@ where
 
             // Mark worker as available again.
             self.available_workers.fetch_add(1, Ordering::Relaxed);
+
+            idle_start = Instant::now();
         }
 
         trace!(
@@ -1336,12 +1367,14 @@ where
             worker_id=self.worker_id,
             account_proofs_processed,
             account_nodes_processed,
+            total_idle_time_us = total_idle_time.as_micros(),
             "Account worker shutting down"
         );
 
         #[cfg(feature = "metrics")]
         {
             self.metrics.record_account_nodes(account_nodes_processed as usize);
+            self.metrics.record_account_worker_idle_time(total_idle_time);
             self.cursor_metrics.record(&mut cursor_metrics_cache);
         }
 
@@ -1356,7 +1389,7 @@ where
         collect_branch_node_masks: bool,
         multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
         proof_cursor_metrics: &mut ProofTaskCursorMetricsCache,
-    ) -> Result<ProofResult, ParallelStateRootError>
+    ) -> Result<(ProofResult, Duration), ParallelStateRootError>
     where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
@@ -1401,15 +1434,17 @@ where
             cached_storage_roots: &self.cached_storage_roots,
         };
 
+        let mut storage_wait_time = Duration::ZERO;
         let result = build_account_multiproof_with_storage_roots(
             provider,
             ctx,
             &mut tracker,
             proof_cursor_metrics,
-        );
+            &mut storage_wait_time,
+        )?;
 
         let stats = tracker.finish();
-        result.map(|proof| ProofResult::Legacy(proof, stats))
+        Ok((ProofResult::Legacy(result, stats), storage_wait_time))
     }
 
     fn compute_v2_account_multiproof<Provider>(
@@ -1421,7 +1456,7 @@ where
         >,
         provider: &Rc<Provider>,
         targets: MultiProofTargetsV2,
-    ) -> Result<ProofResult, ParallelStateRootError>
+    ) -> Result<(ProofResult, Duration), ParallelStateRootError>
     where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
@@ -1449,15 +1484,19 @@ where
             provider.clone(),
         );
 
-        let proof = DecodedMultiProofV2 {
-            account_proofs: v2_calculator.proof(&mut value_encoder, &mut account_targets)?,
-            storage_proofs: value_encoder.into_storage_proofs()?,
-        };
+        let account_proofs = v2_calculator.proof(&mut value_encoder, &mut account_targets)?;
 
-        Ok(ProofResult::V2(proof))
+        let (storage_proofs, storage_wait_time) =
+            value_encoder.into_storage_proofs_with_wait_time()?;
+
+        let proof = DecodedMultiProofV2 { account_proofs, storage_proofs };
+
+        Ok((ProofResult::V2(proof), storage_wait_time))
     }
 
     /// Processes an account multiproof request.
+    ///
+    /// Returns the time spent waiting for storage proof results.
     fn process_account_multiproof<Provider>(
         &self,
         provider_rc: &Rc<Provider>,
@@ -1471,38 +1510,46 @@ where
         input: AccountMultiproofInput,
         account_proofs_processed: &mut u64,
         cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
-    ) where
+    ) -> Duration
+    where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
         let mut proof_cursor_metrics = ProofTaskCursorMetricsCache::default();
         let proof_start = Instant::now();
 
-        let (proof_result_sender, result) = match input {
+        let (proof_result_sender, result, storage_wait_time) = match input {
             AccountMultiproofInput::Legacy {
                 targets,
                 prefix_sets,
                 collect_branch_node_masks,
                 multi_added_removed_keys,
                 proof_result_sender,
-            } => (
-                proof_result_sender,
-                self.compute_legacy_account_multiproof(
+            } => {
+                let (result, storage_wait_time) = match self.compute_legacy_account_multiproof(
                     provider_rc.as_ref(),
                     targets,
                     prefix_sets,
                     collect_branch_node_masks,
                     multi_added_removed_keys,
                     &mut proof_cursor_metrics,
-                ),
-            ),
-            AccountMultiproofInput::V2 { targets, proof_result_sender } => (
-                proof_result_sender,
-                self.compute_v2_account_multiproof::<Provider>(
-                    v2_calculator.expect("v2 calculator provided"),
-                    provider_rc,
-                    targets,
-                ),
-            ),
+                ) {
+                    Ok((proof, wait_time)) => (Ok(proof), wait_time),
+                    Err(e) => (Err(e), Duration::ZERO),
+                };
+                (proof_result_sender, result, storage_wait_time)
+            }
+            AccountMultiproofInput::V2 { targets, proof_result_sender } => {
+                let (result, storage_wait_time) = match self
+                    .compute_v2_account_multiproof::<Provider>(
+                        v2_calculator.expect("v2 calculator provided"),
+                        provider_rc,
+                        targets,
+                    ) {
+                    Ok((proof, wait_time)) => (Ok(proof), wait_time),
+                    Err(e) => (Err(e), Duration::ZERO),
+                };
+                (proof_result_sender, result, storage_wait_time)
+            }
         };
 
         let ProofResultContext {
@@ -1555,6 +1602,8 @@ where
         #[cfg(feature = "metrics")]
         // Accumulate per-proof metrics into the worker's cache
         cursor_metrics_cache.extend(&proof_cursor_metrics);
+
+        storage_wait_time
     }
 
     /// Processes a blinded account node lookup request.
@@ -1614,11 +1663,13 @@ where
 /// enabling interleaved parallelism between account trie traversal and storage proof computation.
 ///
 /// Returns a `DecodedMultiProof` containing the account subtree and storage proofs.
+/// Also accumulates the time spent waiting for storage proofs into `storage_wait_time`.
 fn build_account_multiproof_with_storage_roots<P>(
     provider: &P,
     ctx: AccountMultiproofParams<'_>,
     tracker: &mut ParallelTrieTracker,
     proof_cursor_metrics: &mut ProofTaskCursorMetricsCache,
+    storage_wait_time: &mut Duration,
 ) -> Result<DecodedMultiProof, ParallelStateRootError>
 where
     P: TrieCursorFactory + HashedCursorFactory,
@@ -1682,6 +1733,7 @@ where
                         );
                         // Block on this specific storage proof receiver - enables interleaved
                         // parallelism
+                        let wait_start = Instant::now();
                         let proof_msg = receiver.recv().map_err(|_| {
                             ParallelStateRootError::StorageRoot(
                                 reth_execution_errors::StorageRootError::Database(
@@ -1691,6 +1743,7 @@ where
                                 ),
                             )
                         })?;
+                        *storage_wait_time += wait_start.elapsed();
 
                         drop(_guard);
 
@@ -1782,7 +1835,9 @@ where
     // Consume remaining storage proof receivers for accounts not encountered during trie walk.
     // Done last to allow storage workers more time to complete while we finalized the account trie.
     for (hashed_address, receiver) in storage_proof_receivers {
+        let wait_start = Instant::now();
         if let Ok(proof_msg) = receiver.recv() {
+            *storage_wait_time += wait_start.elapsed();
             let proof_result = proof_msg.result?;
             let proof = Into::<Option<DecodedStorageMultiProof>>::into(proof_result)
                 .expect("Partial proofs are not yet supported");

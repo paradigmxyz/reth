@@ -4,6 +4,7 @@ use reth_trie::{
     trie_cursor::{TrieCursorMetrics, TrieCursorMetricsCache},
     TrieType,
 };
+use std::time::Duration;
 
 /// Metrics for the proof task.
 #[derive(Clone, Metrics)]
@@ -13,6 +14,13 @@ pub struct ProofTaskTrieMetrics {
     blinded_account_nodes: Histogram,
     /// A histogram for the number of blinded storage nodes fetched.
     blinded_storage_nodes: Histogram,
+    /// Histogram for storage worker idle time in seconds (waiting for proof jobs).
+    storage_worker_idle_time_seconds: Histogram,
+    /// Histogram for account worker idle time in seconds (waiting for proof jobs + storage
+    /// results).
+    account_worker_idle_time_seconds: Histogram,
+    /// Histogram for account storage worker idle time in seconds (waiting for proof jobs).
+    account_storage_worker_idle_time_seconds: Histogram,
 }
 
 impl ProofTaskTrieMetrics {
@@ -24,6 +32,21 @@ impl ProofTaskTrieMetrics {
     /// Record storage nodes fetched.
     pub fn record_storage_nodes(&self, count: usize) {
         self.blinded_storage_nodes.record(count as f64);
+    }
+
+    /// Record storage worker idle time.
+    pub fn record_storage_worker_idle_time(&self, duration: Duration) {
+        self.storage_worker_idle_time_seconds.record(duration.as_secs_f64());
+    }
+
+    /// Record account worker idle time.
+    pub fn record_account_worker_idle_time(&self, duration: Duration) {
+        self.account_worker_idle_time_seconds.record(duration.as_secs_f64());
+    }
+
+    /// Record account storage worker idle time.
+    pub fn record_account_storage_worker_idle_time(&self, duration: Duration) {
+        self.account_storage_worker_idle_time_seconds.record(duration.as_secs_f64());
     }
 }
 

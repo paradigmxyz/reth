@@ -15,7 +15,11 @@ use reth_trie::{
     trie_cursor::TrieCursorFactory,
     ProofTrieNode,
 };
-use std::{rc::Rc, sync::Arc};
+use std::{
+    rc::Rc,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 /// Returned from [`AsyncAccountValueEncoder`], used to track an async storage root calculation.
 pub(crate) enum AsyncAccountDeferredValueEncoder<T, H> {
@@ -26,6 +30,8 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<T, H> {
         proof_result_rx: Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError>,
         /// None if results shouldn't be retained for this dispatched proof.
         storage_proof_results: Option<Rc<RefCell<B256Map<Vec<ProofTrieNode>>>>>,
+        /// Shared accumulator for storage wait time.
+        storage_wait_time: Rc<RefCell<Duration>>,
     },
     /// The storage root was found in cache.
     FromCache { account: Account, root: B256 },
@@ -50,7 +56,9 @@ where
                 account,
                 proof_result_rx,
                 storage_proof_results,
+                storage_wait_time,
             } => {
+                let wait_start = Instant::now();
                 let result = proof_result_rx?
                     .recv()
                     .map_err(|_| {
@@ -59,6 +67,7 @@ where
                         )))
                     })?
                     .result?;
+                *storage_wait_time.borrow_mut() += wait_start.elapsed();
 
                 let StorageProofResult::V2 { root: Some(root), proof } = result else {
                     panic!("StorageProofResult is not V2 with root: {result:?}")
@@ -124,6 +133,8 @@ pub(crate) struct AsyncAccountValueEncoder<T, H> {
     trie_cursor_factory: Rc<T>,
     /// Factory for creating hashed cursors (for synchronous fallback).
     hashed_cursor_factory: Rc<H>,
+    /// Accumulated time spent waiting for storage proof results.
+    storage_wait_time: Rc<RefCell<Duration>>,
 }
 
 impl<T, H> AsyncAccountValueEncoder<T, H> {
@@ -151,24 +162,31 @@ impl<T, H> AsyncAccountValueEncoder<T, H> {
             account_storage_work_tx,
             trie_cursor_factory,
             hashed_cursor_factory,
+            storage_wait_time: Default::default(),
         }
     }
 
-    /// Consume [`Self`] and return all collected storage proofs which had been dispatched.
+    /// Consume [`Self`] and return all collected storage proofs which had been dispatched,
+    /// along with the total time spent waiting for storage proofs.
     ///
     /// # Panics
     ///
     /// This method panics if any deferred encoders produced by [`Self::deferred_encoder`] have not
     /// been dropped.
-    pub(crate) fn into_storage_proofs(
+    pub(crate) fn into_storage_proofs_with_wait_time(
         self,
-    ) -> Result<B256Map<Vec<ProofTrieNode>>, StateProofError> {
+    ) -> Result<(B256Map<Vec<ProofTrieNode>>, Duration), StateProofError> {
         let mut storage_proof_results = Rc::into_inner(self.storage_proof_results)
+            .expect("no deferred encoders are still allocated")
+            .into_inner();
+
+        let mut storage_wait_time = Rc::into_inner(self.storage_wait_time)
             .expect("no deferred encoders are still allocated")
             .into_inner();
 
         // Any remaining dispatched proofs need to have their results collected
         for (hashed_address, rx) in &self.dispatched {
+            let wait_start = Instant::now();
             let result = rx
                 .recv()
                 .map_err(|_| {
@@ -177,6 +195,7 @@ impl<T, H> AsyncAccountValueEncoder<T, H> {
                     )))
                 })?
                 .result?;
+            storage_wait_time += wait_start.elapsed();
 
             let StorageProofResult::V2 { proof, .. } = result else {
                 panic!("StorageProofResult is not V2: {result:?}")
@@ -185,7 +204,7 @@ impl<T, H> AsyncAccountValueEncoder<T, H> {
             storage_proof_results.insert(*hashed_address, proof);
         }
 
-        Ok(storage_proof_results)
+        Ok((storage_proof_results, storage_wait_time))
     }
 }
 
@@ -210,6 +229,7 @@ where
                 account,
                 proof_result_rx: Ok(rx),
                 storage_proof_results: Some(self.storage_proof_results.clone()),
+                storage_wait_time: self.storage_wait_time.clone(),
             }
         }
 
@@ -238,6 +258,7 @@ where
                 account,
                 proof_result_rx: Ok(rx),
                 storage_proof_results: None,
+                storage_wait_time: self.storage_wait_time.clone(),
             },
             Err(crossbeam_channel::TrySendError::Full(_)) => {
                 // Channel is full, fall back to synchronous computation
@@ -257,6 +278,7 @@ where
                         "account storage workers unavailable".to_string(),
                     )),
                     storage_proof_results: None,
+                    storage_wait_time: self.storage_wait_time.clone(),
                 }
             }
         }
