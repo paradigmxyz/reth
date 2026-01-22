@@ -768,6 +768,29 @@ impl RpcServerArgs {
         self.rpc_send_raw_transaction_sync_timeout = timeout;
         self
     }
+
+    /// Returns `true` if the debug RPC namespace is enabled on any transport.
+    ///
+    /// This is used to determine whether to enable runtime log level changes
+    /// via `debug_verbosity` and `debug_vmodule` RPC methods.
+    pub fn debug_namespace_enabled(&self) -> bool {
+        let debug_module = RethRpcModule::Debug;
+
+        // Check HTTP API
+        if self.http_api.as_ref().is_some_and(|api| api.contains(&debug_module)) {
+            return true;
+        }
+
+        // Check WS API
+        if self.ws_api.as_ref().is_some_and(|api| api.contains(&debug_module)) {
+            return true;
+        }
+
+        // IPC is enabled by default unless ipcdisable is true
+        // When IPC is enabled without explicit API config, it uses all standard modules
+        // which includes debug
+        !self.ipcdisable
+    }
 }
 
 impl Default for RpcServerArgs {
