@@ -703,7 +703,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         self.unwind_storage_hashing(changed_storages.iter().copied())?;
 
         // Unwind storage history indices.
-        self.unwind_storage_history_indices(changed_storages.iter().copied())?;
+        self.unwind_storage_history_indices(changed_storages.into_iter())?;
 
         // Unwind accounts/storages trie tables using the revert.
         // Get the database tip block number
