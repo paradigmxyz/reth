@@ -52,8 +52,10 @@ fn load_sharded_history<H: HistoryShardWriter>(
     append_only: bool,
     writer: &mut H,
 ) -> Result<(), StageError> {
-    // Track which prefix (address or address+storage_key) we're currently accumulating
-    let mut current_prefix: Option<<H::TableKey as ShardedHistoryKey>::Prefix> = None;
+    type Prefix<H> = <<H as HistoryShardWriter>::TableKey as ShardedHistoryKey>::Prefix;
+
+    // Option needed to distinguish "no prefix yet" from "processing Address::ZERO"
+    let mut current_prefix: Option<Prefix<H>> = None;
     // Buffer for block numbers; sized for ~2 shards to minimize reallocations
     let mut current_list = Vec::<u64>::with_capacity(NUM_OF_INDICES_IN_SHARD * 2);
 
