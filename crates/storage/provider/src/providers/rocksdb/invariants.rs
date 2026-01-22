@@ -308,7 +308,14 @@ impl RocksDBProvider {
                 Ok(None)
             }
             None => {
-                // Empty RocksDB table, nothing to check.
+                if checkpoint > 0 {
+                    tracing::info!(
+                        target: "reth::providers::rocksdb",
+                        checkpoint,
+                        "StoragesHistory is empty but checkpoint is non-zero; \
+                         treating as first-run/migration (no unwind)"
+                    );
+                }
                 Ok(None)
             }
         }
@@ -340,7 +347,7 @@ impl RocksDBProvider {
                 let filtered: Vec<u64> = value.iter().filter(|&bn| bn <= max_block).collect();
                 if filtered.is_empty() {
                     to_delete.push(key);
-                } else if filtered.len() != value.len() as usize {
+                } else if filtered.len() as u64 != value.len() {
                     to_rewrite.push((key, BlockNumberList::new_pre_sorted(filtered)));
                 }
             } else if highest_block > max_block {
@@ -466,7 +473,14 @@ impl RocksDBProvider {
                 Ok(None)
             }
             None => {
-                // Empty RocksDB table, nothing to check.
+                if checkpoint > 0 {
+                    tracing::info!(
+                        target: "reth::providers::rocksdb",
+                        checkpoint,
+                        "AccountsHistory is empty but checkpoint is non-zero; \
+                         treating as first-run/migration (no unwind)"
+                    );
+                }
                 Ok(None)
             }
         }
@@ -502,7 +516,7 @@ impl RocksDBProvider {
                 let filtered: Vec<u64> = value.iter().filter(|&bn| bn <= max_block).collect();
                 if filtered.is_empty() {
                     to_delete.push(key);
-                } else if filtered.len() != value.len() as usize {
+                } else if filtered.len() as u64 != value.len() {
                     // Some entries were filtered out, rewrite the shard
                     to_rewrite.push((key, BlockNumberList::new_pre_sorted(filtered)));
                 }

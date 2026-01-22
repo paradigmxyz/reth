@@ -3499,6 +3499,11 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
     ///
     /// This ordering ensures that when a reader follows a `RocksDB` history index
     /// to a changeset, the changeset exists in MDBX.
+    ///
+    /// TODO(<https://github.com/paradigmxyz/reth/issues/18983>): When changesets move to static
+    /// files, the order should become: `static_file` → `RocksDB` → MDBX. This matches the data
+    /// dependency chain where `RocksDB` indices reference static file data (e.g., history
+    /// indices will reference changesets in static files, tx hash lookups reference txs).
     fn commit(self) -> ProviderResult<()> {
         // For unwinding it makes more sense to commit the database first, since if
         // it is interrupted before the static files commit, we can just

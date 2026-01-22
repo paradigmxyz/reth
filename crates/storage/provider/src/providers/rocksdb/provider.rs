@@ -1091,7 +1091,7 @@ impl RocksDBProvider {
     fn write_account_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
-        _ctx: &RocksDBWriteCtx,
+        ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut local: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
         for block in blocks {
@@ -1107,7 +1107,7 @@ impl RocksDBProvider {
             }
         }
 
-        let mut pending = _ctx.pending_history.lock();
+        let mut pending = ctx.pending_history.lock();
         for (address, mut indices) in local {
             pending.accounts.entry(address).or_default().append(&mut indices);
         }
@@ -1165,16 +1165,50 @@ impl RocksDBProvider {
 
         // Write account history shards
         for (address, mut indices) in history.accounts {
-            // Sort and dedup in case of duplicate block numbers from multiple save_blocks calls
+            let before = indices.len();
             indices.sort_unstable();
             indices.dedup();
+            let after = indices.len();
+
+            if after != before {
+                tracing::warn!(
+                    target: "reth::providers::rocksdb",
+                    ?address,
+                    removed = before - after,
+                    remaining = after,
+                    "duplicate account history indices detected; dedup applied"
+                );
+                debug_assert_eq!(
+                    before, after,
+                    "duplicate account history indices for {address:?}"
+                );
+            }
+
             batch.append_account_history_shard(address, indices)?;
         }
 
         // Write storage history shards
         for ((address, slot), mut indices) in history.storages {
+            let before = indices.len();
             indices.sort_unstable();
             indices.dedup();
+            let after = indices.len();
+
+            if after != before {
+                tracing::warn!(
+                    target: "reth::providers::rocksdb",
+                    ?address,
+                    ?slot,
+                    removed = before - after,
+                    remaining = after,
+                    "duplicate storage history indices detected; dedup applied"
+                );
+                debug_assert_eq!(
+                    before, after,
+                    "duplicate storage history indices for {address:?}:{slot:?}"
+                );
+            }
+
             batch.append_storage_history_shard(address, slot, indices)?;
         }
 
