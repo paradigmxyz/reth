@@ -87,7 +87,9 @@ fn txpool_batch_insertion(c: &mut Criterion) {
                     let rt = tokio::runtime::Runtime::new().unwrap();
                     let pool = testing_pool();
                     let txs = generate_transactions(tx_count, sender_count);
-                    let (processor, request_tx) = BatchTxProcessor::new(pool, tx_count);
+                    let config =
+                        reth_transaction_pool::BatchConfig::default().with_max_batch_size(tx_count);
+                    let (processor, request_tx) = BatchTxProcessor::new(pool, config);
                     let processor_handle = rt.spawn(processor);
 
                     let mut batch_requests = Vec::with_capacity(tx_count);
@@ -105,7 +107,7 @@ fn txpool_batch_insertion(c: &mut Criterion) {
                     rt.block_on(async {
                         // Send all transactions
                         for request in batch_requests {
-                            request_tx.send(request).unwrap();
+                            request_tx.try_send(request).unwrap();
                         }
 
                         for response_rx in response_futures {

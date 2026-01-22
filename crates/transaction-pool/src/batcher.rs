@@ -14,7 +14,58 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 
-/// A single batch transaction request
+/// Default capacity for the transaction batch request channel.
+///
+/// This bounds the number of pending batch requests to prevent unbounded memory growth
+/// under denial-of-service attacks where malicious users blast large transactions and quickly
+/// cancel requests. The value of 2048 provides enough headroom for burst scenarios while ensuring
+/// backpressure is applied before memory usage becomes problematic.
+pub const DEFAULT_BATCH_CHANNEL_CAPACITY: usize = 2048;
+
+/// Default maximum batch size for processing transactions.
+pub const DEFAULT_MAX_BATCH_SIZE: usize = 1000;
+
+/// Configuration for the transaction batch processor.
+#[derive(Debug, Clone, Copy)]
+pub struct BatchConfig {
+    /// Maximum number of transactions to process in a single batch.
+    pub max_batch_size: usize,
+    /// Capacity of the bounded channel for pending batch requests.
+    ///
+    /// This limits memory usage and provides backpressure under high load.
+    pub channel_capacity: usize,
+}
+
+impl Default for BatchConfig {
+    fn default() -> Self {
+        Self {
+            max_batch_size: DEFAULT_MAX_BATCH_SIZE,
+            channel_capacity: DEFAULT_BATCH_CHANNEL_CAPACITY,
+        }
+    }
+}
+
+impl BatchConfig {
+    /// Creates a new batch configuration with the given settings.
+    pub const fn new(max_batch_size: usize, channel_capacity: usize) -> Self {
+        Self { max_batch_size, channel_capacity }
+    }
+
+    /// Sets the maximum batch size.
+    pub const fn with_max_batch_size(mut self, max_batch_size: usize) -> Self {
+        self.max_batch_size = max_batch_size;
+        self
+    }
+
+    /// Sets the channel capacity.
+    pub const fn with_channel_capacity(mut self, channel_capacity: usize) -> Self {
+        self.channel_capacity = channel_capacity;
+        self
+    }
+}
+
+/// A single batch transaction request.
+///
 /// All transactions processed through the batcher are considered local
 /// transactions (`TransactionOrigin::Local`) when inserted into the pool.
 #[derive(Debug)]
@@ -46,21 +97,26 @@ pub struct BatchTxProcessor<Pool: TransactionPool> {
     max_batch_size: usize,
     buf: Vec<BatchTxRequest<Pool::Transaction>>,
     #[pin]
-    request_rx: mpsc::UnboundedReceiver<BatchTxRequest<Pool::Transaction>>,
+    request_rx: mpsc::Receiver<BatchTxRequest<Pool::Transaction>>,
 }
 
 impl<Pool> BatchTxProcessor<Pool>
 where
     Pool: TransactionPool + 'static,
 {
-    /// Create a new `BatchTxProcessor`
+    /// Create a new `BatchTxProcessor` with the given configuration.
     pub fn new(
         pool: Pool,
-        max_batch_size: usize,
-    ) -> (Self, mpsc::UnboundedSender<BatchTxRequest<Pool::Transaction>>) {
-        let (request_tx, request_rx) = mpsc::unbounded_channel();
+        config: BatchConfig,
+    ) -> (Self, mpsc::Sender<BatchTxRequest<Pool::Transaction>>) {
+        let (request_tx, request_rx) = mpsc::channel(config.channel_capacity);
 
-        let processor = Self { pool, max_batch_size, buf: Vec::with_capacity(1), request_rx };
+        let processor = Self {
+            pool,
+            max_batch_size: config.max_batch_size,
+            buf: Vec::with_capacity(1),
+            request_rx,
+        };
 
         (processor, request_tx)
     }
@@ -100,7 +156,12 @@ where
 
         loop {
             // Drain all available requests from the receiver
-            ready!(this.request_rx.poll_recv_many(cx, this.buf, *this.max_batch_size));
+            let n = ready!(this.request_rx.poll_recv_many(cx, this.buf, *this.max_batch_size));
+
+            // Channel closed and no remaining items - shutdown gracefully
+            if n == 0 && this.buf.is_empty() {
+                return Poll::Ready(());
+            }
 
             if !this.buf.is_empty() {
                 let batch = std::mem::take(this.buf);
@@ -109,12 +170,7 @@ where
                     Self::process_batch(&pool, batch).await;
                 });
                 this.buf.reserve(1);
-
-                continue;
             }
-
-            // No requests available, return Pending to wait for more
-            return Poll::Pending;
         }
     }
 }
@@ -156,7 +212,8 @@ mod tests {
     #[tokio::test]
     async fn test_batch_processor() {
         let pool = testing_pool();
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000);
+        let config = BatchConfig::default().with_max_batch_size(1000);
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
 
         // Spawn the processor
         let handle = tokio::spawn(processor);
@@ -167,7 +224,9 @@ mod tests {
             let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-            request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("Could not send batch tx");
+            request_tx
+                .try_send(BatchTxRequest::new(tx, response_tx))
+                .expect("Could not send batch tx");
             responses.push(response_rx);
         }
 
@@ -188,7 +247,8 @@ mod tests {
     #[tokio::test]
     async fn test_add_transaction() {
         let pool = testing_pool();
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000);
+        let config = BatchConfig::default().with_max_batch_size(1000);
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
 
         // Spawn the processor
         let handle = tokio::spawn(processor);
@@ -198,7 +258,7 @@ mod tests {
             let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
             let request = BatchTxRequest::new(tx, response_tx);
-            request_tx.send(request).expect("Could not send batch tx");
+            request_tx.try_send(request).expect("Could not send batch tx");
             results.push(response_rx);
         }
 
@@ -216,7 +276,8 @@ mod tests {
     async fn test_max_batch_size() {
         let pool = testing_pool();
         let max_batch_size = 10;
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), max_batch_size);
+        let config = BatchConfig::default().with_max_batch_size(max_batch_size);
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
 
         // Spawn batch processor with threshold
         let handle = tokio::spawn(processor);
@@ -229,7 +290,7 @@ mod tests {
             let request_tx_clone = request_tx.clone();
 
             let tx_fut = async move {
-                request_tx_clone.send(request).expect("Could not send batch tx");
+                request_tx_clone.try_send(request).expect("Could not send batch tx");
                 response_rx.await.expect("Could not receive batch response")
             };
             futures.push(tx_fut);
