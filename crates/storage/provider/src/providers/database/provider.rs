@@ -40,7 +40,7 @@ use reth_db_api::{
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
-        ShardedKey, StorageSettings, StoredBlockBodyIndices,
+        ShardedKey, StorageBeforeTx, StorageSettings, StoredBlockBodyIndices,
     },
     table::Table,
     tables,
@@ -3573,7 +3573,7 @@ mod tests {
     use alloy_primitives::map::B256Map;
     use reth_ethereum_primitives::Receipt;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
-    use reth_trie::Nibbles;
+    use reth_trie::{Nibbles, StoredNibblesSubKey};
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {
