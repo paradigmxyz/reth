@@ -363,6 +363,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             .with_receipts_in_static_files(self.static_files.receipts)
             .with_transaction_senders_in_static_files(self.static_files.transaction_senders)
             .with_account_changesets_in_static_files(self.static_files.account_changesets)
+            .with_storage_changesets_in_static_files(self.static_files.storage_changesets)
             .with_transaction_hash_numbers_in_rocksdb(self.rocksdb.all || self.rocksdb.tx_hash)
             .with_storages_history_in_rocksdb(self.rocksdb.all || self.rocksdb.storages_history)
             .with_account_history_in_rocksdb(self.rocksdb.all || self.rocksdb.account_history)
