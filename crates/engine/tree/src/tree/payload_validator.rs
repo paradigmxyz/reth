@@ -7,10 +7,10 @@ use crate::tree::{
     payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
-    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
-    StateProviderDatabase, TreeConfig,
+    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, MeteredStateHook, PayloadHandle,
+    StateProviderBuilder, StateProviderDatabase, TreeConfig,
 };
-use alloy_consensus::transaction::Either;
+use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
@@ -39,9 +39,9 @@ use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader,
+    StateProviderFactory, StateReader, StorageChangeSetReader,
 };
-use reth_revm::db::State;
+use reth_revm::db::{states::bundle_state::BundleRetention, State};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
@@ -144,6 +144,7 @@ where
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
+                          + StorageChangeSetReader
                           + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
@@ -479,11 +480,15 @@ where
         let block = self.convert_to_block(input)?.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
-        let receipt_root_bloom = Some(
-            receipt_root_rx
-                .blocking_recv()
-                .expect("receipt root task dropped sender without result"),
-        );
+        let receipt_root_bloom = receipt_root_rx
+            .blocking_recv()
+            .inspect_err(|_| {
+                tracing::error!(
+                    target: "engine::tree::payload_validator",
+                    "Receipt root task dropped sender without result, receipt root calculation likely aborted"
+                );
+            })
+            .ok();
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
@@ -638,7 +643,13 @@ where
         Ok(())
     }
 
-    /// Executes a block with the given state provider
+    /// Executes a block with the given state provider.
+    ///
+    /// This method orchestrates block execution:
+    /// 1. Sets up the EVM with state database and precompile caching
+    /// 2. Spawns a background task for incremental receipt root computation
+    /// 3. Executes transactions with metrics collection via state hooks
+    /// 4. Merges state transitions and records execution metrics
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
     fn execute_block<S, Err, T>(
@@ -701,29 +712,115 @@ where
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
         self.payload_processor.executor().spawn_blocking(move || task_handle.run(receipts_len));
 
+        // Wrap the state hook with metrics collection
+        let inner_hook = Box::new(handle.state_hook());
+        let state_hook =
+            MeteredStateHook { metrics: self.metrics.executor_metrics().clone(), inner_hook };
+
+        let transaction_count = input.transaction_count();
+        let executor = executor.with_state_hook(Some(Box::new(state_hook)));
+
         let execution_start = Instant::now();
-        let state_hook = Box::new(handle.state_hook());
-        let (output, senders) = self.metrics.execute_metered(
+
+        // Execute all transactions and finalize
+        let (executor, senders) = self.execute_transactions(
             executor,
-            handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
-            input.transaction_count(),
-            state_hook,
-            |receipts| {
-                // Send the latest receipt to the background task for incremental root computation.
-                // The receipt is cloned here; encoding happens in the background thread.
-                if let Some(receipt) = receipts.last() {
-                    // Infer tx_index from the number of receipts collected so far
-                    let tx_index = receipts.len() - 1;
-                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
-                }
-            },
+            transaction_count,
+            handle.iter_transactions(),
+            &receipt_tx,
         )?;
         drop(receipt_tx);
 
-        let execution_finish = Instant::now();
-        let execution_time = execution_finish.duration_since(execution_start);
-        debug!(target: "engine::tree::payload_validator", elapsed = ?execution_time, "Executed block");
+        // Finish execution and get the result
+        let post_exec_start = Instant::now();
+        let (_evm, result) = debug_span!(target: "engine::tree", "finish")
+            .in_scope(|| executor.finish())
+            .map(|(evm, result)| (evm.into_db(), result))?;
+        self.metrics.record_post_execution(post_exec_start.elapsed());
+
+        // Merge transitions into bundle state
+        debug_span!(target: "engine::tree", "merge transitions")
+            .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
+
+        let output = BlockExecutionOutput { result, state: db.take_bundle() };
+
+        let execution_duration = execution_start.elapsed();
+        self.metrics.record_block_execution(&output, execution_duration);
+
+        debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
         Ok((output, senders, result_rx))
+    }
+
+    /// Executes transactions and collects senders, streaming receipts to a background task.
+    ///
+    /// This method handles:
+    /// - Applying pre-execution changes (e.g., beacon root updates)
+    /// - Executing each transaction with timing metrics
+    /// - Streaming receipts to the receipt root computation task
+    /// - Collecting transaction senders for later use
+    ///
+    /// Returns the executor (for finalization) and the collected senders.
+    fn execute_transactions<E, Tx, InnerTx, Err>(
+        &self,
+        mut executor: E,
+        transaction_count: usize,
+        transactions: impl Iterator<Item = Result<Tx, Err>>,
+        receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+    ) -> Result<(E, Vec<Address>), BlockExecutionError>
+    where
+        E: BlockExecutor<Receipt = N::Receipt>,
+        Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
+        InnerTx: TxHashRef,
+        Err: core::error::Error + Send + Sync + 'static,
+    {
+        let mut senders = Vec::with_capacity(transaction_count);
+
+        // Apply pre-execution changes (e.g., beacon root update)
+        let pre_exec_start = Instant::now();
+        debug_span!(target: "engine::tree", "pre execution")
+            .in_scope(|| executor.apply_pre_execution_changes())?;
+        self.metrics.record_pre_execution(pre_exec_start.elapsed());
+
+        // Execute transactions
+        let exec_span = debug_span!(target: "engine::tree", "execution").entered();
+        let mut transactions = transactions.into_iter();
+        loop {
+            // Measure time spent waiting for next transaction from iterator
+            // (e.g., parallel signature recovery)
+            let wait_start = Instant::now();
+            let Some(tx_result) = transactions.next() else { break };
+            self.metrics.record_transaction_wait(wait_start.elapsed());
+
+            let tx = tx_result.map_err(BlockExecutionError::other)?;
+            let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
+            let tx_hash = <Tx as alloy_evm::RecoveredTx<InnerTx>>::tx(&tx).tx_hash();
+
+            senders.push(tx_signer);
+
+            let span = debug_span!(
+                target: "engine::tree",
+                "execute tx",
+                ?tx_hash,
+                gas_used = tracing::field::Empty,
+            );
+            let enter = span.entered();
+            trace!(target: "engine::tree", "Executing transaction");
+
+            let tx_start = Instant::now();
+            let gas_used = executor.execute_transaction(tx)?;
+            self.metrics.record_transaction_execution(tx_start.elapsed());
+
+            // Send the latest receipt to the background task for incremental root computation
+            if let Some(receipt) = executor.receipts().last() {
+                let tx_index = executor.receipts().len() - 1;
+                let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+            }
+
+            enter.record("gas_used", gas_used);
+        }
+        drop(exec_span);
+
+        Ok((executor, senders))
     }
 
     /// Compute state root for the given hashed post state in parallel.
@@ -1240,6 +1337,7 @@ where
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
+                          + StorageChangeSetReader
                           + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory

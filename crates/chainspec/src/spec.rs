@@ -283,6 +283,7 @@ pub fn create_chain_config(
     // Check if DAO fork is supported (it has an activation block)
     let dao_fork_support = hardforks.fork(EthereumHardfork::Dao) != ForkCondition::Never;
 
+    #[allow(clippy::needless_update)]
     ChainConfig {
         chain_id: chain.map(|c| c.id()).unwrap_or(0),
         homestead_block: block_num(EthereumHardfork::Homestead),
@@ -318,6 +319,7 @@ pub fn create_chain_config(
         extra_fields: Default::default(),
         deposit_contract_address,
         blob_schedule,
+        ..Default::default()
     }
 }
 

@@ -22,12 +22,42 @@ use reth_primitives_traits::constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIM
 use std::{path::PathBuf, time::Instant};
 use tracing::info;
 
+/// Parses a gas limit value with optional suffix: K for thousand, M for million, G for billion.
+///
+/// Examples: "30000000", "30M", "1G", "2G"
+fn parse_gas_limit(s: &str) -> eyre::Result<u64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(eyre::eyre!("empty value"));
+    }
+
+    let (num_str, multiplier) = if let Some(prefix) = s.strip_suffix(['G', 'g']) {
+        (prefix, 1_000_000_000u64)
+    } else if let Some(prefix) = s.strip_suffix(['M', 'm']) {
+        (prefix, 1_000_000u64)
+    } else if let Some(prefix) = s.strip_suffix(['K', 'k']) {
+        (prefix, 1_000u64)
+    } else {
+        (s, 1u64)
+    };
+
+    let base: u64 = num_str.trim().parse()?;
+    base.checked_mul(multiplier).ok_or_else(|| eyre::eyre!("value overflow"))
+}
+
 /// `reth benchmark gas-limit-ramp` command.
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// Number of blocks to generate.
-    #[arg(long, value_name = "BLOCKS")]
-    blocks: u64,
+    /// Number of blocks to generate. Mutually exclusive with --target-gas-limit.
+    #[arg(long, value_name = "BLOCKS", conflicts_with = "target_gas_limit")]
+    blocks: Option<u64>,
+
+    /// Target gas limit to ramp up to. The benchmark will generate blocks until the gas limit
+    /// reaches or exceeds this value. Mutually exclusive with --blocks.
+    /// Accepts short notation: K for thousand, M for million, G for billion (e.g., 2G = 2
+    /// billion).
+    #[arg(long, value_name = "TARGET_GAS_LIMIT", conflicts_with = "blocks", value_parser = parse_gas_limit)]
+    target_gas_limit: Option<u64>,
 
     /// The Engine API RPC URL.
     #[arg(long = "engine-rpc-url", value_name = "ENGINE_RPC_URL")]
@@ -42,12 +72,37 @@ pub struct Command {
     output: PathBuf,
 }
 
+/// Mode for determining when to stop ramping.
+#[derive(Debug, Clone, Copy)]
+enum RampMode {
+    /// Ramp for a fixed number of blocks.
+    Blocks(u64),
+    /// Ramp until reaching or exceeding target gas limit.
+    TargetGasLimit(u64),
+}
+
 impl Command {
     /// Execute `benchmark gas-limit-ramp` command.
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        if self.blocks == 0 {
-            return Err(eyre::eyre!("--blocks must be greater than 0"));
-        }
+        let mode = match (self.blocks, self.target_gas_limit) {
+            (Some(blocks), None) => {
+                if blocks == 0 {
+                    return Err(eyre::eyre!("--blocks must be greater than 0"));
+                }
+                RampMode::Blocks(blocks)
+            }
+            (None, Some(target)) => {
+                if target == 0 {
+                    return Err(eyre::eyre!("--target-gas-limit must be greater than 0"));
+                }
+                RampMode::TargetGasLimit(target)
+            }
+            _ => {
+                return Err(eyre::eyre!(
+                    "Exactly one of --blocks or --target-gas-limit must be specified"
+                ));
+            }
+        };
 
         // Ensure output directory exists
         if self.output.is_file() {
@@ -84,14 +139,31 @@ impl Command {
 
         let canonical_parent = parent_header.number;
         let start_block = canonical_parent + 1;
-        let end_block = start_block + self.blocks - 1;
 
-        info!(canonical_parent, start_block, end_block, "Starting gas limit ramp benchmark");
+        match mode {
+            RampMode::Blocks(blocks) => {
+                info!(
+                    canonical_parent,
+                    start_block,
+                    end_block = start_block + blocks - 1,
+                    "Starting gas limit ramp benchmark (block count mode)"
+                );
+            }
+            RampMode::TargetGasLimit(target) => {
+                info!(
+                    canonical_parent,
+                    start_block,
+                    current_gas_limit = parent_header.gas_limit,
+                    target_gas_limit = target,
+                    "Starting gas limit ramp benchmark (target gas limit mode)"
+                );
+            }
+        }
 
-        let mut next_block_number = start_block;
+        let mut blocks_processed = 0u64;
         let total_benchmark_duration = Instant::now();
 
-        while next_block_number <= end_block {
+        while !should_stop(mode, blocks_processed, parent_header.gas_limit) {
             let timestamp = parent_header.timestamp.saturating_add(1);
 
             let request = prepare_payload_request(&chain_spec, timestamp, parent_hash);
@@ -140,13 +212,13 @@ impl Command {
 
             parent_header = block.header;
             parent_hash = block_hash;
-            next_block_number += 1;
+            blocks_processed += 1;
         }
 
         let final_gas_limit = parent_header.gas_limit;
         info!(
             total_duration=?total_benchmark_duration.elapsed(),
-            blocks_processed = self.blocks,
+            blocks_processed,
             final_gas_limit,
             "Benchmark complete"
         );
@@ -157,4 +229,58 @@ impl Command {
 
 const fn max_gas_limit_increase(parent_gas_limit: u64) -> u64 {
     (parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR).saturating_sub(1)
+}
+
+const fn should_stop(mode: RampMode, blocks_processed: u64, current_gas_limit: u64) -> bool {
+    match mode {
+        RampMode::Blocks(target_blocks) => blocks_processed >= target_blocks,
+        RampMode::TargetGasLimit(target) => current_gas_limit >= target,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_gas_limit_plain_number() {
+        assert_eq!(parse_gas_limit("30000000").unwrap(), 30_000_000);
+        assert_eq!(parse_gas_limit("1").unwrap(), 1);
+        assert_eq!(parse_gas_limit("0").unwrap(), 0);
+    }
+
+    #[test]
+    fn test_parse_gas_limit_k_suffix() {
+        assert_eq!(parse_gas_limit("1K").unwrap(), 1_000);
+        assert_eq!(parse_gas_limit("30k").unwrap(), 30_000);
+        assert_eq!(parse_gas_limit("100K").unwrap(), 100_000);
+    }
+
+    #[test]
+    fn test_parse_gas_limit_m_suffix() {
+        assert_eq!(parse_gas_limit("1M").unwrap(), 1_000_000);
+        assert_eq!(parse_gas_limit("30m").unwrap(), 30_000_000);
+        assert_eq!(parse_gas_limit("100M").unwrap(), 100_000_000);
+    }
+
+    #[test]
+    fn test_parse_gas_limit_g_suffix() {
+        assert_eq!(parse_gas_limit("1G").unwrap(), 1_000_000_000);
+        assert_eq!(parse_gas_limit("2g").unwrap(), 2_000_000_000);
+        assert_eq!(parse_gas_limit("10G").unwrap(), 10_000_000_000);
+    }
+
+    #[test]
+    fn test_parse_gas_limit_with_whitespace() {
+        assert_eq!(parse_gas_limit(" 1G ").unwrap(), 1_000_000_000);
+        assert_eq!(parse_gas_limit("2 M").unwrap(), 2_000_000);
+    }
+
+    #[test]
+    fn test_parse_gas_limit_errors() {
+        assert!(parse_gas_limit("").is_err());
+        assert!(parse_gas_limit("abc").is_err());
+        assert!(parse_gas_limit("G").is_err());
+        assert!(parse_gas_limit("-1G").is_err());
+    }
 }

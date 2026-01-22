@@ -1,11 +1,13 @@
-use super::metrics::{RocksDBMetrics, RocksDBOperation};
+use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
 use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
 use itertools::Itertools;
+use metrics::Label;
 use parking_lot::Mutex;
 use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
+    database_metrics::DatabaseMetrics,
     models::{
         sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
         StorageSettings,
@@ -37,6 +39,23 @@ use tracing::instrument;
 
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
+
+/// Statistics for a single `RocksDB` table (column family).
+#[derive(Debug, Clone)]
+pub struct RocksDBTableStats {
+    /// Size of SST files on disk in bytes.
+    pub sst_size_bytes: u64,
+    /// Size of memtables in memory in bytes.
+    pub memtable_size_bytes: u64,
+    /// Name of the table/column family.
+    pub name: String,
+    /// Estimated number of keys in the table.
+    pub estimated_num_keys: u64,
+    /// Estimated size of live data in bytes (SST files + memtables).
+    pub estimated_size_bytes: u64,
+    /// Estimated bytes pending compaction (reclaimable space).
+    pub pending_compaction_bytes: u64,
+}
 
 /// Context for `RocksDB` block writes.
 #[derive(Clone)]
@@ -74,13 +93,17 @@ const DEFAULT_MAX_BACKGROUND_JOBS: i32 = 6;
 /// Default bytes per sync for `RocksDB` WAL writes (1 MB).
 const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 
-/// Default bloom filter bits per key (~1% false positive rate).
-const DEFAULT_BLOOM_FILTER_BITS: f64 = 10.0;
-
 /// Default buffer capacity for compression in batches.
 /// 4 KiB matches common block/page sizes and comfortably holds typical history values,
 /// reducing the first few reallocations without over-allocating.
 const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
+
+/// Default auto-commit threshold for batch writes (4 GiB).
+///
+/// When a batch exceeds this size, it is automatically committed to prevent OOM
+/// during large bulk writes. The consistency check on startup heals any crash
+/// that occurs between auto-commits.
+const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 4 * 1024 * 1024 * 1024;
 
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
@@ -126,11 +149,6 @@ impl RocksDBBuilder {
         table_options.set_pin_l0_filter_and_index_blocks_in_cache(true);
         // Shared block cache for all column families.
         table_options.set_block_cache(cache);
-        // Bloom filter: 10 bits/key = ~1% false positive rate, full filter for better read
-        // performance. this setting is good trade off a little bit of memory for better
-        // point lookup performance. see https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#configuration-basics
-        table_options.set_bloom_filter(DEFAULT_BLOOM_FILTER_BITS, false);
-        table_options.set_optimize_filters_for_memory(true);
         table_options
     }
 
@@ -178,6 +196,32 @@ impl RocksDBBuilder {
         cf_options.set_bottommost_compression_type(DBCompressionType::Zstd);
         // Only use Zstd compression, disable dictionary training
         cf_options.set_bottommost_zstd_max_train_bytes(0, true);
+
+        cf_options
+    }
+
+    /// Creates optimized column family options for `TransactionHashNumbers`.
+    ///
+    /// This table stores `B256 -> TxNumber` mappings where:
+    /// - Keys are incompressible 32-byte hashes (compression wastes CPU for zero benefit)
+    /// - Values are varint-encoded `u64` (a few bytes - too small to benefit from compression)
+    /// - Every lookup expects a hit (bloom filters only help when checking non-existent keys)
+    fn tx_hash_numbers_column_family_options(cache: &Cache) -> Options {
+        let mut table_options = BlockBasedOptions::default();
+        table_options.set_block_size(DEFAULT_BLOCK_SIZE);
+        table_options.set_cache_index_and_filter_blocks(true);
+        table_options.set_pin_l0_filter_and_index_blocks_in_cache(true);
+        table_options.set_block_cache(cache);
+        // Disable bloom filter: every lookup expects a hit, so bloom filters provide no benefit
+        // and waste memory
+
+        let mut cf_options = Options::default();
+        cf_options.set_block_based_table_factory(&table_options);
+        cf_options.set_level_compaction_dynamic_level_bytes(true);
+        // Disable compression: B256 keys are incompressible hashes, TxNumber values are
+        // varint-encoded u64 (a few bytes). Compression wastes CPU cycles for zero space savings.
+        cf_options.set_compression_type(DBCompressionType::None);
+        cf_options.set_bottommost_compression_type(DBCompressionType::None);
 
         cf_options
     }
@@ -243,10 +287,12 @@ impl RocksDBBuilder {
             .column_families
             .iter()
             .map(|name| {
-                ColumnFamilyDescriptor::new(
-                    name.clone(),
-                    Self::default_column_family_options(&self.block_cache),
-                )
+                let cf_options = if name == tables::TransactionHashNumbers::NAME {
+                    Self::tx_hash_numbers_column_family_options(&self.block_cache)
+                } else {
+                    Self::default_column_family_options(&self.block_cache)
+                };
+                ColumnFamilyDescriptor::new(name.clone(), cf_options)
             })
             .collect();
 
@@ -405,6 +451,65 @@ impl RocksDBProviderInner {
             Self::ReadOnly { db, .. } => RocksDBIterEnum::ReadOnly(db.iterator_cf(cf, mode)),
         }
     }
+
+    /// Returns statistics for all column families in the database.
+    fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        let mut stats = Vec::new();
+
+        macro_rules! collect_stats {
+            ($db:expr) => {
+                for cf_name in ROCKSDB_TABLES {
+                    if let Some(cf) = $db.cf_handle(cf_name) {
+                        let estimated_num_keys = $db
+                            .property_int_value_cf(cf, rocksdb::properties::ESTIMATE_NUM_KEYS)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        // SST files size (on-disk) + memtable size (in-memory)
+                        let sst_size = $db
+                            .property_int_value_cf(cf, rocksdb::properties::LIVE_SST_FILES_SIZE)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        let memtable_size = $db
+                            .property_int_value_cf(cf, rocksdb::properties::SIZE_ALL_MEM_TABLES)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        let estimated_size_bytes = sst_size + memtable_size;
+
+                        let pending_compaction_bytes = $db
+                            .property_int_value_cf(
+                                cf,
+                                rocksdb::properties::ESTIMATE_PENDING_COMPACTION_BYTES,
+                            )
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        stats.push(RocksDBTableStats {
+                            sst_size_bytes: sst_size,
+                            memtable_size_bytes: memtable_size,
+                            name: cf_name.to_string(),
+                            estimated_num_keys,
+                            estimated_size_bytes,
+                            pending_compaction_bytes,
+                        });
+                    }
+                }
+            };
+        }
+
+        match self {
+            Self::ReadWrite { db, .. } => collect_stats!(db),
+            Self::ReadOnly { db, .. } => collect_stats!(db),
+        }
+
+        stats
+    }
 }
 
 impl fmt::Debug for RocksDBProviderInner {
@@ -431,10 +536,14 @@ impl Drop for RocksDBProviderInner {
                 // Flush all memtables if possible. If not, they will be rebuilt from the WAL on
                 // restart
                 if let Err(e) = db.flush_wal(true) {
-                    tracing::warn!(target: "storage::rocksdb", ?e, "Failed to flush WAL on drop");
+                    tracing::warn!(target: "providers::rocksdb", ?e, "Failed to flush WAL on drop");
                 }
-                if let Err(e) = db.flush() {
-                    tracing::warn!(target: "storage::rocksdb", ?e, "Failed to flush memtables on drop");
+                for cf_name in ROCKSDB_TABLES {
+                    if let Some(cf) = db.cf_handle(cf_name) &&
+                        let Err(e) = db.flush_cf(&cf)
+                    {
+                        tracing::warn!(target: "providers::rocksdb", cf = cf_name, ?e, "Failed to flush CF on drop");
+                    }
                 }
                 db.cancel_all_background_work(true);
             }
@@ -446,6 +555,42 @@ impl Drop for RocksDBProviderInner {
 impl Clone for RocksDBProvider {
     fn clone(&self) -> Self {
         Self(self.0.clone())
+    }
+}
+
+impl DatabaseMetrics for RocksDBProvider {
+    fn gauge_metrics(&self) -> Vec<(&'static str, f64, Vec<Label>)> {
+        let mut metrics = Vec::new();
+
+        for stat in self.table_stats() {
+            metrics.push((
+                "rocksdb.table_size",
+                stat.estimated_size_bytes as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.table_entries",
+                stat.estimated_num_keys as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.pending_compaction_bytes",
+                stat.pending_compaction_bytes as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.sst_size",
+                stat.sst_size_bytes as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.memtable_size",
+                stat.memtable_size_bytes as f64,
+                vec![Label::new("table", stat.name)],
+            ));
+        }
+
+        metrics
     }
 }
 
@@ -491,6 +636,21 @@ impl RocksDBProvider {
             provider: self,
             inner: WriteBatchWithTransaction::<true>::default(),
             buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+            auto_commit_threshold: None,
+        }
+    }
+
+    /// Creates a new batch with auto-commit enabled.
+    ///
+    /// When the batch size exceeds the threshold (4 GiB), the batch is automatically
+    /// committed and reset. This prevents OOM during large bulk writes while maintaining
+    /// crash-safety via the consistency check on startup.
+    pub fn batch_with_auto_commit(&self) -> RocksDBBatch<'_> {
+        RocksDBBatch {
+            provider: self,
+            inner: WriteBatchWithTransaction::<true>::default(),
+            buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+            auto_commit_threshold: Some(DEFAULT_AUTO_COMMIT_THRESHOLD),
         }
     }
 
@@ -666,6 +826,13 @@ impl RocksDBProvider {
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
     }
 
+    /// Returns statistics for all column families in the database.
+    ///
+    /// Returns a vector of (`table_name`, `estimated_keys`, `estimated_size_bytes`) tuples.
+    pub fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        self.0.table_stats()
+    }
+
     /// Creates a raw iterator over all entries in the specified table.
     ///
     /// Returns raw `(key_bytes, value_bytes)` pairs without decoding.
@@ -727,6 +894,52 @@ impl RocksDBProvider {
         Ok(result)
     }
 
+    /// Returns all storage history shards for the given `(address, storage_key)` pair.
+    ///
+    /// Iterates through all shards in ascending `highest_block_number` order until
+    /// a different `(address, storage_key)` is encountered.
+    pub fn storage_history_shards(
+        &self,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
+        let cf = self.get_cf_handle::<tables::StoragesHistory>()?;
+
+        let start_key = StorageShardedKey::new(address, storage_key, 0u64);
+        let start_bytes = start_key.encode();
+
+        let iter = self
+            .0
+            .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
+
+        let mut result = Vec::new();
+        for item in iter {
+            match item {
+                Ok((key_bytes, value_bytes)) => {
+                    let key = StorageShardedKey::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                    if key.address != address || key.sharded_key.key != storage_key {
+                        break;
+                    }
+
+                    let value = BlockNumberList::decompress(&value_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                    result.push((key, value));
+                }
+                Err(e) => {
+                    return Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })));
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
     /// Unwinds account history indices for the given `(address, block_number)` pairs.
     ///
     /// Groups addresses by their minimum block number and calls the appropriate unwind
@@ -734,6 +947,7 @@ impl RocksDBProvider {
     /// (i.e., removes the minimum block and all higher blocks).
     ///
     /// Returns a `WriteBatchWithTransaction` that can be committed later.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn unwind_account_history_indices(
         &self,
         last_indices: &[(Address, BlockNumber)],
@@ -758,7 +972,39 @@ impl RocksDBProvider {
         Ok(batch.into_inner())
     }
 
+    /// Unwinds storage history indices for the given `(address, storage_key, block_number)` tuples.
+    ///
+    /// Groups by `(address, storage_key)` and finds the minimum block number for each.
+    /// For each key, keeps only blocks less than the minimum block
+    /// (i.e., removes the minimum block and all higher blocks).
+    ///
+    /// Returns a `WriteBatchWithTransaction` that can be committed later.
+    pub fn unwind_storage_history_indices(
+        &self,
+        storage_changesets: &[(Address, B256, BlockNumber)],
+    ) -> ProviderResult<WriteBatchWithTransaction<true>> {
+        let mut key_min_block: HashMap<(Address, B256), BlockNumber> =
+            HashMap::with_capacity_and_hasher(storage_changesets.len(), Default::default());
+        for &(address, storage_key, block_number) in storage_changesets {
+            key_min_block
+                .entry((address, storage_key))
+                .and_modify(|min| *min = (*min).min(block_number))
+                .or_insert(block_number);
+        }
+
+        let mut batch = self.batch();
+        for ((address, storage_key), min_block) in key_min_block {
+            match min_block.checked_sub(1) {
+                Some(keep_to) => batch.unwind_storage_history_to(address, storage_key, keep_to)?,
+                None => batch.clear_storage_history(address, storage_key)?,
+            }
+        }
+
+        Ok(batch.into_inner())
+    }
+
     /// Writes a batch of operations atomically.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
         F: FnOnce(&mut RocksDBBatch<'_>) -> ProviderResult<()>,
@@ -777,6 +1023,7 @@ impl RocksDBProvider {
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len(), batch_size = batch.size_in_bytes()))]
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
         self.0.db_rw().write_opt(batch, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
@@ -791,7 +1038,7 @@ impl RocksDBProvider {
     /// This handles transaction hash numbers, account history, and storage history based on
     /// the provided storage settings. Each operation runs in parallel with its own batch,
     /// pushing to `ctx.pending_batches` for later commit.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(num_blocks = blocks.len(), first_block = ctx.first_block_number))]
     pub(crate) fn write_blocks_data<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -832,7 +1079,7 @@ impl RocksDBProvider {
     }
 
     /// Writes transaction hash to number mappings for the given blocks.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_tx_hash_numbers<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -853,7 +1100,7 @@ impl RocksDBProvider {
     }
 
     /// Writes account history indices for the given blocks.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_account_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -878,7 +1125,7 @@ impl RocksDBProvider {
     }
 
     /// Writes storage history indices for the given blocks.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_storage_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -912,11 +1159,16 @@ impl RocksDBProvider {
 /// Unlike [`RocksTx`], this does NOT support read-your-writes. Use for write-only flows
 /// where you don't need to read back uncommitted data within the same operation
 /// (e.g., history index writes).
+///
+/// When `auto_commit_threshold` is set, the batch will automatically commit and reset
+/// when the batch size exceeds the threshold. This prevents OOM during large bulk writes.
 #[must_use = "batch must be committed"]
 pub struct RocksDBBatch<'a> {
     provider: &'a RocksDBProvider,
     inner: WriteBatchWithTransaction<true>,
     buf: Vec<u8>,
+    /// If set, batch auto-commits when size exceeds this threshold (in bytes).
+    auto_commit_threshold: Option<usize>,
 }
 
 impl fmt::Debug for RocksDBBatch<'_> {
@@ -935,12 +1187,16 @@ impl fmt::Debug for RocksDBBatch<'_> {
 
 impl<'a> RocksDBBatch<'a> {
     /// Puts a value into the batch.
+    ///
+    /// If auto-commit is enabled and the batch exceeds the threshold, commits and resets.
     pub fn put<T: Table>(&mut self, key: T::Key, value: &T::Value) -> ProviderResult<()> {
         let encoded_key = key.encode();
         self.put_encoded::<T>(&encoded_key, value)
     }
 
     /// Puts a value into the batch using pre-encoded key.
+    ///
+    /// If auto-commit is enabled and the batch exceeds the threshold, commits and resets.
     pub fn put_encoded<T: Table>(
         &mut self,
         key: &<T::Key as Encode>::Encoded,
@@ -948,12 +1204,43 @@ impl<'a> RocksDBBatch<'a> {
     ) -> ProviderResult<()> {
         let value_bytes = compress_to_buf_or_ref!(self.buf, value).unwrap_or(&self.buf);
         self.inner.put_cf(self.provider.get_cf_handle::<T>()?, key, value_bytes);
+        self.maybe_auto_commit()?;
         Ok(())
     }
 
     /// Deletes a value from the batch.
+    ///
+    /// If auto-commit is enabled and the batch exceeds the threshold, commits and resets.
     pub fn delete<T: Table>(&mut self, key: T::Key) -> ProviderResult<()> {
         self.inner.delete_cf(self.provider.get_cf_handle::<T>()?, key.encode().as_ref());
+        self.maybe_auto_commit()?;
+        Ok(())
+    }
+
+    /// Commits and resets the batch if it exceeds the auto-commit threshold.
+    ///
+    /// This is called after each `put` or `delete` operation to prevent unbounded memory growth.
+    /// Returns immediately if auto-commit is disabled or threshold not reached.
+    fn maybe_auto_commit(&mut self) -> ProviderResult<()> {
+        if let Some(threshold) = self.auto_commit_threshold &&
+            self.inner.size_in_bytes() >= threshold
+        {
+            tracing::debug!(
+                target: "providers::rocksdb",
+                batch_size = self.inner.size_in_bytes(),
+                threshold,
+                "Auto-committing RocksDB batch"
+            );
+            let old_batch = std::mem::take(&mut self.inner);
+            self.provider.0.db_rw().write_opt(old_batch, &WriteOptions::default()).map_err(
+                |e| {
+                    ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                },
+            )?;
+        }
         Ok(())
     }
 
@@ -963,6 +1250,7 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len(), batch_size = self.inner.size_in_bytes()))]
     pub fn commit(self) -> ProviderResult<()> {
         self.provider.0.db_rw().write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
@@ -980,6 +1268,11 @@ impl<'a> RocksDBBatch<'a> {
     /// Returns `true` if the batch contains no operations.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
+    }
+
+    /// Returns the size of the batch in bytes.
+    pub fn size_in_bytes(&self) -> usize {
+        self.inner.size_in_bytes()
     }
 
     /// Returns a reference to the underlying `RocksDB` provider.
@@ -1199,6 +1492,87 @@ impl<'a> RocksDBBatch<'a> {
         Ok(())
     }
 
+    /// Unwinds storage history to keep only blocks `<= keep_to`.
+    ///
+    /// Handles multi-shard scenarios by:
+    /// 1. Loading all shards for the `(address, storage_key)` pair
+    /// 2. Finding the boundary shard containing `keep_to`
+    /// 3. Deleting all shards after the boundary
+    /// 4. Truncating the boundary shard to keep only indices `<= keep_to`
+    /// 5. Ensuring the last shard is keyed with `u64::MAX`
+    pub fn unwind_storage_history_to(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        keep_to: BlockNumber,
+    ) -> ProviderResult<()> {
+        let shards = self.provider.storage_history_shards(address, storage_key)?;
+        if shards.is_empty() {
+            return Ok(());
+        }
+
+        // Find the first shard that might contain blocks > keep_to.
+        // A shard is affected if it's the sentinel (u64::MAX) or its highest_block_number > keep_to
+        let boundary_idx = shards.iter().position(|(key, _)| {
+            key.sharded_key.highest_block_number == u64::MAX ||
+                key.sharded_key.highest_block_number > keep_to
+        });
+
+        // Repair path: no shards affected means all blocks <= keep_to, just ensure sentinel exists
+        let Some(boundary_idx) = boundary_idx else {
+            let (last_key, last_value) = shards.last().expect("shards is non-empty");
+            if last_key.sharded_key.highest_block_number != u64::MAX {
+                self.delete::<tables::StoragesHistory>(last_key.clone())?;
+                self.put::<tables::StoragesHistory>(
+                    StorageShardedKey::last(address, storage_key),
+                    last_value,
+                )?;
+            }
+            return Ok(());
+        };
+
+        // Delete all shards strictly after the boundary (they are entirely > keep_to)
+        for (key, _) in shards.iter().skip(boundary_idx + 1) {
+            self.delete::<tables::StoragesHistory>(key.clone())?;
+        }
+
+        // Process the boundary shard: filter out blocks > keep_to
+        let (boundary_key, boundary_list) = &shards[boundary_idx];
+
+        // Delete the boundary shard (we'll either drop it or rewrite at u64::MAX)
+        self.delete::<tables::StoragesHistory>(boundary_key.clone())?;
+
+        // Build truncated list once; check emptiness directly (avoids double iteration)
+        let new_last =
+            BlockNumberList::new_pre_sorted(boundary_list.iter().take_while(|&b| b <= keep_to));
+
+        if new_last.is_empty() {
+            // Boundary shard is now empty. Previous shard becomes the last and must be keyed
+            // u64::MAX.
+            if boundary_idx == 0 {
+                // Nothing left for this (address, storage_key) pair
+                return Ok(());
+            }
+
+            let (prev_key, prev_value) = &shards[boundary_idx - 1];
+            if prev_key.sharded_key.highest_block_number != u64::MAX {
+                self.delete::<tables::StoragesHistory>(prev_key.clone())?;
+                self.put::<tables::StoragesHistory>(
+                    StorageShardedKey::last(address, storage_key),
+                    prev_value,
+                )?;
+            }
+            return Ok(());
+        }
+
+        self.put::<tables::StoragesHistory>(
+            StorageShardedKey::last(address, storage_key),
+            &new_last,
+        )?;
+
+        Ok(())
+    }
+
     /// Clears all account history shards for the given address.
     ///
     /// Used when unwinding from block 0 (i.e., removing all history).
@@ -1206,6 +1580,21 @@ impl<'a> RocksDBBatch<'a> {
         let shards = self.provider.account_history_shards(address)?;
         for (key, _) in shards {
             self.delete::<tables::AccountsHistory>(key)?;
+        }
+        Ok(())
+    }
+
+    /// Clears all storage history shards for the given `(address, storage_key)` pair.
+    ///
+    /// Used when unwinding from block 0 (i.e., removing all history for this storage slot).
+    pub fn clear_storage_history(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<()> {
+        let shards = self.provider.storage_history_shards(address, storage_key)?;
+        for (key, _) in shards {
+            self.delete::<tables::StoragesHistory>(key)?;
         }
         Ok(())
     }
@@ -1311,6 +1700,7 @@ impl<'db> RocksTx<'db> {
     }
 
     /// Commits the transaction, persisting all changes.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn commit(self) -> ProviderResult<()> {
         self.inner.commit().map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
@@ -1321,6 +1711,7 @@ impl<'db> RocksTx<'db> {
     }
 
     /// Rolls back the transaction, discarding all changes.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn rollback(self) -> ProviderResult<()> {
         self.inner.rollback().map_err(|e| {
             ProviderError::Database(DatabaseError::Other(format!("rollback failed: {e}")))
@@ -2442,5 +2833,41 @@ mod tests {
         // Second shard truncated and re-keyed to MAX
         assert_eq!(shards[1].0.highest_block_number, u64::MAX);
         assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), (51..=75).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_batch_auto_commit_on_threshold() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Create batch with tiny threshold (1KB) to force auto-commits
+        let mut batch = RocksDBBatch {
+            provider: &provider,
+            inner: WriteBatchWithTransaction::<true>::default(),
+            buf: Vec::new(),
+            auto_commit_threshold: Some(1024), // 1KB
+        };
+
+        // Write entries until we exceed threshold multiple times
+        // Each entry is ~20 bytes, so 100 entries = ~2KB = 2 auto-commits
+        for i in 0..100u64 {
+            let value = format!("value_{i:04}").into_bytes();
+            batch.put::<TestTable>(i, &value).unwrap();
+        }
+
+        // Data should already be visible (auto-committed) even before final commit
+        // At least some entries should be readable
+        let first_visible = provider.get::<TestTable>(0).unwrap();
+        assert!(first_visible.is_some(), "Auto-committed data should be visible");
+
+        // Final commit for remaining batch
+        batch.commit().unwrap();
+
+        // All entries should now be visible
+        for i in 0..100u64 {
+            let value = format!("value_{i:04}").into_bytes();
+            assert_eq!(provider.get::<TestTable>(i).unwrap(), Some(value));
+        }
     }
 }

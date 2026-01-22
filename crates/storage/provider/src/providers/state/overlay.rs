@@ -10,6 +10,7 @@ use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
     DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
+    StorageChangeSetReader,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -129,6 +130,8 @@ impl<F> OverlayStateProviderFactory<F> {
     /// This overlay will be applied on top of any reverts applied via `with_block_hash`.
     pub fn with_overlay_source(mut self, source: Option<OverlaySource>) -> Self {
         self.overlay_source = source;
+        // Clear the overlay cache since we've updated the source.
+        self.overlay_cache = Default::default();
         self
     }
 
@@ -137,6 +140,8 @@ impl<F> OverlayStateProviderFactory<F> {
     /// Convenience method that wraps the lazy overlay in `OverlaySource::Lazy`.
     pub fn with_lazy_overlay(mut self, lazy_overlay: Option<LazyOverlay>) -> Self {
         self.overlay_source = lazy_overlay.map(OverlaySource::Lazy);
+        // Clear the overlay cache since we've updated the source.
+        self.overlay_cache = Default::default();
         self
     }
 
@@ -152,6 +157,8 @@ impl<F> OverlayStateProviderFactory<F> {
                 trie: Arc::new(TrieUpdatesSorted::default()),
                 state,
             });
+            // Clear the overlay cache since we've updated the source.
+            self.overlay_cache = Default::default();
         }
         self
     }
@@ -178,6 +185,8 @@ impl<F> OverlayStateProviderFactory<F> {
                 });
             }
         }
+        // Clear the overlay cache since we've updated the source.
+        self.overlay_cache = Default::default();
         self
     }
 }
@@ -188,6 +197,7 @@ where
     F::Provider: StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
+        + StorageChangeSetReader
         + DBProvider
         + BlockNumReader,
 {
@@ -438,7 +448,11 @@ where
 impl<F> DatabaseProviderROFactory for OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: StageCheckpointReader + PruneCheckpointReader + BlockNumReader + ChangeSetReader,
+    F::Provider: StageCheckpointReader
+        + PruneCheckpointReader
+        + BlockNumReader
+        + ChangeSetReader
+        + StorageChangeSetReader,
 {
     type Provider = OverlayStateProvider<F::Provider>;
 
