@@ -252,7 +252,7 @@ fn event_loop<B: Backend, F, T: Table>(
     tick_rate: Duration,
 ) -> io::Result<()>
 where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
+    F: FnMut(usize, usize) -> eyre::Result<Vec<TableRow<T>>>,
 {
     let mut last_tick = Instant::now();
     let mut running = true;
@@ -280,7 +280,7 @@ where
 /// Handle incoming events
 fn handle_event<F, T: Table>(app: &mut DbListTUI<F, T>, event: Event) -> io::Result<bool>
 where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
+    F: FnMut(usize, usize) -> eyre::Result<Vec<TableRow<T>>>,
 {
     if app.mode == ViewMode::GoToPage {
         if let Event::Key(key) = event {
@@ -303,7 +303,7 @@ where
             }
         }
 
-        return Ok(false)
+        return Ok(false);
     }
 
     match event {
@@ -410,6 +410,7 @@ where
     if let Some(err) = &app.last_error {
         footer_text = format!("{footer_text} | Error: {err}");
     }
+
     let footer = match app.mode {
         ViewMode::Normal => Paragraph::new(footer_text),
         ViewMode::GoToPage => Paragraph::new(format!(
