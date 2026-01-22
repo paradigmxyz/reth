@@ -169,6 +169,9 @@ pub enum ProviderError {
         /// The available range of blocks with changesets
         available: core::ops::RangeInclusive<BlockNumber>,
     },
+    /// Invalid storage settings configuration.
+    #[error("invalid storage settings: {_0}")]
+    InvalidStorageSettings(&'static str),
     /// Any other error type wrapped into a cloneable [`AnyError`].
     #[error(transparent)]
     Other(#[from] AnyError),
