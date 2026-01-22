@@ -32,8 +32,8 @@ use reth_ethereum::{
         EthApiBuilder,
     },
     tasks::TokioTaskExecutor,
-    tracing::LogLevelHandle,
 };
+use reth_tracing::LogLevelHandle;
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 
@@ -82,7 +82,8 @@ async fn main() -> eyre::Result<()> {
     // Pick which namespaces to expose.
     let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);
 
-    let mut server = rpc_builder.build(config, eth_api, Default::default(), LogLevelHandle::default());
+    let mut server =
+        rpc_builder.build(config, eth_api, Default::default(), LogLevelHandle::default());
 
     // Add a custom rpc namespace
     let custom_rpc = MyRpcExt { provider };
