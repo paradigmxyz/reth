@@ -126,13 +126,10 @@ impl Decode for String {
 }
 
 impl Encode for StoredNibbles {
-    type Encoded = Vec<u8>;
+    type Encoded = arrayvec::ArrayVec<u8, 64>;
 
-    // Delegate to the Compact implementation
     fn encode(self) -> Self::Encoded {
-        // NOTE: This used to be `to_compact`, but all it does is append the bytes to the buffer,
-        // so we can just use the implementation of `Into<Vec<u8>>` to reuse the buffer.
-        self.0.to_vec()
+        self.0.iter().collect()
     }
 }
 
