@@ -1351,7 +1351,8 @@ mod rocksdb_tests {
 
         // Run queries against both backends using EitherReader
         let mdbx_ro = factory.database_provider_ro().unwrap();
-        let rocks_tx = rocks_provider.tx();
+        // Use `with_assume_history_complete()` since both backends have identical data
+        let rocks_tx = rocks_provider.tx().with_assume_history_complete();
 
         for (i, query) in queries.iter().enumerate() {
             // MDBX query via EitherReader
@@ -1443,7 +1444,8 @@ mod rocksdb_tests {
 
         // Run queries against both backends using EitherReader
         let mdbx_ro = factory.database_provider_ro().unwrap();
-        let rocks_tx = rocks_provider.tx();
+        // Use `with_assume_history_complete()` since both backends have identical data
+        let rocks_tx = rocks_provider.tx().with_assume_history_complete();
 
         for (i, query) in queries.iter().enumerate() {
             // MDBX query via EitherReader

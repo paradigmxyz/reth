@@ -594,7 +594,7 @@ impl RocksDBProvider {
         let write_options = WriteOptions::default();
         let txn_options = OptimisticTransactionOptions::default();
         let inner = self.0.db_rw().transaction_opt(&write_options, &txn_options);
-        RocksTx { inner, provider: self }
+        RocksTx { inner, provider: self, assume_history_complete: false }
     }
 
     /// Creates a new batch for atomic writes.
@@ -1525,6 +1525,10 @@ impl<'a> RocksDBBatch<'a> {
 pub struct RocksTx<'db> {
     inner: Transaction<'db, OptimisticTransactionDB>,
     provider: &'db RocksDBProvider,
+    /// When true, assume RocksDB has complete history (like MDBX) and return `NotYetWritten`
+    /// when querying before the first history entry. When false (default), return
+    /// `MaybeInPlainState` for hybrid storage safety.
+    assume_history_complete: bool,
 }
 
 impl fmt::Debug for RocksTx<'_> {
@@ -1534,6 +1538,16 @@ impl fmt::Debug for RocksTx<'_> {
 }
 
 impl<'db> RocksTx<'db> {
+    /// Sets the `assume_history_complete` flag to true.
+    ///
+    /// When enabled, history queries will return `NotYetWritten` (like MDBX) instead of
+    /// `MaybeInPlainState` when querying before the first history entry. Use this in tests
+    /// where RocksDB and MDBX have identical data.
+    pub fn with_assume_history_complete(mut self) -> Self {
+        self.assume_history_complete = true;
+        self
+    }
+
     /// Gets a value from the specified table. Sees uncommitted writes in this transaction.
     pub fn get<T: Table>(&self, key: T::Key) -> ProviderResult<Option<T::Value>> {
         let encoded_key = key.encode();
@@ -1700,13 +1714,17 @@ impl<'db> RocksTx<'db> {
     where
         T: Table<Value = BlockNumberList>,
     {
-        // History may be pruned if a lowest available block is set.
-        let is_maybe_pruned = lowest_available_block_number.is_some();
+        // RocksDB only has history for blocks AFTER it was enabled. Accounts modified before
+        // RocksDB was enabled exist only in MDBX. Returning `NotYetWritten` would incorrectly
+        // treat them as non-existent (nonce 0).
+        //
+        // When `assume_history_complete` is true (for tests with identical data), return
+        // `NotYetWritten` to match MDBX semantics.
         let fallback = || {
-            Ok(if is_maybe_pruned {
-                HistoryInfo::MaybeInPlainState
-            } else {
+            Ok(if self.assume_history_complete {
                 HistoryInfo::NotYetWritten
+            } else {
+                HistoryInfo::MaybeInPlainState
             })
         };
 
@@ -1757,11 +1775,20 @@ impl<'db> RocksTx<'db> {
             false
         };
 
-        Ok(HistoryInfo::from_lookup(
+        // Use `from_lookup` but then override `NotYetWritten` -> `MaybeInPlainState`
+        // unless `assume_history_complete` is true (for tests with identical data).
+        let result = HistoryInfo::from_lookup(
             found_block,
             is_before_first_write,
             lowest_available_block_number,
-        ))
+        );
+
+        Ok(match result {
+            HistoryInfo::NotYetWritten if !self.assume_history_complete => {
+                HistoryInfo::MaybeInPlainState
+            }
+            other => other,
+        })
     }
 
     /// Returns an error if the raw iterator is in an invalid state due to an I/O error.
