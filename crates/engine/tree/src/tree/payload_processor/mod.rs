@@ -18,6 +18,7 @@ use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
 use crossbeam_channel::Sender as CrossbeamSender;
 use executor::WorkloadExecutor;
+use metrics::Counter;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
@@ -27,6 +28,7 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
     TxEnvFor,
 };
+use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProvider,
@@ -244,6 +246,9 @@ where
         let (to_sparse_trie, sparse_trie_rx) = channel();
         let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
 
+        // Extract V2 proofs flag early so we can pass it to prewarm
+        let v2_proofs_enabled = config.enable_proof_v2();
+
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {
             // When BAL is present, use BAL prewarming and send BAL to multiproof
@@ -260,6 +265,7 @@ where
                 provider_builder.clone(),
                 None, // Don't send proof targets when BAL is present
                 Some(bal),
+                v2_proofs_enabled,
             )
         } else {
             // Normal path: spawn with transaction prewarming
@@ -270,6 +276,7 @@ where
                 provider_builder.clone(),
                 Some(to_multi_proof.clone()),
                 None,
+                v2_proofs_enabled,
             )
         };
 
@@ -277,7 +284,6 @@ where
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let v2_proofs_enabled = config.enable_proof_v2();
         let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
             task_ctx,
@@ -289,10 +295,13 @@ where
         let multi_proof_task = MultiProofTask::new(
             proof_handle.clone(),
             to_sparse_trie,
-            config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
+            config
+                .multiproof_chunking_enabled()
+                .then_some(config.effective_multiproof_chunk_size()),
             to_multi_proof.clone(),
             from_multi_proof,
-        );
+        )
+        .with_v2_proofs_enabled(v2_proofs_enabled);
 
         // spawn multi-proof task
         let parent_span = span.clone();
@@ -341,8 +350,9 @@ where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
+        // This path doesn't use multiproof, so V2 proofs flag doesn't matter
         let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None, bal);
+            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None, bal, false);
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
@@ -409,6 +419,7 @@ where
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
+    #[expect(clippy::too_many_arguments)]
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
@@ -417,6 +428,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
+        v2_proofs_enabled: bool,
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -439,6 +451,7 @@ where
             terminate_execution: Arc::new(AtomicBool::new(false)),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
+            v2_proofs_enabled,
         };
 
         let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(
@@ -775,6 +788,8 @@ impl<R> Drop for CacheTaskHandle<R> {
 struct ExecutionCache {
     /// Guarded cloneable cache identified by a block hash.
     inner: Arc<RwLock<Option<SavedCache>>>,
+    /// Metrics for cache operations.
+    metrics: ExecutionCacheMetrics,
 }
 
 impl ExecutionCache {
@@ -819,6 +834,10 @@ impl ExecutionCache {
                 }
                 return Some(c.clone())
             }
+
+            if hash_matches && !available {
+                self.metrics.execution_cache_in_use.increment(1);
+            }
         } else {
             debug!(target: "engine::caching", %parent_hash, "No cache found");
         }
@@ -852,6 +871,15 @@ impl ExecutionCache {
         let mut guard = self.inner.write();
         update_fn(&mut guard);
     }
+}
+
+/// Metrics for execution cache operations.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "consensus.engine.beacon")]
+pub(crate) struct ExecutionCacheMetrics {
+    /// Counter for when the execution cache was unavailable because other threads
+    /// (e.g., prewarming) are still using it.
+    pub(crate) execution_cache_in_use: Counter,
 }
 
 /// EVM context required to execute a block.
