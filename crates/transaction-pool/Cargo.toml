@@ -36,7 +36,6 @@ futures-util.workspace = true
 parking_lot.workspace = true
 pin-project.workspace = true
 tokio = { workspace = true, features = ["sync"] }
-tokio-stream.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -74,6 +73,7 @@ tempfile.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 futures.workspace = true
+tokio-stream.workspace = true
 
 [features]
 serde = [
