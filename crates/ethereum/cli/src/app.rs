@@ -17,7 +17,7 @@ use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
-use reth_tracing::{FileWorkerGuard, Layers};
+use reth_tracing::{FileWorkerGuard, Layers, LogLevelHandle};
 use std::{fmt, sync::Arc};
 
 /// A wrapper around a parsed CLI that handles command execution.
@@ -32,6 +32,7 @@ pub struct CliApp<
     runner: Option<CliRunner>,
     layers: Option<Layers>,
     guard: Option<FileWorkerGuard>,
+    log_handle: Option<LogLevelHandle>,
 }
 
 impl<C, Ext, Rpc, SubCmd> CliApp<C, Ext, Rpc, SubCmd>
@@ -42,7 +43,7 @@ where
     SubCmd: ExtendedCommand + Subcommand + fmt::Debug,
 {
     pub(crate) fn new(cli: Cli<C, Ext, Rpc, SubCmd>) -> Self {
-        Self { cli, runner: None, layers: Some(Layers::new()), guard: None }
+        Self { cli, runner: None, layers: Some(Layers::new()), guard: None, log_handle: None }
     }
 
     /// Sets the runner for the CLI commander.
@@ -110,7 +111,10 @@ where
         // Install the prometheus recorder to be sure to record all metrics
         install_prometheus_recorder();
 
-        run_commands_with::<C, Ext, Rpc, N, SubCmd>(self.cli, runner, components, launcher)
+        let log_handle = self.log_handle.take().unwrap_or_else(LogLevelHandle::noop);
+        run_commands_with::<C, Ext, Rpc, N, SubCmd>(
+            self.cli, runner, log_handle, components, launcher,
+        )
     }
 
     /// Initializes tracing with the configured options.
@@ -118,7 +122,15 @@ where
     /// See [`Cli::init_tracing`] for more information.
     pub fn init_tracing(&mut self, runner: &CliRunner) -> Result<()> {
         if self.guard.is_none() {
-            self.guard = self.cli.init_tracing(runner, self.layers.take().unwrap_or_default())?;
+            // Enable reload support only when debug namespace is enabled
+            let enable_reload = self.cli.command.debug_namespace_enabled();
+            let result = self.cli.init_tracing(
+                runner,
+                self.layers.take().unwrap_or_default(),
+                enable_reload,
+            )?;
+            self.guard = result.file_guard;
+            self.log_handle = Some(result.log_handle);
         }
 
         Ok(())
@@ -130,6 +142,7 @@ where
 pub(crate) fn run_commands_with<C, Ext, Rpc, N, SubCmd>(
     cli: Cli<C, Ext, Rpc, SubCmd>,
     runner: CliRunner,
+    log_handle: LogLevelHandle,
     components: impl CliComponentsBuilder<N>,
     launcher: impl AsyncFnOnce(
         WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
@@ -153,7 +166,7 @@ where
                 Rpc::validate_selection(ws_api, "ws.api").map_err(|e| eyre!("{e}"))?;
             }
 
-            runner.run_command_until_exit(|ctx| {
+            runner.run_command_until_exit(log_handle, |ctx| {
                 command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
             })
         }
@@ -166,12 +179,11 @@ where
         Commands::ExportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
         Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::Db(command) => {
-            runner.run_blocking_command_until_exit(|ctx| command.execute::<N>(ctx))
+            runner.run_blocking_command_until_exit(log_handle, |ctx| command.execute::<N>(ctx))
         }
         Commands::Download(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::Stage(command) => {
-            runner.run_command_until_exit(|ctx| command.execute::<N, _>(ctx, components))
-        }
+        Commands::Stage(command) => runner
+            .run_command_until_exit(log_handle, |ctx| command.execute::<N, _>(ctx, components)),
         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<N>()),
         Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<N>()),

@@ -132,54 +132,44 @@ impl LogArgs {
     ///
     /// Returns the file worker guard if a file worker was configured.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        self.init_tracing_with_layers(Layers::new())
+        self.init_tracing_with_layers(Layers::new()).map(|r| r.into_guard())
     }
 
     /// Initializes tracing with the configured options from cli args.
     ///
-    /// Returns the file worker guard, and the file name, if a file worker was configured.
-    pub fn init_tracing_with_layers(
-        &self,
-        layers: Layers,
-    ) -> eyre::Result<Option<FileWorkerGuard>> {
-        let mut tracer = RethTracer::new();
-
-        let stdout = self.layer_info(self.log_stdout_format, self.log_stdout_filter.clone(), true);
-        tracer = tracer.with_stdout(stdout);
-
-        if self.journald {
-            tracer = tracer.with_journald(self.journald_filter.clone());
-        }
-
-        if self.log_file_max_files > 0 {
-            let info = self.file_info();
-            let file = self.layer_info(self.log_file_format, self.log_file_filter.clone(), false);
-            tracer = tracer.with_file(file, info);
-        }
-
-        if self.samply {
-            let config = self.layer_info(LogFormat::Terminal, self.samply_filter.clone(), false);
-            tracer = tracer.with_samply(config);
-        }
-
-        #[cfg(feature = "tracy")]
-        if self.tracy {
-            let config = self.layer_info(LogFormat::Terminal, self.tracy_filter.clone(), false);
-            tracer = tracer.with_tracy(config);
-        }
-
-        let guard = tracer.init_with_layers(layers)?;
-        Ok(guard)
+    /// # Arguments
+    /// * `layers` - Pre-configured layers to include
+    ///
+    /// Returns the tracing result containing the file worker guard and a noop log handle.
+    pub fn init_tracing_with_layers(&self, layers: Layers) -> eyre::Result<TracingInitResult> {
+        self.init_tracing_impl(layers, false)
     }
 
     /// Initializes tracing with reload support for runtime log level changes.
     ///
-    /// This is similar to [`Self::init_tracing_with_layers`] but returns a
-    /// [`TracingInitResult`] containing a handle that can be used to change
-    /// log levels at runtime via RPC methods like `debug_verbosity` and `debug_vmodule`.
+    /// When `enable_reload` is true, the returned [`TracingInitResult`] contains a
+    /// [`LogLevelHandle`] that can be used to change log levels at runtime via
+    /// RPC methods like `debug_verbosity` and `debug_vmodule`.
     ///
-    /// Returns the tracing init result containing the file worker guard and log level handle.
-    pub fn init_tracing_with_reload(&self, layers: Layers) -> eyre::Result<TracingInitResult> {
+    /// # Arguments
+    /// * `layers` - Pre-configured layers to include
+    /// * `enable_reload` - If true, enables runtime log level changes
+    ///
+    /// Returns the tracing result containing the file worker guard and log level handle.
+    pub fn init_tracing_with_reload(
+        &self,
+        layers: Layers,
+        enable_reload: bool,
+    ) -> eyre::Result<TracingInitResult> {
+        self.init_tracing_impl(layers, enable_reload)
+    }
+
+    /// Internal implementation for tracing initialization.
+    fn init_tracing_impl(
+        &self,
+        layers: Layers,
+        enable_reload: bool,
+    ) -> eyre::Result<TracingInitResult> {
         let mut tracer = RethTracer::new();
 
         let stdout = self.layer_info(self.log_stdout_format, self.log_stdout_filter.clone(), true);
@@ -206,7 +196,7 @@ impl LogArgs {
             tracer = tracer.with_tracy(config);
         }
 
-        tracer.init_with_reload(layers)
+        tracer.init_with_layers_and_reload(layers, enable_reload)
     }
 }
 

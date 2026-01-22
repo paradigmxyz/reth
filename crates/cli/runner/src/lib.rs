@@ -11,6 +11,7 @@
 //! Entrypoint for running commands.
 
 use reth_tasks::{TaskExecutor, TaskManager};
+use reth_tracing::LogLevelHandle;
 use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
 use tracing::{debug, error, trace};
 
@@ -56,8 +57,12 @@ impl CliRunner {
     ///
     /// Tasks spawned by the command via the [`TaskExecutor`] are shut down and an attempt is made
     /// to drive their shutdown to completion after the command has finished.
+    ///
+    /// The `log_handle` is passed to the command via [`CliContext`] to enable runtime log level
+    /// changes through RPC methods like `debug_verbosity` and `debug_vmodule`.
     pub fn run_command_until_exit<F, E>(
         self,
+        log_handle: LogLevelHandle,
         command: impl FnOnce(CliContext) -> F,
     ) -> Result<(), E>
     where
@@ -65,7 +70,7 @@ impl CliRunner {
         E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
     {
         let AsyncCliRunner { context, mut task_manager, tokio_runtime } =
-            AsyncCliRunner::new(self.tokio_runtime);
+            AsyncCliRunner::new(self.tokio_runtime, log_handle);
 
         // Executes the command until it finished or ctrl-c was fired
         let command_res = tokio_runtime.block_on(run_to_completion_or_panic(
@@ -106,8 +111,12 @@ impl CliRunner {
     /// Executes a command in a blocking context with access to `CliContext`.
     ///
     /// See [`Runtime::spawn_blocking`](tokio::runtime::Runtime::spawn_blocking).
+    ///
+    /// The `log_handle` is passed to the command via [`CliContext`] to enable runtime log level
+    /// changes through RPC methods like `debug_verbosity` and `debug_vmodule`.
     pub fn run_blocking_command_until_exit<F, E>(
         self,
+        log_handle: LogLevelHandle,
         command: impl FnOnce(CliContext) -> F + Send + 'static,
     ) -> Result<(), E>
     where
@@ -115,7 +124,7 @@ impl CliRunner {
         E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
     {
         let AsyncCliRunner { context, mut task_manager, tokio_runtime } =
-            AsyncCliRunner::new(self.tokio_runtime);
+            AsyncCliRunner::new(self.tokio_runtime, log_handle);
 
         // Spawn the command on the blocking thread pool
         let handle = tokio_runtime.handle().clone();
@@ -203,10 +212,10 @@ struct AsyncCliRunner {
 impl AsyncCliRunner {
     /// Given a tokio [`Runtime`](tokio::runtime::Runtime), creates additional context required to
     /// execute commands asynchronously.
-    fn new(tokio_runtime: tokio::runtime::Runtime) -> Self {
+    fn new(tokio_runtime: tokio::runtime::Runtime, log_handle: LogLevelHandle) -> Self {
         let task_manager = TaskManager::new(tokio_runtime.handle().clone());
         let task_executor = task_manager.executor();
-        Self { context: CliContext { task_executor }, task_manager, tokio_runtime }
+        Self { context: CliContext { task_executor, log_handle }, task_manager, tokio_runtime }
     }
 }
 
@@ -215,6 +224,8 @@ impl AsyncCliRunner {
 pub struct CliContext {
     /// Used to execute/spawn tasks
     pub task_executor: TaskExecutor,
+    /// Handle for runtime log level changes via `debug_verbosity` and `debug_vmodule` RPC methods.
+    pub log_handle: LogLevelHandle,
 }
 
 /// Default timeout for graceful shutdown of tasks.

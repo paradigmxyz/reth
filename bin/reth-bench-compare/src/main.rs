@@ -25,6 +25,7 @@ use clap::Parser;
 use cli::{run_comparison, Args};
 use eyre::Result;
 use reth_cli_runner::CliRunner;
+use reth_tracing::LogLevelHandle;
 
 fn main() -> Result<()> {
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
@@ -41,5 +42,5 @@ fn main() -> Result<()> {
 
     // Run until either exit or sigint or sigterm
     let runner = CliRunner::try_default_runtime()?;
-    runner.run_command_until_exit(|ctx| run_comparison(args, ctx))
+    runner.run_command_until_exit(LogLevelHandle::noop(), |ctx| run_comparison(args, ctx))
 }

@@ -68,6 +68,16 @@ impl<
         Ext: clap::Args + fmt::Debug,
     > Commands<C, Ext>
 {
+    /// Returns `true` if the debug RPC namespace is enabled.
+    ///
+    /// This is only applicable to the `Node` command. For other commands, returns `false`.
+    pub fn debug_namespace_enabled(&self) -> bool {
+        match self {
+            Self::Node(cmd) => cmd.rpc.debug_namespace_enabled(),
+            _ => false,
+        }
+    }
+
     /// Returns the underlying chain being used for commands
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         match self {

@@ -7908,7 +7908,6 @@ dependencies = [
  "reth-static-file",
  "reth-static-file-types",
  "reth-tasks",
- "reth-tracing",
  "reth-trie",
  "reth-trie-common",
  "reth-trie-db",
@@ -7930,6 +7929,7 @@ name = "reth-cli-runner"
 version = "1.10.2"
 dependencies = [
  "reth-tasks",
+ "reth-tracing",
  "tokio",
  "tracing",
 ]

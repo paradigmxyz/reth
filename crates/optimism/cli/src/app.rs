@@ -9,7 +9,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_node::{OpExecutorProvider, OpNode};
 use reth_rpc_server_types::RpcModuleValidator;
-use reth_tracing::{FileWorkerGuard, Layers};
+use reth_tracing::{FileWorkerGuard, Layers, LogLevelHandle};
 use std::{fmt, sync::Arc};
 use tracing::{info, warn};
 
@@ -20,6 +20,7 @@ pub struct CliApp<Spec: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcM
     runner: Option<CliRunner>,
     layers: Option<Layers>,
     guard: Option<FileWorkerGuard>,
+    log_handle: Option<LogLevelHandle>,
 }
 
 impl<C, Ext, Rpc> CliApp<C, Ext, Rpc>
@@ -29,7 +30,7 @@ where
     Rpc: RpcModuleValidator,
 {
     pub(crate) fn new(cli: Cli<C, Ext, Rpc>) -> Self {
-        Self { cli, runner: None, layers: Some(Layers::new()), guard: None }
+        Self { cli, runner: None, layers: Some(Layers::new()), guard: None, log_handle: None }
     }
 
     /// Sets the runner for the CLI commander.
@@ -73,6 +74,8 @@ where
             (OpExecutorProvider::optimism(spec.clone()), Arc::new(OpBeaconConsensus::new(spec)))
         };
 
+        let log_handle = self.log_handle.take().unwrap_or_else(LogLevelHandle::noop);
+
         match self.cli.command {
             Commands::Node(command) => {
                 // Validate RPC modules using the configured validator
@@ -83,7 +86,7 @@ where
                     Rpc::validate_selection(ws_api, "ws.api").map_err(|e| eyre!("{e}"))?;
                 }
 
-                runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
+                runner.run_command_until_exit(log_handle, |ctx| command.execute(ctx, launcher))
             }
             Commands::Init(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
@@ -98,12 +101,11 @@ where
                 runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Db(command) => {
-                runner.run_blocking_command_until_exit(|ctx| command.execute::<OpNode>(ctx))
-            }
-            Commands::Stage(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<OpNode, _>(ctx, components))
-            }
+            Commands::Db(command) => runner
+                .run_blocking_command_until_exit(log_handle, |ctx| command.execute::<OpNode>(ctx)),
+            Commands::Stage(command) => runner.run_command_until_exit(log_handle, |ctx| {
+                command.execute::<OpNode, _>(ctx, components)
+            }),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<OpNode>()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<OpNode>()),
@@ -126,7 +128,12 @@ where
             let otlp_status = runner.block_on(self.cli.traces.init_otlp_tracing(&mut layers))?;
             let otlp_logs_status = runner.block_on(self.cli.traces.init_otlp_logs(&mut layers))?;
 
-            self.guard = self.cli.logs.init_tracing_with_layers(layers)?;
+            // Enable reload support only when debug namespace is enabled
+            let enable_reload = self.cli.command.debug_namespace_enabled();
+            let result = self.cli.logs.init_tracing_with_reload(layers, enable_reload)?;
+            self.guard = result.file_guard;
+            self.log_handle = Some(result.log_handle);
+
             info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
 
             match otlp_status {

@@ -56,7 +56,6 @@ reth-trie-common.workspace = true
 reth-primitives-traits.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
-reth-tracing.workspace = true
 
 # ethereum
 alloy-eips.workspace = true

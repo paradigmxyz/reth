@@ -755,6 +755,39 @@ impl RpcServerArgs {
         self
     }
 
+    /// Returns `true` if the debug RPC namespace is enabled on any interface.
+    ///
+    /// This checks HTTP, WS, and IPC (if IPC is not disabled) API configurations
+    /// for the presence of the `debug` module.
+    pub fn debug_namespace_enabled(&self) -> bool {
+        let debug_module = RethRpcModule::Debug;
+
+        // Check HTTP API
+        if let Some(ref http_api) = self.http_api {
+            if http_api.contains(&debug_module) {
+                return true;
+            }
+        }
+
+        // Check WS API
+        if let Some(ref ws_api) = self.ws_api {
+            if ws_api.contains(&debug_module) {
+                return true;
+            }
+        }
+
+        // Check IPC (default modules include debug if IPC is enabled)
+        // IPC is enabled by default unless ipcdisable is true
+        // When IPC is enabled without explicit API config, it uses all standard modules
+        if !self.ipcdisable {
+            // IPC with no explicit module config defaults to all standard modules
+            // which includes debug
+            return true;
+        }
+
+        false
+    }
+
     /// Apply a function to the args.
     pub fn apply<F>(self, f: F) -> Self
     where
@@ -1128,5 +1161,51 @@ mod tests {
         .args;
 
         assert_eq!(parsed_args, args);
+    }
+
+    #[test]
+    fn test_debug_namespace_enabled_http() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            "eth,debug",
+            "--ipcdisable",
+        ])
+        .args;
+        assert!(args.debug_namespace_enabled());
+    }
+
+    #[test]
+    fn test_debug_namespace_enabled_ws() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--ws.api",
+            "eth,debug",
+            "--ipcdisable",
+        ])
+        .args;
+        assert!(args.debug_namespace_enabled());
+    }
+
+    #[test]
+    fn test_debug_namespace_enabled_ipc_default() {
+        // IPC is enabled by default, which includes debug namespace
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert!(args.debug_namespace_enabled());
+    }
+
+    #[test]
+    fn test_debug_namespace_disabled() {
+        // IPC disabled and no debug in http/ws
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            "eth,net",
+            "--ws.api",
+            "eth,net",
+            "--ipcdisable",
+        ])
+        .args;
+        assert!(!args.debug_namespace_enabled());
     }
 }

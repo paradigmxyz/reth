@@ -154,13 +154,22 @@ impl std::fmt::Debug for LogLevelHandle {
     }
 }
 
-/// Result of initializing tracing with reload support.
+/// Result of initializing tracing.
 #[derive(Debug)]
 pub struct TracingInitResult {
     /// File worker guard (keeps file logging alive).
     pub file_guard: Option<WorkerGuard>,
-    /// Handle for runtime log level changes.
+    /// Handle for runtime log level changes (only available if reload was enabled).
     pub log_handle: LogLevelHandle,
+}
+
+impl TracingInitResult {
+    /// Returns just the file guard, discarding the log handle.
+    ///
+    /// This is useful for backward compatibility with code that only cares about the guard.
+    pub fn into_guard(self) -> Option<WorkerGuard> {
+        self.file_guard
+    }
 }
 
 ///  Tracer for application logging.
@@ -304,8 +313,9 @@ pub trait Tracer: Sized {
     /// An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
     /// or an `Err` in case of an error during initialization.
     fn init(self) -> eyre::Result<Option<WorkerGuard>> {
-        self.init_with_layers(Layers::new())
+        self.init_with_layers(Layers::new()).map(|r| r.into_guard())
     }
+
     /// Initialize the logging configuration with additional custom layers.
     ///
     /// This method allows for more customized setup by accepting pre-configured
@@ -317,7 +327,27 @@ pub trait Tracer: Sized {
     /// # Returns
     /// An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
     /// or an `Err` in case of an error during initialization.
-    fn init_with_layers(self, layers: Layers) -> eyre::Result<Option<WorkerGuard>>;
+    fn init_with_layers(self, layers: Layers) -> eyre::Result<TracingInitResult> {
+        self.init_with_layers_and_reload(layers, false)
+    }
+
+    /// Initialize the logging configuration with optional reload support.
+    ///
+    /// When `enable_reload` is true, the stdout filter can be changed at runtime
+    /// via the returned `LogLevelHandle`. This is useful for RPC methods like
+    /// `debug_verbosity` and `debug_vmodule`.
+    ///
+    /// # Arguments
+    /// * `layers` - Pre-configured `Layers` instance to use for initialization
+    /// * `enable_reload` - If true, enables runtime log level changes
+    ///
+    /// # Returns
+    /// A [`TracingInitResult`] containing the file guard and log level handle.
+    fn init_with_layers_and_reload(
+        self,
+        layers: Layers,
+        enable_reload: bool,
+    ) -> eyre::Result<TracingInitResult>;
 }
 
 impl Tracer for RethTracer {
@@ -328,65 +358,35 @@ impl Tracer for RethTracer {
     ///
     ///  The default layer is stdout.
     ///
+    ///  # Arguments
+    ///  * `layers` - Pre-configured `Layers` instance to use for initialization
+    ///  * `enable_reload` - If true, enables runtime log level changes via `LogLevelHandle`
+    ///
     ///  # Returns
-    ///  An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
-    ///  or an `Err` in case of an error during initialization.
-    fn init_with_layers(self, mut layers: Layers) -> eyre::Result<Option<WorkerGuard>> {
-        layers.stdout(
-            self.stdout.format,
-            self.stdout.default_directive.parse()?,
-            &self.stdout.filters,
-            self.stdout.color,
-        )?;
-
-        if let Some(config) = self.journald {
-            layers.journald(&config)?;
-        }
-
-        let file_guard = if let Some((config, file_info)) = self.file {
-            Some(layers.file(config.format, &config.filters, file_info)?)
+    ///  A [`TracingInitResult`] containing the file guard and log level handle.
+    fn init_with_layers_and_reload(
+        self,
+        mut layers: Layers,
+        enable_reload: bool,
+    ) -> eyre::Result<TracingInitResult> {
+        // Configure stdout layer - reloadable if requested
+        let log_handle = if enable_reload {
+            let handle = layers.stdout_reloadable(
+                self.stdout.format,
+                self.stdout.default_directive.parse()?,
+                &self.stdout.filters,
+                self.stdout.color,
+            )?;
+            LogLevelHandle::new(handle)
         } else {
-            None
+            layers.stdout(
+                self.stdout.format,
+                self.stdout.default_directive.parse()?,
+                &self.stdout.filters,
+                self.stdout.color,
+            )?;
+            LogLevelHandle::noop()
         };
-
-        if let Some(config) = self.samply {
-            layers.samply(config)?;
-        }
-
-        #[cfg(feature = "tracy")]
-        if let Some(config) = self.tracy {
-            layers.tracy(config)?;
-        }
-
-        // The error is returned if the global default subscriber is already set,
-        // so it's safe to ignore it
-        let _ = tracing_subscriber::registry().with(layers.into_inner()).try_init();
-        Ok(file_guard)
-    }
-}
-
-impl RethTracer {
-    /// Initializes the logging system with reload support for runtime log level changes.
-    ///
-    /// This method is similar to [`Tracer::init_with_layers`] but uses a reloadable filter
-    /// for the stdout layer, allowing log levels to be changed at runtime via RPC methods
-    /// like `debug_verbosity` and `debug_vmodule`.
-    ///
-    /// # Arguments
-    /// * `layers` - Pre-configured `Layers` instance to use for initialization
-    ///
-    /// # Returns
-    /// A [`TracingInitResult`] containing:
-    /// - `file_guard`: Optional file worker guard (keeps file logging alive)
-    /// - `log_handle`: Handle for runtime log level changes
-    pub fn init_with_reload(self, mut layers: Layers) -> eyre::Result<TracingInitResult> {
-        // Create reloadable stdout filter
-        let handle = layers.stdout_reloadable(
-            self.stdout.format,
-            self.stdout.default_directive.parse()?,
-            &self.stdout.filters,
-            self.stdout.color,
-        )?;
 
         if let Some(config) = self.journald {
             layers.journald(&config)?;
@@ -411,7 +411,7 @@ impl RethTracer {
         // so it's safe to ignore it
         let _ = tracing_subscriber::registry().with(layers.into_inner()).try_init();
 
-        Ok(TracingInitResult { file_guard, log_handle: LogLevelHandle::new(handle) })
+        Ok(TracingInitResult { file_guard, log_handle })
     }
 }
 
