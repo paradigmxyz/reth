@@ -22,7 +22,7 @@ struct InMemoryBlobStoreInner {
 
 impl PartialEq for InMemoryBlobStoreInner {
     fn eq(&self, other: &Self) -> bool {
-        self.store.read().eq(&other.store.read())
+        self.store.read().eq(&*other.store.read())
     }
 }
 
