@@ -186,6 +186,14 @@ Label PRs appropriately, first check the available labels and then apply the rel
 
 If changes in reth include changes to dependencies, run commands `zepter` and `make lint-toml` before finalizing the pr. Assume `zepter` binary is installed.
 
+### PR Description Style
+
+Write PR descriptions that are clear and concise:
+* Use **bold** for section labels instead of markdown headers
+* Keep descriptions short - state the problem, solution, and key changes
+* Avoid verbose explanations; let the code speak
+* Format: **Problem:** one line. **Solution:** one line. **Changes:** bullet list. **Impact:** one line.
+
 ### Debugging Tips
 
 1. **Logging**: Use `tracing` crate with appropriate levels
