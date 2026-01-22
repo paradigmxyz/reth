@@ -1154,16 +1154,16 @@ mod tests {
         }
     }
 
-    /// Tests StoragesHistory changeset-based healing with enough blocks to trigger batching.
+    /// Tests `StoragesHistory` changeset-based healing with enough blocks to trigger batching.
     ///
     /// Scenario:
     /// 1. Generate 15,000 blocks worth of storage changeset data (to exceed the 10k batch size)
     /// 2. Each block has 1 storage change (address + slot + value)
     /// 3. Write storage changesets to static files for all 15k blocks
-    /// 4. Set IndexStorageHistory checkpoint to block 5000
-    /// 5. Insert stale StoragesHistory entries in RocksDB for (address, slot) pairs that changed in
-    ///    blocks 5001-15000
-    /// 6. Run check_consistency
+    /// 4. Set `IndexStorageHistory` checkpoint to block 5000
+    /// 5. Insert stale `StoragesHistory` entries in `RocksDB` for (address, slot) pairs that
+    ///    changed in blocks 5001-15000
+    /// 6. Run `check_consistency`
     /// 7. Verify stale entries for blocks > 5000 are pruned and batching worked
     #[test]
     fn test_check_consistency_storages_history_heals_via_changesets_large_range() {
@@ -1286,16 +1286,16 @@ mod tests {
         );
     }
 
-    /// Tests AccountsHistory changeset-based healing with enough blocks to trigger batching.
+    /// Tests `AccountsHistory` changeset-based healing with enough blocks to trigger batching.
     ///
     /// Scenario:
     /// 1. Generate 15,000 blocks worth of account changeset data (to exceed the 10k batch size)
     /// 2. Each block has 1 account change (simple - just random addresses)
     /// 3. Write account changesets to static files for all 15k blocks
-    /// 4. Set IndexAccountHistory checkpoint to block 5000
-    /// 5. Insert stale AccountsHistory entries in RocksDB for addresses that changed in blocks
+    /// 4. Set `IndexAccountHistory` checkpoint to block 5000
+    /// 5. Insert stale `AccountsHistory` entries in `RocksDB` for addresses that changed in blocks
     ///    5001-15000
-    /// 6. Run check_consistency
+    /// 6. Run `check_consistency`
     /// 7. Verify:
     ///    - Stale entries for blocks > 5000 are pruned
     ///    - The batching worked (no OOM, completed successfully)
@@ -1435,8 +1435,8 @@ mod tests {
         let key2 = StorageShardedKey::new(Address::random(), B256::random(), 80);
         let block_list1 = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
         let block_list2 = BlockNumberList::new_pre_sorted([40, 60, 80]);
-        rocksdb.put::<tables::StoragesHistory>(key1.clone(), &block_list1).unwrap();
-        rocksdb.put::<tables::StoragesHistory>(key2.clone(), &block_list2).unwrap();
+        rocksdb.put::<tables::StoragesHistory>(key1, &block_list1).unwrap();
+        rocksdb.put::<tables::StoragesHistory>(key2, &block_list2).unwrap();
 
         // Capture entries before consistency check
         let entries_before: Vec<_> =
