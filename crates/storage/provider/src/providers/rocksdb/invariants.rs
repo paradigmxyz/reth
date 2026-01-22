@@ -353,7 +353,7 @@ impl RocksDBProvider {
             extract_indices: |changesets, checkpoint| {
                 let unique_keys: HashSet<_> = changesets
                     .into_iter()
-                    .map(|(block_addr, entry)| (block_addr.address(), entry.key, checkpoint))
+                    .map(|(block_addr, entry)| (block_addr.address(), entry.key, checkpoint + 1))
                     .collect();
                 unique_keys.into_iter().collect::<Vec<_>>()
             },
@@ -1295,6 +1295,103 @@ mod tests {
         );
     }
 
+    /// Tests that healing preserves entries at exactly the checkpoint block.
+    ///
+    /// This catches off-by-one bugs where checkpoint block data is incorrectly deleted.
+    #[test]
+    fn test_check_consistency_storages_history_preserves_checkpoint_block() {
+        use alloy_primitives::U256;
+        use reth_db_api::models::StorageBeforeTx;
+
+        const CHECKPOINT_BLOCK: u64 = 100;
+        const SF_TIP: u64 = 200;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy()
+                .with_storages_history_in_rocksdb(true)
+                .with_storage_changesets_in_static_files(true),
+        );
+
+        let checkpoint_addr = Address::repeat_byte(0xAA);
+        let checkpoint_slot = B256::repeat_byte(0xBB);
+        let stale_addr = Address::repeat_byte(0xCC);
+        let stale_slot = B256::repeat_byte(0xDD);
+
+        // Write storage changesets to static files
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+
+            for block_num in 0..=SF_TIP {
+                let changeset = if block_num == CHECKPOINT_BLOCK {
+                    vec![StorageBeforeTx {
+                        address: checkpoint_addr,
+                        key: checkpoint_slot,
+                        value: U256::from(block_num),
+                    }]
+                } else if block_num > CHECKPOINT_BLOCK {
+                    vec![StorageBeforeTx {
+                        address: stale_addr,
+                        key: stale_slot,
+                        value: U256::from(block_num),
+                    }]
+                } else {
+                    vec![StorageBeforeTx {
+                        address: Address::ZERO,
+                        key: B256::ZERO,
+                        value: U256::ZERO,
+                    }]
+                };
+                writer.append_storage_changeset(changeset, block_num).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        // Set checkpoint
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(
+                    StageId::IndexStorageHistory,
+                    StageCheckpoint::new(CHECKPOINT_BLOCK),
+                )
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        // Insert entry AT the checkpoint block (should be preserved)
+        let checkpoint_key =
+            StorageShardedKey::new(checkpoint_addr, checkpoint_slot, CHECKPOINT_BLOCK);
+        let checkpoint_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK]);
+        rocksdb.put::<tables::StoragesHistory>(checkpoint_key.clone(), &checkpoint_list).unwrap();
+
+        // Insert stale entry AFTER the checkpoint (should be removed)
+        let stale_key = StorageShardedKey::new(stale_addr, stale_slot, SF_TIP);
+        let stale_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK + 1, SF_TIP]);
+        rocksdb.put::<tables::StoragesHistory>(stale_key.clone(), &stale_list).unwrap();
+
+        // Run healing
+        let provider = factory.database_provider_ro().unwrap();
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Should heal without unwind");
+
+        // Verify checkpoint block entry is PRESERVED
+        let preserved = rocksdb.get::<tables::StoragesHistory>(checkpoint_key).unwrap();
+        assert!(preserved.is_some(), "Entry at checkpoint block should be preserved, not deleted");
+
+        // Verify stale entry is removed or unwound
+        let stale = rocksdb.get::<tables::StoragesHistory>(stale_key).unwrap();
+        assert!(stale.is_none(), "Stale entry after checkpoint should be removed");
+    }
+
     /// Tests `AccountsHistory` changeset-based healing with enough blocks to trigger batching.
     ///
     /// Scenario:
@@ -1425,6 +1522,86 @@ mod tests {
             "All stale entries (block > {}) should be pruned",
             CHECKPOINT_BLOCK
         );
+    }
+
+    /// Tests that accounts history healing preserves entries at exactly the checkpoint block.
+    #[test]
+    fn test_check_consistency_accounts_history_preserves_checkpoint_block() {
+        use reth_db::models::AccountBeforeTx;
+        use reth_db_api::models::ShardedKey;
+
+        const CHECKPOINT_BLOCK: u64 = 100;
+        const SF_TIP: u64 = 200;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::AccountsHistory>()
+            .build()
+            .unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy()
+                .with_account_history_in_rocksdb(true)
+                .with_account_changesets_in_static_files(true),
+        );
+
+        let checkpoint_addr = Address::repeat_byte(0xAA);
+        let stale_addr = Address::repeat_byte(0xCC);
+
+        // Write account changesets to static files
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+            for block_num in 0..=SF_TIP {
+                let changeset = if block_num == CHECKPOINT_BLOCK {
+                    vec![AccountBeforeTx { address: checkpoint_addr, info: None }]
+                } else if block_num > CHECKPOINT_BLOCK {
+                    vec![AccountBeforeTx { address: stale_addr, info: None }]
+                } else {
+                    vec![AccountBeforeTx { address: Address::ZERO, info: None }]
+                };
+                writer.append_account_changeset(changeset, block_num).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        // Set checkpoint
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(
+                    StageId::IndexAccountHistory,
+                    StageCheckpoint::new(CHECKPOINT_BLOCK),
+                )
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        // Insert entry AT the checkpoint block (should be preserved)
+        let checkpoint_key = ShardedKey::new(checkpoint_addr, CHECKPOINT_BLOCK);
+        let checkpoint_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK]);
+        rocksdb.put::<tables::AccountsHistory>(checkpoint_key.clone(), &checkpoint_list).unwrap();
+
+        // Insert stale entry AFTER the checkpoint (should be removed)
+        let stale_key = ShardedKey::new(stale_addr, SF_TIP);
+        let stale_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK + 1, SF_TIP]);
+        rocksdb.put::<tables::AccountsHistory>(stale_key.clone(), &stale_list).unwrap();
+
+        // Run healing
+        let provider = factory.database_provider_ro().unwrap();
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Should heal without unwind");
+
+        // Verify checkpoint block entry is PRESERVED
+        let preserved = rocksdb.get::<tables::AccountsHistory>(checkpoint_key).unwrap();
+        assert!(preserved.is_some(), "Entry at checkpoint block should be preserved, not deleted");
+
+        // Verify stale entry is removed or unwound
+        let stale = rocksdb.get::<tables::AccountsHistory>(stale_key).unwrap();
+        assert!(stale.is_none(), "Stale entry after checkpoint should be removed");
     }
 
     #[test]
