@@ -136,7 +136,7 @@ where
 
         info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
 
-        provider.with_rocksdb_batch(|rocksdb_batch| {
+        provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
             let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
             load_account_history(collector, first_sync, &mut writer)
                 .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;

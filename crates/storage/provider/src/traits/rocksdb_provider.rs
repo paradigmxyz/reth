@@ -58,4 +58,30 @@ pub trait RocksDBProviderFactory {
             Ok(result)
         }
     }
+
+    /// Executes a closure with a `RocksDB` batch that auto-commits on threshold.
+    ///
+    /// Unlike [`Self::with_rocksdb_batch`], this uses a batch that automatically commits
+    /// when it exceeds the size threshold, preventing OOM during large bulk writes.
+    /// The consistency check on startup heals any crash between auto-commits.
+    fn with_rocksdb_batch_auto_commit<F, R>(&self, f: F) -> ProviderResult<R>
+    where
+        F: FnOnce(RocksBatchArg<'_>) -> ProviderResult<(R, Option<RawRocksDBBatch>)>,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        {
+            let rocksdb = self.rocksdb_provider();
+            let batch = rocksdb.batch_with_auto_commit();
+            let (result, raw_batch) = f(batch)?;
+            if let Some(b) = raw_batch {
+                self.set_pending_rocksdb_batch(b);
+            }
+            Ok(result)
+        }
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        {
+            let (result, _) = f(())?;
+            Ok(result)
+        }
+    }
 }
