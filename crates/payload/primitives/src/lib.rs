@@ -439,6 +439,13 @@ where
         payload_or_attrs.message_validation_kind(),
         payload_or_attrs.timestamp(),
         payload_or_attrs.parent_beacon_block_root().is_some(),
+    )?;
+    validate_slot_number_presence(
+        chain_spec,
+        version,
+        payload_or_attrs.message_validation_kind(),
+        payload_or_attrs.timestamp(),
+        payload_or_attrs.parent_beacon_block_root().is_some(),
     )
 }
 

@@ -162,6 +162,11 @@ pub trait PayloadAttributes:
     ///
     /// `Some` for post-merge blocks, `None` for pre-merge blocks.
     fn parent_beacon_block_root(&self) -> Option<B256>;
+
+    /// Returns the slot number.
+    ///
+    /// `Some` for post-amsterdam blocks, `None` for pre-amsterdam blocks.
+    fn slot_number(&self) -> Option<u64>;
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -175,6 +180,10 @@ impl PayloadAttributes for EthPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.parent_beacon_block_root
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.slot_number
     }
 }
 
@@ -190,6 +199,10 @@ impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.payload_attributes.parent_beacon_block_root
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.payload_attributes.slot_number
     }
 }
 

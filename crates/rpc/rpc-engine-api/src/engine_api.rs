@@ -365,6 +365,19 @@ where
             .await
     }
 
+    /// Sends a message to the beacon consensus engine to update the fork choice _with_ slot number,
+    /// but only _after_ amsterdam.
+    ///
+    /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
+    pub async fn fork_choice_updated_v4(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V6, state, payload_attrs)
+            .await
+    }
+
     /// Metrics version of `fork_choice_updated_v3`
     pub async fn fork_choice_updated_v3_metered(
         &self,
@@ -374,6 +387,18 @@ where
         let start = Instant::now();
         let res = Self::fork_choice_updated_v3(self, state, payload_attrs).await;
         self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
+        res
+    }
+
+    /// Metrics version of `fork_choice_updated_v4`
+    pub async fn fork_choice_updated_v4_metered(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v4(self, state, payload_attrs).await;
+        self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
         res
     }
 
@@ -740,6 +765,8 @@ where
     ///
     /// * If the version above [`EngineApiMessageVersion::V3`], then the payload attributes will be
     ///   validated according to the Cancun rules.
+    /// * If the version above [`EngineApiMessageVersion::V6`], then the payload attributes will be
+    ///   validated according to the Amsterdam rules.
     async fn validate_and_execute_forkchoice(
         &self,
         version: EngineApiMessageVersion,
@@ -1077,6 +1104,18 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         Ok(self.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
+    }
+
+    /// Handler for `engine_forkchoiceUpdatedV4`
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4>
+    async fn fork_choice_updated_v4(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
+        Ok(self.fork_choice_updated_v4_metered(fork_choice_state, payload_attributes).await?)
     }
 
     /// Handler for `engine_getPayloadV1`
