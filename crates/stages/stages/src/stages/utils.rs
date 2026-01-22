@@ -116,6 +116,7 @@ fn flush_shards_partial<H: HistoryShardWriter>(
     }
 
     let flush_len = shards_to_flush * NUM_OF_INDICES_IN_SHARD;
+    debug_assert!(flush_len <= list.len(), "flush_len exceeds list length");
 
     for chunk in list[..flush_len].chunks(NUM_OF_INDICES_IN_SHARD) {
         let highest = *chunk.last().expect("chunk is non-empty");
