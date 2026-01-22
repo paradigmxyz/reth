@@ -20,6 +20,10 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use std::collections::HashSet;
 
+/// Batch size for changeset iteration during history healing.
+/// Balances memory usage against iteration overhead.
+const HEAL_HISTORY_BATCH_SIZE: u64 = 10_000;
+
 impl RocksDBProvider {
     /// Checks consistency of `RocksDB` tables against MDBX stage checkpoints.
     ///
@@ -260,11 +264,10 @@ impl RocksDBProvider {
             "StoragesHistory: healing via changesets"
         );
 
-        const BATCH_SIZE: u64 = 10_000;
         let mut batch_start = checkpoint.saturating_add(1);
 
         while batch_start <= sf_tip {
-            let batch_end = batch_start.saturating_add(BATCH_SIZE - 1).min(sf_tip);
+            let batch_end = batch_start.saturating_add(HEAL_HISTORY_BATCH_SIZE - 1).min(sf_tip);
 
             let changesets = provider.storage_changesets_range(batch_start..=batch_end)?;
 
@@ -302,8 +305,6 @@ impl RocksDBProvider {
     where
         Provider: DBProvider + StageCheckpointReader + StaticFileProviderFactory + ChangeSetReader,
     {
-        const BATCH_SIZE: u64 = 10_000;
-
         let checkpoint = provider
             .get_stage_checkpoint(StageId::IndexAccountHistory)?
             .map(|cp| cp.block_number)
@@ -341,7 +342,7 @@ impl RocksDBProvider {
 
         let mut batch_start = checkpoint + 1;
         while batch_start <= sf_tip {
-            let batch_end = (batch_start + BATCH_SIZE - 1).min(sf_tip);
+            let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(sf_tip);
 
             let changesets = provider.account_changesets_range(batch_start..=batch_end)?;
 
