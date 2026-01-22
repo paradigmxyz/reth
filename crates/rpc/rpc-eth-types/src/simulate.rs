@@ -258,11 +258,13 @@ where
         let call = match result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error = Err::from_evm_halt(reason, tx.gas_limit());
+                #[allow(clippy::needless_update)]
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
                         message: error.to_string(),
                         code: error.into().code(),
+                        ..SimulateError::invalid_params()
                     }),
                     gas_used,
                     logs: Vec::new(),
@@ -271,11 +273,13 @@ where
             }
             ExecutionResult::Revert { output, gas_used } => {
                 let error = Err::from_revert(output.clone());
+                #[allow(clippy::needless_update)]
                 SimCallResult {
                     return_data: output,
                     error: Some(SimulateError {
                         message: error.to_string(),
                         code: error.into().code(),
+                        ..SimulateError::invalid_params()
                     }),
                     gas_used,
                     status: false,

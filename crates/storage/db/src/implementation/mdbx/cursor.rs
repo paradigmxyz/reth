@@ -11,7 +11,7 @@ use reth_db_api::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
     },
-    table::{Compress, Decode, Decompress, DupSort, Encode, Table},
+    table::{Compress, Decode, Decompress, DupSort, Encode, IntoVec, Table},
 };
 use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
@@ -268,7 +268,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
                             info: e.into(),
                             operation: DatabaseWriteOperation::CursorUpsert,
                             table_name: T::NAME,
-                            key: key.into(),
+                            key: key.into_vec(),
                         }
                         .into()
                     })
@@ -290,7 +290,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
                             info: e.into(),
                             operation: DatabaseWriteOperation::CursorInsert,
                             table_name: T::NAME,
-                            key: key.into(),
+                            key: key.into_vec(),
                         }
                         .into()
                     })
@@ -314,7 +314,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
                             info: e.into(),
                             operation: DatabaseWriteOperation::CursorAppend,
                             table_name: T::NAME,
-                            key: key.into(),
+                            key: key.into_vec(),
                         }
                         .into()
                     })
@@ -350,7 +350,7 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
                             info: e.into(),
                             operation: DatabaseWriteOperation::CursorAppendDup,
                             table_name: T::NAME,
-                            key: key.into(),
+                            key: key.into_vec(),
                         }
                         .into()
                     })
