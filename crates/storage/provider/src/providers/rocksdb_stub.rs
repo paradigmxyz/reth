@@ -88,6 +88,13 @@ impl RocksDBProvider {
     pub const fn clear<T>(&self) -> ProviderResult<()> {
         Ok(())
     }
+
+    /// Returns the total size of WAL (Write-Ahead Log) files in bytes (stub implementation).
+    ///
+    /// Returns 0 since there is no `RocksDB` when the feature is disabled.
+    pub const fn wal_size_bytes(&self) -> u64 {
+        0
+    }
 }
 
 impl DatabaseMetrics for RocksDBProvider {
