@@ -67,14 +67,6 @@ pub enum InitStorageError {
         /// Actual genesis hash.
         storage_hash: B256,
     },
-    /// Storage settings changed after chain has progressed past genesis.
-    #[error("storage settings mismatch: stored {stored:?}, current {current:?}. Delete datadir to resync.")]
-    StorageSettingsMismatch {
-        /// Persisted storage settings.
-        stored: StorageSettings,
-        /// Current storage settings from CLI/config.
-        current: StorageSettings,
-    },
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
@@ -173,10 +165,17 @@ where
                 if factory.best_block_number()? > genesis_block_number {
                     let stored = factory.storage_settings()?.unwrap_or(StorageSettings::legacy());
                     if stored != genesis_storage_settings {
-                        return Err(InitStorageError::StorageSettingsMismatch {
-                            stored,
-                            current: genesis_storage_settings,
-                        })
+                        warn!(
+                            target: "reth::storage",
+                            ?stored,
+                            requested = ?genesis_storage_settings,
+                            "Storage settings mismatch detected. The database was initialized with \
+                             different settings than currently configured. Continuing with stored \
+                             settings to prevent data inconsistency. To apply new settings, delete \
+                             the datadir and resync."
+                        );
+                        // Use stored settings to prevent data corruption
+                        factory.set_storage_settings_cache(stored);
                     }
                 }
 
@@ -920,20 +919,25 @@ mod tests {
     }
 
     #[test]
-    fn fail_storage_settings_mismatch_after_sync() {
+    fn warn_storage_settings_mismatch_after_sync() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        init_genesis_with_settings(&factory, StorageSettings::legacy()).unwrap();
+        let stored_settings = StorageSettings::legacy();
+        init_genesis_with_settings(&factory, stored_settings).unwrap();
 
         let provider_rw = factory.database_provider_rw().unwrap();
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(100)).unwrap();
         provider_rw.commit().unwrap();
 
-        let result = init_genesis_with_settings(
-            &factory,
-            StorageSettings::legacy().with_receipts_in_static_files(true),
-        );
+        // Request different settings - should warn but succeed
+        let requested_settings = StorageSettings::legacy().with_receipts_in_static_files(true);
+        let result = init_genesis_with_settings(&factory, requested_settings);
 
-        assert!(matches!(result.unwrap_err(), InitStorageError::StorageSettingsMismatch { .. }));
+        // Should succeed (warning is logged, not an error)
+        assert!(result.is_ok());
+
+        // Effective settings should be the stored ones, not the requested ones
+        let effective = factory.storage_settings().unwrap().unwrap();
+        assert_eq!(effective, stored_settings);
     }
 
     #[test]
