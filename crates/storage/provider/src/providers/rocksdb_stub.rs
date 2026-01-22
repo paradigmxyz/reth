@@ -81,6 +81,13 @@ impl RocksDBProvider {
     pub const fn table_stats(&self) -> Vec<RocksDBTableStats> {
         Vec::new()
     }
+
+    /// Clears all entries from the specified table (stub implementation).
+    ///
+    /// This is a no-op since there is no `RocksDB` when the feature is disabled.
+    pub const fn clear<T>(&self) -> ProviderResult<()> {
+        Ok(())
+    }
 }
 
 impl DatabaseMetrics for RocksDBProvider {
@@ -92,13 +99,6 @@ impl DatabaseMetrics for RocksDBProvider {
 /// A stub batch writer for `RocksDB`.
 #[derive(Debug)]
 pub struct RocksDBBatch;
-
-impl RocksDBBatch {
-    /// Clears all entries from the specified table (stub - no-op).
-    pub const fn clear<T>(&mut self) -> ProviderResult<()> {
-        Ok(())
-    }
-}
 
 /// A stub builder for `RocksDB`.
 #[derive(Debug)]

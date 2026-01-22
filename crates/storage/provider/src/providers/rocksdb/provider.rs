@@ -707,6 +707,27 @@ impl RocksDBProvider {
         })
     }
 
+    /// Clears all entries from the specified table.
+    ///
+    /// Uses `delete_range_cf` from empty key to a max key (256 bytes of 0xFF).
+    /// This end key must exceed the maximum encoded key size for any table.
+    /// Current max is ~60 bytes (`StorageShardedKey` = 20 + 32 + 8).
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
+    pub fn clear<T: Table>(&self) -> ProviderResult<()> {
+        let cf = self.get_cf_handle::<T>()?;
+
+        self.0.delete_range_cf(cf, &[] as &[u8], &[0xFF; 256]).map_err(|e| {
+            ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })?;
+
+        Ok(())
+    }
+
     /// Gets the first (smallest key) entry from the specified table.
     pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
         self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
@@ -1141,15 +1162,6 @@ impl<'a> RocksDBBatch<'a> {
     /// Deletes a value from the batch.
     pub fn delete<T: Table>(&mut self, key: T::Key) -> ProviderResult<()> {
         self.inner.delete_cf(self.provider.get_cf_handle::<T>()?, key.encode().as_ref());
-        Ok(())
-    }
-
-    /// Clears all entries from the specified table.
-    ///
-    /// Uses `delete_range_cf` from empty key to a max key (256 bytes of 0xFF).
-    /// The clear is buffered and only applied when the batch is committed.
-    pub fn clear<T: Table>(&mut self) -> ProviderResult<()> {
-        self.inner.delete_range_cf(self.provider.get_cf_handle::<T>()?, &[] as &[u8], &[0xFF; 256]);
         Ok(())
     }
 
