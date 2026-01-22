@@ -828,7 +828,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_rocksdb_table_size{$instance_label=\"$instance\"}) or vector(0)",
+          "expr": "(sum(reth_rocksdb_table_size{$instance_label=\"$instance\"}) or vector(0)) + (sum(reth_rocksdb_wal_size{$instance_label=\"$instance\"}) or vector(0))",
           "hide": false,
           "instant": false,
           "legendFormat": "RocksDB",
@@ -841,7 +841,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\"}) + sum(reth_db_freelist{$instance_label=\"$instance\"} * reth_db_page_size{$instance_label=\"$instance\"}) + sum(reth_static_files_segment_size{$instance_label=\"$instance\"}) + (sum(reth_rocksdb_table_size{$instance_label=\"$instance\"}) or vector(0))",
+          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\"}) + sum(reth_db_freelist{$instance_label=\"$instance\"} * reth_db_page_size{$instance_label=\"$instance\"}) + sum(reth_static_files_segment_size{$instance_label=\"$instance\"}) + (sum(reth_rocksdb_table_size{$instance_label=\"$instance\"}) or vector(0)) + (sum(reth_rocksdb_wal_size{$instance_label=\"$instance\"}) or vector(0))",
           "hide": false,
           "instant": false,
           "legendFormat": "Total",
@@ -6771,6 +6771,17 @@
           "legendFormat": "{{table}}",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_rocksdb_wal_size{$instance_label=\"$instance\"}",
+          "legendFormat": "WAL",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "RocksDB Tables Size",
@@ -7091,7 +7102,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (job) ( reth_rocksdb_table_size{$instance_label=\"$instance\"} )",
+          "expr": "sum by (job) ( reth_rocksdb_table_size{$instance_label=\"$instance\"} ) + (sum by (job) ( reth_rocksdb_wal_size{$instance_label=\"$instance\"} ) or vector(0))",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -12536,6 +12547,18 @@
           "legendFormat": "__auto",
           "range": true,
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "label_replace(reth_rocksdb_wal_size{$instance_label=\"$instance\"}, \"table\", \"WAL\", \"\", \"\")",
+          "format": "table",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "C"
         }
       ],
       "transformations": [
@@ -12554,6 +12577,12 @@
                 "operation": "aggregate"
               },
               "Value #B": {
+                "aggregations": [
+                  "lastNotNull"
+                ],
+                "operation": "aggregate"
+              },
+              "Value #C": {
                 "aggregations": [
                   "lastNotNull"
                 ],
@@ -12584,7 +12613,8 @@
             "renameByName": {
               "table": "Table",
               "Value #A (lastNotNull)": "SST Size",
-              "Value #B (lastNotNull)": "Memtable Size"
+              "Value #B (lastNotNull)": "Memtable Size",
+              "Value #C (lastNotNull)": "WAL Size"
             }
           }
         }
