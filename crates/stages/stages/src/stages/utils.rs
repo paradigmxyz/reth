@@ -1,11 +1,11 @@
 //! Utils for `stages`.
-use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
+use alloy_primitives::{Address, BlockNumber, TxNumber};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::{
         sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, ShardedKey,
+        AccountBeforeTx, ShardedHistoryKey, ShardedKey,
     },
     table::{Decode, Decompress, Key, Table},
     transaction::DbTx,
@@ -25,21 +25,13 @@ use tracing::info;
 
 /// Trait for writing sharded history indices to the database.
 pub(crate) trait HistoryShardWriter {
-    /// The prefix key type (e.g., Address for accounts, (Address, B256) for storage).
-    type PrefixKey: Copy + Eq;
     /// The full sharded key type for the table.
-    type TableKey: Key;
-
-    /// Creates a sharded key from prefix and highest block number.
-    fn make_key(prefix: Self::PrefixKey, highest: u64) -> Self::TableKey;
-
-    /// Extracts the prefix key from a sharded key.
-    fn key_prefix(key: &Self::TableKey) -> Self::PrefixKey;
+    type TableKey: Key + ShardedHistoryKey;
 
     /// Gets the last shard for a prefix (for incremental sync merging).
     fn get_last_shard(
         &mut self,
-        prefix: Self::PrefixKey,
+        prefix: <Self::TableKey as ShardedHistoryKey>::Prefix,
     ) -> ProviderResult<Option<BlockNumberList>>;
 
     /// Writes a shard to the database (append or upsert based on flag).
@@ -60,7 +52,7 @@ fn load_sharded_history<H: HistoryShardWriter>(
     append_only: bool,
     writer: &mut H,
 ) -> Result<(), StageError> {
-    let mut current_prefix: Option<H::PrefixKey> = None;
+    let mut current_prefix: Option<<H::TableKey as ShardedHistoryKey>::Prefix> = None;
     let mut current_list = Vec::<u64>::with_capacity(NUM_OF_INDICES_IN_SHARD * 2);
 
     let total_entries = collector.len();
@@ -75,7 +67,7 @@ fn load_sharded_history<H: HistoryShardWriter>(
             info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
         }
 
-        let prefix = H::key_prefix(&sharded_key);
+        let prefix = sharded_key.prefix();
 
         if current_prefix != Some(prefix) {
             if let Some(prev_prefix) = current_prefix {
@@ -103,7 +95,7 @@ fn load_sharded_history<H: HistoryShardWriter>(
 
 /// Flushes complete shards, keeping at least one shard buffered for continued accumulation.
 fn flush_shards_partial<H: HistoryShardWriter>(
-    prefix: H::PrefixKey,
+    prefix: <H::TableKey as ShardedHistoryKey>::Prefix,
     list: &mut Vec<u64>,
     append_only: bool,
     writer: &mut H,
@@ -127,7 +119,7 @@ fn flush_shards_partial<H: HistoryShardWriter>(
 
     for chunk in list[..flush_len].chunks(NUM_OF_INDICES_IN_SHARD) {
         let highest = *chunk.last().expect("chunk is non-empty");
-        let key = H::make_key(prefix, highest);
+        let key = H::TableKey::new_sharded(prefix, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
         writer.write_shard(key, &value, append_only)?;
     }
@@ -140,7 +132,7 @@ fn flush_shards_partial<H: HistoryShardWriter>(
 /// Flushes all remaining shards. Uses `u64::MAX` for the final shard's key to enable
 /// incremental sync lookups via `seek_exact(prefix, u64::MAX)`.
 fn flush_shards<H: HistoryShardWriter>(
-    prefix: H::PrefixKey,
+    prefix: <H::TableKey as ShardedHistoryKey>::Prefix,
     list: &mut Vec<u64>,
     append_only: bool,
     writer: &mut H,
@@ -154,7 +146,7 @@ fn flush_shards<H: HistoryShardWriter>(
     for (i, chunk) in list.chunks(NUM_OF_INDICES_IN_SHARD).enumerate() {
         let is_last = i == num_chunks - 1;
         let highest = if is_last { u64::MAX } else { *chunk.last().expect("chunk is non-empty") };
-        let key = H::make_key(prefix, highest);
+        let key = H::TableKey::new_sharded(prefix, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
         writer.write_shard(key, &value, append_only)?;
     }
@@ -324,20 +316,11 @@ where
     CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
         + DbCursorRO<reth_db_api::tables::AccountsHistory>,
 {
-    type PrefixKey = Address;
     type TableKey = ShardedKey<Address>;
-
-    fn make_key(prefix: Self::PrefixKey, highest: u64) -> Self::TableKey {
-        ShardedKey::new(prefix, highest)
-    }
-
-    fn key_prefix(key: &Self::TableKey) -> Self::PrefixKey {
-        key.key
-    }
 
     fn get_last_shard(
         &mut self,
-        prefix: Self::PrefixKey,
+        prefix: <Self::TableKey as ShardedHistoryKey>::Prefix,
     ) -> ProviderResult<Option<BlockNumberList>> {
         self.writer.get_last_account_history_shard(prefix)
     }
@@ -417,20 +400,11 @@ where
     CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
         + DbCursorRO<reth_db_api::tables::StoragesHistory>,
 {
-    type PrefixKey = (Address, B256);
     type TableKey = StorageShardedKey;
-
-    fn make_key(prefix: Self::PrefixKey, highest: u64) -> Self::TableKey {
-        StorageShardedKey::new(prefix.0, prefix.1, highest)
-    }
-
-    fn key_prefix(key: &Self::TableKey) -> Self::PrefixKey {
-        (key.address, key.sharded_key.key)
-    }
 
     fn get_last_shard(
         &mut self,
-        prefix: Self::PrefixKey,
+        prefix: <Self::TableKey as ShardedHistoryKey>::Prefix,
     ) -> ProviderResult<Option<BlockNumberList>> {
         self.writer.get_last_storage_history_shard(prefix.0, prefix.1)
     }

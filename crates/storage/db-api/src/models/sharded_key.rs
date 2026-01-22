@@ -10,6 +10,21 @@ use std::hash::Hash;
 /// Number of indices in one shard.
 pub const NUM_OF_INDICES_IN_SHARD: usize = 2_000;
 
+/// Trait for sharded history keys that can be constructed from a prefix + block number.
+///
+/// This abstracts over the key construction and prefix extraction for sharded history tables
+/// like `AccountsHistory` and `StoragesHistory`.
+pub trait ShardedHistoryKey: Sized {
+    /// The prefix type (e.g., `Address` for accounts, `(Address, B256)` for storage).
+    type Prefix: Copy + Eq;
+
+    /// Creates a new sharded key from prefix and highest block number.
+    fn new_sharded(prefix: Self::Prefix, highest_block_number: u64) -> Self;
+
+    /// Extracts the prefix from this key.
+    fn prefix(&self) -> Self::Prefix;
+}
+
 /// Size of `BlockNumber` in bytes (u64 = 8 bytes).
 const BLOCK_NUMBER_SIZE: usize = std::mem::size_of::<BlockNumber>();
 
@@ -77,6 +92,20 @@ impl Decode for ShardedKey<Address> {
     }
 }
 
+impl ShardedHistoryKey for ShardedKey<Address> {
+    type Prefix = Address;
+
+    #[inline]
+    fn new_sharded(prefix: Self::Prefix, highest_block_number: u64) -> Self {
+        Self::new(prefix, highest_block_number)
+    }
+
+    #[inline]
+    fn prefix(&self) -> Self::Prefix {
+        self.key
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,5 +138,15 @@ mod tests {
         let encoded = key.encode();
         let decoded = ShardedKey::<Address>::decode(&encoded).unwrap();
         assert_eq!(decoded.highest_block_number, u64::MAX);
+    }
+
+    #[test]
+    fn sharded_history_key_trait_roundtrip() {
+        let addr = address!("0102030405060708091011121314151617181920");
+        let block_num = 0x123456789ABCDEFu64;
+
+        let key = ShardedKey::<Address>::new_sharded(addr, block_num);
+        assert_eq!(key.prefix(), addr);
+        assert_eq!(key.highest_block_number, block_num);
     }
 }
