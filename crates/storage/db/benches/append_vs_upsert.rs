@@ -1,18 +1,12 @@
 #![allow(missing_docs)]
 
-//! Benchmarks comparing APPEND/APPEND_DUP vs UPSERT for sorted writes.
-//!
-//! This validates the optimization opportunity where PlainStorageState uses
-//! upsert() despite having pre-sorted input.
-
 use alloy_primitives::{Address, B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use reth_db::test_utils::create_test_rw_db_with_path;
+use reth_db::{test_utils::create_test_rw_db_with_path, Database};
 use reth_db_api::{
     cursor::{DbCursorRW, DbDupCursorRW},
     tables::{CanonicalHeaders, PlainStorageState},
-    transaction::DbTxMut,
-    Database,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_primitives_traits::StorageEntry;
 use std::path::Path;
@@ -27,7 +21,6 @@ fn bench_dupsort_writes(c: &mut Criterion) {
     for count in [100, 1000, 10000] {
         group.throughput(Throughput::Elements(count as u64));
 
-        // Pre-generate sorted test data
         let addresses: Vec<Address> =
             (0..10u64).map(|i| Address::with_last_byte(i as u8)).collect();
 
@@ -44,7 +37,6 @@ fn bench_dupsort_writes(c: &mut Criterion) {
             })
             .collect();
 
-        // Benchmark: append_dup (optimal for sorted data)
         group.bench_with_input(
             BenchmarkId::new("append_dup", count),
             &(&addresses, &storage_entries),
@@ -60,7 +52,7 @@ fn bench_dupsort_writes(c: &mut Criterion) {
 
                         for (addr, addr_entries) in addrs.iter().zip(entries.iter()) {
                             for entry in addr_entries {
-                                cursor.append_dup(*addr, entry.clone()).unwrap();
+                                cursor.append_dup(*addr, *entry).unwrap();
                             }
                         }
 
@@ -70,7 +62,6 @@ fn bench_dupsort_writes(c: &mut Criterion) {
             },
         );
 
-        // Benchmark: upsert (current approach - suboptimal for sorted data)
         group.bench_with_input(
             BenchmarkId::new("upsert", count),
             &(&addresses, &storage_entries),
@@ -86,7 +77,7 @@ fn bench_dupsort_writes(c: &mut Criterion) {
 
                         for (addr, addr_entries) in addrs.iter().zip(entries.iter()) {
                             for entry in addr_entries {
-                                cursor.upsert(*addr, entry.clone()).unwrap();
+                                cursor.upsert(*addr, entry).unwrap();
                             }
                         }
 
@@ -96,7 +87,6 @@ fn bench_dupsort_writes(c: &mut Criterion) {
             },
         );
 
-        // Benchmark: insert (for comparison)
         group.bench_with_input(
             BenchmarkId::new("insert", count),
             &(&addresses, &storage_entries),
@@ -112,8 +102,7 @@ fn bench_dupsort_writes(c: &mut Criterion) {
 
                         for (addr, addr_entries) in addrs.iter().zip(entries.iter()) {
                             for entry in addr_entries {
-                                // Insert fails if exists, but we start fresh each iter
-                                let _ = cursor.insert(*addr, entry.clone());
+                                let _ = cursor.insert(*addr, entry);
                             }
                         }
 
@@ -131,10 +120,9 @@ fn bench_regular_table_append(c: &mut Criterion) {
     let mut group = c.benchmark_group("regular_table_append_vs_put");
     let bench_db_path = Path::new(BENCH_DB_PATH);
 
-    for count in [1000, 10000] {
-        group.throughput(Throughput::Elements(count as u64));
+    for count in [1000u64, 10000] {
+        group.throughput(Throughput::Elements(count));
 
-        // CanonicalHeaders: BlockNumber -> B256
         let headers: Vec<(u64, B256)> =
             (0..count).map(|i| (i, B256::from(U256::from(i)))).collect();
 
@@ -149,7 +137,7 @@ fn bench_regular_table_append(c: &mut Criterion) {
                     let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
 
                     for (num, hash) in hdrs {
-                        cursor.append(*num, *hash).unwrap();
+                        cursor.append(*num, hash).unwrap();
                     }
 
                     tx.commit().unwrap();
@@ -168,7 +156,7 @@ fn bench_regular_table_append(c: &mut Criterion) {
                     let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
 
                     for (num, hash) in hdrs {
-                        cursor.upsert(*num, *hash).unwrap();
+                        cursor.upsert(*num, hash).unwrap();
                     }
 
                     tx.commit().unwrap();
