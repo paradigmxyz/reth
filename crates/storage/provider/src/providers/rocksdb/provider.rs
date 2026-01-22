@@ -642,7 +642,7 @@ impl RocksDBProvider {
 
     /// Creates a new batch with auto-commit enabled.
     ///
-    /// When the batch size exceeds [`DEFAULT_AUTO_COMMIT_THRESHOLD`], the batch is automatically
+    /// When the batch size exceeds the threshold (4 GiB), the batch is automatically
     /// committed and reset. This prevents OOM during large bulk writes while maintaining
     /// crash-safety via the consistency check on startup.
     pub fn batch_with_auto_commit(&self) -> RocksDBBatch<'_> {
