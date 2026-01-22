@@ -4,11 +4,17 @@ use crate::{
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_provider::{PruneShardOutcome, RocksDBProviderFactory, StorageChangeSetReader};
+use alloy_primitives::BlockNumber;
+use reth_provider::{
+    DBProvider, EitherWriter, PruneShardOutcome, RocksDBProviderFactory, StaticFileProviderFactory,
+    StorageChangeSetReader, StorageSettingsCache,
+};
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
+use reth_static_file_types::StaticFileSegment;
 use rustc_hash::FxHashMap;
+use std::ops::RangeInclusive;
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -20,35 +26,98 @@ impl StoragesHistoryPruner {
     pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
-}
 
-impl<Provider> Segment<Provider> for StoragesHistoryPruner
-where
-    Provider: StorageChangeSetReader + RocksDBProviderFactory,
-{
-    fn segment(&self) -> PruneSegment {
-        PruneSegment::StorageHistory
-    }
+    /// Prune when storage changesets are in static files.
+    fn prune_static_files<Provider>(
+        &self,
+        provider: &Provider,
+        range: RangeInclusive<BlockNumber>,
+        range_end: BlockNumber,
+        input: PruneInput,
+    ) -> Result<SegmentOutput, PrunerError>
+    where
+        Provider: StorageChangeSetReader + RocksDBProviderFactory + StaticFileProviderFactory,
+    {
+        let mut limiter = input.limiter;
+        if limiter.is_limit_reached() {
+            return Ok(SegmentOutput::not_done(
+                limiter.interrupt_reason(),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ))
+        }
 
-    fn mode(&self) -> Option<PruneMode> {
-        Some(self.mode)
-    }
+        let mut highest_deleted_storages = FxHashMap::default();
+        let mut last_changeset_pruned_block = None;
+        let mut scanned_changesets = 0usize;
+        let mut done = true;
 
-    fn purpose(&self) -> PrunePurpose {
-        PrunePurpose::User
-    }
+        for block in range {
+            let changes = provider.storage_block_changeset(block)?;
+            let changes_count = changes.len();
 
-    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
-    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
-        let range = match input.get_next_block_range() {
-            Some(range) => range,
-            None => {
-                trace!(target: "pruner", "No storage history to prune");
-                return Ok(SegmentOutput::done())
+            for change in changes {
+                highest_deleted_storages.insert((change.address, change.key), block);
             }
-        };
-        let range_end = *range.end();
 
+            scanned_changesets += changes_count;
+            limiter.increment_deleted_entries_count_by(changes_count);
+            last_changeset_pruned_block = Some(block);
+
+            if limiter.is_limit_reached() {
+                done = false;
+                break;
+            }
+        }
+        trace!(target: "pruner", scanned = %scanned_changesets, %done, "Scanned storage changesets");
+
+        let last_changeset_pruned_block = last_changeset_pruned_block.unwrap_or(range_end);
+
+        let mut keys_deleted = 0usize;
+        let mut keys_updated = 0usize;
+
+        provider.with_rocksdb_batch(|mut batch| {
+            for ((address, storage_key), highest_block) in &highest_deleted_storages {
+                let prune_to = (*highest_block).min(last_changeset_pruned_block);
+                match batch.prune_storage_history_to(*address, *storage_key, prune_to)? {
+                    PruneShardOutcome::Deleted => keys_deleted += 1,
+                    PruneShardOutcome::Updated => keys_updated += 1,
+                    PruneShardOutcome::Unchanged => {}
+                }
+            }
+            Ok(((), Some(batch.into_inner())))
+        })?;
+
+        trace!(target: "pruner", keys_deleted, keys_updated, %done, "Pruned storage history (RocksDB indices)");
+
+        // Delete static file jars below the pruned block
+        provider.static_file_provider().delete_segment_below_block(
+            StaticFileSegment::StorageChangeSets,
+            last_changeset_pruned_block + 1,
+        )?;
+
+        let progress = limiter.progress(done);
+
+        Ok(SegmentOutput {
+            progress,
+            pruned: scanned_changesets + keys_deleted,
+            checkpoint: Some(SegmentOutputCheckpoint {
+                block_number: Some(last_changeset_pruned_block),
+                tx_number: None,
+            }),
+        })
+    }
+
+    /// Prune when storage changesets are in the database.
+    fn prune_database<Provider>(
+        &self,
+        provider: &Provider,
+        range: RangeInclusive<BlockNumber>,
+        range_end: BlockNumber,
+        input: PruneInput,
+    ) -> Result<SegmentOutput, PrunerError>
+    where
+        Provider: StorageChangeSetReader + RocksDBProviderFactory,
+    {
         let mut limiter = input.limiter;
         if limiter.is_limit_reached() {
             return Ok(SegmentOutput::not_done(
@@ -113,6 +182,45 @@ where
     }
 }
 
+impl<Provider> Segment<Provider> for StoragesHistoryPruner
+where
+    Provider: DBProvider
+        + StorageChangeSetReader
+        + RocksDBProviderFactory
+        + StaticFileProviderFactory
+        + StorageSettingsCache,
+{
+    fn segment(&self) -> PruneSegment {
+        PruneSegment::StorageHistory
+    }
+
+    fn mode(&self) -> Option<PruneMode> {
+        Some(self.mode)
+    }
+
+    fn purpose(&self) -> PrunePurpose {
+        PrunePurpose::User
+    }
+
+    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
+    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
+        let range = match input.get_next_block_range() {
+            Some(range) => range,
+            None => {
+                trace!(target: "pruner", "No storage history to prune");
+                return Ok(SegmentOutput::done())
+            }
+        };
+        let range_end = *range.end();
+
+        if EitherWriter::storage_changesets_destination(provider).is_static_file() {
+            self.prune_static_files(provider, range, range_end, input)
+        } else {
+            self.prune_database(provider, range, range_end, input)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,7 +228,9 @@ mod tests {
     use alloy_primitives::{Address, B256, U256};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress, StorageBeforeTx},
-        tables, BlockNumberList,
+        tables,
+        transaction::DbTxMut,
+        BlockNumberList,
     };
     use reth_primitives_traits::StorageEntry;
     use reth_provider::{
@@ -136,7 +246,7 @@ mod tests {
     fn setup_rocksdb_test_db() -> TestStageDB {
         let db = TestStageDB::default();
         db.factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_storage_history_in_rocksdb(true),
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
         );
         db
     }
@@ -248,6 +358,16 @@ mod tests {
 
         let segment = StoragesHistoryPruner::new(PruneMode::Before(3));
         let provider = db.factory.database_provider_rw().unwrap();
+        provider.set_storage_settings_cache(
+            StorageSettings::legacy()
+                .with_storages_history_in_rocksdb(true)
+                .with_storage_changesets_in_static_files(true),
+        );
+
+        let static_file_provider = db.factory.static_file_provider();
+        let highest_before = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets);
+        assert!(highest_before.is_some(), "Should have static file coverage before pruning");
 
         let input =
             PruneInput { previous_checkpoint: None, to_block: 3, limiter: PruneLimiter::default() };
@@ -273,6 +393,13 @@ mod tests {
 
         let history4 = read_storage_history_from_rocksdb(&db, addr2, key2);
         assert!(!history4.contains(&3));
+
+        let highest_after = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets);
+        assert!(
+            highest_after.is_none() || highest_after < highest_before,
+            "Static file jars should be pruned"
+        );
     }
 
     #[test]
@@ -362,7 +489,7 @@ mod tests {
         let checkpoint = result.checkpoint.expect("should have checkpoint");
         let pruned_block = checkpoint.block_number.expect("should have block number");
         assert!(pruned_block < 10, "Should have stopped before target block");
-        assert!(pruned_block >= 0, "Should have pruned at least some blocks");
+        assert!(pruned_block > 0, "Should have pruned at least some blocks");
     }
 
     #[test]

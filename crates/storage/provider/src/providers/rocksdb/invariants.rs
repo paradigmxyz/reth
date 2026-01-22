@@ -10,7 +10,7 @@ use crate::{
     StaticFileProviderFactory,
 };
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_primitives::BlockNumber;
 use rayon::prelude::*;
 use reth_db::cursor::DbCursorRO;
 use reth_db_api::{tables, transaction::DbTx};
@@ -234,7 +234,7 @@ impl RocksDBProvider {
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + StageCheckpointReader,
+        Provider: DBProvider + StageCheckpointReader + StaticFileProviderFactory,
     {
         // Get the IndexStorageHistory stage checkpoint
         let checkpoint = provider
@@ -253,7 +253,7 @@ impl RocksDBProvider {
                         target: "reth::providers::rocksdb",
                         "StoragesHistory has data but checkpoint is 0, clearing all"
                     );
-                    self.prune_storages_history_above(0)?;
+                    self.prune_storages_history_in_range(provider, 0..=u64::MAX)?;
                     return Ok(None);
                 }
 
@@ -287,7 +287,10 @@ impl RocksDBProvider {
                         checkpoint,
                         "StoragesHistory ahead of checkpoint, pruning excess data"
                     );
-                    self.prune_storages_history_above(checkpoint)?;
+                    self.prune_storages_history_in_range(
+                        provider,
+                        (checkpoint + 1)..=max_highest_block,
+                    )?;
                 } else if max_highest_block < checkpoint {
                     // RocksDB is behind checkpoint, return highest block to signal unwind needed
                     tracing::warn!(
@@ -355,7 +358,7 @@ impl RocksDBProvider {
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + StageCheckpointReader,
+        Provider: DBProvider + StageCheckpointReader + StaticFileProviderFactory,
     {
         // Get the IndexAccountHistory stage checkpoint
         let checkpoint = provider
@@ -374,7 +377,7 @@ impl RocksDBProvider {
                         target: "reth::providers::rocksdb",
                         "AccountsHistory has data but checkpoint is 0, clearing all"
                     );
-                    self.prune_accounts_history_above(0)?;
+                    self.prune_accounts_history_in_range(provider, 0..=u64::MAX)?;
                     return Ok(None);
                 }
 
@@ -408,7 +411,10 @@ impl RocksDBProvider {
                         checkpoint,
                         "AccountsHistory ahead of checkpoint, pruning excess data"
                     );
-                    self.prune_accounts_history_above(checkpoint)?;
+                    self.prune_accounts_history_in_range(
+                        provider,
+                        (checkpoint + 1)..=max_highest_block,
+                    )?;
                     return Ok(None);
                 }
 
@@ -508,7 +514,7 @@ impl RocksDBProvider {
                 );
 
                 // Collect unique addresses from static file changesets
-                let mut addresses_to_unwind: HashSet<Address> = HashSet::new();
+                let mut addresses_to_unwind = HashSet::new();
                 let walker: StaticFileAccountChangesetWalker<_> =
                     static_file_provider.walk_account_changeset_range(static_range);
 
@@ -595,7 +601,7 @@ impl RocksDBProvider {
                 );
 
                 // Collect unique (address, storage_key) pairs from static file changesets
-                let mut keys_to_unwind: HashSet<(Address, B256)> = HashSet::new();
+                let mut keys_to_unwind = HashSet::new();
                 let walker: StaticFileStorageChangesetWalker<_> =
                     static_file_provider.walk_storage_changeset_range(static_range);
 

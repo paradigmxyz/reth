@@ -4,11 +4,16 @@ use crate::{
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_provider::{ChangeSetReader, PruneShardOutcome, RocksDBProviderFactory};
+use reth_provider::{
+    ChangeSetReader, DBProvider, EitherWriter, PruneShardOutcome, RocksDBProviderFactory,
+    StaticFileProviderFactory, StorageSettingsCache,
+};
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
+use reth_static_file_types::StaticFileSegment;
 use rustc_hash::FxHashMap;
+use std::ops::RangeInclusive;
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -22,33 +27,97 @@ impl AccountsHistoryPruner {
     }
 }
 
-impl<Provider> Segment<Provider> for AccountsHistoryPruner
-where
-    Provider: ChangeSetReader + RocksDBProviderFactory,
-{
-    fn segment(&self) -> PruneSegment {
-        PruneSegment::AccountHistory
-    }
+impl AccountsHistoryPruner {
+    fn prune_static_files<Provider>(
+        &self,
+        provider: &Provider,
+        range: RangeInclusive<u64>,
+        range_end: u64,
+        input: PruneInput,
+    ) -> Result<SegmentOutput, PrunerError>
+    where
+        Provider: ChangeSetReader + RocksDBProviderFactory + StaticFileProviderFactory,
+    {
+        let mut limiter = input.limiter;
+        if limiter.is_limit_reached() {
+            return Ok(SegmentOutput::not_done(
+                limiter.interrupt_reason(),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ))
+        }
 
-    fn mode(&self) -> Option<PruneMode> {
-        Some(self.mode)
-    }
+        let mut highest_deleted_accounts = FxHashMap::default();
+        let mut last_changeset_pruned_block = None;
+        let mut scanned_changesets = 0usize;
+        let mut done = true;
 
-    fn purpose(&self) -> PrunePurpose {
-        PrunePurpose::User
-    }
+        for block in range {
+            let changes = provider.account_block_changeset(block)?;
+            let changes_count = changes.len();
 
-    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
-    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
-        let range = match input.get_next_block_range() {
-            Some(range) => range,
-            None => {
-                trace!(target: "pruner", "No account history to prune");
-                return Ok(SegmentOutput::done())
+            for change in changes {
+                highest_deleted_accounts.insert(change.address, block);
             }
-        };
-        let range_end = *range.end();
 
+            scanned_changesets += changes_count;
+            limiter.increment_deleted_entries_count_by(changes_count);
+            last_changeset_pruned_block = Some(block);
+
+            if limiter.is_limit_reached() {
+                done = false;
+                break;
+            }
+        }
+        trace!(target: "pruner", scanned = %scanned_changesets, %done, "Scanned account changesets");
+
+        let last_changeset_pruned_block = last_changeset_pruned_block.unwrap_or(range_end);
+
+        let mut keys_deleted = 0usize;
+        let mut keys_updated = 0usize;
+
+        provider.with_rocksdb_batch(|mut batch| {
+            for (address, highest_block) in &highest_deleted_accounts {
+                let prune_to = (*highest_block).min(last_changeset_pruned_block);
+                match batch.prune_account_history_to(*address, prune_to)? {
+                    PruneShardOutcome::Deleted => keys_deleted += 1,
+                    PruneShardOutcome::Updated => keys_updated += 1,
+                    PruneShardOutcome::Unchanged => {}
+                }
+            }
+            Ok(((), Some(batch.into_inner())))
+        })?;
+
+        trace!(target: "pruner", keys_deleted, keys_updated, %done, "Pruned account history (RocksDB indices)");
+
+        if done {
+            provider.static_file_provider().delete_segment_below_block(
+                StaticFileSegment::AccountChangeSets,
+                last_changeset_pruned_block + 1,
+            )?;
+        }
+
+        let progress = limiter.progress(done);
+
+        Ok(SegmentOutput {
+            progress,
+            pruned: scanned_changesets + keys_deleted,
+            checkpoint: Some(SegmentOutputCheckpoint {
+                block_number: Some(last_changeset_pruned_block),
+                tx_number: None,
+            }),
+        })
+    }
+
+    fn prune_database<Provider>(
+        &self,
+        provider: &Provider,
+        range: RangeInclusive<u64>,
+        range_end: u64,
+        input: PruneInput,
+    ) -> Result<SegmentOutput, PrunerError>
+    where
+        Provider: ChangeSetReader + RocksDBProviderFactory,
+    {
         let mut limiter = input.limiter;
         if limiter.is_limit_reached() {
             return Ok(SegmentOutput::not_done(
@@ -113,6 +182,45 @@ where
     }
 }
 
+impl<Provider> Segment<Provider> for AccountsHistoryPruner
+where
+    Provider: ChangeSetReader
+        + RocksDBProviderFactory
+        + StaticFileProviderFactory
+        + StorageSettingsCache
+        + DBProvider,
+{
+    fn segment(&self) -> PruneSegment {
+        PruneSegment::AccountHistory
+    }
+
+    fn mode(&self) -> Option<PruneMode> {
+        Some(self.mode)
+    }
+
+    fn purpose(&self) -> PrunePurpose {
+        PrunePurpose::User
+    }
+
+    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
+    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
+        let range = match input.get_next_block_range() {
+            Some(range) => range,
+            None => {
+                trace!(target: "pruner", "No account history to prune");
+                return Ok(SegmentOutput::done())
+            }
+        };
+        let range_end = *range.end();
+
+        if EitherWriter::account_changesets_destination(provider).is_static_file() {
+            self.prune_static_files(provider, range, range_end, input)
+        } else {
+            self.prune_database(provider, range, range_end, input)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,7 +256,7 @@ mod tests {
 
         let blocks = random_block_range(
             &mut rng,
-            1..=10,
+            0..=10,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
         );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
@@ -167,7 +275,7 @@ mod tests {
                 .latest_writer(StaticFileSegment::AccountChangeSets)
                 .expect("get writer");
 
-            for block_num in 1..=10 {
+            for block_num in 0..=10 {
                 let changeset = generate_test_changeset(block_num, &addresses);
                 writer.append_account_changeset(changeset, block_num).expect("append changeset");
             }
@@ -176,11 +284,11 @@ mod tests {
 
         let highest = static_file_provider
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
-        assert_eq!(highest, Some(10), "Static file should cover blocks 1-10");
+        assert_eq!(highest, Some(10), "Static file should cover blocks 0-10");
 
         let provider = db.factory.database_provider_rw().unwrap();
 
-        for block_num in 1..=10u64 {
+        for block_num in 0..=10u64 {
             for addr in &addresses {
                 provider
                     .tx_ref()
@@ -230,7 +338,7 @@ mod tests {
             0..0,
         );
         db.insert_changesets(changesets.clone(), None).expect("insert changesets");
-        db.insert_history(changesets.clone(), None).expect("insert history");
+        db.insert_history(changesets, None).expect("insert history");
 
         let mdbx_count_before = db.table::<tables::AccountChangeSets>().unwrap().len();
         assert!(mdbx_count_before > 0, "Should have MDBX changesets");
@@ -260,7 +368,7 @@ mod tests {
 
         let blocks = random_block_range(
             &mut rng,
-            1..=20,
+            0..=20,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
         );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
@@ -279,7 +387,7 @@ mod tests {
                 .latest_writer(StaticFileSegment::AccountChangeSets)
                 .expect("get writer");
 
-            for block_num in 1..=20 {
+            for block_num in 0..=20 {
                 let changeset = generate_test_changeset(block_num, &addresses);
                 writer.append_account_changeset(changeset, block_num).expect("append changeset");
             }
@@ -287,7 +395,7 @@ mod tests {
         }
 
         let provider = db.factory.database_provider_rw().unwrap();
-        for block_num in 1..=20u64 {
+        for block_num in 0..=20u64 {
             for addr in &addresses {
                 provider
                     .tx_ref()
@@ -320,7 +428,7 @@ mod tests {
         let checkpoint = result.checkpoint.expect("should have checkpoint");
         let pruned_block = checkpoint.block_number.expect("should have block number");
         assert!(pruned_block < 15, "Should have stopped before target block");
-        assert!(pruned_block >= 1, "Should have pruned at least one block");
+        assert!(pruned_block >= 0, "Should have pruned at least one block");
     }
 
     #[test]
