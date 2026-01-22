@@ -118,8 +118,9 @@ impl LogLevelHandle {
             _ => LevelFilter::TRACE,
         };
 
+        // Use parse_lossy to avoid reading from RUST_LOG env var
         let filter =
-            EnvFilter::builder().with_default_directive(level_filter.into()).from_env_lossy();
+            EnvFilter::builder().with_default_directive(level_filter.into()).parse_lossy("");
 
         handle.reload(filter).map_err(|e| e.to_string())
     }
@@ -134,6 +135,10 @@ impl LogLevelHandle {
         let Some(handle) = &self.inner else {
             return Err("Log filter reload not available".to_string());
         };
+
+        if pattern.trim().is_empty() {
+            return Err("Filter pattern cannot be empty".to_string());
+        }
 
         let filter =
             EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))?;
