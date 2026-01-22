@@ -24,9 +24,11 @@ pub enum PruneSegment {
     Receipts,
     /// Prune segment responsible for some rows in `Receipts` table filtered by logs.
     ContractLogs,
-    /// Prune segment responsible for the `AccountChangeSets` and `AccountsHistory` tables.
+    /// Prune segment responsible for account changesets (from static files) and
+    /// `AccountsHistory` table (from MDBX).
     AccountHistory,
-    /// Prune segment responsible for the `StorageChangeSets` and `StoragesHistory` tables.
+    /// Prune segment responsible for storage changesets (from static files) and
+    /// `StoragesHistory` table (from MDBX).
     StorageHistory,
     #[deprecated = "Variant indexes cannot be changed"]
     #[strum(disabled)]
@@ -43,10 +45,6 @@ pub enum PruneSegment {
     MerkleChangeSets,
     /// Prune segment responsible for bodies (transactions in static files).
     Bodies,
-    /// Prune segment responsible for the `AccountChangeSets` static file segment.
-    AccountChangeSets,
-    /// Prune segment responsible for the `StorageChangeSets` static file segment.
-    StorageChangeSets,
 }
 
 #[cfg(test)]
@@ -69,12 +67,7 @@ impl PruneSegment {
     /// Returns minimum number of blocks to keep in the database for this segment.
     pub const fn min_blocks(&self) -> u64 {
         match self {
-            Self::SenderRecovery |
-            Self::TransactionLookup |
-            Self::Receipts |
-            Self::Bodies |
-            Self::AccountChangeSets |
-            Self::StorageChangeSets => 0,
+            Self::SenderRecovery | Self::TransactionLookup | Self::Receipts | Self::Bodies => 0,
             Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
                 MINIMUM_PRUNING_DISTANCE
             }

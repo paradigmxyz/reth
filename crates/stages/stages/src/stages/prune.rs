@@ -10,6 +10,7 @@ use reth_prune::{
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
+use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
 use tracing::info;
 
 /// The prune stage that runs the pruner with the provided prune modes.
@@ -46,7 +47,9 @@ where
         + StageCheckpointReader
         + StaticFileProviderFactory<
             Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
-        > + StorageSettingsCache,
+        > + StorageSettingsCache
+        + ChangeSetReader
+        + StorageChangeSetReader,
 {
     fn id(&self) -> StageId {
         StageId::Prune
@@ -151,7 +154,9 @@ where
         + StageCheckpointReader
         + StaticFileProviderFactory<
             Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
-        > + StorageSettingsCache,
+        > + StorageSettingsCache
+        + ChangeSetReader
+        + StorageChangeSetReader,
 {
     fn id(&self) -> StageId {
         StageId::PruneSenderRecovery
