@@ -243,14 +243,9 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        let sf_tip = provider
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
-            .unwrap_or(0);
-
-        let has_data = self.first::<tables::StoragesHistory>()?.is_some();
-
-        if checkpoint == 0 && has_data {
+        // Fast path: if checkpoint is 0 and RocksDB has data, clear everything.
+        // Short-circuit: only check has_data when checkpoint == 0 (rare case).
+        if checkpoint == 0 && self.first::<tables::StoragesHistory>()?.is_some() {
             tracing::info!(
                 target: "reth::providers::rocksdb",
                 "StoragesHistory has data but checkpoint is 0, clearing all"
@@ -258,6 +253,11 @@ impl RocksDBProvider {
             self.clear::<tables::StoragesHistory>()?;
             return Ok(None);
         }
+
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
+            .unwrap_or(0);
 
         if sf_tip <= checkpoint {
             return Ok(None);
@@ -328,9 +328,9 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        let has_data = self.first::<tables::AccountsHistory>()?.is_some();
-
-        if checkpoint == 0 && has_data {
+        // Fast path: if checkpoint is 0 and RocksDB has data, clear everything.
+        // Short-circuit: only check has_data when checkpoint == 0 (rare case).
+        if checkpoint == 0 && self.first::<tables::AccountsHistory>()?.is_some() {
             tracing::info!(
                 target: "reth::providers::rocksdb",
                 "AccountsHistory has data but checkpoint is 0, clearing all"
