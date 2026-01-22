@@ -1,6 +1,6 @@
 use crate::{
     db_ext::DbTxPruneExt,
-    segments::{user::history::prune_history_indices, PruneInput, PruneLimiter, Segment},
+    segments::{user::history::prune_history_indices, PruneInput, Segment},
     PrunerError,
 };
 use alloy_primitives::BlockNumber;
@@ -67,7 +67,7 @@ where
         let range_end = *range.end();
 
         if EitherWriter::storage_changesets_destination(provider).is_static_file() {
-            self.prune_static_files(provider, range, range_end, input.limiter)
+            self.prune_static_files(provider, input, range, range_end)
         } else {
             self.prune_database(provider, input, range, range_end)
         }
@@ -79,18 +79,25 @@ impl StorageHistory {
     fn prune_static_files<Provider>(
         &self,
         provider: &Provider,
+        input: PruneInput,
         range: std::ops::RangeInclusive<BlockNumber>,
         range_end: BlockNumber,
-        limiter: PruneLimiter,
     ) -> Result<SegmentOutput, PrunerError>
     where
         Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
     {
-        let mut limiter = if let Some(limit) = limiter.deleted_entries_limit() {
-            limiter.set_deleted_entries_limit(limit / STORAGE_HISTORY_TABLES_TO_PRUNE)
+        let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
+            input.limiter.set_deleted_entries_limit(limit / STORAGE_HISTORY_TABLES_TO_PRUNE)
         } else {
-            limiter
+            input.limiter
         };
+
+        if limiter.is_limit_reached() {
+            return Ok(SegmentOutput::not_done(
+                limiter.interrupt_reason(),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ))
+        }
 
         // The size of this map is limited by `prune_delete_limit * blocks_since_last_run /
         // STORAGE_HISTORY_TABLES_TO_PRUNE`, and with current defaults it's usually `3500 * 5
