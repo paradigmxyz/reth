@@ -66,7 +66,7 @@ impl Command {
             Some(search) => {
                 if let Some(search) = search.strip_prefix("0x") {
                     hex::decode(search).wrap_err(
-                        "Invalid hex in --search. If using hex, provide it as 0x-prefixed hex (e.g. 0xdeadbeef).",
+                        "Invalid hex content after 0x prefix in --search (expected valid hex like 0xdeadbeef).",
                     )?
                 } else {
                     search.as_bytes().to_vec()
