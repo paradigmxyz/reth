@@ -4,7 +4,7 @@ use crate::tree::payload_processor::multiproof::{MultiProofTaskMetrics, SparseTr
 use alloy_primitives::B256;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_trie::{updates::TrieUpdates, Nibbles};
-use reth_trie_parallel::root::ParallelStateRootError;
+use reth_trie_parallel::{proof_task::ProofResult, root::ParallelStateRootError};
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
@@ -97,8 +97,8 @@ where
             debug!(
                 target: "engine::root",
                 num_updates,
-                account_proofs = update.multiproof.account_subtree.len(),
-                storage_proofs = update.multiproof.storages.len(),
+                account_proofs = update.multiproof.account_proofs_len(),
+                storage_proofs = update.multiproof.storage_proofs_len(),
                 "Updating sparse trie"
             );
 
@@ -157,7 +157,14 @@ where
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
-    trie.reveal_decoded_multiproof(multiproof)?;
+    match multiproof {
+        ProofResult::Legacy(decoded, _) => {
+            trie.reveal_decoded_multiproof(decoded)?;
+        }
+        ProofResult::V2(decoded_v2) => {
+            trie.reveal_decoded_multiproof_v2(decoded_v2)?;
+        }
+    }
     let reveal_multiproof_elapsed = started_at.elapsed();
     trace!(
         target: "engine::root::sparse",
