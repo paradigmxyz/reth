@@ -1683,8 +1683,7 @@ mod tests {
                             block_changesets.iter().map(|(address, account, _)| {
                                 (*address, Some(Some((*account).into())), [])
                             })
-                        })
-                        ,
+                        }),
                     Vec::new(),
                 ),
                 first_block: first_database_block,
