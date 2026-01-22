@@ -66,9 +66,102 @@ mod layers;
 mod test_tracer;
 mod throttle;
 
+use std::sync::Arc;
 use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    layer::SubscriberExt, reload, util::SubscriberInitExt, EnvFilter, Registry,
+};
+
+/// Type alias for the reload handle used to dynamically update log filters.
+pub type LogFilterReloadHandle = reload::Handle<EnvFilter, Registry>;
+
+/// Handle for dynamically reloading log filters at runtime.
+///
+/// This handle is thread-safe and can be cloned to share across components.
+/// It allows changing log verbosity via RPC methods like `debug_verbosity` and `debug_vmodule`.
+#[derive(Clone, Default)]
+pub struct LogLevelHandle {
+    inner: Option<Arc<LogFilterReloadHandle>>,
+}
+
+impl LogLevelHandle {
+    /// Creates a new handle wrapping the reload handle.
+    pub fn new(handle: LogFilterReloadHandle) -> Self {
+        Self { inner: Some(Arc::new(handle)) }
+    }
+
+    /// Creates a no-op handle (for when reloading is not available).
+    pub fn noop() -> Self {
+        Self { inner: None }
+    }
+
+    /// Returns true if this handle can actually reload filters.
+    pub fn is_available(&self) -> bool {
+        self.inner.is_some()
+    }
+
+    /// Sets the global log verbosity level.
+    ///
+    /// Level mapping (geth-compatible):
+    /// - 0: OFF (silent)
+    /// - 1: ERROR
+    /// - 2: WARN
+    /// - 3: INFO
+    /// - 4: DEBUG
+    /// - 5+: TRACE
+    pub fn set_verbosity(&self, level: usize) -> Result<(), String> {
+        let Some(handle) = &self.inner else {
+            return Err("Log filter reload not available".to_string());
+        };
+
+        let level_filter = match level {
+            0 => LevelFilter::OFF,
+            1 => LevelFilter::ERROR,
+            2 => LevelFilter::WARN,
+            3 => LevelFilter::INFO,
+            4 => LevelFilter::DEBUG,
+            _ => LevelFilter::TRACE,
+        };
+
+        let filter =
+            EnvFilter::builder().with_default_directive(level_filter.into()).from_env_lossy();
+
+        handle.reload(filter).map_err(|e| e.to_string())
+    }
+
+    /// Sets module-specific log levels using a pattern string.
+    ///
+    /// Pattern format follows the `RUST_LOG` environment variable syntax:
+    /// - "module1=level1,module2=level2"
+    /// - Example: "reth::sync=debug,reth::net=trace"
+    /// - Example: "info,reth::stages=debug"
+    pub fn set_vmodule(&self, pattern: &str) -> Result<(), String> {
+        let Some(handle) = &self.inner else {
+            return Err("Log filter reload not available".to_string());
+        };
+
+        let filter =
+            EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))?;
+
+        handle.reload(filter).map_err(|e| e.to_string())
+    }
+}
+
+impl std::fmt::Debug for LogLevelHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LogLevelHandle").field("available", &self.is_available()).finish()
+    }
+}
+
+/// Result of initializing tracing with reload support.
+#[derive(Debug)]
+pub struct TracingInitResult {
+    /// File worker guard (keeps file logging alive).
+    pub file_guard: Option<WorkerGuard>,
+    /// Handle for runtime log level changes.
+    pub log_handle: LogLevelHandle,
+}
 
 ///  Tracer for application logging.
 ///
@@ -269,6 +362,56 @@ impl Tracer for RethTracer {
         // so it's safe to ignore it
         let _ = tracing_subscriber::registry().with(layers.into_inner()).try_init();
         Ok(file_guard)
+    }
+}
+
+impl RethTracer {
+    /// Initializes the logging system with reload support for runtime log level changes.
+    ///
+    /// This method is similar to [`Tracer::init_with_layers`] but uses a reloadable filter
+    /// for the stdout layer, allowing log levels to be changed at runtime via RPC methods
+    /// like `debug_verbosity` and `debug_vmodule`.
+    ///
+    /// # Arguments
+    /// * `layers` - Pre-configured `Layers` instance to use for initialization
+    ///
+    /// # Returns
+    /// A [`TracingInitResult`] containing:
+    /// - `file_guard`: Optional file worker guard (keeps file logging alive)
+    /// - `log_handle`: Handle for runtime log level changes
+    pub fn init_with_reload(self, mut layers: Layers) -> eyre::Result<TracingInitResult> {
+        // Create reloadable stdout filter
+        let handle = layers.stdout_reloadable(
+            self.stdout.format,
+            self.stdout.default_directive.parse()?,
+            &self.stdout.filters,
+            self.stdout.color,
+        )?;
+
+        if let Some(config) = self.journald {
+            layers.journald(&config)?;
+        }
+
+        let file_guard = if let Some((config, file_info)) = self.file {
+            Some(layers.file(config.format, &config.filters, file_info)?)
+        } else {
+            None
+        };
+
+        if let Some(config) = self.samply {
+            layers.samply(config)?;
+        }
+
+        #[cfg(feature = "tracy")]
+        if let Some(config) = self.tracy {
+            layers.tracy(config)?;
+        }
+
+        // The error is returned if the global default subscriber is already set,
+        // so it's safe to ignore it
+        let _ = tracing_subscriber::registry().with(layers.into_inner()).try_init();
+
+        Ok(TracingInitResult { file_guard, log_handle: LogLevelHandle::new(handle) })
     }
 }
 
