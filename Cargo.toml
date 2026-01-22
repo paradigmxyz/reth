@@ -797,3 +797,7 @@ ipnet = "2.11"
 
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
 # alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
+
+# EIP-7778: Point to local alloy-evm fork with gas refund tracking
+alloy-evm = { path = "../alloy-evm/crates/evm" }
+alloy-op-evm = { path = "../alloy-evm/crates/op-evm" }
