@@ -639,7 +639,7 @@ impl RocksDBProvider {
             provider: self,
             inner: WriteBatchWithTransaction::<true>::default(),
             buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
-            auto_commit_threshold: Some(4 * 1024 * 1024 * 1024), // 4GB
+            auto_commit_threshold: Some(4u64 * 1024 * 1024 * 1024),
         }
     }
 
@@ -1157,7 +1157,7 @@ pub struct RocksDBBatch<'a> {
     inner: WriteBatchWithTransaction<true>,
     buf: Vec<u8>,
     /// If set, batch auto-commits when size exceeds this threshold (in bytes).
-    auto_commit_threshold: Option<usize>,
+    auto_commit_threshold: Option<u64>,
 }
 
 impl fmt::Debug for RocksDBBatch<'_> {
@@ -1206,17 +1206,15 @@ impl<'a> RocksDBBatch<'a> {
         Ok(())
     }
 
-    /// If auto-commit is enabled and batch exceeds threshold, commits and resets.
     fn maybe_auto_commit(&mut self) -> ProviderResult<()> {
         if let Some(threshold) = self.auto_commit_threshold {
-            if self.inner.size_in_bytes() >= threshold {
+            if self.inner.size_in_bytes() as u64 >= threshold {
                 tracing::debug!(
                     target: "providers::rocksdb",
                     batch_size = self.inner.size_in_bytes(),
                     threshold,
-                    "Auto-committing RocksDB batch to prevent OOM"
+                    "Auto-committing RocksDB batch"
                 );
-                // Commit current batch
                 let old_batch = std::mem::replace(
                     &mut self.inner,
                     WriteBatchWithTransaction::<true>::default(),
@@ -2823,5 +2821,41 @@ mod tests {
         // Second shard truncated and re-keyed to MAX
         assert_eq!(shards[1].0.highest_block_number, u64::MAX);
         assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), (51..=75).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_batch_auto_commit_on_threshold() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Create batch with tiny threshold (1KB) to force auto-commits
+        let mut batch = RocksDBBatch {
+            provider: &provider,
+            inner: WriteBatchWithTransaction::<true>::default(),
+            buf: Vec::new(),
+            auto_commit_threshold: Some(1024), // 1KB
+        };
+
+        // Write entries until we exceed threshold multiple times
+        // Each entry is ~20 bytes, so 100 entries = ~2KB = 2 auto-commits
+        for i in 0..100u64 {
+            let value = format!("value_{i:04}").into_bytes();
+            batch.put::<TestTable>(i, &value).unwrap();
+        }
+
+        // Data should already be visible (auto-committed) even before final commit
+        // At least some entries should be readable
+        let first_visible = provider.get::<TestTable>(0).unwrap();
+        assert!(first_visible.is_some(), "Auto-committed data should be visible");
+
+        // Final commit for remaining batch
+        batch.commit().unwrap();
+
+        // All entries should now be visible
+        for i in 0..100u64 {
+            let value = format!("value_{i:04}").into_bytes();
+            assert_eq!(provider.get::<TestTable>(i).unwrap(), Some(value));
+        }
     }
 }
