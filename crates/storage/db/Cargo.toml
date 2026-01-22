@@ -117,3 +117,8 @@ harness = false
 name = "put"
 required-features = ["test-utils"]
 harness = false
+
+[[bench]]
+name = "append_vs_upsert"
+required-features = ["test-utils"]
+harness = false
