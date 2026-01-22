@@ -33,6 +33,7 @@ use reth_payload_util::{
 };
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
+use reth_tracing::LogLevelHandle;
 use reth_transaction_pool::PoolTransaction;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -142,6 +143,7 @@ async fn test_custom_block_priority_config() {
                 tasks.executor(),
                 builder.config.datadir(),
                 Default::default(),
+                LogLevelHandle::noop(),
             );
             builder.launch_with(launcher)
         })

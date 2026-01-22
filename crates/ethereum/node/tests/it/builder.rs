@@ -12,6 +12,7 @@ use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_builder::Identity;
 use reth_tasks::TaskManager;
+use reth_tracing::LogLevelHandle;
 
 #[test]
 fn test_basic_setup() {
@@ -52,7 +53,7 @@ async fn test_eth_launcher() {
     let _builder =
         NodeBuilder::new(config)
             .with_database(db)
-            .with_launch_context(tasks.executor())
+            .with_launch_context(tasks.executor(), LogLevelHandle::noop())
             .with_types_and_provider::<EthereumNode, BlockchainProvider<
                 NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
             >>()
@@ -67,6 +68,7 @@ async fn test_eth_launcher() {
                     tasks.executor(),
                     builder.config().datadir(),
                     Default::default(),
+                    LogLevelHandle::noop(),
                 );
                 builder.launch_with(launcher)
             });
@@ -87,7 +89,7 @@ fn test_eth_launcher_with_tokio_runtime() {
         let _builder =
             NodeBuilder::new(config)
                 .with_database(db)
-                .with_launch_context(tasks.executor())
+                .with_launch_context(tasks.executor(), LogLevelHandle::noop())
                 .with_types_and_provider::<EthereumNode, BlockchainProvider<
                     NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
                 >>()
@@ -104,6 +106,7 @@ fn test_eth_launcher_with_tokio_runtime() {
                         tasks.executor(),
                         builder.config().datadir(),
                         Default::default(),
+                        LogLevelHandle::noop(),
                     );
                     builder.launch_with(launcher)
                 });

@@ -7908,6 +7908,7 @@ dependencies = [
  "reth-static-file",
  "reth-static-file-types",
  "reth-tasks",
+ "reth-tracing",
  "reth-trie",
  "reth-trie-common",
  "reth-trie-db",
@@ -9335,6 +9336,7 @@ dependencies = [
  "reth-provider",
  "reth-tasks",
  "reth-tokio-util",
+ "reth-tracing",
  "reth-transaction-pool",
 ]
 
@@ -10445,6 +10447,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-testing-utils",
+ "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-common",
  "revm",

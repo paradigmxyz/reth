@@ -36,7 +36,10 @@ use reth_provider::{
 };
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
-use reth_tracing::tracing::{debug, error, info};
+use reth_tracing::{
+    tracing::{debug, error, info},
+    LogLevelHandle,
+};
 use reth_trie_db::ChangesetCache;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
@@ -59,8 +62,9 @@ impl EngineNodeLauncher {
         task_executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
         engine_tree_config: TreeConfig,
+        log_handle: LogLevelHandle,
     ) -> Self {
-        Self { ctx: LaunchContext::new(task_executor, data_dir), engine_tree_config }
+        Self { ctx: LaunchContext::new(task_executor, data_dir, log_handle), engine_tree_config }
     }
 
     async fn launch_node<T, CB, AO>(
@@ -187,6 +191,7 @@ impl EngineNodeLauncher {
             beacon_engine_handle: beacon_engine_handle.clone(),
             jwt_secret,
             engine_events: event_sender.clone(),
+            log_handle: ctx.log_handle(),
         };
         let validator_builder = add_ons.engine_validator_builder();
 

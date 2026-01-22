@@ -16,6 +16,7 @@ use reth_node_core::{
     node_config::NodeConfig,
     version,
 };
+use reth_tracing::LogLevelHandle;
 use std::{ffi::OsString, fmt, path::PathBuf, sync::Arc};
 
 /// Start the node
@@ -212,9 +213,11 @@ where
             node_config = node_config.with_unused_ports();
         }
 
+        // TODO: Thread log_handle from CLI initialization for runtime log level changes
+        // via debug_verbosity and debug_vmodule RPC methods
         let builder = NodeBuilder::new(node_config)
             .with_database(database)
-            .with_launch_context(ctx.task_executor);
+            .with_launch_context(ctx.task_executor, LogLevelHandle::noop());
 
         launcher.entrypoint(builder, ext).await
     }

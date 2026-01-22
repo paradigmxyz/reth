@@ -14,6 +14,7 @@ use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::TaskManager;
+use reth_tracing::LogLevelHandle;
 use std::str::FromStr;
 use tempfile::tempdir;
 use tokio::sync::oneshot;
@@ -41,7 +42,7 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
 
     let builder = NodeBuilder::new(config)
         .with_database(db)
-        .with_launch_context(tasks.executor())
+        .with_launch_context(tasks.executor(), LogLevelHandle::noop())
         .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
         .with_add_ons(EthereumAddOns::default())
