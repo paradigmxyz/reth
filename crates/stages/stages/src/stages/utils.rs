@@ -45,10 +45,19 @@ pub(crate) trait HistoryShardWriter {
 
 /// Loads sharded history indices from a collector into the database.
 ///
-/// A "shard" is a chunk of up to `NUM_OF_INDICES_IN_SHARD` (2000) block numbers stored under
-/// one key. We shard because a single address may have changes across millions of blocks.
+/// ## Why sharding?
+/// History indices track "which blocks modified this address/storage slot". A popular contract
+/// may have millions of changes, too large for a single DB value. We split into shards of
+/// `NUM_OF_INDICES_IN_SHARD` (2000) block numbers each.
 ///
-/// Uses `u64::MAX` as the final shard's key to enable incremental sync lookups.
+/// ## Key structure
+/// Each shard is keyed by `(prefix, highest_block_in_shard)`. Example for an address:
+/// - `(0xABC..., 5000)` → blocks 3001-5000
+/// - `(0xABC..., u64::MAX)` → blocks 5001-6234 (final shard)
+///
+/// The `u64::MAX` sentinel on the last shard enables `seek_exact(prefix, u64::MAX)` to find
+/// it for incremental sync merging.
+///
 /// When `append_only=true`, collector must yield keys in ascending order (MDBX requirement).
 fn load_sharded_history<H: HistoryShardWriter>(
     collector: &mut Collector<H::TableKey, BlockNumberList>,
