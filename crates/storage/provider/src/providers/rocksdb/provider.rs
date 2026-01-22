@@ -1069,8 +1069,13 @@ impl RocksDBProvider {
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
             let bundle = &block.execution_outcome().state;
-            for &address in bundle.state().keys() {
-                account_history.entry(address).or_default().push(block_number);
+            // Only record accounts where account-info changed OR account was destroyed.
+            // Skip accounts that only had storage changes - this matches MDBX semantics
+            // where AccountsHistory tracks account-level changes, not storage-only touches.
+            for (&address, account) in bundle.state() {
+                if account.is_info_changed() || account.was_destroyed() {
+                    account_history.entry(address).or_default().push(block_number);
+                }
             }
         }
 
@@ -1095,9 +1100,14 @@ impl RocksDBProvider {
             let block_number = ctx.first_block_number + block_idx as u64;
             let bundle = &block.execution_outcome().state;
             for (&address, account) in bundle.state() {
-                for &slot in account.storage.keys() {
-                    let key = B256::new(slot.to_be_bytes());
-                    storage_history.entry((address, key)).or_default().push(block_number);
+                // Only record storage slots that actually changed value.
+                // This matches MDBX semantics where StoragesHistory only tracks
+                // slots with value changes, not just touched slots.
+                for (&slot, storage_slot) in &account.storage {
+                    if storage_slot.is_changed() {
+                        let key = B256::new(slot.to_be_bytes());
+                        storage_history.entry((address, key)).or_default().push(block_number);
+                    }
                 }
             }
         }
