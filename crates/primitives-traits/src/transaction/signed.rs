@@ -48,6 +48,24 @@ pub trait SignedTransaction:
     + TxHashRef
     + IsTyped2718
 {
+    /// Returns whether this transaction is a system transaction
+    ///
+    /// Maximum standard Ethereum transaction type value.
+    ///
+    /// Standard transaction types are:
+    /// - Type 0: Legacy transactions (original Ethereum)
+    /// - Type 1: EIP-2930 (access list transactions)
+    /// - Type 2: EIP-1559 (dynamic fee transactions)
+    /// - Type 3: EIP-4844 (blob transactions)
+    /// - Type 4: EIP-7702 (set code authorization transactions)
+    ///
+    /// Any transaction with a type > 4 is considered a non-standard/system transaction,
+    /// typically used by L2s for special purposes (e.g., Optimism deposit transactions use type
+    /// 126).
+    fn is_system_tx(&self) -> bool {
+        false
+    }
+
     /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
     /// network.
     ///
