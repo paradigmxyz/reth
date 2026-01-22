@@ -74,17 +74,12 @@ use tracing_subscriber::{
 };
 
 /// Global log level handle for runtime filter changes.
-///
-/// This is set once during CLI initialization and can be accessed from anywhere
-/// (e.g., RPC endpoints) without needing to propagate the handle through the codebase.
 static GLOBAL_LOG_HANDLE: OnceLock<Arc<LogFilterReloadHandle>> = OnceLock::new();
 
 /// Type alias for the reload handle used to dynamically update log filters.
 pub type LogFilterReloadHandle = reload::Handle<EnvFilter, Registry>;
 
 /// Installs the global log level handle.
-///
-/// This should be called once during CLI initialization when reload support is enabled.
 /// Returns `true` if the handle was installed, `false` if one was already installed.
 pub fn install_log_handle(handle: LogFilterReloadHandle) -> bool {
     GLOBAL_LOG_HANDLE.set(Arc::new(handle)).is_ok()
@@ -97,7 +92,7 @@ pub fn log_handle_available() -> bool {
 
 /// Sets the global log verbosity level.
 ///
-/// - 0: OFF (silent)
+/// - 0: OFF
 /// - 1: ERROR
 /// - 2: WARN
 /// - 3: INFO

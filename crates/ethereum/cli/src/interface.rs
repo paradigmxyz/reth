@@ -233,7 +233,7 @@ impl<
         let otlp_status = runner.block_on(self.traces.init_otlp_tracing(&mut layers))?;
         let otlp_logs_status = runner.block_on(self.traces.init_otlp_logs(&mut layers))?;
 
-        let guard = self.logs.init_tracing_with_layers(layers)?;
+        let result = self.logs.init_tracing_with_layers(layers, false)?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
         match otlp_status {
@@ -256,7 +256,7 @@ impl<
             OtlpLogsStatus::Disabled => {}
         }
 
-        Ok(guard)
+        Ok(result.into_guard())
     }
 }
 

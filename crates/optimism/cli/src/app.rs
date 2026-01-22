@@ -126,7 +126,7 @@ where
             let otlp_status = runner.block_on(self.cli.traces.init_otlp_tracing(&mut layers))?;
             let otlp_logs_status = runner.block_on(self.cli.traces.init_otlp_logs(&mut layers))?;
 
-            self.guard = self.cli.logs.init_tracing_with_layers(layers)?;
+            self.guard = self.cli.logs.init_tracing_with_layers(layers, false)?.into_guard();
             info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
 
             match otlp_status {
