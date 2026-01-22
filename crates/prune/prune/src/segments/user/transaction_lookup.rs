@@ -116,11 +116,16 @@ where
         let tx_range_end = *tx_range.end();
 
         // Retrieve transactions in the range and calculate their hashes in parallel
-        let hashes = provider
+        let mut hashes = provider
             .transactions_by_tx_range(tx_range.clone())?
             .into_par_iter()
             .map(|transaction| transaction.trie_hash())
             .collect::<Vec<_>>();
+
+        // Sort hashes to enable efficient cursor traversal through the TransactionHashNumbers
+        // table, which is keyed by hash. Without sorting, each seek would be O(log n) random
+        // access; with sorting, the cursor advances sequentially through the B+tree.
+        hashes.sort_unstable();
 
         // Number of transactions retrieved from the database should match the tx range count
         let tx_count = tx_range.count();
