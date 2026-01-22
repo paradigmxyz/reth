@@ -264,7 +264,7 @@ where
                     error: Some(SimulateError {
                         message: error.to_string(),
                         code: error.into().code(),
-                        ..Default::default()
+                        ..SimulateError::invalid_params()
                     }),
                     gas_used,
                     logs: Vec::new(),
@@ -279,7 +279,7 @@ where
                     error: Some(SimulateError {
                         message: error.to_string(),
                         code: error.into().code(),
-                        ..Default::default()
+                        ..SimulateError::invalid_params()
                     }),
                     gas_used,
                     status: false,
