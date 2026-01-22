@@ -158,14 +158,13 @@ where
                 let append_only =
                     provider.count_entries::<tables::TransactionHashNumbers>()?.is_zero();
 
+                // Auto-commits on threshold; consistency check heals any crash.
                 #[cfg(all(unix, feature = "rocksdb"))]
                 let rocksdb = provider.rocksdb_provider();
                 #[cfg(all(unix, feature = "rocksdb"))]
                 let rocksdb_batch = rocksdb.batch_with_auto_commit();
                 #[cfg(not(all(unix, feature = "rocksdb")))]
                 let rocksdb_batch = ();
-
-                // Create writer that routes to either MDBX or RocksDB based on settings
                 let mut writer =
                     EitherWriter::new_transaction_hash_numbers(provider, rocksdb_batch)?;
 
@@ -216,14 +215,13 @@ where
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.chunk_size);
 
+        // Auto-commits on threshold; consistency check heals any crash.
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb = provider.rocksdb_provider();
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_batch = rocksdb.batch_with_auto_commit();
         #[cfg(not(all(unix, feature = "rocksdb")))]
         let rocksdb_batch = ();
-
-        // Create writer that routes to either MDBX or RocksDB based on settings
         let mut writer = EitherWriter::new_transaction_hash_numbers(provider, rocksdb_batch)?;
 
         let static_file_provider = provider.static_file_provider();

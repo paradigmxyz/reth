@@ -633,13 +633,13 @@ impl RocksDBProvider {
         }
     }
 
-    /// Creates a new batch with auto-commit enabled (1GB threshold).
+    /// Creates a new batch with auto-commit enabled (4GB threshold).
     pub fn batch_with_auto_commit(&self) -> RocksDBBatch<'_> {
         RocksDBBatch {
             provider: self,
             inner: WriteBatchWithTransaction::<true>::default(),
             buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
-            auto_commit_threshold: Some(1024 * 1024 * 1024),
+            auto_commit_threshold: Some(4 * 1024 * 1024 * 1024),
         }
     }
 
@@ -1193,8 +1193,6 @@ impl<'a> RocksDBBatch<'a> {
     ) -> ProviderResult<()> {
         let value_bytes = compress_to_buf_or_ref!(self.buf, value).unwrap_or(&self.buf);
         self.inner.put_cf(self.provider.get_cf_handle::<T>()?, key, value_bytes);
-
-        // Auto-commit if threshold exceeded
         self.maybe_auto_commit()?;
         Ok(())
     }
@@ -1204,8 +1202,6 @@ impl<'a> RocksDBBatch<'a> {
     /// If auto-commit is enabled and the batch exceeds the threshold, commits and resets.
     pub fn delete<T: Table>(&mut self, key: T::Key) -> ProviderResult<()> {
         self.inner.delete_cf(self.provider.get_cf_handle::<T>()?, key.encode().as_ref());
-
-        // Auto-commit if threshold exceeded
         self.maybe_auto_commit()?;
         Ok(())
     }

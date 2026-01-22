@@ -140,13 +140,13 @@ where
 
         info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
 
+        // Auto-commits on threshold; consistency check heals any crash.
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb = provider.rocksdb_provider();
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_batch = rocksdb.batch_with_auto_commit();
         #[cfg(not(all(unix, feature = "rocksdb")))]
         let rocksdb_batch = ();
-
         let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
         load_storage_history(collector, first_sync, &mut writer)
             .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
