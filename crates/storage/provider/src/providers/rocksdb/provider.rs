@@ -1596,7 +1596,7 @@ impl<'a> RocksDBBatch<'a> {
 /// - Iteration over uncommitted data
 ///
 /// Note: `Transaction` is `Send` but NOT `Sync`. This wrapper does not implement
-/// `DbTx`/`DbTxMut` traits directly; use RocksDB-specific methods instead.
+/// `DbTx`/`DbTxMut` traits directly; use `RocksDB`-specific methods instead.
 pub struct RocksTx<'db> {
     inner: Transaction<'db, OptimisticTransactionDB>,
     provider: &'db RocksDBProvider,
@@ -1618,8 +1618,8 @@ impl<'db> RocksTx<'db> {
     /// When enabled, history queries will return `NotYetWritten` (like MDBX) instead of
     /// `MaybeInPlainState` when querying before the first history entry.
     ///
-    /// WARNING: Only use in tests where RocksDB has complete history (identical to MDBX).
-    /// In production, RocksDB may have partial history, so this flag would cause incorrect
+    /// WARNING: Only use in tests where `RocksDB` has complete history (identical to MDBX).
+    /// In production, `RocksDB` may have partial history, so this flag would cause incorrect
     /// behavior (treating accounts as non-existent when they exist in MDBX).
     #[cfg(test)]
     pub const fn with_assume_history_complete(mut self) -> Self {
@@ -2372,7 +2372,7 @@ mod tests {
 
     /// Tests the edge case where block < `lowest_available_block_number`.
     /// This case cannot be tested via `HistoricalStateProviderRef` (which errors before lookup),
-    /// so we keep this RocksDB-specific test to verify the low-level behavior.
+    /// so we keep this `RocksDB`-specific test to verify the low-level behavior.
     #[test]
     fn test_account_history_info_pruned_before_first_entry() {
         let temp_dir = TempDir::new().unwrap();
