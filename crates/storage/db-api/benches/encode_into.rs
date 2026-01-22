@@ -7,7 +7,11 @@ fn bench_encode_methods(c: &mut Criterion) {
     group.throughput(Throughput::Elements(10000));
 
     let addresses: Vec<Address> = (0..10000u64)
-        .map(|i| Address::from_word(B256::from(i.to_be_bytes().repeat(4).try_into().unwrap())))
+        .map(|i| {
+            let mut bytes = [0u8; 32];
+            bytes[24..32].copy_from_slice(&i.to_be_bytes());
+            Address::from_word(B256::from(bytes))
+        })
         .collect();
 
     group.bench_function("Address::encode (returns array)", |b| {
