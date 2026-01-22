@@ -1,11 +1,9 @@
-//! `RocksDB` `StoragesHistory` pruner segment.
+//! RocksDB `StoragesHistory` pruner segment.
 //!
-//! This segment prunes **only** `RocksDB` history indices. It reads changesets from wherever
-//! they are stored (MDBX or static files) via the `StorageChangeSetReader` trait, then uses that
-//! information to prune the corresponding `RocksDB` history shards.
+//! Prunes RocksDB history indices only. Reads changesets via `StorageChangeSetReader`
+//! (MDBX or static files) to determine which storage slots need history shards pruned.
 //!
-//! **Note**: This segment does NOT delete MDBX changesets. That is handled by the regular
-//! `StorageHistory` pruner segment. This segment only handles the `RocksDB` history index pruning.
+//! Does NOT delete MDBX changesets - that's handled by the regular `StorageHistory` segment.
 
 use crate::{
     segments::{PruneInput, Segment},
@@ -18,18 +16,12 @@ use reth_prune_types::{
 use rustc_hash::FxHashMap;
 use tracing::{instrument, trace};
 
-/// RocksDB-based `StoragesHistory` pruner segment.
-///
-/// This segment prunes only `RocksDB` history indices. It reads changesets via the
-/// `StorageChangeSetReader` trait (which works with both MDBX and static files) to determine
-/// which storage slots need their history shards pruned.
 #[derive(Debug)]
 pub struct StoragesHistoryPruner {
     mode: PruneMode,
 }
 
 impl StoragesHistoryPruner {
-    /// Creates a new [`StoragesHistoryPruner`] with the given prune mode.
     pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
@@ -70,7 +62,6 @@ where
             ))
         }
 
-        // Scan changesets to find affected storage slots
         let mut highest_deleted_storages = FxHashMap::default();
         let mut last_changeset_pruned_block = None;
         let mut scanned_changesets = 0usize;
@@ -83,32 +74,22 @@ where
             }
 
             let changes = provider.storage_block_changeset(block)?;
+            let changes_count = changes.len();
 
             for change in changes {
-                if limiter.is_limit_reached() {
-                    done = false;
-                    break;
-                }
-
                 highest_deleted_storages.insert((change.address, change.key), block);
-                scanned_changesets += 1;
-                limiter.increment_deleted_entries_count();
-                last_changeset_pruned_block = Some(block);
             }
 
-            if !done {
-                break;
-            }
+            scanned_changesets += changes_count;
+            limiter.increment_deleted_entries_count_by(changes_count);
+            last_changeset_pruned_block = Some(block);
         }
         trace!(target: "pruner", scanned = %scanned_changesets, %done, "Scanned storage changesets");
 
         let last_changeset_pruned_block = last_changeset_pruned_block
-            // If there's more storage changesets to prune, set the checkpoint block number to
-            // previous, so we could finish pruning its storage changesets on the next run.
             .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
             .unwrap_or(range_end);
 
-        // Prune RocksDB history shards for affected storage slots
         let mut keys_deleted = 0usize;
         let mut keys_updated = 0usize;
 
@@ -129,7 +110,7 @@ where
 
         Ok(SegmentOutput {
             progress,
-            pruned: scanned_changesets + keys_deleted + keys_updated,
+            pruned: scanned_changesets + keys_deleted,
             checkpoint: Some(SegmentOutputCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
                 tx_number: None,
