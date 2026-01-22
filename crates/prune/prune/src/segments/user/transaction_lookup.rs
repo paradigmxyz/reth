@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use reth_db_api::{tables, transaction::DbTxMut};
 use reth_provider::{BlockReader, DBProvider, PruneCheckpointReader, StaticFileProviderFactory};
 use reth_prune_types::{
-    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint,
+    PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutputCheckpoint,
 };
 use reth_static_file_types::StaticFileSegment;
 use tracing::{debug, instrument, trace};
@@ -82,6 +82,26 @@ where
             }
         }
         .into_inner();
+
+        // For PruneMode::Full, clear the entire table in one operation
+        if self.mode.is_full() {
+            let pruned = provider.tx_ref().clear_table::<tables::TransactionHashNumbers>()?;
+            trace!(target: "pruner", %pruned, "Cleared transaction lookup table");
+
+            let last_pruned_block = provider
+                .block_by_transaction_id(end)?
+                .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?;
+
+            return Ok(SegmentOutput {
+                progress: PruneProgress::Finished,
+                pruned,
+                checkpoint: Some(SegmentOutputCheckpoint {
+                    block_number: Some(last_pruned_block),
+                    tx_number: Some(end),
+                }),
+            });
+        }
+
         let tx_range = start..=
             Some(end)
                 .min(
