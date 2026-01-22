@@ -158,3 +158,14 @@ pub struct RocksTx;
 /// A stub raw iterator for `RocksDB`.
 #[derive(Debug)]
 pub struct RocksDBRawIter;
+
+/// Outcome of pruning a history shard (stub).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneShardOutcome {
+    /// Shard was deleted entirely.
+    Deleted,
+    /// Shard was updated with filtered block numbers.
+    Updated,
+    /// Shard was unchanged (no blocks <= `to_block`).
+    Unchanged,
+}

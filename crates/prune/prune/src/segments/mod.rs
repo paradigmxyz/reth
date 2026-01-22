@@ -20,6 +20,8 @@ pub use user::{
     AccountHistory, Bodies, Receipts as UserReceipts, ReceiptsByLogs, SenderRecovery,
     StorageHistory, TransactionLookup,
 };
+#[cfg(all(unix, feature = "rocksdb"))]
+pub use user::{AccountsHistoryPruner, StoragesHistoryPruner};
 
 /// Prunes data from static files for a given segment.
 ///

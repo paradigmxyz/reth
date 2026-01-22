@@ -41,6 +41,9 @@ rayon.workspace = true
 tokio.workspace = true
 rustc-hash.workspace = true
 
+[features]
+rocksdb = ["reth-provider/rocksdb"]
+
 [dev-dependencies]
 # reth
 reth-db = { workspace = true, features = ["test-utils"] }
