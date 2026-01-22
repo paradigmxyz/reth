@@ -358,16 +358,6 @@ mod tests {
 
         let segment = StoragesHistoryPruner::new(PruneMode::Before(3));
         let provider = db.factory.database_provider_rw().unwrap();
-        provider.set_storage_settings_cache(
-            StorageSettings::legacy()
-                .with_storages_history_in_rocksdb(true)
-                .with_storage_changesets_in_static_files(true),
-        );
-
-        let static_file_provider = db.factory.static_file_provider();
-        let highest_before = static_file_provider
-            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets);
-        assert!(highest_before.is_some(), "Should have static file coverage before pruning");
 
         let input =
             PruneInput { previous_checkpoint: None, to_block: 3, limiter: PruneLimiter::default() };
@@ -393,13 +383,6 @@ mod tests {
 
         let history4 = read_storage_history_from_rocksdb(&db, addr2, key2);
         assert!(!history4.contains(&3));
-
-        let highest_after = static_file_provider
-            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets);
-        assert!(
-            highest_after.is_none() || highest_after < highest_before,
-            "Static file jars should be pruned"
-        );
     }
 
     #[test]

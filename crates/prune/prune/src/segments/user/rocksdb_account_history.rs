@@ -226,8 +226,16 @@ mod tests {
     use super::*;
     use crate::segments::{PruneInput, PruneLimiter, Segment};
     use alloy_primitives::{Address, B256};
-    use reth_db_api::{models::AccountBeforeTx, tables, transaction::DbTxMut};
-    use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter};
+    use reth_db_api::{
+        models::{AccountBeforeTx, ShardedKey},
+        tables,
+        transaction::DbTxMut,
+        BlockNumberList,
+    };
+    use reth_provider::{
+        DatabaseProviderFactory, RocksDBProviderFactory, StaticFileProviderFactory,
+        StaticFileWriter,
+    };
     use reth_prune_types::{PruneMode, PruneProgress};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_static_file_types::StaticFileSegment;
@@ -247,6 +255,23 @@ mod tests {
 
     fn generate_test_changeset(_block: u64, addresses: &[Address]) -> Vec<AccountBeforeTx> {
         addresses.iter().map(|&address| AccountBeforeTx { address, info: None }).collect()
+    }
+
+    /// Helper to write account history to RocksDB.
+    fn write_account_history_to_rocksdb(db: &TestStageDB, history: &[(Address, Vec<u64>)]) {
+        let provider = db.factory.database_provider_rw().unwrap();
+        provider
+            .with_rocksdb_batch(|mut batch| {
+                for (address, blocks) in history {
+                    let shard = BlockNumberList::new_pre_sorted(blocks.iter().copied());
+                    batch
+                        .put::<tables::AccountsHistory>(ShardedKey::last(*address), &shard)
+                        .unwrap();
+                }
+                Ok(((), Some(batch.into_inner())))
+            })
+            .unwrap();
+        provider.commit().unwrap();
     }
 
     #[test]
@@ -286,20 +311,9 @@ mod tests {
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
         assert_eq!(highest, Some(10), "Static file should cover blocks 0-10");
 
-        let provider = db.factory.database_provider_rw().unwrap();
-
-        for block_num in 0..=10u64 {
-            for addr in &addresses {
-                provider
-                    .tx_ref()
-                    .put::<tables::AccountsHistory>(
-                        reth_db_api::models::ShardedKey::new(*addr, block_num),
-                        reth_db_api::BlockNumberList::new([block_num]).unwrap(),
-                    )
-                    .expect("insert history");
-            }
-        }
-        provider.commit().expect("commit provider");
+        // Write account history to RocksDB (not MDBX)
+        let history: Vec<_> = addresses.iter().map(|&addr| (addr, (0..=10).collect())).collect();
+        write_account_history_to_rocksdb(&db, &history);
 
         let prune_mode = PruneMode::Before(5);
         let input =
@@ -469,7 +483,7 @@ mod tests {
 
         let blocks = random_block_range(
             &mut rng,
-            1..=20,
+            0..=20,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
         );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
@@ -488,7 +502,7 @@ mod tests {
                 .latest_writer(StaticFileSegment::AccountChangeSets)
                 .expect("get writer");
 
-            for block_num in 1..=10 {
+            for block_num in 0..=10 {
                 let changeset = generate_test_changeset(block_num, &addresses);
                 writer.append_account_changeset(changeset, block_num).expect("append changeset");
             }
@@ -509,7 +523,7 @@ mod tests {
         .expect("insert MDBX changesets");
 
         let provider = db.factory.database_provider_rw().unwrap();
-        for block_num in 1..=20u64 {
+        for block_num in 0..=20u64 {
             for addr in &addresses {
                 provider
                     .tx_ref()
