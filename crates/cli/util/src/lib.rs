@@ -8,11 +8,15 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(feature = "tracy-allocator")]
+use reth_tracing as _;
+
 pub mod allocator;
+pub mod cancellation;
 
 /// Helper function to load a secret key from a file.
 pub mod load_secret_key;
-pub use load_secret_key::get_secret_key;
+pub use load_secret_key::{get_secret_key, parse_secret_key_from_hex};
 
 /// Cli parsers functions.
 pub mod parsers;

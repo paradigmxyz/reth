@@ -8,7 +8,7 @@ use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx},
     eth::{EthBlockExecutionCtx, EthBlockExecutor},
     precompiles::PrecompilesMap,
-    revm::context::result::ResultAndState,
+    revm::context::{result::ResultAndState, Block as _},
     EthEvm, EthEvmFactory,
 };
 use alloy_sol_macro::sol;
@@ -201,6 +201,10 @@ where
         self.inner.apply_pre_execution_changes()
     }
 
+    fn receipts(&self) -> &[Self::Receipt] {
+        self.inner.receipts()
+    }
+
     fn execute_transaction_without_commit(
         &mut self,
         tx: impl ExecutableTx<Self>,
@@ -271,7 +275,7 @@ pub fn apply_withdrawals_contract_call(
 
     // Clean-up post system tx context
     state.remove(&SYSTEM_ADDRESS);
-    state.remove(&evm.block().beneficiary);
+    state.remove(&evm.block().beneficiary());
 
     evm.db_mut().commit(state);
 

@@ -91,7 +91,7 @@ pub trait TxpoolExtApi {
     ) -> SubscriptionResult;
 }
 
-/// The type that implements the `txpool` rpc namespace trait
+/// The type that implements the `txpoolExt` rpc namespace trait
 pub struct TxpoolExt<Pool> {
     pool: Pool,
 }

@@ -237,8 +237,13 @@ pub enum InvalidPoolTransactionError {
     /// Thrown if the input data of a transaction is greater
     /// than some meaningful limit a user might use. This is not a consensus error
     /// making the transaction invalid, rather a DOS protection.
-    #[error("input data too large")]
-    OversizedData(usize, usize),
+    #[error("oversized data: transaction size {size}, limit {limit}")]
+    OversizedData {
+        /// Size of the transaction/input data that exceeded the limit.
+        size: usize,
+        /// Configured limit that was exceeded.
+        limit: usize,
+    },
     /// Thrown if the transaction's fee is below the minimum fee
     #[error("transaction underpriced")]
     Underpriced,
@@ -335,7 +340,7 @@ impl InvalidPoolTransactionError {
             }
             Self::ExceedsFeeCap { max_tx_fee_wei: _, tx_fee_cap_wei: _ } => true,
             Self::ExceedsMaxInitCodeSize(_, _) => true,
-            Self::OversizedData(_, _) => true,
+            Self::OversizedData { .. } => true,
             Self::Underpriced => {
                 // local setting
                 false
@@ -391,9 +396,26 @@ impl InvalidPoolTransactionError {
         }
     }
 
+    /// Returns true if this is a [`Self::Consensus`] variant.
+    pub const fn as_consensus(&self) -> Option<&InvalidTransactionError> {
+        match self {
+            Self::Consensus(err) => Some(err),
+            _ => None,
+        }
+    }
+
+    /// Returns true if this is [`InvalidTransactionError::NonceNotConsistent`] and the
+    /// transaction's nonce is lower than the state's.
+    pub fn is_nonce_too_low(&self) -> bool {
+        match self {
+            Self::Consensus(err) => err.is_nonce_too_low(),
+            _ => false,
+        }
+    }
+
     /// Returns `true` if an import failed due to an oversized transaction
     pub const fn is_oversized(&self) -> bool {
-        matches!(self, Self::OversizedData(_, _))
+        matches!(self, Self::OversizedData { .. })
     }
 
     /// Returns `true` if an import failed due to nonce gap.

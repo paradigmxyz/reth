@@ -69,9 +69,7 @@ pub async fn import_blocks_from_file<N>(
     provider_factory: ProviderFactory<N>,
     config: &Config,
     executor: impl ConfigureEvm<Primitives = N::Primitives> + 'static,
-    consensus: Arc<
-        impl FullConsensus<N::Primitives, Error = reth_consensus::ConsensusError> + 'static,
-    >,
+    consensus: Arc<impl FullConsensus<N::Primitives> + 'static>,
 ) -> eyre::Result<ImportResult>
 where
     N: ProviderNodeTypes,
@@ -102,6 +100,9 @@ where
         .sealed_header(provider_factory.last_block_number()?)?
         .expect("should have genesis");
 
+    let static_file_producer =
+        StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
+
     while let Some(file_client) =
         reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?
     {
@@ -121,7 +122,7 @@ where
             provider_factory.clone(),
             &consensus,
             Arc::new(file_client),
-            StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+            static_file_producer.clone(),
             import_config.no_state,
             executor.clone(),
         )?;
@@ -195,7 +196,7 @@ pub fn build_import_pipeline_impl<N, C, E>(
 ) -> eyre::Result<(Pipeline<N>, impl futures::Stream<Item = NodeEvent<N::Primitives>> + use<N, C, E>)>
 where
     N: ProviderNodeTypes,
-    C: FullConsensus<N::Primitives, Error = reth_consensus::ConsensusError> + 'static,
+    C: FullConsensus<N::Primitives> + 'static,
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
     if !file_client.has_canonical_blocks() {

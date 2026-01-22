@@ -42,15 +42,15 @@ impl PruneMode {
         purpose: PrunePurpose,
     ) -> Result<Option<(BlockNumber, Self)>, PruneSegmentError> {
         let result = match self {
-            Self::Full if segment.min_blocks(purpose) == 0 => Some((tip, *self)),
+            Self::Full if segment.min_blocks() == 0 => Some((tip, *self)),
             Self::Distance(distance) if *distance > tip => None, // Nothing to prune yet
-            Self::Distance(distance) if *distance >= segment.min_blocks(purpose) => {
+            Self::Distance(distance) if *distance >= segment.min_blocks() => {
                 Some((tip - distance, *self))
             }
             Self::Before(n) if *n == tip + 1 && purpose.is_static_file() => Some((tip, *self)),
             Self::Before(n) if *n > tip => None, // Nothing to prune yet
             Self::Before(n) => {
-                (tip - n >= segment.min_blocks(purpose)).then(|| ((*n).saturating_sub(1), *self))
+                (tip - n >= segment.min_blocks()).then(|| ((*n).saturating_sub(1), *self))
             }
             _ => return Err(PruneSegmentError::Configuration(segment)),
         };
@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn test_prune_target_block() {
         let tip = 20000;
-        let segment = PruneSegment::Receipts;
+        let segment = PruneSegment::AccountHistory;
 
         let tests = vec![
             // MINIMUM_PRUNING_DISTANCE makes this impossible
@@ -101,8 +101,8 @@ mod tests {
             // Nothing to prune
             (PruneMode::Distance(tip + 1), Ok(None)),
             (
-                PruneMode::Distance(segment.min_blocks(PrunePurpose::User) + 1),
-                Ok(Some(tip - (segment.min_blocks(PrunePurpose::User) + 1))),
+                PruneMode::Distance(segment.min_blocks() + 1),
+                Ok(Some(tip - (segment.min_blocks() + 1))),
             ),
             // Nothing to prune
             (PruneMode::Before(tip + 1), Ok(None)),
@@ -129,7 +129,11 @@ mod tests {
 
         // Test for a scenario where there are no minimum blocks and Full can be used
         assert_eq!(
-            PruneMode::Full.prune_target_block(tip, PruneSegment::Transactions, PrunePurpose::User),
+            PruneMode::Full.prune_target_block(
+                tip,
+                PruneSegment::TransactionLookup,
+                PrunePurpose::User
+            ),
             Ok(Some((tip, PruneMode::Full))),
         );
     }

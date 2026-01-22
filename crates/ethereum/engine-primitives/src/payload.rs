@@ -24,8 +24,10 @@ use crate::BuiltPayloadConversionError;
 /// Contains the built payload.
 ///
 /// According to the [engine API specification](https://github.com/ethereum/execution-apis/blob/main/src/engine/README.md) the execution layer should build the initial version of the payload with an empty transaction set and then keep update it in order to maximize the revenue.
-/// Therefore, the empty-block here is always available and full-block will be set/updated
-/// afterward.
+///
+/// This struct represents a single built block at a point in time. The payload building process
+/// creates a sequence of these payloads, starting with an empty block and progressively including
+/// more transactions.
 #[derive(Debug, Clone)]
 pub struct EthBuiltPayload<N: NodePrimitives = EthPrimitives> {
     /// Identifier of the payload
@@ -120,11 +122,11 @@ impl EthBuiltPayload {
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV4`].
     ///
     /// Returns an error if the payload contains non EIP-4844 sidecar.
-    pub fn try_into_v4(self) -> Result<ExecutionPayloadEnvelopeV4, BuiltPayloadConversionError> {
-        Ok(ExecutionPayloadEnvelopeV4 {
-            execution_requests: self.requests.clone().unwrap_or_default(),
-            envelope_inner: self.try_into()?,
-        })
+    pub fn try_into_v4(
+        mut self,
+    ) -> Result<ExecutionPayloadEnvelopeV4, BuiltPayloadConversionError> {
+        let execution_requests = self.requests.take().unwrap_or_default();
+        Ok(ExecutionPayloadEnvelopeV4 { execution_requests, envelope_inner: self.try_into()? })
     }
 
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV5`].
@@ -424,6 +426,8 @@ pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
     }
 
     let out = hasher.finalize();
+
+    #[allow(deprecated)] // generic-array 0.14 deprecated
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
 }
 

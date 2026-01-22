@@ -1,15 +1,28 @@
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::Future;
 use reth_eth_wire_types::snap::{
-    AccountRangeMessage, GetAccountRangeMessage, GetByteCodesMessage, GetStorageRangesMessage,
-    GetTrieNodesMessage,
+    AccountRangeMessage, ByteCodesMessage, GetAccountRangeMessage, GetByteCodesMessage,
+    GetStorageRangesMessage, GetTrieNodesMessage, StorageRangesMessage, TrieNodesMessage,
 };
+
+/// Response types for snap sync requests
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnapResponse {
+    /// Response containing account range data
+    AccountRange(AccountRangeMessage),
+    /// Response containing storage ranges data
+    StorageRanges(StorageRangesMessage),
+    /// Response containing bytecode data
+    ByteCodes(ByteCodesMessage),
+    /// Response containing trie node data
+    TrieNodes(TrieNodesMessage),
+}
 
 /// The snap sync downloader client
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait SnapClient: DownloadClient {
-    /// The output future type for account range requests
-    type Output: Future<Output = PeerRequestResult<AccountRangeMessage>> + Send + Sync + Unpin;
+    /// The output future type for snap requests
+    type Output: Future<Output = PeerRequestResult<SnapResponse>> + Send + Sync + Unpin;
 
     /// Sends the account range request to the p2p network and returns the account range
     /// response received from a peer.

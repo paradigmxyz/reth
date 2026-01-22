@@ -61,6 +61,34 @@ pub struct LogArgs {
     )]
     pub journald_filter: String,
 
+    /// Emit traces to samply. Only useful when profiling.
+    #[arg(long = "log.samply", global = true, hide = true)]
+    pub samply: bool,
+
+    /// The filter to use for traces emitted to samply.
+    #[arg(
+        long = "log.samply.filter",
+        value_name = "FILTER",
+        global = true,
+        default_value = "debug",
+        hide = true
+    )]
+    pub samply_filter: String,
+
+    /// Emit traces to tracy. Only useful when profiling.
+    #[arg(long = "log.tracy", global = true, hide = true)]
+    pub tracy: bool,
+
+    /// The filter to use for traces emitted to tracy.
+    #[arg(
+        long = "log.tracy.filter",
+        value_name = "FILTER",
+        global = true,
+        default_value = "debug",
+        hide = true
+    )]
+    pub tracy_filter: String,
+
     /// Sets whether or not the formatter emits ANSI terminal escape codes for colors and other
     /// text formatting.
     #[arg(
@@ -129,6 +157,17 @@ impl LogArgs {
             tracer = tracer.with_file(file, info);
         }
 
+        if self.samply {
+            let config = self.layer_info(LogFormat::Terminal, self.samply_filter.clone(), false);
+            tracer = tracer.with_samply(config);
+        }
+
+        #[cfg(feature = "tracy")]
+        if self.tracy {
+            let config = self.layer_info(LogFormat::Terminal, self.tracy_filter.clone(), false);
+            tracer = tracer.with_tracy(config);
+        }
+
         let guard = tracer.init_with_layers(layers)?;
         Ok(guard)
     }
@@ -139,7 +178,7 @@ impl LogArgs {
 pub enum ColorMode {
     /// Colors on
     Always,
-    /// Colors on
+    /// Auto-detect
     Auto,
     /// Colors off
     Never,

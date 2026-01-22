@@ -12,18 +12,22 @@ use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
-use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
+use reth_trie_common::{
+    StorageTrieEntry, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry, *,
+};
 use serde::{Deserialize, Serialize};
 
 pub mod accounts;
 pub mod blocks;
 pub mod integer_list;
+pub mod metadata;
 pub mod sharded_key;
 pub mod storage_sharded_key;
 
 pub use accounts::*;
 pub use blocks::*;
 pub use integer_list::IntegerList;
+pub use metadata::*;
 pub use reth_db_models::{
     AccountBeforeTx, ClientVersion, StaticFileBlockWithdrawals, StoredBlockBodyIndices,
     StoredBlockWithdrawals,
@@ -122,13 +126,10 @@ impl Decode for String {
 }
 
 impl Encode for StoredNibbles {
-    type Encoded = Vec<u8>;
+    type Encoded = arrayvec::ArrayVec<u8, 64>;
 
-    // Delegate to the Compact implementation
     fn encode(self) -> Self::Encoded {
-        // NOTE: This used to be `to_compact`, but all it does is append the bytes to the buffer,
-        // so we can just use the implementation of `Into<Vec<u8>>` to reuse the buffer.
-        self.0.to_vec()
+        self.0.iter().collect()
     }
 }
 
@@ -219,6 +220,7 @@ impl_compression_for_compact!(
     TxType,
     StorageEntry,
     BranchNodeCompact,
+    TrieChangeSetsEntry,
     StoredNibbles,
     StoredNibblesSubKey,
     StorageTrieEntry,

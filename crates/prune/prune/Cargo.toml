@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
 reth-exex-types.workspace = true
 reth-db-api.workspace = true
 reth-errors.workspace = true
@@ -22,6 +21,7 @@ reth-tokio-util.workspace = true
 reth-config.workspace = true
 reth-prune-types.workspace = true
 reth-primitives-traits.workspace = true
+reth-stages-types.workspace = true
 reth-static-file-types.workspace = true
 
 # ethereum

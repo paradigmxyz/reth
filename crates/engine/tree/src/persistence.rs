@@ -1,13 +1,13 @@
 use crate::metrics::PersistenceMetrics;
-use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use crossbeam_channel::Sender as CrossbeamSender;
+use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
-    DBProvider, DatabaseProviderFactory, ProviderFactory,
+    DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
 };
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -16,7 +16,6 @@ use std::{
     time::Instant,
 };
 use thiserror::Error;
-use tokio::sync::oneshot;
 use tracing::{debug, error};
 
 /// Writes parts of reth's in memory tree state to the database and static files.
@@ -140,23 +139,28 @@ where
 
     fn on_save_blocks(
         &self,
-        blocks: Vec<ExecutedBlockWithTrieUpdates<N::Primitives>>,
+        blocks: Vec<ExecutedBlock<N::Primitives>>,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
-        debug!(target: "engine::persistence", first=?blocks.first().map(|b| b.recovered_block.num_hash()), last=?blocks.last().map(|b| b.recovered_block.num_hash()), "Saving range of blocks");
-        let start_time = Instant::now();
-        let last_block_hash_num = blocks.last().map(|block| BlockNumHash {
-            hash: block.recovered_block().hash(),
-            number: block.recovered_block().header().number(),
-        });
+        let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
+        let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
+        let block_count = blocks.len();
+        debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
 
-        if last_block_hash_num.is_some() {
+        let start_time = Instant::now();
+
+        if last_block.is_some() {
             let provider_rw = self.provider.database_provider_rw()?;
 
-            provider_rw.save_blocks(blocks)?;
+            provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
             provider_rw.commit()?;
         }
+
+        debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
+
+        self.metrics.save_blocks_block_count.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
-        Ok(last_block_hash_num)
+
+        Ok(last_block)
     }
 }
 
@@ -180,13 +184,13 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     ///
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlockWithTrieUpdates<N>>, oneshot::Sender<Option<BlockNumHash>>),
+    SaveBlocks(Vec<ExecutedBlock<N>>, CrossbeamSender<Option<BlockNumHash>>),
 
     /// Removes block data above the given block number from the database.
     ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
-    RemoveBlocksAbove(u64, oneshot::Sender<Option<BlockNumHash>>),
+    RemoveBlocksAbove(u64, CrossbeamSender<Option<BlockNumHash>>),
 
     /// Update the persisted finalized block on disk
     SaveFinalizedBlock(u64),
@@ -257,8 +261,8 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     /// If there are no blocks to persist, then `None` is sent in the sender.
     pub fn save_blocks(
         &self,
-        blocks: Vec<ExecutedBlockWithTrieUpdates<T>>,
-        tx: oneshot::Sender<Option<BlockNumHash>>,
+        blocks: Vec<ExecutedBlock<T>>,
+        tx: CrossbeamSender<Option<BlockNumHash>>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
     }
@@ -287,7 +291,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn remove_blocks_above(
         &self,
         block_num: u64,
-        tx: oneshot::Sender<Option<BlockNumHash>>,
+        tx: CrossbeamSender<Option<BlockNumHash>>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
     }
@@ -316,22 +320,22 @@ mod tests {
         PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
     }
 
-    #[tokio::test]
-    async fn test_save_blocks_empty() {
+    #[test]
+    fn test_save_blocks_empty() {
         reth_tracing::init_test_tracing();
         let persistence_handle = default_persistence_handle();
 
         let blocks = vec![];
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = crossbeam_channel::bounded(1);
 
         persistence_handle.save_blocks(blocks, tx).unwrap();
 
-        let hash = rx.await.unwrap();
+        let hash = rx.recv().unwrap();
         assert_eq!(hash, None);
     }
 
-    #[tokio::test]
-    async fn test_save_blocks_single_block() {
+    #[test]
+    fn test_save_blocks_single_block() {
         reth_tracing::init_test_tracing();
         let persistence_handle = default_persistence_handle();
         let block_number = 0;
@@ -341,37 +345,35 @@ mod tests {
         let block_hash = executed.recovered_block().hash();
 
         let blocks = vec![executed];
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = crossbeam_channel::bounded(1);
 
         persistence_handle.save_blocks(blocks, tx).unwrap();
 
-        let BlockNumHash { hash: actual_hash, number: _ } =
-            tokio::time::timeout(std::time::Duration::from_secs(10), rx)
-                .await
-                .expect("test timed out")
-                .expect("channel closed unexpectedly")
-                .expect("no hash returned");
+        let BlockNumHash { hash: actual_hash, number: _ } = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("test timed out")
+            .expect("no hash returned");
 
         assert_eq!(block_hash, actual_hash);
     }
 
-    #[tokio::test]
-    async fn test_save_blocks_multiple_blocks() {
+    #[test]
+    fn test_save_blocks_multiple_blocks() {
         reth_tracing::init_test_tracing();
         let persistence_handle = default_persistence_handle();
 
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks = test_block_builder.get_executed_blocks(0..5).collect::<Vec<_>>();
         let last_hash = blocks.last().unwrap().recovered_block().hash();
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = crossbeam_channel::bounded(1);
 
         persistence_handle.save_blocks(blocks, tx).unwrap();
-        let BlockNumHash { hash: actual_hash, number: _ } = rx.await.unwrap().unwrap();
+        let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
         assert_eq!(last_hash, actual_hash);
     }
 
-    #[tokio::test]
-    async fn test_save_blocks_multiple_calls() {
+    #[test]
+    fn test_save_blocks_multiple_calls() {
         reth_tracing::init_test_tracing();
         let persistence_handle = default_persistence_handle();
 
@@ -380,11 +382,11 @@ mod tests {
         for range in ranges {
             let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
             let last_hash = blocks.last().unwrap().recovered_block().hash();
-            let (tx, rx) = oneshot::channel();
+            let (tx, rx) = crossbeam_channel::bounded(1);
 
             persistence_handle.save_blocks(blocks, tx).unwrap();
 
-            let BlockNumHash { hash: actual_hash, number: _ } = rx.await.unwrap().unwrap();
+            let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
             assert_eq!(last_hash, actual_hash);
         }
     }

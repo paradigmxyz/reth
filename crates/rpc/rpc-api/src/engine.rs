@@ -240,6 +240,30 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Option<Vec<BlobAndProofV2>>>;
+
+    /// Fetch blobs for the consensus layer from the blob store.
+    ///
+    /// Returns a response of the same length as the request. Missing or older-version blobs are
+    /// returned as `null` elements.
+    ///
+    /// Returns `null` if syncing.
+    #[method(name = "getBlobsV3")]
+    async fn get_blobs_v3(
+        &self,
+        versioned_hashes: Vec<B256>,
+    ) -> RpcResult<Option<Vec<Option<BlobAndProofV2>>>>;
+
+    /// Returns the Block Access Lists for the given block hashes.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    #[method(name = "getBALsByHashV1")]
+    async fn get_bals_by_hash_v1(&self, block_hashes: Vec<BlockHash>) -> RpcResult<Vec<Bytes>>;
+
+    /// Returns the Block Access Lists for the given block range.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    #[method(name = "getBALsByRangeV1")]
+    async fn get_bals_by_range_v1(&self, start: U64, count: U64) -> RpcResult<Vec<Bytes>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>

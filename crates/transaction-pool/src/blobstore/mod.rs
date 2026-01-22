@@ -5,6 +5,7 @@ use alloy_eips::{
     eip7594::BlobTransactionSidecarVariant,
 };
 use alloy_primitives::B256;
+pub use converter::BlobSidecarConverter;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
@@ -17,6 +18,7 @@ use std::{
 };
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
+mod converter;
 pub mod disk;
 mod mem;
 mod noop;
@@ -97,6 +99,15 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError>;
+
+    /// Return the [`BlobAndProofV2`]s for a list of blob versioned hashes.
+    ///
+    /// The response is always the same length as the request. Missing or older-version blobs are
+    /// returned as `None` elements.
+    fn get_by_versioned_hashes_v3(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError>;
 
     /// Data size of all transactions in the blob store.
     fn data_size_hint(&self) -> Option<usize>;

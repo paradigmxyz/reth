@@ -87,8 +87,18 @@ fn read_file(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::superchain::Superchain;
-    use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
+    use crate::{generated_chain_value_parser, superchain::Superchain, SUPPORTED_CHAINS};
+    use alloy_chains::NamedChain;
+    use alloy_op_hardforks::{
+        OpHardfork, BASE_MAINNET_CANYON_TIMESTAMP, BASE_MAINNET_ECOTONE_TIMESTAMP,
+        BASE_MAINNET_ISTHMUS_TIMESTAMP, BASE_MAINNET_JOVIAN_TIMESTAMP,
+        BASE_SEPOLIA_CANYON_TIMESTAMP, BASE_SEPOLIA_ECOTONE_TIMESTAMP,
+        BASE_SEPOLIA_ISTHMUS_TIMESTAMP, BASE_SEPOLIA_JOVIAN_TIMESTAMP, OP_MAINNET_CANYON_TIMESTAMP,
+        OP_MAINNET_ECOTONE_TIMESTAMP, OP_MAINNET_ISTHMUS_TIMESTAMP, OP_MAINNET_JOVIAN_TIMESTAMP,
+        OP_SEPOLIA_CANYON_TIMESTAMP, OP_SEPOLIA_ECOTONE_TIMESTAMP, OP_SEPOLIA_ISTHMUS_TIMESTAMP,
+        OP_SEPOLIA_JOVIAN_TIMESTAMP,
+    };
+    use reth_optimism_primitives::L2_TO_L1_MESSAGE_PASSER_ADDRESS;
     use tar_no_std::TarArchiveRef;
 
     #[test]
@@ -96,7 +106,7 @@ mod tests {
         let genesis = read_superchain_genesis("unichain", "mainnet").unwrap();
         assert_eq!(genesis.config.chain_id, 130);
         assert_eq!(genesis.timestamp, 1730748359);
-        assert!(genesis.alloc.contains_key(&ADDRESS_L2_TO_L1_MESSAGE_PASSER));
+        assert!(genesis.alloc.contains_key(&L2_TO_L1_MESSAGE_PASSER_ADDRESS));
     }
 
     #[test]
@@ -104,7 +114,7 @@ mod tests {
         let genesis = read_superchain_genesis("funki", "mainnet").unwrap();
         assert_eq!(genesis.config.chain_id, 33979);
         assert_eq!(genesis.timestamp, 1721211095);
-        assert!(genesis.alloc.contains_key(&ADDRESS_L2_TO_L1_MESSAGE_PASSER));
+        assert!(genesis.alloc.contains_key(&L2_TO_L1_MESSAGE_PASSER_ADDRESS));
     }
 
     #[test]
@@ -148,6 +158,141 @@ mod tests {
                 chain.name(),
                 chain.environment()
             );
+        }
+    }
+
+    #[test]
+    fn test_hardfork_timestamps() {
+        for &chain in SUPPORTED_CHAINS {
+            let metadata = generated_chain_value_parser(chain).unwrap();
+
+            match metadata.chain().named() {
+                Some(NamedChain::Optimism) => {
+                    assert_eq!(
+                        metadata.hardforks.get(OpHardfork::Jovian).unwrap().as_timestamp().unwrap(),
+                        OP_MAINNET_JOVIAN_TIMESTAMP
+                    );
+
+                    assert_eq!(
+                        metadata
+                            .hardforks
+                            .get(OpHardfork::Isthmus)
+                            .unwrap()
+                            .as_timestamp()
+                            .unwrap(),
+                        OP_MAINNET_ISTHMUS_TIMESTAMP
+                    );
+
+                    assert_eq!(
+                        metadata.hardforks.get(OpHardfork::Canyon).unwrap().as_timestamp().unwrap(),
+                        OP_MAINNET_CANYON_TIMESTAMP
+                    );
+
+                    assert_eq!(
+                        metadata
+                            .hardforks
+                            .get(OpHardfork::Ecotone)
+                            .unwrap()
+                            .as_timestamp()
+                            .unwrap(),
+                        OP_MAINNET_ECOTONE_TIMESTAMP
+                    );
+                }
+                Some(NamedChain::OptimismSepolia) => {
+                    assert_eq!(
+                        metadata.hardforks.get(OpHardfork::Jovian).unwrap().as_timestamp().unwrap(),
+                        OP_SEPOLIA_JOVIAN_TIMESTAMP
+                    );
+
+                    assert_eq!(
+                        metadata
+                            .hardforks
+                            .get(OpHardfork::Isthmus)
+                            .unwrap()
+                            .as_timestamp()
+                            .unwrap(),
+                        OP_SEPOLIA_ISTHMUS_TIMESTAMP
+                    );
+
+                    assert_eq!(
+                        metadata.hardforks.get(OpHardfork::Canyon).unwrap().as_timestamp().unwrap(),
+                        OP_SEPOLIA_CANYON_TIMESTAMP
+                    );
+
+                    assert_eq!(
+                        metadata
+                            .hardforks
+                            .get(OpHardfork::Ecotone)
+                            .unwrap()
+                            .as_timestamp()
+                            .unwrap(),
+                        OP_SEPOLIA_ECOTONE_TIMESTAMP
+                    );
+                }
+                Some(NamedChain::Base) => {
+                    assert_eq!(
+                        metadata.hardforks.get(OpHardfork::Jovian).unwrap().as_timestamp().unwrap(),
+                        BASE_MAINNET_JOVIAN_TIMESTAMP
+                    );
+
+                    assert_eq!(
+                        metadata
+                            .hardforks
+                            .get(OpHardfork::Isthmus)
+                            .unwrap()
+                            .as_timestamp()
+                            .unwrap(),
+                        BASE_MAINNET_ISTHMUS_TIMESTAMP
+                    );
+
+                    assert_eq!(
+                        metadata.hardforks.get(OpHardfork::Canyon).unwrap().as_timestamp().unwrap(),
+                        BASE_MAINNET_CANYON_TIMESTAMP
+                    );
+
+                    assert_eq!(
+                        metadata
+                            .hardforks
+                            .get(OpHardfork::Ecotone)
+                            .unwrap()
+                            .as_timestamp()
+                            .unwrap(),
+                        BASE_MAINNET_ECOTONE_TIMESTAMP
+                    );
+                }
+                Some(NamedChain::BaseSepolia) => {
+                    assert_eq!(
+                        metadata.hardforks.get(OpHardfork::Jovian).unwrap().as_timestamp().unwrap(),
+                        BASE_SEPOLIA_JOVIAN_TIMESTAMP
+                    );
+
+                    assert_eq!(
+                        metadata
+                            .hardforks
+                            .get(OpHardfork::Isthmus)
+                            .unwrap()
+                            .as_timestamp()
+                            .unwrap(),
+                        BASE_SEPOLIA_ISTHMUS_TIMESTAMP
+                    );
+
+                    assert_eq!(
+                        metadata.hardforks.get(OpHardfork::Canyon).unwrap().as_timestamp().unwrap(),
+                        BASE_SEPOLIA_CANYON_TIMESTAMP
+                    );
+
+                    assert_eq!(
+                        metadata
+                            .hardforks
+                            .get(OpHardfork::Ecotone)
+                            .unwrap()
+                            .as_timestamp()
+                            .unwrap(),
+                        BASE_SEPOLIA_ECOTONE_TIMESTAMP
+                    );
+                }
+                _ => {}
+            }
         }
     }
 }

@@ -1,15 +1,15 @@
-use crate::formatter::LogFormat;
+use crate::{formatter::LogFormat, LayerInfo};
+#[cfg(feature = "otlp-logs")]
+use reth_tracing_otlp::{log_layer, OtlpLogsConfig};
 #[cfg(feature = "otlp")]
-use reth_tracing_otlp::span_layer;
+use reth_tracing_otlp::{span_layer, OtlpConfig};
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::{
     fmt,
     path::{Path, PathBuf},
 };
-use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
-use url::Url;
 
 /// A worker guard returned by the file layer.
 ///
@@ -20,14 +20,20 @@ pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
 ///  A boxed tracing [Layer].
 pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
-/// Default [directives](Directive) for [`EnvFilter`] which disables high-frequency debug logs from
-/// `hyper`, `hickory-resolver`, `jsonrpsee-server`, and `discv5`.
-const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 5] = [
+/// Default [directives](Directive) for [`EnvFilter`] which:
+/// 1. Disable high-frequency debug logs from dependencies such as `hyper`, `hickory-resolver`,
+///    `hickory_proto`, `discv5`, `jsonrpsee-server`, and `hyper_util::client::legacy::pool`.
+/// 2. Set `opentelemetry_*` crates log level to `WARN`, as `DEBUG` is too noisy.
+const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 9] = [
     "hyper::proto::h1=off",
     "hickory_resolver=off",
     "hickory_proto=off",
     "discv5=off",
     "jsonrpsee-server=off",
+    "opentelemetry-otlp=warn",
+    "opentelemetry_sdk=warn",
+    "opentelemetry-http=warn",
+    "hyper_util::client::legacy::pool=off",
 ];
 
 /// Manages the collection of layers for a tracing subscriber.
@@ -126,21 +132,57 @@ impl Layers {
         Ok(guard)
     }
 
+    pub(crate) fn samply(&mut self, config: LayerInfo) -> eyre::Result<()> {
+        self.add_layer(
+            tracing_samply::SamplyLayer::new()
+                .map_err(|e| eyre::eyre!("Failed to create samply layer: {e}"))?
+                .with_filter(build_env_filter(
+                    Some(config.default_directive.parse()?),
+                    &config.filters,
+                )?),
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "tracy")]
+    pub(crate) fn tracy(&mut self, config: LayerInfo) -> eyre::Result<()> {
+        self.add_layer(tracing_tracy::TracyLayer::default().with_filter(build_env_filter(
+            Some(config.default_directive.parse()?),
+            &config.filters,
+        )?));
+        Ok(())
+    }
+
     /// Add OTLP spans layer to the layer collection
     #[cfg(feature = "otlp")]
     pub fn with_span_layer(
         &mut self,
-        service_name: String,
-        endpoint_exporter: Url,
-        level: tracing::Level,
+        otlp_config: OtlpConfig,
+        filter: EnvFilter,
     ) -> eyre::Result<()> {
         // Create the span provider
 
-        let span_layer = span_layer(service_name, &endpoint_exporter)
+        let span_layer = span_layer(otlp_config)
             .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?
-            .with_filter(LevelFilter::from_level(level));
+            .with_filter(filter);
 
         self.add_layer(span_layer);
+
+        Ok(())
+    }
+
+    /// Add OTLP logs layer to the layer collection
+    #[cfg(feature = "otlp-logs")]
+    pub fn with_log_layer(
+        &mut self,
+        otlp_config: OtlpLogsConfig,
+        filter: EnvFilter,
+    ) -> eyre::Result<()> {
+        let log_layer = log_layer(otlp_config)
+            .map_err(|e| eyre::eyre!("Failed to build OTLP log exporter {}", e))?
+            .with_filter(filter);
+
+        self.add_layer(log_layer);
 
         Ok(())
     }

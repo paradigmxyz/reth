@@ -175,6 +175,7 @@ pub use reth_network_p2p as p2p;
 
 /// re-export types crates
 pub mod types {
+    pub use reth_discv4::NatResolver;
     pub use reth_eth_wire_types::*;
     pub use reth_network_types::*;
 }

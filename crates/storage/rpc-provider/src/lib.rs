@@ -364,18 +364,6 @@ where
         Ok(Some(sealed_header.into_header()))
     }
 
-    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
-        let header = self.header(hash).map_err(ProviderError::other)?;
-
-        Ok(header.map(|b| b.difficulty()))
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        let header = self.header_by_number(number).map_err(ProviderError::other)?;
-
-        Ok(header.map(|b| b.difficulty()))
-    }
-
     fn headers_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
@@ -684,10 +672,6 @@ where
         &self,
         _hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1373,7 +1357,7 @@ where
         self
     }
 
-    fn commit(self) -> ProviderResult<bool> {
+    fn commit(self) -> ProviderResult<()> {
         unimplemented!("commit not supported for RPC provider")
     }
 
@@ -1583,10 +1567,6 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn transaction_block(&self, _id: TxNumber) -> Result<Option<BlockNumber>, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
     fn transactions_by_block(
         &self,
         _block: alloy_rpc_types::BlockHashOrNumber,
@@ -1671,14 +1651,6 @@ where
     }
 
     fn header_by_number(&self, _num: BlockNumber) -> Result<Option<Self::Header>, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn header_td(&self, _hash: BlockHash) -> Result<Option<U256>, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn header_td_by_number(&self, _number: BlockNumber) -> Result<Option<U256>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1770,6 +1742,17 @@ where
         _block_number: BlockNumber,
         _address: Address,
     ) -> ProviderResult<Option<reth_db_api::models::AccountBeforeTx>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn account_changesets_range(
+        &self,
+        _range: impl std::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, reth_db_api::models::AccountBeforeTx)>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
         Err(ProviderError::UnsupportedProvider)
     }
 }

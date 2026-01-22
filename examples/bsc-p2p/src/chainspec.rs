@@ -1,4 +1,4 @@
-//! Chain specification for BSC, credits to: <https://github.com/bnb-chain/reth/blob/main/crates/bsc/chainspec/src/bsc.rs>
+//! Chain specification for BSC, credits to: <https://github.com/bnb-chain/reth/blob/main/examples/bsc-p2p/src/chainspec.rs>
 
 use alloy_primitives::{BlockHash, U256};
 use reth_chainspec::{

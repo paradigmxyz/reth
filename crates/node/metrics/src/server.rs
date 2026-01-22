@@ -4,13 +4,16 @@ use crate::{
     recorder::install_prometheus_recorder,
     version::VersionInfo,
 };
+use bytes::Bytes;
 use eyre::WrapErr;
-use http::{header::CONTENT_TYPE, HeaderValue, Response};
+use http::{header::CONTENT_TYPE, HeaderValue, Request, Response, StatusCode};
+use http_body_util::Full;
 use metrics::describe_gauge;
 use metrics_process::Collector;
+use reqwest::Client;
 use reth_metrics::metrics::Unit;
 use reth_tasks::TaskExecutor;
-use std::{convert::Infallible, net::SocketAddr, sync::Arc};
+use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 /// Configuration for the [`MetricServer`]
 #[derive(Debug)]
@@ -20,6 +23,9 @@ pub struct MetricServerConfig {
     chain_spec_info: ChainSpecInfo,
     task_executor: TaskExecutor,
     hooks: Hooks,
+    push_gateway_url: Option<String>,
+    push_gateway_interval: Duration,
+    pprof_dump_dir: PathBuf,
 }
 
 impl MetricServerConfig {
@@ -30,8 +36,25 @@ impl MetricServerConfig {
         chain_spec_info: ChainSpecInfo,
         task_executor: TaskExecutor,
         hooks: Hooks,
+        pprof_dump_dir: PathBuf,
     ) -> Self {
-        Self { listen_addr, hooks, task_executor, version_info, chain_spec_info }
+        Self {
+            listen_addr,
+            hooks,
+            task_executor,
+            version_info,
+            chain_spec_info,
+            push_gateway_url: None,
+            push_gateway_interval: Duration::from_secs(5),
+            pprof_dump_dir,
+        }
+    }
+
+    /// Set the gateway URL and interval for pushing metrics
+    pub fn with_push_gateway(mut self, url: Option<String>, interval: Duration) -> Self {
+        self.push_gateway_url = url;
+        self.push_gateway_interval = interval;
+        self
     }
 }
 
@@ -49,21 +72,41 @@ impl MetricServer {
 
     /// Spawns the metrics server
     pub async fn serve(&self) -> eyre::Result<()> {
-        let MetricServerConfig { listen_addr, hooks, task_executor, version_info, chain_spec_info } =
-            &self.config;
+        let MetricServerConfig {
+            listen_addr,
+            hooks,
+            task_executor,
+            version_info,
+            chain_spec_info,
+            push_gateway_url,
+            push_gateway_interval,
+            pprof_dump_dir,
+        } = &self.config;
 
-        let hooks = hooks.clone();
+        let hooks_for_endpoint = hooks.clone();
         self.start_endpoint(
             *listen_addr,
-            Arc::new(move || hooks.iter().for_each(|hook| hook())),
+            Arc::new(move || hooks_for_endpoint.iter().for_each(|hook| hook())),
             task_executor.clone(),
+            pprof_dump_dir.clone(),
         )
         .await
         .wrap_err_with(|| format!("Could not start Prometheus endpoint at {listen_addr}"))?;
 
+        // Start push-gateway task if configured
+        if let Some(url) = push_gateway_url {
+            self.start_push_gateway_task(
+                url.clone(),
+                *push_gateway_interval,
+                hooks.clone(),
+                task_executor.clone(),
+            )?;
+        }
+
         // Describe metrics after recorder installation
         describe_db_metrics();
         describe_static_file_metrics();
+        describe_rocksdb_metrics();
         Collector::default().describe();
         describe_memory_stats();
         describe_io_stats();
@@ -79,10 +122,13 @@ impl MetricServer {
         listen_addr: SocketAddr,
         hook: Arc<F>,
         task_executor: TaskExecutor,
+        pprof_dump_dir: PathBuf,
     ) -> eyre::Result<()> {
         let listener = tokio::net::TcpListener::bind(listen_addr)
             .await
             .wrap_err("Could not bind to address")?;
+
+        tracing::info!(target: "reth::cli", "Starting metrics endpoint at {}", listener.local_addr().unwrap());
 
         task_executor.spawn_with_graceful_shutdown_signal(|mut signal| {
             Box::pin(async move {
@@ -102,13 +148,10 @@ impl MetricServer {
 
                     let handle = install_prometheus_recorder();
                     let hook = hook.clone();
-                    let service = tower::service_fn(move |_| {
-                        (hook)();
-                        let metrics = handle.handle().render();
-                        let mut response = Response::new(metrics);
-                        response
-                            .headers_mut()
-                            .insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+                    let pprof_dump_dir = pprof_dump_dir.clone();
+                    let service = tower::service_fn(move |req: Request<_>| {
+                        let response =
+                            handle_request(req.uri().path(), &*hook, handle, &pprof_dump_dir);
                         async move { Ok::<_, Infallible>(response) }
                     });
 
@@ -126,6 +169,51 @@ impl MetricServer {
             })
         });
 
+        Ok(())
+    }
+
+    /// Starts a background task to push metrics to a metrics gateway
+    fn start_push_gateway_task(
+        &self,
+        url: String,
+        interval: Duration,
+        hooks: Hooks,
+        task_executor: TaskExecutor,
+    ) -> eyre::Result<()> {
+        let client = Client::builder()
+            .build()
+            .wrap_err("Could not create HTTP client to push metrics to gateway")?;
+        task_executor.spawn_with_graceful_shutdown_signal(move |mut signal| {
+            Box::pin(async move {
+                tracing::info!(url = %url, interval = ?interval, "Starting task to push metrics to gateway");
+                let handle = install_prometheus_recorder();
+                loop {
+                    tokio::select! {
+                        _ = &mut signal => {
+                            tracing::info!("Shutting down task to push metrics to gateway");
+                            break;
+                        }
+                        _ = tokio::time::sleep(interval) => {
+                            hooks.iter().for_each(|hook| hook());
+                            let metrics = handle.handle().render();
+                            match client.put(&url).header("Content-Type", "text/plain").body(metrics).send().await {
+                                Ok(response) => {
+                                    if !response.status().is_success() {
+                                        tracing::warn!(
+                                            status = %response.status(),
+                                            "Failed to push metrics to gateway"
+                                        );
+                                    }
+                                }
+                                Err(err) => {
+                                    tracing::warn!(%err, "Failed to push metrics to gateway");
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+        });
         Ok(())
     }
 }
@@ -148,6 +236,26 @@ fn describe_static_file_metrics() {
     describe_gauge!(
         "static_files.segment_entries",
         "The number of entries for a static file segment"
+    );
+}
+
+fn describe_rocksdb_metrics() {
+    describe_gauge!(
+        "rocksdb.table_size",
+        Unit::Bytes,
+        "The estimated size of a RocksDB table (SST + memtable)"
+    );
+    describe_gauge!("rocksdb.table_entries", "The estimated number of keys in a RocksDB table");
+    describe_gauge!(
+        "rocksdb.pending_compaction_bytes",
+        Unit::Bytes,
+        "Bytes pending compaction for a RocksDB table"
+    );
+    describe_gauge!("rocksdb.sst_size", Unit::Bytes, "The size of SST files for a RocksDB table");
+    describe_gauge!(
+        "rocksdb.memtable_size",
+        Unit::Bytes,
+        "The size of memtables for a RocksDB table"
     );
 }
 
@@ -205,6 +313,103 @@ fn describe_io_stats() {
 #[cfg(not(target_os = "linux"))]
 const fn describe_io_stats() {}
 
+fn handle_request(
+    path: &str,
+    hook: impl Fn(),
+    handle: &crate::recorder::PrometheusRecorder,
+    pprof_dump_dir: &PathBuf,
+) -> Response<Full<Bytes>> {
+    match path {
+        "/debug/pprof/heap" => handle_pprof_heap(pprof_dump_dir),
+        _ => {
+            hook();
+            let metrics = handle.handle().render();
+            let mut response = Response::new(Full::new(Bytes::from(metrics)));
+            response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+            response
+        }
+    }
+}
+
+#[cfg(all(feature = "jemalloc-prof", unix))]
+fn handle_pprof_heap(pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
+    use http::header::CONTENT_ENCODING;
+
+    match jemalloc_pprof::PROF_CTL.as_ref() {
+        Some(prof_ctl) => match prof_ctl.try_lock() {
+            Ok(_) => match jemalloc_pprof_dump(pprof_dump_dir) {
+                Ok(pprof) => {
+                    let mut response = Response::new(Full::new(Bytes::from(pprof)));
+                    response
+                        .headers_mut()
+                        .insert(CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
+                    response
+                        .headers_mut()
+                        .insert(CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+                    response
+                }
+                Err(err) => {
+                    let mut response = Response::new(Full::new(Bytes::from(format!(
+                        "Failed to dump pprof: {err}"
+                    ))));
+                    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                    response
+                }
+            },
+            Err(_) => {
+                let mut response = Response::new(Full::new(Bytes::from_static(
+                    b"Profile dump already in progress. Try again later.",
+                )));
+                *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
+                response
+            }
+        },
+        None => {
+            let mut response = Response::new(Full::new(Bytes::from_static(
+                b"jemalloc profiling not enabled. \
+                 Set MALLOC_CONF=prof:true or rebuild with jemalloc-prof feature.",
+            )));
+            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            response
+        }
+    }
+}
+
+/// Equivalent to [`jemalloc_pprof::JemallocProfCtl::dump`], but accepts a directory that the
+/// temporary pprof file will be written to. The file is deleted when the function exits.
+#[cfg(all(feature = "jemalloc-prof", unix))]
+fn jemalloc_pprof_dump(pprof_dump_dir: &PathBuf) -> eyre::Result<Vec<u8>> {
+    use std::{ffi::CString, io::BufReader};
+
+    use mappings::MAPPINGS;
+    use pprof_util::parse_jeheap;
+    use tempfile::NamedTempFile;
+
+    reth_fs_util::create_dir_all(pprof_dump_dir)?;
+    let f = NamedTempFile::new_in(pprof_dump_dir)?;
+    let path = CString::new(f.path().as_os_str().as_encoded_bytes()).unwrap();
+
+    // SAFETY: "prof.dump" is documented as being writable and taking a C string as input:
+    // http://jemalloc.net/jemalloc.3.html#prof.dump
+    unsafe { tikv_jemalloc_ctl::raw::write(b"prof.dump\0", path.as_ptr()) }?;
+
+    let dump_reader = BufReader::new(f);
+    let profile =
+        parse_jeheap(dump_reader, MAPPINGS.as_deref()).map_err(|err| eyre::eyre!(Box::new(err)))?;
+    let pprof = profile.to_pprof(("inuse_space", "bytes"), ("space", "bytes"), None);
+
+    Ok(pprof)
+}
+
+#[cfg(not(all(feature = "jemalloc-prof", unix)))]
+fn handle_pprof_heap(_pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(Bytes::from_static(
+        b"jemalloc pprof support not compiled. Rebuild with the jemalloc-prof feature.",
+    )));
+    *response.status_mut() = StatusCode::NOT_IMPLEMENTED;
+    response
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,8 +446,14 @@ mod tests {
         let hooks = Hooks::builder().build();
 
         let listen_addr = get_random_available_addr();
-        let config =
-            MetricServerConfig::new(listen_addr, version_info, chain_spec_info, executor, hooks);
+        let config = MetricServerConfig::new(
+            listen_addr,
+            version_info,
+            chain_spec_info,
+            executor,
+            hooks,
+            std::env::temp_dir(),
+        );
 
         MetricServer::new(config).serve().await.unwrap();
 

@@ -14,8 +14,8 @@ pub mod app;
 pub mod chainspec;
 pub mod interface;
 
-pub use app::CliApp;
-pub use interface::{Cli, Commands};
+pub use app::{CliApp, ExtendedCommand};
+pub use interface::{Cli, Commands, NoSubCmd};
 
 #[cfg(test)]
 mod test {

@@ -1,18 +1,18 @@
 use std::sync::Arc;
 
 use super::setup;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{Address, BlockNumber};
 use eyre::Result;
 use reth_config::config::EtlConfig;
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_db::DatabaseEnv;
-use reth_db_api::{database::Database, table::TableImporter, tables};
+use reth_db_api::{database::Database, models::BlockNumberAddress, table::TableImporter, tables};
 use reth_db_common::DbTool;
 use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
-    providers::{ProviderNodeTypes, StaticFileProvider},
+    providers::{ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{
@@ -31,7 +31,7 @@ pub(crate) async fn dump_merkle_stage<N>(
     output_datadir: ChainPath<DataDirPath>,
     should_run: bool,
     evm_config: impl ConfigureEvm<Primitives = N::Primitives>,
-    consensus: impl FullConsensus<N::Primitives, Error = ConsensusError> + 'static,
+    consensus: impl FullConsensus<N::Primitives> + 'static,
 ) -> Result<()>
 where
     N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
@@ -62,7 +62,8 @@ where
                 Arc::new(output_db),
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
-            ),
+                RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+            )?,
             to,
             from,
         )?;
@@ -78,7 +79,7 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
     tip_block_number: u64,
     output_db: &DatabaseEnv,
     evm_config: impl ConfigureEvm<Primitives = N::Primitives>,
-    consensus: impl FullConsensus<N::Primitives, Error = ConsensusError> + 'static,
+    consensus: impl FullConsensus<N::Primitives> + 'static,
 ) -> eyre::Result<()> {
     let (from, to) = range;
     let provider = db_tool.provider_factory.database_provider_rw()?;
@@ -135,9 +136,13 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 
     let unwind_inner_tx = provider.into_tx();
 
-    // TODO optimize we can actually just get the entries we need
-    output_db
-        .update(|tx| tx.import_dupsort::<tables::StorageChangeSets, _>(&unwind_inner_tx))??;
+    output_db.update(|tx| {
+        tx.import_table_with_range::<tables::StorageChangeSets, _>(
+            &unwind_inner_tx,
+            Some(BlockNumberAddress((from, Address::ZERO))),
+            BlockNumberAddress((to, Address::repeat_byte(0xff))),
+        )
+    })??;
 
     output_db.update(|tx| tx.import_table::<tables::HashedAccounts, _>(&unwind_inner_tx))??;
     output_db.update(|tx| tx.import_dupsort::<tables::HashedStorages, _>(&unwind_inner_tx))??;

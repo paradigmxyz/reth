@@ -8,6 +8,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+// `url` is needed for serde support on `reqwest::Url`
+use url as _;
+
 pub mod block;
 pub mod builder;
 pub mod cache;
@@ -23,6 +26,7 @@ pub mod transaction;
 pub mod tx_forward;
 pub mod utils;
 
+pub use alloy_rpc_types_eth::FillTransaction;
 pub use builder::config::{EthConfig, EthFilterConfig};
 pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,

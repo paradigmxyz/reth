@@ -2,7 +2,7 @@
 
 use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainInfoTracker, MemoryOverlayStateProvider,
+    ChainInfoTracker, ComputedTrieData, DeferredTrieData, MemoryOverlayStateProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
@@ -10,14 +10,14 @@ use alloy_primitives::{map::HashMap, BlockNumber, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
     BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, TrieInputSorted};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -86,14 +86,20 @@ impl<N: NodePrimitives> InMemoryState<N> {
     ///
     /// This tries to acquire a read lock. Drop any write locks before calling this.
     pub(crate) fn update_metrics(&self) {
-        let numbers = self.numbers.read();
-        if let Some((earliest_block_number, _)) = numbers.first_key_value() {
-            self.metrics.earliest_block.set(*earliest_block_number as f64);
+        let (count, earliest, latest) = {
+            let numbers = self.numbers.read();
+            let count = numbers.len();
+            let earliest = numbers.first_key_value().map(|(number, _)| *number);
+            let latest = numbers.last_key_value().map(|(number, _)| *number);
+            (count, earliest, latest)
+        };
+        if let Some(earliest_block_number) = earliest {
+            self.metrics.earliest_block.set(earliest_block_number as f64);
         }
-        if let Some((latest_block_number, _)) = numbers.last_key_value() {
-            self.metrics.latest_block.set(*latest_block_number as f64);
+        if let Some(latest_block_number) = latest {
+            self.metrics.latest_block.set(latest_block_number as f64);
         }
-        self.metrics.num_blocks.set(numbers.len() as f64);
+        self.metrics.num_blocks.set(count as f64);
     }
 
     /// Returns the state for a given block hash.
@@ -242,7 +248,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Updates the pending block with the given block.
     ///
     /// Note: This assumes that the parent block of the pending block is canonical.
-    pub fn set_pending_block(&self, pending: ExecutedBlockWithTrieUpdates<N>) {
+    pub fn set_pending_block(&self, pending: ExecutedBlock<N>) {
         // fetch the state of the pending block's parent block
         let parent = self.state_by_hash(pending.recovered_block().parent_hash());
         let pending = BlockState::with_parent(pending, parent);
@@ -258,7 +264,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// them to their parent blocks.
     fn update_blocks<I, R>(&self, new_blocks: I, reorged: R)
     where
-        I: IntoIterator<Item = ExecutedBlockWithTrieUpdates<N>>,
+        I: IntoIterator<Item = ExecutedBlock<N>>,
         R: IntoIterator<Item = ExecutedBlock<N>>,
     {
         {
@@ -311,6 +317,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// This will update the links between blocks and remove all blocks that are [..
     /// `persisted_height`].
     pub fn remove_persisted_blocks(&self, persisted_num_hash: BlockNumHash) {
+        self.set_persisted(persisted_num_hash);
         // if the persisted hash is not in the canonical in memory state, do nothing, because it
         // means canonical blocks were not actually persisted.
         //
@@ -438,6 +445,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.chain_info_tracker.set_finalized(header);
     }
 
+    /// Persisted block setter.
+    pub fn set_persisted(&self, num_hash: BlockNumHash) {
+        self.inner.chain_info_tracker.set_persisted(num_hash);
+    }
+
     /// Canonical head getter.
     pub fn get_canonical_head(&self) -> SealedHeader<N::BlockHeader> {
         self.inner.chain_info_tracker.get_canonical_head()
@@ -451,6 +463,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Safe header getter.
     pub fn get_safe_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
         self.inner.chain_info_tracker.get_safe_header()
+    }
+
+    /// Persisted block `BlockNumHash` getter.
+    pub fn get_persisted_num_hash(&self) -> Option<BlockNumHash> {
+        self.inner.chain_info_tracker.get_persisted_num_hash()
     }
 
     /// Returns the `SealedHeader` corresponding to the pending state.
@@ -503,6 +520,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         &self,
     ) -> watch::Receiver<Option<SealedHeader<N::BlockHeader>>> {
         self.inner.chain_info_tracker.subscribe_finalized_block()
+    }
+
+    /// Subscribe to new persisted block events.
+    pub fn subscribe_persisted_block(&self) -> watch::Receiver<Option<BlockNumHash>> {
+        self.inner.chain_info_tracker.subscribe_persisted_block()
     }
 
     /// Attempts to send a new [`CanonStateNotification`] to all active Receiver handles.
@@ -565,25 +587,28 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
 /// State after applying the given block, this block is part of the canonical chain that partially
 /// stored in memory and can be traced back to a canonical block on disk.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 pub struct BlockState<N: NodePrimitives = EthPrimitives> {
     /// The executed block that determines the state after this block has been executed.
-    block: ExecutedBlockWithTrieUpdates<N>,
+    block: ExecutedBlock<N>,
     /// The block's parent block if it exists.
-    parent: Option<Arc<BlockState<N>>>,
+    parent: Option<Arc<Self>>,
+}
+
+impl<N: NodePrimitives> PartialEq for BlockState<N> {
+    fn eq(&self, other: &Self) -> bool {
+        self.block == other.block && self.parent == other.parent
+    }
 }
 
 impl<N: NodePrimitives> BlockState<N> {
     /// [`BlockState`] constructor.
-    pub const fn new(block: ExecutedBlockWithTrieUpdates<N>) -> Self {
+    pub const fn new(block: ExecutedBlock<N>) -> Self {
         Self { block, parent: None }
     }
 
     /// [`BlockState`] constructor with parent.
-    pub const fn with_parent(
-        block: ExecutedBlockWithTrieUpdates<N>,
-        parent: Option<Arc<Self>>,
-    ) -> Self {
+    pub const fn with_parent(block: ExecutedBlock<N>, parent: Option<Arc<Self>>) -> Self {
         Self { block, parent }
     }
 
@@ -597,12 +622,12 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Returns the executed block that determines the state.
-    pub fn block(&self) -> ExecutedBlockWithTrieUpdates<N> {
+    pub fn block(&self) -> ExecutedBlock<N> {
         self.block.clone()
     }
 
     /// Returns a reference to the executed block that determines the state.
-    pub const fn block_ref(&self) -> &ExecutedBlockWithTrieUpdates<N> {
+    pub const fn block_ref(&self) -> &ExecutedBlock<N> {
         &self.block
     }
 
@@ -623,7 +648,7 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Returns the `Receipts` of executed block that determines the state.
-    pub fn receipts(&self) -> &Vec<Vec<N::Receipt>> {
+    pub fn receipts(&self) -> &Vec<N::Receipt> {
         &self.block.execution_outcome().receipts
     }
 
@@ -631,34 +656,28 @@ impl<N: NodePrimitives> BlockState<N> {
     /// We assume that the `Receipts` in the executed block `ExecutionOutcome`
     /// has only one element corresponding to the executed block associated to
     /// the state.
+    ///
+    /// This clones the vector of receipts. To avoid it, use [`Self::executed_block_receipts_ref`].
     pub fn executed_block_receipts(&self) -> Vec<N::Receipt> {
-        let receipts = self.receipts();
-
-        debug_assert!(
-            receipts.len() <= 1,
-            "Expected at most one block's worth of receipts, found {}",
-            receipts.len()
-        );
-
-        receipts.first().cloned().unwrap_or_default()
+        self.receipts().clone()
     }
 
-    /// Returns a vector of __parent__ `BlockStates`.
+    /// Returns a slice of `Receipt` of executed block that determines the state.
+    /// We assume that the `Receipts` in the executed block `ExecutionOutcome`
+    /// has only one element corresponding to the executed block associated to
+    /// the state.
+    pub fn executed_block_receipts_ref(&self) -> &[N::Receipt] {
+        self.receipts()
+    }
+
+    /// Returns an iterator over __parent__ `BlockStates`.
     ///
-    /// The block state order in the output vector is newest to oldest (highest to lowest):
+    /// The block state order is newest to oldest (highest to lowest):
     /// `[5,4,3,2,1]`
     ///
     /// Note: This does not include self.
-    pub fn parent_state_chain(&self) -> Vec<&Self> {
-        let mut parents = Vec::new();
-        let mut current = self.parent.as_deref();
-
-        while let Some(parent) = current {
-            parents.push(parent);
-            current = parent.parent.as_deref();
-        }
-
-        parents
+    pub fn parent_state_chain(&self) -> impl Iterator<Item = &Self> + '_ {
+        std::iter::successors(self.parent.as_deref(), |state| state.parent.as_deref())
     }
 
     /// Returns a vector of `BlockStates` representing the entire in memory chain.
@@ -669,6 +688,11 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Appends the parent chain of this [`BlockState`] to the given vector.
+    ///
+    /// Parents are appended in order from newest to oldest (highest to lowest).
+    /// This does not include self, only the parent states.
+    ///
+    /// This is a convenience method equivalent to `chain.extend(self.parent_state_chain())`.
     pub fn append_parent_chain<'a>(&'a self, chain: &mut Vec<&'a Self>) {
         chain.extend(self.parent_state_chain());
     }
@@ -722,27 +746,80 @@ impl<N: NodePrimitives> BlockState<N> {
 }
 
 /// Represents an executed block stored in-memory.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// Recovered Block
     pub recovered_block: Arc<RecoveredBlock<N::Block>>,
     /// Block's execution outcome.
-    pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
-    /// Block's hashed state.
-    pub hashed_state: Arc<HashedPostState>,
+    pub execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
+    /// Deferred trie data produced by execution.
+    ///
+    /// This allows deferring the computation of the trie data which can be expensive.
+    /// The data can be populated asynchronously after the block was validated.
+    pub trie_data: DeferredTrieData,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
     fn default() -> Self {
         Self {
             recovered_block: Default::default(),
-            execution_output: Default::default(),
-            hashed_state: Default::default(),
+            execution_output: Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: Default::default(),
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
+            trie_data: DeferredTrieData::ready(ComputedTrieData::default()),
         }
     }
 }
 
+impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
+    fn eq(&self, other: &Self) -> bool {
+        // Trie data is computed asynchronously and doesn't define block identity.
+        self.recovered_block == other.recovered_block &&
+            self.execution_output == other.execution_output
+    }
+}
+
 impl<N: NodePrimitives> ExecutedBlock<N> {
+    /// Create a new [`ExecutedBlock`] with already-computed trie data.
+    ///
+    /// Use this constructor when trie data is available immediately (e.g., sequencers,
+    /// payload builders). This is the safe default path.
+    pub fn new(
+        recovered_block: Arc<RecoveredBlock<N::Block>>,
+        execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
+        trie_data: ComputedTrieData,
+    ) -> Self {
+        Self { recovered_block, execution_output, trie_data: DeferredTrieData::ready(trie_data) }
+    }
+
+    /// Create a new [`ExecutedBlock`] with deferred trie data.
+    ///
+    /// This is useful if the trie data is populated somewhere else, e.g. asynchronously
+    /// after the block was validated.
+    ///
+    /// The [`DeferredTrieData`] handle allows expensive trie operations (sorting hashed state,
+    /// sorting trie updates, and building the accumulated trie input overlay) to be performed
+    /// outside the critical validation path. This can improve latency for time-sensitive
+    /// operations like block validation.
+    ///
+    /// If the data hasn't been populated when [`Self::trie_data()`] is called, computation
+    /// occurs synchronously from stored inputs, so there is no blocking or deadlock risk.
+    ///
+    /// Use [`Self::new()`] instead when trie data is already computed and available immediately.
+    pub const fn with_deferred_trie_data(
+        recovered_block: Arc<RecoveredBlock<N::Block>>,
+        execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
+        trie_data: DeferredTrieData,
+    ) -> Self {
+        Self { recovered_block, execution_output, trie_data }
+    }
+
     /// Returns a reference to an inner [`SealedBlock`]
     #[inline]
     pub fn sealed_block(&self) -> &SealedBlock<N::Block> {
@@ -757,14 +834,59 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 
     /// Returns a reference to the block's execution outcome
     #[inline]
-    pub fn execution_outcome(&self) -> &ExecutionOutcome<N::Receipt> {
+    pub fn execution_outcome(&self) -> &BlockExecutionOutput<N::Receipt> {
         &self.execution_output
     }
 
-    /// Returns a reference to the hashed state result of the execution outcome
+    /// Returns the trie data, computing it synchronously if not already cached.
+    ///
+    /// Uses `OnceLock::get_or_init` internally:
+    /// - If already computed: returns cached result immediately
+    /// - If not computed: first caller computes, others wait for that result
     #[inline]
-    pub fn hashed_state(&self) -> &HashedPostState {
-        &self.hashed_state
+    #[tracing::instrument(level = "debug", target = "engine::tree", name = "trie_data", skip_all)]
+    pub fn trie_data(&self) -> ComputedTrieData {
+        self.trie_data.wait_cloned()
+    }
+
+    /// Returns a clone of the deferred trie data handle.
+    ///
+    /// A handle is a lightweight reference that can be passed to descendants without
+    /// forcing trie data to be computed immediately. The actual work runs when
+    /// `wait_cloned()` is called by a consumer (e.g. when merging overlays).
+    #[inline]
+    pub fn trie_data_handle(&self) -> DeferredTrieData {
+        self.trie_data.clone()
+    }
+
+    /// Returns the hashed state result of the execution outcome.
+    ///
+    /// May compute trie data synchronously if the deferred task hasn't completed.
+    #[inline]
+    pub fn hashed_state(&self) -> Arc<HashedPostStateSorted> {
+        self.trie_data().hashed_state
+    }
+
+    /// Returns the trie updates resulting from the execution outcome.
+    ///
+    /// May compute trie data synchronously if the deferred task hasn't completed.
+    #[inline]
+    pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
+        self.trie_data().trie_updates
+    }
+
+    /// Returns the trie input anchored to the persisted ancestor.
+    ///
+    /// May compute trie data synchronously if the deferred task hasn't completed.
+    #[inline]
+    pub fn trie_input(&self) -> Option<Arc<TrieInputSorted>> {
+        self.trie_data().trie_input().cloned()
+    }
+
+    /// Returns the anchor hash of the trie input, if present.
+    #[inline]
+    pub fn anchor_hash(&self) -> Option<B256> {
+        self.trie_data().anchor_hash()
     }
 
     /// Returns a [`BlockNumber`] of the block.
@@ -774,127 +896,20 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     }
 }
 
-/// Trie updates that result from calculating the state root for the block.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ExecutedTrieUpdates {
-    /// Trie updates present. State root was calculated, and the trie updates can be applied to the
-    /// database.
-    Present(Arc<TrieUpdates>),
-    /// Trie updates missing. State root was calculated, but the trie updates cannot be applied to
-    /// the current database state. To apply the updates, the state root must be recalculated, and
-    /// new trie updates must be generated.
-    ///
-    /// This can happen when processing fork chain blocks that are building on top of the
-    /// historical database state. Since we don't store the historical trie state, we cannot
-    /// generate the trie updates for it.
-    Missing,
-}
-
-impl ExecutedTrieUpdates {
-    /// Creates a [`ExecutedTrieUpdates`] with present but empty trie updates.
-    pub fn empty() -> Self {
-        Self::Present(Arc::default())
-    }
-
-    /// Sets the trie updates to the provided value as present.
-    pub fn set_present(&mut self, updates: Arc<TrieUpdates>) {
-        *self = Self::Present(updates);
-    }
-
-    /// Takes the present trie updates, leaving the state as missing.
-    pub fn take_present(&mut self) -> Option<Arc<TrieUpdates>> {
-        match self {
-            Self::Present(updates) => {
-                let updates = core::mem::take(updates);
-                *self = Self::Missing;
-                Some(updates)
-            }
-            Self::Missing => None,
-        }
-    }
-
-    /// Returns a reference to the trie updates if present.
-    #[allow(clippy::missing_const_for_fn)] // false positive
-    pub fn as_ref(&self) -> Option<&TrieUpdates> {
-        match self {
-            Self::Present(updates) => Some(updates),
-            Self::Missing => None,
-        }
-    }
-
-    /// Returns `true` if the trie updates are present.
-    pub const fn is_present(&self) -> bool {
-        matches!(self, Self::Present(_))
-    }
-
-    /// Returns `true` if the trie updates are missing.
-    pub const fn is_missing(&self) -> bool {
-        matches!(self, Self::Missing)
-    }
-}
-
-/// An [`ExecutedBlock`] with its [`TrieUpdates`].
-///
-/// We store it as separate type because [`TrieUpdates`] are only available for blocks stored in
-/// memory and can't be obtained for canonical persisted blocks.
-#[derive(
-    Clone, Debug, PartialEq, Eq, derive_more::Deref, derive_more::DerefMut, derive_more::Into,
-)]
-pub struct ExecutedBlockWithTrieUpdates<N: NodePrimitives = EthPrimitives> {
-    /// Inner [`ExecutedBlock`].
-    #[deref]
-    #[deref_mut]
-    #[into]
-    pub block: ExecutedBlock<N>,
-    /// Trie updates that result from calculating the state root for the block.
-    ///
-    /// If [`ExecutedTrieUpdates::Missing`], the trie updates should be computed when persisting
-    /// the block **on top of the canonical parent**.
-    pub trie: ExecutedTrieUpdates,
-}
-
-impl<N: NodePrimitives> ExecutedBlockWithTrieUpdates<N> {
-    /// [`ExecutedBlock`] constructor.
-    pub const fn new(
-        recovered_block: Arc<RecoveredBlock<N::Block>>,
-        execution_output: Arc<ExecutionOutcome<N::Receipt>>,
-        hashed_state: Arc<HashedPostState>,
-        trie: ExecutedTrieUpdates,
-    ) -> Self {
-        Self { block: ExecutedBlock { recovered_block, execution_output, hashed_state }, trie }
-    }
-
-    /// Returns a reference to the trie updates for the block, if present.
-    #[inline]
-    pub fn trie_updates(&self) -> Option<&TrieUpdates> {
-        self.trie.as_ref()
-    }
-
-    /// Converts the value into [`SealedBlock`].
-    pub fn into_sealed_block(self) -> SealedBlock<N::Block> {
-        let block = Arc::unwrap_or_clone(self.block.recovered_block);
-        block.into_sealed_block()
-    }
-}
-
 /// Non-empty chain of blocks.
 #[derive(Debug)]
 pub enum NewCanonicalChain<N: NodePrimitives = EthPrimitives> {
     /// A simple append to the current canonical head
     Commit {
         /// all blocks that lead back to the canonical head
-        new: Vec<ExecutedBlockWithTrieUpdates<N>>,
+        new: Vec<ExecutedBlock<N>>,
     },
     /// A reorged chain consists of two chains that trace back to a shared ancestor block at which
     /// point they diverge.
     Reorg {
         /// All blocks of the _new_ chain
-        new: Vec<ExecutedBlockWithTrieUpdates<N>>,
+        new: Vec<ExecutedBlock<N>>,
         /// All blocks of the _old_ chain
-        ///
-        /// These are not [`ExecutedBlockWithTrieUpdates`] because we don't always have the trie
-        /// updates for the old canonical chain. For example, in case of node being restarted right
-        /// before the reorg [`TrieUpdates`] can't be fetched from database.
         old: Vec<ExecutedBlock<N>>,
     },
 }
@@ -919,31 +934,39 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     pub fn to_chain_notification(&self) -> CanonStateNotification<N> {
         match self {
             Self::Commit { new } => {
-                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
-                    chain.append_block(
-                        exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
-                    );
-                    chain
-                }));
-                CanonStateNotification::Commit { new }
+                CanonStateNotification::Commit { new: Arc::new(Self::blocks_to_chain(new)) }
             }
-            Self::Reorg { new, old } => {
-                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
+            Self::Reorg { new, old } => CanonStateNotification::Reorg {
+                new: Arc::new(Self::blocks_to_chain(new)),
+                old: Arc::new(Self::blocks_to_chain(old)),
+            },
+        }
+    }
+
+    /// Converts a slice of executed blocks into a [`Chain`].
+    fn blocks_to_chain(blocks: &[ExecutedBlock<N>]) -> Chain<N> {
+        match blocks {
+            [] => Chain::default(),
+            [first, rest @ ..] => {
+                let mut chain = Chain::from_block(
+                    first.recovered_block().clone(),
+                    ExecutionOutcome::from((
+                        first.execution_outcome().clone(),
+                        first.block_number(),
+                    )),
+                    LazyTrieData::ready(first.hashed_state(), first.trie_updates()),
+                );
+                for exec in rest {
                     chain.append_block(
                         exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
+                        ExecutionOutcome::from((
+                            exec.execution_outcome().clone(),
+                            exec.block_number(),
+                        )),
+                        LazyTrieData::ready(exec.hashed_state(), exec.trie_updates()),
                     );
-                    chain
-                }));
-                let old = Arc::new(old.iter().fold(Chain::default(), |mut chain, exec| {
-                    chain.append_block(
-                        exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
-                    );
-                    chain
-                }));
-                CanonStateNotification::Reorg { new, old }
+                }
+                chain
             }
         }
     }
@@ -976,8 +999,8 @@ mod tests {
         StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
     };
     use reth_trie::{
-        AccountProof, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
-        StorageProof, TrieInput,
+        updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+        MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
     };
 
     fn create_mock_state(
@@ -1237,7 +1260,7 @@ mod tests {
 
         let state = BlockState::new(block);
 
-        assert_eq!(state.receipts(), &receipts);
+        assert_eq!(state.receipts(), receipts.first().unwrap());
     }
 
     #[test]
@@ -1257,7 +1280,7 @@ mod tests {
             block1.recovered_block().hash()
         );
 
-        let chain = NewCanonicalChain::Reorg { new: vec![block2.clone()], old: vec![block1.block] };
+        let chain = NewCanonicalChain::Reorg { new: vec![block2.clone()], old: vec![block1] };
         state.update_chain(chain);
         assert_eq!(
             state.head_state().unwrap().block_ref().recovered_block().hash(),
@@ -1449,19 +1472,18 @@ mod tests {
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let chain = create_mock_state_chain(&mut test_block_builder, 4);
 
-        let parents = chain[3].parent_state_chain();
+        let parents: Vec<_> = chain[3].parent_state_chain().collect();
         assert_eq!(parents.len(), 3);
         assert_eq!(parents[0].block().recovered_block().number, 3);
         assert_eq!(parents[1].block().recovered_block().number, 2);
         assert_eq!(parents[2].block().recovered_block().number, 1);
 
-        let parents = chain[2].parent_state_chain();
+        let parents: Vec<_> = chain[2].parent_state_chain().collect();
         assert_eq!(parents.len(), 2);
         assert_eq!(parents[0].block().recovered_block().number, 2);
         assert_eq!(parents[1].block().recovered_block().number, 1);
 
-        let parents = chain[0].parent_state_chain();
-        assert_eq!(parents.len(), 0);
+        assert_eq!(chain[0].parent_state_chain().count(), 0);
     }
 
     #[test]
@@ -1472,8 +1494,7 @@ mod tests {
             create_mock_state(&mut test_block_builder, single_block_number, B256::random());
         let single_block_hash = single_block.block().recovered_block().hash();
 
-        let parents = single_block.parent_state_chain();
-        assert_eq!(parents.len(), 0);
+        assert_eq!(single_block.parent_state_chain().count(), 0);
 
         let block_state_chain = single_block.chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 1);
@@ -1516,22 +1537,31 @@ mod tests {
         let block2a =
             test_block_builder.get_executed_block_with_number(2, block1.recovered_block.hash());
 
-        let sample_execution_outcome = ExecutionOutcome {
-            receipts: vec![vec![], vec![]],
-            requests: vec![Requests::default(), Requests::default()],
-            ..Default::default()
-        };
-
         // Test commit notification
         let chain_commit = NewCanonicalChain::Commit { new: vec![block0.clone(), block1.clone()] };
+
+        // Build expected trie data map
+        let mut expected_trie_data = BTreeMap::new();
+        expected_trie_data
+            .insert(0, LazyTrieData::ready(block0.hashed_state(), block0.trie_updates()));
+        expected_trie_data
+            .insert(1, LazyTrieData::ready(block1.hashed_state(), block1.trie_updates()));
+
+        // Build expected execution outcome (first_block matches first block number)
+        let commit_execution_outcome = ExecutionOutcome {
+            receipts: vec![vec![], vec![]],
+            requests: vec![Requests::default(), Requests::default()],
+            first_block: 0,
+            ..Default::default()
+        };
 
         assert_eq!(
             chain_commit.to_chain_notification(),
             CanonStateNotification::Commit {
                 new: Arc::new(Chain::new(
                     vec![block0.recovered_block().clone(), block1.recovered_block().clone()],
-                    sample_execution_outcome.clone(),
-                    None
+                    commit_execution_outcome,
+                    expected_trie_data,
                 ))
             }
         );
@@ -1539,7 +1569,28 @@ mod tests {
         // Test reorg notification
         let chain_reorg = NewCanonicalChain::Reorg {
             new: vec![block1a.clone(), block2a.clone()],
-            old: vec![block1.block.clone(), block2.block.clone()],
+            old: vec![block1.clone(), block2.clone()],
+        };
+
+        // Build expected trie data for old chain
+        let mut old_trie_data = BTreeMap::new();
+        old_trie_data.insert(1, LazyTrieData::ready(block1.hashed_state(), block1.trie_updates()));
+        old_trie_data.insert(2, LazyTrieData::ready(block2.hashed_state(), block2.trie_updates()));
+
+        // Build expected trie data for new chain
+        let mut new_trie_data = BTreeMap::new();
+        new_trie_data
+            .insert(1, LazyTrieData::ready(block1a.hashed_state(), block1a.trie_updates()));
+        new_trie_data
+            .insert(2, LazyTrieData::ready(block2a.hashed_state(), block2a.trie_updates()));
+
+        // Build expected execution outcome for reorg chains (first_block matches first block
+        // number)
+        let reorg_execution_outcome = ExecutionOutcome {
+            receipts: vec![vec![], vec![]],
+            requests: vec![Requests::default(), Requests::default()],
+            first_block: 1,
+            ..Default::default()
         };
 
         assert_eq!(
@@ -1547,13 +1598,13 @@ mod tests {
             CanonStateNotification::Reorg {
                 old: Arc::new(Chain::new(
                     vec![block1.recovered_block().clone(), block2.recovered_block().clone()],
-                    sample_execution_outcome.clone(),
-                    None
+                    reorg_execution_outcome.clone(),
+                    old_trie_data,
                 )),
                 new: Arc::new(Chain::new(
                     vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()],
-                    sample_execution_outcome,
-                    None
+                    reorg_execution_outcome,
+                    new_trie_data,
                 ))
             }
         );
