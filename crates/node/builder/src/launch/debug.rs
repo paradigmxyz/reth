@@ -112,7 +112,8 @@ impl<L> DebugNodeLauncher<L> {
     }
 }
 
-/// Type alias for the default debug block provider. We use etherscan provider to satisfy the bounds.
+/// Type alias for the default debug block provider. We use etherscan provider to satisfy the
+/// bounds.
 pub type DefaultDebugBlockProvider<N> = EtherscanBlockProvider<
     <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcBlock,
     BlockTy<<N as FullNodeTypes>::Types>,
