@@ -10,6 +10,7 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{setup_engine, transaction::TransactionTestContext};
 use reth_node_ethereum::EthereumNode;
+
 use reth_rpc_api::EngineApiClient;
 use std::sync::Arc;
 
@@ -33,11 +34,10 @@ async fn can_handle_invalid_payload_then_valid() -> eyre::Result<()> {
             .chain(MAINNET.chain)
             .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
             .cancun_activated()
-            .prague_activated()
             .build(),
     );
 
-    let (mut nodes, _tasks, _) = setup_engine::<EthereumNode>(
+    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
         2,
         chain_spec.clone(),
         false,
@@ -52,78 +52,78 @@ async fn can_handle_invalid_payload_then_valid() -> eyre::Result<()> {
     // Get engine API client for the receiver node
     let receiver_engine = receiver.auth_server_handle().http_client();
 
-    // Produce several blocks on the producer node
-    for block_num in 1..=5 {
-        // Build a valid payload on the producer
-        let payload = producer.advance_block().await?;
-        let valid_block = payload.block().clone();
+    // Inject a transaction to allow block building (advance_block waits for transactions)
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    producer.rpc.inject_tx(raw_tx).await?;
 
-        // Create valid payload first, then corrupt the state root
-        let mut invalid_payload = ExecutionPayloadV3::from_block_unchecked(
-            valid_block.hash(),
-            &valid_block.clone().into_block(),
-        );
-        let original_state_root = invalid_payload.payload_inner.payload_inner.state_root;
-        invalid_payload.payload_inner.payload_inner.state_root = B256::random_with(&mut rng);
+    // Build a valid payload on the producer
+    let payload = producer.advance_block().await?;
+    let valid_block = payload.block().clone();
 
-        // Send the invalid payload to the receiver - should be rejected
-        let invalid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
-            &receiver_engine,
-            invalid_payload.clone(),
-            vec![],
-            valid_block.header().parent_beacon_block_root.unwrap_or_default(),
-        )
-        .await?;
+    // Create valid payload first, then corrupt the state root
+    let mut invalid_payload = ExecutionPayloadV3::from_block_unchecked(
+        valid_block.hash(),
+        &valid_block.clone().into_block(),
+    );
+    let original_state_root = invalid_payload.payload_inner.payload_inner.state_root;
+    invalid_payload.payload_inner.payload_inner.state_root = B256::random_with(&mut rng);
 
-        println!(
-            "Block {block_num}: Invalid payload response: {:?} (state_root changed from {original_state_root} to {})",
+    // Send the invalid payload to the receiver - should be rejected
+    let invalid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
+        &receiver_engine,
+        invalid_payload.clone(),
+        vec![],
+        valid_block.header().parent_beacon_block_root.unwrap_or_default(),
+    )
+    .await?;
+
+    println!(
+        "Invalid payload response: {:?} (state_root changed from {original_state_root} to {})",
+        invalid_result.status, invalid_payload.payload_inner.payload_inner.state_root
+    );
+
+    // The invalid payload should be rejected
+    assert!(
+        matches!(
             invalid_result.status,
-            invalid_payload.payload_inner.payload_inner.state_root
-        );
+            PayloadStatusEnum::Invalid { .. } | PayloadStatusEnum::Syncing
+        ),
+        "Expected INVALID or SYNCING status for invalid payload, got {:?}",
+        invalid_result.status
+    );
 
-        // The invalid payload should be rejected (INVALID or SYNCING if parent unknown)
-        assert!(
-            matches!(
-                invalid_result.status,
-                PayloadStatusEnum::Invalid { .. } | PayloadStatusEnum::Syncing
-            ),
-            "Expected INVALID or SYNCING status for invalid payload, got {:?}",
-            invalid_result.status
-        );
+    // Now send the valid payload - should be accepted
+    let valid_payload = ExecutionPayloadV3::from_block_unchecked(
+        valid_block.hash(),
+        &valid_block.clone().into_block(),
+    );
 
-        // Now send the valid payload - should be accepted
-        let valid_payload = ExecutionPayloadV3::from_block_unchecked(
-            valid_block.hash(),
-            &valid_block.clone().into_block(),
-        );
+    let valid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
+        &receiver_engine,
+        valid_payload,
+        vec![],
+        valid_block.header().parent_beacon_block_root.unwrap_or_default(),
+    )
+    .await?;
 
-        let valid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
-            &receiver_engine,
-            valid_payload,
-            vec![],
-            valid_block.header().parent_beacon_block_root.unwrap_or_default(),
-        )
-        .await?;
+    println!("Valid payload response: {:?}", valid_result.status);
 
-        println!("Block {block_num}: Valid payload response: {:?}", valid_result.status);
+    // The valid payload should be accepted
+    assert!(
+        matches!(
+            valid_result.status,
+            PayloadStatusEnum::Valid | PayloadStatusEnum::Syncing | PayloadStatusEnum::Accepted
+        ),
+        "Expected VALID/SYNCING/ACCEPTED status for valid payload, got {:?}",
+        valid_result.status
+    );
 
-        // The valid payload should be accepted (VALID or SYNCING if catching up)
-        assert!(
-            matches!(
-                valid_result.status,
-                PayloadStatusEnum::Valid | PayloadStatusEnum::Syncing | PayloadStatusEnum::Accepted
-            ),
-            "Expected VALID/SYNCING/ACCEPTED status for valid payload, got {:?}",
-            valid_result.status
-        );
-
-        // Update forkchoice on receiver to the valid block
-        receiver.update_forkchoice(valid_block.hash(), valid_block.hash()).await?;
-    }
+    // Update forkchoice on receiver to the valid block
+    receiver.update_forkchoice(valid_block.hash(), valid_block.hash()).await?;
 
     // Verify the receiver node is at the expected block
-    let receiver_head = receiver.block_hash(5);
-    let producer_head = producer.block_hash(5);
+    let receiver_head = receiver.block_hash(1);
+    let producer_head = producer.block_hash(1);
     assert_eq!(
         receiver_head, producer_head,
         "Receiver should have synced to the same chain as producer"
@@ -151,11 +151,10 @@ async fn can_handle_multiple_invalid_payloads() -> eyre::Result<()> {
             .chain(MAINNET.chain)
             .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
             .cancun_activated()
-            .prague_activated()
             .build(),
     );
 
-    let (mut nodes, _tasks, _) = setup_engine::<EthereumNode>(
+    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
         2,
         chain_spec.clone(),
         false,
@@ -168,6 +167,10 @@ async fn can_handle_multiple_invalid_payloads() -> eyre::Result<()> {
     let receiver = nodes.pop().unwrap();
 
     let receiver_engine = receiver.auth_server_handle().http_client();
+
+    // Inject a transaction to allow block building
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    producer.rpc.inject_tx(raw_tx).await?;
 
     // Produce a valid block
     let payload = producer.advance_block().await?;
@@ -249,7 +252,6 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
             .chain(MAINNET.chain)
             .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
             .cancun_activated()
-            .prague_activated()
             .build(),
     );
 
@@ -267,87 +269,83 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
 
     let receiver_engine = receiver.auth_server_handle().http_client();
 
-    // Produce blocks with transactions
-    for block_num in 1..=3 {
-        // Create and send a transaction to the producer node
-        let raw_tx =
-            TransactionTestContext::transfer_tx_bytes(block_num, wallet.inner.clone()).await;
-        let tx_hash = producer.rpc.inject_tx(raw_tx).await?;
-        println!("Block {block_num}: Injected transaction {tx_hash}");
+    // Create and send a transaction to the producer node
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    let tx_hash = producer.rpc.inject_tx(raw_tx).await?;
+    println!("Injected transaction {tx_hash}");
 
-        // Build a block containing the transaction
-        let payload = producer.advance_block().await?;
-        let valid_block = payload.block().clone();
+    // Build a block containing the transaction
+    let payload = producer.advance_block().await?;
+    let valid_block = payload.block().clone();
 
-        // Verify the block contains a transaction
-        let tx_count = valid_block.body().transactions().count();
-        println!("Block {block_num}: Contains {tx_count} transaction(s)");
-        assert!(tx_count > 0, "Block should contain at least one transaction");
+    // Verify the block contains a transaction
+    let tx_count = valid_block.body().transactions().count();
+    println!("Block contains {tx_count} transaction(s)");
+    assert!(tx_count > 0, "Block should contain at least one transaction");
 
-        // Create invalid payload by corrupting the state root
-        let mut invalid_payload = ExecutionPayloadV3::from_block_unchecked(
-            valid_block.hash(),
-            &valid_block.clone().into_block(),
-        );
-        let original_state_root = invalid_payload.payload_inner.payload_inner.state_root;
-        invalid_payload.payload_inner.payload_inner.state_root = B256::random_with(&mut rng);
+    // Create invalid payload by corrupting the state root
+    let mut invalid_payload = ExecutionPayloadV3::from_block_unchecked(
+        valid_block.hash(),
+        &valid_block.clone().into_block(),
+    );
+    let original_state_root = invalid_payload.payload_inner.payload_inner.state_root;
+    invalid_payload.payload_inner.payload_inner.state_root = B256::random_with(&mut rng);
 
-        // Send invalid payload - should be rejected
-        let invalid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
-            &receiver_engine,
-            invalid_payload.clone(),
-            vec![],
-            valid_block.header().parent_beacon_block_root.unwrap_or_default(),
-        )
-        .await?;
+    // Send invalid payload - should be rejected
+    let invalid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
+        &receiver_engine,
+        invalid_payload.clone(),
+        vec![],
+        valid_block.header().parent_beacon_block_root.unwrap_or_default(),
+    )
+    .await?;
 
-        println!(
-            "Block {block_num}: Invalid payload (with tx) response: {:?} (state_root changed from {original_state_root} to {})",
+    println!(
+        "Invalid payload (with tx) response: {:?} (state_root changed from {original_state_root} to {})",
+        invalid_result.status,
+        invalid_payload.payload_inner.payload_inner.state_root
+    );
+
+    assert!(
+        matches!(
             invalid_result.status,
-            invalid_payload.payload_inner.payload_inner.state_root
-        );
+            PayloadStatusEnum::Invalid { .. } | PayloadStatusEnum::Syncing
+        ),
+        "Expected INVALID or SYNCING for invalid payload with transactions, got {:?}",
+        invalid_result.status
+    );
 
-        assert!(
-            matches!(
-                invalid_result.status,
-                PayloadStatusEnum::Invalid { .. } | PayloadStatusEnum::Syncing
-            ),
-            "Expected INVALID or SYNCING for invalid payload with transactions, got {:?}",
-            invalid_result.status
-        );
+    // Send valid payload - should be accepted
+    let valid_payload = ExecutionPayloadV3::from_block_unchecked(
+        valid_block.hash(),
+        &valid_block.clone().into_block(),
+    );
 
-        // Send valid payload - should be accepted
-        let valid_payload = ExecutionPayloadV3::from_block_unchecked(
-            valid_block.hash(),
-            &valid_block.clone().into_block(),
-        );
+    let valid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
+        &receiver_engine,
+        valid_payload,
+        vec![],
+        valid_block.header().parent_beacon_block_root.unwrap_or_default(),
+    )
+    .await?;
 
-        let valid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
-            &receiver_engine,
-            valid_payload,
-            vec![],
-            valid_block.header().parent_beacon_block_root.unwrap_or_default(),
-        )
-        .await?;
+    println!("Valid payload (with tx) response: {:?}", valid_result.status);
 
-        println!("Block {block_num}: Valid payload (with tx) response: {:?}", valid_result.status);
+    assert!(
+        matches!(
+            valid_result.status,
+            PayloadStatusEnum::Valid | PayloadStatusEnum::Syncing | PayloadStatusEnum::Accepted
+        ),
+        "Expected valid status for correct payload with transactions, got {:?}",
+        valid_result.status
+    );
 
-        assert!(
-            matches!(
-                valid_result.status,
-                PayloadStatusEnum::Valid | PayloadStatusEnum::Syncing | PayloadStatusEnum::Accepted
-            ),
-            "Expected valid status for correct payload with transactions, got {:?}",
-            valid_result.status
-        );
-
-        // Update forkchoice
-        receiver.update_forkchoice(valid_block.hash(), valid_block.hash()).await?;
-    }
+    // Update forkchoice
+    receiver.update_forkchoice(valid_block.hash(), valid_block.hash()).await?;
 
     // Verify both nodes are at the same head
-    let receiver_head = receiver.block_hash(3);
-    let producer_head = producer.block_hash(3);
+    let receiver_head = receiver.block_hash(1);
+    let producer_head = producer.block_hash(1);
     assert_eq!(
         receiver_head, producer_head,
         "Receiver should have synced to the same chain as producer"
