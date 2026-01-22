@@ -768,14 +768,17 @@ impl SparseTrieInterface for ParallelSparseTrie {
     }
 
     fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
-        // Values from update_leaf are stored in upper_subtrie.inner.values,
-        // but values from reveal_node are stored in the appropriate subtrie.
-        // Check upper first (where update_leaf stores them), then fall back to the subtrie.
-        self.upper_subtrie
-            .inner
-            .values
-            .get(full_path)
-            .or_else(|| self.subtrie_for_path(full_path)?.inner.values.get(full_path))
+        // `subtrie_for_path` is intended for a node path, but here we are using a full key path. So
+        // we need to check if the subtrie that the key might belong to has any nodes; if not then
+        // the key's portion of the trie doesn't have enough depth to reach into the subtrie, and
+        // the key will be in the upper subtrie
+        if let Some(subtrie) = self.subtrie_for_path(full_path) &&
+            !subtrie.is_empty()
+        {
+            return subtrie.inner.values.get(full_path);
+        }
+
+        self.upper_subtrie.inner.values.get(full_path)
     }
 
     fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
@@ -2283,14 +2286,24 @@ impl SparseSubtrieInner {
                 if let Some((hash, store_in_db_trie)) =
                     hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
                 {
+                    let rlp_node = RlpNode::word_rlp(&hash);
+                    let node_type =
+                        SparseNodeType::Branch { store_in_db_trie: Some(store_in_db_trie) };
+
+                    trace!(
+                        target: "trie::parallel_sparse",
+                        ?path,
+                        ?node_type,
+                        ?rlp_node,
+                        "Adding node to RLP node stack (cached branch)"
+                    );
+
                     // If the node hash is already computed, and the node path is not in
                     // the prefix set, return the pre-computed hash
                     self.buffers.rlp_node_stack.push(RlpNodeStackItem {
                         path,
-                        rlp_node: RlpNode::word_rlp(&hash),
-                        node_type: SparseNodeType::Branch {
-                            store_in_db_trie: Some(store_in_db_trie),
-                        },
+                        rlp_node,
+                        node_type,
                     });
                     return
                 }
@@ -2454,13 +2467,14 @@ impl SparseSubtrieInner {
             }
         };
 
-        self.buffers.rlp_node_stack.push(RlpNodeStackItem { path, rlp_node, node_type });
         trace!(
             target: "trie::parallel_sparse",
             ?path,
             ?node_type,
-            "Added node to RLP node stack"
+            ?rlp_node,
+            "Adding node to RLP node stack"
         );
+        self.buffers.rlp_node_stack.push(RlpNodeStackItem { path, rlp_node, node_type });
     }
 
     /// Clears the subtrie, keeping the data structures allocated.
@@ -6999,11 +7013,11 @@ mod tests {
         let idx = path_subtrie_index_unchecked(&leaf_path);
         let lower_subtrie = trie.lower_subtries[idx].as_revealed_ref().unwrap();
         assert!(
-            lower_subtrie.inner.values.get(&full_path).is_some(),
+            lower_subtrie.inner.values.contains_key(&full_path),
             "value should be in lower subtrie"
         );
         assert!(
-            trie.upper_subtrie.inner.values.get(&full_path).is_none(),
+            !trie.upper_subtrie.inner.values.contains_key(&full_path),
             "value should NOT be in upper subtrie"
         );
 
@@ -7039,7 +7053,7 @@ mod tests {
 
         // Verify the value is stored in upper_subtrie (where update_leaf puts it)
         assert!(
-            trie.upper_subtrie.inner.values.get(&full_path).is_some(),
+            trie.upper_subtrie.inner.values.contains_key(&full_path),
             "value should be in upper subtrie after update_leaf"
         );
 
