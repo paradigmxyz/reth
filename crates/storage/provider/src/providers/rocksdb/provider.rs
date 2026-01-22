@@ -1525,7 +1525,7 @@ impl<'a> RocksDBBatch<'a> {
 pub struct RocksTx<'db> {
     inner: Transaction<'db, OptimisticTransactionDB>,
     provider: &'db RocksDBProvider,
-    /// When true, assume RocksDB has complete history (like MDBX) and return `NotYetWritten`
+    /// When true, assume `RocksDB` has complete history (like `MDBX`) and return `NotYetWritten`
     /// when querying before the first history entry. When false (default), return
     /// `MaybeInPlainState` for hybrid storage safety.
     assume_history_complete: bool,
@@ -1540,10 +1540,10 @@ impl fmt::Debug for RocksTx<'_> {
 impl<'db> RocksTx<'db> {
     /// Sets the `assume_history_complete` flag to true.
     ///
-    /// When enabled, history queries will return `NotYetWritten` (like MDBX) instead of
+    /// When enabled, history queries will return `NotYetWritten` (like `MDBX`) instead of
     /// `MaybeInPlainState` when querying before the first history entry. Use this in tests
-    /// where RocksDB and MDBX have identical data.
-    pub fn with_assume_history_complete(mut self) -> Self {
+    /// where `RocksDB` and `MDBX` have identical data.
+    pub const fn with_assume_history_complete(mut self) -> Self {
         self.assume_history_complete = true;
         self
     }
@@ -1717,7 +1717,8 @@ impl<'db> RocksTx<'db> {
         // Determines whether to soften NotYetWritten -> MaybeInPlainState.
         //
         // We soften when:
-        // 1. `assume_history_complete` is false (hybrid storage - RocksDB may not have full history)
+        // 1. `assume_history_complete` is false (hybrid storage - RocksDB may not have full
+        //    history)
         // 2. OR history may be pruned (`lowest_available_block_number.is_some()`)
         //
         // We only return NotYetWritten when we're certain history is complete AND not pruned.
