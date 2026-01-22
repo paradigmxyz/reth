@@ -1665,6 +1665,17 @@ where
         BranchNodeMasksMap::default()
     };
 
+    // Consume remaining storage proof receivers for accounts not encountered during trie walk.
+    // Done last to allow storage workers more time to complete while we finalized the account trie.
+    for (hashed_address, receiver) in storage_proof_receivers {
+        if let Ok(proof_msg) = receiver.recv() {
+            let proof_result = proof_msg.result?;
+            let proof = Into::<Option<DecodedStorageMultiProof>>::into(proof_result)
+                .expect("Partial proofs are not yet supported");
+            collected_decoded_storages.insert(hashed_address, proof);
+        }
+    }
+
     Ok(DecodedMultiProof {
         account_subtree: decoded_account_subtree,
         branch_node_masks,
