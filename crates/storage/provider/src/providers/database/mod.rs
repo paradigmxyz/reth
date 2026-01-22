@@ -236,8 +236,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Uses unwind commit order (MDBX first, then `RocksDB`, then static files) to allow
     /// recovery by truncating static files on restart if interrupted.
     #[track_caller]
-    pub fn unwind_provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N>> {
-        Ok(DatabaseProviderRW(DatabaseProvider::new_unwind_rw(
+    pub fn unwind_provider_rw(
+        &self,
+    ) -> ProviderResult<DatabaseProvider<<N::DB as Database>::TXMut, N>> {
+        Ok(DatabaseProvider::new_unwind_rw(
             self.db.tx_mut()?,
             self.chain_spec.clone(),
             self.static_file_provider.clone(),
@@ -246,7 +248,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
-        )))
+        ))
     }
 
     /// State provider for latest block
