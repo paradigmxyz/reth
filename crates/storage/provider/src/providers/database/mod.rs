@@ -44,7 +44,9 @@ use std::{
 use tracing::trace;
 
 mod provider;
-pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, SaveBlocksMode};
+pub use provider::{
+    CommitOrder, DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, SaveBlocksMode,
+};
 
 use super::ProviderNodeTypes;
 use reth_trie::KeccakKeyHasher;
@@ -219,6 +221,23 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     #[track_caller]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N>> {
         Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
+            self.db.tx_mut()?,
+            self.chain_spec.clone(),
+            self.static_file_provider.clone(),
+            self.prune_modes.clone(),
+            self.storage.clone(),
+            self.storage_settings.clone(),
+            self.rocksdb_provider.clone(),
+            self.changeset_cache.clone(),
+        )))
+    }
+
+    /// Returns a provider with a created `DbTxMut` inside, configured for unwind operations.
+    /// Uses unwind commit order (MDBX first, then `RocksDB`, then static files) to allow
+    /// recovery by truncating static files on restart if interrupted.
+    #[track_caller]
+    pub fn unwind_provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N>> {
+        Ok(DatabaseProviderRW(DatabaseProvider::new_unwind_rw(
             self.db.tx_mut()?,
             self.chain_spec.clone(),
             self.static_file_provider.clone(),
