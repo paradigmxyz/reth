@@ -517,8 +517,8 @@ mod tests {
         assert!(table.is_empty());
     }
 
-    /// Tests exact shard boundary: exactly k * NUM_OF_INDICES_IN_SHARD entries.
-    /// Verifies the final shard correctly uses u64::MAX as sentinel key when
+    /// Tests exact shard boundary: exactly k * `NUM_OF_INDICES_IN_SHARD` entries.
+    /// Verifies the final shard correctly uses `u64::MAX` as sentinel key when
     /// the entry count is an exact multiple of shard size.
     #[tokio::test]
     async fn insert_index_exact_shard_boundary() {
@@ -543,7 +543,7 @@ mod tests {
         assert_eq!(table.len(), 1, "Should have exactly one shard");
         assert_eq!(
             table,
-            BTreeMap::from([(shard(u64::MAX), expected_blocks.clone())]),
+            BTreeMap::from([(shard(u64::MAX), expected_blocks)]),
             "Final shard key should be u64::MAX"
         );
 
@@ -554,8 +554,8 @@ mod tests {
     }
 
     /// Tests incremental merge overflow: existing full shard gets converted
-    /// from u64::MAX sentinel to actual highest block, and new entries
-    /// create a new final shard with u64::MAX.
+    /// from `u64::MAX` sentinel to actual highest block, and new entries
+    /// create a new final shard with `u64::MAX`.
     #[tokio::test]
     async fn insert_index_incremental_merge_overflow() {
         let db = TestStageDB::default();

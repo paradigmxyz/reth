@@ -531,6 +531,101 @@ mod tests {
         assert!(table.is_empty());
     }
 
+    /// Tests exact shard boundary: exactly k * `NUM_OF_INDICES_IN_SHARD` entries.
+    /// Verifies the final shard correctly uses `u64::MAX` as sentinel key when
+    /// the entry count is an exact multiple of shard size.
+    #[tokio::test]
+    async fn insert_index_exact_shard_boundary() {
+        let db = TestStageDB::default();
+
+        db.commit(|tx| {
+            for block in 0..NUM_OF_INDICES_IN_SHARD as u64 {
+                tx.put::<tables::BlockBodyIndices>(
+                    block,
+                    StoredBlockBodyIndices { tx_count: 1, ..Default::default() },
+                )?;
+                tx.put::<tables::StorageChangeSets>(
+                    block_number_address(block),
+                    storage(STORAGE_KEY),
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        run(&db, (NUM_OF_INDICES_IN_SHARD - 1) as u64, None);
+
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
+        let expected_blocks: Vec<u64> = (0..NUM_OF_INDICES_IN_SHARD as u64).collect();
+        assert_eq!(table.len(), 1, "Should have exactly one shard");
+        assert_eq!(
+            table,
+            BTreeMap::from([(shard(u64::MAX), expected_blocks)]),
+            "Final shard key should be u64::MAX"
+        );
+
+        unwind(&db, (NUM_OF_INDICES_IN_SHARD - 1) as u64, 0);
+
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![0])]));
+    }
+
+    /// Tests incremental merge overflow: existing full shard gets converted
+    /// from `u64::MAX` sentinel to actual highest block, and new entries
+    /// create a new final shard with `u64::MAX`.
+    #[tokio::test]
+    async fn insert_index_incremental_merge_overflow() {
+        let db = TestStageDB::default();
+
+        let first_shard_blocks: Vec<u64> = (0..NUM_OF_INDICES_IN_SHARD as u64).collect();
+
+        db.commit(|tx| {
+            for block in 0..(NUM_OF_INDICES_IN_SHARD + 5) as u64 {
+                tx.put::<tables::BlockBodyIndices>(
+                    block,
+                    StoredBlockBodyIndices { tx_count: 1, ..Default::default() },
+                )?;
+                tx.put::<tables::StorageChangeSets>(
+                    block_number_address(block),
+                    storage(STORAGE_KEY),
+                )?;
+            }
+
+            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&first_shard_blocks))?;
+            Ok(())
+        })
+        .unwrap();
+
+        let last_block = (NUM_OF_INDICES_IN_SHARD + 4) as u64;
+        run(&db, last_block, Some((NUM_OF_INDICES_IN_SHARD - 1) as u64));
+
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
+        assert_eq!(table.len(), 2, "Should have two shards after overflow");
+
+        let new_shard_blocks: Vec<u64> =
+            (NUM_OF_INDICES_IN_SHARD as u64..(NUM_OF_INDICES_IN_SHARD + 5) as u64).collect();
+
+        assert_eq!(
+            table.get(&shard((NUM_OF_INDICES_IN_SHARD - 1) as u64)),
+            Some(&first_shard_blocks),
+            "First shard should have highest_block = last entry"
+        );
+        assert_eq!(
+            table.get(&shard(u64::MAX)),
+            Some(&new_shard_blocks),
+            "New final shard should have u64::MAX key"
+        );
+
+        unwind(&db, last_block, (NUM_OF_INDICES_IN_SHARD - 1) as u64);
+
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
+        assert_eq!(
+            table,
+            BTreeMap::from([(shard(u64::MAX), first_shard_blocks)]),
+            "After unwind, should revert to single shard with u64::MAX"
+        );
+    }
+
     stage_test_suite_ext!(IndexStorageHistoryTestRunner, index_storage_history);
 
     struct IndexStorageHistoryTestRunner {
