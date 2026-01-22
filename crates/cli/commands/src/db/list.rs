@@ -61,19 +61,21 @@ impl Command {
     }
 
     /// Generate [`ListFilter`] from command.
-    pub fn list_filter(&self) -> ListFilter {
-        let search = self
-            .search
-            .as_ref()
-            .map(|search| {
+    pub fn list_filter(&self) -> eyre::Result<ListFilter> {
+        let search = match self.search.as_deref() {
+            Some(search) => {
                 if let Some(search) = search.strip_prefix("0x") {
-                    return hex::decode(search).unwrap()
+                    hex::decode(search).wrap_err(
+                        "Invalid hex in --search. If using hex, provide it as 0x-prefixed hex (e.g. 0xdeadbeef).",
+                    )?
+                } else {
+                    search.as_bytes().to_vec()
                 }
-                search.as_bytes().to_vec()
-            })
-            .unwrap_or_default();
+            }
+            None => Vec::new(),
+        };
 
-        ListFilter {
+        Ok(ListFilter {
             skip: self.skip,
             len: self.len,
             search,
@@ -83,7 +85,7 @@ impl Command {
             reverse: self.reverse,
             only_count: self.count,
         }
-    }
+    })
 }
 
 struct ListTableViewer<'a, N: NodeTypes> {
@@ -115,7 +117,7 @@ impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
             }
 
 
-            let list_filter = self.args.list_filter();
+            let list_filter = self.args.list_filter()?;
 
             if self.args.json || self.args.count {
                 let (list, count) = self.tool.list::<T>(&list_filter)?;
