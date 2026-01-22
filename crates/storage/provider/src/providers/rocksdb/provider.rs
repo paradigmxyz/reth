@@ -201,6 +201,32 @@ impl RocksDBBuilder {
         cf_options
     }
 
+    /// Creates optimized column family options for `TransactionHashNumbers`.
+    ///
+    /// This table stores `B256 -> TxNumber` mappings where:
+    /// - Keys are incompressible 32-byte hashes (compression wastes CPU for zero benefit)
+    /// - Values are varint-encoded `u64` (a few bytes - too small to benefit from compression)
+    /// - Every lookup expects a hit (bloom filters only help when checking non-existent keys)
+    fn tx_hash_numbers_column_family_options(cache: &Cache) -> Options {
+        let mut table_options = BlockBasedOptions::default();
+        table_options.set_block_size(DEFAULT_BLOCK_SIZE);
+        table_options.set_cache_index_and_filter_blocks(true);
+        table_options.set_pin_l0_filter_and_index_blocks_in_cache(true);
+        table_options.set_block_cache(cache);
+        // Disable bloom filter: every lookup expects a hit, so bloom filters provide no benefit
+        // and waste memory
+
+        let mut cf_options = Options::default();
+        cf_options.set_block_based_table_factory(&table_options);
+        cf_options.set_level_compaction_dynamic_level_bytes(true);
+        // Disable compression: B256 keys are incompressible hashes, TxNumber values are
+        // varint-encoded u64 (a few bytes). Compression wastes CPU cycles for zero space savings.
+        cf_options.set_compression_type(DBCompressionType::None);
+        cf_options.set_bottommost_compression_type(DBCompressionType::None);
+
+        cf_options
+    }
+
     /// Adds a column family for a specific table type.
     pub fn with_table<T: Table>(mut self) -> Self {
         self.column_families.push(T::NAME.to_string());
@@ -262,10 +288,12 @@ impl RocksDBBuilder {
             .column_families
             .iter()
             .map(|name| {
-                ColumnFamilyDescriptor::new(
-                    name.clone(),
-                    Self::default_column_family_options(&self.block_cache),
-                )
+                let cf_options = if name == tables::TransactionHashNumbers::NAME {
+                    Self::tx_hash_numbers_column_family_options(&self.block_cache)
+                } else {
+                    Self::default_column_family_options(&self.block_cache)
+                };
+                ColumnFamilyDescriptor::new(name.clone(), cf_options)
             })
             .collect();
 
