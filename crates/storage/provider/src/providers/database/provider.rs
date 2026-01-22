@@ -32,7 +32,10 @@ use alloy_primitives::{
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
-use rayon::slice::ParallelSliceMut;
+use rayon::{
+    iter::{IntoParallelIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
@@ -2793,16 +2796,19 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
-        // Aggregate all block changesets and make a list of accounts that have been changed.
-        // Note that collecting and then reversing the order is necessary to ensure that the
-        // changes are applied in the correct order.
-        let hashed_accounts = changesets
-            .into_iter()
-            .map(|(_, e)| (keccak256(e.address), e.info))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<BTreeMap<_, _>>();
+        // Deduplicate by address, keeping only the earliest "before" value for each address.
+        // Changesets are ordered by block number ascending, so the first occurrence of each
+        // address contains the state before any of the blocks being unwound.
+        let mut accounts_by_address: HashMap<Address, Option<Account>> = HashMap::default();
+        for (_, entry) in changesets {
+            accounts_by_address.entry(entry.address).or_insert(entry.info);
+        }
+
+        // Hash addresses in parallel and collect into sorted BTreeMap.
+        let hashed_accounts: BTreeMap<B256, Option<Account>> = accounts_by_address
+            .into_par_iter()
+            .map(|(address, info)| (keccak256(address), info))
+            .collect();
 
         // Apply values to HashedState, and remove the account if it's None.
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
