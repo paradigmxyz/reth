@@ -835,9 +835,20 @@ where
         // Initially mark this worker as available.
         self.available_workers.fetch_add(1, Ordering::Relaxed);
 
+        let total_workers = self.available_workers.load(Ordering::Relaxed);
+
         while let Ok(job) = self.work_rx.recv() {
             // Mark worker as busy.
-            self.available_workers.fetch_sub(1, Ordering::Relaxed);
+            let prev_available = self.available_workers.fetch_sub(1, Ordering::Relaxed);
+            let active = total_workers.saturating_sub(prev_available.saturating_sub(1));
+            debug!(
+                target: "trie::worker_utilization",
+                worker_type = "storage",
+                active,
+                total = total_workers,
+                worker_id = self.worker_id,
+                "worker_state_change"
+            );
 
             match job {
                 StorageWorkerJob::StorageProof { input, proof_result_sender } => {
@@ -864,7 +875,16 @@ where
             }
 
             // Mark worker as available again.
-            self.available_workers.fetch_add(1, Ordering::Relaxed);
+            let prev_available = self.available_workers.fetch_add(1, Ordering::Relaxed);
+            let active = total_workers.saturating_sub(prev_available.saturating_add(1));
+            debug!(
+                target: "trie::worker_utilization",
+                worker_type = "storage",
+                active,
+                total = total_workers,
+                worker_id = self.worker_id,
+                "worker_state_change"
+            );
         }
 
         trace!(
@@ -1120,9 +1140,20 @@ where
         // Count this worker as available only after successful initialization.
         self.available_workers.fetch_add(1, Ordering::Relaxed);
 
+        let total_workers = self.available_workers.load(Ordering::Relaxed);
+
         while let Ok(job) = self.work_rx.recv() {
             // Mark worker as busy.
-            self.available_workers.fetch_sub(1, Ordering::Relaxed);
+            let prev_available = self.available_workers.fetch_sub(1, Ordering::Relaxed);
+            let active = total_workers.saturating_sub(prev_available.saturating_sub(1));
+            debug!(
+                target: "trie::worker_utilization",
+                worker_type = "account",
+                active,
+                total = total_workers,
+                worker_id = self.worker_id,
+                "worker_state_change"
+            );
 
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
@@ -1146,7 +1177,16 @@ where
             }
 
             // Mark worker as available again.
-            self.available_workers.fetch_add(1, Ordering::Relaxed);
+            let prev_available = self.available_workers.fetch_add(1, Ordering::Relaxed);
+            let active = total_workers.saturating_sub(prev_available.saturating_add(1));
+            debug!(
+                target: "trie::worker_utilization",
+                worker_type = "account",
+                active,
+                total = total_workers,
+                worker_id = self.worker_id,
+                "worker_state_change"
+            );
         }
 
         trace!(
