@@ -158,11 +158,13 @@ where
                 let append_only =
                     provider.count_entries::<tables::TransactionHashNumbers>()?.is_zero();
 
-                // Create RocksDB batch if feature is enabled
+                // Create RocksDB batch if feature is enabled (with auto-commit to prevent OOM)
                 #[cfg(all(unix, feature = "rocksdb"))]
                 let rocksdb = provider.rocksdb_provider();
                 #[cfg(all(unix, feature = "rocksdb"))]
-                let rocksdb_batch = rocksdb.batch();
+                let rocksdb_batch = rocksdb.batch().with_auto_commit(
+                    reth_provider::providers::rocksdb::DEFAULT_BATCH_COMMIT_THRESHOLD_BYTES,
+                );
                 #[cfg(not(all(unix, feature = "rocksdb")))]
                 let rocksdb_batch = ();
 
@@ -217,11 +219,13 @@ where
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.chunk_size);
 
-        // Create RocksDB batch if feature is enabled
+        // Create RocksDB batch if feature is enabled (with auto-commit to prevent OOM)
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb = provider.rocksdb_provider();
         #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_batch = rocksdb.batch();
+        let rocksdb_batch = rocksdb.batch().with_auto_commit(
+            reth_provider::providers::rocksdb::DEFAULT_BATCH_COMMIT_THRESHOLD_BYTES,
+        );
         #[cfg(not(all(unix, feature = "rocksdb")))]
         let rocksdb_batch = ();
 

@@ -136,12 +136,24 @@ where
 
         info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
 
-        provider.with_rocksdb_batch(|rocksdb_batch| {
-            let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
-            load_account_history(collector, first_sync, &mut writer)
-                .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
-            Ok(((), writer.into_raw_rocksdb_batch()))
-        })?;
+        // Create RocksDB batch with auto-commit to prevent OOM
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb = provider.rocksdb_provider();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb_batch = rocksdb.batch().with_auto_commit(
+            reth_provider::providers::rocksdb::DEFAULT_BATCH_COMMIT_THRESHOLD_BYTES,
+        );
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let rocksdb_batch = ();
+
+        let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
+        load_account_history(collector, first_sync, &mut writer)
+            .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
+
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
