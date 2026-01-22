@@ -1714,17 +1714,21 @@ impl<'db> RocksTx<'db> {
     where
         T: Table<Value = BlockNumberList>,
     {
-        // RocksDB only has history for blocks AFTER it was enabled. Accounts modified before
-        // RocksDB was enabled exist only in MDBX. Returning `NotYetWritten` would incorrectly
-        // treat them as non-existent (nonce 0).
+        // Determines whether to soften NotYetWritten -> MaybeInPlainState.
         //
-        // When `assume_history_complete` is true (for tests with identical data), return
-        // `NotYetWritten` to match MDBX semantics.
+        // We soften when:
+        // 1. `assume_history_complete` is false (hybrid storage - RocksDB may not have full history)
+        // 2. OR history may be pruned (`lowest_available_block_number.is_some()`)
+        //
+        // We only return NotYetWritten when we're certain history is complete AND not pruned.
+        let should_soften_not_yet_written =
+            !self.assume_history_complete || lowest_available_block_number.is_some();
+
         let fallback = || {
-            Ok(if self.assume_history_complete {
-                HistoryInfo::NotYetWritten
-            } else {
+            Ok(if should_soften_not_yet_written {
                 HistoryInfo::MaybeInPlainState
+            } else {
+                HistoryInfo::NotYetWritten
             })
         };
 
@@ -1775,8 +1779,7 @@ impl<'db> RocksTx<'db> {
             false
         };
 
-        // Use `from_lookup` but then override `NotYetWritten` -> `MaybeInPlainState`
-        // unless `assume_history_complete` is true (for tests with identical data).
+        // Apply the same softening logic to `from_lookup` result.
         let result = HistoryInfo::from_lookup(
             found_block,
             is_before_first_write,
@@ -1784,7 +1787,7 @@ impl<'db> RocksTx<'db> {
         );
 
         Ok(match result {
-            HistoryInfo::NotYetWritten if !self.assume_history_complete => {
+            HistoryInfo::NotYetWritten if should_soften_not_yet_written => {
                 HistoryInfo::MaybeInPlainState
             }
             other => other,
