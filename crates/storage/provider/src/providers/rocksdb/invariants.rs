@@ -277,17 +277,22 @@ impl RocksDBProvider {
             return Ok(None);
         }
 
+        let total_blocks = sf_tip - checkpoint;
         tracing::info!(
             target: "reth::providers::rocksdb",
             checkpoint,
             sf_tip,
+            total_blocks,
             "StoragesHistory: healing via changesets"
         );
 
         let mut batch_start = checkpoint.saturating_add(1);
+        let mut batch_num = 0u64;
+        let total_batches = total_blocks.div_ceil(HEAL_HISTORY_BATCH_SIZE);
 
         while batch_start <= sf_tip {
             let batch_end = batch_start.saturating_add(HEAL_HISTORY_BATCH_SIZE - 1).min(sf_tip);
+            batch_num += 1;
 
             let changesets = provider.storage_changesets_range(batch_start..=batch_end)?;
 
@@ -299,12 +304,14 @@ impl RocksDBProvider {
 
                 let indices: Vec<_> = unique_keys.into_iter().collect();
 
-                tracing::debug!(
+                tracing::info!(
                     target: "reth::providers::rocksdb",
+                    batch_num,
+                    total_batches,
                     batch_start,
                     batch_end,
                     indices_count = indices.len(),
-                    "Unwinding storage history indices batch"
+                    "StoragesHistory: unwinding batch"
                 );
 
                 let batch = self.unwind_storage_history_indices(&indices)?;
@@ -366,16 +373,22 @@ impl RocksDBProvider {
             return Ok(None);
         }
 
+        let total_blocks = sf_tip - checkpoint;
         tracing::info!(
             target: "reth::providers::rocksdb",
             sf_tip,
             checkpoint,
-            "AccountsHistory ahead of checkpoint, healing via changesets"
+            total_blocks,
+            "AccountsHistory: healing via changesets"
         );
 
         let mut batch_start = checkpoint + 1;
+        let mut batch_num = 0u64;
+        let total_batches = total_blocks.div_ceil(HEAL_HISTORY_BATCH_SIZE);
+
         while batch_start <= sf_tip {
             let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(sf_tip);
+            batch_num += 1;
 
             let changesets = provider.account_changesets_range(batch_start..=batch_end)?;
 
@@ -386,6 +399,16 @@ impl RocksDBProvider {
                 let unwind_from = checkpoint + 1;
                 let indices: Vec<_> =
                     addresses.into_iter().map(|addr| (addr, unwind_from)).collect();
+
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    batch_num,
+                    total_batches,
+                    batch_start,
+                    batch_end,
+                    indices_count = indices.len(),
+                    "AccountsHistory: unwinding batch"
+                );
 
                 let batch = self.unwind_account_history_indices(&indices)?;
                 self.commit_batch(batch)?;
