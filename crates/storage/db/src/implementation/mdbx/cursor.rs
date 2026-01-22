@@ -481,7 +481,7 @@ mod tests {
     };
     use alloy_primitives::{address, Address, B256, U256};
     use reth_db_api::{
-        cursor::{DbCursorRO, DbDupCursorRW},
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
         models::{BlockNumberAddress, ClientVersion},
         table::TableImporter,
         transaction::{DbTx, DbTxMut},
@@ -575,6 +575,193 @@ mod tests {
         {
             assert_eq!(copied_key, expected_key);
             assert_eq!(copied_value, expected_value);
+        }
+    }
+
+    /// Tests that the zero-copy reserve path works correctly for B256 values.
+    /// B256 implements `uncompressable_ref()` returning Some, so it uses the reserve path.
+    #[test]
+    fn test_reserve_path_b256_roundtrip() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        // B256 values use the reserve path (uncompressable_ref returns Some)
+        let test_data: Vec<(u64, B256)> = vec![
+            (0, B256::ZERO),
+            (1, B256::with_last_byte(1)),
+            (100, B256::repeat_byte(0xab)),
+            (u64::MAX, B256::repeat_byte(0xff)),
+        ];
+
+        // Write using upsert (uses reserve path for B256)
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            for (key, value) in &test_data {
+                cursor.upsert(*key, value).unwrap();
+            }
+        }
+
+        // Read back and verify
+        {
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+            for (expected_key, expected_value) in &test_data {
+                let (key, value) = cursor.seek_exact(*expected_key).unwrap().unwrap();
+                assert_eq!(key, *expected_key);
+                assert_eq!(value, *expected_value);
+            }
+        }
+
+        tx.commit().unwrap();
+
+        // Verify again after commit
+        let tx = db.tx().unwrap();
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+        let all_entries: Vec<_> = cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(all_entries.len(), test_data.len());
+        for ((key, value), (expected_key, expected_value)) in all_entries.iter().zip(test_data.iter()) {
+            assert_eq!(key, expected_key);
+            assert_eq!(value, expected_value);
+        }
+    }
+
+    /// Tests insert operation with reserve path
+    #[test]
+    fn test_reserve_path_insert_roundtrip() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        let hash1 = B256::repeat_byte(0x11);
+        let hash2 = B256::repeat_byte(0x22);
+
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            cursor.insert(1, &hash1).unwrap();
+            cursor.insert(2, &hash2).unwrap();
+
+            // Insert with existing key should fail
+            assert!(cursor.insert(1, &hash2).is_err());
+        }
+
+        // Verify
+        {
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+            let (k1, v1) = cursor.seek_exact(1).unwrap().unwrap();
+            assert_eq!(k1, 1);
+            assert_eq!(v1, hash1);
+
+            let (k2, v2) = cursor.seek_exact(2).unwrap().unwrap();
+            assert_eq!(k2, 2);
+            assert_eq!(v2, hash2);
+        }
+    }
+
+    /// Tests append operation with reserve path
+    #[test]
+    fn test_reserve_path_append_roundtrip() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        let hashes: Vec<B256> = (0..10u8).map(|i| B256::repeat_byte(i)).collect();
+
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            for (i, hash) in hashes.iter().enumerate() {
+                cursor.append(i as u64, hash).unwrap();
+            }
+        }
+
+        // Verify all entries
+        {
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+            let entries: Vec<_> = cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+            assert_eq!(entries.len(), hashes.len());
+            for (i, (key, value)) in entries.iter().enumerate() {
+                assert_eq!(*key, i as u64);
+                assert_eq!(*value, hashes[i]);
+            }
+        }
+    }
+
+    /// Tests that DupSort append_dup works with reserve path
+    #[test]
+    fn test_reserve_path_append_dup_roundtrip() {
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        let addr = address!("0000000000000000000000000000000000000001");
+        let entries = vec![
+            StorageEntry { key: B256::with_last_byte(1), value: U256::from(100) },
+            StorageEntry { key: B256::with_last_byte(2), value: U256::from(200) },
+            StorageEntry { key: B256::with_last_byte(3), value: U256::from(300) },
+        ];
+
+        {
+            let mut cursor = tx.cursor_dup_write::<StorageChangeSets>().unwrap();
+            for entry in &entries {
+                cursor.append_dup(BlockNumberAddress((1, addr)), *entry).unwrap();
+            }
+        }
+
+        // Verify
+        {
+            let mut cursor = tx.cursor_dup_read::<StorageChangeSets>().unwrap();
+            let results: Vec<_> = cursor
+                .walk_dup(Some(BlockNumberAddress((1, addr))), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+
+            assert_eq!(results.len(), entries.len());
+            for ((_, value), expected) in results.iter().zip(entries.iter()) {
+                assert_eq!(value, expected);
+            }
+        }
+    }
+
+    /// Tests mixed operations to ensure reserve and non-reserve paths work together
+    #[test]
+    fn test_reserve_path_mixed_operations() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+
+        // First transaction: upsert
+        {
+            let tx = db.tx_mut().unwrap();
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            cursor.upsert(1, &B256::repeat_byte(0x11)).unwrap();
+            cursor.upsert(2, &B256::repeat_byte(0x22)).unwrap();
+            tx.commit().unwrap();
+        }
+
+        // Second transaction: upsert to update existing
+        {
+            let tx = db.tx_mut().unwrap();
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            cursor.upsert(1, &B256::repeat_byte(0xaa)).unwrap(); // Update
+            cursor.upsert(3, &B256::repeat_byte(0x33)).unwrap(); // New
+            tx.commit().unwrap();
+        }
+
+        // Verify final state
+        {
+            let tx = db.tx().unwrap();
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+            let (_, v1) = cursor.seek_exact(1).unwrap().unwrap();
+            assert_eq!(v1, B256::repeat_byte(0xaa)); // Updated
+
+            let (_, v2) = cursor.seek_exact(2).unwrap().unwrap();
+            assert_eq!(v2, B256::repeat_byte(0x22)); // Unchanged
+
+            let (_, v3) = cursor.seek_exact(3).unwrap().unwrap();
+            assert_eq!(v3, B256::repeat_byte(0x33)); // New
         }
     }
 }
