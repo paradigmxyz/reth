@@ -1,6 +1,7 @@
 //! Async caching support for eth RPC
 
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
+use crate::block::CachedTransaction;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{TxHash, B256};
@@ -14,38 +15,56 @@ use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use schnellru::{ByLength, Limiter, LruMap};
 use std::{
     future::Future,
+    ops::Deref,
     pin::Pin,
-    rc::Rc,
     sync::Arc,
     task::{Context, Poll},
 };
+
+// Used within `SendRc`
+use std::rc::Rc;
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, Semaphore,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-/// Cached data for a transaction lookup.
-#[derive(Debug, Clone)]
-pub struct CachedTransaction<B: Block, R> {
-    /// The block containing this transaction.
-    pub block: Arc<RecoveredBlock<B>>,
-    /// Index of the transaction within the block.
-    pub tx_index: usize,
-    /// Receipts for the block, if available.
-    pub receipts: Option<Arc<Vec<R>>>,
-}
+/// A wrapper around `Rc<T>` that implements `Send`.
+///
+/// # Safety
+///
+/// This type must only be used within a single-threaded context where all access
+/// is confined to one task/thread. It is designed for use in the `EthStateCacheService`
+/// where the `Rc` is only ever accessed from within the service's poll loop.
+#[derive(Debug)]
+struct SendRc<T>(Rc<T>);
 
-impl<B: Block, R> CachedTransaction<B, R> {
-    /// Creates a new cached transaction entry.
-    pub const fn new(
-        block: Arc<RecoveredBlock<B>>,
-        tx_index: usize,
-        receipts: Option<Arc<Vec<R>>>,
-    ) -> Self {
-        Self { block, tx_index, receipts }
+impl<T> SendRc<T> {
+    /// Creates a new `SendRc` wrapping the given value.
+    fn new(value: T) -> Self {
+        Self(Rc::new(value))
     }
 }
+
+impl<T> Clone for SendRc<T> {
+    fn clone(&self) -> Self {
+        Self(Rc::clone(&self.0))
+    }
+}
+
+impl<T> Deref for SendRc<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+// SAFETY: `SendRc` is only used within `EthStateCacheService` where all access to the inner
+// `Rc` is confined to a single task's poll loop. The `Rc` is created in `index_block_transactions`,
+// accessed in `GetTransactionByHash` handler, and removed in `remove_block_transactions` - all
+// within the same task.
+unsafe impl<T> Send for SendRc<T> {}
 
 pub mod config;
 pub mod db;
@@ -362,22 +381,7 @@ pub(crate) struct EthStateCacheService<
     /// This restricts the max concurrent fetch tasks at the same time.
     rate_limiter: Arc<Semaphore>,
     /// LRU index mapping transaction hashes to their block hash and index within the block.
-    tx_hash_index: LruMap<TxHash, (Rc<B256>, usize), ByLength>,
-}
-
-// SAFETY: The `Rc<B256>` in `tx_hash_index` is only ever accessed from within the single
-// `EthStateCacheService` task. It is created in `index_block_transactions`, accessed in the
-// `GetTransactionByHash` handler, and removed in `remove_block_transactions` - all within
-// the same task's poll loop.
-unsafe impl<Provider, Tasks, LimitBlocks, LimitReceipts, LimitHeaders> Send
-    for EthStateCacheService<Provider, Tasks, LimitBlocks, LimitReceipts, LimitHeaders>
-where
-    Provider: BlockReader + Send,
-    Tasks: Send,
-    LimitBlocks: Limiter<B256, Arc<RecoveredBlock<Provider::Block>>> + Send,
-    LimitReceipts: Limiter<B256, Arc<Vec<Provider::Receipt>>> + Send,
-    LimitHeaders: Limiter<B256, Provider::Header> + Send,
-{
+    tx_hash_index: LruMap<TxHash, (SendRc<B256>, usize), ByLength>,
 }
 
 impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
@@ -387,9 +391,9 @@ where
 {
     /// Indexes all transactions in a block by transaction hash.
     fn index_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
-        let block_hash = Rc::new(block.hash());
+        let block_hash = SendRc::new(block.hash());
         for (tx_idx, tx) in block.body().transactions().iter().enumerate() {
-            self.tx_hash_index.insert(*tx.tx_hash(), (Rc::clone(&block_hash), tx_idx));
+            self.tx_hash_index.insert(*tx.tx_hash(), (block_hash.clone(), tx_idx));
         }
     }
 
