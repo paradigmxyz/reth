@@ -15,7 +15,8 @@ use reth_db_common::{
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
 use reth_provider::{
-    DBProvider, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
+    DBProvider, DatabaseProviderFactory, RocksDBProviderFactory, StaticFileProviderFactory,
+    StaticFileWriter, StorageSettingsCache,
 };
 use reth_prune::PruneSegment;
 use reth_stages::StageId;
@@ -168,8 +169,20 @@ impl<C: ChainSpecParser> Command<C> {
                 )?;
             }
             StageEnum::AccountHistory | StageEnum::StorageHistory => {
-                tx.clear::<tables::AccountsHistory>()?;
-                tx.clear::<tables::StoragesHistory>()?;
+                let settings = provider_rw.cached_storage_settings();
+                let rocksdb = tool.provider_factory.rocksdb_provider();
+
+                if settings.account_history_in_rocksdb {
+                    rocksdb.clear::<tables::AccountsHistory>()?;
+                } else {
+                    tx.clear::<tables::AccountsHistory>()?;
+                }
+
+                if settings.storages_history_in_rocksdb {
+                    rocksdb.clear::<tables::StoragesHistory>()?;
+                } else {
+                    tx.clear::<tables::StoragesHistory>()?;
+                }
 
                 reset_stage_checkpoint(tx, StageId::IndexAccountHistory)?;
                 reset_stage_checkpoint(tx, StageId::IndexStorageHistory)?;
@@ -177,7 +190,14 @@ impl<C: ChainSpecParser> Command<C> {
                 insert_genesis_history(&provider_rw, self.env.chain.genesis().alloc.iter())?;
             }
             StageEnum::TxLookup => {
-                tx.clear::<tables::TransactionHashNumbers>()?;
+                if provider_rw.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+                    tool.provider_factory
+                        .rocksdb_provider()
+                        .clear::<tables::TransactionHashNumbers>()?;
+                } else {
+                    tx.clear::<tables::TransactionHashNumbers>()?;
+                }
+
                 reset_prune_checkpoint(tx, PruneSegment::TransactionLookup)?;
 
                 reset_stage_checkpoint(tx, StageId::TransactionLookup)?;
