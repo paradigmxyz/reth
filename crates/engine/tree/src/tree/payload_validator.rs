@@ -39,7 +39,7 @@ use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader,
+    StateProviderFactory, StateReader, StorageChangeSetReader,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, State};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
@@ -144,6 +144,7 @@ where
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
+                          + StorageChangeSetReader
                           + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
@@ -479,11 +480,15 @@ where
         let block = self.convert_to_block(input)?.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
-        let receipt_root_bloom = Some(
-            receipt_root_rx
-                .blocking_recv()
-                .expect("receipt root task dropped sender without result"),
-        );
+        let receipt_root_bloom = receipt_root_rx
+            .blocking_recv()
+            .inspect_err(|_| {
+                tracing::error!(
+                    target: "engine::tree::payload_validator",
+                    "Receipt root task dropped sender without result, receipt root calculation likely aborted"
+                );
+            })
+            .ok();
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
@@ -1332,6 +1337,7 @@ where
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
+                          + StorageChangeSetReader
                           + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory

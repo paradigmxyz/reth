@@ -1,4 +1,4 @@
-use super::collect_history_indices;
+use super::{collect_history_indices, collect_storage_history_indices};
 use crate::{stages::utils::load_storage_history, StageCheckpoint, StageId};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
@@ -8,7 +8,8 @@ use reth_db_api::{
 };
 use reth_provider::{
     DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
-    RocksDBProviderFactory, StorageSettingsCache,
+    RocksDBProviderFactory, StaticFileProviderFactory, StorageChangeSetReader,
+    StorageSettingsCache,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
@@ -54,6 +55,8 @@ where
         + PruneCheckpointWriter
         + StorageSettingsCache
         + RocksDBProviderFactory
+        + StorageChangeSetReader
+        + StaticFileProviderFactory
         + reth_provider::NodePrimitivesProvider,
 {
     /// Return the id of the stage
@@ -121,7 +124,9 @@ where
         }
 
         info!(target: "sync::stages::index_storage_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
-        let collector =
+        let collector = if provider.cached_storage_settings().storage_changesets_in_static_files {
+            collect_storage_history_indices(provider, range.clone(), &self.etl_config)?
+        } else {
             collect_history_indices::<_, tables::StorageChangeSets, tables::StoragesHistory, _>(
                 provider,
                 BlockNumberAddress::range(range.clone()),
@@ -130,7 +135,8 @@ where
                 },
                 |(key, value)| (key.block_number(), AddressStorageKey((key.address(), value.key))),
                 &self.etl_config,
-            )?;
+            )?
+        };
 
         info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
 
