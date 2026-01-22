@@ -92,12 +92,12 @@ impl LogLevelHandle {
     }
 
     /// Creates a no-op handle (for when reloading is not available).
-    pub fn noop() -> Self {
+    pub const fn noop() -> Self {
         Self { inner: None }
     }
 
     /// Returns true if this handle can actually reload filters.
-    pub fn is_available(&self) -> bool {
+    pub const fn is_available(&self) -> bool {
         self.inner.is_some()
     }
 
@@ -132,9 +132,9 @@ impl LogLevelHandle {
     /// Sets module-specific log levels using a pattern string.
     ///
     /// Pattern format follows the `RUST_LOG` environment variable syntax:
-    /// - "module1=level1,module2=level2"
-    /// - Example: "reth::sync=debug,reth::net=trace"
-    /// - Example: "info,reth::stages=debug"
+    /// - `module1=level1,module2=level2`
+    /// - Example: `reth::sync=debug,reth::net=trace`
+    /// - Example: `info,reth::stages=debug`
     pub fn set_vmodule(&self, pattern: &str) -> Result<(), String> {
         let Some(handle) = &self.inner else {
             return Err("Log filter reload not available".to_string());
