@@ -112,3 +112,324 @@ where
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::segments::{PruneInput, PruneLimiter, Segment};
+    use alloy_primitives::{Address, B256};
+    use reth_db_api::{models::AccountBeforeTx, tables, transaction::DbTxMut};
+    use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter};
+    use reth_prune_types::{PruneMode, PruneProgress};
+    use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_static_file_types::StaticFileSegment;
+    use reth_storage_api::{DBProvider, StorageSettings, StorageSettingsCache};
+    use reth_testing_utils::generators::{
+        self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
+    };
+    use std::collections::BTreeMap;
+
+    fn setup_rocksdb_test_db() -> TestStageDB {
+        let db = TestStageDB::default();
+        db.factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+        );
+        db
+    }
+
+    fn generate_test_changeset(_block: u64, addresses: &[Address]) -> Vec<AccountBeforeTx> {
+        addresses.iter().map(|&address| AccountBeforeTx { address, info: None }).collect()
+    }
+
+    #[test]
+    fn test_prune_account_history_static_files_full_range() {
+        let db = setup_rocksdb_test_db();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            1..=10,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        let addresses: Vec<Address> = (0..3)
+            .map(|i| {
+                let mut addr = Address::ZERO;
+                addr.0[0] = i as u8;
+                addr
+            })
+            .collect();
+
+        let static_file_provider = db.factory.static_file_provider();
+        {
+            let mut writer = static_file_provider
+                .latest_writer(StaticFileSegment::AccountChangeSets)
+                .expect("get writer");
+
+            for block_num in 1..=10 {
+                let changeset = generate_test_changeset(block_num, &addresses);
+                writer.append_account_changeset(changeset, block_num).expect("append changeset");
+            }
+            writer.commit().expect("commit static file");
+        }
+
+        let highest = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+        assert_eq!(highest, Some(10), "Static file should cover blocks 1-10");
+
+        let provider = db.factory.database_provider_rw().unwrap();
+
+        for block_num in 1..=10u64 {
+            for addr in &addresses {
+                provider
+                    .tx_ref()
+                    .put::<tables::AccountsHistory>(
+                        reth_db_api::models::ShardedKey::new(*addr, block_num),
+                        reth_db_api::BlockNumberList::new([block_num]).unwrap(),
+                    )
+                    .expect("insert history");
+            }
+        }
+        provider.commit().expect("commit provider");
+
+        let prune_mode = PruneMode::Before(5);
+        let input =
+            PruneInput { previous_checkpoint: None, to_block: 5, limiter: PruneLimiter::default() };
+        let segment = AccountsHistoryPruner::new(prune_mode);
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input).expect("prune should succeed");
+        provider.commit().expect("commit after prune");
+
+        assert_eq!(result.progress, PruneProgress::Finished);
+        assert!(result.pruned > 0, "Should have pruned some entries");
+
+        let checkpoint = result.checkpoint.expect("should have checkpoint");
+        assert_eq!(checkpoint.block_number, Some(5));
+    }
+
+    #[test]
+    fn test_prune_account_history_mdbx_fallback() {
+        let db = setup_rocksdb_test_db();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            1..=10,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
+        let (changesets, _) = random_changeset_range(
+            &mut rng,
+            blocks.iter(),
+            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            0..0,
+            0..0,
+        );
+        db.insert_changesets(changesets.clone(), None).expect("insert changesets");
+        db.insert_history(changesets.clone(), None).expect("insert history");
+
+        let mdbx_count_before = db.table::<tables::AccountChangeSets>().unwrap().len();
+        assert!(mdbx_count_before > 0, "Should have MDBX changesets");
+
+        let static_file_provider = db.factory.static_file_provider();
+        let highest = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+        assert!(highest.is_none(), "No static file coverage expected");
+
+        let prune_mode = PruneMode::Before(5);
+        let input =
+            PruneInput { previous_checkpoint: None, to_block: 5, limiter: PruneLimiter::default() };
+        let segment = AccountsHistoryPruner::new(prune_mode);
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input).expect("prune should succeed");
+        provider.commit().expect("commit after prune");
+
+        assert_eq!(result.progress, PruneProgress::Finished);
+        assert!(result.pruned > 0, "Should have pruned some entries");
+    }
+
+    #[test]
+    fn test_prune_account_history_limiter_block_boundary() {
+        let db = setup_rocksdb_test_db();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            1..=20,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        let addresses: Vec<Address> = (0..10)
+            .map(|i| {
+                let mut addr = Address::ZERO;
+                addr.0[0] = i as u8;
+                addr
+            })
+            .collect();
+
+        let static_file_provider = db.factory.static_file_provider();
+        {
+            let mut writer = static_file_provider
+                .latest_writer(StaticFileSegment::AccountChangeSets)
+                .expect("get writer");
+
+            for block_num in 1..=20 {
+                let changeset = generate_test_changeset(block_num, &addresses);
+                writer.append_account_changeset(changeset, block_num).expect("append changeset");
+            }
+            writer.commit().expect("commit static file");
+        }
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        for block_num in 1..=20u64 {
+            for addr in &addresses {
+                provider
+                    .tx_ref()
+                    .put::<tables::AccountsHistory>(
+                        reth_db_api::models::ShardedKey::new(*addr, block_num),
+                        reth_db_api::BlockNumberList::new([block_num]).unwrap(),
+                    )
+                    .expect("insert history");
+            }
+        }
+        provider.commit().expect("commit provider");
+
+        let prune_mode = PruneMode::Before(15);
+        let limiter = PruneLimiter::default().set_deleted_entries_limit(25);
+        let input = PruneInput { previous_checkpoint: None, to_block: 15, limiter };
+        let segment = AccountsHistoryPruner::new(prune_mode);
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input).expect("prune should succeed");
+        provider.commit().expect("commit after prune");
+
+        assert_eq!(
+            result.progress,
+            PruneProgress::HasMoreData(
+                reth_prune_types::PruneInterruptReason::DeletedEntriesLimitReached
+            ),
+            "Should stop due to limit"
+        );
+
+        let checkpoint = result.checkpoint.expect("should have checkpoint");
+        let pruned_block = checkpoint.block_number.expect("should have block number");
+        assert!(pruned_block < 15, "Should have stopped before target block");
+        assert!(pruned_block >= 1, "Should have pruned at least one block");
+    }
+
+    #[test]
+    fn test_prune_account_history_empty_range() {
+        let db = setup_rocksdb_test_db();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            1..=5,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        let prune_mode = PruneMode::Before(5);
+        let input = PruneInput {
+            previous_checkpoint: Some(reth_prune_types::PruneCheckpoint {
+                block_number: Some(5),
+                tx_number: None,
+                prune_mode,
+            }),
+            to_block: 5,
+            limiter: PruneLimiter::default(),
+        };
+        let segment = AccountsHistoryPruner::new(prune_mode);
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input).expect("prune should succeed");
+
+        assert_eq!(result.progress, PruneProgress::Finished);
+        assert_eq!(result.pruned, 0, "Nothing to prune");
+    }
+
+    #[test]
+    fn test_prune_account_history_mixed_static_and_mdbx() {
+        let db = setup_rocksdb_test_db();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            1..=20,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        let addresses: Vec<Address> = (0..3)
+            .map(|i| {
+                let mut addr = Address::ZERO;
+                addr.0[0] = i as u8;
+                addr
+            })
+            .collect();
+
+        let static_file_provider = db.factory.static_file_provider();
+        {
+            let mut writer = static_file_provider
+                .latest_writer(StaticFileSegment::AccountChangeSets)
+                .expect("get writer");
+
+            for block_num in 1..=10 {
+                let changeset = generate_test_changeset(block_num, &addresses);
+                writer.append_account_changeset(changeset, block_num).expect("append changeset");
+            }
+            writer.commit().expect("commit static file");
+        }
+
+        db.commit(|tx| {
+            for block_num in 11..=20u64 {
+                for addr in &addresses {
+                    tx.put::<tables::AccountChangeSets>(
+                        block_num,
+                        AccountBeforeTx { address: *addr, info: None },
+                    )?;
+                }
+            }
+            Ok(())
+        })
+        .expect("insert MDBX changesets");
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        for block_num in 1..=20u64 {
+            for addr in &addresses {
+                provider
+                    .tx_ref()
+                    .put::<tables::AccountsHistory>(
+                        reth_db_api::models::ShardedKey::new(*addr, block_num),
+                        reth_db_api::BlockNumberList::new([block_num]).unwrap(),
+                    )
+                    .expect("insert history");
+            }
+        }
+        provider.commit().expect("commit provider");
+
+        let prune_mode = PruneMode::Before(15);
+        let input = PruneInput {
+            previous_checkpoint: None,
+            to_block: 15,
+            limiter: PruneLimiter::default(),
+        };
+        let segment = AccountsHistoryPruner::new(prune_mode);
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input).expect("prune should succeed");
+        provider.commit().expect("commit after prune");
+
+        assert_eq!(result.progress, PruneProgress::Finished);
+        assert!(result.pruned > 0, "Should have pruned entries from both static and MDBX");
+
+        let checkpoint = result.checkpoint.expect("should have checkpoint");
+        assert_eq!(checkpoint.block_number, Some(15));
+    }
+}

@@ -5,9 +5,12 @@
 //! inconsistencies between `RocksDB` data and MDBX checkpoints.
 
 use super::RocksDBProvider;
-use crate::StaticFileProviderFactory;
+use crate::{
+    changeset_walker::{StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker},
+    StaticFileProviderFactory,
+};
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{Address, BlockNumber, B256};
 use rayon::prelude::*;
 use reth_db::cursor::DbCursorRO;
 use reth_db_api::{tables, transaction::DbTx};
@@ -17,6 +20,7 @@ use reth_storage_api::{
     DBProvider, StageCheckpointReader, StorageSettingsCache, TransactionsProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
+use std::collections::HashSet;
 
 impl RocksDBProvider {
     /// Checks consistency of `RocksDB` tables against MDBX stage checkpoints.
@@ -466,6 +470,181 @@ impl RocksDBProvider {
         }
 
         Ok(())
+    }
+
+    /// Prunes `AccountsHistory` entries for accounts changed in the given block range.
+    ///
+    /// Uses static file changesets to identify which addresses were changed, then unwinds
+    /// the corresponding `RocksDB` history entries.
+    /// Falls back to table iteration if static files don't cover the range.
+    pub fn prune_accounts_history_in_range<Provider>(
+        &self,
+        provider: &Provider,
+        block_range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<()>
+    where
+        Provider: StaticFileProviderFactory,
+    {
+        if block_range.is_empty() {
+            return Ok(());
+        }
+
+        let static_file_provider = provider.static_file_provider();
+
+        // Check if static files cover the range we need
+        let highest_static_block = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+
+        match highest_static_block {
+            Some(highest) if highest >= *block_range.start() => {
+                // Static files cover at least part of the range - use changeset-based approach
+                let effective_end = (*block_range.end()).min(highest);
+                let static_range = *block_range.start()..=effective_end;
+
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    ?static_range,
+                    "Using static file changesets for AccountsHistory healing"
+                );
+
+                // Collect unique addresses from static file changesets
+                let mut addresses_to_unwind: HashSet<Address> = HashSet::new();
+                let walker: StaticFileAccountChangesetWalker<_> =
+                    static_file_provider.walk_account_changeset_range(static_range);
+
+                for result in walker {
+                    let (_block_number, account) = result?;
+                    addresses_to_unwind.insert(account.address);
+                }
+
+                if !addresses_to_unwind.is_empty() {
+                    tracing::info!(
+                        target: "reth::providers::rocksdb",
+                        addresses_count = addresses_to_unwind.len(),
+                        "Unwinding AccountsHistory for changed accounts"
+                    );
+
+                    // Unwind history for each address to keep only blocks <= (start - 1)
+                    let keep_to = block_range.start().saturating_sub(1);
+                    let mut batch = self.batch();
+                    for address in addresses_to_unwind {
+                        batch.unwind_account_history_to(address, keep_to)?;
+                    }
+                    batch.commit()?;
+                }
+
+                // If static files didn't cover the entire range, fall back for remainder
+                if effective_end < *block_range.end() {
+                    tracing::info!(
+                        target: "reth::providers::rocksdb",
+                        from_block = effective_end + 1,
+                        to_block = *block_range.end(),
+                        "Static files don't cover full range, using table scan for remainder"
+                    );
+                    self.prune_accounts_history_above(effective_end)?;
+                }
+
+                Ok(())
+            }
+            _ => {
+                // Static files don't cover the range - fall back to table iteration
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    ?highest_static_block,
+                    ?block_range,
+                    "Static files don't cover range, falling back to table scan"
+                );
+                self.prune_accounts_history_above(block_range.start().saturating_sub(1))
+            }
+        }
+    }
+
+    /// Prunes `StoragesHistory` entries for storage slots changed in the given block range.
+    ///
+    /// Uses static file changesets to identify which `(address, storage_key)` pairs
+    /// were changed, then unwinds the corresponding `RocksDB` history entries.
+    /// Falls back to table iteration if static files don't cover the range.
+    pub fn prune_storages_history_in_range<Provider>(
+        &self,
+        provider: &Provider,
+        block_range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<()>
+    where
+        Provider: StaticFileProviderFactory,
+    {
+        if block_range.is_empty() {
+            return Ok(());
+        }
+
+        let static_file_provider = provider.static_file_provider();
+
+        // Check if static files cover the range we need
+        let highest_static_block = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets);
+
+        match highest_static_block {
+            Some(highest) if highest >= *block_range.start() => {
+                // Static files cover at least part of the range - use changeset-based approach
+                let effective_end = (*block_range.end()).min(highest);
+                let static_range = *block_range.start()..=effective_end;
+
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    ?static_range,
+                    "Using static file changesets for StoragesHistory healing"
+                );
+
+                // Collect unique (address, storage_key) pairs from static file changesets
+                let mut keys_to_unwind: HashSet<(Address, B256)> = HashSet::new();
+                let walker: StaticFileStorageChangesetWalker<_> =
+                    static_file_provider.walk_storage_changeset_range(static_range);
+
+                for result in walker {
+                    let (block_number_address, entry) = result?;
+                    keys_to_unwind.insert((block_number_address.address(), entry.key));
+                }
+
+                if !keys_to_unwind.is_empty() {
+                    tracing::info!(
+                        target: "reth::providers::rocksdb",
+                        keys_count = keys_to_unwind.len(),
+                        "Unwinding StoragesHistory for changed storage slots"
+                    );
+
+                    // Unwind history for each (address, storage_key) pair to keep only
+                    // blocks <= (start - 1)
+                    let keep_to = block_range.start().saturating_sub(1);
+                    let mut batch = self.batch();
+                    for (address, storage_key) in keys_to_unwind {
+                        batch.unwind_storage_history_to(address, storage_key, keep_to)?;
+                    }
+                    batch.commit()?;
+                }
+
+                // If static files didn't cover the entire range, fall back for remainder
+                if effective_end < *block_range.end() {
+                    tracing::info!(
+                        target: "reth::providers::rocksdb",
+                        from_block = effective_end + 1,
+                        to_block = *block_range.end(),
+                        "Static files don't cover full range, using table scan for remainder"
+                    );
+                    self.prune_storages_history_above(effective_end)?;
+                }
+
+                Ok(())
+            }
+            _ => {
+                // Static files don't cover the range - fall back to table iteration
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    ?highest_static_block,
+                    ?block_range,
+                    "Static files don't cover range, falling back to table scan"
+                );
+                self.prune_storages_history_above(block_range.start().saturating_sub(1))
+            }
+        }
     }
 }
 
@@ -1400,6 +1579,293 @@ mod tests {
             result,
             Some(50),
             "Should require unwind to block 50 to rebuild AccountsHistory"
+        );
+    }
+
+    /// Test that healing for `AccountsHistory` uses static file changesets when available.
+    ///
+    /// This test verifies that:
+    /// 1. When static files contain changesets, healing uses them to identify which addresses need
+    ///    their history unwound
+    /// 2. Addresses NOT in the changeset range remain untouched
+    /// 3. The unwind re-keys shards appropriately (to `u64::MAX` sentinel)
+    #[test]
+    fn test_accounts_history_healing_uses_changesets() {
+        use crate::providers::static_file::StaticFileWriter;
+        use reth_db_api::models::ShardedKey;
+        use reth_primitives_traits::Account;
+        use reth_static_file_types::StaticFileSegment;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::AccountsHistory>()
+            .build()
+            .unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+        );
+
+        let addr1 = Address::repeat_byte(0x11);
+        let addr2 = Address::repeat_byte(0x22);
+        let addr3 = Address::repeat_byte(0x33);
+
+        // Write changesets for addr1 and addr2 (not addr3)
+        {
+            let static_file_provider = factory.static_file_provider();
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            for block_num in 0..=10 {
+                let changeset = vec![
+                    reth_db_api::models::AccountBeforeTx {
+                        address: addr1,
+                        info: Some(Account { nonce: block_num, ..Default::default() }),
+                    },
+                    reth_db_api::models::AccountBeforeTx {
+                        address: addr2,
+                        info: Some(Account { nonce: block_num + 100, ..Default::default() }),
+                    },
+                ];
+                writer.append_account_changeset(changeset, block_num).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        // Insert history shards into RocksDB
+        let key_addr1_block5 = ShardedKey::new(addr1, 5);
+        let key_addr1_block10 = ShardedKey::new(addr1, 10);
+        let key_addr2_block10 = ShardedKey::new(addr2, 10);
+        let key_addr3_block10 = ShardedKey::new(addr3, 10);
+
+        let block_list_5 = BlockNumberList::new_pre_sorted([1, 2, 3, 4, 5]);
+        let block_list_10 = BlockNumberList::new_pre_sorted([6, 7, 8, 9, 10]);
+        rocksdb.put::<tables::AccountsHistory>(key_addr1_block5.clone(), &block_list_5).unwrap();
+        rocksdb.put::<tables::AccountsHistory>(key_addr1_block10.clone(), &block_list_10).unwrap();
+        rocksdb.put::<tables::AccountsHistory>(key_addr2_block10.clone(), &block_list_10).unwrap();
+        rocksdb.put::<tables::AccountsHistory>(key_addr3_block10.clone(), &block_list_10).unwrap();
+
+        let highest = factory
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+        assert_eq!(highest, Some(10), "Static files should cover blocks 0-10");
+
+        // Prune blocks 6-10 - should use changesets
+        rocksdb.prune_accounts_history_in_range(&factory, 6..=10).unwrap();
+
+        // After healing, addr1's block5 shard is re-keyed to sentinel
+        let key_addr1_sentinel = ShardedKey::new(addr1, u64::MAX);
+
+        assert!(
+            rocksdb.get::<tables::AccountsHistory>(key_addr1_block5).unwrap().is_none(),
+            "addr1 block 5 shard should be re-keyed to sentinel"
+        );
+        assert!(
+            rocksdb.get::<tables::AccountsHistory>(key_addr1_sentinel).unwrap().is_some(),
+            "addr1 should have sentinel shard after healing"
+        );
+        assert!(
+            rocksdb.get::<tables::AccountsHistory>(key_addr1_block10).unwrap().is_none(),
+            "addr1 block 10 shard should be pruned"
+        );
+        assert!(
+            rocksdb.get::<tables::AccountsHistory>(key_addr2_block10).unwrap().is_none(),
+            "addr2 block 10 shard should be pruned (all blocks > 5)"
+        );
+        assert!(
+            rocksdb.get::<tables::AccountsHistory>(key_addr3_block10).unwrap().is_some(),
+            "addr3 block 10 shard should remain (not in static file changesets)"
+        );
+    }
+
+    /// Test that healing for `StoragesHistory` uses static file changesets when available.
+    #[test]
+    fn test_storages_history_healing_uses_changesets() {
+        use crate::providers::static_file::StaticFileWriter;
+        use reth_static_file_types::StaticFileSegment;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+        );
+
+        let addr1 = Address::repeat_byte(0x11);
+        let storage_key1 = B256::repeat_byte(0xAA);
+        let storage_key2 = B256::repeat_byte(0xBB);
+        let addr2 = Address::repeat_byte(0x22);
+        let addr_not_in_changeset = Address::repeat_byte(0x99);
+
+        // Write storage changesets
+        {
+            let static_file_provider = factory.static_file_provider();
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            for block_num in 0..=10 {
+                let changeset = vec![
+                    reth_db_api::models::StorageBeforeTx {
+                        address: addr1,
+                        key: storage_key1,
+                        value: alloy_primitives::U256::from(block_num),
+                    },
+                    reth_db_api::models::StorageBeforeTx {
+                        address: addr1,
+                        key: storage_key2,
+                        value: alloy_primitives::U256::from(block_num + 100),
+                    },
+                    reth_db_api::models::StorageBeforeTx {
+                        address: addr2,
+                        key: storage_key1,
+                        value: alloy_primitives::U256::from(block_num + 200),
+                    },
+                ];
+                writer.append_storage_changeset(changeset, block_num).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        // Insert history shards
+        let key_addr1_key1_block5 = StorageShardedKey::new(addr1, storage_key1, 5);
+        let key_addr1_key1_block10 = StorageShardedKey::new(addr1, storage_key1, 10);
+        let key_addr1_key2_block10 = StorageShardedKey::new(addr1, storage_key2, 10);
+        let key_addr2_key1_block10 = StorageShardedKey::new(addr2, storage_key1, 10);
+        let key_not_in_changeset = StorageShardedKey::new(addr_not_in_changeset, storage_key1, 10);
+
+        let block_list_5 = BlockNumberList::new_pre_sorted([1, 2, 3, 4, 5]);
+        let block_list_10 = BlockNumberList::new_pre_sorted([6, 7, 8, 9, 10]);
+        rocksdb
+            .put::<tables::StoragesHistory>(key_addr1_key1_block5.clone(), &block_list_5)
+            .unwrap();
+        rocksdb
+            .put::<tables::StoragesHistory>(key_addr1_key1_block10.clone(), &block_list_10)
+            .unwrap();
+        rocksdb
+            .put::<tables::StoragesHistory>(key_addr1_key2_block10.clone(), &block_list_10)
+            .unwrap();
+        rocksdb
+            .put::<tables::StoragesHistory>(key_addr2_key1_block10.clone(), &block_list_10)
+            .unwrap();
+        rocksdb
+            .put::<tables::StoragesHistory>(key_not_in_changeset.clone(), &block_list_10)
+            .unwrap();
+
+        let highest = factory
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets);
+        assert_eq!(highest, Some(10), "Static files should cover blocks 0-10");
+
+        rocksdb.prune_storages_history_in_range(&factory, 6..=10).unwrap();
+
+        let key_addr1_key1_sentinel = StorageShardedKey::new(addr1, storage_key1, u64::MAX);
+
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key_addr1_key1_block5).unwrap().is_none(),
+            "addr1/key1 block 5 shard should be re-keyed to sentinel"
+        );
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key_addr1_key1_sentinel).unwrap().is_some(),
+            "addr1/key1 should have sentinel shard"
+        );
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key_addr1_key1_block10).unwrap().is_none(),
+            "addr1/key1 block 10 shard should be pruned"
+        );
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key_addr1_key2_block10).unwrap().is_none(),
+            "addr1/key2 block 10 shard should be pruned"
+        );
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key_addr2_key1_block10).unwrap().is_none(),
+            "addr2/key1 block 10 shard should be pruned"
+        );
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key_not_in_changeset).unwrap().is_some(),
+            "addr not in changeset should remain"
+        );
+    }
+
+    /// Test fallback to table scan when static files don't cover the range.
+    #[test]
+    fn test_history_healing_fallback_when_no_static_files() {
+        use reth_db_api::models::ShardedKey;
+        use reth_static_file_types::StaticFileSegment;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy()
+                .with_account_history_in_rocksdb(true)
+                .with_storages_history_in_rocksdb(true),
+        );
+
+        let addr1 = Address::repeat_byte(0x11);
+        let addr2 = Address::repeat_byte(0x22);
+
+        // Insert shards - no static file changesets written
+        let key_addr1_block50 = ShardedKey::new(addr1, 50);
+        let key_addr2_block100 = ShardedKey::new(addr2, 100);
+        let key_addr1_sentinel = ShardedKey::new(addr1, u64::MAX);
+
+        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
+        rocksdb.put::<tables::AccountsHistory>(key_addr1_block50.clone(), &block_list).unwrap();
+        rocksdb.put::<tables::AccountsHistory>(key_addr2_block100.clone(), &block_list).unwrap();
+        rocksdb.put::<tables::AccountsHistory>(key_addr1_sentinel.clone(), &block_list).unwrap();
+
+        let storage_key = B256::repeat_byte(0xAA);
+        let storage_key_block50 = StorageShardedKey::new(addr1, storage_key, 50);
+        let storage_key_block100 = StorageShardedKey::new(addr1, storage_key, 100);
+        let storage_key_sentinel = StorageShardedKey::new(addr1, storage_key, u64::MAX);
+
+        rocksdb.put::<tables::StoragesHistory>(storage_key_block50.clone(), &block_list).unwrap();
+        rocksdb.put::<tables::StoragesHistory>(storage_key_block100.clone(), &block_list).unwrap();
+        rocksdb.put::<tables::StoragesHistory>(storage_key_sentinel.clone(), &block_list).unwrap();
+
+        // No static files exist
+        let highest = factory
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+        assert!(highest.is_none(), "No static files should exist");
+
+        // Without changesets, fallback deletes all shards with highest_block > 50
+        rocksdb.prune_accounts_history_in_range(&factory, 51..=100).unwrap();
+
+        assert!(
+            rocksdb.get::<tables::AccountsHistory>(key_addr1_block50).unwrap().is_some(),
+            "addr1 block 50 should remain (at boundary)"
+        );
+        assert!(
+            rocksdb.get::<tables::AccountsHistory>(key_addr2_block100).unwrap().is_none(),
+            "addr2 block 100 should be pruned (fallback deletes > 50)"
+        );
+        assert!(
+            rocksdb.get::<tables::AccountsHistory>(key_addr1_sentinel).unwrap().is_some(),
+            "sentinel entry should remain"
+        );
+
+        rocksdb.prune_storages_history_in_range(&factory, 51..=100).unwrap();
+
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(storage_key_block50).unwrap().is_some(),
+            "storage block 50 should remain"
+        );
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(storage_key_block100).unwrap().is_none(),
+            "storage block 100 should be pruned"
+        );
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(storage_key_sentinel).unwrap().is_some(),
+            "storage sentinel should remain"
         );
     }
 }
