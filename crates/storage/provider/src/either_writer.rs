@@ -36,32 +36,6 @@ use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, Stor
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
-/// Error for invalid storage settings configuration.
-///
-/// Used when `RocksDB` tables are configured but no transaction was provided.
-#[cfg(all(unix, feature = "rocksdb"))]
-#[derive(Debug)]
-struct InvalidStorageSettings(&'static str);
-
-#[cfg(all(unix, feature = "rocksdb"))]
-impl std::fmt::Display for InvalidStorageSettings {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "invalid storage settings: {}", self.0)
-    }
-}
-
-#[cfg(all(unix, feature = "rocksdb"))]
-impl std::error::Error for InvalidStorageSettings {}
-
-/// Unwraps a `RocksDB` transaction reference or returns an error.
-#[cfg(all(unix, feature = "rocksdb"))]
-fn unwrap_rocksdb_tx<'a>(
-    tx: RocksTxRefArg<'a>,
-    setting_name: &'static str,
-) -> ProviderResult<&'a crate::providers::rocksdb::RocksTx<'a>> {
-    tx.ok_or_else(|| ProviderError::other(InvalidStorageSettings(setting_name)))
-}
-
 /// Type alias for [`EitherReader`] constructors.
 type EitherReaderTy<'a, P, T> =
     EitherReader<'a, CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
@@ -791,10 +765,9 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().storages_history_in_rocksdb {
-            return Ok(EitherReader::RocksDB(unwrap_rocksdb_tx(
-                _rocksdb_tx,
-                "storages_history_in_rocksdb requires rocksdb tx",
-            )?));
+            return Ok(EitherReader::RocksDB(
+                _rocksdb_tx.expect("storages_history_in_rocksdb requires rocksdb tx"),
+            ));
         }
 
         Ok(EitherReader::Database(
@@ -814,10 +787,9 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            return Ok(EitherReader::RocksDB(unwrap_rocksdb_tx(
-                _rocksdb_tx,
-                "transaction_hash_numbers_in_rocksdb requires rocksdb tx",
-            )?));
+            return Ok(EitherReader::RocksDB(
+                _rocksdb_tx.expect("transaction_hash_numbers_in_rocksdb requires rocksdb tx"),
+            ));
         }
 
         Ok(EitherReader::Database(
@@ -837,10 +809,9 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().account_history_in_rocksdb {
-            return Ok(EitherReader::RocksDB(unwrap_rocksdb_tx(
-                _rocksdb_tx,
-                "account_history_in_rocksdb requires rocksdb tx",
-            )?));
+            return Ok(EitherReader::RocksDB(
+                _rocksdb_tx.expect("account_history_in_rocksdb requires rocksdb tx"),
+            ));
         }
 
         Ok(EitherReader::Database(
