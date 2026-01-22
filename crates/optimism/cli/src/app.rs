@@ -74,7 +74,7 @@ where
             (OpExecutorProvider::optimism(spec.clone()), Arc::new(OpBeaconConsensus::new(spec)))
         };
 
-        let log_handle = self.log_handle.take().unwrap_or_else(LogLevelHandle::noop);
+        let log_handle = self.log_handle.take().unwrap_or_default();
 
         match self.cli.command {
             Commands::Node(command) => {
@@ -130,7 +130,7 @@ where
 
             // Enable reload support only when debug namespace is enabled
             let enable_reload = self.cli.command.debug_namespace_enabled();
-            let result = self.cli.logs.init_tracing_with_reload(layers, enable_reload)?;
+            let result = self.cli.logs.init_tracing_with_layers(layers, enable_reload)?;
             self.guard = result.file_guard;
             self.log_handle = Some(result.log_handle);
 

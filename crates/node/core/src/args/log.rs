@@ -127,45 +127,23 @@ impl LogArgs {
 
     /// Initializes tracing with the configured options from cli args.
     ///
-    /// Uses default layers for tracing. If you need to include custom layers,
-    /// use `init_tracing_with_layers` instead.
-    ///
     /// Returns the file worker guard if a file worker was configured.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        self.init_tracing_with_layers(Layers::new()).map(|r| r.into_guard())
+        self.init_tracing_with_layers(Layers::new(), false).map(|r| r.into_guard())
     }
 
     /// Initializes tracing with the configured options from cli args.
     ///
-    /// # Arguments
-    /// * `layers` - Pre-configured layers to include
-    ///
-    /// Returns the tracing result containing the file worker guard and a noop log handle.
-    pub fn init_tracing_with_layers(&self, layers: Layers) -> eyre::Result<TracingInitResult> {
-        self.init_tracing_impl(layers, false)
-    }
-
-    /// Initializes tracing with reload support for runtime log level changes.
-    ///
     /// When `enable_reload` is true, the returned [`TracingInitResult`] contains a
-    /// [`LogLevelHandle`] that can be used to change log levels at runtime via
-    /// RPC methods like `debug_verbosity` and `debug_vmodule`.
+    /// [`LogLevelHandle`](reth_tracing::LogLevelHandle) that can be used to change log levels
+    /// at runtime via RPC methods like `debug_verbosity` and `debug_vmodule`.
     ///
     /// # Arguments
     /// * `layers` - Pre-configured layers to include
     /// * `enable_reload` - If true, enables runtime log level changes
     ///
     /// Returns the tracing result containing the file worker guard and log level handle.
-    pub fn init_tracing_with_reload(
-        &self,
-        layers: Layers,
-        enable_reload: bool,
-    ) -> eyre::Result<TracingInitResult> {
-        self.init_tracing_impl(layers, enable_reload)
-    }
-
-    /// Internal implementation for tracing initialization.
-    fn init_tracing_impl(
+    pub fn init_tracing_with_layers(
         &self,
         layers: Layers,
         enable_reload: bool,

@@ -111,7 +111,7 @@ where
         // Install the prometheus recorder to be sure to record all metrics
         install_prometheus_recorder();
 
-        let log_handle = self.log_handle.take().unwrap_or_else(LogLevelHandle::noop);
+        let log_handle = self.log_handle.take().unwrap_or_default();
         run_commands_with::<C, Ext, Rpc, N, SubCmd>(
             self.cli, runner, log_handle, components, launcher,
         )
