@@ -27,7 +27,7 @@ const HEAL_HISTORY_BATCH_SIZE: u64 = 10_000;
 /// Generates a `heal_*_history` method for a history table.
 ///
 /// This macro deduplicates the common healing logic between `StoragesHistory` and
-/// `AccountsHistory`, which share identical checkpoint/sf_tip handling and batch loop structure.
+/// `AccountsHistory`, which share identical `checkpoint/sf_tip` handling and batch loop structure.
 macro_rules! impl_heal_history {
     (
         $(#[$attr:meta])*
