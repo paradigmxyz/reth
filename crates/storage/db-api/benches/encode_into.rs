@@ -17,7 +17,7 @@ fn bench_encode_methods(c: &mut Criterion) {
     group.bench_function("Address::encode (returns array)", |b| {
         b.iter(|| {
             for addr in &addresses {
-                let encoded = black_box(addr.clone().encode());
+                let encoded = black_box((*addr).encode());
                 black_box(encoded);
             }
         })
