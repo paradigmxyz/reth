@@ -158,3 +158,6 @@ pub struct RocksTx;
 /// A stub raw iterator for `RocksDB`.
 #[derive(Debug)]
 pub struct RocksDBRawIter;
+
+/// Default threshold for auto-committing batches to prevent OOM (1GB).
+pub const DEFAULT_BATCH_COMMIT_THRESHOLD_BYTES: usize = 1024 * 1024 * 1024;
