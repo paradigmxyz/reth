@@ -9,7 +9,7 @@ use reth_db_api::{
 use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
     ChangeSetReader, DBProvider, HeaderProvider, ProviderError, StageCheckpointReader,
-    StageCheckpointWriter, StatsReader, TrieWriter,
+    StageCheckpointWriter, StatsReader, StorageChangeSetReader, TrieWriter,
 };
 use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
@@ -159,6 +159,7 @@ where
         + StatsReader
         + HeaderProvider
         + ChangeSetReader
+        + StorageChangeSetReader
         + StageCheckpointReader
         + StageCheckpointWriter,
 {

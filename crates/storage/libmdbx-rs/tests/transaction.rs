@@ -105,8 +105,11 @@ fn test_reserve() {
     let txn = env.begin_rw_txn().unwrap();
     let dbi = txn.open_db(None).unwrap().dbi();
     {
-        let mut writer = txn.reserve(dbi, b"key1", 4, WriteFlags::empty()).unwrap();
-        writer.write_all(b"val1").unwrap();
+        unsafe {
+            // SAFETY: the returned slice is used before the transaction is committed or aborted.
+            let mut writer = txn.reserve(dbi, b"key1", 4, WriteFlags::empty()).unwrap();
+            writer.write_all(b"val1").unwrap();
+        }
     }
     txn.commit().unwrap();
 

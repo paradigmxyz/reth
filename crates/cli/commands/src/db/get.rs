@@ -21,6 +21,7 @@ use reth_node_builder::NodeTypesWithDB;
 use reth_primitives_traits::ValueWithSubKey;
 use reth_provider::{providers::ProviderNodeTypes, ChangeSetReader, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
+use reth_storage_api::StorageChangeSetReader;
 use tracing::error;
 
 /// The arguments for the `reth db get` command
@@ -82,6 +83,33 @@ impl Command {
                 table.view(&GetValueViewer { tool, key, subkey, end_key, end_subkey, raw })?
             }
             Subcommand::StaticFile { segment, key, subkey, raw } => {
+                if let StaticFileSegment::StorageChangeSets = segment {
+                    let storage_key =
+                        table_subkey::<tables::StorageChangeSets>(subkey.as_deref()).ok();
+                    let key = table_key::<tables::StorageChangeSets>(&key)?;
+
+                    let provider = tool.provider_factory.static_file_provider();
+
+                    if let Some(storage_key) = storage_key {
+                        let entry = provider.get_storage_before_block(
+                            key.block_number(),
+                            key.address(),
+                            storage_key,
+                        )?;
+
+                        if let Some(entry) = entry {
+                            println!("{}", serde_json::to_string_pretty(&entry)?);
+                        } else {
+                            error!(target: "reth::cli", "No content for the given table key.");
+                        }
+                        return Ok(());
+                    }
+
+                    let changesets = provider.storage_changeset(key.block_number())?;
+                    println!("{}", serde_json::to_string_pretty(&changesets)?);
+                    return Ok(());
+                }
+
                 let (key, subkey, mask): (u64, _, _) = match segment {
                     StaticFileSegment::Headers => (
                         table_key::<tables::Headers>(&key)?,
@@ -111,6 +139,9 @@ impl Command {
                             subkey,
                             AccountChangesetMask::MASK,
                         )
+                    }
+                    StaticFileSegment::StorageChangeSets => {
+                        unreachable!("storage changesets handled above");
                     }
                 };
 
@@ -189,6 +220,9 @@ impl Command {
                                 }
                                 StaticFileSegment::AccountChangeSets => {
                                     unreachable!("account changeset static files are special cased before this match")
+                                }
+                                StaticFileSegment::StorageChangeSets => {
+                                    unreachable!("storage changeset static files are special cased before this match")
                                 }
                             }
                         }

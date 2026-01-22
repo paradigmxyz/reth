@@ -64,14 +64,11 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     ///
     /// * `receipts_len` - The total number of receipts expected. This is needed to correctly order
     ///   the trie keys according to RLP encoding rules.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the number of receipts received doesn't match `receipts_len`.
     pub fn run(self, receipts_len: usize) {
         let mut builder = OrderedTrieRootEncodedBuilder::new(receipts_len);
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::new();
+        let mut received_count = 0usize;
 
         for indexed_receipt in self.receipt_rx {
             let receipt_with_bloom = indexed_receipt.receipt.with_bloom_ref();
@@ -81,9 +78,21 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
 
             aggregated_bloom |= *receipt_with_bloom.bloom_ref();
             builder.push_unchecked(indexed_receipt.index, &encode_buf);
+            received_count += 1;
         }
 
-        let root = builder.finalize().expect("receipt root builder incomplete");
+        let Ok(root) = builder.finalize() else {
+            // Finalize fails if we didn't receive exactly `receipts_len` receipts. This can
+            // happen if execution was aborted early (e.g., invalid transaction encountered).
+            // We return without sending a result, allowing the caller to handle the abort.
+            tracing::error!(
+                target: "engine::tree::payload_processor",
+                expected = receipts_len,
+                received = received_count,
+                "Receipt root task received incomplete receipts, execution likely aborted"
+            );
+            return;
+        };
         let _ = self.result_tx.send((root, aggregated_bloom));
     }
 }

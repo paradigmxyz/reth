@@ -3,13 +3,11 @@ use crate::{
 };
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use reth_db_api::{
-    cursor::DbCursorRO,
-    models::{AccountBeforeTx, BlockNumberAddress, BlockNumberAddressRange},
-    tables,
+    models::{AccountBeforeTx, BlockNumberAddress},
     transaction::DbTx,
 };
 use reth_execution_errors::StateRootError;
-use reth_storage_api::{BlockNumReader, ChangeSetReader, DBProvider};
+use reth_storage_api::{BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
@@ -34,7 +32,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// An instance of state root calculator with account and storage prefixes loaded.
     fn incremental_root_calculator(
-        provider: &'a (impl ChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError>;
 
@@ -45,7 +43,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The updated state root.
     fn incremental_root(
-        provider: &'a (impl ChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<B256, StateRootError>;
 
@@ -58,7 +56,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The updated state root and the trie updates.
     fn incremental_root_with_updates(
-        provider: &'a (impl ChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 
@@ -69,7 +67,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// The intermediate progress of state root computation.
     fn incremental_root_with_progress(
-        provider: &'a (impl ChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<StateRootProgress, StateRootError>;
 
@@ -133,7 +131,7 @@ pub trait DatabaseHashedPostState: Sized {
     /// Initializes [`HashedPostStateSorted`] from reverts. Iterates over state reverts in the
     /// specified range and aggregates them into sorted hashed state.
     fn from_reverts<KH: KeyHasher>(
-        provider: &(impl ChangeSetReader + BlockNumReader + DBProvider),
+        provider: &(impl ChangeSetReader + StorageChangeSetReader + BlockNumReader + DBProvider),
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<HashedPostStateSorted, ProviderError>;
 }
@@ -146,7 +144,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 
     fn incremental_root_calculator(
-        provider: &'a (impl ChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
         let loaded_prefix_sets =
@@ -155,7 +153,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 
     fn incremental_root(
-        provider: &'a (impl ChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<B256, StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root");
@@ -163,7 +161,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 
     fn incremental_root_with_updates(
-        provider: &'a (impl ChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root");
@@ -171,7 +169,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 
     fn incremental_root_with_progress(
-        provider: &'a (impl ChangeSetReader + DBProvider<Tx = TX>),
+        provider: &'a (impl ChangeSetReader + StorageChangeSetReader + DBProvider<Tx = TX>),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<StateRootProgress, StateRootError> {
         debug!(target: "trie::loader", ?range, "incremental state root with progress");
@@ -248,11 +246,9 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
     /// - Hashes keys and returns them already ordered for trie iteration.
     #[instrument(target = "trie::db", skip(provider), fields(range))]
     fn from_reverts<KH: KeyHasher>(
-        provider: &(impl ChangeSetReader + BlockNumReader + DBProvider),
+        provider: &(impl ChangeSetReader + StorageChangeSetReader + BlockNumReader + DBProvider),
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Self, ProviderError> {
-        let tx = provider.tx_ref();
-
         // Extract concrete start/end values to use for both account and storage changesets.
         let start = match range.start_bound() {
             Bound::Included(&n) => n,
@@ -266,9 +262,6 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
             Bound::Unbounded => BlockNumber::MAX,
         };
 
-        // Convert to BlockNumberAddressRange for storage changesets.
-        let storage_range: BlockNumberAddressRange = (start..end).into();
-
         // Iterate over account changesets and record value before first occurring account change
         let mut accounts = Vec::new();
         let mut seen_accounts = HashSet::new();
@@ -280,20 +273,23 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
         }
         accounts.sort_unstable_by_key(|(hash, _)| *hash);
 
-        // Read storages directly into B256Map<Vec<_>> with HashSet to track seen keys.
+        // Read storages into B256Map<Vec<_>> with HashSet to track seen keys.
         // Only keep the first (oldest) occurrence of each (address, slot) pair.
         let mut storages = B256Map::<Vec<_>>::default();
         let mut seen_storage_keys = HashSet::new();
-        let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
 
-        for entry in storage_changesets_cursor.walk_range(storage_range)? {
-            let (BlockNumberAddress((_, address)), storage) = entry?;
-            if seen_storage_keys.insert((address, storage.key)) {
-                let hashed_address = KH::hash_key(address);
-                storages
-                    .entry(hashed_address)
-                    .or_default()
-                    .push((KH::hash_key(storage.key), storage.value));
+        if start < end {
+            let end_inclusive = end.saturating_sub(1);
+            for (BlockNumberAddress((_, address)), storage) in
+                provider.storage_changesets_range(start..=end_inclusive)?
+            {
+                if seen_storage_keys.insert((address, storage.key)) {
+                    let hashed_address = KH::hash_key(address);
+                    storages
+                        .entry(hashed_address)
+                        .or_default()
+                        .push((KH::hash_key(storage.key), storage.value));
+                }
             }
         }
 

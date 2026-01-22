@@ -6,7 +6,7 @@ use crate::{
 use reth_db_api::{tables, transaction::DbTxMut};
 use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
 use reth_prune_types::{
-    PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
+    PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
 use tracing::{instrument, trace};
 
@@ -47,6 +47,25 @@ where
             }
         };
         let tx_range_end = *tx_range.end();
+
+        // For PruneMode::Full, clear the entire table in one operation
+        if self.mode.is_full() {
+            let pruned = provider.tx_ref().clear_table::<tables::TransactionSenders>()?;
+            trace!(target: "pruner", %pruned, "Cleared transaction senders table");
+
+            let last_pruned_block = provider
+                .block_by_transaction_id(tx_range_end)?
+                .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?;
+
+            return Ok(SegmentOutput {
+                progress: PruneProgress::Finished,
+                pruned,
+                checkpoint: Some(SegmentOutputCheckpoint {
+                    block_number: Some(last_pruned_block),
+                    tx_number: Some(tx_range_end),
+                }),
+            });
+        }
 
         let mut limiter = input.limiter;
 

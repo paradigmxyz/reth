@@ -4,6 +4,8 @@ use reth_db_api::{
     cursor::DbCursorRO, models::BlockNumberAddress, tables, transaction::DbTx, DatabaseError,
 };
 use reth_execution_errors::StorageRootError;
+use reth_storage_api::{BlockNumReader, StorageChangeSetReader};
+use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
 };
@@ -32,6 +34,36 @@ pub trait DatabaseHashedStorage<TX>: Sized {
     /// Initializes [`HashedStorage`] from reverts. Iterates over storage reverts from the specified
     /// block up to the current tip and aggregates them into hashed storage in reverse.
     fn from_reverts(tx: &TX, address: Address, from: BlockNumber) -> Result<Self, DatabaseError>;
+}
+
+/// Initializes [`HashedStorage`] from reverts using a provider.
+pub fn hashed_storage_from_reverts_with_provider<P>(
+    provider: &P,
+    address: Address,
+    from: BlockNumber,
+) -> ProviderResult<HashedStorage>
+where
+    P: StorageChangeSetReader + BlockNumReader,
+{
+    let mut storage = HashedStorage::new(false);
+    let tip = provider.last_block_number()?;
+
+    if from > tip {
+        return Ok(storage)
+    }
+
+    for (BlockNumberAddress((_, storage_address)), storage_change) in
+        provider.storage_changesets_range(from..=tip)?
+    {
+        if storage_address == address {
+            let hashed_slot = keccak256(storage_change.key);
+            if let hash_map::Entry::Vacant(entry) = storage.storage.entry(hashed_slot) {
+                entry.insert(storage_change.value);
+            }
+        }
+    }
+
+    Ok(storage)
 }
 
 impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>

@@ -412,8 +412,16 @@ impl Transaction<RW> {
     /// Returns a buffer which can be used to write a value into the item at the
     /// given key and with the given length. The buffer must be completely
     /// filled by the caller.
+    ///
+    /// This should not be used on dupsort tables.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the returned buffer is not used after the transaction is
+    /// committed or aborted, or if another value is inserted. To be clear: the second call to
+    /// this function is not permitted while the returned slice is reachable.
     #[allow(clippy::mut_from_ref)]
-    pub fn reserve(
+    pub unsafe fn reserve(
         &self,
         dbi: ffi::MDBX_dbi,
         key: impl AsRef<[u8]>,
