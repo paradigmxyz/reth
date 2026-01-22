@@ -20,18 +20,14 @@ use reth_chain_state::{
     MemoryOverlayStateProvider, PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
-use reth_db_api::models::{
-    AccountBeforeTx, BlockNumberAddress, StorageSettings, StoredBlockBodyIndices,
-};
+use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{
-    BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
-};
+use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{HashedPostState, KeccakKeyHasher};
 use revm_database::BundleState;
@@ -178,16 +174,6 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
         self.database.get_static_file_writer(block, segment)
-    }
-}
-
-impl<N: ProviderNodeTypes> StorageSettingsCache for BlockchainProvider<N> {
-    fn cached_storage_settings(&self) -> StorageSettings {
-        self.database.cached_storage_settings()
-    }
-
-    fn set_storage_settings_cache(&self, settings: StorageSettings) {
-        self.database.set_storage_settings_cache(settings)
     }
 }
 

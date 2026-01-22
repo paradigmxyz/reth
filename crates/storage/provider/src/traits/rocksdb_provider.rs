@@ -65,7 +65,7 @@ pub trait RocksDBProviderFactory {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix, feature = "rocksdb"))]
 mod tests {
     use super::*;
     use reth_db_api::models::StorageSettings;
@@ -77,7 +77,7 @@ mod tests {
     }
 
     impl MockRocksDBProvider {
-        fn new() -> Self {
+        const fn new() -> Self {
             Self { tx_call_count: AtomicUsize::new(0) }
         }
 
@@ -94,11 +94,16 @@ mod tests {
     struct TestProvider {
         settings: StorageSettings,
         mock_rocksdb: MockRocksDBProvider,
+        temp_dir: tempfile::TempDir,
     }
 
     impl TestProvider {
         fn new(settings: StorageSettings) -> Self {
-            Self { settings, mock_rocksdb: MockRocksDBProvider::new() }
+            Self {
+                settings,
+                mock_rocksdb: MockRocksDBProvider::new(),
+                temp_dir: tempfile::TempDir::new().unwrap(),
+            }
         }
 
         fn tx_call_count(&self) -> usize {
@@ -117,10 +122,9 @@ mod tests {
     impl RocksDBProviderFactory for TestProvider {
         fn rocksdb_provider(&self) -> RocksDBProvider {
             self.mock_rocksdb.increment_tx_count();
-            RocksDBProvider::new("/tmp/test").unwrap()
+            RocksDBProvider::new(self.temp_dir.path()).unwrap()
         }
 
-        #[cfg(all(unix, feature = "rocksdb"))]
         fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {}
     }
 
@@ -138,7 +142,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(unix, feature = "rocksdb"))]
     fn test_rocksdb_settings_create_tx() {
         let settings =
             StorageSettings { account_history_in_rocksdb: true, ..StorageSettings::legacy() };

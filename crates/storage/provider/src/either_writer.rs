@@ -1829,4 +1829,23 @@ mod rocksdb_tests {
             "Data should be visible after provider.commit()"
         );
     }
+
+    /// Test that `EitherReader::new_accounts_history` returns an error when
+    /// settings require `RocksDB` but no tx is provided (`None`).
+    #[test]
+    fn test_settings_mismatch_returns_error() {
+        let factory = create_test_provider_factory();
+
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+        );
+
+        let provider = factory.database_provider_ro().unwrap();
+        let result = EitherReader::<(), ()>::new_accounts_history(&provider, None);
+
+        assert!(
+            matches!(result, Err(ProviderError::InvalidStorageSettings(_))),
+            "expected InvalidStorageSettings error when settings require RocksDB but tx is None"
+        );
+    }
 }

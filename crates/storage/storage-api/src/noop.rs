@@ -10,7 +10,7 @@ use crate::{
 };
 
 #[cfg(feature = "db-api")]
-use crate::{DBProvider, DatabaseProviderFactory, StorageChangeSetReader, StorageSettingsCache};
+use crate::{DBProvider, DatabaseProviderFactory, StorageChangeSetReader};
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -25,8 +25,6 @@ use core::{
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 #[cfg(feature = "db-api")]
 use reth_db_api::mock::{DatabaseMock, TxMock};
-#[cfg(feature = "db-api")]
-use reth_db_api::models::StorageSettings;
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
@@ -693,18 +691,5 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DatabaseProviderFactory
 
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
         Ok(self.clone())
-    }
-}
-
-#[cfg(feature = "db-api")]
-impl<ChainSpec: Send + Sync, N: NodePrimitives> StorageSettingsCache
-    for NoopProvider<ChainSpec, N>
-{
-    fn cached_storage_settings(&self) -> StorageSettings {
-        StorageSettings::legacy()
-    }
-
-    fn set_storage_settings_cache(&self, _settings: StorageSettings) {
-        // No-op for NoopProvider
     }
 }
