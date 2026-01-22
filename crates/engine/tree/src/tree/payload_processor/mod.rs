@@ -15,7 +15,7 @@ use crate::tree::{
 };
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip1898::BlockWithParent;
-use alloy_evm::{block::StateChangeSource, ToTxEnv};
+use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use crossbeam_channel::Sender as CrossbeamSender;
 use executor::WorkloadExecutor;
@@ -25,6 +25,7 @@ use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
+    block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
     ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
     TxEnvFor,
@@ -101,7 +102,7 @@ pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
-    WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxTuple>::Tx>,
+    WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>,
     <I as ExecutableTxTuple>::Error,
     <N as NodePrimitives>::Receipt,
 >;
@@ -247,6 +248,9 @@ where
         let (to_sparse_trie, sparse_trie_rx) = channel();
         let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
 
+        // Extract V2 proofs flag early so we can pass it to prewarm
+        let v2_proofs_enabled = config.enable_proof_v2();
+
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {
             // When BAL is present, use BAL prewarming and send BAL to multiproof
@@ -263,6 +267,7 @@ where
                 provider_builder.clone(),
                 None, // Don't send proof targets when BAL is present
                 Some(bal),
+                v2_proofs_enabled,
             )
         } else {
             // Normal path: spawn with transaction prewarming
@@ -273,6 +278,7 @@ where
                 provider_builder.clone(),
                 Some(to_multi_proof.clone()),
                 None,
+                v2_proofs_enabled,
             )
         };
 
@@ -280,7 +286,6 @@ where
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let v2_proofs_enabled = config.enable_proof_v2();
         let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
             task_ctx,
@@ -292,10 +297,13 @@ where
         let multi_proof_task = MultiProofTask::new(
             proof_handle.clone(),
             to_sparse_trie,
-            config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
+            config
+                .multiproof_chunking_enabled()
+                .then_some(config.effective_multiproof_chunk_size()),
             to_multi_proof.clone(),
             from_multi_proof,
-        );
+        )
+        .with_v2_proofs_enabled(v2_proofs_enabled);
 
         // spawn multi-proof task
         let parent_span = span.clone();
@@ -344,8 +352,9 @@ where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
+        // This path doesn't use multiproof, so V2 proofs flag doesn't matter
         let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None, bal);
+            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None, bal, false);
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
@@ -361,8 +370,8 @@ where
         &self,
         transactions: I,
     ) -> (
-        mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Tx>>,
-        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>,
+        mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
+        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
         usize,
     ) {
         let (transactions, convert) = transactions.into();
@@ -377,7 +386,10 @@ where
         self.executor.spawn_blocking(move || {
             transactions.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
                 let tx = convert(tx);
-                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
+                let tx = tx.map(|tx| {
+                    let (tx_env, tx) = tx.into_parts();
+                    WithTxEnv { tx_env, tx: Arc::new(tx) }
+                });
                 // Only send Ok(_) variants to prewarming task.
                 if let Ok(tx) = &tx {
                     let _ = prewarm_tx.send(tx.clone());
@@ -412,6 +424,7 @@ where
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
+    #[expect(clippy::too_many_arguments)]
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
@@ -420,6 +433,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
+        v2_proofs_enabled: bool,
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -442,6 +456,7 @@ where
             terminate_execution: Arc::new(AtomicBool::new(false)),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
+            v2_proofs_enabled,
         };
 
         let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(

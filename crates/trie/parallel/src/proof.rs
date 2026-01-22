@@ -197,7 +197,7 @@ impl ParallelProof {
         let (result_tx, result_rx) = crossbeam_unbounded();
         let account_multiproof_start_time = Instant::now();
 
-        let input = AccountMultiproofInput {
+        let input = AccountMultiproofInput::Legacy {
             targets,
             prefix_sets,
             collect_branch_node_masks: self.collect_branch_node_masks,
@@ -208,7 +208,6 @@ impl ParallelProof {
                 HashedPostState::default(),
                 account_multiproof_start_time,
             ),
-            v2_proofs_enabled: self.v2_proofs_enabled,
         };
 
         self.proof_worker_handle
@@ -222,7 +221,9 @@ impl ParallelProof {
             )
         })?;
 
-        let ProofResult { proof: multiproof, stats } = proof_result_msg.result?;
+        let ProofResult::Legacy(multiproof, stats) = proof_result_msg.result? else {
+            panic!("AccountMultiproofInput::Legacy was submitted, expected legacy result")
+        };
 
         #[cfg(feature = "metrics")]
         self.metrics.record(stats);
@@ -235,7 +236,7 @@ impl ParallelProof {
             leaves_added = stats.leaves_added(),
             missed_leaves = stats.missed_leaves(),
             precomputed_storage_roots = stats.precomputed_storage_roots(),
-            "Calculated decoded proof"
+            "Calculated decoded proof",
         );
 
         Ok(multiproof)

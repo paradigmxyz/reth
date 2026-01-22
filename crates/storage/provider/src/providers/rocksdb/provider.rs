@@ -106,13 +106,17 @@ const DEFAULT_MAX_BACKGROUND_JOBS: i32 = 6;
 /// Default bytes per sync for `RocksDB` WAL writes (1 MB).
 const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 
-/// Default bloom filter bits per key (~1% false positive rate).
-const DEFAULT_BLOOM_FILTER_BITS: f64 = 10.0;
-
 /// Default buffer capacity for compression in batches.
 /// 4 KiB matches common block/page sizes and comfortably holds typical history values,
 /// reducing the first few reallocations without over-allocating.
 const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
+
+/// Default auto-commit threshold for batch writes (4 GiB).
+///
+/// When a batch exceeds this size, it is automatically committed to prevent OOM
+/// during large bulk writes. The consistency check on startup heals any crash
+/// that occurs between auto-commits.
+const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 4 * 1024 * 1024 * 1024;
 
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
@@ -158,11 +162,6 @@ impl RocksDBBuilder {
         table_options.set_pin_l0_filter_and_index_blocks_in_cache(true);
         // Shared block cache for all column families.
         table_options.set_block_cache(cache);
-        // Bloom filter: 10 bits/key = ~1% false positive rate, full filter for better read
-        // performance. this setting is good trade off a little bit of memory for better
-        // point lookup performance. see https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#configuration-basics
-        table_options.set_bloom_filter(DEFAULT_BLOOM_FILTER_BITS, false);
-        table_options.set_optimize_filters_for_memory(true);
         table_options
     }
 
@@ -210,6 +209,32 @@ impl RocksDBBuilder {
         cf_options.set_bottommost_compression_type(DBCompressionType::Zstd);
         // Only use Zstd compression, disable dictionary training
         cf_options.set_bottommost_zstd_max_train_bytes(0, true);
+
+        cf_options
+    }
+
+    /// Creates optimized column family options for `TransactionHashNumbers`.
+    ///
+    /// This table stores `B256 -> TxNumber` mappings where:
+    /// - Keys are incompressible 32-byte hashes (compression wastes CPU for zero benefit)
+    /// - Values are varint-encoded `u64` (a few bytes - too small to benefit from compression)
+    /// - Every lookup expects a hit (bloom filters only help when checking non-existent keys)
+    fn tx_hash_numbers_column_family_options(cache: &Cache) -> Options {
+        let mut table_options = BlockBasedOptions::default();
+        table_options.set_block_size(DEFAULT_BLOCK_SIZE);
+        table_options.set_cache_index_and_filter_blocks(true);
+        table_options.set_pin_l0_filter_and_index_blocks_in_cache(true);
+        table_options.set_block_cache(cache);
+        // Disable bloom filter: every lookup expects a hit, so bloom filters provide no benefit
+        // and waste memory
+
+        let mut cf_options = Options::default();
+        cf_options.set_block_based_table_factory(&table_options);
+        cf_options.set_level_compaction_dynamic_level_bytes(true);
+        // Disable compression: B256 keys are incompressible hashes, TxNumber values are
+        // varint-encoded u64 (a few bytes). Compression wastes CPU cycles for zero space savings.
+        cf_options.set_compression_type(DBCompressionType::None);
+        cf_options.set_bottommost_compression_type(DBCompressionType::None);
 
         cf_options
     }
@@ -275,10 +300,12 @@ impl RocksDBBuilder {
             .column_families
             .iter()
             .map(|name| {
-                ColumnFamilyDescriptor::new(
-                    name.clone(),
-                    Self::default_column_family_options(&self.block_cache),
-                )
+                let cf_options = if name == tables::TransactionHashNumbers::NAME {
+                    Self::tx_hash_numbers_column_family_options(&self.block_cache)
+                } else {
+                    Self::default_column_family_options(&self.block_cache)
+                };
+                ColumnFamilyDescriptor::new(name.clone(), cf_options)
             })
             .collect();
 
@@ -655,6 +682,21 @@ impl RocksDBProvider {
             provider: self,
             inner: WriteBatchWithTransaction::<true>::default(),
             buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+            auto_commit_threshold: None,
+        }
+    }
+
+    /// Creates a new batch with auto-commit enabled.
+    ///
+    /// When the batch size exceeds the threshold (4 GiB), the batch is automatically
+    /// committed and reset. This prevents OOM during large bulk writes while maintaining
+    /// crash-safety via the consistency check on startup.
+    pub fn batch_with_auto_commit(&self) -> RocksDBBatch<'_> {
+        RocksDBBatch {
+            provider: self,
+            inner: WriteBatchWithTransaction::<true>::default(),
+            buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+            auto_commit_threshold: Some(DEFAULT_AUTO_COMMIT_THRESHOLD),
         }
     }
 
@@ -1179,11 +1221,16 @@ impl RocksDBProvider {
 /// Unlike [`RocksTx`], this does NOT support read-your-writes. Use for write-only flows
 /// where you don't need to read back uncommitted data within the same operation
 /// (e.g., history index writes).
+///
+/// When `auto_commit_threshold` is set, the batch will automatically commit and reset
+/// when the batch size exceeds the threshold. This prevents OOM during large bulk writes.
 #[must_use = "batch must be committed"]
 pub struct RocksDBBatch<'a> {
     provider: &'a RocksDBProvider,
     inner: WriteBatchWithTransaction<true>,
     buf: Vec<u8>,
+    /// If set, batch auto-commits when size exceeds this threshold (in bytes).
+    auto_commit_threshold: Option<usize>,
 }
 
 impl fmt::Debug for RocksDBBatch<'_> {
@@ -1202,12 +1249,16 @@ impl fmt::Debug for RocksDBBatch<'_> {
 
 impl<'a> RocksDBBatch<'a> {
     /// Puts a value into the batch.
+    ///
+    /// If auto-commit is enabled and the batch exceeds the threshold, commits and resets.
     pub fn put<T: Table>(&mut self, key: T::Key, value: &T::Value) -> ProviderResult<()> {
         let encoded_key = key.encode();
         self.put_encoded::<T>(&encoded_key, value)
     }
 
     /// Puts a value into the batch using pre-encoded key.
+    ///
+    /// If auto-commit is enabled and the batch exceeds the threshold, commits and resets.
     pub fn put_encoded<T: Table>(
         &mut self,
         key: &<T::Key as Encode>::Encoded,
@@ -1215,12 +1266,43 @@ impl<'a> RocksDBBatch<'a> {
     ) -> ProviderResult<()> {
         let value_bytes = compress_to_buf_or_ref!(self.buf, value).unwrap_or(&self.buf);
         self.inner.put_cf(self.provider.get_cf_handle::<T>()?, key, value_bytes);
+        self.maybe_auto_commit()?;
         Ok(())
     }
 
     /// Deletes a value from the batch.
+    ///
+    /// If auto-commit is enabled and the batch exceeds the threshold, commits and resets.
     pub fn delete<T: Table>(&mut self, key: T::Key) -> ProviderResult<()> {
         self.inner.delete_cf(self.provider.get_cf_handle::<T>()?, key.encode().as_ref());
+        self.maybe_auto_commit()?;
+        Ok(())
+    }
+
+    /// Commits and resets the batch if it exceeds the auto-commit threshold.
+    ///
+    /// This is called after each `put` or `delete` operation to prevent unbounded memory growth.
+    /// Returns immediately if auto-commit is disabled or threshold not reached.
+    fn maybe_auto_commit(&mut self) -> ProviderResult<()> {
+        if let Some(threshold) = self.auto_commit_threshold &&
+            self.inner.size_in_bytes() >= threshold
+        {
+            tracing::debug!(
+                target: "providers::rocksdb",
+                batch_size = self.inner.size_in_bytes(),
+                threshold,
+                "Auto-committing RocksDB batch"
+            );
+            let old_batch = std::mem::take(&mut self.inner);
+            self.provider.0.db_rw().write_opt(old_batch, &WriteOptions::default()).map_err(
+                |e| {
+                    ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                },
+            )?;
+        }
         Ok(())
     }
 
@@ -1248,6 +1330,11 @@ impl<'a> RocksDBBatch<'a> {
     /// Returns `true` if the batch contains no operations.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
+    }
+
+    /// Returns the size of the batch in bytes.
+    pub fn size_in_bytes(&self) -> usize {
+        self.inner.size_in_bytes()
     }
 
     /// Returns a reference to the underlying `RocksDB` provider.
@@ -2808,5 +2895,41 @@ mod tests {
         // Second shard truncated and re-keyed to MAX
         assert_eq!(shards[1].0.highest_block_number, u64::MAX);
         assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), (51..=75).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_batch_auto_commit_on_threshold() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Create batch with tiny threshold (1KB) to force auto-commits
+        let mut batch = RocksDBBatch {
+            provider: &provider,
+            inner: WriteBatchWithTransaction::<true>::default(),
+            buf: Vec::new(),
+            auto_commit_threshold: Some(1024), // 1KB
+        };
+
+        // Write entries until we exceed threshold multiple times
+        // Each entry is ~20 bytes, so 100 entries = ~2KB = 2 auto-commits
+        for i in 0..100u64 {
+            let value = format!("value_{i:04}").into_bytes();
+            batch.put::<TestTable>(i, &value).unwrap();
+        }
+
+        // Data should already be visible (auto-committed) even before final commit
+        // At least some entries should be readable
+        let first_visible = provider.get::<TestTable>(0).unwrap();
+        assert!(first_visible.is_some(), "Auto-committed data should be visible");
+
+        // Final commit for remaining batch
+        batch.commit().unwrap();
+
+        // All entries should now be visible
+        for i in 0..100u64 {
+            let value = format!("value_{i:04}").into_bytes();
+            assert_eq!(provider.get::<TestTable>(i).unwrap(), Some(value));
+        }
     }
 }

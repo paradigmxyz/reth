@@ -15,8 +15,8 @@ use reth_db_common::{
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
 use reth_provider::{
-    DBProvider, DatabaseProviderFactory, RocksDBProviderFactory, StaticFileProviderFactory,
-    StaticFileWriter, StorageSettingsCache,
+    DBProvider, RocksDBProviderFactory, StaticFileProviderFactory, StaticFileWriter,
+    StorageSettingsCache,
 };
 use reth_prune::PruneSegment;
 use reth_stages::StageId;
@@ -91,11 +91,14 @@ impl<C: ChainSpecParser> Command<C> {
                     StaticFileSegment::AccountChangeSets => {
                         writer.prune_account_changesets(highest_block)?;
                     }
+                    StaticFileSegment::StorageChangeSets => {
+                        writer.prune_storage_changesets(highest_block)?;
+                    }
                 }
             }
         }
 
-        let provider_rw = tool.provider_factory.database_provider_rw()?;
+        let provider_rw = tool.provider_factory.unwind_provider_rw()?;
         let tx = provider_rw.tx_ref();
 
         match self.stage {
