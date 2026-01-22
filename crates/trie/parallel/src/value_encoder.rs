@@ -72,7 +72,6 @@ impl DeferredValueEncoder for AsyncAccountDeferredValueEncoder {
 /// storage proofs, for cases where it's possible to determine some necessary accounts ahead of
 /// time.
 pub(crate) struct AsyncAccountValueEncoder {
-    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Storage proof jobs which were dispatched ahead of time.
     dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
     /// Storage roots which have already been computed. This can be used only if a storage proof
@@ -81,21 +80,30 @@ pub(crate) struct AsyncAccountValueEncoder {
     /// Tracks storage proof results received from the storage workers. [`Rc`] + [`RefCell`] is
     /// required because [`DeferredValueEncoder`] cannot have a lifetime.
     storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNode>>>>,
+    /// Channel for dispatching on-demand storage root proofs during account iteration.
+    /// This uses a separate worker pool to avoid blocking behind pre-dispatched target proofs.
+    account_storage_work_tx: CrossbeamSender<StorageWorkerJob>,
 }
 
 impl AsyncAccountValueEncoder {
     /// Initializes a [`Self`] using a `ProofWorkerHandle` which will be used to calculate storage
     /// roots asynchronously.
+    ///
+    /// # Parameters
+    /// - `dispatched`: Pre-dispatched storage proof receivers for target accounts
+    /// - `cached_storage_roots`: Shared cache of already-computed storage roots
+    /// - `account_storage_work_tx`: Channel for on-demand storage root proofs (uses separate worker
+    ///   pool to avoid blocking behind pre-dispatched target proofs)
     pub(crate) fn new(
-        storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
+        account_storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     ) -> Self {
         Self {
-            storage_work_tx,
             dispatched,
             cached_storage_roots,
             storage_proof_results: Default::default(),
+            account_storage_work_tx,
         }
     }
 
@@ -163,14 +171,15 @@ impl LeafValueEncoder for AsyncAccountValueEncoder {
         }
 
         // Create a proof input which targets a bogus key, so that we calculate the root as a
-        // side-effect.
+        // side-effect. Use the account storage worker pool to avoid blocking behind pre-dispatched
+        // target storage proofs.
         let input = StorageProofInput::new(hashed_address, vec![Target::new(B256::ZERO)]);
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         let proof_result_rx = self
-            .storage_work_tx
+            .account_storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender: tx })
-            .map_err(|_| DatabaseError::Other("storage workers unavailable".to_string()))
+            .map_err(|_| DatabaseError::Other("account storage workers unavailable".to_string()))
             .map(|_| rx);
 
         AsyncAccountDeferredValueEncoder::Dispatched {
