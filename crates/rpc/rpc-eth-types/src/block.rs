@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use alloy_consensus::TxReceipt;
+use alloy_consensus::{transaction::TxHashRef, TxReceipt};
 use alloy_primitives::TxHash;
 use reth_primitives_traits::{
-    Block, BlockTy, IndexedTx, NodePrimitives, ReceiptTy, RecoveredBlock, SealedBlock,
+    Block, BlockBody, BlockTy, IndexedTx, NodePrimitives, ReceiptTy, RecoveredBlock, SealedBlock,
 };
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcTypes};
 
@@ -46,7 +46,12 @@ impl<B: Block, R> CachedTransaction<B, R> {
     {
         let receipts = self.receipts?;
         let receipt = receipts.get(self.tx_index)?;
-        let tx = self.block.find_indexed_by_index(self.tx_index)?;
+        let tx = self
+            .block
+            .body()
+            .transactions()
+            .get(self.tx_index)
+            .map(|tx| self.block.find_indexed(*tx.tx_hash()))??;
         convert_transaction_receipt::<N, C>(
             self.block.as_ref(),
             receipts.as_ref(),

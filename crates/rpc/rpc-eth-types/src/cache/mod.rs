@@ -55,6 +55,12 @@ impl<T> Deref for SendRc<T> {
     }
 }
 
+impl<T> AsRef<T> for SendRc<T> {
+    fn as_ref(&self) -> &T {
+        &self.0
+    }
+}
+
 // SAFETY: Only used within `EthStateCacheService` where all access is confined to a single
 // task's poll loop.
 unsafe impl<T> Send for SendRc<T> {}
