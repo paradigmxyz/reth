@@ -3950,6 +3950,7 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "reth-ethereum",
+ "reth-tracing",
  "tokio",
 ]
 
