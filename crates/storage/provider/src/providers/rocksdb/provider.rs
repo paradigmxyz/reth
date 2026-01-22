@@ -23,7 +23,7 @@ use reth_storage_errors::{
 };
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
-    DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
+    DBRawIteratorWithThreadMode, FlushOptions, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, Transaction, WriteBatchWithTransaction, WriteOptions,
     DB,
 };
@@ -483,6 +483,27 @@ impl RocksDBProviderInner {
 
         stats
     }
+
+    /// Flushes all column family memtables to SST files.
+    ///
+    /// This allows `RocksDB` to delete older WAL segments and reclaim disk space.
+    /// The operation waits for the flush to complete before returning.
+    fn flush(&self) -> Result<(), rocksdb::Error> {
+        let Self::ReadWrite { db, .. } = self else {
+            return Ok(());
+        };
+
+        let mut flush_opts = FlushOptions::default();
+        flush_opts.set_wait(true);
+
+        for cf_name in ROCKSDB_TABLES {
+            if let Some(cf) = db.cf_handle(cf_name) {
+                db.flush_cf_opt(&cf, &flush_opts)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl fmt::Debug for RocksDBProviderInner {
@@ -583,6 +604,24 @@ impl RocksDBProvider {
         matches!(self.0.as_ref(), RocksDBProviderInner::ReadOnly { .. })
     }
 
+    /// Flushes all column family memtables to SST files.
+    ///
+    /// This forces `RocksDB` to write all in-memory data (memtables) to SST files on disk,
+    /// allowing older WAL segments to be deleted and reclaiming disk space. This is useful
+    /// during pipeline sync where large amounts of data are written to `RocksDB`.
+    ///
+    /// The operation waits for the flush to complete before returning.
+    ///
+    /// This is a no-op in read-only mode.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
+    pub fn flush(&self) -> ProviderResult<()> {
+        self.0.flush().map_err(|e| {
+            ProviderError::Database(DatabaseError::Other(format!(
+                "RocksDB flush failed: {e}"
+            )))
+        })
+    }
+
     /// Creates a new transaction with MDBX-like semantics (read-your-writes, rollback).
     ///
     /// Note: With `OptimisticTransactionDB`, commits may fail if there are conflicts.
@@ -645,12 +684,13 @@ impl RocksDBProvider {
         key: &<T::Key as Encode>::Encoded,
     ) -> ProviderResult<Option<T::Value>> {
         self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
-            let result = this.0.get_cf(this.get_cf_handle::<T>()?, key.as_ref()).map_err(|e| {
-                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })?;
+            let result =
+                this.0.get_cf(this.get_cf_handle::<T>()?, key.as_ref()).map_err(|e| {
+                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })?;
 
             Ok(result.and_then(|value| T::Value::decompress(&value).ok()))
         })
@@ -698,12 +738,14 @@ impl RocksDBProvider {
     /// Panics if the provider is in read-only mode.
     pub fn delete<T: Table>(&self, key: T::Key) -> ProviderResult<()> {
         self.execute_with_operation_metric(RocksDBOperation::Delete, T::NAME, |this| {
-            this.0.delete_cf(this.get_cf_handle::<T>()?, key.encode().as_ref()).map_err(|e| {
-                ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })
+            this.0.delete_cf(this.get_cf_handle::<T>()?, key.encode().as_ref()).map_err(
+                |e| {
+                    ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                },
+            )
         })
     }
 
@@ -817,9 +859,10 @@ impl RocksDBProvider {
         let start_bytes = start_key.encode();
 
         // Create a forward iterator starting from our seek position.
-        let iter = self
-            .0
-            .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
+        let iter = self.0.iterator_cf(
+            cf,
+            IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward),
+        );
 
         let mut result = Vec::new();
         for item in iter {
@@ -866,9 +909,10 @@ impl RocksDBProvider {
         let start_key = StorageShardedKey::new(address, storage_key, 0u64);
         let start_bytes = start_key.encode();
 
-        let iter = self
-            .0
-            .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
+        let iter = self.0.iterator_cf(
+            cf,
+            IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward),
+        );
 
         let mut result = Vec::new();
         for item in iter {
@@ -887,10 +931,9 @@ impl RocksDBProvider {
                     result.push((key, value));
                 }
                 Err(e) => {
-                    return Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    })));
+                    return Err(ProviderError::Database(DatabaseError::Read(
+                        DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
+                    )));
                 }
             }
         }
@@ -1170,12 +1213,14 @@ impl<'a> RocksDBBatch<'a> {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len(), batch_size = self.inner.size_in_bytes()))]
     pub fn commit(self) -> ProviderResult<()> {
-        self.provider.0.db_rw().write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
-            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })
+        self.provider.0.db_rw().write_opt(self.inner, &WriteOptions::default()).map_err(
+            |e| {
+                ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            },
+        )
     }
 
     /// Returns the number of write operations (puts + deletes) queued in this batch.

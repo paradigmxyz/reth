@@ -1,3 +1,4 @@
+use reth_provider::RocksDBProviderFactory;
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
@@ -10,16 +11,21 @@ use reth_stages_api::{
 #[non_exhaustive]
 pub struct FinishStage;
 
-impl<Provider> Stage<Provider> for FinishStage {
+impl<Provider: RocksDBProviderFactory> Stage<Provider> for FinishStage {
     fn id(&self) -> StageId {
         StageId::Finish
     }
 
     fn execute(
         &mut self,
-        _provider: &Provider,
+        provider: &Provider,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        // Flush RocksDB memtables to SST files to keep WAL size bounded.
+        // This runs at the end of pipeline execution after all stages complete.
+        #[cfg(all(unix, feature = "rocksdb"))]
+        provider.rocksdb_provider().flush()?;
+
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
     }
 

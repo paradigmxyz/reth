@@ -491,7 +491,7 @@ where
                 .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
                 .build()?;
 
-        // Initialize RocksDB provider with metrics, statistics, and default tables
+        // Initialize RocksDB provider with metrics, statistics, and default tables.
         let rocksdb_provider = RocksDBProvider::builder(self.data_dir().rocksdb())
             .with_default_tables()
             .with_metrics()

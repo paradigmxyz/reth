@@ -51,7 +51,7 @@ use reth_consensus::FullConsensus;
 use reth_evm::ConfigureEvm;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
 use reth_primitives_traits::{Block, NodePrimitives};
-use reth_provider::HeaderSyncGapProvider;
+use reth_provider::{HeaderSyncGapProvider, RocksDBProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::Stage;
 use std::sync::Arc;
@@ -152,6 +152,7 @@ where
     ) -> StageSetBuilder<Provider>
     where
         OfflineStages<E>: StageSet<Provider>,
+        Provider: RocksDBProviderFactory,
     {
         StageSetBuilder::default()
             .add_set(default_offline)
@@ -168,6 +169,7 @@ where
     E: ConfigureEvm,
     OnlineStages<P, H, B>: StageSet<Provider>,
     OfflineStages<E>: StageSet<Provider>,
+    Provider: RocksDBProviderFactory,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         Self::add_offline_stages(
