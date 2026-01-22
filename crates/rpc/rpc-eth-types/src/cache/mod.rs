@@ -21,7 +21,6 @@ use std::{
     task::{Context, Poll},
 };
 
-// Used within `SendRc`
 use std::rc::Rc;
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
@@ -31,16 +30,12 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A wrapper around `Rc<T>` that implements `Send`.
 ///
-/// # Safety
-///
-/// This type must only be used within a single-threaded context where all access
-/// is confined to one task/thread. It is designed for use in the `EthStateCacheService`
-/// where the `Rc` is only ever accessed from within the service's poll loop.
+/// This is used in `EthStateCacheService` where the `Rc` is only ever accessed from within
+/// the service's single-threaded poll loop.
 #[derive(Debug)]
 struct SendRc<T>(Rc<T>);
 
 impl<T> SendRc<T> {
-    /// Creates a new `SendRc` wrapping the given value.
     fn new(value: T) -> Self {
         Self(Rc::new(value))
     }
@@ -60,10 +55,8 @@ impl<T> Deref for SendRc<T> {
     }
 }
 
-// SAFETY: `SendRc` is only used within `EthStateCacheService` where all access to the inner
-// `Rc` is confined to a single task's poll loop. The `Rc` is created in `index_block_transactions`,
-// accessed in `GetTransactionByHash` handler, and removed in `remove_block_transactions` - all
-// within the same task.
+// SAFETY: Only used within `EthStateCacheService` where all access is confined to a single
+// task's poll loop.
 unsafe impl<T> Send for SendRc<T> {}
 
 pub mod config;
