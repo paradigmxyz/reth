@@ -35,9 +35,9 @@ fn default_account_worker_count() -> usize {
 ///
 /// Account storage workers handle on-demand storage root proofs triggered during account
 /// iteration. They use a separate pool to avoid blocking behind pre-dispatched target
-/// storage proofs. Default is half the storage worker count.
+/// storage proofs. Default is equal to account worker count.
 fn default_account_storage_worker_count() -> usize {
-    default_storage_worker_count() / 2
+    default_account_worker_count()
 }
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
