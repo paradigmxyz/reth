@@ -98,7 +98,7 @@ impl StorageHistory {
             return Ok(SegmentOutput::not_done(
                 limiter.interrupt_reason(),
                 input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
-            ))
+            ));
         }
 
         // The size of this map is limited by `prune_delete_limit * blocks_since_last_run /

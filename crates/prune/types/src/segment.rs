@@ -43,10 +43,6 @@ pub enum PruneSegment {
     MerkleChangeSets,
     /// Prune segment responsible for bodies (transactions in static files).
     Bodies,
-    /// Prune segment responsible for the `AccountChangeSets` static file segment.
-    AccountChangeSets,
-    /// Prune segment responsible for the `StorageChangeSets` static file segment.
-    StorageChangeSets,
 }
 
 #[cfg(test)]
@@ -69,12 +65,7 @@ impl PruneSegment {
     /// Returns minimum number of blocks to keep in the database for this segment.
     pub const fn min_blocks(&self) -> u64 {
         match self {
-            Self::SenderRecovery |
-            Self::TransactionLookup |
-            Self::Receipts |
-            Self::Bodies |
-            Self::AccountChangeSets |
-            Self::StorageChangeSets => 0,
+            Self::SenderRecovery | Self::TransactionLookup | Self::Receipts | Self::Bodies => 0,
             Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
                 MINIMUM_PRUNING_DISTANCE
             }

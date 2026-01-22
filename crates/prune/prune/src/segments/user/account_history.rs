@@ -20,12 +20,6 @@ use reth_storage_api::ChangeSetReader;
 use rustc_hash::FxHashMap;
 use tracing::{instrument, trace};
 
-/// Number of account history tables to prune in one step.
-///
-/// Account History consists of two tables: [`tables::AccountChangeSets`] and
-/// [`tables::AccountsHistory`]. We want to prune them to the same block number.
-const ACCOUNT_HISTORY_TABLES_TO_PRUNE: usize = 2;
-
 #[derive(Debug)]
 pub struct AccountHistory {
     mode: PruneMode,
