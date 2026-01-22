@@ -1347,6 +1347,11 @@ where
             return
         }
 
+        // Early return if we don't have capacity for any imports
+        if !self.has_capacity_for_pending_pool_imports() {
+            return
+        }
+
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
         let client_version = peer.client_version.clone();
         let mut transactions = transactions.0;
@@ -1400,14 +1405,31 @@ where
             true
         });
 
+        // Truncate to remaining capacity before recovery to avoid wasting CPU on transactions
+        // that won't be imported anyway.
+        let capacity = self.remaining_pool_import_capacity();
+        if transactions.len() > capacity {
+            let skipped = transactions.len() - capacity;
+            transactions.truncate(capacity);
+            self.metrics
+                .skipped_transactions_pending_pool_imports_at_capacity
+                .increment(skipped as u64);
+            trace!(target: "net::tx", skipped, capacity, "Truncated transactions batch to capacity");
+        }
+
         let txs_len = transactions.len();
 
-        let mut new_txs = transactions
+        let new_txs = transactions
             .into_par_iter()
             .filter_map(|tx| match tx.try_into_recovered() {
                 Ok(tx) => Some(Pool::Transaction::from_pooled(tx)),
-                Err(_badtx) => {
-                    // Note: logging omitted in parallel iterator
+                Err(badtx) => {
+                    trace!(target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        hash=%badtx.tx_hash(),
+                        client_version=%client_version,
+                        "failed ecrecovery for transaction"
+                    );
                     None
                 }
             })
@@ -1418,18 +1440,6 @@ where
         // Record the transactions as seen by the peer
         for tx in &new_txs {
             self.transactions_by_peers.insert(*tx.hash(), HashSet::from([peer_id]));
-        }
-
-        // 3. import new transactions as a batch to minimize lock contention on the underlying
-        // pool. Truncate to remaining capacity to provide backpressure.
-        let capacity = self.remaining_pool_import_capacity();
-        if new_txs.len() > capacity {
-            let skipped = new_txs.len() - capacity;
-            new_txs.truncate(capacity);
-            self.metrics
-                .skipped_transactions_pending_pool_imports_at_capacity
-                .increment(skipped as u64);
-            trace!(target: "net::tx", skipped, capacity, "Truncated transactions batch to capacity");
         }
 
         if !new_txs.is_empty() {
