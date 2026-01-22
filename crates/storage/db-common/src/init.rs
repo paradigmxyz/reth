@@ -162,7 +162,7 @@ where
                     return Err(InitStorageError::UninitializedDatabase)
                 }
 
-                let stored = factory.storage_settings()?.unwrap_or(StorageSettings::legacy());
+                let stored = factory.storage_settings()?.unwrap_or_else(StorageSettings::legacy);
                 if stored != genesis_storage_settings {
                     warn!(
                         target: "reth::storage",
