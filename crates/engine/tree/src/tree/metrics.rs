@@ -8,7 +8,7 @@ use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
 use core::borrow::BorrowMut;
 use reth_engine_primitives::{ForkchoiceStatus, OnForkChoiceUpdated};
 use reth_errors::{BlockExecutionError, ProviderError};
-use reth_evm::{metrics::ExecutorMetrics, OnStateHook};
+use reth_evm::{metrics::ExecutorMetrics, OnStateHook, RecoveredTx};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
@@ -63,7 +63,9 @@ impl EngineApiMetrics {
     pub(crate) fn execute_metered<E, DB>(
         &self,
         executor: E,
-        mut transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
+        mut transactions: impl Iterator<
+            Item = Result<impl ExecutableTx<E> + RecoveredTx<E::Transaction>, BlockExecutionError>,
+        >,
         transaction_count: usize,
         state_hook: Box<dyn OnStateHook>,
     ) -> Result<(BlockExecutionOutput<E::Receipt>, Vec<Address>), BlockExecutionError>
@@ -386,16 +388,18 @@ pub(crate) struct BlockBufferMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::TxType;
     use alloy_eips::eip7685::Requests;
     use alloy_evm::block::StateChangeSource;
     use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
     use reth_ethereum_primitives::{Receipt, TransactionSigned};
+    use reth_evm::eth::EthTxResult;
     use reth_evm_ethereum::EthEvm;
     use reth_execution_types::BlockExecutionResult;
     use reth_primitives_traits::RecoveredBlock;
     use revm::{
-        context::result::{ExecutionResult, Output, ResultAndState, SuccessReason},
+        context::result::{ExecutionResult, HaltReason, Output, ResultAndState, SuccessReason},
         database::State,
         database_interface::EmptyDB,
         inspector::NoOpInspector,
@@ -425,6 +429,7 @@ mod tests {
         type Transaction = TransactionSigned;
         type Receipt = Receipt;
         type Evm = MockEvm;
+        type Result = EthTxResult<HaltReason, TxType>;
 
         fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
             Ok(())
@@ -432,29 +437,32 @@ mod tests {
 
         fn execute_transaction_without_commit(
             &mut self,
-            _tx: impl ExecutableTx<Self>,
-        ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
+            tx: impl ExecutableTx<Self>,
+        ) -> Result<Self::Result, BlockExecutionError> {
             // Call hook with our mock state for each transaction
             if let Some(hook) = self.hook.as_mut() {
                 hook.on_state(StateChangeSource::Transaction(0), &self.state);
             }
 
-            Ok(ResultAndState::new(
-                ExecutionResult::Success {
-                    reason: SuccessReason::Return,
-                    gas_used: 1000, // Mock gas used
-                    gas_refunded: 0,
-                    logs: vec![],
-                    output: Output::Call(Bytes::from(vec![])),
-                },
-                Default::default(),
-            ))
+            Ok(EthTxResult {
+                result: ResultAndState::new(
+                    ExecutionResult::Success {
+                        reason: SuccessReason::Return,
+                        gas_used: 0,
+                        gas_refunded: 0,
+                        logs: vec![],
+                        output: Output::Call(Bytes::from(vec![])),
+                    },
+                    Default::default(),
+                ),
+                tx_type: tx.into_parts().1.tx().tx_type(),
+                blob_gas_used: 0,
+            })
         }
 
         fn commit_transaction(
             &mut self,
-            _output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
-            _tx: impl ExecutableTx<Self>,
+            _output: Self::Result,
         ) -> Result<u64, BlockExecutionError> {
             Ok(1000)
         }

@@ -12,12 +12,12 @@ use alloy_evm::{
         BlockExecutorFor, ExecutableTx, OnStateHook,
     },
     precompiles::PrecompilesMap,
-    Database, Evm,
+    Database, Evm, RecoveredTx,
 };
-use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor};
+use alloy_op_evm::{block::OpTxResult, OpBlockExecutionCtx, OpBlockExecutor};
 use reth_ethereum::evm::primitives::InspectorFor;
-use reth_op::{chainspec::OpChainSpec, node::OpRethReceiptBuilder, OpReceipt};
-use revm::{context::result::ResultAndState, database::State};
+use reth_op::{chainspec::OpChainSpec, node::OpRethReceiptBuilder, OpReceipt, OpTxType};
+use revm::database::State;
 use std::sync::Arc;
 
 pub struct CustomBlockExecutor<Evm> {
@@ -32,6 +32,7 @@ where
     type Transaction = CustomTransaction;
     type Receipt = OpReceipt;
     type Evm = E;
+    type Result = OpTxResult<E::HaltReason, OpTxType>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
@@ -44,7 +45,8 @@ where
     fn execute_transaction_without_commit(
         &mut self,
         tx: impl ExecutableTx<Self>,
-    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
+    ) -> Result<Self::Result, BlockExecutionError> {
+        let tx = tx.into_parts().1;
         match tx.tx() {
             CustomTransaction::Op(op_tx) => self
                 .inner
@@ -53,17 +55,8 @@ where
         }
     }
 
-    fn commit_transaction(
-        &mut self,
-        output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
-        tx: impl ExecutableTx<Self>,
-    ) -> Result<u64, BlockExecutionError> {
-        match tx.tx() {
-            CustomTransaction::Op(op_tx) => {
-                self.inner.commit_transaction(output, Recovered::new_unchecked(op_tx, *tx.signer()))
-            }
-            CustomTransaction::Payment(..) => todo!(),
-        }
+    fn commit_transaction(&mut self, output: Self::Result) -> Result<u64, BlockExecutionError> {
+        self.inner.commit_transaction(output)
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<OpReceipt>), BlockExecutionError> {

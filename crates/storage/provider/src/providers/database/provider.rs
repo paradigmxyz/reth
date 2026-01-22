@@ -5126,7 +5126,6 @@ mod tests {
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
-                StateWriteConfig::default(),
             )
             .unwrap();
         provider_rw.commit().unwrap();

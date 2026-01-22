@@ -29,10 +29,10 @@ use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_execution_types::ExecutionOutcome;
 use reth_metrics::Metrics;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_provider::{AccountReader, BlockReader, StateProvider, StateProviderFactory, StateReader};
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_trie::MultiProofTargets;
@@ -558,7 +558,7 @@ where
         sender: Sender<PrewarmTaskEvent<N::Receipt>>,
         done_tx: Sender<()>,
     ) where
-        Tx: ExecutableTxFor<Evm>,
+        Tx: ExecutableTxFor<Evm> + RecoveredTx<TxTy<Evm::Primitives>>,
     {
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
@@ -581,7 +581,8 @@ where
                 break
             }
 
-            let res = match evm.transact(&tx) {
+            let (tx_env, tx) = tx.into_parts();
+            let res = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
