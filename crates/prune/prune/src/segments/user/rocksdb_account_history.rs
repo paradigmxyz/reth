@@ -1,6 +1,18 @@
 //! `RocksDB` `AccountsHistory` pruner segment.
-
-#![cfg(all(unix, feature = "rocksdb"))]
+//!
+//! # Atomicity Limitation
+//!
+//! This segment prunes MDBX changesets first, then `RocksDB` history indices second.
+//! These operations are **not atomic** across the two databases:
+//!
+//! - If `RocksDB` pruning fails after MDBX changesets are committed, `RocksDB` history indices will
+//!   be stale (pointing to deleted changesets).
+//! - Recovery is problematic because the pruned changeset data (needed to derive affected keys) is
+//!   already gone from MDBX.
+//!
+//! **Operational recommendation**: Treat `RocksDB` pruning errors as serious. If
+//! `RocksDB` fails, consider rebuilding history indices rather than assuming
+//! re-running prune will fix the inconsistency.
 
 use crate::{
     db_ext::DbTxPruneExt,
@@ -109,8 +121,7 @@ where
 
         provider.with_rocksdb_batch(|mut batch| {
             for (address, highest_block) in &highest_deleted_accounts {
-                let to_block = *highest_block;
-                match batch.prune_account_history_to(*address, to_block)? {
+                match batch.prune_account_history_to(*address, *highest_block)? {
                     PruneShardOutcome::Deleted => deleted_shards += 1,
                     PruneShardOutcome::Updated => updated_shards += 1,
                     PruneShardOutcome::Unchanged => {}
@@ -125,7 +136,7 @@ where
 
         Ok(SegmentOutput {
             progress,
-            pruned: pruned_changesets + deleted_shards,
+            pruned: pruned_changesets + deleted_shards + updated_shards,
             checkpoint: Some(SegmentOutputCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
                 tx_number: None,

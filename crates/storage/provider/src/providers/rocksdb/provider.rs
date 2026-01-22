@@ -1507,23 +1507,31 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// Mirrors MDBX `prune_shard` semantics. After pruning, the last remaining shard
     /// (if any) will have the sentinel key (`u64::MAX`).
-    pub fn prune_account_history_to(
+    #[allow(clippy::too_many_arguments)]
+    fn prune_history_shards_inner<K>(
         &mut self,
-        address: Address,
+        shards: Vec<(K, BlockNumberList)>,
         to_block: BlockNumber,
-    ) -> ProviderResult<PruneShardOutcome> {
-        let shards = self.provider.account_history_shards(address)?;
+        get_highest: impl Fn(&K) -> u64,
+        is_sentinel: impl Fn(&K) -> bool,
+        delete_shard: impl Fn(&mut Self, K) -> ProviderResult<()>,
+        put_shard: impl Fn(&mut Self, K, &BlockNumberList) -> ProviderResult<()>,
+        create_sentinel: impl Fn() -> K,
+    ) -> ProviderResult<PruneShardOutcome>
+    where
+        K: Clone,
+    {
         if shards.is_empty() {
             return Ok(PruneShardOutcome::Unchanged);
         }
 
         let mut deleted = false;
         let mut updated = false;
-        let mut last_remaining: Option<(ShardedKey<Address>, BlockNumberList)> = None;
+        let mut last_remaining: Option<(K, BlockNumberList)> = None;
 
         for (key, block_list) in shards {
-            if key.highest_block_number != u64::MAX && key.highest_block_number <= to_block {
-                self.delete::<tables::AccountsHistory>(key)?;
+            if !is_sentinel(&key) && get_highest(&key) <= to_block {
+                delete_shard(self, key)?;
                 deleted = true;
             } else {
                 let original_len = block_list.len();
@@ -1531,10 +1539,10 @@ impl<'a> RocksDBBatch<'a> {
                     BlockNumberList::new_pre_sorted(block_list.iter().filter(|&b| b > to_block));
 
                 if filtered.is_empty() {
-                    self.delete::<tables::AccountsHistory>(key)?;
+                    delete_shard(self, key)?;
                     deleted = true;
                 } else if filtered.len() < original_len {
-                    self.put::<tables::AccountsHistory>(key.clone(), &filtered)?;
+                    put_shard(self, key.clone(), &filtered)?;
                     last_remaining = Some((key, filtered));
                     updated = true;
                 } else {
@@ -1544,10 +1552,10 @@ impl<'a> RocksDBBatch<'a> {
         }
 
         if let Some((last_key, last_value)) = last_remaining &&
-            last_key.highest_block_number != u64::MAX
+            !is_sentinel(&last_key)
         {
-            self.delete::<tables::AccountsHistory>(last_key)?;
-            self.put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &last_value)?;
+            delete_shard(self, last_key)?;
+            put_shard(self, create_sentinel(), &last_value)?;
             updated = true;
         }
 
@@ -1558,6 +1566,27 @@ impl<'a> RocksDBBatch<'a> {
         } else {
             Ok(PruneShardOutcome::Unchanged)
         }
+    }
+
+    /// Prunes account history for the given address, removing blocks <= `to_block`.
+    ///
+    /// Mirrors MDBX `prune_shard` semantics. After pruning, the last remaining shard
+    /// (if any) will have the sentinel key (`u64::MAX`).
+    pub fn prune_account_history_to(
+        &mut self,
+        address: Address,
+        to_block: BlockNumber,
+    ) -> ProviderResult<PruneShardOutcome> {
+        let shards = self.provider.account_history_shards(address)?;
+        self.prune_history_shards_inner(
+            shards,
+            to_block,
+            |key| key.highest_block_number,
+            |key| key.highest_block_number == u64::MAX,
+            |batch, key| batch.delete::<tables::AccountsHistory>(key),
+            |batch, key, value| batch.put::<tables::AccountsHistory>(key, value),
+            || ShardedKey::new(address, u64::MAX),
+        )
     }
 
     /// Prunes storage history for the given address and storage key, removing blocks <=
@@ -1572,56 +1601,15 @@ impl<'a> RocksDBBatch<'a> {
         to_block: BlockNumber,
     ) -> ProviderResult<PruneShardOutcome> {
         let shards = self.provider.storage_history_shards(address, storage_key)?;
-        if shards.is_empty() {
-            return Ok(PruneShardOutcome::Unchanged);
-        }
-
-        let mut deleted = false;
-        let mut updated = false;
-        let mut last_remaining: Option<(StorageShardedKey, BlockNumberList)> = None;
-
-        for (key, block_list) in shards {
-            if key.sharded_key.highest_block_number != u64::MAX &&
-                key.sharded_key.highest_block_number <= to_block
-            {
-                self.delete::<tables::StoragesHistory>(key)?;
-                deleted = true;
-            } else {
-                let original_len = block_list.len();
-                let filtered =
-                    BlockNumberList::new_pre_sorted(block_list.iter().filter(|&b| b > to_block));
-
-                if filtered.is_empty() {
-                    self.delete::<tables::StoragesHistory>(key)?;
-                    deleted = true;
-                } else if filtered.len() < original_len {
-                    self.put::<tables::StoragesHistory>(key.clone(), &filtered)?;
-                    last_remaining = Some((key, filtered));
-                    updated = true;
-                } else {
-                    last_remaining = Some((key, block_list));
-                }
-            }
-        }
-
-        if let Some((last_key, last_value)) = last_remaining &&
-            last_key.sharded_key.highest_block_number != u64::MAX
-        {
-            self.delete::<tables::StoragesHistory>(last_key)?;
-            self.put::<tables::StoragesHistory>(
-                StorageShardedKey::last(address, storage_key),
-                &last_value,
-            )?;
-            updated = true;
-        }
-
-        if deleted {
-            Ok(PruneShardOutcome::Deleted)
-        } else if updated {
-            Ok(PruneShardOutcome::Updated)
-        } else {
-            Ok(PruneShardOutcome::Unchanged)
-        }
+        self.prune_history_shards_inner(
+            shards,
+            to_block,
+            |key| key.sharded_key.highest_block_number,
+            |key| key.sharded_key.highest_block_number == u64::MAX,
+            |batch, key| batch.delete::<tables::StoragesHistory>(key),
+            |batch, key, value| batch.put::<tables::StoragesHistory>(key, value),
+            || StorageShardedKey::last(address, storage_key),
+        )
     }
 
     /// Unwinds storage history to keep only blocks `<= keep_to`.
@@ -3678,6 +3666,276 @@ mod tests {
         if !shards.is_empty() {
             let last = shards.last().unwrap();
             assert_eq!(last.0.highest_block_number, u64::MAX, "Last shard must be sentinel");
+        }
+    }
+
+    // ==================== Additional Storage History Equivalence Tests ====================
+
+    #[test]
+    fn test_prune_storage_equivalence_delete_early_shards_keep_sentinel() {
+        // 3 shards, first two deleted, sentinel unchanged
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let storage_key = B256::from([0x01; 32]);
+
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, 20),
+                &BlockNumberList::new_pre_sorted([10u64, 15, 20]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, 50),
+                &BlockNumberList::new_pre_sorted([30u64, 40, 50]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::last(address, storage_key),
+                &BlockNumberList::new_pre_sorted([60u64, 70]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let mut batch = provider.batch();
+        let outcome = batch.prune_storage_history_to(address, storage_key, 55).unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(outcome, PruneShardOutcome::Deleted);
+
+        let shards = provider.storage_history_shards(address, storage_key).unwrap();
+        assert_eq!(shards.len(), 1);
+        assert_eq!(shards[0].0.sharded_key.highest_block_number, u64::MAX);
+        assert_eq!(shards[0].1.iter().collect::<Vec<_>>(), vec![60, 70]);
+    }
+
+    #[test]
+    fn test_prune_storage_equivalence_sentinel_becomes_empty_with_prev() {
+        // Sentinel becomes empty, prev shard promoted
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let storage_key = B256::from([0x01; 32]);
+
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, 50),
+                &BlockNumberList::new_pre_sorted([30u64, 40, 50]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::last(address, storage_key),
+                &BlockNumberList::new_pre_sorted([35u64]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let mut batch = provider.batch();
+        let outcome = batch.prune_storage_history_to(address, storage_key, 40).unwrap();
+        batch.commit().unwrap();
+
+        // Deleted because the sentinel shard was removed (its content pruned) and prev promoted
+        assert_eq!(outcome, PruneShardOutcome::Deleted);
+
+        let shards = provider.storage_history_shards(address, storage_key).unwrap();
+        assert_eq!(shards.len(), 1);
+        assert_eq!(shards[0].0.sharded_key.highest_block_number, u64::MAX);
+        assert_eq!(shards[0].1.iter().collect::<Vec<_>>(), vec![50]);
+    }
+
+    #[test]
+    fn test_prune_storage_equivalence_all_shards_become_empty() {
+        // All shards empty after pruning
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let storage_key = B256::from([0x01; 32]);
+
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, 50),
+                &BlockNumberList::new_pre_sorted([30u64, 40, 50]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::last(address, storage_key),
+                &BlockNumberList::new_pre_sorted([51u64]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let mut batch = provider.batch();
+        let outcome = batch.prune_storage_history_to(address, storage_key, 51).unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(outcome, PruneShardOutcome::Deleted);
+
+        let shards = provider.storage_history_shards(address, storage_key).unwrap();
+        assert!(shards.is_empty());
+    }
+
+    #[test]
+    fn test_prune_storage_equivalence_filter_within_shard() {
+        // Filter blocks within existing sentinel
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let storage_key = B256::from([0x01; 32]);
+
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::last(address, storage_key),
+                &BlockNumberList::new_pre_sorted([10u64, 20, 30, 40]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let mut batch = provider.batch();
+        let outcome = batch.prune_storage_history_to(address, storage_key, 25).unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(outcome, PruneShardOutcome::Updated);
+
+        let shards = provider.storage_history_shards(address, storage_key).unwrap();
+        assert_eq!(shards.len(), 1);
+        assert_eq!(shards[0].0.sharded_key.highest_block_number, u64::MAX);
+        assert_eq!(shards[0].1.iter().collect::<Vec<_>>(), vec![30, 40]);
+    }
+
+    #[test]
+    fn test_prune_storage_equivalence_multi_shard_partial_delete() {
+        // First shard fully deleted, second partially pruned, third unchanged
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let storage_key = B256::from([0x01; 32]);
+
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, 20),
+                &BlockNumberList::new_pre_sorted([10u64, 20]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, 50),
+                &BlockNumberList::new_pre_sorted([30u64, 40, 50]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::last(address, storage_key),
+                &BlockNumberList::new_pre_sorted([60u64, 70]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let mut batch = provider.batch();
+        let outcome = batch.prune_storage_history_to(address, storage_key, 35).unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(outcome, PruneShardOutcome::Deleted);
+
+        let shards = provider.storage_history_shards(address, storage_key).unwrap();
+        assert_eq!(shards.len(), 2);
+        assert_eq!(shards[0].0.sharded_key.highest_block_number, 50);
+        assert_eq!(shards[0].1.iter().collect::<Vec<_>>(), vec![40, 50]);
+        assert_eq!(shards[1].0.sharded_key.highest_block_number, u64::MAX);
+        assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), vec![60, 70]);
+    }
+
+    #[test]
+    fn test_prune_storage_invariant_no_empty_shards() {
+        // Verify no empty shards remain after pruning
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let storage_key = B256::from([0x01; 32]);
+
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, 10),
+                &BlockNumberList::new_pre_sorted([5u64, 10]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, 20),
+                &BlockNumberList::new_pre_sorted([15u64, 20]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::last(address, storage_key),
+                &BlockNumberList::new_pre_sorted([25u64, 30]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let mut batch = provider.batch();
+        batch.prune_storage_history_to(address, storage_key, 20).unwrap();
+        batch.commit().unwrap();
+
+        let shards = provider.storage_history_shards(address, storage_key).unwrap();
+        for (key, blocks) in &shards {
+            assert!(
+                !blocks.is_empty(),
+                "Found empty shard at key {:?}",
+                key.sharded_key.highest_block_number
+            );
+        }
+
+        assert_eq!(shards.len(), 1);
+        assert_eq!(shards[0].0.sharded_key.highest_block_number, u64::MAX);
+    }
+
+    #[test]
+    fn test_prune_storage_invariant_sentinel_is_last() {
+        // Verify last shard is always sentinel after pruning
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let storage_key = B256::from([0x01; 32]);
+
+        // Non-sentinel shard only
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, 100),
+                &BlockNumberList::new_pre_sorted([50u64, 100]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let mut batch = provider.batch();
+        batch.prune_storage_history_to(address, storage_key, 60).unwrap();
+        batch.commit().unwrap();
+
+        let shards = provider.storage_history_shards(address, storage_key).unwrap();
+        if !shards.is_empty() {
+            let last = shards.last().unwrap();
+            assert_eq!(
+                last.0.sharded_key.highest_block_number,
+                u64::MAX,
+                "Last shard must be sentinel"
+            );
         }
     }
 }
