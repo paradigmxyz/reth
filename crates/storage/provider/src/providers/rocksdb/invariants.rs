@@ -1,8 +1,7 @@
-//! Invariant checking for `RocksDB` tables.
+//! Invariant checking and healing for `RocksDB` tables.
 //!
-//! This module provides consistency checks for tables stored in `RocksDB`, similar to the
-//! consistency checks for static files. The goal is to detect and potentially heal
-//! inconsistencies between `RocksDB` data and MDBX checkpoints.
+//! Detects and heals inconsistencies between `RocksDB` data and MDBX checkpoints,
+//! typically caused by crashes during pipeline execution.
 
 use super::RocksDBProvider;
 use crate::StaticFileProviderFactory;
@@ -21,29 +20,16 @@ use reth_storage_errors::provider::ProviderResult;
 use std::collections::HashSet;
 
 impl RocksDBProvider {
-    /// Checks consistency of `RocksDB` tables against MDBX stage checkpoints.
+    /// Checks consistency of `RocksDB` tables against MDBX stage checkpoints and heals
+    /// inconsistencies.
     ///
-    /// Returns an unwind target block number if the pipeline needs to unwind to rebuild
-    /// `RocksDB` data. Returns `None` if all invariants pass or if inconsistencies were healed.
+    /// Returns an unwind target block number if healing is not possible and the pipeline
+    /// must unwind. Returns `None` if all invariants pass or inconsistencies were healed.
     ///
-    /// # Invariants checked
-    ///
-    /// For `TransactionHashNumbers`:
-    /// - The maximum `TxNumber` value should not exceed what the `TransactionLookup` stage
-    ///   checkpoint indicates has been processed.
-    /// - If `RocksDB` is ahead, excess entries are pruned (healed).
-    /// - If `RocksDB` is behind, an unwind is required.
-    ///
-    /// For `StoragesHistory`:
-    /// - The maximum block number in shards should not exceed the `IndexStorageHistory` stage
-    ///   checkpoint.
-    /// - Similar healing/unwind logic applies.
-    ///
-    /// # Requirements
-    ///
-    /// For pruning `TransactionHashNumbers`, the provider must be able to supply transaction
-    /// data (typically from static files) so that transaction hashes can be computed. This
-    /// implies that static files should be ahead of or in sync with `RocksDB`.
+    /// Heals the following tables when enabled:
+    /// - `TransactionHashNumbers`: prunes entries beyond the `TransactionLookup` checkpoint
+    /// - `StoragesHistory`: removes stale entries using changesets
+    /// - `AccountsHistory`: removes stale entries using changesets
     pub fn check_consistency<Provider>(
         &self,
         provider: &Provider,
@@ -84,13 +70,8 @@ impl RocksDBProvider {
     /// Returns a block number to unwind to if MDBX is behind the checkpoint.
     /// If static files are ahead of MDBX, prunes excess `RocksDB` entries.
     ///
-    /// # Approach
-    ///
-    /// Uses static files and MDBX to determine what needs pruning (avoids expensive
-    /// `RocksDB` iteration):
-    /// - Static files are committed before `RocksDB`, so they're at least at the same height
-    /// - MDBX `TransactionBlocks` tells us what's been fully committed
-    /// - If static files have more transactions than MDBX, prune the excess range
+    /// Compares static file tip against MDBX `TransactionBlocks` to determine the
+    /// excess range, then prunes those entries from `RocksDB`.
     fn heal_transaction_hash_numbers<Provider>(
         &self,
         provider: &Provider,
@@ -173,16 +154,8 @@ impl RocksDBProvider {
 
     /// Prunes `TransactionHashNumbers` entries for transactions in the given range.
     ///
-    /// This fetches transactions from the provider, computes their hashes in parallel,
-    /// and deletes the corresponding entries from `RocksDB` by key. This approach is more
-    /// scalable than iterating all rows because it only processes the transactions that
-    /// need to be pruned.
-    ///
-    /// # Requirements
-    ///
-    /// The provider must be able to supply transaction data (typically from static files)
-    /// so that transaction hashes can be computed. This implies that static files should
-    /// be ahead of or in sync with `RocksDB`.
+    /// Fetches transactions from the provider, computes their hashes in parallel,
+    /// and deletes the corresponding entries from `RocksDB`.
     fn prune_transaction_hash_numbers_in_range<Provider>(
         &self,
         provider: &Provider,
@@ -223,11 +196,8 @@ impl RocksDBProvider {
 
     /// Heals the `StoragesHistory` table by removing stale entries.
     ///
-    /// Removes entries that were written after the stage checkpoint (stale data from
-    /// a crash during indexing). Uses changesets to identify affected keys.
-    ///
-    /// - Fast path: if checkpoint == 0 AND `RocksDB` has data, clears everything
-    /// - If `sf_tip` > checkpoint, iterates changesets in batches and unwinds affected keys
+    /// Iterates changesets in batches from `checkpoint+1` to `sf_tip` to identify
+    /// affected storage keys, then unwinds their history indices.
     fn heal_storages_history<Provider>(&self, provider: &Provider) -> ProviderResult<()>
     where
         Provider:
@@ -301,11 +271,8 @@ impl RocksDBProvider {
 
     /// Heals the `AccountsHistory` table by removing stale entries.
     ///
-    /// Removes entries that were written after the stage checkpoint (stale data from
-    /// a crash during indexing). Uses changesets to identify affected keys.
-    ///
-    /// - Fast path: if checkpoint == 0 AND `RocksDB` has data, clears everything
-    /// - If `sf_tip` > checkpoint, iterates changesets in batches and unwinds affected keys
+    /// Iterates changesets in batches from `checkpoint+1` to `sf_tip` to identify
+    /// affected addresses, then unwinds their history indices.
     fn heal_accounts_history<Provider>(&self, provider: &Provider) -> ProviderResult<()>
     where
         Provider: DBProvider + StageCheckpointReader + StaticFileProviderFactory + ChangeSetReader,
