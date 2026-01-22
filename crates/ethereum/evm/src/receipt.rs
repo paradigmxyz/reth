@@ -14,14 +14,18 @@ impl ReceiptBuilder for RethReceiptBuilder {
     type Receipt = Receipt;
 
     fn build_receipt<E: Evm>(&self, ctx: ReceiptBuilderCtx<'_, TxType, E>) -> Self::Receipt {
-        let ReceiptBuilderCtx { tx_type, result, cumulative_gas_used, .. } = ctx;
+        // EIP-7778: gas_spent is the per-tx net gas after refunds (what user pays).
+        // result.gas_used() from revm already has refunds applied.
+        let gas_spent = Some(ctx.result.gas_used());
+
         Receipt {
-            tx_type,
+            tx_type: ctx.tx_type,
             // Success flag was added in `EIP-658: Embedding transaction status code in
             // receipts`.
-            success: result.is_success(),
-            cumulative_gas_used,
-            logs: result.into_logs(),
+            success: ctx.result.is_success(),
+            cumulative_gas_used: ctx.cumulative_gas_used,
+            logs: ctx.result.into_logs(),
+            gas_spent,
         }
     }
 }

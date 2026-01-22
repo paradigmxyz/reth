@@ -14640,3 +14640,13 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "alloy-evm"
+version = "0.26.3"
+source = "git+https://github.com/alloy-rs/evm?branch=jenpaff%2Feip-7778#07ad76840382f2d3f04907d41bad3fc9a74587dd"
+
+[[patch.unused]]
+name = "alloy-op-evm"
+version = "0.26.3"
+source = "git+https://github.com/alloy-rs/evm?branch=jenpaff%2Feip-7778#07ad76840382f2d3f04907d41bad3fc9a74587dd"

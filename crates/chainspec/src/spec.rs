@@ -1209,6 +1209,19 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Amsterdam at genesis.
+    pub fn amsterdam_activated(mut self) -> Self {
+        self = self.osaka_activated();
+        self.hardforks.insert(EthereumHardfork::Amsterdam, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Amsterdam at the given timestamp.
+    pub fn with_amsterdam_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Amsterdam, ForkCondition::Timestamp(timestamp));
+        self
+    }
+
     /// Build the resulting [`ChainSpec`].
     ///
     /// # Panics

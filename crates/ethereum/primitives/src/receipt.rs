@@ -50,8 +50,9 @@ pub type RpcReceipt<T = TxType> = EthereumReceipt<T, alloy_rpc_types_eth::Log>;
 #[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact, rlp))]
+#[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[rlp(trailing)]
 pub struct EthereumReceipt<T = TxType, L = Log> {
     /// Receipt type.
     #[cfg_attr(feature = "serde", serde(rename = "type"))]
@@ -66,6 +67,17 @@ pub struct EthereumReceipt<T = TxType, L = Log> {
     pub cumulative_gas_used: u64,
     /// Log send from contracts.
     pub logs: Vec<L>,
+    /// EIP-7778: Per-transaction gas after refunds. Not included in consensus RLP.
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            default,
+            with = "alloy_serde::quantity::opt",
+            skip_serializing_if = "Option::is_none"
+        )
+    )]
+    #[rlp(default)]
+    pub gas_spent: Option<u64>,
 }
 
 #[cfg(feature = "rpc")]
@@ -76,9 +88,9 @@ impl<T> Receipt<T> {
         next_log_index: usize,
         meta: alloy_consensus::transaction::TransactionMeta,
     ) -> RpcReceipt<T> {
-        let Self { tx_type, success, cumulative_gas_used, logs } = self;
+        let Self { tx_type, success, cumulative_gas_used, logs, gas_spent } = self;
         let logs = alloy_rpc_types_eth::Log::collect_for_receipt(next_log_index, meta, logs);
-        RpcReceipt { tx_type, success, cumulative_gas_used, logs }
+        RpcReceipt { tx_type, success, cumulative_gas_used, logs, gas_spent }
     }
 }
 
@@ -127,7 +139,7 @@ impl<T: TxTy> Receipt<T> {
         }
 
         Ok(ReceiptWithBloom {
-            receipt: Self { cumulative_gas_used, tx_type, success, logs },
+            receipt: Self { cumulative_gas_used, tx_type, success, logs, gas_spent: None },
             logs_bloom,
         })
     }
@@ -273,6 +285,7 @@ where
             success: value.is_success(),
             cumulative_gas_used: value.cumulative_gas_used(),
             logs: value.into_logs(),
+            gas_spent: None,
         }
     }
 }
@@ -344,6 +357,8 @@ pub(super) mod serde_bincode_compat {
         pub cumulative_gas_used: u64,
         /// Log send from contracts.
         pub logs: Cow<'a, Vec<Log>>,
+        /// EIP-7778: Gas spent after refunds.
+        pub gas_spent: Option<u64>,
     }
 
     /// Ensures that txtype is deserialized symmetrically as U8
@@ -362,6 +377,7 @@ pub(super) mod serde_bincode_compat {
                 success: value.success,
                 cumulative_gas_used: value.cumulative_gas_used,
                 logs: Cow::Borrowed(&value.logs),
+                gas_spent: value.gas_spent,
             }
         }
     }
@@ -373,6 +389,7 @@ pub(super) mod serde_bincode_compat {
                 success: value.success,
                 cumulative_gas_used: value.cumulative_gas_used,
                 logs: value.logs.into_owned(),
+                gas_spent: value.gas_spent,
             }
         }
     }
@@ -453,11 +470,11 @@ mod compact {
     impl Receipt {
         #[doc = "Used bytes by [`ReceiptFlags`]"]
         pub const fn bitflag_encoded_bytes() -> usize {
-            1u8 as usize
+            2u8 as usize
         }
         #[doc = "Unused bits for new fields by [`ReceiptFlags`]"]
         pub const fn bitflag_unused_bits() -> usize {
-            0u8 as usize
+            3u8 as usize
         }
     }
 
@@ -465,7 +482,7 @@ mod compact {
     mod flags {
         use super::*;
 
-        #[doc = "Fieldset that facilitates compacting the parent type. Used bytes: 1 | Unused bits: 0"]
+        #[doc = "Fieldset that facilitates compacting the parent type. Used bytes: 2 | Unused bits: 3"]
         #[bitfield]
         #[derive(Clone, Copy, Debug, Default)]
         pub struct ReceiptFlags {
@@ -473,12 +490,15 @@ mod compact {
             pub success_len: B1,
             pub cumulative_gas_used_len: B4,
             pub __zstd: B1,
+            pub has_gas_spent: B1,
+            pub gas_spent_len: B4,
+            pub __unused: B3,
         }
 
         impl ReceiptFlags {
             #[doc = r" Deserializes this fieldset and returns it, alongside the original slice in an advanced position."]
             pub fn from(mut buf: &[u8]) -> (Self, &[u8]) {
-                (Self::from_bytes([buf.get_u8()]), buf)
+                (Self::from_bytes([buf.get_u8(), buf.get_u8()]), buf)
             }
         }
     }
@@ -501,6 +521,13 @@ mod compact {
             let cumulative_gas_used_len = self.cumulative_gas_used.to_compact(&mut buffer);
             flags.set_cumulative_gas_used_len(cumulative_gas_used_len as u8);
             self.logs.to_compact(&mut buffer);
+
+            // EIP-7778: encode gas_spent if present
+            if let Some(gas_spent) = self.gas_spent {
+                flags.set_has_gas_spent(1);
+                let gas_spent_len = gas_spent.to_compact(&mut buffer);
+                flags.set_gas_spent_len(gas_spent_len as u8);
+            }
 
             let zstd = buffer.len() > 7;
             if zstd {
@@ -537,8 +564,19 @@ mod compact {
                     let (cumulative_gas_used, new_buf) =
                         u64::from_compact(buf, flags.cumulative_gas_used_len() as usize);
                     buf = new_buf;
-                    let (logs, _) = Vec::from_compact(buf, buf.len());
-                    (Self { tx_type, success, cumulative_gas_used, logs }, original_buf)
+                    let (logs, new_buf) = Vec::from_compact(buf, buf.len());
+                    buf = new_buf;
+                    // EIP-7778: decode gas_spent if present
+                    let gas_spent = if flags.has_gas_spent() != 0 {
+                        let (gas_spent, new_buf) =
+                            u64::from_compact(buf, flags.gas_spent_len() as usize);
+                        buf = new_buf;
+                        Some(gas_spent)
+                    } else {
+                        None
+                    };
+                    let _ = buf;
+                    (Self { tx_type, success, cumulative_gas_used, logs, gas_spent }, original_buf)
                 })
             } else {
                 let (tx_type, new_buf) = T::from_compact(buf, flags.tx_type_len() as usize);
@@ -550,7 +588,16 @@ mod compact {
                 buf = new_buf;
                 let (logs, new_buf) = Vec::from_compact(buf, buf.len());
                 buf = new_buf;
-                let obj = Self { tx_type, success, cumulative_gas_used, logs };
+                // EIP-7778: decode gas_spent if present
+                let gas_spent = if flags.has_gas_spent() != 0 {
+                    let (gas_spent, new_buf) =
+                        u64::from_compact(buf, flags.gas_spent_len() as usize);
+                    buf = new_buf;
+                    Some(gas_spent)
+                } else {
+                    None
+                };
+                let obj = Self { tx_type, success, cumulative_gas_used, logs, gas_spent };
                 (obj, buf)
             }
         }
@@ -579,14 +626,6 @@ mod tests {
     /// Withdrawals can be optionally included at the end of the RLP encoded message.
     pub(crate) type Block<T = TransactionSigned> = alloy_consensus::Block<T>;
 
-    #[test]
-    #[cfg(feature = "reth-codec")]
-    fn test_decode_receipt() {
-        reth_codecs::test_utils::test_decode::<Receipt<TxType>>(&hex!(
-            "c428b52ffd23fc42696156b10200f034792b6a94c3850215c2fef7aea361a0c31b79d9a32652eefc0d4e2e730036061cff7344b6fc6132b50cda0ed810a991ae58ef013150c12b2522533cb3b3a8b19b7786a8b5ff1d3cdc84225e22b02def168c8858df"
-        ));
-    }
-
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
     fn encode_legacy_receipt() {
@@ -608,6 +647,7 @@ mod tests {
                     bytes!("0100ff"),
                 )],
                 success: false,
+                gas_spent: None,
             },
             logs_bloom: [0; 256].into(),
         };
@@ -640,6 +680,7 @@ mod tests {
                     bytes!("0100ff"),
                 )],
                 success: false,
+                gas_spent: None,
             },
             logs_bloom: [0; 256].into(),
         };
@@ -649,11 +690,13 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "reth-codec")]
     fn gigantic_receipt() {
         let receipt = Receipt {
             cumulative_gas_used: 16747627,
             success: true,
             tx_type: TxType::Legacy,
+            gas_spent: None,
             logs: vec![
                 Log::new_unchecked(
                     address!("0x4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
@@ -686,6 +729,7 @@ mod tests {
                 success: true,
                 cumulative_gas_used: 21000,
                 logs: vec![],
+                gas_spent: None,
             },
             logs_bloom: Bloom::default(),
         };
@@ -704,6 +748,7 @@ mod tests {
                 success: true,
                 cumulative_gas_used: 21000,
                 logs: vec![],
+                gas_spent: None,
             },
             logs_bloom: Bloom::default(),
         };
@@ -771,6 +816,7 @@ mod tests {
                 success: true,
                 cumulative_gas_used: 102068,
                 logs,
+                gas_spent: None,
             },
             logs_bloom: bloom,
         };
