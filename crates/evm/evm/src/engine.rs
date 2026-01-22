@@ -66,7 +66,7 @@ pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
     ExecutableTxTuple<Tx: ExecutableTxFor<Evm, Recovered = Self::Recovered>>
 {
     /// HACK: for some reason, this duplicated AT is the only way to enforce the inner Recovered:
-    /// Send + Sync bound. Effectively alias for Self::Tx::Recovered.
+    /// Send + Sync bound. Effectively alias for `Self::Tx::Recovered`.
     type Recovered: RecoveredTx<TxTy<Evm::Primitives>> + Send + Sync;
 }
 
