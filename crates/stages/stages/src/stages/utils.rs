@@ -52,9 +52,12 @@ fn load_sharded_history<H: HistoryShardWriter>(
     append_only: bool,
     writer: &mut H,
 ) -> Result<(), StageError> {
+    // Track which prefix (address or address+storage_key) we're currently accumulating
     let mut current_prefix: Option<<H::TableKey as ShardedHistoryKey>::Prefix> = None;
+    // Buffer for block numbers; sized for ~2 shards to minimize reallocations
     let mut current_list = Vec::<u64>::with_capacity(NUM_OF_INDICES_IN_SHARD * 2);
 
+    // Progress reporting setup
     let total_entries = collector.len();
     let interval = (total_entries / 10).max(1);
 
@@ -69,7 +72,9 @@ fn load_sharded_history<H: HistoryShardWriter>(
 
         let prefix = sharded_key.prefix();
 
+        // When prefix changes, flush previous prefix's shards and start fresh
         if current_prefix != Some(prefix) {
+            // Flush remaining shards for the previous prefix (uses u64::MAX for final shard)
             if let Some(prev_prefix) = current_prefix {
                 flush_shards::<H>(prev_prefix, &mut current_list, append_only, writer)?;
             }
@@ -77,15 +82,19 @@ fn load_sharded_history<H: HistoryShardWriter>(
             current_prefix = Some(prefix);
             current_list.clear();
 
+            // On incremental sync, merge with existing last shard (stored with u64::MAX key)
             if !append_only && let Some(last_shard) = writer.get_last_shard(prefix)? {
                 current_list.extend(last_shard.iter());
             }
         }
 
+        // Accumulate new block numbers
         current_list.extend(new_list.iter());
+        // Flush complete shards while keeping one buffered for continued accumulation
         flush_shards_partial::<H>(prefix, &mut current_list, append_only, writer)?;
     }
 
+    // Flush final prefix's remaining shard
     if let Some(prefix) = current_prefix {
         flush_shards::<H>(prefix, &mut current_list, append_only, writer)?;
     }
