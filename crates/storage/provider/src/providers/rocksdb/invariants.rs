@@ -59,43 +59,39 @@ impl RocksDBProvider {
     {
         let mut unwind_target: Option<BlockNumber> = None;
 
-        // Check TransactionHashNumbers if stored in RocksDB
+        // Heal TransactionHashNumbers if stored in RocksDB
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
-            let Some(target) = self.check_transaction_hash_numbers(provider)?
+            let Some(target) = self.heal_transaction_hash_numbers(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
-        // Check StoragesHistory if stored in RocksDB
-        if provider.cached_storage_settings().storages_history_in_rocksdb &&
-            let Some(target) = self.check_storages_history(provider)?
-        {
-            unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
+        // Heal StoragesHistory if stored in RocksDB
+        if provider.cached_storage_settings().storages_history_in_rocksdb {
+            self.heal_storages_history(provider)?;
         }
 
-        // Check AccountsHistory if stored in RocksDB
-        if provider.cached_storage_settings().account_history_in_rocksdb &&
-            let Some(target) = self.check_accounts_history(provider)?
-        {
-            unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
+        // Heal AccountsHistory if stored in RocksDB
+        if provider.cached_storage_settings().account_history_in_rocksdb {
+            self.heal_accounts_history(provider)?;
         }
 
         Ok(unwind_target)
     }
 
-    /// Checks invariants for the `TransactionHashNumbers` table.
+    /// Heals the `TransactionHashNumbers` table by removing stale entries.
     ///
     /// Returns a block number to unwind to if MDBX is behind the checkpoint.
-    /// If static files are ahead of MDBX, excess `RocksDB` entries are pruned (healed).
+    /// If static files are ahead of MDBX, prunes excess `RocksDB` entries.
     ///
     /// # Approach
     ///
-    /// Instead of iterating `RocksDB` entries (which is expensive and doesn't give us the
-    /// tx range we need), we use static files and MDBX to determine what needs pruning:
+    /// Uses static files and MDBX to determine what needs pruning (avoids expensive
+    /// `RocksDB` iteration):
     /// - Static files are committed before `RocksDB`, so they're at least at the same height
     /// - MDBX `TransactionBlocks` tells us what's been fully committed
     /// - If static files have more transactions than MDBX, prune the excess range
-    fn check_transaction_hash_numbers<Provider>(
+    fn heal_transaction_hash_numbers<Provider>(
         &self,
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
@@ -225,16 +221,14 @@ impl RocksDBProvider {
         Ok(())
     }
 
-    /// Checks invariants for the `StoragesHistory` table.
+    /// Heals the `StoragesHistory` table by removing stale entries.
     ///
-    /// Uses changeset-based healing instead of O(n) table scan:
-    /// - Fast path: if checkpoint == 0 AND `RocksDB` has data, clear everything
-    /// - If `sf_tip` <= checkpoint, nothing to do
-    /// - If `sf_tip` > checkpoint, heal via changesets in batches
-    fn check_storages_history<Provider>(
-        &self,
-        provider: &Provider,
-    ) -> ProviderResult<Option<BlockNumber>>
+    /// Removes entries that were written after the stage checkpoint (stale data from
+    /// a crash during indexing). Uses changesets to identify affected keys.
+    ///
+    /// - Fast path: if checkpoint == 0 AND `RocksDB` has data, clears everything
+    /// - If `sf_tip` > checkpoint, iterates changesets in batches and unwinds affected keys
+    fn heal_storages_history<Provider>(&self, provider: &Provider) -> ProviderResult<()>
     where
         Provider:
             DBProvider + StageCheckpointReader + StaticFileProviderFactory + StorageChangeSetReader,
@@ -252,7 +246,7 @@ impl RocksDBProvider {
                 "StoragesHistory has data but checkpoint is 0, clearing all"
             );
             self.clear::<tables::StoragesHistory>()?;
-            return Ok(None);
+            return Ok(());
         }
 
         let sf_tip = provider
@@ -261,7 +255,7 @@ impl RocksDBProvider {
             .unwrap_or(0);
 
         if sf_tip <= checkpoint {
-            return Ok(None);
+            return Ok(());
         }
 
         tracing::info!(
@@ -302,20 +296,17 @@ impl RocksDBProvider {
             batch_start = batch_end.saturating_add(1);
         }
 
-        Ok(None)
+        Ok(())
     }
 
-    /// Checks invariants for the `AccountsHistory` table using changeset-based healing.
+    /// Heals the `AccountsHistory` table by removing stale entries.
     ///
-    /// Instead of scanning the entire table, this uses changesets to efficiently heal
-    /// by iterating only the blocks that need to be unwound.
+    /// Removes entries that were written after the stage checkpoint (stale data from
+    /// a crash during indexing). Uses changesets to identify affected keys.
     ///
-    /// Returns a block number to unwind to if `RocksDB` is behind the checkpoint.
-    /// If `RocksDB` is ahead of the checkpoint, excess entries are healed via changesets.
-    fn check_accounts_history<Provider>(
-        &self,
-        provider: &Provider,
-    ) -> ProviderResult<Option<BlockNumber>>
+    /// - Fast path: if checkpoint == 0 AND `RocksDB` has data, clears everything
+    /// - If `sf_tip` > checkpoint, iterates changesets in batches and unwinds affected keys
+    fn heal_accounts_history<Provider>(&self, provider: &Provider) -> ProviderResult<()>
     where
         Provider: DBProvider + StageCheckpointReader + StaticFileProviderFactory + ChangeSetReader,
     {
@@ -334,7 +325,7 @@ impl RocksDBProvider {
                 "AccountsHistory has data but checkpoint is 0, clearing all"
             );
             self.clear::<tables::AccountsHistory>()?;
-            return Ok(None);
+            return Ok(());
         }
 
         let sf_tip = provider
@@ -342,11 +333,11 @@ impl RocksDBProvider {
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
 
         let Some(sf_tip) = sf_tip else {
-            return Ok(None);
+            return Ok(());
         };
 
         if sf_tip <= checkpoint {
-            return Ok(None);
+            return Ok(());
         }
 
         tracing::info!(
@@ -377,7 +368,7 @@ impl RocksDBProvider {
             batch_start = batch_end + 1;
         }
 
-        Ok(None)
+        Ok(())
     }
 }
 
