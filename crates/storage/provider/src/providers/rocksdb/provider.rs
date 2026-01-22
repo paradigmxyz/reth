@@ -1089,8 +1089,13 @@ impl RocksDBProvider {
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
             let bundle = &block.execution_outcome().state;
-            for &address in bundle.state().keys() {
-                account_history.entry(address).or_default().push(block_number);
+            for (&address, account) in bundle.state() {
+                // Only index accounts where info actually changed (not just touched/read).
+                // This matches changeset semantics and prevents false-positive history entries
+                // that would cause AccountChangesetNotFound errors during historical lookups.
+                if account.is_info_changed() {
+                    account_history.entry(address).or_default().push(block_number);
+                }
             }
         }
 
@@ -1115,9 +1120,14 @@ impl RocksDBProvider {
             let block_number = ctx.first_block_number + block_idx as u64;
             let bundle = &block.execution_outcome().state;
             for (&address, account) in bundle.state() {
-                for &slot in account.storage.keys() {
-                    let key = B256::new(slot.to_be_bytes());
-                    storage_history.entry((address, key)).or_default().push(block_number);
+                for (&slot, slot_value) in &account.storage {
+                    // Only index slots where the value actually changed (not just touched/read).
+                    // This matches changeset semantics and prevents false-positive history entries
+                    // that would cause StorageChangesetNotFound errors during historical lookups.
+                    if slot_value.is_changed() {
+                        let key = B256::new(slot.to_be_bytes());
+                        storage_history.entry((address, key)).or_default().push(block_number);
+                    }
                 }
             }
         }
