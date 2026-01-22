@@ -1,0 +1,56 @@
+number: 20661
+title: 'feat(txpool): add configurable batch timeout to transaction pool insertions'
+state: open
+author: keanji-x
+head: fix_timeout
+base: main
+labels:
+- M-changelog
+- A-rpc
+- A-cli
+created_at: 2025-12-29T04:05:53Z
+updated_at: 2026-01-10T15:16:41Z
+additions: 518
+deletions: 59
+is_draft: false
+files:
+- path: crates/node/builder/src/rpc.rs
+  additions: 2
+  deletions: 2
+- path: crates/node/core/src/args/txpool.rs
+  additions: 35
+  deletions: 7
+- path: crates/node/core/src/cli/config.rs
+  additions: 3
+  deletions: 3
+- path: crates/rpc/rpc-eth-types/Cargo.toml
+  additions: 1
+  deletions: 1
+- path: crates/rpc/rpc-eth-types/src/builder/config.rs
+  additions: 19
+  deletions: 4
+- path: crates/rpc/rpc/src/eth/builder.rs
+  additions: 29
+  deletions: 12
+- path: crates/rpc/rpc/src/eth/core.rs
+  additions: 5
+  deletions: 5
+- path: crates/transaction-pool/benches/insertion.rs
+  additions: 3
+  deletions: 1
+- path: crates/transaction-pool/src/batcher.rs
+  additions: 391
+  deletions: 23
+- path: crates/transaction-pool/src/config.rs
+  additions: 19
+  deletions: 0
+- path: crates/transaction-pool/src/lib.rs
+  additions: 1
+  deletions: 1
+- path: docs/vocs/docs/pages/cli/op-reth/node.mdx
+  additions: 5
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/node.mdx
+  additions: 5
+  deletions: 0
+body: "## Introduced a mechanism to forcefully batch transactions for a specified duration using --txpool.batch-timeout.\r\n\r\nThe previous implementation relied on greedy consumption (poll_recv_many), which processes whatever is available immediately. Under low-to-medium load, this often results in small batches (or single transactions), failing to effectively amortize the cost of acquiring the transaction pool lock.\r\n\r\nBy introducing a timeout, we can enforce buffering up to  `max_batch_size` or  `batch_timeout`, significantly improving lock contention and throughput by ensuring larger persistent batches.\r\n\r\n## Implementation Details\r\n\r\nUsed Option<tokio::time::Interval> in BatchTxProcessor to maintain zero-cost overhead for the default immediate mode (timeout=0).\r\nRefactored the poll loop to support both immediate consumptions and time-buffered batching.\r\nAdded config propagation and integration tests."

@@ -1,0 +1,38 @@
+number: 21140
+title: 'perf(storage): batch trie updates across blocks in save_blocks'
+state: open
+author: gakonst
+head: georgios/batch-trie-updates
+base: main
+labels: []
+created_at: 2026-01-16T18:45:03Z
+updated_at: 2026-01-19T12:45:56Z
+additions: 1365
+deletions: 6
+is_draft: false
+files:
+- path: crates/engine/tree/Cargo.toml
+  additions: 8
+  deletions: 0
+- path: crates/engine/tree/benches/execution_cache.rs
+  additions: 374
+  deletions: 0
+- path: crates/engine/tree/benches/heavy_persistence.rs
+  additions: 363
+  deletions: 0
+- path: crates/storage/provider/src/providers/database/provider.rs
+  additions: 44
+  deletions: 6
+- path: crates/trie/parallel/Cargo.toml
+  additions: 4
+  deletions: 0
+- path: crates/trie/parallel/benches/heavy_root.rs
+  additions: 330
+  deletions: 0
+- path: docs/perf/OPTIMIZATION_OPPORTUNITIES.md
+  additions: 170
+  deletions: 0
+- path: scripts/bench-heavy.sh
+  additions: 72
+  deletions: 0
+body: "## Summary\n\nBatches trie updates across all blocks in `save_blocks` instead of writing per-block.\n\n## Problem\n\nPer #eng-perf profiling, `write_trie_updates` was taking **~25% of persistence time**. The current implementation calls `write_trie_updates_sorted` once per block, opening/closing cursors N times.\n\nIn back-to-back (b2b) scenarios with 75-250 accumulated blocks, this overhead compounds significantly.\n\n## Solution\n\nAccumulate trie updates across blocks using the existing `extend_ref` method, then write them all in a single batch:\n\n```rust\n// Accumulate across blocks\nlet mut accumulated_trie_updates: Option<TrieUpdatesSorted> = None;\n\nfor block in blocks {\n    // ... other per-block writes ...\n    \n    match &mut accumulated_trie_updates {\n        Some(acc) => acc.extend_ref(&trie_data.trie_updates),\n        None => accumulated_trie_updates = Some((*trie_data.trie_updates).clone()),\n    }\n}\n\n// Single batch write at end\nif let Some(trie_updates) = &accumulated_trie_updates {\n    self.write_trie_updates_sorted(trie_updates)?;\n}\n```\n\n## Expected Impact\n\n- **~50% reduction** in `write_trie_updates` time for b2b scenarios\n- Reduces cursor open/close overhead from N to 1\n- Reduces MDBX transaction overhead\n\n## Testing\n\n- All existing `reth-provider` tests pass\n\n## Related\n\n- Based on analysis from #eng-perf Slack channel\n- Complements `georgios/history-indices-from-memory` (26% history indices optimization)\n- Supersedes #21106 and #21139"

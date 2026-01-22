@@ -1,0 +1,73 @@
+number: 21237
+title: 'feat(evm): standardize slow block JSON output for cross-client metrics'
+state: open
+author: CPerezz
+head: feature/execution-metrics-standardization
+base: main
+labels: []
+created_at: 2026-01-21T09:35:51Z
+updated_at: 2026-01-21T13:43:33Z
+additions: 394
+deletions: 41
+is_draft: false
+files:
+- path: Cargo.lock
+  additions: 1
+  deletions: 0
+- path: crates/engine/tree/src/tree/cached_state.rs
+  additions: 105
+  deletions: 8
+- path: crates/engine/tree/src/tree/metrics.rs
+  additions: 4
+  deletions: 0
+- path: crates/engine/tree/src/tree/mod.rs
+  additions: 5
+  deletions: 0
+- path: crates/engine/tree/src/tree/payload_validator.rs
+  additions: 57
+  deletions: 15
+- path: crates/evm/evm/Cargo.toml
+  additions: 19
+  deletions: 17
+- path: crates/evm/evm/src/metrics.rs
+  additions: 203
+  deletions: 1
+body: |-
+  ## Summary
+
+  Implement standardized JSON format for slow block logging to enable cross-client performance analysis and protocol research.
+
+  This change is part of the **Cross-Client Execution Metrics** initiative proposed by Gary Rong and CPerezz.
+
+  ## Motivation
+
+  Standardized execution metrics are critical for:
+  - Cross-client performance comparison
+  - Network health monitoring
+  - Data-driven protocol research
+
+  **Real-world example:** The [EIP-7907 analysis](https://ethresear.ch/t/data-driven-analysis-on-eip-7907/23850) used execution metrics to measure code read latency, per-call overhead scaling, and block execution breakdown. Without standardized metrics across clients, such analysis cannot be validated cross-client.
+
+  ## References
+
+  - Original proposal: https://hackmd.io/dg7rizTyTXuCf2LSa2LsyQ (Gary Rong)
+  - EIP-7907 analysis: https://ethresear.ch/t/data-driven-analysis-on-eip-7907/23850
+
+  ## JSON Format
+
+  ```json
+  {
+    "level": "warn",
+    "msg": "Slow block",
+    "block": { "number": ..., "hash": ..., "gas_used": ..., "tx_count": ... },
+    "timing": { "execution_ms": ..., "total_ms": ... },
+    "throughput": { "mgas_per_sec": ... },
+    "state_reads": { "accounts": ..., "storage_slots": ..., "code": ..., "code_bytes": ... },
+    "state_writes": { "accounts": ..., "storage_slots": ... },
+    "cache": {
+      "account": { "hits": ..., "misses": ..., "hit_rate": ... },
+      "storage": { ... },
+      "code": { ... }
+    }
+  }
+  ```

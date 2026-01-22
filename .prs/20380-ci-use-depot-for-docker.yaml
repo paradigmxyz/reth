@@ -1,0 +1,28 @@
+number: 20380
+title: 'ci: use depot for docker'
+state: open
+author: shekhirin
+head: alexey/docker-depot
+base: main
+labels: []
+created_at: 2025-12-15T14:35:51Z
+updated_at: 2026-01-11T02:17:14Z
+additions: 241
+deletions: 185
+is_draft: true
+files:
+- path: .github/workflows/docker-git.yml
+  additions: 0
+  deletions: 54
+- path: .github/workflows/docker-nightly.yml
+  additions: 0
+  deletions: 61
+- path: .github/workflows/docker.yml
+  additions: 73
+  deletions: 70
+- path: Dockerfile.depot
+  additions: 86
+  deletions: 0
+- path: docker-bake.hcl
+  additions: 82
+  deletions: 0

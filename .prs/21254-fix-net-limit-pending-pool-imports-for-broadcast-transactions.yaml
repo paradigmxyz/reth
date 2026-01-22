@@ -1,0 +1,38 @@
+number: 21254
+title: 'fix(net): limit pending pool imports for broadcast transactions'
+state: open
+author: gakonst
+head: limit-pending-pool-imports
+base: main
+labels:
+- A-devp2p
+created_at: 2026-01-21T14:49:02Z
+updated_at: 2026-01-21T15:30:23Z
+additions: 132
+deletions: 53
+is_draft: false
+files:
+- path: crates/net/network/src/test_utils/testnet.rs
+  additions: 13
+  deletions: 13
+- path: crates/net/network/src/transactions/mod.rs
+  additions: 119
+  deletions: 40
+body: |
+  ## Summary
+
+  Add backpressure to prevent memory exhaustion when receiving broadcast transactions. Previously, only transaction fetches had capacity checks via `has_capacity_for_fetching_pending_hashes()`. This adds the same check for incoming broadcast transactions (`IncomingTransactions` events).
+
+  ## Changes
+
+  - Extract `has_capacity_for_pending_pool_imports()` helper method from the existing capacity check
+  - Add capacity check before processing `IncomingTransactions` (broadcast transactions)
+  - When pending pool imports reach capacity, broadcast transactions are now dropped with a trace log
+
+  ## Context
+
+  Related to sigp audit issue flagged in [CHAIN-489](https://linear.app/tempoxyz/issue/CHAIN-489) - unbounded RLP decoding can exhaust validator memory. While the RLP decoding limit is a separate concern, this ensures the transaction processing pipeline has proper backpressure at the pool import stage.
+
+  The `pool_imports` FuturesUnordered queue can grow unbounded when broadcast transactions arrive faster than the pool can process them. With this change, the capacity limit (`DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS = 4096`) now applies to both:
+  1. Transactions fetched via GetPooledTransactions (already had check)
+  2. Transactions received via broadcast (new check added)

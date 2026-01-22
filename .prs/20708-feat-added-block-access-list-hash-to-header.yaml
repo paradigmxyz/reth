@@ -1,0 +1,79 @@
+number: 20708
+title: 'feat: added block_access_list_hash to header'
+state: open
+author: Rimeeeeee
+head: bal-header
+base: main
+labels: []
+created_at: 2026-01-02T13:04:07Z
+updated_at: 2026-01-10T15:16:41Z
+additions: 263
+deletions: 192
+is_draft: true
+files:
+- path: Cargo.lock
+  additions: 168
+  deletions: 162
+- path: Cargo.toml
+  additions: 28
+  deletions: 28
+- path: crates/chainspec/Cargo.toml
+  additions: 1
+  deletions: 0
+- path: crates/chainspec/src/spec.rs
+  additions: 9
+  deletions: 0
+- path: crates/e2e-test-utils/Cargo.toml
+  additions: 3
+  deletions: 0
+- path: crates/e2e-test-utils/src/test_rlp_utils.rs
+  additions: 2
+  deletions: 0
+- path: crates/era/Cargo.toml
+  additions: 3
+  deletions: 0
+- path: crates/era/src/test_utils.rs
+  additions: 4
+  deletions: 0
+- path: crates/ethereum/evm/Cargo.toml
+  additions: 1
+  deletions: 0
+- path: crates/ethereum/evm/src/build.rs
+  additions: 2
+  deletions: 0
+- path: crates/net/eth-wire-types/Cargo.toml
+  additions: 1
+  deletions: 0
+- path: crates/net/eth-wire-types/src/blocks.rs
+  additions: 8
+  deletions: 0
+- path: crates/net/eth-wire-types/src/header.rs
+  additions: 6
+  deletions: 0
+- path: crates/optimism/evm/Cargo.toml
+  additions: 1
+  deletions: 0
+- path: crates/optimism/evm/src/build.rs
+  additions: 2
+  deletions: 0
+- path: crates/optimism/primitives/Cargo.toml
+  additions: 1
+  deletions: 0
+- path: crates/optimism/primitives/src/bedrock.rs
+  additions: 2
+  deletions: 0
+- path: crates/primitives-traits/Cargo.toml
+  additions: 1
+  deletions: 0
+- path: crates/primitives-traits/src/block/recovered.rs
+  additions: 5
+  deletions: 0
+- path: crates/primitives-traits/src/block/sealed.rs
+  additions: 2
+  deletions: 0
+- path: crates/storage/codecs/Cargo.toml
+  additions: 1
+  deletions: 0
+- path: crates/storage/codecs/src/alloy/header.rs
+  additions: 12
+  deletions: 2

@@ -1,0 +1,17 @@
+number: 20950
+title: 'docs: align replace_.. docs in TransportRpcModules with real behavior'
+state: open
+author: lisenokdonbassenok
+head: docs/align-transport-rpc-replace-docs
+base: main
+labels: []
+created_at: 2026-01-12T08:21:40Z
+updated_at: 2026-01-12T08:21:41Z
+additions: 16
+deletions: 13
+is_draft: false
+files:
+- path: crates/rpc/rpc-builder/src/lib.rs
+  additions: 16
+  deletions: 13
+body: Updated the documentation of TransportRpcModules::replace_http, replace_ws, replace_ipc and replace_configured to match their actual semantics. The comments previously claimed that these helpers fail when the method being replaced is missing and that the boolean return value indicates whether any replacement occurred, which was not true. The docs now describe that the old methods are always removed if present, new methods are merged, errors only come from the merge step, and replace_configured always returns Ok(true) on success.

@@ -1,0 +1,20 @@
+number: 20715
+title: 'fix: history index stages incorrectly detect first sync with non-zero…'
+state: open
+author: livehardd
+head: genesis
+base: main
+labels: []
+created_at: 2026-01-02T21:16:48Z
+updated_at: 2026-01-10T15:16:41Z
+additions: 19
+deletions: 6
+is_draft: false
+files:
+- path: crates/stages/stages/src/stages/index_account_history.rs
+  additions: 12
+  deletions: 3
+- path: crates/stages/stages/src/stages/index_storage_history.rs
+  additions: 7
+  deletions: 3
+body: "The history index stages were hardcoding block 0 to check for first sync, which fails when genesis starts at a non-zero block. This prevented the first-sync optimization (clearing tables and rebuilding from scratch) from running.\r\n\r\nChanged to check if the history table is empty instead, and use the actual checkpoint block number as the starting point rather than assuming 0."

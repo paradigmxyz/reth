@@ -1,0 +1,17 @@
+number: 20683
+title: 'fix(config): call validate() when loading static file config'
+state: open
+author: ethfanWilliam
+head: config
+base: main
+labels: []
+created_at: 2025-12-30T12:01:17Z
+updated_at: 2026-01-10T15:16:41Z
+additions: 38
+deletions: 1
+is_draft: false
+files:
+- path: crates/config/src/config.rs
+  additions: 38
+  deletions: 1
+body: "validate() was already implemented but never called in from_path(), so invalid blocks_per_file values (like 0) would only blow up at runtime.\r\n\r\nnow we validate right after parsing."

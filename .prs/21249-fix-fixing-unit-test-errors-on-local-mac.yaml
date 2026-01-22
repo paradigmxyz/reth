@@ -1,0 +1,26 @@
+number: 21249
+title: 'fix: fixing unit test errors on local mac'
+state: open
+author: cliff0412
+head: fix/cliff-dev
+base: main
+labels: []
+created_at: 2026-01-21T10:53:32Z
+updated_at: 2026-01-21T10:53:33Z
+additions: 26
+deletions: 20
+is_draft: false
+files:
+- path: crates/etl/Cargo.toml
+  additions: 1
+  deletions: 1
+- path: crates/etl/src/lib.rs
+  additions: 1
+  deletions: 1
+- path: crates/net/discv4/src/lib.rs
+  additions: 11
+  deletions: 15
+- path: crates/net/discv4/src/test_utils.rs
+  additions: 13
+  deletions: 3
+body: running `make test-unit` on mac ( a powerful machine), some tests failed. this PR fix those test errors

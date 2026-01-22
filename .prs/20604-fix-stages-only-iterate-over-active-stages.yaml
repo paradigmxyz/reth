@@ -1,0 +1,32 @@
+number: 20604
+title: 'fix(stages): only iterate over active stages'
+state: open
+author: joshieDo
+head: joshie/stages-active
+base: main
+labels:
+- C-bug
+- A-staged-sync
+- A-engine
+created_at: 2025-12-23T14:27:10Z
+updated_at: 2026-01-10T15:16:41Z
+additions: 28
+deletions: 7
+is_draft: false
+files:
+- path: Cargo.lock
+  additions: 1
+  deletions: 0
+- path: crates/node/builder/src/launch/common.rs
+  additions: 5
+  deletions: 5
+- path: crates/stages/types/Cargo.toml
+  additions: 5
+  deletions: 0
+- path: crates/stages/types/src/id.rs
+  additions: 13
+  deletions: 0
+- path: crates/storage/provider/src/providers/database/provider.rs
+  additions: 4
+  deletions: 2
+body: "During engine sync, we iterate over all stages in `StageId::ALL` and bump their checkpoints via `update_pipeline_stages`. During the pipeline consistency check, we iterate all checkpoints and compare them to the header stage.\r\n\r\nHowever, the pipeline itself conditionally adds `PruneSenderRecoveryStage` only if sender pruning is enabled:\r\n\r\nhttps://github.com/paradigmxyz/reth/blob/b79c58d83537b8db52a6a6c02e81d2f868bd4f6d/crates/stages/stages/src/sets.rs#L337-L340\r\n\r\nThis can result in the following weird scenario if sender pruning is not enabled:\r\n\r\n1. `PruneSenderRecovery` checkpoint is set to block 100 by engine sync (via `update_pipeline_stages`)\r\n2. Run unwind command to block 95. Since `PruneSenderRecoveryStage` is not in the pipeline, its checkpoint stays at 100 (ahead of other stages, but not an issue yet)\r\n3. Run pipeline forward to block 105. Once again, `PruneSenderRecoveryStage` is not in the pipeline and won't run, so its checkpoint stays at 100\r\n4. Now `PruneSenderRecovery` (100) < `Headers` (105), which triggers the inconsistency check:\r\n\r\nor\r\n\r\n1. Engine sync to block 50 → update_pipeline_stages creates PruneSenderRecovery at 50\r\n2. Pipeline sync continues to block 100 → Headers at 100, but PruneSenderRecovery stuck at 50\r\n3. CLI unwind to block 60 → Headers at 60, PruneSenderRecovery still at 50\r\n4. reth node → consistency check: 50 < 60\r\n\r\nhttps://github.com/paradigmxyz/reth/blob/b79c58d83537b8db52a6a6c02e81d2f868bd4f6d/crates/node/builder/src/launch/common.rs#L975-L985\r\n"

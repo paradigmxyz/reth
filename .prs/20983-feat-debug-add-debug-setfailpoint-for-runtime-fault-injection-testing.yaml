@@ -1,0 +1,59 @@
+number: 20983
+title: 'feat(debug): add `debug_setFailpoint` for runtime fault injection testing'
+state: open
+author: AshinGau
+head: failpoint
+base: main
+labels: []
+created_at: 2026-01-13T02:56:23Z
+updated_at: 2026-01-15T18:10:03Z
+additions: 156
+deletions: 3
+is_draft: false
+files:
+- path: Cargo.lock
+  additions: 13
+  deletions: 0
+- path: Cargo.toml
+  additions: 1
+  deletions: 0
+- path: bin/reth/Cargo.toml
+  additions: 2
+  deletions: 0
+- path: crates/ethereum/node/Cargo.toml
+  additions: 2
+  deletions: 0
+- path: crates/node/builder/Cargo.toml
+  additions: 5
+  deletions: 0
+- path: crates/rpc/rpc-api/src/debug.rs
+  additions: 10
+  deletions: 0
+- path: crates/rpc/rpc/Cargo.toml
+  additions: 2
+  deletions: 0
+- path: crates/rpc/rpc/src/debug.rs
+  additions: 17
+  deletions: 0
+- path: crates/storage/db/Cargo.toml
+  additions: 2
+  deletions: 0
+- path: crates/storage/db/src/lib.rs
+  additions: 32
+  deletions: 0
+- path: crates/storage/provider/Cargo.toml
+  additions: 1
+  deletions: 0
+- path: crates/storage/provider/src/providers/database/provider.rs
+  additions: 11
+  deletions: 0
+- path: crates/storage/provider/src/providers/rocksdb/provider.rs
+  additions: 7
+  deletions: 2
+- path: crates/storage/provider/src/providers/static_file/writer.rs
+  additions: 3
+  deletions: 1
+- path: docs/vocs/docs/pages/jsonrpc/debug.mdx
+  additions: 48
+  deletions: 0
+body: "## Summary\r\n\r\nThis PR introduces runtime fault injection support via the `fail` crate, enabling crash recovery testing for reth's multi-storage architecture. Since reth now uses multiple storage backends (MDBX, RocksDB, and Static Files) without cross-system atomic transactions, this feature allows testing and validating the consistency recovery mechanisms when crashes occur between storage system commits.\r\n\r\n## Motivation\r\n\r\nReth's storage layer has evolved to use three different storage systems:\r\n- **MDBX**: Primary database for state data (transactional)\r\n- **RocksDB**: Used for history indices (https://github.com/paradigmxyz/reth/issues/19942)\r\n- **Static Files**: Immutable historical data\r\n\r\nWhile MDBX provides block-level transactionality internally, the overall commit process involves multiple independent storage systems that cannot be atomically committed together. This breaks the traditional single-database transactional guarantees and requires careful recovery logic to handle partial commits.\r\n\r\nInspired by [Aptos's failpoint implementation](https://github.com/aptos-labs/aptos-core), this PR adds failpoint support to test these critical consistency boundaries.\r\n\r\n## Changes\r\n\r\n### New Feature: `failpoints`\r\n\r\nA new optional feature `failpoints` that can be enabled at build time:\r\n\r\n```bash\r\ncargo build -p reth --features failpoints"

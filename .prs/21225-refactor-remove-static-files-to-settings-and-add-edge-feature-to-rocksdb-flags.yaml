@@ -1,0 +1,143 @@
+number: 21225
+title: 'refactor: remove static_files.to_settings() and add edge feature to RocksDB flags'
+state: open
+author: gakonst
+head: fix/remove-static-files-to-settings
+base: main
+labels: []
+created_at: 2026-01-20T19:13:58Z
+updated_at: 2026-01-21T15:26:58Z
+additions: 851
+deletions: 71
+is_draft: false
+files:
+- path: Cargo.lock
+  additions: 0
+  deletions: 1
+- path: crates/cli/commands/src/common.rs
+  additions: 18
+  deletions: 3
+- path: crates/node/builder/src/launch/common.rs
+  additions: 2
+  deletions: 8
+- path: crates/node/core/Cargo.toml
+  additions: 1
+  deletions: 2
+- path: crates/node/core/src/args/rocksdb.rs
+  additions: 63
+  deletions: 25
+- path: crates/node/core/src/args/static_files.rs
+  additions: 0
+  deletions: 13
+- path: crates/node/core/src/node_config.rs
+  additions: 8
+  deletions: 13
+- path: crates/storage/db-api/src/models/metadata.rs
+  additions: 15
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/op-reth/db.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/op-reth/import-op.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/op-reth/import-receipts-op.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/op-reth/init-state.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/op-reth/init.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/op-reth/node.mdx
+  additions: 12
+  deletions: 3
+- path: docs/vocs/docs/pages/cli/op-reth/prune.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/op-reth/re-execute.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/op-reth/stage/drop.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/op-reth/stage/dump.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/op-reth/stage/run.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/op-reth/stage/unwind.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/db.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/download.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/export-era.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/import-era.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/import.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/init-state.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/init.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/node.mdx
+  additions: 12
+  deletions: 3
+- path: docs/vocs/docs/pages/cli/reth/prune.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/re-execute.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/stage/drop.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/stage/dump.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/stage/run.mdx
+  additions: 30
+  deletions: 0
+- path: docs/vocs/docs/pages/cli/reth/stage/unwind.mdx
+  additions: 30
+  deletions: 0
+body: |-
+  ## Summary
+
+  This PR addresses the review comment from #21191 ([discussion](https://github.com/paradigmxyz/reth/pull/21191#discussion_r2709676364)):
+
+  > we can do it in this PR or on a follow-up, but we probably want to remove static_files.to_settings() i think ?
+  > and we should make sure that the following behaviour introduced here #21208 also applies to rocksdb
+
+  ## Changes
+
+  1. **Remove `StaticFilesArgs::to_settings()`** - This method is now superseded by `NodeConfig::storage_settings()` which handles both static files and RocksDB settings in one place.
+
+  2. **Add edge feature behavior to RocksDB flags** - Following the pattern from #21208:
+     - Individual RocksDB flags (`tx_hash`, `storages_history`, `account_history`) now default to `true` when the `edge` feature is enabled
+     - Changed flags from `Option<bool>` to `bool` with proper defaults using `default_value_t` and `ArgAction::Set`
+     - Added consistent doc comments about genesis-initialization-only behavior
+
+  3. **Add RocksDbArgs to EnvironmentArgs** - The `EnvironmentArgs` in `cli/commands` now includes `RocksDbArgs` with a `storage_settings()` method for consistent storage settings across all CLI commands.
+
+  4. **Update storage_settings() to use edge feature base** - Both `NodeConfig::storage_settings()` and `EnvironmentArgs::storage_settings()` now start from `StorageSettings::edge()` or `StorageSettings::legacy()` based on the feature flag.
+
+  ## Files Changed
+
+  - `crates/node/core/src/args/rocksdb.rs` - Add edge feature defaults, change Option<bool> to bool
+  - `crates/node/core/src/args/static_files.rs` - Remove `to_settings()` method
+  - `crates/node/core/src/node_config.rs` - Update `storage_settings()` to use edge feature base
+  - `crates/cli/commands/src/common.rs` - Add `RocksDbArgs` and `storage_settings()`
+  - `crates/node/builder/src/launch/common.rs` - Update callers to use `storage_settings()`

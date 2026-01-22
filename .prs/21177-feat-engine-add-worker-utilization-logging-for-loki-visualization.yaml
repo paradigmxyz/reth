@@ -1,0 +1,64 @@
+number: 21177
+title: 'feat(engine): add worker utilization logging for Loki visualization'
+state: open
+author: gakonst
+head: feat/worker-utilization-logging
+base: main
+labels:
+- A-engine
+created_at: 2026-01-18T23:38:29Z
+updated_at: 2026-01-18T23:38:35Z
+additions: 73
+deletions: 6
+is_draft: false
+files:
+- path: crates/engine/tree/src/tree/payload_processor/mod.rs
+  additions: 3
+  deletions: 1
+- path: crates/engine/tree/src/tree/payload_processor/prewarm.rs
+  additions: 26
+  deletions: 1
+- path: crates/trie/parallel/src/proof_task.rs
+  additions: 44
+  deletions: 4
+body: |-
+  ## Summary
+
+  Adds structured debug logs on worker state changes for:
+  - **Storage proof workers** (target: `trie::worker_utilization`)
+  - **Account proof workers** (target: `trie::worker_utilization`)
+  - **Prewarm workers** (target: `prewarm::worker_utilization`)
+
+  ## Log Format
+
+  Each log includes:
+  ```
+  worker_type = "storage" | "account" | "prewarm"
+  active = <current active workers>
+  total = <total workers in pool>
+  worker_id = <which worker changed state> (proof workers only)
+  ```
+
+  ## Usage
+
+  Logs are emitted when workers start and finish work, enabling millisecond-precision utilization visualization in Loki/Grafana.
+
+  **Example LogQL query:**
+  ```logql
+  {app="reth"} | json | worker_type="storage"
+  | unwrap active | unwrap total
+  ```
+
+  **Utilization calculation:**
+  ```
+  active / total * 100 = % utilization
+  ```
+
+  ## Motivation
+
+  Enables tracking exact worker utilization at any point in time via log post-processing, which is useful for:
+  - Identifying bottlenecks in proof computation
+  - Tuning worker pool sizes
+  - Understanding prewarm efficiency
+
+  cc @shekhirin

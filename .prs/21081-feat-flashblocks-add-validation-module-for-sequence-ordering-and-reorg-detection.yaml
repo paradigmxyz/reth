@@ -1,0 +1,20 @@
+number: 21081
+title: 'feat(flashblocks): add validation module for sequence ordering and reorg detection'
+state: open
+author: teddyknox
+head: teddyknox/flashblock-sequencing
+base: main
+labels: []
+created_at: 2026-01-14T23:13:11Z
+updated_at: 2026-01-14T23:24:29Z
+additions: 550
+deletions: 0
+is_draft: false
+files:
+- path: crates/optimism/flashblocks/src/lib.rs
+  additions: 2
+  deletions: 0
+- path: crates/optimism/flashblocks/src/validation.rs
+  additions: 548
+  deletions: 0
+body: "Part of the [speculative flashblock building design](https://www.notion.so/oplabs/Flashblocks-Upstreaming-node-reth-features-2e8f153ee162805eaaa5f067fe3440a3?source=copy_link).\r\n\r\n## Motivation\r\n\r\nThe existing flashblocks implementation relies on implicit parent hash matching to reject invalid sequences, but lacks explicit detection of sequence gaps, duplicates, and reorgs. This PR adds the foundational validation types that subsequent PRs will use for canonical block reconciliation and speculative building.\r\n\r\n## Changes\r\n\r\nAdds `validation.rs` with three stateless validators:\r\n\r\n- **`FlashblockSequenceValidator`** - Validates that incoming flashblocks follow expected ordering. Returns `NextInSequence`, `FirstOfNextBlock`, `Duplicate`, `NonSequentialGap`, or `InvalidNewBlockIndex`.\r\n\r\n- **`ReorgDetector`** - Compares transaction hash slices between tracked pending state and canonical blocks. Returns `NoReorg` or `ReorgDetected` with diagnostic counts.\r\n\r\n- **`CanonicalBlockReconciler`** - Determines reconciliation strategy when canonical blocks arrive: `CatchUp`, `HandleReorg`, `DepthLimitExceeded`, `Continue`, or `NoPendingState`.\r\n\r\nAll types are stateless with `const fn` where possible, making them easy to test and reason about.\r\n\r\n## Testing\r\n\r\nComprehensive unit tests covering:\r\n- Sequence validation: consecutive indices, block transitions, gaps, duplicates\r\n- Reorg detection: matching sequences, different order, different counts, different hashes\r\n- Reconciliation: all strategy branches and priority ordering\r\n"

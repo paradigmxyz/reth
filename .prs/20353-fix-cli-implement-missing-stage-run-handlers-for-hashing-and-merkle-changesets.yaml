@@ -1,0 +1,17 @@
+number: 20353
+title: 'fix(cli): implement missing stage run handlers for hashing and merkle-changesets'
+state: open
+author: anim001k
+head: patch-14
+base: main
+labels: []
+created_at: 2025-12-13T12:17:58Z
+updated_at: 2026-01-12T02:17:18Z
+additions: 213
+deletions: 194
+is_draft: false
+files:
+- path: crates/cli/commands/src/stage/run.rs
+  additions: 213
+  deletions: 194
+body: "\r\n\r\nThe `reth stage run` command accepted `hashing` and `merkle-changesets` as valid stage arguments, but silently returned without executing them. This created a mismatch between the documented behavior and actual implementation, causing confusion when users attempted to run these stages.\r\n\r\n"

@@ -1,0 +1,19 @@
+number: 20565
+title: 'fix(rpc): preserve nested bundle structure in mev_simBundle logs'
+state: open
+author: meetrick
+head: reth/sim_bundle_todo
+base: main
+labels:
+- C-bug
+- A-rpc
+created_at: 2025-12-22T07:55:12Z
+updated_at: 2026-01-20T18:02:17Z
+additions: 281
+deletions: 23
+is_draft: false
+files:
+- path: crates/rpc/rpc/src/eth/sim_bundle.rs
+  additions: 281
+  deletions: 23
+body: "## Summary\r\n\r\nFix log collection in `mev_simBundle` to preserve the hierarchical structure of nested bundles.\r\n\r\n## Problem\r\n\r\nWhen MEV searchers simulate nested bundles using `mev_simBundle`, the response logs were flattened into a single array. This made it impossible to determine which transactions belonged to which nested bundle.\r\n\r\n**Example: Arbitrage strategy with backrun**\r\n\r\n```\r\nArbitrage Bundle\r\n├── tx1: Buy on DEX A\r\n├── Backrun Bundle\r\n│   ├── tx2: Target transaction\r\n│   └── tx3: Sell on DEX B\r\n└── tx4: Collect profit\r\n```\r\n\r\n## Before (Flattened - Structure Lost)\r\n\r\n```json\r\n{\r\n  \"logs\": [\r\n    { \"txLogs\": [\"tx1 logs\"], \"bundleLogs\": null },\r\n    { \"txLogs\": [\"tx2 logs\"], \"bundleLogs\": null },\r\n    { \"txLogs\": [\"tx3 logs\"], \"bundleLogs\": null },\r\n    { \"txLogs\": [\"tx4 logs\"], \"bundleLogs\": null }\r\n  ]\r\n}\r\n```\r\n\r\n→ Cannot identify tx2, tx3 belong to Backrun Bundle\r\n\r\n## After (Hierarchical - Structure Preserved)\r\n\r\n```json\r\n{\r\n  \"logs\": [\r\n    { \"txLogs\": [\"tx1 logs\"], \"bundleLogs\": null },\r\n    { \"txLogs\": null, \"bundleLogs\": [\r\n        { \"txLogs\": [\"tx2 logs\"], \"bundleLogs\": null },\r\n        { \"txLogs\": [\"tx3 logs\"], \"bundleLogs\": null }\r\n    ]},\r\n    { \"txLogs\": [\"tx4 logs\"], \"bundleLogs\": null }\r\n  ]\r\n}\r\n```\r\n\r\n→ Backrun Bundle clearly identified via `bundleLogs`\r\n\r\nNote: `txLogs` and `bundleLogs` are mutually exclusive by design - a `SimBundleLogs` entry represents either a transaction (with `txLogs`) or a nested bundle (with `bundleLogs`), never both.\r\n\r\n## User Benefits\r\n\r\n- **Accurate debugging**: Identify exactly which nested bundle caused failures\r\n- **Strategy analysis**: Analyze gas usage and events per sub-bundle\r\n- **Proper API behavior**: `SimBundleLogs.bundle_logs` field now works as intended\r\n\r\n## Changes\r\n\r\n- Add `build_bundle_logs()` using stack-based iteration to reconstruct log hierarchy (avoids recursive calls)\r\n- Add `bundle_path` field to `FlattenedBundleItem` to track each transaction's position in the bundle hierarchy\r\n- Store logs in `HashMap` during execution for structure reconstruction\r\n- Add 4 unit tests for nested bundle log collection\r\n"

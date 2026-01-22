@@ -1,0 +1,17 @@
+number: 21073
+title: 'feat(mdbx): more tracing observability'
+state: open
+author: figtracer
+head: more-granular-instrumentation
+base: main
+labels: []
+created_at: 2026-01-14T20:50:57Z
+updated_at: 2026-01-15T13:09:56Z
+additions: 10
+deletions: 0
+is_draft: true
+files:
+- path: crates/storage/db/src/implementation/mdbx/cursor.rs
+  additions: 10
+  deletions: 0
+body: "this PR aims at migrating https://github.com/figtracer/reth-mdbx-profiler into a reth exex\r\n- the codebase would be much smaller \r\n- data would also be 100% accurate, since we wouldn't need to make assumptions based on page fault-ops timing\r\n\r\nfor that i wanted to add a couple of extra tracing spans which may be useful as well for other experiments\r\n\r\nedit: this would probably cause a lot of overhead as well so idk if leaving it in tracing without any feature gate would be a good idea"

@@ -1,0 +1,26 @@
+number: 20961
+title: 'refactor: spanning and misc improvements to consistency check code '
+state: open
+author: prestwich
+head: prestwich/check-spans
+base: main
+labels: []
+created_at: 2026-01-12T16:09:40Z
+updated_at: 2026-01-12T16:51:05Z
+additions: 267
+deletions: 165
+is_draft: false
+files:
+- path: crates/node/builder/src/launch/common.rs
+  additions: 6
+  deletions: 29
+- path: crates/storage/errors/src/provider.rs
+  additions: 10
+  deletions: 0
+- path: crates/storage/provider/src/providers/database/mod.rs
+  additions: 72
+  deletions: 3
+- path: crates/storage/provider/src/providers/static_file/manager.rs
+  additions: 179
+  deletions: 133
+body: "1. Create a high-level `check_consistency` fn on the `ProviderFactory` type\r\n2. Add spans to consistency check functions and loops with relevant data\r\n    - remove many redundant event props in favor of span props\r\n3. reduce code nesting by \r\n    - replacing `if let Some(thing) = call() { } else { }` with `let Some(thing) = call() else { };` for large blocks\r\n    - inverting some if conditions to use early return/break\r\n4. introduce `ensure_invariants_for` to reduce code complexity in `check_consistency`\r\n5. remove `pub` from make `check_segment_consistency`, as this appears to be an oversight\r\n"

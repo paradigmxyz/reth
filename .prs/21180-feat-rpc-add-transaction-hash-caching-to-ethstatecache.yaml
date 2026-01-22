@@ -1,0 +1,38 @@
+number: 21180
+title: 'feat(rpc): add transaction hash caching to EthStateCache'
+state: open
+author: figtracer
+head: cache-txs
+base: main
+labels: []
+created_at: 2026-01-19T09:27:19Z
+updated_at: 2026-01-19T16:34:25Z
+additions: 139
+deletions: 8
+is_draft: false
+files:
+- path: crates/node/core/src/args/rpc_server.rs
+  additions: 1
+  deletions: 0
+- path: crates/node/core/src/args/rpc_state_cache.rs
+  additions: 9
+  deletions: 1
+- path: crates/rpc/rpc-builder/src/config.rs
+  additions: 1
+  deletions: 0
+- path: crates/rpc/rpc-eth-api/src/helpers/transaction.rs
+  additions: 19
+  deletions: 1
+- path: crates/rpc/rpc-eth-types/src/cache/config.rs
+  additions: 4
+  deletions: 1
+- path: crates/rpc/rpc-eth-types/src/cache/mod.rs
+  additions: 101
+  deletions: 4
+- path: crates/rpc/rpc-eth-types/src/lib.rs
+  additions: 1
+  deletions: 1
+- path: crates/rpc/rpc-server-types/src/constants.rs
+  additions: 3
+  deletions: 0
+body: "## **Summary**\r\n\r\nAdds O(1) transaction hash lookup caching to the RPC layer's `EthStateCache`. This speeds up `eth_getTransactionByHash` and `eth_getTransactionReceipt` for recently cached blocks by avoiding database lookups.\r\n\r\n## Changes\r\n\r\n- Introduces `CachedTransaction<B, R>` helper struct containing:\r\n  - `block: Arc<RecoveredBlock<B>>` - the cached block (shared with block cache)\r\n  - `tx_index: usize` - transaction index within the block\r\n  - `receipts: Option<Arc<Vec<R>>>` - optional receipts (shared with receipts cache)\r\n\r\n- Adds `tx_hash_index: LruMap<TxHash, (B256, usize)>` to `EthStateCacheService` that indexes transaction hashes to their block hash and index\r\n\r\n- New `get_transaction_by_hash()` method returns the full `CachedTransaction` with block and optional receipts in a single lookup\r\n\r\n- Transactions are indexed when new canonical blocks arrive via `CacheNewCanonicalChain` and removed on reorgs via `RemoveReorgedChain`\r\n\r\n- Adds `--rpc-cache.max-cached-tx-hashes` CLI option (default: 20,000) to configure the transaction hash cache size"

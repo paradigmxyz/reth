@@ -1,0 +1,19 @@
+number: 20799
+title: 'perf(rpc): reuse EVM instance in debug_traceBlock'
+state: open
+author: t-nakatani
+head: perf/rpc-debug-trace-block
+base: main
+labels:
+- C-enhancement
+- A-rpc
+created_at: 2026-01-07T11:32:55Z
+updated_at: 2026-01-14T11:00:56Z
+additions: 15
+deletions: 11
+is_draft: false
+files:
+- path: crates/rpc/rpc/src/debug.rs
+  additions: 15
+  deletions: 11
+body: "This closes #17045\r\n\r\nNoticed this issue was sitting idle, so I took a stab at it.\r\n\r\n## Summary\r\n\r\nReuse a single EVM instance across all transactions when tracing a block in the `debug_` API, matching the optimization already present in the `trace_` API.\r\n\r\n## Motivation\r\n\r\nPreviously, `debug_traceBlock` (and related methods) called `eth_api.inspect()` for each transaction in a loop, which creates a new EVM instance every time:\r\n\r\n## Changes\r\n\r\nThis PR implements EVM reuse manually in `debug.rs`:\r\n\r\n1. Create the EVM once before the loop using `evm_with_env_and_inspector()`\r\n2. Call `evm.transact()` for each transaction (reusing the same EVM)\r\n3. Access inspector and database through `evm.components_mut()` for `get_result()`, `fuse()`, and `commit()`\r\n\r\n> we recently added support for reusing the evm for block tracing:\r\nwhich we can mirror for the debug_ api as well.\r\n\r\nThe `trace_` API already solved this problem using `create_tracer().try_trace_many()` and `trace_block_until_with_inspector()`. However, these APIs require `Inspector: Clone`.\r\n\r\n"

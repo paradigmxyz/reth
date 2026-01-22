@@ -1,0 +1,23 @@
+number: 20698
+title: 'refactor(stages): extract IncrementalSettings struct from MerkleStage'
+state: open
+author: meetrick
+head: refactor/merkle-incremental-settings
+base: main
+labels: []
+created_at: 2026-01-02T03:12:06Z
+updated_at: 2026-01-10T15:16:41Z
+additions: 55
+deletions: 54
+is_draft: false
+files:
+- path: crates/cli/commands/src/stage/dump/merkle.rs
+  additions: 2
+  deletions: 2
+- path: crates/stages/stages/benches/criterion.rs
+  additions: 7
+  deletions: 3
+- path: crates/stages/stages/src/stages/merkle.rs
+  additions: 46
+  deletions: 49
+body: "refactor(stages): extract IncrementalSettings struct from MerkleStage\r\n\r\n## Problem\r\n\r\nThe `MerkleStage` enum duplicated the `rebuild_threshold` and `incremental_threshold` fields across both the `Execution` and `Both` variants. This required making the same changes in multiple places when modifying threshold-related behavior, increasing maintenance overhead and the risk of inconsistencies.\r\n\r\n## Analysis\r\n\r\nBoth variants use these thresholds in exactly the same way inside `execute()`: they determine when to rebuild the trie versus apply incremental updates, and they control the chunk size in incremental mode. The `unwind()` path does not reference these values at all. The only behavioral difference between the variants is that `Execution` skips unwind, while `Both` supports both execution and unwind. No behavioral changes are introduced by this refactor, making it safe to consolidate the duplicated fields.\r\n\r\n## Solution\r\n\r\nIntroduce a new `IncrementalSettings` struct that encapsulates both threshold fields and provides a `Default` implementation. The relevant `MerkleStage` variants now store this struct instead of duplicating the fields. This refactor is purely structural and does not change stage semantics or public behavior.\r\n\r\n## Changes\r\n\r\n- `crates/stages/stages/src/stages/merkle.rs`: added `IncrementalSettings`, updated enum variants, and adjusted match patterns\r\n- `crates/cli/commands/src/stage/dump/merkle.rs`: updated `MerkleStage::Execution` construction\r\n- `crates/stages/stages/benches/criterion.rs`: updated `MerkleStage::Both` construction\r\n\r\nCode paths using `new_execution()` or `default_unwind()` required no changes.\r\n\r\n## Verification\r\n\r\n- All 104 tests in `reth-stages` passed\r\n- Full workspace build succeeded\r\n- Clippy passed with no warnings"

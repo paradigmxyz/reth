@@ -232,8 +232,8 @@ impl<
     /// collector.
     ///
     /// If `enable_reload` is true, the returned [`TracingInitResult`] will contain a
-    /// [`LogLevelHandle`] that can be used to change log levels at runtime via RPC methods
-    /// like `debug_verbosity` and `debug_vmodule`.
+    /// [`LogLevelHandle`](reth_tracing::LogLevelHandle) that can be used to change log levels
+    /// at runtime via RPC methods like `debug_verbosity` and `debug_vmodule`.
     pub fn init_tracing(
         &mut self,
         runner: &CliRunner,

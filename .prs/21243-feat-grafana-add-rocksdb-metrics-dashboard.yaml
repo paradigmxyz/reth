@@ -1,0 +1,91 @@
+number: 21243
+title: 'feat(grafana): add RocksDB metrics dashboard'
+state: open
+author: joshieDo
+head: joshie/rocksdb-grafana-dashboard
+base: main
+labels: []
+created_at: 2026-01-21T10:12:47Z
+updated_at: 2026-01-21T15:19:08Z
+additions: 1005
+deletions: 240
+is_draft: false
+files:
+- path: crates/node/builder/src/launch/common.rs
+  additions: 4
+  deletions: 0
+- path: crates/node/metrics/src/server.rs
+  additions: 21
+  deletions: 0
+- path: crates/storage/provider/Cargo.toml
+  additions: 1
+  deletions: 1
+- path: crates/storage/provider/src/providers/rocksdb/provider.rs
+  additions: 38
+  deletions: 0
+- path: crates/storage/provider/src/providers/rocksdb_stub.rs
+  additions: 8
+  deletions: 1
+- path: etc/grafana/dashboards/overview.json
+  additions: 933
+  deletions: 238
+body: |-
+  ## Summary
+
+  Adds RocksDB metrics to the Grafana overview dashboard, mirroring the existing MDBX database section.
+
+  ### Dashboard Panels Added
+
+  | Panel | Type | Description |
+  |-------|------|-------------|
+  | RocksDB Tables Size | Pie chart | Size of each table (SST files + memtables) |
+  | RocksDB Entries per Table | Table | Estimated number of keys per table |
+  | RocksDB Pending Compaction | Table | Bytes pending compaction per table |
+  | RocksDB Storage Breakdown | Table | SST file size and memtable size per table |
+  | RocksDB Growth | Timeseries | Total size over time |
+  | RocksDB Pending Compaction Over Time | Timeseries | Compaction backlog over time |
+
+  ### Code Changes
+
+  1. **Implements `DatabaseMetrics` trait for `RocksDBProvider`** to expose:
+     - `reth_rocksdb_table_size`: estimated size of each table in bytes
+     - `reth_rocksdb_table_entries`: estimated number of keys per table
+     - `reth_rocksdb_pending_compaction_bytes`: bytes pending compaction
+     - `reth_rocksdb_sst_size`: size of SST files on disk
+     - `reth_rocksdb_memtable_size`: size of memtables in memory
+
+  2. **Adds `describe_rocksdb_metrics()`** to register metric descriptions with proper `# HELP` and `# TYPE` annotations in Prometheus output
+
+  3. **Adds metrics hook** in `metrics_hooks()` to call `report_metrics()` on RocksDBProvider (throttled to every 5 minutes)
+
+  4. **Enables `rocksdb` feature** when `edge` feature is enabled in reth-provider
+
+  5. **Implements `DatabaseMetrics` for stub** so code compiles without rocksdb feature (no-op)
+
+  ### Metrics Exposed
+
+  ```
+  # HELP rocksdb_table_size The estimated size of a RocksDB table (SST + memtable)
+  # TYPE rocksdb_table_size gauge
+  reth_rocksdb_table_size{table="TransactionHashNumbers"} 1050624
+
+  # HELP rocksdb_table_entries The estimated number of keys in a RocksDB table
+  # TYPE rocksdb_table_entries gauge
+  reth_rocksdb_table_entries{table="TransactionHashNumbers"} 9865
+
+  # HELP rocksdb_pending_compaction_bytes Bytes pending compaction for a RocksDB table
+  # TYPE rocksdb_pending_compaction_bytes gauge
+  reth_rocksdb_pending_compaction_bytes{table="TransactionHashNumbers"} 0
+
+  # HELP rocksdb_sst_size The size of SST files for a RocksDB table
+  # TYPE rocksdb_sst_size gauge
+  reth_rocksdb_sst_size{table="TransactionHashNumbers"} 0
+
+  # HELP rocksdb_memtable_size The size of memtables for a RocksDB table
+  # TYPE rocksdb_memtable_size gauge
+  reth_rocksdb_memtable_size{table="TransactionHashNumbers"} 2048
+  ```
+
+  <img width="1595" height="658" alt="image" src="https://github.com/user-attachments/assets/f09df634-82a2-446f-9848-0390a15ac033" />
+
+  <img width="543" height="366" alt="image" src="https://github.com/user-attachments/assets/b6af7442-225a-4400-80e2-f79141335cfd" />

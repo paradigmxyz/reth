@@ -1,0 +1,40 @@
+number: 21257
+title: 'feat(chainspec): add earliest_block to ChainInfo'
+state: open
+author: mattsse
+head: matt/chain-info-earliest-block
+base: main
+labels:
+- A-sdk
+created_at: 2026-01-21T15:21:59Z
+updated_at: 2026-01-21T15:23:34Z
+additions: 27
+deletions: 6
+is_draft: true
+files:
+- path: crates/chain-state/src/chain_info.rs
+  additions: 1
+  deletions: 1
+- path: crates/chainspec/src/info.rs
+  additions: 5
+  deletions: 0
+- path: crates/storage/provider/src/providers/consistent.rs
+  additions: 5
+  deletions: 1
+- path: crates/storage/provider/src/providers/database/provider.rs
+  additions: 1
+  deletions: 1
+- path: crates/storage/provider/src/test_utils/mock.rs
+  additions: 5
+  deletions: 1
+- path: crates/storage/rpc-provider/src/lib.rs
+  additions: 10
+  deletions: 2
+body: |-
+  Add `earliest_block` field to `ChainInfo` struct to track the lowest block height still retained. This is useful for determining what data has expired (e.g., due to pruning).
+
+  ## Changes
+  - Added `earliest_block: BlockNumber` field to `ChainInfo` (defaults to 0)
+  - Updated all `ChainInfo` construction sites to include the new field
+
+  Towards #20038

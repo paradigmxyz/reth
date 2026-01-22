@@ -1,0 +1,30 @@
+number: 21247
+title: 'feat(engine-api): add BAL cache for EIP-7928'
+state: open
+author: mattsse
+head: feat/bal-cache
+base: main
+labels:
+- A-rpc
+created_at: 2026-01-21T10:35:28Z
+updated_at: 2026-01-21T11:36:08Z
+additions: 376
+deletions: 16
+is_draft: false
+files:
+- path: Cargo.lock
+  additions: 1
+  deletions: 0
+- path: crates/rpc/rpc-engine-api/Cargo.toml
+  additions: 1
+  deletions: 0
+- path: crates/rpc/rpc-engine-api/src/bal_cache.rs
+  additions: 274
+  deletions: 0
+- path: crates/rpc/rpc-engine-api/src/engine_api.rs
+  additions: 96
+  deletions: 16
+- path: crates/rpc/rpc-engine-api/src/lib.rs
+  additions: 4
+  deletions: 0
+body: "## Summary\n\nIntroduces an in-memory LRU cache for Block Access Lists (BALs) in the Engine API, building on #21204.\n\n## Changes\n\n- Add `BalCache` with internal `Arc` for cheap cloning\n- Store BALs keyed by block hash with block number index for range queries  \n- Implement `engine_getBALsByHashV1` and `engine_getBALsByRangeV1` to retrieve from cache\n- Cache BALs when `newPayload` returns `VALID` status\n- Add metrics for cache inserts/hits/misses\n\n## EIP-7928 Compliance\n\nPer [EIP-7928](https://eips.ethereum.org/EIPS/eip-7928), the EL should retain BALs for at least the weak subjectivity period (~3533 epochs ≈ 113,000 blocks). This initial implementation uses a configurable LRU cache (default 1024 entries) as a starting point.\n\n## Next Steps\n\n- Wire up `ExecutionPayload::block_access_list()` to return actual BAL data (currently returns `None`)\n- Consider disk-backed storage for full WSP retention\n- Add network-based BAL retrieval for missing entries"

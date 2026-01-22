@@ -1,0 +1,87 @@
+number: 21138
+title: 'perf(storage): derive history indices from in-memory state'
+state: open
+author: gakonst
+head: georgios/history-indices-from-memory
+base: main
+labels:
+- C-perf
+- S-needs-benchmark
+created_at: 2026-01-16T18:20:49Z
+updated_at: 2026-01-19T14:31:25Z
+additions: 1541
+deletions: 6
+is_draft: false
+files:
+- path: crates/engine/tree/Cargo.toml
+  additions: 8
+  deletions: 0
+- path: crates/engine/tree/benches/execution_cache.rs
+  additions: 374
+  deletions: 0
+- path: crates/engine/tree/benches/heavy_persistence.rs
+  additions: 363
+  deletions: 0
+- path: crates/storage/provider/src/providers/database/provider.rs
+  additions: 51
+  deletions: 6
+- path: crates/storage/provider/src/writer/mod.rs
+  additions: 169
+  deletions: 0
+- path: crates/trie/parallel/Cargo.toml
+  additions: 4
+  deletions: 0
+- path: crates/trie/parallel/benches/heavy_root.rs
+  additions: 330
+  deletions: 0
+- path: docs/perf/OPTIMIZATION_OPPORTUNITIES.md
+  additions: 170
+  deletions: 0
+- path: scripts/bench-heavy.sh
+  additions: 72
+  deletions: 0
+body: |-
+  ## Summary
+
+  Derives history indices directly from in-memory `ExecutionOutcome` instead of scanning database tables.
+
+  ## Problem
+
+  Per #eng-perf profiling, `update_history_indices` was taking **26% of persistence time**. The current implementation:
+  1. Writes state to DB (including changesets)
+  2. Scans `AccountChangeSets` and `StorageChangeSets` tables via cursor to build history indices
+
+  ## Solution
+
+  Collect account/storage transitions from the in-memory `ExecutionOutcome` during the block processing loop, avoiding the expensive DB cursor scans entirely.
+
+  ```rust
+  // Collect from in-memory state during block loop
+  for (address, account) in execution_output.state.state().iter() {
+      if account.status.is_not_modified() { continue; }
+      account_transitions.entry(*address).or_default().push(block_number);
+      for (slot, _) in account.storage.iter() {
+          storage_transitions.entry((*address, slot_key)).or_default().push(block_number);
+      }
+  }
+
+  // Write directly without DB scan
+  self.insert_account_history_index(account_transitions)?;
+  self.insert_storage_history_index(storage_transitions)?;
+  ```
+
+  ## Expected Impact
+
+  - **~26% reduction** in `update_history_indices` time
+  - Eliminates DB cursor scans in persistence hot path
+  - No change in behavior - same indices written
+
+  ## Testing
+
+  - All existing `reth-provider` tests pass
+  - Run benchmark: `cargo bench -p reth-engine-tree --bench heavy_persistence -- history_indices`
+
+  ## Related
+
+  - Based on analysis from #eng-perf Slack channel
+  - See also: `georgios/heavy-benchmarks` branch for benchmark harness

@@ -1,0 +1,17 @@
+number: 20646
+title: 'fix(db-api): set is_done=true in RangeWalker when cursor returns None'
+state: open
+author: dizer-ti
+head: fix/range-walker-is-done-on-empty
+base: main
+labels: []
+created_at: 2025-12-26T11:15:12Z
+updated_at: 2026-01-10T15:16:41Z
+additions: 1
+deletions: 1
+is_draft: false
+files:
+- path: crates/storage/db-api/src/cursor.rs
+  additions: 1
+  deletions: 1
+body: "Set `is_done` to `true` in `RangeWalker::next()` when cursor returns `None`, regardless of the range bound type. Previously, `is_done` was only set for `Unbounded` ranges, leading to unnecessary `cursor.next()` calls on subsequent \r\n iterations for bounded ranges."

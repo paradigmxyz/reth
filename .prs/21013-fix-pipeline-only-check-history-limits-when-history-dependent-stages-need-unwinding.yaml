@@ -1,0 +1,40 @@
+number: 21013
+title: 'fix(pipeline): only check history limits when history-dependent stages need unwinding'
+state: open
+author: yongkangc
+head: fix/unwind-history-limit-check
+base: main
+labels: []
+created_at: 2026-01-13T18:36:13Z
+updated_at: 2026-01-19T07:32:47Z
+additions: 109
+deletions: 19
+is_draft: false
+files:
+- path: crates/cli/commands/src/common.rs
+  additions: 26
+  deletions: 5
+- path: crates/node/builder/src/launch/common.rs
+  additions: 24
+  deletions: 2
+- path: crates/prune/types/src/target.rs
+  additions: 3
+  deletions: 3
+- path: crates/stages/api/src/pipeline/mod.rs
+  additions: 56
+  deletions: 9
+body: |-
+  Fixes cases where a static file inconsistency (e.g., corrupted TransactionSenders) triggers an unwind that fails due to pruned history, even though the affected stage doesn't need history to unwind.
+
+  The `ensure_unwind_target_unpruned` check was applied universally, but only three stages actually need account/storage changesets to unwind:
+  - `Execution`: reverts plain state using changesets
+  - `AccountHashing`: reads `AccountChangeSets` via `unwind_account_hashing_range()`
+  - `StorageHashing`: reads `StorageChangeSets` via `unwind_storage_hashing_range()`
+
+  Other stages like Headers, Bodies, and SenderRecovery can unwind without history data.
+
+  This PR:
+  1. Adds `STAGES_REQUIRING_HISTORY_FOR_UNWIND` constant listing all history-dependent stages
+  2. Extracts checking logic into `any_history_dependent_stage_needs_unwind()` helper
+  3. Only enforces pruning limits when at least one of these stages would actually unwind
+  4. Adds pre-checks in node launcher and CLI to detect unrecoverable situations early with clear error messages

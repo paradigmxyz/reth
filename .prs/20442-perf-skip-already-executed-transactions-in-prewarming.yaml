@@ -1,0 +1,26 @@
+number: 20442
+title: 'perf: skip already executed transactions in prewarming'
+state: open
+author: gancerlory
+head: prewarming
+base: main
+labels: []
+created_at: 2025-12-16T21:02:07Z
+updated_at: 2026-01-11T02:17:09Z
+additions: 98
+deletions: 27
+is_draft: false
+files:
+- path: crates/engine/tree/src/tree/metrics.rs
+  additions: 14
+  deletions: 1
+- path: crates/engine/tree/src/tree/payload_processor/mod.rs
+  additions: 30
+  deletions: 10
+- path: crates/engine/tree/src/tree/payload_processor/prewarm.rs
+  additions: 52
+  deletions: 16
+- path: crates/engine/tree/src/tree/payload_validator.rs
+  additions: 2
+  deletions: 0
+body: "Closes #20433\r\n\r\nPrewarming was processing transactions without knowing which ones already ran in the main execution path. Now shares an `AtomicUsize` counter so prewarming can skip the ones that are done.\r\n\r\nPass original tx index through prewarm channel instead of using receive order,main execution updates shared counter after each tx, prewarming skips txs with index < current executed index\r\n\r\nBTW its strange that the todo comment that in the issue is missing...."

@@ -1,0 +1,21 @@
+number: 20674
+title: 'perf(provider): optimize RocksDB history pruning with changeset-based approach'
+state: open
+author: meetrick
+head: reth/storage-optimize_RocksDB
+base: main
+labels:
+- A-rocksdb
+created_at: 2025-12-30T03:32:07Z
+updated_at: 2026-01-10T15:16:41Z
+additions: 514
+deletions: 27
+is_draft: false
+files:
+- path: crates/storage/provider/src/providers/rocksdb/invariants.rs
+  additions: 501
+  deletions: 27
+- path: crates/storage/provider/src/providers/rocksdb/provider.rs
+  additions: 13
+  deletions: 0
+body: "## Summary\r\nOptimizes `StoragesHistory` and `AccountsHistory` pruning in RocksDB by using\r\nMDBX changesets instead of iterating the entire history tables.\r\n- Closes #20417\r\n\r\n## Problem\r\nDuring consistency checks (e.g. after crash recovery), RocksDB history pruning\r\ncurrently scans the entire `StoragesHistory` / `AccountsHistory` tables to\r\ndelete entries above a given block.\r\n\r\nOn mainnet-scale databases, this results in unnecessary full table scans and\r\nslow startup times.\r\n\r\n## Solution\r\nUse MDBX `StorageChangeSets` and `AccountChangeSets` to identify only the\r\n(address, key) pairs that changed in the excess block range, and prune\r\ncorresponding history entries using `iter_from` seeks.\r\n\r\nIf changeset data is unavailable or incomplete, the logic safely falls back\r\nto a full table scan to preserve correctness.\r\n\r\n### Key Changes\r\n- Add `iter_from` to `RocksDBProvider` for efficient seek-based iteration\r\n- Prune history entries based on MDBX changesets instead of full scans\r\n- Retain a full-scan fallback for safety\r\n- Add a defensive check to catch missed entries in edge cases\r\n\r\n## Testing\r\n- All existing RocksDB invariant tests pass\r\n- Added tests to verify the defensive fallback when changesets are incomplete:\r\n  - `test_storages_history_defensive_check_catches_missed_entries`\r\n  - `test_accounts_history_defensive_check_catches_missed_entries`"

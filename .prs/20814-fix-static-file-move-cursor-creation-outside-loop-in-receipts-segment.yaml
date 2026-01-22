@@ -1,0 +1,17 @@
+number: 20814
+title: 'fix(static-file): move cursor creation outside loop in receipts segment'
+state: open
+author: dizer-ti
+head: fix/static-file-cursor-reuse
+base: main
+labels: []
+created_at: 2026-01-07T17:30:11Z
+updated_at: 2026-01-10T15:16:41Z
+additions: 4
+deletions: 4
+is_draft: false
+files:
+- path: crates/static-file/static-file/src/segments/receipts.rs
+  additions: 4
+  deletions: 4
+body: The receipts cursor was being recreated on every block iteration in `copy_to_static_files`. This is unnecessary since `walk_range` performs a seek to the start of the range internally, so a single cursor can be reused across multiple sequential ranges. Moved cursor creation before the loop to avoid redundant allocations.
