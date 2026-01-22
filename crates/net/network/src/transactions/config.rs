@@ -110,6 +110,9 @@ pub struct TransactionFetcherConfig {
     /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) yet, or it wasn't returned
     /// upon request to peers.
     pub max_capacity_cache_txns_pending_fetch: u32,
+    /// Enables the experimental per-peer queue based scheduler for fetching transactions.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub enable_peer_queue_scheduler: bool,
 }
 
 impl Default for TransactionFetcherConfig {
@@ -121,7 +124,8 @@ impl Default for TransactionFetcherConfig {
                 SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request:
                 DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
-                max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+            max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+            enable_peer_queue_scheduler: true,
         }
     }
 }
