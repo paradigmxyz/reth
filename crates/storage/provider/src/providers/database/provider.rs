@@ -95,6 +95,13 @@ pub enum CommitOrder {
     Unwind,
 }
 
+impl CommitOrder {
+    /// Returns true if this is unwind commit order.
+    pub const fn is_unwind(&self) -> bool {
+        matches!(self, Self::Unwind)
+    }
+}
+
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
 
@@ -3550,8 +3557,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         // it is interrupted before the static files commit, we can just
         // truncate the static files according to the
         // checkpoints on the next start-up.
-        if self.static_file_provider.has_unwind_queued() || self.commit_order == CommitOrder::Unwind
-        {
+        if self.static_file_provider.has_unwind_queued() || self.commit_order.is_unwind() {
             self.tx.commit()?;
 
             #[cfg(all(unix, feature = "rocksdb"))]
