@@ -3,6 +3,19 @@
 //! This module provides consistency checks for tables stored in `RocksDB`, similar to the
 //! consistency checks for static files. The goal is to detect and potentially heal
 //! inconsistencies between `RocksDB` data and MDBX checkpoints.
+//!
+//! # Safety Invariant
+//!
+//! `RocksDB` history indices (`AccountsHistory`, `StoragesHistory`) are derived data that
+//! index into changesets. They can only be safely stored in `RocksDB` when changesets are
+//! in static files (append-only, crash-stable), not MDBX (can be unwound).
+//!
+//! This is because after a crash during unwind, `RocksDB` history could reference block
+//! numbers whose changesets were already removed from MDBX, causing "future state lookups"
+//! or missing data.
+//!
+//! This invariant is enforced by [`StorageSettings::validate`] at configuration time,
+//! which requires `account_changesets_in_static_files=true` when any history is in `RocksDB`.
 
 use super::RocksDBProvider;
 use crate::StaticFileProviderFactory;

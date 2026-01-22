@@ -123,4 +123,74 @@ impl StorageSettings {
             self.account_history_in_rocksdb ||
             self.storages_history_in_rocksdb
     }
+
+    /// Returns `true` if any history indices are configured for `RocksDB`.
+    pub const fn any_history_in_rocksdb(&self) -> bool {
+        self.account_history_in_rocksdb || self.storages_history_in_rocksdb
+    }
+
+    /// Validates that the storage settings are consistent.
+    ///
+    /// # Invariant
+    ///
+    /// `RocksDB` history indices (`AccountsHistory`, `StoragesHistory`) are derived data
+    /// that index into changesets. They can only be safely stored in `RocksDB` when
+    /// changesets are in static files (append-only, crash-stable), not MDBX (can be unwound).
+    ///
+    /// This is because after a crash during unwind, `RocksDB` history could reference
+    /// block numbers whose changesets were already removed from MDBX, causing "future
+    /// state lookups" or missing data.
+    ///
+    /// Returns `Err` with a description if the configuration is invalid.
+    pub const fn validate(&self) -> Result<(), &'static str> {
+        if self.any_history_in_rocksdb() && !self.account_changesets_in_static_files {
+            return Err("RocksDB history indices require account_changesets_in_static_files=true; \
+                 otherwise crash/unwind can diverge RocksDB history from MDBX changesets");
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_storage_settings_validate_legacy_is_valid() {
+        assert!(StorageSettings::legacy().validate().is_ok());
+    }
+
+    #[test]
+    #[cfg(feature = "edge")]
+    fn test_storage_settings_validate_edge_is_valid() {
+        assert!(StorageSettings::edge().validate().is_ok());
+    }
+
+    #[test]
+    fn test_storage_settings_validate_history_without_changesets_is_invalid() {
+        let settings = StorageSettings::legacy().with_account_history_in_rocksdb(true);
+        assert!(settings.validate().is_err());
+
+        let settings = StorageSettings::legacy().with_storages_history_in_rocksdb(true);
+        assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn test_storage_settings_validate_history_with_changesets_is_valid() {
+        let settings = StorageSettings::legacy()
+            .with_account_changesets_in_static_files(true)
+            .with_account_history_in_rocksdb(true);
+        assert!(settings.validate().is_ok());
+
+        let settings = StorageSettings::legacy()
+            .with_account_changesets_in_static_files(true)
+            .with_storages_history_in_rocksdb(true);
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn test_storage_settings_validate_tx_hash_without_changesets_is_valid() {
+        let settings = StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true);
+        assert!(settings.validate().is_ok());
+    }
 }

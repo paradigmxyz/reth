@@ -66,6 +66,9 @@ pub enum InitStorageError {
         /// Actual genesis hash.
         storage_hash: B256,
     },
+    /// Invalid storage settings configuration.
+    #[error("invalid storage settings: {0}")]
+    InvalidStorageSettings(&'static str),
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
@@ -175,6 +178,11 @@ where
     }
 
     debug!("Writing genesis block.");
+
+    // Validate storage settings configuration
+    if let Err(e) = genesis_storage_settings.validate() {
+        return Err(InitStorageError::InvalidStorageSettings(e));
+    }
 
     // Make sure to set storage settings before anything writes
     factory.set_storage_settings_cache(genesis_storage_settings);

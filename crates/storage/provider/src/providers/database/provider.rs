@@ -2362,6 +2362,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
         let storage_range = BlockNumberAddress::range(range.clone());
 
+        // Unwind history indices BEFORE taking (deleting) the changesets.
+        // This is critical for RocksDB history: if we delete the changesets first,
+        // we lose the data needed to know which history entries to unwind.
+        self.unwind_storage_history_indices_range(storage_range.clone())?;
+        self.unwind_account_history_indices_range(range.clone())?;
+
         let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
         let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
 
@@ -2457,6 +2463,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             block_bodies.last().expect("already checked if there are blocks").last_tx_num();
 
         let storage_range = BlockNumberAddress::range(range.clone());
+
+        // Unwind history indices BEFORE taking (deleting) the changesets.
+        // This is critical for RocksDB history: if we delete the changesets first,
+        // we lose the data needed to know which history entries to unwind.
+        self.unwind_storage_history_indices_range(storage_range.clone())?;
+        self.unwind_account_history_indices_range(range.clone())?;
 
         let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
 
@@ -3487,23 +3499,19 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
     /// Commit database transaction, static files, and pending `RocksDB` batches.
     ///
-    /// # Commit Order (Critical for Correctness)
+    /// # Commit Order
     ///
-    /// `RocksDB` history indices must commit AFTER MDBX changesets to prevent a race
-    /// condition where history indices point to non-existent changesets:
+    /// 1. Static files finalize (headers, transactions, receipts, changesets)
+    /// 2. `RocksDB` commits (tx hash lookups, history indices)
+    /// 3. MDBX commits (plain state, other tables)
     ///
-    /// 1. Static files finalize (headers, transactions, receipts)
-    /// 2. MDBX commits (changesets become visible)
-    /// 3. `RocksDB` batches commit (non-history data like tx hashes)
-    /// 4. `RocksDB` history commits (account/storage history indices)
+    /// # Safety Invariant
     ///
-    /// This ordering ensures that when a reader follows a `RocksDB` history index
-    /// to a changeset, the changeset exists in MDBX.
-    ///
-    /// TODO(<https://github.com/paradigmxyz/reth/issues/18983>): When changesets move to static
-    /// files, the order should become: `static_file` → `RocksDB` → MDBX. This matches the data
-    /// dependency chain where `RocksDB` indices reference static file data (e.g., history
-    /// indices will reference changesets in static files, tx hash lookups reference txs).
+    /// `RocksDB` history indices are only safe when changesets are in static files
+    /// (crash-stable), not MDBX. This is enforced by [`StorageSettings::validate`]
+    /// at configuration time. With changesets in static files, the commit order
+    /// above is safe because `RocksDB` history indices reference static file data
+    /// which is already committed.
     fn commit(self) -> ProviderResult<()> {
         // For unwinding it makes more sense to commit the database first, since if
         // it is interrupted before the static files commit, we can just
@@ -3514,13 +3522,11 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
             #[cfg(all(unix, feature = "rocksdb"))]
             {
-                // Commit non-history batches
                 let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
                 for batch in batches {
                     self.rocksdb_provider.commit_batch(batch)?;
                 }
 
-                // Commit pending history (after MDBX, so changesets exist)
                 let history = std::mem::take(&mut *self.pending_rocksdb_history.lock());
                 self.rocksdb_provider.commit_pending_history(history)?;
             }
@@ -3534,29 +3540,24 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             self.static_file_provider.finalize()?;
             timings.sf = start.elapsed();
 
-            // CRITICAL: MDBX must commit BEFORE RocksDB history indices.
-            // This prevents a race where history says "look at changeset N" but
-            // the changeset doesn't exist yet.
-            let start = Instant::now();
-            self.tx.commit()?;
-            timings.mdbx = start.elapsed();
-
             #[cfg(all(unix, feature = "rocksdb"))]
             {
                 let start = Instant::now();
 
-                // Commit non-history batches (tx hashes, etc.)
                 let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
                 for batch in batches {
                     self.rocksdb_provider.commit_batch(batch)?;
                 }
 
-                // Commit pending history (after MDBX, so changesets exist)
                 let history = std::mem::take(&mut *self.pending_rocksdb_history.lock());
                 self.rocksdb_provider.commit_pending_history(history)?;
 
                 timings.rocksdb = start.elapsed();
             }
+
+            let start = Instant::now();
+            self.tx.commit()?;
+            timings.mdbx = start.elapsed();
 
             self.metrics.record_commit(&timings);
         }
