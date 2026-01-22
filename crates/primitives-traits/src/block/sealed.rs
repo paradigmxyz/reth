@@ -510,27 +510,12 @@ mod tests {
     fn test_sealed_block_rlp_roundtrip() {
         // Create a sample block using alloy_consensus::Block
         let header = alloy_consensus::Header {
-            parent_hash: B256::ZERO,
-            ommers_hash: B256::ZERO,
-            beneficiary: Address::ZERO,
-            state_root: B256::ZERO,
-            transactions_root: B256::ZERO,
-            receipts_root: B256::ZERO,
-            logs_bloom: Default::default(),
-            difficulty: Default::default(),
             number: 42,
             gas_limit: 30_000_000,
             gas_used: 21_000,
             timestamp: 1_000_000,
-            extra_data: Default::default(),
-            mix_hash: B256::ZERO,
-            nonce: Default::default(),
             base_fee_per_gas: Some(1_000_000_000),
-            withdrawals_root: None,
-            blob_gas_used: None,
-            excess_blob_gas: None,
-            parent_beacon_block_root: None,
-            requests_hash: None,
+            ..Default::default()
         };
 
         // Create a simple transaction
@@ -585,27 +570,12 @@ mod tests {
     fn test_decode_sealed_produces_correct_hash() {
         // Create a sample block using alloy_consensus::Block
         let header = alloy_consensus::Header {
-            parent_hash: B256::ZERO,
-            ommers_hash: B256::ZERO,
-            beneficiary: Address::ZERO,
-            state_root: B256::ZERO,
-            transactions_root: B256::ZERO,
-            receipts_root: B256::ZERO,
-            logs_bloom: Default::default(),
-            difficulty: Default::default(),
             number: 42,
             gas_limit: 30_000_000,
             gas_used: 21_000,
             timestamp: 1_000_000,
-            extra_data: Default::default(),
-            mix_hash: B256::ZERO,
-            nonce: Default::default(),
             base_fee_per_gas: Some(1_000_000_000),
-            withdrawals_root: None,
-            blob_gas_used: None,
-            excess_blob_gas: None,
-            parent_beacon_block_root: None,
-            requests_hash: None,
+            ..Default::default()
         };
 
         // Create a simple transaction

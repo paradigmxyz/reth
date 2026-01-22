@@ -297,6 +297,11 @@ where
                     // Replace the shared cache with the new one; the previous cache (if any) is
                     // dropped.
                     *cached = Some(new_cache);
+                } else {
+                    // Block was invalid; caches were already mutated by insert_state above,
+                    // so we must clear to prevent using polluted state
+                    *cached = None;
+                    debug!(target: "engine::caching", "cleared execution cache on invalid block");
                 }
             });
 

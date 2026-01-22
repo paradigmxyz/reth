@@ -12,6 +12,10 @@ pub enum StageId {
         note = "Static Files are generated outside of the pipeline and do not require a separate stage"
     )]
     StaticFile,
+    #[deprecated(
+        note = "MerkleChangeSets stage has been removed; kept for DB checkpoint compatibility"
+    )]
+    MerkleChangeSets,
     Era,
     Headers,
     Bodies,
@@ -75,6 +79,8 @@ impl StageId {
         match self {
             #[expect(deprecated)]
             Self::StaticFile => "StaticFile",
+            #[expect(deprecated)]
+            Self::MerkleChangeSets => "MerkleChangeSets",
             Self::Era => "Era",
             Self::Headers => "Headers",
             Self::Bodies => "Bodies",

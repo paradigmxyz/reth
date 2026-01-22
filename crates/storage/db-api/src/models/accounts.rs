@@ -5,7 +5,7 @@ use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
-use alloy_primitives::{Address, BlockNumber, StorageKey, B256};
+use alloy_primitives::{Address, BlockNumber, StorageKey};
 use serde::{Deserialize, Serialize};
 use std::ops::{Bound, Range, RangeBounds, RangeInclusive};
 
@@ -108,43 +108,6 @@ impl<R: RangeBounds<BlockNumber>> From<R> for BlockNumberAddressRange {
     }
 }
 
-/// [`BlockNumber`] concatenated with [`B256`] (hashed address).
-///
-/// Since it's used as a key, it isn't compressed when encoding it.
-#[derive(
-    Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Ord, PartialOrd, Hash,
-)]
-pub struct BlockNumberHashedAddress(pub (BlockNumber, B256));
-
-impl From<(BlockNumber, B256)> for BlockNumberHashedAddress {
-    fn from(tpl: (BlockNumber, B256)) -> Self {
-        Self(tpl)
-    }
-}
-
-impl Encode for BlockNumberHashedAddress {
-    type Encoded = [u8; 40];
-
-    fn encode(self) -> Self::Encoded {
-        let block_number = self.0 .0;
-        let hashed_address = self.0 .1;
-
-        let mut buf = [0u8; 40];
-
-        buf[..8].copy_from_slice(&block_number.to_be_bytes());
-        buf[8..].copy_from_slice(hashed_address.as_slice());
-        buf
-    }
-}
-
-impl Decode for BlockNumberHashedAddress {
-    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
-        let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::Decode)?);
-        let hash = B256::from_slice(&value[8..]);
-        Ok(Self((num, hash)))
-    }
-}
-
 /// [`Address`] concatenated with [`StorageKey`]. Used by `reth_etl` and history stages.
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
@@ -176,11 +139,7 @@ impl Decode for AddressStorageKey {
     }
 }
 
-impl_fixed_arbitrary!(
-    (BlockNumberAddress, 28),
-    (BlockNumberHashedAddress, 40),
-    (AddressStorageKey, 52)
-);
+impl_fixed_arbitrary!((BlockNumberAddress, 28), (AddressStorageKey, 52));
 
 #[cfg(test)]
 mod tests {
@@ -210,31 +169,6 @@ mod tests {
         let mut bytes = [0u8; 28];
         rng().fill(bytes.as_mut_slice());
         let key = BlockNumberAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
-        assert_eq!(bytes, Encode::encode(key));
-    }
-
-    #[test]
-    fn test_block_number_hashed_address() {
-        let num = 1u64;
-        let hash = B256::from_slice(&[0xba; 32]);
-        let key = BlockNumberHashedAddress((num, hash));
-
-        let mut bytes = [0u8; 40];
-        bytes[..8].copy_from_slice(&num.to_be_bytes());
-        bytes[8..].copy_from_slice(hash.as_slice());
-
-        let encoded = Encode::encode(key);
-        assert_eq!(encoded, bytes);
-
-        let decoded: BlockNumberHashedAddress = Decode::decode(&encoded).unwrap();
-        assert_eq!(decoded, key);
-    }
-
-    #[test]
-    fn test_block_number_hashed_address_rand() {
-        let mut bytes = [0u8; 40];
-        rng().fill(bytes.as_mut_slice());
-        let key = BlockNumberHashedAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
         assert_eq!(bytes, Encode::encode(key));
     }
 
