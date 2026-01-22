@@ -46,12 +46,8 @@ impl<B: Block, R> CachedTransaction<B, R> {
     {
         let receipts = self.receipts?;
         let receipt = receipts.get(self.tx_index)?;
-        let tx = self
-            .block
-            .body()
-            .transactions()
-            .get(self.tx_index)
-            .map(|tx| self.block.find_indexed(*tx.tx_hash()))??;
+        let tx_hash = *self.block.body().transactions().get(self.tx_index)?.tx_hash();
+        let tx = self.block.find_indexed(tx_hash)?;
         convert_transaction_receipt::<N, C>(
             self.block.as_ref(),
             receipts.as_ref(),
