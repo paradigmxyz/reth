@@ -29,7 +29,7 @@ use reth_trie::{
 use reth_trie_db::DatabaseStateRoot;
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 /// Default soft limit for number of bytes to read from state dump file, before inserting into
 /// database.
@@ -169,9 +169,7 @@ where
                             target: "reth::storage",
                             ?stored,
                             requested = ?genesis_storage_settings,
-                            "Storage settings mismatch: database was initialized with different \
-                             settings than currently configured. To apply new settings, delete \
-                             the datadir and resync."
+                            "Storage settings mismatch detected"
                         );
                     }
                 }
