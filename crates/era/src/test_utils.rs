@@ -35,6 +35,7 @@ pub(crate) fn create_header() -> Header {
         parent_beacon_block_root: None,
         requests_hash: None,
         block_access_list_hash: None,
+        slot_number: None,
     }
 }
 
@@ -140,6 +141,7 @@ pub(crate) fn create_test_block_with_compressed_data(number: BlockNumber) -> Blo
         parent_beacon_block_root: None,
         requests_hash: None,
         block_access_list_hash: None,
+        slot_number: None,
     };
 
     // Create test body

@@ -61,6 +61,7 @@ pub fn optimism_payload_attributes<T>(timestamp: u64) -> OpPayloadBuilderAttribu
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
+        slot_number: None,
     };
 
     OpPayloadBuilderAttributes {

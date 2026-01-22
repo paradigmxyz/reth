@@ -112,6 +112,7 @@ impl From<Header> for SealedHeader {
             parent_beacon_block_root: value.parent_beacon_block_root,
             requests_hash: value.requests_hash,
             block_access_list_hash: None,
+            slot_number: None,
         };
         Self::new(header, value.hash)
     }

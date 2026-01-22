@@ -532,6 +532,7 @@ mod tests {
             parent_beacon_block_root: None,
             requests_hash: None,
             block_access_list_hash: None,
+            slot_number: None,
         };
 
         // Create a simple transaction
@@ -608,6 +609,7 @@ mod tests {
             parent_beacon_block_root: None,
             requests_hash: None,
             block_access_list_hash: None,
+            slot_number: Some(0),
         };
 
         // Create a simple transaction

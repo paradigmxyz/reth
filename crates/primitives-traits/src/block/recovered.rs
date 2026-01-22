@@ -456,6 +456,10 @@ impl<B: Block> BlockHeader for RecoveredBlock<B> {
     fn extra_data(&self) -> &Bytes {
         self.header().extra_data()
     }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.header().slot_number()
+    }
 }
 
 impl<B: Block> Eq for RecoveredBlock<B> {}
