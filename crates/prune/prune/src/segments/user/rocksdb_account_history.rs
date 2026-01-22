@@ -1,8 +1,4 @@
-//! RocksDB `AccountsHistory` pruner segment.
-//!
-//! Prunes RocksDB history indices only. Reads changesets via `ChangeSetReader` (MDBX or static
-//! files) to determine which addresses need their history shards pruned. Does NOT delete MDBX
-//! changesets - that's handled by the regular `AccountHistory` segment.
+//! `RocksDB` account history index pruner.
 
 use crate::{
     segments::{PruneInput, Segment},
@@ -67,11 +63,6 @@ where
         let mut done = true;
 
         for block in range {
-            if limiter.is_limit_reached() {
-                done = false;
-                break;
-            }
-
             let changes = provider.account_block_changeset(block)?;
             let changes_count = changes.len();
 
@@ -82,19 +73,23 @@ where
             scanned_changesets += changes_count;
             limiter.increment_deleted_entries_count_by(changes_count);
             last_changeset_pruned_block = Some(block);
+
+            if limiter.is_limit_reached() {
+                done = false;
+                break;
+            }
         }
         trace!(target: "pruner", scanned = %scanned_changesets, %done, "Scanned account changesets");
 
-        let last_changeset_pruned_block = last_changeset_pruned_block
-            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
-            .unwrap_or(range_end);
+        let last_changeset_pruned_block = last_changeset_pruned_block.unwrap_or(range_end);
 
         let mut keys_deleted = 0usize;
         let mut keys_updated = 0usize;
 
         provider.with_rocksdb_batch(|mut batch| {
             for (address, highest_block) in &highest_deleted_accounts {
-                match batch.prune_account_history_to(*address, *highest_block)? {
+                let prune_to = (*highest_block).min(last_changeset_pruned_block);
+                match batch.prune_account_history_to(*address, prune_to)? {
                     PruneShardOutcome::Deleted => keys_deleted += 1,
                     PruneShardOutcome::Updated => keys_updated += 1,
                     PruneShardOutcome::Unchanged => {}

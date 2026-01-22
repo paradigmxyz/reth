@@ -1,9 +1,4 @@
-//! RocksDB `StoragesHistory` pruner segment.
-//!
-//! Prunes RocksDB history indices only. Reads changesets via `StorageChangeSetReader`
-//! (MDBX or static files) to determine which storage slots need history shards pruned.
-//!
-//! Does NOT delete MDBX changesets - that's handled by the regular `StorageHistory` segment.
+//! `RocksDB` storage history index pruner.
 
 use crate::{
     segments::{PruneInput, Segment},
@@ -68,11 +63,6 @@ where
         let mut done = true;
 
         for block in range {
-            if limiter.is_limit_reached() {
-                done = false;
-                break;
-            }
-
             let changes = provider.storage_block_changeset(block)?;
             let changes_count = changes.len();
 
@@ -83,19 +73,23 @@ where
             scanned_changesets += changes_count;
             limiter.increment_deleted_entries_count_by(changes_count);
             last_changeset_pruned_block = Some(block);
+
+            if limiter.is_limit_reached() {
+                done = false;
+                break;
+            }
         }
         trace!(target: "pruner", scanned = %scanned_changesets, %done, "Scanned storage changesets");
 
-        let last_changeset_pruned_block = last_changeset_pruned_block
-            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
-            .unwrap_or(range_end);
+        let last_changeset_pruned_block = last_changeset_pruned_block.unwrap_or(range_end);
 
         let mut keys_deleted = 0usize;
         let mut keys_updated = 0usize;
 
         provider.with_rocksdb_batch(|mut batch| {
             for ((address, storage_key), highest_block) in &highest_deleted_storages {
-                match batch.prune_storage_history_to(*address, *storage_key, *highest_block)? {
+                let prune_to = (*highest_block).min(last_changeset_pruned_block);
+                match batch.prune_storage_history_to(*address, *storage_key, prune_to)? {
                     PruneShardOutcome::Deleted => keys_deleted += 1,
                     PruneShardOutcome::Updated => keys_updated += 1,
                     PruneShardOutcome::Unchanged => {}
