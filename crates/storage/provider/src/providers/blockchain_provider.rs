@@ -1684,7 +1684,7 @@ mod tests {
                                 (*address, Some(Some((*account).into())), [])
                             })
                         })
-                        .collect::<Vec<_>>(),
+                        ,
                     Vec::new(),
                 ),
                 first_block: first_database_block,
