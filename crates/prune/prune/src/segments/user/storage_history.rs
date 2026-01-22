@@ -12,7 +12,7 @@ use reth_db_api::{
     tables,
     transaction::DbTxMut,
 };
-use reth_provider::{DBProvider, EitherWriter, StaticFileProviderFactory};
+use reth_provider::{DBProvider, EitherWriter, RocksDBProviderFactory, StaticFileProviderFactory};
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
@@ -43,7 +43,8 @@ where
     Provider: DBProvider<Tx: DbTxMut>
         + StaticFileProviderFactory
         + StorageChangeSetReader
-        + StorageSettingsCache,
+        + StorageSettingsCache
+        + RocksDBProviderFactory,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::StorageHistory
@@ -68,6 +69,13 @@ where
         };
         let range_end = *range.end();
 
+        // Check where storage history indices are stored
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().storages_history_in_rocksdb {
+            return self.prune_rocksdb(provider, input, range, range_end);
+        }
+
+        // Check where storage changesets are stored (MDBX path)
         if EitherWriter::storage_changesets_destination(provider).is_static_file() {
             self.prune_static_files(provider, input, range, range_end)
         } else {
@@ -215,6 +223,93 @@ impl StorageHistory {
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
         )
         .map_err(Into::into)
+    }
+
+    /// Prunes storage history when indices are stored in RocksDB.
+    ///
+    /// Reads storage changesets from static files and prunes the corresponding
+    /// RocksDB history shards.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn prune_rocksdb<Provider>(
+        &self,
+        provider: &Provider,
+        input: PruneInput,
+        range: std::ops::RangeInclusive<BlockNumber>,
+        range_end: BlockNumber,
+    ) -> Result<SegmentOutput, PrunerError>
+    where
+        Provider: DBProvider + StaticFileProviderFactory + RocksDBProviderFactory,
+    {
+        use reth_provider::PruneShardOutcome;
+
+        let mut limiter = input.limiter;
+
+        if limiter.is_limit_reached() {
+            return Ok(SegmentOutput::not_done(
+                limiter.interrupt_reason(),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ))
+        }
+
+        let mut highest_deleted_storages: FxHashMap<_, _> = FxHashMap::default();
+        let mut last_changeset_pruned_block = None;
+        let mut changesets_processed = 0usize;
+        let mut done = true;
+
+        let walker = provider.static_file_provider().walk_storage_changeset_range(range);
+        for result in walker {
+            if limiter.is_limit_reached() {
+                done = false;
+                break;
+            }
+            let (block_address, entry) = result?;
+            let block_number = block_address.block_number();
+            let address = block_address.address();
+            highest_deleted_storages.insert((address, entry.key), block_number);
+            last_changeset_pruned_block = Some(block_number);
+            changesets_processed += 1;
+            limiter.increment_deleted_entries_count();
+        }
+
+        // Delete static file jars below the pruned block
+        if let Some(last_block) = last_changeset_pruned_block {
+            provider
+                .static_file_provider()
+                .delete_segment_below_block(StaticFileSegment::StorageChangeSets, last_block + 1)?;
+        }
+        trace!(target: "pruner", processed = %changesets_processed, %done, "Scanned storage changesets from static files");
+
+        let last_changeset_pruned_block = last_changeset_pruned_block
+            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
+            .unwrap_or(range_end);
+
+        // Prune RocksDB history shards for affected storage slots
+        let mut deleted_shards = 0usize;
+        let mut updated_shards = 0usize;
+
+        provider.with_rocksdb_batch(|mut batch| {
+            for ((address, storage_key), highest_block) in &highest_deleted_storages {
+                match batch.prune_storage_history_to(*address, *storage_key, *highest_block)? {
+                    PruneShardOutcome::Deleted => deleted_shards += 1,
+                    PruneShardOutcome::Updated => updated_shards += 1,
+                    PruneShardOutcome::Unchanged => {}
+                }
+            }
+            Ok(((), Some(batch.into_inner())))
+        })?;
+
+        trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned storage history (RocksDB indices)");
+
+        let progress = limiter.progress(done);
+
+        Ok(SegmentOutput {
+            progress,
+            pruned: deleted_shards + updated_shards,
+            checkpoint: Some(SegmentOutputCheckpoint {
+                block_number: Some(last_changeset_pruned_block),
+                tx_number: None,
+            }),
+        })
     }
 }
 

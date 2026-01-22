@@ -10,13 +10,13 @@ use alloy_primitives::BlockNumber;
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
 use reth_provider::{
     changeset_walker::StaticFileAccountChangesetWalker, DBProvider, EitherWriter,
-    StaticFileProviderFactory, StorageSettingsCache,
+    RocksDBProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::ChangeSetReader;
+use reth_storage_api::{ChangeSetReader, StorageSettingsCache};
 use rustc_hash::FxHashMap;
 use tracing::{instrument, trace};
 
@@ -36,7 +36,8 @@ where
     Provider: DBProvider<Tx: DbTxMut>
         + StaticFileProviderFactory
         + StorageSettingsCache
-        + ChangeSetReader,
+        + ChangeSetReader
+        + RocksDBProviderFactory,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::AccountHistory
@@ -61,7 +62,13 @@ where
         };
         let range_end = *range.end();
 
-        // Check where account changesets are stored
+        // Check where account history indices are stored
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().account_history_in_rocksdb {
+            return self.prune_rocksdb(provider, input, range, range_end);
+        }
+
+        // Check where account changesets are stored (MDBX path)
         if EitherWriter::account_changesets_destination(provider).is_static_file() {
             self.prune_static_files(provider, input, range, range_end)
         } else {
@@ -203,6 +210,91 @@ impl AccountHistory {
             |a, b| a.key == b.key,
         )
         .map_err(Into::into)
+    }
+
+    /// Prunes account history when indices are stored in RocksDB.
+    ///
+    /// Reads account changesets from static files and prunes the corresponding
+    /// RocksDB history shards.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn prune_rocksdb<Provider>(
+        &self,
+        provider: &Provider,
+        input: PruneInput,
+        range: std::ops::RangeInclusive<BlockNumber>,
+        range_end: BlockNumber,
+    ) -> Result<SegmentOutput, PrunerError>
+    where
+        Provider: DBProvider + StaticFileProviderFactory + ChangeSetReader + RocksDBProviderFactory,
+    {
+        use reth_provider::PruneShardOutcome;
+
+        let mut limiter = input.limiter;
+
+        if limiter.is_limit_reached() {
+            return Ok(SegmentOutput::not_done(
+                limiter.interrupt_reason(),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ))
+        }
+
+        let mut highest_deleted_accounts: FxHashMap<_, _> = FxHashMap::default();
+        let mut last_changeset_pruned_block = None;
+        let mut changesets_processed = 0usize;
+        let mut done = true;
+
+        let walker = StaticFileAccountChangesetWalker::new(provider, range);
+        for result in walker {
+            if limiter.is_limit_reached() {
+                done = false;
+                break;
+            }
+            let (block_number, changeset) = result?;
+            highest_deleted_accounts.insert(changeset.address, block_number);
+            last_changeset_pruned_block = Some(block_number);
+            changesets_processed += 1;
+            limiter.increment_deleted_entries_count();
+        }
+
+        // Delete static file jars below the pruned block
+        if let Some(last_block) = last_changeset_pruned_block {
+            provider
+                .static_file_provider()
+                .delete_segment_below_block(StaticFileSegment::AccountChangeSets, last_block + 1)?;
+        }
+        trace!(target: "pruner", processed = %changesets_processed, %done, "Scanned account changesets from static files");
+
+        let last_changeset_pruned_block = last_changeset_pruned_block
+            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
+            .unwrap_or(range_end);
+
+        // Prune RocksDB history shards for affected accounts
+        let mut deleted_shards = 0usize;
+        let mut updated_shards = 0usize;
+
+        provider.with_rocksdb_batch(|mut batch| {
+            for (address, highest_block) in &highest_deleted_accounts {
+                match batch.prune_account_history_to(*address, *highest_block)? {
+                    PruneShardOutcome::Deleted => deleted_shards += 1,
+                    PruneShardOutcome::Updated => updated_shards += 1,
+                    PruneShardOutcome::Unchanged => {}
+                }
+            }
+            Ok(((), Some(batch.into_inner())))
+        })?;
+
+        trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned account history (RocksDB indices)");
+
+        let progress = limiter.progress(done);
+
+        Ok(SegmentOutput {
+            progress,
+            pruned: deleted_shards + updated_shards,
+            checkpoint: Some(SegmentOutputCheckpoint {
+                block_number: Some(last_changeset_pruned_block),
+                tx_number: None,
+            }),
+        })
     }
 }
 
