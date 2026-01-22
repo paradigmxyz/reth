@@ -98,6 +98,13 @@ const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 /// reducing the first few reallocations without over-allocating.
 const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 
+/// Default auto-commit threshold for batch writes (4 GiB).
+///
+/// When a batch exceeds this size, it is automatically committed to prevent OOM
+/// during large bulk writes. The consistency check on startup heals any crash
+/// that occurs between auto-commits.
+const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 4 * 1024 * 1024 * 1024;
+
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
     path: PathBuf,
@@ -633,13 +640,17 @@ impl RocksDBProvider {
         }
     }
 
-    /// Creates a new batch with auto-commit enabled (4GB threshold).
+    /// Creates a new batch with auto-commit enabled.
+    ///
+    /// When the batch size exceeds [`DEFAULT_AUTO_COMMIT_THRESHOLD`], the batch is automatically
+    /// committed and reset. This prevents OOM during large bulk writes while maintaining
+    /// crash-safety via the consistency check on startup.
     pub fn batch_with_auto_commit(&self) -> RocksDBBatch<'_> {
         RocksDBBatch {
             provider: self,
             inner: WriteBatchWithTransaction::<true>::default(),
             buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
-            auto_commit_threshold: Some(4u64 * 1024 * 1024 * 1024),
+            auto_commit_threshold: Some(DEFAULT_AUTO_COMMIT_THRESHOLD),
         }
     }
 
@@ -1157,7 +1168,7 @@ pub struct RocksDBBatch<'a> {
     inner: WriteBatchWithTransaction<true>,
     buf: Vec<u8>,
     /// If set, batch auto-commits when size exceeds this threshold (in bytes).
-    auto_commit_threshold: Option<u64>,
+    auto_commit_threshold: Option<usize>,
 }
 
 impl fmt::Debug for RocksDBBatch<'_> {
@@ -1206,9 +1217,13 @@ impl<'a> RocksDBBatch<'a> {
         Ok(())
     }
 
+    /// Commits and resets the batch if it exceeds the auto-commit threshold.
+    ///
+    /// This is called after each `put` or `delete` operation to prevent unbounded memory growth.
+    /// Returns immediately if auto-commit is disabled or threshold not reached.
     fn maybe_auto_commit(&mut self) -> ProviderResult<()> {
         if let Some(threshold) = self.auto_commit_threshold &&
-            self.inner.size_in_bytes() as u64 >= threshold
+            self.inner.size_in_bytes() >= threshold
         {
             tracing::debug!(
                 target: "providers::rocksdb",
