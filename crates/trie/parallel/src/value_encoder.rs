@@ -151,7 +151,7 @@ impl LeafValueEncoder for AsyncAccountValueEncoder {
                 account,
                 proof_result_rx: Ok(rx),
                 storage_proof_results: Some(self.storage_proof_results.clone()),
-            }
+            };
         }
 
         // If the address didn't have a job dispatched for it then we can assume it has no targets,
@@ -159,7 +159,7 @@ impl LeafValueEncoder for AsyncAccountValueEncoder {
 
         // If the root is already calculated then just use it directly
         if let Some(root) = self.cached_storage_roots.get(&hashed_address) {
-            return AsyncAccountDeferredValueEncoder::FromCache { account, root: *root }
+            return AsyncAccountDeferredValueEncoder::FromCache { account, root: *root };
         }
 
         // Create a proof input which targets a bogus key, so that we calculate the root as a

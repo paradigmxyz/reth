@@ -54,9 +54,9 @@ impl From<OpEthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
         match err {
             OpEthApiError::Eth(err) => err.into(),
             OpEthApiError::InvalidTransaction(err) => err.into(),
-            OpEthApiError::Evm(_) |
-            OpEthApiError::L1BlockFeeError |
-            OpEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
+            OpEthApiError::Evm(_)
+            | OpEthApiError::L1BlockFeeError
+            | OpEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
             OpEthApiError::Sequencer(err) => err.into(),
         }
     }
@@ -82,9 +82,9 @@ pub enum OpInvalidTransactionError {
 impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(err: OpInvalidTransactionError) -> Self {
         match err {
-            OpInvalidTransactionError::DepositSystemTxPostRegolith |
-            OpInvalidTransactionError::HaltedDepositPostRegolith |
-            OpInvalidTransactionError::MissingEnvelopedTx => {
+            OpInvalidTransactionError::DepositSystemTxPostRegolith
+            | OpInvalidTransactionError::HaltedDepositPostRegolith
+            | OpInvalidTransactionError::MissingEnvelopedTx => {
                 rpc_err(EthRpcErrorCode::TransactionRejected.code(), err.to_string(), None)
             }
             OpInvalidTransactionError::TxConditionalErr(_) => err.into(),

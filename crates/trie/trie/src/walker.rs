@@ -188,9 +188,9 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
                 "Checked for only non-removed child",
             );
 
-            !self.changes.contains(node.full_key()) &&
-                node.hash_flag() &&
-                !key_is_only_nonremoved_child
+            !self.changes.contains(node.full_key())
+                && node.hash_flag()
+                && !key_is_only_nonremoved_child
         });
         trace!(
             target: "trie::walker",
@@ -302,7 +302,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         let Some((key, node)) = self.node(false)? else {
             // If no next node is found, clear the stack.
             self.stack.clear();
-            return Ok(())
+            return Ok(());
         };
 
         // Overwrite the root node's first nibble
@@ -316,13 +316,13 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         // Sanity check that the newly retrieved trie node key is the child of the last item
         // on the stack. If not, advance to the next sibling instead of adding the node to the
         // stack.
-        if let Some(subnode) = self.stack.last() &&
-            !key.starts_with(subnode.full_key())
+        if let Some(subnode) = self.stack.last()
+            && !key.starts_with(subnode.full_key())
         {
             #[cfg(feature = "metrics")]
             self.metrics.inc_out_of_order_subnode(1);
             self.move_to_next_sibling(false)?;
-            return Ok(())
+            return Ok(());
         }
 
         // Create a new CursorSubNode and push it to the stack.
@@ -333,8 +333,8 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
 
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
-        if (!self.can_skip_current_node || position.is_child()) &&
-            let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?)
+        if (!self.can_skip_current_node || position.is_child())
+            && let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?)
         {
             keys.insert(key);
         }
@@ -352,18 +352,18 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
-        if subnode.position().is_last_child() ||
-            (subnode.position().is_parent() && !allow_root_to_child_nibble)
+        if subnode.position().is_last_child()
+            || (subnode.position().is_parent() && !allow_root_to_child_nibble)
         {
             self.stack.pop();
             self.move_to_next_sibling(false)?;
-            return Ok(())
+            return Ok(());
         }
 
         subnode.inc_nibble();
 
         if subnode.node.is_none() {
-            return self.consume_node()
+            return self.consume_node();
         }
 
         // Find the next sibling with state.
@@ -371,11 +371,11 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             let position = subnode.position();
             if subnode.state_flag() {
                 trace!(target: "trie::walker", ?position, "found next sibling with state");
-                return Ok(())
+                return Ok(());
             }
             if position.is_last_child() {
                 trace!(target: "trie::walker", ?position, "checked all siblings");
-                break
+                break;
             }
             subnode.inc_nibble();
         }

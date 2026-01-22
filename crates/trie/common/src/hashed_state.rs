@@ -214,10 +214,10 @@ impl HashedPostState {
                 Some(storage_in_targets) => {
                     let mut storage_not_in_targets = HashedStorage::default();
                     storage.storage.retain(|&slot, value| {
-                        if storage_in_targets.contains(&slot) &&
-                            !storage_added_removed_keys.is_some_and(|k| k.is_removed(&slot))
+                        if storage_in_targets.contains(&slot)
+                            && !storage_added_removed_keys.is_some_and(|k| k.is_removed(&slot))
                         {
-                            return true
+                            return true;
                         }
 
                         storage_not_in_targets.storage.insert(slot, *value);
@@ -252,7 +252,7 @@ impl HashedPostState {
         });
         self.accounts.retain(|&address, account| {
             if targets.contains_key(&address) {
-                return true
+                return true;
             }
 
             state_updates_not_in_targets.accounts.insert(address, *account);
@@ -271,8 +271,9 @@ impl HashedPostState {
 
     /// Returns the number of items that will be considered during chunking in `[Self::chunks]`.
     pub fn chunking_length(&self) -> usize {
-        self.accounts.len() +
-            self.storages
+        self.accounts.len()
+            + self
+                .storages
                 .values()
                 .map(|storage| if storage.wiped { 1 } else { 0 } + storage.storage.len())
                 .sum::<usize>()

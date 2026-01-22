@@ -144,7 +144,7 @@ where
         Box::pin(async move {
             // Check if request should be forwarded to historical endpoint
             if let Some(response) = historical.maybe_forward_request(&req).await {
-                return response
+                return response;
             }
 
             // Handle the request with the inner service
@@ -162,8 +162,8 @@ where
         async move {
             let mut needs_forwarding = false;
             for entry in req.iter_mut() {
-                if let Ok(BatchEntry::Call(call)) = entry &&
-                    historical.should_forward_request(call)
+                if let Ok(BatchEntry::Call(call)) = entry
+                    && historical.should_forward_request(call)
                 {
                     needs_forwarding = true;
                     break;
@@ -237,10 +237,10 @@ where
     /// Checks if a request should be forwarded to the historical endpoint (synchronous check).
     fn should_forward_request(&self, req: &Request<'_>) -> bool {
         match req.method_name() {
-            "debug_traceTransaction" |
-            "eth_getTransactionByHash" |
-            "eth_getTransactionReceipt" |
-            "eth_getRawTransactionByHash" => self.should_forward_transaction(req),
+            "debug_traceTransaction"
+            | "eth_getTransactionByHash"
+            | "eth_getTransactionReceipt"
+            | "eth_getRawTransactionByHash" => self.should_forward_transaction(req),
             method => self.should_forward_block_request(method, req),
         }
     }
@@ -249,7 +249,7 @@ where
     /// the response if it was forwarded.
     async fn maybe_forward_request(&self, req: &Request<'_>) -> Option<MethodResponse> {
         if self.should_forward_request(req) {
-            return self.forward_to_historical(req).await
+            return self.forward_to_historical(req).await;
         }
         None
     }
@@ -360,17 +360,17 @@ enum ParseError {
 /// Extracts the block ID from request parameters based on the method name
 fn extract_block_id_for_method(method: &str, params: &Params<'_>) -> Option<BlockId> {
     match method {
-        "eth_getBlockByNumber" |
-        "eth_getBlockByHash" |
-        "debug_traceBlockByNumber" |
-        "debug_traceBlockByHash" => parse_block_id_from_params(params, 0),
-        "eth_getBalance" |
-        "eth_getCode" |
-        "eth_getTransactionCount" |
-        "eth_call" |
-        "eth_estimateGas" |
-        "eth_createAccessList" |
-        "debug_traceCall" => parse_block_id_from_params(params, 1),
+        "eth_getBlockByNumber"
+        | "eth_getBlockByHash"
+        | "debug_traceBlockByNumber"
+        | "debug_traceBlockByHash" => parse_block_id_from_params(params, 0),
+        "eth_getBalance"
+        | "eth_getCode"
+        | "eth_getTransactionCount"
+        | "eth_call"
+        | "eth_estimateGas"
+        | "eth_createAccessList"
+        | "debug_traceCall" => parse_block_id_from_params(params, 1),
         "eth_getStorageAt" | "eth_getProof" => parse_block_id_from_params(params, 2),
         _ => None,
     }

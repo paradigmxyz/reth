@@ -233,7 +233,7 @@ where
 
             if filter.block > best_number {
                 // no new blocks since the last poll
-                return Ok(FilterChanges::Empty)
+                return Ok(FilterChanges::Empty);
             }
 
             // update filter
@@ -308,7 +308,7 @@ where
                 *inner_filter.clone()
             } else {
                 // Not a log filter
-                return Err(EthFilterError::FilterNotFound(id))
+                return Err(EthFilterError::FilterNotFound(id));
             }
         };
 
@@ -471,7 +471,7 @@ where
                 let Some((receipts, maybe_block)) =
                     self.eth_cache().get_receipts_and_maybe_block(block_hash).await?
                 else {
-                    return Err(ProviderError::HeaderNotFound(block_hash.into()).into())
+                    return Err(ProviderError::HeaderNotFound(block_hash.into()).into());
                 };
 
                 // Get header - from cached block if available, otherwise from provider
@@ -516,8 +516,8 @@ where
                     }
                     // Try to get pending block and receipts
                     if let Ok(Some(pending_block)) = self.eth_api.local_pending_block().await {
-                        if let BlockNumberOrTag::Number(to_block) = to_block &&
-                            to_block < pending_block.block.number()
+                        if let BlockNumberOrTag::Number(to_block) = to_block
+                            && to_block < pending_block.block.number()
                         {
                             // this block range is empty based on the user input
                             return Ok(Vec::new());
@@ -555,14 +555,14 @@ where
                     .flatten();
 
                 // Return error if toBlock exceeds current head
-                if let Some(t) = to &&
-                    t > info.best_number
+                if let Some(t) = to
+                    && t > info.best_number
                 {
                     return Err(EthFilterError::BlockRangeExceedsHead);
                 }
 
-                if let Some(f) = from &&
-                    f > info.best_number
+                if let Some(f) = from
+                    && f > info.best_number
                 {
                     // start block higher than local head, can return empty
                     return Ok(Vec::new());
@@ -623,13 +623,13 @@ where
 
         // perform boundary checks first
         if to_block < from_block {
-            return Err(EthFilterError::InvalidBlockRangeParams)
+            return Err(EthFilterError::InvalidBlockRangeParams);
         }
 
         if let Some(max_blocks_per_filter) =
             limits.max_blocks_per_filter.filter(|limit| to_block - from_block > *limit)
         {
-            return Err(EthFilterError::QueryExceedsMaxBlocks(max_blocks_per_filter))
+            return Err(EthFilterError::QueryExceedsMaxBlocks(max_blocks_per_filter));
         }
 
         let (tx, rx) = oneshot::channel();
@@ -674,7 +674,7 @@ where
 
             while let Some(header) = headers_iter.next() {
                 if !filter.matches_bloom(header.logs_bloom()) {
-                    continue
+                    continue;
                 }
 
                 let current_number = header.number();
@@ -724,9 +724,9 @@ where
             // size check but only if range is multiple blocks, so we always return all
             // logs of a single block
             let is_multi_block_range = from_block != to_block;
-            if let Some(max_logs_per_response) = limits.max_logs_per_response &&
-                is_multi_block_range &&
-                all_logs.len() > max_logs_per_response
+            if let Some(max_logs_per_response) = limits.max_logs_per_response
+                && is_multi_block_range
+                && all_logs.len() > max_logs_per_response
             {
                 debug!(
                     target: "rpc::eth::filter",
@@ -900,7 +900,7 @@ impl Iterator for BlockRangeInclusiveIter {
         let start = self.iter.next()?;
         let end = (start + self.step).min(self.end);
         if start > end {
-            return None
+            return None;
         }
         Some((start, end))
     }
@@ -950,10 +950,10 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             EthFilterError::EthAPIError(err) => err.into(),
-            err @ (EthFilterError::InvalidBlockRangeParams |
-            EthFilterError::QueryExceedsMaxBlocks(_) |
-            EthFilterError::QueryExceedsMaxResults { .. } |
-            EthFilterError::BlockRangeExceedsHead) => {
+            err @ (EthFilterError::InvalidBlockRangeParams
+            | EthFilterError::QueryExceedsMaxBlocks(_)
+            | EthFilterError::QueryExceedsMaxResults { .. }
+            | EthFilterError::BlockRangeExceedsHead) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }

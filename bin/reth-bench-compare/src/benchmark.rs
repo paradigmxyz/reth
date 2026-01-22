@@ -278,8 +278,8 @@ impl BenchmarkRunner {
             // Print all captured output when command fails
             error!("reth-bench failed with exit code: {:?}", status.code());
 
-            if let Ok(stdout) = stdout_lines.lock() &&
-                !stdout.is_empty()
+            if let Ok(stdout) = stdout_lines.lock()
+                && !stdout.is_empty()
             {
                 error!("reth-bench stdout:");
                 for line in stdout.iter() {
@@ -287,8 +287,8 @@ impl BenchmarkRunner {
                 }
             }
 
-            if let Ok(stderr) = stderr_lines.lock() &&
-                !stderr.is_empty()
+            if let Ok(stderr) = stderr_lines.lock()
+                && !stderr.is_empty()
             {
                 error!("reth-bench stderr:");
                 for line in stderr.iter() {

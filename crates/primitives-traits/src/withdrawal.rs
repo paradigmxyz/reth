@@ -40,10 +40,10 @@ mod tests {
 
     impl PartialEq<Withdrawal> for RethWithdrawal {
         fn eq(&self, other: &Withdrawal) -> bool {
-            self.index == other.index &&
-                self.validator_index == other.validator_index &&
-                self.address == other.address &&
-                self.amount == other.amount
+            self.index == other.index
+                && self.validator_index == other.validator_index
+                && self.address == other.address
+                && self.amount == other.amount
         }
     }
 

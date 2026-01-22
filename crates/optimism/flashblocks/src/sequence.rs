@@ -189,9 +189,9 @@ impl FlashBlockCompleteSequence {
 
         // Ensure that index are successive from 0, have same block number and payload id
         if !blocks.iter().enumerate().all(|(idx, block)| {
-            idx == block.index as usize &&
-                block.payload_id == first_block.payload_id &&
-                block.block_number() == first_block.block_number()
+            idx == block.index as usize
+                && block.payload_id == first_block.payload_id
+                && block.block_number() == first_block.block_number()
         }) {
             bail!("Flashblock inconsistencies detected in sequence");
         }

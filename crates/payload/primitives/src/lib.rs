@@ -100,7 +100,7 @@ pub fn validate_payload_timestamp(
         //
         // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
         //    payload or payloadAttributes is greater or equal to the Cancun activation timestamp.
-        return Err(EngineObjectValidationError::UnsupportedFork)
+        return Err(EngineObjectValidationError::UnsupportedFork);
     }
 
     if version.is_v3() && !is_cancun {
@@ -122,7 +122,7 @@ pub fn validate_payload_timestamp(
         //
         // 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
         //    the payload does not fall within the time frame of the Cancun fork.
-        return Err(EngineObjectValidationError::UnsupportedFork)
+        return Err(EngineObjectValidationError::UnsupportedFork);
     }
 
     let is_prague = chain_spec.is_prague_active_at_timestamp(timestamp);
@@ -145,7 +145,7 @@ pub fn validate_payload_timestamp(
         //
         // 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
         //    the payload does not fall within the time frame of the Prague fork.
-        return Err(EngineObjectValidationError::UnsupportedFork)
+        return Err(EngineObjectValidationError::UnsupportedFork);
     }
 
     let is_osaka = chain_spec.is_osaka_active_at_timestamp(timestamp);
@@ -157,12 +157,12 @@ pub fn validate_payload_timestamp(
         //
         // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
         //    built payload does not fall within the time frame of the Osaka fork.
-        return Err(EngineObjectValidationError::UnsupportedFork)
+        return Err(EngineObjectValidationError::UnsupportedFork);
     }
 
     // `engine_getPayloadV4` MUST reject payloads with a timestamp >= Osaka.
     if version.is_v4() && kind == MessageValidationKind::GetPayload && is_osaka {
-        return Err(EngineObjectValidationError::UnsupportedFork)
+        return Err(EngineObjectValidationError::UnsupportedFork);
     }
 
     Ok(())
@@ -184,20 +184,20 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V1 => {
             if has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1))
+                    .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1));
             }
         }
-        EngineApiMessageVersion::V2 |
-        EngineApiMessageVersion::V3 |
-        EngineApiMessageVersion::V4 |
-        EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V2
+        | EngineApiMessageVersion::V3
+        | EngineApiMessageVersion::V4
+        | EngineApiMessageVersion::V5 => {
             if is_shanghai_active && !has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
+                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai));
             }
             if !is_shanghai_active && has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::HasWithdrawalsPreShanghai))
+                    .to_error(VersionSpecificValidationError::HasWithdrawalsPreShanghai));
             }
         }
     };
@@ -288,13 +288,13 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
             if has_parent_beacon_block_root {
                 return Err(validation_kind.to_error(
                     VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
-                ))
+                ));
             }
         }
         EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
             if !has_parent_beacon_block_root {
                 return Err(validation_kind
-                    .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
+                    .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun));
             }
         }
     };
@@ -477,20 +477,20 @@ pub fn validate_execution_requests(requests: &[Bytes]) -> Result<(), EngineObjec
     let mut last_request_type = None;
     for request in requests {
         if request.len() <= 1 {
-            return Err(EngineObjectValidationError::InvalidParams("EmptyExecutionRequest".into()))
+            return Err(EngineObjectValidationError::InvalidParams("EmptyExecutionRequest".into()));
         }
 
         let request_type = request[0];
         if Some(request_type) < last_request_type {
             return Err(EngineObjectValidationError::InvalidParams(
                 "OutOfOrderExecutionRequest".into(),
-            ))
+            ));
         }
 
         if Some(request_type) == last_request_type {
             return Err(EngineObjectValidationError::InvalidParams(
                 "DuplicatedExecutionRequestType".into(),
-            ))
+            ));
         }
 
         last_request_type = Some(request_type);

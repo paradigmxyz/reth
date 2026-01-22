@@ -217,7 +217,7 @@ where
     ) -> Result<Option<LocalizedTransactionTrace>, Eth::Error> {
         if indices.len() != 1 {
             // The OG impl failed if it gets more than a single index
-            return Ok(None)
+            return Ok(None);
         }
         self.trace_get_index(hash, indices[0]).await
     }
@@ -283,7 +283,7 @@ where
         let chain_spec = self.provider().chain_spec();
 
         if chain_spec.is_paris_active_at_block(header.number()) {
-            return Ok(None)
+            return Ok(None);
         }
 
         Ok(Some(base_block_reward_pre_merge(&chain_spec, header.number())))
@@ -358,7 +358,7 @@ where
             return Err(EthApiError::InvalidParams(
                 "invalid parameters: fromBlock cannot be greater than toBlock".to_string(),
             )
-            .into())
+            .into());
         }
 
         // ensure that the range is not too large, since we need to fetch all blocks in the range
@@ -367,7 +367,7 @@ where
             return Err(EthApiError::InvalidParams(
                 "Block range too large; currently limited to 100 blocks".to_string(),
             )
-            .into())
+            .into());
         }
 
         let mut all_traces = Vec::new();
@@ -433,13 +433,13 @@ where
                 } else {
                     // no block reward, means we're past the Paris hardfork and don't expect any
                     // rewards because the blocks in ascending order
-                    break
+                    break;
                 }
             }
 
             // Skips the first `after` number of matching traces.
-            if let Some(cutoff) = after.map(|a| a as usize) &&
-                cutoff < all_traces.len()
+            if let Some(cutoff) = after.map(|a| a as usize)
+                && cutoff < all_traces.len()
             {
                 all_traces.drain(..cutoff);
                 // we removed the first `after` traces
@@ -451,17 +451,17 @@ where
                 let count = count as usize;
                 if count < all_traces.len() {
                     all_traces.truncate(count);
-                    return Ok(all_traces)
+                    return Ok(all_traces);
                 }
             };
         }
 
         // If `after` is greater than or equal to the number of matched traces, it returns an
         // empty array.
-        if let Some(cutoff) = after.map(|a| a as usize) &&
-            cutoff >= all_traces.len()
+        if let Some(cutoff) = after.map(|a| a as usize)
+            && cutoff >= all_traces.len()
         {
-            return Ok(vec![])
+            return Ok(vec![]);
         }
 
         Ok(all_traces)
@@ -491,8 +491,8 @@ where
         let mut maybe_traces =
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
-        if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) &&
-            let Some(base_block_reward) = self.calculate_base_block_reward(block.header())?
+        if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut())
+            && let Some(base_block_reward) = self.calculate_base_block_reward(block.header())?
         {
             traces.extend(self.extract_reward_traces(
                 block.header(),

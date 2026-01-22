@@ -157,7 +157,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
                         let Some((block_number, timestamp)) = *state else {
                             // we haven't received a new flashblock sequence yet, so we can skip
                             // until we receive the first index 0 (base)
-                            return futures::future::ready(Some(Vec::new()))
+                            return futures::future::ready(Some(Vec::new()));
                         };
 
                         let receipts =
@@ -198,7 +198,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         parent_hash: B256,
     ) -> eyre::Result<Option<PendingBlock<N::Primitives>>> {
         let Some(rx) = self.inner.flashblocks.as_ref().map(|f| &f.pending_block_rx) else {
-            return Ok(None)
+            return Ok(None);
         };
 
         // Check if a flashblock is being built

@@ -595,8 +595,8 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     }
 
     fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
-        if let Some(pending) = self.canonical_in_memory_state.pending_state() &&
-            pending.hash() == block_hash
+        if let Some(pending) = self.canonical_in_memory_state.pending_state()
+            && pending.hash() == block_hash
         {
             return Ok(Some(Box::new(self.block_state_provider(&pending)?)));
         }
@@ -605,7 +605,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            return Ok(Some(Box::new(self.block_state_provider(&pending)?)))
+            return Ok(Some(Box::new(self.block_state_provider(&pending)?)));
         }
 
         Ok(None)
@@ -1001,8 +1001,8 @@ mod tests {
     ) {
         let hook_provider = provider.clone();
         provider.database.db_ref().set_post_transaction_hook(Box::new(move || {
-            if let Some(state) = hook_provider.canonical_in_memory_state.head_state() &&
-                state.anchor().number + 1 == block_number
+            if let Some(state) = hook_provider.canonical_in_memory_state.head_state()
+                && state.anchor().number + 1 == block_number
             {
                 let mut lowest_memory_block =
                     state.parent_state_chain().last().expect("qed").block();

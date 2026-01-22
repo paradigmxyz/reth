@@ -469,8 +469,8 @@ where
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let pool_config = ctx.pool_config();
 
-        let blobs_disabled = ctx.config().txpool.disable_blobs_support ||
-            ctx.config().txpool.blobpool_max_count == 0;
+        let blobs_disabled = ctx.config().txpool.disable_blobs_support
+            || ctx.config().txpool.blobpool_max_count == 0;
 
         let blob_cache_size = if let Some(blob_cache_size) = pool_config.blob_cache_size {
             Some(blob_cache_size)

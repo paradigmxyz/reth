@@ -178,13 +178,13 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         .with_prune_modes(prune_modes.clone());
 
         // Check for consistency between database and static files.
-        if !access.is_read_only_inconsistent() &&
-            let Some(unwind_target) =
+        if !access.is_read_only_inconsistent()
+            && let Some(unwind_target) =
                 factory.static_file_provider().check_consistency(&factory.provider()?)?
         {
             if factory.db_ref().is_read_only()? {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
-                return Ok(factory)
+                return Ok(factory);
             }
 
             // Highly unlikely to happen, and given its destructive nature, it's better to panic

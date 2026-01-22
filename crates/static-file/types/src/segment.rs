@@ -103,11 +103,11 @@ impl StaticFileSegment {
     pub const fn columns(&self) -> usize {
         match self {
             Self::Headers => 3,
-            Self::Transactions |
-            Self::Receipts |
-            Self::TransactionSenders |
-            Self::AccountChangeSets |
-            Self::StorageChangeSets => 1,
+            Self::Transactions
+            | Self::Receipts
+            | Self::TransactionSenders
+            | Self::AccountChangeSets
+            | Self::StorageChangeSets => 1,
         }
     }
 
@@ -152,14 +152,14 @@ impl StaticFileSegment {
     pub fn parse_filename(name: &str) -> Option<(Self, SegmentRangeInclusive)> {
         let mut parts = name.split('_');
         if !(parts.next() == Some("static") && parts.next() == Some("file")) {
-            return None
+            return None;
         }
 
         let segment = Self::from_str(parts.next()?).ok()?;
         let (block_start, block_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
 
         if block_start > block_end {
-            return None
+            return None;
         }
 
         Some((segment, SegmentRangeInclusive::new(block_start, block_end)))
@@ -185,11 +185,11 @@ impl StaticFileSegment {
     pub const fn is_block_based(&self) -> bool {
         match self {
             Self::Headers => true,
-            Self::Receipts |
-            Self::Transactions |
-            Self::TransactionSenders |
-            Self::AccountChangeSets |
-            Self::StorageChangeSets => false,
+            Self::Receipts
+            | Self::Transactions
+            | Self::TransactionSenders
+            | Self::AccountChangeSets
+            | Self::StorageChangeSets => false,
         }
     }
 
@@ -485,8 +485,8 @@ impl SegmentHeader {
                     range.end = range.end.saturating_sub(num);
 
                     // Update changeset offsets for account changesets
-                    if self.segment.is_change_based() &&
-                        let Some(offsets) = &mut self.changeset_offsets
+                    if self.segment.is_change_based()
+                        && let Some(offsets) = &mut self.changeset_offsets
                     {
                         // Calculate how many blocks we're removing
                         let blocks_to_remove = old_end - range.end;
@@ -558,11 +558,11 @@ impl SegmentHeader {
     /// Returns the row offset which depends on whether the segment is block or transaction based.
     pub fn start(&self) -> Option<u64> {
         if self.segment.is_change_based() {
-            return Some(0)
+            return Some(0);
         }
 
         if self.segment.is_block_based() {
-            return self.block_start()
+            return self.block_start();
         }
         self.tx_start()
     }
@@ -575,7 +575,7 @@ impl SegmentHeader {
     pub fn changeset_offset(&self, block: BlockNumber) -> Option<&ChangesetOffset> {
         let block_range = self.block_range()?;
         if !block_range.contains(block) {
-            return None
+            return None;
         }
 
         let offsets = self.changeset_offsets.as_ref()?;

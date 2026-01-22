@@ -120,12 +120,12 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     ///
     /// Returns `true` if this a newer block
     pub(crate) fn update_peer_block(&mut self, peer_id: &PeerId, hash: B256, number: u64) -> bool {
-        if let Some(peer) = self.peers.get_mut(peer_id) &&
-            number > peer.best_number
+        if let Some(peer) = self.peers.get_mut(peer_id)
+            && number > peer.best_number
         {
             peer.best_hash = hash;
             peer.best_number = number;
-            return true
+            return true;
         }
         false
     }
@@ -150,18 +150,18 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             // replace best peer if our current best peer sent us a bad response last time
             if best_peer.1.last_response_likely_bad && !maybe_better.1.last_response_likely_bad {
                 best_peer = maybe_better;
-                continue
+                continue;
             }
 
             // replace best peer if this peer meets the requirements better
             if maybe_better.1.is_better(best_peer.1, &requirement) {
                 best_peer = maybe_better;
-                continue
+                continue;
             }
 
             // replace best peer if this peer has better rtt and both have same range quality
-            if maybe_better.1.timeout() < best_peer.1.timeout() &&
-                !maybe_better.1.last_response_likely_bad
+            if maybe_better.1.timeout() < best_peer.1.timeout()
+                && !maybe_better.1.last_response_likely_bad
             {
                 best_peer = maybe_better;
             }
@@ -174,14 +174,14 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     fn poll_action(&mut self) -> PollAction {
         // we only check and not pop here since we don't know yet whether a peer is available.
         if self.queued_requests.is_empty() {
-            return PollAction::NoRequests
+            return PollAction::NoRequests;
         }
 
         let request = self.queued_requests.pop_front().expect("not empty");
         let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
             // need to put back the request
             self.queued_requests.push_front(request);
-            return PollAction::NoPeersAvailable
+            return PollAction::NoPeersAvailable;
         };
 
         let request = self.prepare_block_request(peer_id, request);
@@ -225,7 +225,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             }
 
             if self.queued_requests.is_empty() || no_peers_available {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -298,7 +298,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             // If the peer is still ready to accept new requests, we try to send a followup
             // request immediately.
             if peer.state.on_request_finished() && !is_error && !is_likely_bad_response {
-                return self.followup_request(peer_id)
+                return self.followup_request(peer_id);
             }
         }
 
@@ -324,7 +324,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             peer.last_response_likely_bad = is_likely_bad_response;
 
             if peer.state.on_request_finished() && !is_likely_bad_response {
-                return self.followup_request(peer_id)
+                return self.followup_request(peer_id);
             }
         }
         None
@@ -473,7 +473,7 @@ impl PeerState {
     const fn on_request_finished(&mut self) -> bool {
         if !matches!(self, Self::Closing) {
             *self = Self::Idle;
-            return true
+            return true;
         }
         false
     }

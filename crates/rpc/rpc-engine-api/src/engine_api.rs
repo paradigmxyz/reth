@@ -550,9 +550,10 @@ where
             // > Client software MUST NOT return trailing null values if the request extends past the current latest known block.
             // truncate the end if it's greater than the last block
             if let Ok(best_block) = inner.provider.best_block_number()
-                && end > best_block {
-                    end = best_block;
-                }
+                && end > best_block
+            {
+                end = best_block;
+            }
 
             // Check if the requested range starts before the earliest available block due to pruning/expiry
             let earliest_block = inner.provider.earliest_block_number().unwrap_or(0);
@@ -715,9 +716,9 @@ where
                 // TODO: decide if we want this branch - the FCU INVALID response might be more
                 // useful than the payload attributes INVALID response
                 if fcu_res.is_invalid() {
-                    return Ok(fcu_res)
+                    return Ok(fcu_res);
                 }
-                return Err(err.into())
+                return Err(err.into());
             }
         }
 
@@ -743,7 +744,7 @@ where
         }
 
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() });
         }
 
         self.inner
@@ -787,7 +788,7 @@ where
         }
 
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() });
         }
 
         self.inner
@@ -810,12 +811,12 @@ where
         }
 
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() });
         }
 
         // Spec requires returning `null` if syncing.
         if (*self.inner.is_syncing)() {
-            return Ok(None)
+            return Ok(None);
         }
 
         self.inner
@@ -1494,8 +1495,8 @@ mod tests {
                 blocks
                     .iter()
                     .filter(|b| {
-                        !first_missing_range.contains(&b.number) &&
-                            !second_missing_range.contains(&b.number)
+                        !first_missing_range.contains(&b.number)
+                            && !second_missing_range.contains(&b.number)
                     })
                     .map(|b| (b.hash(), b.clone().into_block())),
             );
@@ -1524,8 +1525,8 @@ mod tests {
                 // ensure we still return trailing `None`s here because by-hash will not be aware
                 // of the missing block's number, and cannot compare it to the current best block
                 .map(|b| {
-                    if first_missing_range.contains(&b.number) ||
-                        second_missing_range.contains(&b.number)
+                    if first_missing_range.contains(&b.number)
+                        || second_missing_range.contains(&b.number)
                     {
                         None
                     } else {

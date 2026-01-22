@@ -130,8 +130,8 @@ impl StorageSettings {
 
     /// Returns `true` if any tables are configured to be stored in `RocksDB`.
     pub const fn any_in_rocksdb(&self) -> bool {
-        self.transaction_hash_numbers_in_rocksdb ||
-            self.account_history_in_rocksdb ||
-            self.storages_history_in_rocksdb
+        self.transaction_hash_numbers_in_rocksdb
+            || self.account_history_in_rocksdb
+            || self.storages_history_in_rocksdb
     }
 }

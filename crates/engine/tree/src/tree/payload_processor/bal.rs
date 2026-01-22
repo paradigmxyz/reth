@@ -149,12 +149,12 @@ where
         };
 
         // If the account was only read then don't add it to the HashedPostState
-        if balance.is_none() &&
-            nonce.is_none() &&
-            code_hash.is_none() &&
-            account_changes.storage_changes.is_empty()
+        if balance.is_none()
+            && nonce.is_none()
+            && code_hash.is_none()
+            && account_changes.storage_changes.is_empty()
         {
-            continue
+            continue;
         }
 
         // Build the final account state

@@ -281,8 +281,8 @@ where
 
             // On incremental sync, merge with the existing last shard from the database.
             // The last shard is stored with key (address, u64::MAX) so we can find it.
-            if !append_only &&
-                let Some(last_shard) = writer.get_last_account_history_shard(address)?
+            if !append_only
+                && let Some(last_shard) = writer.get_last_account_history_shard(address)?
             {
                 current_list.extend(last_shard.iter());
             }
@@ -419,13 +419,13 @@ where
     // To be extra safe, we make sure that the last tx num matches the last block from its indices.
     // If not, get it.
     loop {
-        if let Some(indices) = provider.block_body_indices(last_block)? &&
-            indices.last_tx_num() <= last_tx_num
+        if let Some(indices) = provider.block_body_indices(last_block)?
+            && indices.last_tx_num() <= last_tx_num
         {
-            break
+            break;
         }
         if last_block == 0 {
-            break
+            break;
         }
         last_block -= 1;
     }
@@ -495,8 +495,8 @@ where
 
             // On incremental sync, merge with the existing last shard from the database.
             // The last shard is stored with key (address, storage_key, u64::MAX) so we can find it.
-            if !append_only &&
-                let Some(last_shard) =
+            if !append_only
+                && let Some(last_shard) =
                     writer.get_last_storage_history_shard(partial_key.0, partial_key.1)?
             {
                 current_list.extend(last_shard.iter());

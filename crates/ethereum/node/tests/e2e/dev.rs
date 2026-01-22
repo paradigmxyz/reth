@@ -70,8 +70,8 @@ async fn can_run_dev_node_custom_attributes() -> eyre::Result<()> {
             .unwrap()
             .unwrap()
             .header
-            .beneficiary ==
-            fee_recipient
+            .beneficiary
+            == fee_recipient
     );
 
     Ok(())

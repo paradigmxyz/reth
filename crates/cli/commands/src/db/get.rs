@@ -155,7 +155,7 @@ impl Command {
                             .account_block_changeset(key)?;
 
                         println!("{}", serde_json::to_string_pretty(&changesets)?);
-                        return Ok(())
+                        return Ok(());
                     };
 
                     let account = tool
@@ -169,7 +169,7 @@ impl Command {
                         error!(target: "reth::cli", "No content for the given table key.");
                     }
 
-                    return Ok(())
+                    return Ok(());
                 }
 
                 let content = tool.provider_factory.static_file_provider().find_static_file(
@@ -348,8 +348,8 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
 
                 // Seek to the starting key. If there is actually a key at the starting key then
                 // seek to the subkey within it.
-                if let Some((decoded_key, _)) = cursor.seek(key.clone())? &&
-                    decoded_key == key
+                if let Some((decoded_key, _)) = cursor.seek(key.clone())?
+                    && decoded_key == key
                 {
                     cursor.seek_by_key_subkey(key.clone(), start_subkey.clone())?;
                 }
@@ -362,8 +362,8 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
                     let decoded_subkey = decoded_value.get_subkey();
 
                     // Check if we've reached the end (exclusive)
-                    if (&decoded_key, Some(&decoded_subkey)) >=
-                        (&end_key, end_subkey_parsed.as_ref())
+                    if (&decoded_key, Some(&decoded_subkey))
+                        >= (&end_key, end_subkey_parsed.as_ref())
                     {
                         break;
                     }

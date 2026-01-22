@@ -143,11 +143,11 @@ impl Capability {
     /// Whether this is any eth version.
     #[inline]
     pub fn is_eth(&self) -> bool {
-        self.is_eth_v66() ||
-            self.is_eth_v67() ||
-            self.is_eth_v68() ||
-            self.is_eth_v69() ||
-            self.is_eth_v70()
+        self.is_eth_v66()
+            || self.is_eth_v67()
+            || self.is_eth_v68()
+            || self.is_eth_v69()
+            || self.is_eth_v70()
     }
 }
 

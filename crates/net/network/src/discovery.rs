@@ -220,7 +220,7 @@ impl Discovery {
         let tcp_addr = record.tcp_addr();
         if tcp_addr.port() == 0 {
             // useless peer for p2p
-            return
+            return;
         }
         let udp_addr = record.udp_addr();
         let addr = PeerAddr::new(tcp_addr, Some(udp_addr));
@@ -258,7 +258,7 @@ impl Discovery {
             // Drain all buffered events first
             if let Some(event) = self.queued_events.pop_front() {
                 self.notify_listeners(&event);
-                return Poll::Ready(event)
+                return Poll::Ready(event);
             }
 
             // drain the discv4 update stream
@@ -272,8 +272,8 @@ impl Discovery {
             while let Some(Poll::Ready(Some(update))) =
                 self.discv5_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
             {
-                if let Some(discv5) = self.discv5.as_mut() &&
-                    let Some(DiscoveredPeer { node_record, fork_id }) =
+                if let Some(discv5) = self.discv5.as_mut()
+                    && let Some(DiscoveredPeer { node_record, fork_id }) =
                         discv5.on_discv5_update(update)
                 {
                     self.on_node_record_update(node_record, fork_id);
@@ -295,7 +295,7 @@ impl Discovery {
             }
 
             if self.queued_events.is_empty() {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }

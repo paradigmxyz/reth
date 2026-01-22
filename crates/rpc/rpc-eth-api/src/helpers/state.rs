@@ -114,7 +114,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .ok_or(EthApiError::HeaderNotFound(block_id))?;
             let max_window = self.max_proof_window();
             if chain_info.best_number.saturating_sub(block_number) > max_window {
-                return Err(EthApiError::ExceedsMaxProofWindow.into())
+                return Err(EthApiError::ExceedsMaxProofWindow.into());
             }
 
             self.spawn_blocking_io_fut(move |this| async move {
@@ -149,7 +149,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .ok_or(EthApiError::HeaderNotFound(block_id))?;
             let max_window = this.max_proof_window();
             if chain_info.best_number.saturating_sub(block_number) > max_window {
-                return Err(EthApiError::ExceedsMaxProofWindow.into())
+                return Err(EthApiError::ExceedsMaxProofWindow.into());
             }
 
             let balance = account.balance;
@@ -223,10 +223,10 @@ pub trait LoadState:
         Self: SpawnBlocking,
     {
         async move {
-            if at.is_pending() &&
-                let Ok(Some(state)) = self.local_pending_state().await
+            if at.is_pending()
+                && let Ok(Some(state)) = self.local_pending_state().await
             {
-                return Ok(state)
+                return Ok(state);
             }
 
             self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)

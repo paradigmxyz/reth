@@ -44,8 +44,8 @@ fn main() {
                     let tx = event.transaction;
                     println!("Transaction received: {tx:?}");
 
-                    if let Some(recipient) = tx.to() &&
-                        args.is_match(&recipient)
+                    if let Some(recipient) = tx.to()
+                        && args.is_match(&recipient)
                     {
                         // trace the transaction with `trace_call`
                         let callrequest =

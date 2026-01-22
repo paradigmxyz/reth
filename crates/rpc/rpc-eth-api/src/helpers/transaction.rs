@@ -111,8 +111,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 while let Some(notification) = stream.next().await {
                     let chain = notification.committed();
                     if let Some((block, tx, receipt, all_receipts)) =
-                        chain.find_transaction_and_receipt_by_hash(hash) &&
-                        let Some(receipt) = convert_transaction_receipt(
+                        chain.find_transaction_and_receipt_by_hash(hash)
+                        && let Some(receipt) = convert_transaction_receipt(
                             block,
                             all_receipts,
                             tx,
@@ -189,7 +189,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             if let Some(tx) =
                 self.pool().get_pooled_transaction_element(hash).map(|tx| tx.encoded_2718().into())
             {
-                return Ok(Some(tx))
+                return Ok(Some(tx));
             }
 
             self.spawn_blocking_io(move |ref this| {
@@ -300,7 +300,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
                     return Ok(Some(
                         self.converter().fill(tx.clone().with_signer(*signer), tx_info)?,
-                    ))
+                    ));
                 }
             }
 
@@ -320,8 +320,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             // Check the pool first
-            if include_pending &&
-                let Some(tx) =
+            if include_pending
+                && let Some(tx) =
                     RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
             {
                 let transaction = tx.transaction.clone_into_consensus();
@@ -393,10 +393,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadBlock,
     {
         async move {
-            if let Some(block) = self.recovered_block(block_id).await? &&
-                let Some(tx) = block.body().transactions().get(index)
+            if let Some(block) = self.recovered_block(block_id).await?
+                && let Some(tx) = block.body().transactions().get(index)
             {
-                return Ok(Some(tx.encoded_2718().into()))
+                return Ok(Some(tx.encoded_2718().into()));
             }
 
             Ok(None)
@@ -419,7 +419,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             };
 
             if self.find_signer(&from).is_err() {
-                return Err(SignError::NoAccount.into_eth_err())
+                return Err(SignError::NoAccount.into_eth_err());
             }
 
             // set nonce if not already set before
@@ -483,15 +483,15 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             let chain_id = self.chain_id();
             request.as_mut().set_chain_id(chain_id.to());
 
-            if request.as_ref().has_eip4844_fields() &&
-                request.as_ref().max_fee_per_blob_gas().is_none()
+            if request.as_ref().has_eip4844_fields()
+                && request.as_ref().max_fee_per_blob_gas().is_none()
             {
                 let blob_fee = self.blob_base_fee().await?;
                 request.as_mut().set_max_fee_per_blob_gas(blob_fee.to());
             }
 
-            if request.as_ref().blob_sidecar().is_some() &&
-                request.as_ref().blob_versioned_hashes.is_none()
+            if request.as_ref().blob_sidecar().is_some()
+                && request.as_ref().blob_versioned_hashes.is_none()
             {
                 request.as_mut().populate_blob_hashes();
             }

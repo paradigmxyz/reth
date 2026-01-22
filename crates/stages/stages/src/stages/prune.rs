@@ -109,8 +109,8 @@ where
 
         for (segment, mut checkpoint) in prune_checkpoints {
             // Only update the checkpoint if unwind_to is lower than the existing checkpoint.
-            if let Some(block) = checkpoint.block_number &&
-                input.unwind_to < block
+            if let Some(block) = checkpoint.block_number
+                && input.unwind_to < block
             {
                 checkpoint.block_number = Some(input.unwind_to);
                 checkpoint.tx_number = unwind_to_last_tx;
@@ -253,7 +253,7 @@ mod tests {
                 let end_block = output.checkpoint.block_number;
 
                 if start_block > end_block {
-                    return Ok(())
+                    return Ok(());
                 }
 
                 let provider = self.db.factory.provider()?;

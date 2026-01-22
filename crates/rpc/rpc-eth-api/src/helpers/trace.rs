@@ -268,7 +268,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         async move {
             let block = async {
                 if block.is_some() {
-                    return Ok(block)
+                    return Ok(block);
                 }
                 self.recovered_block(block_id).await
             };
@@ -279,7 +279,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
             if block.body().transactions().is_empty() {
                 // nothing to trace
-                return Ok(Some(Vec::new()))
+                return Ok(Some(Vec::new()));
             }
 
             // replay all transactions of the block

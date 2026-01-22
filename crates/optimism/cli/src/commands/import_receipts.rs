@@ -141,8 +141,8 @@ where
 
     // Ensure that receipts hasn't been initialized apart from `init_genesis`.
     if let Some(num_receipts) =
-        static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts) &&
-        num_receipts > 0
+        static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts)
+        && num_receipts > 0
     {
         eyre::bail!("Expected no receipts in storage, but found {num_receipts}.");
     }
@@ -174,7 +174,7 @@ where
     {
         if highest_block_receipts == highest_block_transactions {
             warn!(target: "reth::cli",  highest_block_receipts, highest_block_transactions, "Ignoring all other blocks in the file since we have reached the desired height");
-            break
+            break;
         }
 
         // create a new file client from chunk read from file

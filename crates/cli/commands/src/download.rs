@@ -262,8 +262,8 @@ impl<R: Read> ProgressReader<R> {
 impl<R: Read> Read for ProgressReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let bytes = self.reader.read(buf)?;
-        if bytes > 0 &&
-            let Err(e) = self.progress.update(bytes as u64)
+        if bytes > 0
+            && let Err(e) = self.progress.update(bytes as u64)
         {
             return Err(io::Error::other(e));
         }
@@ -370,8 +370,8 @@ fn resumable_download(url: &str, target_dir: &Path) -> Result<(PathBuf, u64)> {
     for attempt in 1..=MAX_DOWNLOAD_RETRIES {
         let existing_size = fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
 
-        if let Some(total) = total_size &&
-            existing_size >= total
+        if let Some(total) = total_size
+            && existing_size >= total
         {
             fs::rename(&part_path, &final_path)?;
             info!(target: "reth::cli", "Download complete: {}", final_path.display());
@@ -488,8 +488,8 @@ fn download_and_extract(url: &str, format: CompressionFormat, target_dir: &Path)
 fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     let format = CompressionFormat::from_url(url)?;
 
-    if let Ok(parsed_url) = Url::parse(url) &&
-        parsed_url.scheme() == "file"
+    if let Ok(parsed_url) = Url::parse(url)
+        && parsed_url.scheme() == "file"
     {
         let file_path = parsed_url
             .to_file_path()

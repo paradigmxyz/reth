@@ -108,12 +108,12 @@ where
                     expected: block.ommers_hash(),
                 }
                 .into(),
-            ))
+            ));
         }
 
         // Check transaction root
         if let Err(error) = block.ensure_transaction_root_valid() {
-            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+            return Err(ConsensusError::BodyTransactionRootDiff(error.into()));
         }
 
         // Check empty shanghai-withdrawals
@@ -122,7 +122,7 @@ where
                 ConsensusError::Other(format!("failed to verify block {}: {err}", block.number()))
             })?
         } else {
-            return Ok(())
+            return Ok(());
         }
 
         // Blob gas used validation
@@ -164,11 +164,11 @@ where
         );
 
         if header.nonce() != Some(B64::ZERO) {
-            return Err(ConsensusError::TheMergeNonceIsNotZero)
+            return Err(ConsensusError::TheMergeNonceIsNotZero);
         }
 
         if header.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
-            return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
+            return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty);
         }
 
         // Post-merge, the consensus layer is expected to perform checks such that the block
@@ -210,8 +210,8 @@ where
             let blob_gas_used = header.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
 
             // Before Jovian and after ecotone, the blob gas used should be 0.
-            if !self.chain_spec.is_jovian_active_at_timestamp(header.timestamp()) &&
-                blob_gas_used != 0
+            if !self.chain_spec.is_jovian_active_at_timestamp(header.timestamp())
+                && blob_gas_used != 0
             {
                 return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
                     got: blob_gas_used,
@@ -226,7 +226,7 @@ where
                     diff: GotExpected { got: excess_blob_gas, expected: 0 },
                     parent_excess_blob_gas: parent.excess_blob_gas().unwrap_or(0),
                     parent_blob_gas_used: parent.blob_gas_used().unwrap_or(0),
-                })
+                });
             }
         }
 

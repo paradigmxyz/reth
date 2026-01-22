@@ -95,7 +95,7 @@ where
     /// Generate state witness
     pub fn generate_witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {
         if let Some(witness) = self.witness_cache.lock().get(&block_hash).cloned() {
-            return Ok(witness.as_ref().clone())
+            return Ok(witness.as_ref().clone());
         }
 
         let block =
@@ -105,7 +105,7 @@ where
         if best_block_number.saturating_sub(block.number()) > self.max_witness_window {
             return Err(ProviderError::TrieWitnessError(
                 "witness target block exceeds maximum witness window".to_owned(),
-            ))
+            ));
         }
 
         let mut executed_ancestors = Vec::new();
@@ -118,8 +118,8 @@ where
                     let mut executed = self.pending_state.executed_block(&ancestor_hash);
 
                     // If it's not present, attempt to lookup invalid block.
-                    if executed.is_none() &&
-                        let Some(invalid) =
+                    if executed.is_none()
+                        && let Some(invalid) =
                             self.pending_state.invalid_recovered_block(&ancestor_hash)
                     {
                         trace!(target: "reth::ress_provider", %block_hash, %ancestor_hash, "Using invalid ancestor block for witness construction");
@@ -128,7 +128,7 @@ where
                     }
 
                     let Some(executed) = executed else {
-                        return Err(ProviderError::StateForHashNotFound(ancestor_hash))
+                        return Err(ProviderError::StateForHashNotFound(ancestor_hash));
                     };
                     ancestor_hash = executed.sealed_block().parent_hash();
                     executed_ancestors.push(executed);

@@ -85,10 +85,10 @@ impl<T> Receipt<T> {
 impl<T: TxTy> Receipt<T> {
     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encoded_fields_length(&self, bloom: &Bloom) -> usize {
-        self.success.length() +
-            self.cumulative_gas_used.length() +
-            bloom.length() +
-            self.logs.length()
+        self.success.length()
+            + self.cumulative_gas_used.length()
+            + bloom.length()
+            + self.logs.length()
     }
 
     /// RLP-encodes receipt fields with the given [`Bloom`] without an RLP header.
@@ -194,7 +194,7 @@ impl<T: TxTy> RlpDecodableReceipt for Receipt<T> {
 
         // Legacy receipt, reuse initial buffer without advancing
         if header.list {
-            return Self::rlp_decode_inner(buf, T::try_from(0)?)
+            return Self::rlp_decode_inner(buf, T::try_from(0)?);
         }
 
         // Otherwise, advance the buffer and try decoding type flag followed by receipt

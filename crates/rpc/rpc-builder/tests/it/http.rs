@@ -33,8 +33,8 @@ use std::collections::HashSet;
 fn is_unimplemented(err: jsonrpsee::core::client::Error) -> bool {
     match err {
         jsonrpsee::core::client::Error::Call(error_obj) => {
-            error_obj.code() == ErrorCode::InternalError.code() &&
-                error_obj.message() == "unimplemented"
+            error_obj.code() == ErrorCode::InternalError.code()
+                && error_obj.message() == "unimplemented"
         }
         _ => false,
     }
@@ -1726,8 +1726,8 @@ async fn test_debug_db_get() {
     let match_error_msg = |err: jsonrpsee::core::client::Error, expected: String| -> bool {
         match err {
             jsonrpsee::core::client::Error::Call(error_obj) => {
-                error_obj.code() == ErrorCode::InvalidParams.code() &&
-                    error_obj.message() == expected
+                error_obj.code() == ErrorCode::InvalidParams.code()
+                    && error_obj.message() == expected
             }
             _ => false,
         }

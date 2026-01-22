@@ -38,9 +38,9 @@ impl TrieUpdates {
 
     /// Returns `true` if the updates are empty.
     pub fn is_empty(&self) -> bool {
-        self.account_nodes.is_empty() &&
-            self.removed_nodes.is_empty() &&
-            self.storage_tries.is_empty()
+        self.account_nodes.is_empty()
+            && self.removed_nodes.is_empty()
+            && self.storage_tries.is_empty()
     }
 
     /// Returns reference to updated account nodes.
@@ -597,8 +597,8 @@ impl TrieUpdatesSorted {
 
     /// Returns the total number of updates including account nodes and all storage updates.
     pub fn total_len(&self) -> usize {
-        self.account_nodes.len() +
-            self.storage_tries.values().map(|storage| storage.len()).sum::<usize>()
+        self.account_nodes.len()
+            + self.storage_tries.values().map(|storage| storage.len()).sum::<usize>()
     }
 
     /// Extends the trie updates with another set of sorted updates.

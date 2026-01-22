@@ -79,7 +79,7 @@ where
     /// static files depending on configuration.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let Some(range_output) =
@@ -98,7 +98,7 @@ where
                 checkpoint: StageCheckpoint::new(input.target())
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
                 done: true,
-            })
+            });
         };
         let end_block = *range_output.block_range.end();
 
@@ -129,7 +129,7 @@ where
                 while let Some((block, index)) = blocks_with_indices.peek() {
                     if index.contains_tx(tx) {
                         block_numbers.push(*block);
-                        return block_numbers
+                        return block_numbers;
                     }
                     blocks_with_indices.next();
                 }
@@ -246,7 +246,7 @@ where
                                     .into(),
                             ))
                         }
-                    }
+                    };
                 }
             };
 
@@ -316,7 +316,7 @@ where
                         // We exit early since we could not process this chunk.
                         let _ = recovered_senders_tx
                             .send(Err(Box::new(SenderRecoveryStageError::StageError(err.into()))));
-                        break
+                        break;
                     }
                 };
 
@@ -339,7 +339,7 @@ where
 
                         // Finish early
                         if is_err {
-                            break
+                            break;
                         }
                     }
                 });
@@ -753,7 +753,7 @@ mod tests {
                     let end_block = output.checkpoint.block_number;
 
                     if start_block > end_block {
-                        return Ok(())
+                        return Ok(());
                     }
 
                     let mut body_cursor =

@@ -1771,7 +1771,7 @@ fn dispatch_v2_storage_proofs(
     for target in account_targets {
         let hashed_address = target.key();
         if storage_proof_receivers.contains_key(&hashed_address) {
-            continue
+            continue;
         }
 
         let (result_tx, result_rx) = crossbeam_channel::unbounded();

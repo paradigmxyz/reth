@@ -62,8 +62,8 @@ pub trait LoadPendingBlock:
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv<Self::Evm>, Self::Error> {
-        if let Some(block) = self.provider().pending_block().map_err(Self::Error::from_eth_err)? &&
-            let Some(receipts) = self
+        if let Some(block) = self.provider().pending_block().map_err(Self::Error::from_eth_err)?
+            && let Some(receipts) = self
                 .provider()
                 .receipts_by_block(block.hash().into())
                 .map_err(Self::Error::from_eth_err)?
@@ -156,9 +156,9 @@ pub trait LoadPendingBlock:
             // Is the pending block cached?
             if let Some(pending_block) = lock.as_ref() {
                 // Is the cached block not expired and latest is its parent?
-                if pending.evm_env.block_env.number() == U256::from(pending_block.block().number()) &&
-                    parent.hash() == pending_block.block().parent_hash() &&
-                    now <= pending_block.expires_at
+                if pending.evm_env.block_env.number() == U256::from(pending_block.block().number())
+                    && parent.hash() == pending_block.block().parent_hash()
+                    && now <= pending_block.expires_at
                 {
                     return Ok(Some(pending_block.clone()));
                 }
@@ -174,7 +174,7 @@ pub trait LoadPendingBlock:
                 Ok(block) => block,
                 Err(err) => {
                     debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None)
+                    return Ok(None);
                 }
             };
 
@@ -282,7 +282,7 @@ pub trait LoadPendingBlock:
                             block_gas_limit,
                         ),
                     );
-                    continue
+                    continue;
                 }
 
                 if pool_tx.origin.is_private() {
@@ -295,7 +295,7 @@ pub trait LoadPendingBlock:
                             InvalidTransactionError::TxTypeNotSupported,
                         ),
                     );
-                    continue
+                    continue;
                 }
 
                 // convert tx to a signed transaction
@@ -303,8 +303,8 @@ pub trait LoadPendingBlock:
 
                 // There's only limited amount of blob space available per block, so we need to
                 // check if the EIP-4844 can still fit in the block
-                if let Some(tx_blob_gas) = tx.blob_gas_used() &&
-                    sum_blob_gas_used + tx_blob_gas > blob_params.max_blob_gas_per_block()
+                if let Some(tx_blob_gas) = tx.blob_gas_used()
+                    && sum_blob_gas_used + tx_blob_gas > blob_params.max_blob_gas_per_block()
                 {
                     // we can't fit this _blob_ transaction into the block, so we mark it as
                     // invalid, which removes its dependent transactions from
@@ -317,7 +317,7 @@ pub trait LoadPendingBlock:
                             blob_params.max_blob_gas_per_block(),
                         ),
                     );
-                    continue
+                    continue;
                 }
 
                 let gas_used = match builder.execute_transaction(tx.clone()) {
@@ -338,7 +338,7 @@ pub trait LoadPendingBlock:
                                 ),
                             );
                         }
-                        continue
+                        continue;
                     }
                     // this is an error that we should treat as fatal for this attempt
                     Err(err) => return Err(Self::Error::from_eth_err(err)),

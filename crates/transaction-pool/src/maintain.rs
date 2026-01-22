@@ -230,8 +230,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
         // check if we have a new finalized block
         if let Some(finalized) =
-            last_finalized_block.update(client.finalized_block_number().ok().flatten()) &&
-            let BlobStoreUpdates::Finalized(blobs) =
+            last_finalized_block.update(client.finalized_block_number().ok().flatten())
+            && let BlobStoreUpdates::Finalized(blobs) =
                 blob_store_tracker.on_finalized_block(finalized)
         {
             metrics.inc_deleted_tracked_blobs(blobs.len());
@@ -324,8 +324,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let old_first = old_blocks.first();
 
                 // check if the reorg is not canonical with the pool's block
-                if !(old_first.parent_hash() == pool_info.last_seen_block_hash ||
-                    new_first.parent_hash() == pool_info.last_seen_block_hash)
+                if !(old_first.parent_hash() == pool_info.last_seen_block_hash
+                    || new_first.parent_hash() == pool_info.last_seen_block_hash)
                 {
                     // the new block points to a higher block than the oldest block in the old chain
                     maintained_state = MaintainedPoolState::Drifted;
@@ -471,7 +471,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     // keep track of mined blob transactions
                     blob_store_tracker.add_new_chain_blocks(&blocks);
 
-                    continue
+                    continue;
                 }
 
                 let mut changed_accounts = Vec::with_capacity(state.state().len());
@@ -506,9 +506,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 blob_store_tracker.add_new_chain_blocks(&blocks);
 
                 // If Osaka activates in 2 slots we need to convert blobs to new format.
-                if !chain_spec.is_osaka_active_at_timestamp(tip.timestamp()) &&
-                    !chain_spec.is_osaka_active_at_timestamp(tip.timestamp().saturating_add(12)) &&
-                    chain_spec.is_osaka_active_at_timestamp(tip.timestamp().saturating_add(24))
+                if !chain_spec.is_osaka_active_at_timestamp(tip.timestamp())
+                    && !chain_spec.is_osaka_active_at_timestamp(tip.timestamp().saturating_add(12))
+                    && chain_spec.is_osaka_active_at_timestamp(tip.timestamp().saturating_add(24))
                 {
                     let pool = pool.clone();
                     let spawner = task_spawner.clone();
@@ -704,14 +704,14 @@ where
     P: TransactionPool<Transaction: PoolTransaction<Consensus: SignedTransaction>>,
 {
     if !file_path.exists() {
-        return Ok(())
+        return Ok(());
     }
 
     debug!(target: "txpool", txs_file =?file_path, "Check local persistent storage for saved transactions");
     let data = reth_fs_util::read(file_path)?;
 
     if data.is_empty() {
-        return Ok(())
+        return Ok(());
     }
 
     let pool_transactions: Vec<(TransactionOrigin, <P as TransactionPool>::Transaction)> =
@@ -763,7 +763,7 @@ where
     let local_transactions = pool.get_local_transactions();
     if local_transactions.is_empty() {
         trace!(target: "txpool", "no local transactions to save");
-        return
+        return;
     }
 
     let local_transactions = local_transactions
@@ -780,7 +780,7 @@ where
         Ok(data) => data,
         Err(err) => {
             warn!(target: "txpool", %err, txs_file=?file_path, "failed to serialize local transactions to json");
-            return
+            return;
         }
     };
 
@@ -835,7 +835,7 @@ pub async fn backup_local_transactions_task<P>(
 {
     let Some(transactions_path) = config.transactions_path else {
         // nothing to do
-        return
+        return;
     };
 
     if let Err(err) = load_and_reinsert_transactions(pool.clone(), &transactions_path).await {

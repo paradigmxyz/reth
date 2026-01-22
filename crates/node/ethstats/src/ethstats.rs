@@ -180,8 +180,8 @@ where
         let response =
             timeout(READ_TIMEOUT, conn.read_json()).await.map_err(|_| EthStatsError::Timeout)??;
 
-        if let Some(ack) = response.get("emit") &&
-            ack.get(0) == Some(&Value::String("ready".to_string()))
+        if let Some(ack) = response.get("emit")
+            && ack.get(0) == Some(&Value::String("ready".to_string()))
         {
             info!(
                 target: "ethstats",
@@ -638,8 +638,8 @@ where
             tokio::spawn(async move {
                 loop {
                     let head = canonical_stream.next().await;
-                    if let Some(head) = head &&
-                        head_tx.send(head).await.is_err()
+                    if let Some(head) = head
+                        && head_tx.send(head).await.is_err()
                     {
                         break;
                     }
@@ -726,8 +726,8 @@ where
     /// Attempts to close the connection cleanly and logs any errors
     /// that occur during the process.
     async fn disconnect(&self) {
-        if let Some(conn) = self.conn.write().await.take() &&
-            let Err(e) = conn.close().await
+        if let Some(conn) = self.conn.write().await.take()
+            && let Err(e) = conn.close().await
         {
             debug!(target: "ethstats", "Error closing connection: {}", e);
         }
@@ -778,8 +778,8 @@ mod tests {
 
             // Handle ping
             while let Some(Ok(msg)) = ws_stream.next().await {
-                if let Message::Text(text) = msg &&
-                    text.contains("node-ping")
+                if let Message::Text(text) = msg
+                    && text.contains("node-ping")
                 {
                     let pong = json!({
                         "emit": ["node-pong", {"id": "test-node"}]

@@ -177,9 +177,9 @@ where
                 }
 
                 // Connect last node with the first if there are more than two
-                if idx + 1 == self.num_nodes &&
-                    self.num_nodes > 2 &&
-                    let Some(first) = prev.first_mut()
+                if idx + 1 == self.num_nodes
+                    && self.num_nodes > 2
+                    && let Some(first) = prev.first_mut()
                 {
                     current.connect(first).await;
                 }

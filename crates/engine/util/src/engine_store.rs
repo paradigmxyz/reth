@@ -140,8 +140,8 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
         let next = ready!(this.stream.poll_next_unpin(cx));
-        if let Some(msg) = &next &&
-            let Err(error) = this.store.on_message(msg, SystemTime::now())
+        if let Some(msg) = &next
+            && let Err(error) = this.store.on_message(msg, SystemTime::now())
         {
             error!(target: "engine::stream::store", ?msg, %error, "Error handling Engine API message");
         }

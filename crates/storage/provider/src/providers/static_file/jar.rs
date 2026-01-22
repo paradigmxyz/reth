@@ -147,7 +147,7 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProv
             {
                 let sealed = SealedHeader::new(header, hash);
                 if !predicate(&sealed) {
-                    break
+                    break;
                 }
                 headers.push(sealed);
             }
@@ -302,10 +302,10 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction, Receipt: Decomp
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
-        if let Some(tx_static_file) = &self.auxiliary_jar &&
-            let Some(num) = tx_static_file.transaction_id(hash)?
+        if let Some(tx_static_file) = &self.auxiliary_jar
+            && let Some(num) = tx_static_file.transaction_id(hash)?
         {
-            return self.receipt(num)
+            return self.receipt(num);
         }
         Ok(None)
     }

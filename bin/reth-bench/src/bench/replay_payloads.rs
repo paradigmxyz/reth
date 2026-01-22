@@ -179,8 +179,8 @@ impl Command {
             .wrap_err_with(|| format!("Failed to read directory {:?}", self.payload_dir))?
             .filter_map(|e| e.ok())
             .filter(|e| {
-                e.path().extension().and_then(|s| s.to_str()) == Some("json") &&
-                    e.file_name().to_string_lossy().starts_with("payload_block_")
+                e.path().extension().and_then(|s| s.to_str()) == Some("json")
+                    && e.file_name().to_string_lossy().starts_with("payload_block_")
             })
             .collect();
 
@@ -237,8 +237,8 @@ impl Command {
             .wrap_err_with(|| format!("Failed to read directory {:?}", dir))?
             .filter_map(|e| e.ok())
             .filter(|e| {
-                e.path().extension().and_then(|s| s.to_str()) == Some("json") &&
-                    e.file_name().to_string_lossy().starts_with("payload_block_")
+                e.path().extension().and_then(|s| s.to_str()) == Some("json")
+                    && e.file_name().to_string_lossy().starts_with("payload_block_")
             })
             .collect();
 

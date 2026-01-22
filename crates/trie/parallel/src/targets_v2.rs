@@ -108,8 +108,8 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         }
 
         // Process any remaining storage-only entries (accounts not in account_targets)
-        while let Some((account_addr, storage_slots)) = self.storage_targets.iter_mut().next() &&
-            count < self.size
+        while let Some((account_addr, storage_slots)) = self.storage_targets.iter_mut().next()
+            && count < self.size
         {
             let account_addr = *account_addr;
             let storage_slots = std::mem::take(storage_slots);

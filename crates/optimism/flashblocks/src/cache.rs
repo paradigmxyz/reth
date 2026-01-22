@@ -181,9 +181,9 @@ impl<T: SignedTransaction> SequenceManager<T> {
         // chain progression.
         let block_time_ms = (base.timestamp - local_tip_timestamp) * 1000;
         let expected_final_flashblock = block_time_ms / FLASHBLOCK_BLOCK_TIME;
-        let compute_state_root = self.compute_state_root &&
-            last_flashblock.diff.state_root.is_zero() &&
-            last_flashblock.index >= expected_final_flashblock.saturating_sub(1);
+        let compute_state_root = self.compute_state_root
+            && last_flashblock.diff.state_root.is_zero()
+            && last_flashblock.index >= expected_final_flashblock.saturating_sub(1);
 
         trace!(
             target: "flashblocks",

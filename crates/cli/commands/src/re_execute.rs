@@ -132,7 +132,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 'blocks: for block in start_block..end_block {
                     if cancellation.is_cancelled() {
                         // exit if the program is being terminated
-                        break
+                        break;
                     }
 
                     let block = provider_factory
@@ -145,9 +145,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             if skip_invalid_blocks {
                                 executor = evm_config.batch_executor(db_at(block.number()));
                                 let _ = info_tx.send((block, eyre::Report::new(err)));
-                                continue
+                                continue;
                             }
-                            return Err(err.into())
+                            return Err(err.into());
                         }
                     };
 
@@ -172,14 +172,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                     ?tx_hash,
                                     "Invalid receipt"
                                 );
-                                let expected_gas_used = correct_receipt.cumulative_gas_used() -
-                                    if i == 0 {
+                                let expected_gas_used = correct_receipt.cumulative_gas_used()
+                                    - if i == 0 {
                                         0
                                     } else {
                                         correct_receipts[i - 1].cumulative_gas_used()
                                     };
-                                let got_gas_used = receipt.cumulative_gas_used() -
-                                    if i == 0 {
+                                let got_gas_used = receipt.cumulative_gas_used()
+                                    - if i == 0 {
                                         0
                                     } else {
                                         result.receipts[i - 1].cumulative_gas_used()
@@ -208,8 +208,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     let _ = stats_tx.send(block.gas_used());
 
                     // Reset DB once in a while to avoid OOM or read tx timeouts
-                    if executor.size_hint() > 1_000_000 ||
-                        executor_created.elapsed() > executor_lifetime
+                    if executor.size_hint() > 1_000_000
+                        || executor_created.elapsed() > executor_lifetime
                     {
                         executor = evm_config.batch_executor(db_at(block.number()));
                         executor_created = Instant::now();

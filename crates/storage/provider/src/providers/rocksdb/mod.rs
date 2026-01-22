@@ -7,4 +7,5 @@ mod provider;
 pub(crate) use provider::{PendingRocksDBBatches, RocksDBWriteCtx};
 pub use provider::{
     RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksDBRawIter, RocksDBTableStats, RocksTx,
+    DEFAULT_BATCH_COMMIT_THRESHOLD_BYTES,
 };

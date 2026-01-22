@@ -532,8 +532,8 @@ impl Drop for RocksDBProviderInner {
                     tracing::warn!(target: "providers::rocksdb", ?e, "Failed to flush WAL on drop");
                 }
                 for cf_name in ROCKSDB_TABLES {
-                    if let Some(cf) = db.cf_handle(cf_name) &&
-                        let Err(e) = db.flush_cf(&cf)
+                    if let Some(cf) = db.cf_handle(cf_name)
+                        && let Err(e) = db.flush_cf(&cf)
                     {
                         tracing::warn!(target: "providers::rocksdb", cf = cf_name, ?e, "Failed to flush CF on drop");
                     }
@@ -1046,8 +1046,8 @@ impl RocksDBProvider {
 
         thread::scope(|s| {
             let handles: Vec<_> = [
-                (ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
-                    ctx.prune_tx_lookup.is_none_or(|m| !m.is_full()))
+                (ctx.storage_settings.transaction_hash_numbers_in_rocksdb
+                    && ctx.prune_tx_lookup.is_none_or(|m| !m.is_full()))
                 .then(|| s.spawn(|| self.write_tx_hash_numbers(blocks, tx_nums, &ctx))),
                 ctx.storage_settings
                     .account_history_in_rocksdb
@@ -1149,6 +1149,24 @@ impl RocksDBProvider {
 }
 
 /// Default threshold for auto-committing batches to prevent OOM (1GB).
+///
+/// When a [`RocksDBBatch`] is configured with auto-commit via [`RocksDBBatch::with_auto_commit`],
+/// it will automatically commit and reset when the batch size exceeds this threshold.
+/// This prevents memory exhaustion during large bulk writes (e.g., syncing history indices).
+///
+/// # Trade-offs
+///
+/// Auto-commit breaks stage atomicity: if a crash occurs mid-stage, the database will be
+/// left in a partially-written state. This is acceptable because reth's bootup consistency
+/// check will detect and heal any such inconsistencies by unwinding to the last consistent
+/// checkpoint.
+///
+/// # Value
+///
+/// 1GB is chosen as a balance between:
+/// - Memory usage: keeps batch memory bounded
+/// - I/O efficiency: large enough to amortize commit overhead
+/// - Recovery time: small enough that partial writes are quickly healed on restart
 pub const DEFAULT_BATCH_COMMIT_THRESHOLD_BYTES: usize = 1024 * 1024 * 1024;
 
 /// Handle for building a batch of operations atomically.
@@ -1525,8 +1543,8 @@ impl<'a> RocksDBBatch<'a> {
         // Find the first shard that might contain blocks > keep_to.
         // A shard is affected if it's the sentinel (u64::MAX) or its highest_block_number > keep_to
         let boundary_idx = shards.iter().position(|(key, _)| {
-            key.sharded_key.highest_block_number == u64::MAX ||
-                key.sharded_key.highest_block_number > keep_to
+            key.sharded_key.highest_block_number == u64::MAX
+                || key.sharded_key.highest_block_number > keep_to
         });
 
         // Repair path: no shards affected means all blocks <= keep_to, just ensure sentinel exists
