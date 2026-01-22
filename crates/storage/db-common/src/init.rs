@@ -169,13 +169,10 @@ where
                             target: "reth::storage",
                             ?stored,
                             requested = ?genesis_storage_settings,
-                            "Storage settings mismatch detected. The database was initialized with \
-                             different settings than currently configured. Continuing with stored \
-                             settings to prevent data inconsistency. To apply new settings, delete \
+                            "Storage settings mismatch: database was initialized with different \
+                             settings than currently configured. To apply new settings, delete \
                              the datadir and resync."
                         );
-                        // Use stored settings to prevent data corruption
-                        factory.set_storage_settings_cache(stored);
                     }
                 }
 
@@ -921,23 +918,20 @@ mod tests {
     #[test]
     fn warn_storage_settings_mismatch_after_sync() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        let stored_settings = StorageSettings::legacy();
-        init_genesis_with_settings(&factory, stored_settings).unwrap();
+        init_genesis_with_settings(&factory, StorageSettings::legacy()).unwrap();
 
         let provider_rw = factory.database_provider_rw().unwrap();
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(100)).unwrap();
         provider_rw.commit().unwrap();
 
         // Request different settings - should warn but succeed
-        let requested_settings = StorageSettings::legacy().with_receipts_in_static_files(true);
-        let result = init_genesis_with_settings(&factory, requested_settings);
+        let result = init_genesis_with_settings(
+            &factory,
+            StorageSettings::legacy().with_receipts_in_static_files(true),
+        );
 
         // Should succeed (warning is logged, not an error)
         assert!(result.is_ok());
-
-        // Effective settings should be the stored ones, not the requested ones
-        let effective = factory.storage_settings().unwrap().unwrap();
-        assert_eq!(effective, stored_settings);
     }
 
     #[test]
