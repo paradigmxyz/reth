@@ -36,8 +36,10 @@ pub trait RocksDBProviderFactory {
                 let tx = rocksdb.tx();
                 return f(Some(&tx));
             }
+            f(None)
         }
-        f(None)
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        f(())
     }
 
     /// Executes a closure with a `RocksDB` batch, automatically registering it for commit.

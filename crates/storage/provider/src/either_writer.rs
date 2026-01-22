@@ -36,6 +36,32 @@ use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, Stor
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
+/// Error for invalid storage settings configuration.
+///
+/// Used when `RocksDB` tables are configured but no transaction was provided.
+#[cfg(all(unix, feature = "rocksdb"))]
+#[derive(Debug)]
+struct InvalidStorageSettings(&'static str);
+
+#[cfg(all(unix, feature = "rocksdb"))]
+impl std::fmt::Display for InvalidStorageSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid storage settings: {}", self.0)
+    }
+}
+
+#[cfg(all(unix, feature = "rocksdb"))]
+impl std::error::Error for InvalidStorageSettings {}
+
+/// Unwraps a `RocksDB` transaction reference or returns an error.
+#[cfg(all(unix, feature = "rocksdb"))]
+fn unwrap_rocksdb_tx<'a>(
+    tx: RocksTxRefArg<'a>,
+    setting_name: &'static str,
+) -> ProviderResult<&'a crate::providers::rocksdb::RocksTx<'a>> {
+    tx.ok_or_else(|| ProviderError::other(InvalidStorageSettings(setting_name)))
+}
+
 /// Type alias for [`EitherReader`] constructors.
 type EitherReaderTy<'a, P, T> =
     EitherReader<'a, CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
@@ -86,19 +112,16 @@ pub type RawRocksDBBatch = ();
 /// When `rocksdb` feature is enabled, this is an optional reference to a `RocksDB` transaction.
 /// The `Option` allows callers to skip transaction creation when `RocksDB` isn't needed
 /// (e.g., on legacy MDBX-only nodes).
-/// When `rocksdb` feature is disabled, it's `Option<()>` to allow the same API without
+/// When `rocksdb` feature is disabled, it's `()` (unit type) to allow the same API without
 /// feature gates.
 #[cfg(all(unix, feature = "rocksdb"))]
 pub type RocksTxRefArg<'a> = Option<&'a crate::providers::rocksdb::RocksTx<'a>>;
 /// Helper type for `RocksDB` transaction reference argument in reader constructors.
 ///
-/// When `rocksdb` feature is enabled, this is an optional reference to a `RocksDB` transaction.
-/// The `Option` allows callers to skip transaction creation when `RocksDB` isn't needed
-/// (e.g., on legacy MDBX-only nodes).
-/// When `rocksdb` feature is disabled, it's `Option<()>` to allow the same API without
+/// When `rocksdb` feature is disabled, it's `()` (unit type) to allow the same API without
 /// feature gates.
 #[cfg(not(all(unix, feature = "rocksdb")))]
-pub type RocksTxRefArg<'a> = Option<()>;
+pub type RocksTxRefArg<'a> = ();
 
 /// Represents a destination for writing data, either to database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
@@ -768,10 +791,10 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().storages_history_in_rocksdb {
-            let tx = _rocksdb_tx.ok_or(ProviderError::InvalidStorageSettings(
-                "rocksdb tx required but not provided",
-            ))?;
-            return Ok(EitherReader::RocksDB(tx));
+            return Ok(EitherReader::RocksDB(unwrap_rocksdb_tx(
+                _rocksdb_tx,
+                "storages_history_in_rocksdb requires rocksdb tx",
+            )?));
         }
 
         Ok(EitherReader::Database(
@@ -791,10 +814,10 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            let tx = _rocksdb_tx.ok_or(ProviderError::InvalidStorageSettings(
-                "rocksdb tx required but not provided",
-            ))?;
-            return Ok(EitherReader::RocksDB(tx));
+            return Ok(EitherReader::RocksDB(unwrap_rocksdb_tx(
+                _rocksdb_tx,
+                "transaction_hash_numbers_in_rocksdb requires rocksdb tx",
+            )?));
         }
 
         Ok(EitherReader::Database(
@@ -814,10 +837,10 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().account_history_in_rocksdb {
-            let tx = _rocksdb_tx.ok_or(ProviderError::InvalidStorageSettings(
-                "rocksdb tx required but not provided",
-            ))?;
-            return Ok(EitherReader::RocksDB(tx));
+            return Ok(EitherReader::RocksDB(unwrap_rocksdb_tx(
+                _rocksdb_tx,
+                "account_history_in_rocksdb requires rocksdb tx",
+            )?));
         }
 
         Ok(EitherReader::Database(
@@ -1843,9 +1866,11 @@ mod rocksdb_tests {
         let provider = factory.database_provider_ro().unwrap();
         let result = EitherReader::<(), ()>::new_accounts_history(&provider, None);
 
+        assert!(result.is_err(), "expected error when settings require RocksDB but tx is None");
+        let err_msg = result.unwrap_err().to_string();
         assert!(
-            matches!(result, Err(ProviderError::InvalidStorageSettings(_))),
-            "expected InvalidStorageSettings error when settings require RocksDB but tx is None"
+            err_msg.contains("account_history_in_rocksdb requires rocksdb tx"),
+            "expected InvalidStorageSettings error, got: {err_msg}"
         );
     }
 }
