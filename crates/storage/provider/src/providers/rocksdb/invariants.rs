@@ -69,13 +69,17 @@ impl RocksDBProvider {
         }
 
         // Heal StoragesHistory if stored in RocksDB
-        if provider.cached_storage_settings().storages_history_in_rocksdb {
-            self.heal_storages_history(provider)?;
+        if provider.cached_storage_settings().storages_history_in_rocksdb &&
+            let Some(target) = self.heal_storages_history(provider)?
+        {
+            unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
         // Heal AccountsHistory if stored in RocksDB
-        if provider.cached_storage_settings().account_history_in_rocksdb {
-            self.heal_accounts_history(provider)?;
+        if provider.cached_storage_settings().account_history_in_rocksdb &&
+            let Some(target) = self.heal_accounts_history(provider)?
+        {
+            unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
         Ok(unwind_target)
@@ -225,9 +229,12 @@ impl RocksDBProvider {
 
     /// Heals the `StoragesHistory` table by removing stale entries.
     ///
-    /// Iterates changesets in batches from `checkpoint+1` to `sf_tip` to identify
-    /// affected storage keys, then unwinds their history indices.
-    fn heal_storages_history<Provider>(&self, provider: &Provider) -> ProviderResult<()>
+    /// Returns an unwind target if static file tip is behind checkpoint (cannot heal).
+    /// Otherwise iterates changesets in batches to identify and unwind affected keys.
+    fn heal_storages_history<Provider>(
+        &self,
+        provider: &Provider,
+    ) -> ProviderResult<Option<BlockNumber>>
     where
         Provider:
             DBProvider + StageCheckpointReader + StaticFileProviderFactory + StorageChangeSetReader,
@@ -245,7 +252,7 @@ impl RocksDBProvider {
                 "StoragesHistory has data but checkpoint is 0, clearing all"
             );
             self.clear::<tables::StoragesHistory>()?;
-            return Ok(());
+            return Ok(None);
         }
 
         let sf_tip = provider
@@ -253,8 +260,21 @@ impl RocksDBProvider {
             .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
             .unwrap_or(0);
 
-        if sf_tip <= checkpoint {
-            return Ok(());
+        if sf_tip < checkpoint {
+            // This should never happen in normal operation - static files are always committed
+            // before RocksDB. If we get here, something is seriously wrong. The unwind is a
+            // best-effort attempt but is probably futile.
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                sf_tip,
+                checkpoint,
+                "StoragesHistory: static file tip behind checkpoint, unwind needed"
+            );
+            return Ok(Some(sf_tip));
+        }
+
+        if sf_tip == checkpoint {
+            return Ok(None);
         }
 
         tracing::info!(
@@ -294,14 +314,17 @@ impl RocksDBProvider {
             batch_start = batch_end.saturating_add(1);
         }
 
-        Ok(())
+        Ok(None)
     }
 
     /// Heals the `AccountsHistory` table by removing stale entries.
     ///
-    /// Iterates changesets in batches from `checkpoint+1` to `sf_tip` to identify
-    /// affected addresses, then unwinds their history indices.
-    fn heal_accounts_history<Provider>(&self, provider: &Provider) -> ProviderResult<()>
+    /// Returns an unwind target if static file tip is behind checkpoint (cannot heal).
+    /// Otherwise iterates changesets in batches to identify and unwind affected keys.
+    fn heal_accounts_history<Provider>(
+        &self,
+        provider: &Provider,
+    ) -> ProviderResult<Option<BlockNumber>>
     where
         Provider: DBProvider + StageCheckpointReader + StaticFileProviderFactory + ChangeSetReader,
     {
@@ -318,19 +341,29 @@ impl RocksDBProvider {
                 "AccountsHistory has data but checkpoint is 0, clearing all"
             );
             self.clear::<tables::AccountsHistory>()?;
-            return Ok(());
+            return Ok(None);
         }
 
         let sf_tip = provider
             .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
+            .unwrap_or(0);
 
-        let Some(sf_tip) = sf_tip else {
-            return Ok(());
-        };
+        if sf_tip < checkpoint {
+            // This should never happen in normal operation - static files are always committed
+            // before RocksDB. If we get here, something is seriously wrong. The unwind is a
+            // best-effort attempt but is probably futile.
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                sf_tip,
+                checkpoint,
+                "AccountsHistory: static file tip behind checkpoint, unwind needed"
+            );
+            return Ok(Some(sf_tip));
+        }
 
-        if sf_tip <= checkpoint {
-            return Ok(());
+        if sf_tip == checkpoint {
+            return Ok(None);
         }
 
         tracing::info!(
@@ -361,7 +394,7 @@ impl RocksDBProvider {
             batch_start = batch_end + 1;
         }
 
-        Ok(())
+        Ok(None)
     }
 }
 
@@ -577,9 +610,10 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
 
         // RocksDB is empty but checkpoint says block 100 was processed.
-        // This is treated as a first-run/migration scenario - no unwind needed.
+        // Since sf_tip=0 < checkpoint=100, we return unwind target of 0.
+        // This should never happen in normal operation.
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, None, "Empty RocksDB with checkpoint is treated as first run");
+        assert_eq!(result, Some(0), "sf_tip=0 < checkpoint=100 returns unwind target");
     }
 
     #[test]
@@ -816,13 +850,11 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB has only sentinel entries (no completed shards) but checkpoint is set.
-        // This is treated as a first-run/migration scenario - no unwind needed.
+        // RocksDB has only sentinel entries but checkpoint is set.
+        // Since sf_tip=0 < checkpoint=100, we return unwind target of 0.
+        // This should never happen in normal operation.
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(
-            result, None,
-            "Sentinel-only entries with checkpoint should be treated as first run"
-        );
+        assert_eq!(result, Some(0), "sf_tip=0 < checkpoint=100 returns unwind target");
     }
 
     #[test]
@@ -862,13 +894,11 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB has only sentinel entries (no completed shards) but checkpoint is set.
-        // This is treated as a first-run/migration scenario - no unwind needed.
+        // RocksDB has only sentinel entries but checkpoint is set.
+        // Since sf_tip=0 < checkpoint=100, we return unwind target of 0.
+        // This should never happen in normal operation.
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(
-            result, None,
-            "Sentinel-only entries with checkpoint should be treated as first run"
-        );
+        assert_eq!(result, Some(0), "sf_tip=0 < checkpoint=100 returns unwind target");
     }
 
     /// Test that pruning works by fetching transactions and computing their hashes,
@@ -1013,9 +1043,10 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
 
         // RocksDB is empty but checkpoint says block 100 was processed.
-        // This is treated as a first-run/migration scenario - no unwind needed.
+        // Since sf_tip=0 < checkpoint=100, we return unwind target of 0.
+        // This should never happen in normal operation.
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, None, "Empty RocksDB with checkpoint is treated as first run");
+        assert_eq!(result, Some(0), "sf_tip=0 < checkpoint=100 returns unwind target");
     }
 
     #[test]
