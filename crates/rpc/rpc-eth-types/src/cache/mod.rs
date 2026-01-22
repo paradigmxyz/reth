@@ -17,11 +17,10 @@ use std::{
     future::Future,
     ops::Deref,
     pin::Pin,
+    rc::Rc,
     sync::Arc,
     task::{Context, Poll},
 };
-
-use std::rc::Rc;
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, Semaphore,
