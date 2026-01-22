@@ -17,8 +17,8 @@ use reth_storage_api::{
     ChangeSetReader, DBProvider, StageCheckpointReader, StorageChangeSetReader,
     StorageSettingsCache, TransactionsProvider,
 };
-use std::collections::HashSet;
 use reth_storage_errors::provider::ProviderResult;
+use std::collections::HashSet;
 
 impl RocksDBProvider {
     /// Checks consistency of `RocksDB` tables against MDBX stage checkpoints.
@@ -236,7 +236,8 @@ impl RocksDBProvider {
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + StageCheckpointReader + StaticFileProviderFactory + StorageChangeSetReader,
+        Provider:
+            DBProvider + StageCheckpointReader + StaticFileProviderFactory + StorageChangeSetReader,
     {
         let checkpoint = provider
             .get_stage_checkpoint(StageId::IndexStorageHistory)?
@@ -284,10 +285,8 @@ impl RocksDBProvider {
                 .collect();
 
             if !unique_keys.is_empty() {
-                let indices: Vec<_> = unique_keys
-                    .into_iter()
-                    .map(|(addr, slot)| (addr, slot, checkpoint))
-                    .collect();
+                let indices: Vec<_> =
+                    unique_keys.into_iter().map(|(addr, slot)| (addr, slot, checkpoint)).collect();
 
                 tracing::debug!(
                     target: "reth::providers::rocksdb",
@@ -379,7 +378,6 @@ impl RocksDBProvider {
 
         Ok(None)
     }
-
 }
 
 #[cfg(test)]
@@ -387,8 +385,8 @@ mod tests {
     use super::*;
     use crate::{
         providers::{rocksdb::RocksDBBuilder, static_file::StaticFileWriter},
-        test_utils::create_test_provider_factory, BlockWriter,
-        DatabaseProviderFactory, StageCheckpointWriter, TransactionsProvider,
+        test_utils::create_test_provider_factory,
+        BlockWriter, DatabaseProviderFactory, StageCheckpointWriter, TransactionsProvider,
     };
     use alloy_primitives::{Address, B256};
     use reth_db::cursor::DbCursorRW;
@@ -1097,11 +1095,8 @@ mod tests {
         rocksdb.put::<tables::AccountsHistory>(key3, &block_list3).unwrap();
 
         // Capture RocksDB state before consistency check
-        let entries_before: Vec<_> = rocksdb
-            .iter::<tables::AccountsHistory>()
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect();
+        let entries_before: Vec<_> =
+            rocksdb.iter::<tables::AccountsHistory>().unwrap().map(|r| r.unwrap()).collect();
         assert_eq!(entries_before.len(), 3, "Should have 3 entries before check");
 
         // Create a test provider factory for MDBX
@@ -1113,15 +1108,11 @@ mod tests {
         // Write account changesets to static files for blocks 0-100
         {
             let sf_provider = factory.static_file_provider();
-            let mut writer = sf_provider
-                .latest_writer(StaticFileSegment::AccountChangeSets)
-                .unwrap();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
 
             for block_num in 0..=100 {
-                let changeset = vec![AccountBeforeTx {
-                    address: Address::random(),
-                    info: None,
-                }];
+                let changeset = vec![AccountBeforeTx { address: Address::random(), info: None }];
                 writer.append_account_changeset(changeset, block_num).unwrap();
             }
 
@@ -1151,11 +1142,8 @@ mod tests {
         assert_eq!(result, None, "sf_tip == checkpoint should not require unwind");
 
         // Verify NO entries are deleted - RocksDB state unchanged
-        let entries_after: Vec<_> = rocksdb
-            .iter::<tables::AccountsHistory>()
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect();
+        let entries_after: Vec<_> =
+            rocksdb.iter::<tables::AccountsHistory>().unwrap().map(|r| r.unwrap()).collect();
 
         assert_eq!(
             entries_after.len(),
@@ -1165,18 +1153,12 @@ mod tests {
 
         // Verify exact entries are preserved
         for (before, after) in entries_before.iter().zip(entries_after.iter()) {
-            assert_eq!(
-                before.0.key, after.0.key,
-                "Entry key should be unchanged"
-            );
+            assert_eq!(before.0.key, after.0.key, "Entry key should be unchanged");
             assert_eq!(
                 before.0.highest_block_number, after.0.highest_block_number,
                 "Entry highest_block_number should be unchanged"
             );
-            assert_eq!(
-                before.1, after.1,
-                "Entry block list should be unchanged"
-            );
+            assert_eq!(before.1, after.1, "Entry block list should be unchanged");
         }
     }
 
@@ -1187,8 +1169,8 @@ mod tests {
     /// 2. Each block has 1 storage change (address + slot + value)
     /// 3. Write storage changesets to static files for all 15k blocks
     /// 4. Set IndexStorageHistory checkpoint to block 5000
-    /// 5. Insert stale StoragesHistory entries in RocksDB for (address, slot) pairs
-    ///    that changed in blocks 5001-15000
+    /// 5. Insert stale StoragesHistory entries in RocksDB for (address, slot) pairs that changed in
+    ///    blocks 5001-15000
     /// 6. Run check_consistency
     /// 7. Verify stale entries for blocks > 5000 are pruned and batching worked
     #[test]
@@ -1229,11 +1211,8 @@ mod tests {
                 slot_bytes[0..8].copy_from_slice(&block_num.to_le_bytes());
                 let slot = B256::from(slot_bytes);
 
-                let changeset = vec![StorageBeforeTx {
-                    address,
-                    key: slot,
-                    value: U256::from(block_num),
-                }];
+                let changeset =
+                    vec![StorageBeforeTx { address, key: slot, value: U256::from(block_num) }];
 
                 writer.append_storage_changeset(changeset, block_num).unwrap();
             }
@@ -1247,11 +1226,7 @@ mod tests {
             let highest = sf_provider
                 .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
                 .unwrap();
-            assert_eq!(
-                highest,
-                TOTAL_BLOCKS - 1,
-                "Static files should have blocks 0..14999"
-            );
+            assert_eq!(highest, TOTAL_BLOCKS - 1, "Static files should have blocks 0..14999");
         }
 
         // Set IndexStorageHistory checkpoint to block 5000
@@ -1320,8 +1295,8 @@ mod tests {
     /// 2. Each block has 1 account change (simple - just random addresses)
     /// 3. Write account changesets to static files for all 15k blocks
     /// 4. Set IndexAccountHistory checkpoint to block 5000
-    /// 5. Insert stale AccountsHistory entries in RocksDB for addresses that changed
-    ///    in blocks 5001-15000
+    /// 5. Insert stale AccountsHistory entries in RocksDB for addresses that changed in blocks
+    ///    5001-15000
     /// 6. Run check_consistency
     /// 7. Verify:
     ///    - Stale entries for blocks > 5000 are pruned
@@ -1361,15 +1336,12 @@ mod tests {
         // Write account changesets to static files for all 15k blocks
         {
             let sf_provider = factory.static_file_provider();
-            let mut writer = sf_provider
-                .latest_writer(StaticFileSegment::AccountChangeSets)
-                .unwrap();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
 
             for block_num in 0..TOTAL_BLOCKS {
-                let changeset = vec![AccountBeforeTx {
-                    address: addresses[block_num as usize],
-                    info: None,
-                }];
+                let changeset =
+                    vec![AccountBeforeTx { address: addresses[block_num as usize], info: None }];
                 writer.append_account_changeset(changeset, block_num).unwrap();
             }
 
@@ -1396,10 +1368,7 @@ mod tests {
         }
 
         // Verify we have entries before healing
-        let entries_before: usize = rocksdb
-            .iter::<tables::AccountsHistory>()
-            .unwrap()
-            .count();
+        let entries_before: usize = rocksdb.iter::<tables::AccountsHistory>().unwrap().count();
         let stale_count = (TOTAL_BLOCKS - CHECKPOINT_BLOCK - 1) as usize;
         let valid_count = 5usize;
         assert_eq!(
@@ -1473,11 +1442,8 @@ mod tests {
         rocksdb.put::<tables::StoragesHistory>(key2.clone(), &block_list2).unwrap();
 
         // Capture entries before consistency check
-        let entries_before: Vec<_> = rocksdb
-            .iter::<tables::StoragesHistory>()
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect();
+        let entries_before: Vec<_> =
+            rocksdb.iter::<tables::StoragesHistory>().unwrap().map(|r| r.unwrap()).collect();
 
         // Create a test provider factory
         let factory = create_test_provider_factory();
@@ -1488,7 +1454,8 @@ mod tests {
         // Write storage changesets to static files for blocks 0-100
         {
             let sf_provider = factory.static_file_provider();
-            let mut writer = sf_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            let mut writer =
+                sf_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
 
             for block_num in 0..=100u64 {
                 let changeset = vec![StorageBeforeTx {
@@ -1524,11 +1491,8 @@ mod tests {
         assert_eq!(result, None, "sf_tip == checkpoint should not require unwind");
 
         // Verify NO entries are deleted - RocksDB state unchanged
-        let entries_after: Vec<_> = rocksdb
-            .iter::<tables::StoragesHistory>()
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect();
+        let entries_after: Vec<_> =
+            rocksdb.iter::<tables::StoragesHistory>().unwrap().map(|r| r.unwrap()).collect();
 
         assert_eq!(
             entries_after.len(),
@@ -1542,5 +1506,4 @@ mod tests {
             assert_eq!(before.1, after.1, "Entry block list should be unchanged");
         }
     }
-
 }
