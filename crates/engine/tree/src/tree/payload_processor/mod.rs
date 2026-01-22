@@ -19,6 +19,7 @@ use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
 use crossbeam_channel::Sender as CrossbeamSender;
 use executor::WorkloadExecutor;
+use metrics::Counter;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
@@ -28,6 +29,7 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
     TxEnvFor,
 };
+use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProvider,
@@ -139,6 +141,8 @@ where
     disable_parallel_sparse_trie: bool,
     /// Maximum concurrency for prewarm task.
     prewarm_max_concurrency: usize,
+    /// Whether to disable cache metrics recording.
+    disable_cache_metrics: bool,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -171,6 +175,7 @@ where
             sparse_state_trie: Arc::default(),
             disable_parallel_sparse_trie: config.disable_parallel_sparse_trie(),
             prewarm_max_concurrency: config.prewarm_max_concurrency(),
+            disable_cache_metrics: config.disable_cache_metrics(),
         }
     }
 }
@@ -300,7 +305,7 @@ where
             // Build a state provider for the multiproof task
             let provider = provider_builder.build().expect("failed to build provider");
             let provider = if let Some(saved_cache) = saved_cache {
-                let (cache, metrics) = saved_cache.split();
+                let (cache, metrics, _) = saved_cache.split();
                 Box::new(CachedStateProvider::new(provider, cache, metrics))
                     as Box<dyn StateProvider>
             } else {
@@ -477,6 +482,7 @@ where
             debug!("creating new execution cache on cache miss");
             let cache = ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
             SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
+                .with_disable_cache_metrics(self.disable_cache_metrics)
         }
     }
 
@@ -558,6 +564,7 @@ where
         block_with_parent: BlockWithParent,
         bundle_state: &BundleState,
     ) {
+        let disable_cache_metrics = self.disable_cache_metrics;
         self.execution_cache.update_with_guard(|cached| {
             if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
                 debug!(
@@ -571,7 +578,8 @@ where
             // Take existing cache (if any) or create fresh caches
             let (caches, cache_metrics) = match cached.take() {
                 Some(existing) => {
-                    existing.split()
+                    let (c, m, _) = existing.split();
+                    (c, m)
                 }
                 None => (
                     ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size),
@@ -580,7 +588,8 @@ where
             };
 
             // Insert the block's bundle state into cache
-            let new_cache = SavedCache::new(block_with_parent.block.hash, caches, cache_metrics);
+            let new_cache = SavedCache::new(block_with_parent.block.hash, caches, cache_metrics)
+                .with_disable_cache_metrics(disable_cache_metrics);
             if new_cache.cache().insert_state(bundle_state).is_err() {
                 *cached = None;
                 debug!(target: "engine::caching", "cleared execution cache on update error");
@@ -770,6 +779,8 @@ impl<R> Drop for CacheTaskHandle<R> {
 struct ExecutionCache {
     /// Guarded cloneable cache identified by a block hash.
     inner: Arc<RwLock<Option<SavedCache>>>,
+    /// Metrics for cache operations.
+    metrics: ExecutionCacheMetrics,
 }
 
 impl ExecutionCache {
@@ -811,6 +822,10 @@ impl ExecutionCache {
             if hash_matches && available {
                 return Some(c.clone());
             }
+
+            if hash_matches && !available {
+                self.metrics.execution_cache_in_use.increment(1);
+            }
         } else {
             debug!(target: "engine::caching", %parent_hash, "No cache found");
         }
@@ -844,6 +859,15 @@ impl ExecutionCache {
         let mut guard = self.inner.write();
         update_fn(&mut guard);
     }
+}
+
+/// Metrics for execution cache operations.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "consensus.engine.beacon")]
+pub(crate) struct ExecutionCacheMetrics {
+    /// Counter for when the execution cache was unavailable because other threads
+    /// (e.g., prewarming) are still using it.
+    pub(crate) execution_cache_in_use: Counter,
 }
 
 /// EVM context required to execute a block.

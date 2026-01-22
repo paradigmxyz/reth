@@ -34,6 +34,21 @@ pub struct StorageSettings {
 }
 
 impl StorageSettings {
+    /// Returns the default base `StorageSettings` for this build.
+    ///
+    /// When the `edge` feature is enabled, returns [`Self::edge()`].
+    /// Otherwise, returns [`Self::legacy()`].
+    pub const fn base() -> Self {
+        #[cfg(feature = "edge")]
+        {
+            Self::edge()
+        }
+        #[cfg(not(feature = "edge"))]
+        {
+            Self::legacy()
+        }
+    }
+
     /// Creates `StorageSettings` for edge nodes with all storage features enabled:
     /// - Receipts and transaction senders in static files
     /// - History indices in `RocksDB` (storages, accounts, transaction hashes)
@@ -45,7 +60,7 @@ impl StorageSettings {
             transaction_senders_in_static_files: true,
             account_changesets_in_static_files: true,
             storages_history_in_rocksdb: false,
-            transaction_hash_numbers_in_rocksdb: false,
+            transaction_hash_numbers_in_rocksdb: true,
             account_history_in_rocksdb: false,
         }
     }

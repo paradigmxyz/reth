@@ -1,11 +1,13 @@
-use super::metrics::{RocksDBMetrics, RocksDBOperation};
+use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
 use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
 use itertools::Itertools;
+use metrics::Label;
 use parking_lot::Mutex;
 use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
+    database_metrics::DatabaseMetrics,
     models::{
         sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
         StorageSettings,
@@ -37,6 +39,23 @@ use tracing::instrument;
 
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
+
+/// Statistics for a single `RocksDB` table (column family).
+#[derive(Debug, Clone)]
+pub struct RocksDBTableStats {
+    /// Size of SST files on disk in bytes.
+    pub sst_size_bytes: u64,
+    /// Size of memtables in memory in bytes.
+    pub memtable_size_bytes: u64,
+    /// Name of the table/column family.
+    pub name: String,
+    /// Estimated number of keys in the table.
+    pub estimated_num_keys: u64,
+    /// Estimated size of live data in bytes (SST files + memtables).
+    pub estimated_size_bytes: u64,
+    /// Estimated bytes pending compaction (reclaimable space).
+    pub pending_compaction_bytes: u64,
+}
 
 /// Context for `RocksDB` block writes.
 #[derive(Clone)]
@@ -405,6 +424,65 @@ impl RocksDBProviderInner {
             Self::ReadOnly { db, .. } => RocksDBIterEnum::ReadOnly(db.iterator_cf(cf, mode)),
         }
     }
+
+    /// Returns statistics for all column families in the database.
+    fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        let mut stats = Vec::new();
+
+        macro_rules! collect_stats {
+            ($db:expr) => {
+                for cf_name in ROCKSDB_TABLES {
+                    if let Some(cf) = $db.cf_handle(cf_name) {
+                        let estimated_num_keys = $db
+                            .property_int_value_cf(cf, rocksdb::properties::ESTIMATE_NUM_KEYS)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        // SST files size (on-disk) + memtable size (in-memory)
+                        let sst_size = $db
+                            .property_int_value_cf(cf, rocksdb::properties::LIVE_SST_FILES_SIZE)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        let memtable_size = $db
+                            .property_int_value_cf(cf, rocksdb::properties::SIZE_ALL_MEM_TABLES)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        let estimated_size_bytes = sst_size + memtable_size;
+
+                        let pending_compaction_bytes = $db
+                            .property_int_value_cf(
+                                cf,
+                                rocksdb::properties::ESTIMATE_PENDING_COMPACTION_BYTES,
+                            )
+                            .ok()
+                            .flatten()
+                            .unwrap_or(0);
+
+                        stats.push(RocksDBTableStats {
+                            sst_size_bytes: sst_size,
+                            memtable_size_bytes: memtable_size,
+                            name: cf_name.to_string(),
+                            estimated_num_keys,
+                            estimated_size_bytes,
+                            pending_compaction_bytes,
+                        });
+                    }
+                }
+            };
+        }
+
+        match self {
+            Self::ReadWrite { db, .. } => collect_stats!(db),
+            Self::ReadOnly { db, .. } => collect_stats!(db),
+        }
+
+        stats
+    }
 }
 
 impl fmt::Debug for RocksDBProviderInner {
@@ -427,7 +505,21 @@ impl fmt::Debug for RocksDBProviderInner {
 impl Drop for RocksDBProviderInner {
     fn drop(&mut self) {
         match self {
-            Self::ReadWrite { db, .. } => db.cancel_all_background_work(true),
+            Self::ReadWrite { db, .. } => {
+                // Flush all memtables if possible. If not, they will be rebuilt from the WAL on
+                // restart
+                if let Err(e) = db.flush_wal(true) {
+                    tracing::warn!(target: "providers::rocksdb", ?e, "Failed to flush WAL on drop");
+                }
+                for cf_name in ROCKSDB_TABLES {
+                    if let Some(cf) = db.cf_handle(cf_name) &&
+                        let Err(e) = db.flush_cf(&cf)
+                    {
+                        tracing::warn!(target: "providers::rocksdb", cf = cf_name, ?e, "Failed to flush CF on drop");
+                    }
+                }
+                db.cancel_all_background_work(true);
+            }
             Self::ReadOnly { db, .. } => db.cancel_all_background_work(true),
         }
     }
@@ -436,6 +528,42 @@ impl Drop for RocksDBProviderInner {
 impl Clone for RocksDBProvider {
     fn clone(&self) -> Self {
         Self(self.0.clone())
+    }
+}
+
+impl DatabaseMetrics for RocksDBProvider {
+    fn gauge_metrics(&self) -> Vec<(&'static str, f64, Vec<Label>)> {
+        let mut metrics = Vec::new();
+
+        for stat in self.table_stats() {
+            metrics.push((
+                "rocksdb.table_size",
+                stat.estimated_size_bytes as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.table_entries",
+                stat.estimated_num_keys as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.pending_compaction_bytes",
+                stat.pending_compaction_bytes as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.sst_size",
+                stat.sst_size_bytes as f64,
+                vec![Label::new("table", stat.name.clone())],
+            ));
+            metrics.push((
+                "rocksdb.memtable_size",
+                stat.memtable_size_bytes as f64,
+                vec![Label::new("table", stat.name)],
+            ));
+        }
+
+        metrics
     }
 }
 
@@ -656,6 +784,22 @@ impl RocksDBProvider {
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
     }
 
+    /// Returns statistics for all column families in the database.
+    ///
+    /// Returns a vector of (`table_name`, `estimated_keys`, `estimated_size_bytes`) tuples.
+    pub fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        self.0.table_stats()
+    }
+
+    /// Creates a raw iterator over all entries in the specified table.
+    ///
+    /// Returns raw `(key_bytes, value_bytes)` pairs without decoding.
+    pub fn raw_iter<T: Table>(&self) -> ProviderResult<RocksDBRawIter<'_>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let iter = self.0.iterator_cf(cf, IteratorMode::Start);
+        Ok(RocksDBRawIter { inner: iter })
+    }
+
     /// Returns all account history shards for the given address in ascending key order.
     ///
     /// This is used for unwind operations where we need to scan all shards for an address
@@ -761,6 +905,7 @@ impl RocksDBProvider {
     /// (i.e., removes the minimum block and all higher blocks).
     ///
     /// Returns a `WriteBatchWithTransaction` that can be committed later.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn unwind_account_history_indices(
         &self,
         last_indices: &[(Address, BlockNumber)],
@@ -817,6 +962,7 @@ impl RocksDBProvider {
     }
 
     /// Writes a batch of operations atomically.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
         F: FnOnce(&mut RocksDBBatch<'_>) -> ProviderResult<()>,
@@ -835,6 +981,7 @@ impl RocksDBProvider {
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len(), batch_size = batch.size_in_bytes()))]
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
         self.0.db_rw().write_opt(batch, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
@@ -849,7 +996,7 @@ impl RocksDBProvider {
     /// This handles transaction hash numbers, account history, and storage history based on
     /// the provided storage settings. Each operation runs in parallel with its own batch,
     /// pushing to `ctx.pending_batches` for later commit.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(num_blocks = blocks.len(), first_block = ctx.first_block_number))]
     pub(crate) fn write_blocks_data<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -890,7 +1037,7 @@ impl RocksDBProvider {
     }
 
     /// Writes transaction hash to number mappings for the given blocks.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_tx_hash_numbers<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -911,7 +1058,7 @@ impl RocksDBProvider {
     }
 
     /// Writes account history indices for the given blocks.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_account_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -936,7 +1083,7 @@ impl RocksDBProvider {
     }
 
     /// Writes storage history indices for the given blocks.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_storage_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -1021,6 +1168,7 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len(), batch_size = self.inner.size_in_bytes()))]
     pub fn commit(self) -> ProviderResult<()> {
         self.provider.0.db_rw().write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
@@ -1465,6 +1613,7 @@ impl<'db> RocksTx<'db> {
     }
 
     /// Commits the transaction, persisting all changes.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn commit(self) -> ProviderResult<()> {
         self.inner.commit().map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
@@ -1475,6 +1624,7 @@ impl<'db> RocksTx<'db> {
     }
 
     /// Rolls back the transaction, discarding all changes.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn rollback(self) -> ProviderResult<()> {
         self.inner.rollback().map_err(|e| {
             ProviderError::Database(DatabaseError::Other(format!("rollback failed: {e}")))
@@ -1687,6 +1837,33 @@ impl<T: Table> Iterator for RocksDBIter<'_, T> {
         };
 
         Some(Ok((key, value)))
+    }
+}
+
+/// Raw iterator over a `RocksDB` table (non-transactional).
+///
+/// Yields raw `(key_bytes, value_bytes)` pairs without decoding.
+pub struct RocksDBRawIter<'db> {
+    inner: RocksDBIterEnum<'db>,
+}
+
+impl fmt::Debug for RocksDBRawIter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBRawIter").finish_non_exhaustive()
+    }
+}
+
+impl Iterator for RocksDBRawIter<'_> {
+    type Item = ProviderResult<(Box<[u8]>, Box<[u8]>)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.inner.next()? {
+            Ok(kv) => Some(Ok(kv)),
+            Err(e) => Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            })))),
+        }
     }
 }
 

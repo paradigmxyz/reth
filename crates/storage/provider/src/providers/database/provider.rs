@@ -1504,10 +1504,17 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     /// If the header for this block is not found, this returns `None`.
     /// If the header is found, but the transactions either do not exist, or are not indexed, this
     /// will return None.
+    ///
+    /// Returns an error if the requested block is below the earliest available history.
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-        if let Some(number) = self.convert_hash_or_number(id)? &&
-            let Some(header) = self.header_by_number(number)?
-        {
+        if let Some(number) = self.convert_hash_or_number(id)? {
+            let earliest_available = self.static_file_provider.earliest_history_height();
+            if number < earliest_available {
+                return Err(ProviderError::BlockExpired { requested: number, earliest_available })
+            }
+
+            let Some(header) = self.header_by_number(number)? else { return Ok(None) };
+
             // If the body indices are not found, this means that the transactions either do not
             // exist in the database yet, or they do exit but are not indexed.
             // If they exist but are not indexed, we don't have enough

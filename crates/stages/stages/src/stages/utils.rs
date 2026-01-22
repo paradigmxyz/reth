@@ -1,5 +1,5 @@
 //! Utils for `stages`.
-use alloy_primitives::{Address, BlockNumber, TxNumber};
+use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -7,7 +7,7 @@ use reth_db_api::{
         sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey,
         AccountBeforeTx, ShardedKey,
     },
-    table::{Decompress, Key, Table},
+    table::{Decode, Decompress, Key, Table},
     transaction::DbTx,
     BlockNumberList,
 };
