@@ -279,14 +279,13 @@ impl RocksDBProvider {
 
             let changesets = provider.storage_changesets_range(batch_start..=batch_end)?;
 
-            let unique_keys: HashSet<_> = changesets
-                .iter()
-                .map(|(block_addr, entry)| (block_addr.address(), entry.key))
-                .collect();
+            if !changesets.is_empty() {
+                let unique_keys: HashSet<_> = changesets
+                    .into_iter()
+                    .map(|(block_addr, entry)| (block_addr.address(), entry.key, checkpoint))
+                    .collect();
 
-            if !unique_keys.is_empty() {
-                let indices: Vec<_> =
-                    unique_keys.into_iter().map(|(addr, slot)| (addr, slot, checkpoint)).collect();
+                let indices: Vec<_> = unique_keys.into_iter().collect();
 
                 tracing::debug!(
                     target: "reth::providers::rocksdb",
@@ -363,12 +362,14 @@ impl RocksDBProvider {
 
             let changesets = provider.account_changesets_range(batch_start..=batch_end)?;
 
-            let addresses: HashSet<_> = changesets.iter().map(|(_, cs)| cs.address).collect();
+            if !changesets.is_empty() {
+                let mut addresses = HashSet::with_capacity(changesets.len());
+                addresses.extend(changesets.iter().map(|(_, cs)| cs.address));
 
-            let indices: Vec<_> =
-                addresses.into_iter().map(|addr| (addr, checkpoint + 1)).collect();
+                let unwind_from = checkpoint + 1;
+                let indices: Vec<_> =
+                    addresses.into_iter().map(|addr| (addr, unwind_from)).collect();
 
-            if !indices.is_empty() {
                 let batch = self.unwind_account_history_indices(&indices)?;
                 self.commit_batch(batch)?;
             }
@@ -1194,6 +1195,22 @@ mod tests {
                 .with_storage_changesets_in_static_files(true),
         );
 
+        // Helper to generate address from block number (reuses stack arrays)
+        #[inline]
+        fn make_address(block_num: u64) -> Address {
+            let mut addr_bytes = [0u8; 20];
+            addr_bytes[0..8].copy_from_slice(&block_num.to_le_bytes());
+            Address::from(addr_bytes)
+        }
+
+        // Helper to generate slot from block number (reuses stack arrays)
+        #[inline]
+        fn make_slot(block_num: u64) -> B256 {
+            let mut slot_bytes = [0u8; 32];
+            slot_bytes[0..8].copy_from_slice(&block_num.to_le_bytes());
+            B256::from(slot_bytes)
+        }
+
         // Write storage changesets to static files for 15k blocks.
         // Each block has 1 storage change with a unique (address, slot) pair.
         {
@@ -1201,20 +1218,18 @@ mod tests {
             let mut writer =
                 sf_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
 
+            // Reuse changeset vec to avoid repeated allocations
+            let mut changeset = Vec::with_capacity(1);
+
             for block_num in 0..TOTAL_BLOCKS {
-                // Generate unique address and slot for each block
-                let mut addr_bytes = [0u8; 20];
-                addr_bytes[0..8].copy_from_slice(&block_num.to_le_bytes());
-                let address = Address::from(addr_bytes);
+                changeset.clear();
+                changeset.push(StorageBeforeTx {
+                    address: make_address(block_num),
+                    key: make_slot(block_num),
+                    value: U256::from(block_num),
+                });
 
-                let mut slot_bytes = [0u8; 32];
-                slot_bytes[0..8].copy_from_slice(&block_num.to_le_bytes());
-                let slot = B256::from(slot_bytes);
-
-                let changeset =
-                    vec![StorageBeforeTx { address, key: slot, value: U256::from(block_num) }];
-
-                writer.append_storage_changeset(changeset, block_num).unwrap();
+                writer.append_storage_changeset(changeset.clone(), block_num).unwrap();
             }
 
             writer.commit().unwrap();
@@ -1244,16 +1259,8 @@ mod tests {
         // Insert stale StoragesHistory entries for blocks 5001-14999
         // These are (address, slot) pairs that changed after the checkpoint
         for block_num in (CHECKPOINT_BLOCK + 1)..TOTAL_BLOCKS {
-            let mut addr_bytes = [0u8; 20];
-            addr_bytes[0..8].copy_from_slice(&block_num.to_le_bytes());
-            let address = Address::from(addr_bytes);
-
-            let mut slot_bytes = [0u8; 32];
-            slot_bytes[0..8].copy_from_slice(&block_num.to_le_bytes());
-            let slot = B256::from(slot_bytes);
-
-            // Create a stale entry with highest_block_number = block_num
-            let key = StorageShardedKey::new(address, slot, block_num);
+            let key =
+                StorageShardedKey::new(make_address(block_num), make_slot(block_num), block_num);
             let block_list = BlockNumberList::new_pre_sorted([block_num]);
             rocksdb.put::<tables::StoragesHistory>(key, &block_list).unwrap();
         }
@@ -1324,14 +1331,13 @@ mod tests {
         const TOTAL_BLOCKS: u64 = 15_000;
         const CHECKPOINT_BLOCK: u64 = 5_000;
 
-        // Generate unique addresses for each block
-        let addresses: Vec<Address> = (0..TOTAL_BLOCKS)
-            .map(|i| {
-                let mut addr = Address::ZERO;
-                addr.0[0..8].copy_from_slice(&i.to_le_bytes());
-                addr
-            })
-            .collect();
+        // Helper to generate address from block number (avoids pre-allocating 15k addresses)
+        #[inline]
+        fn make_address(block_num: u64) -> Address {
+            let mut addr = Address::ZERO;
+            addr.0[0..8].copy_from_slice(&block_num.to_le_bytes());
+            addr
+        }
 
         // Write account changesets to static files for all 15k blocks
         {
@@ -1339,10 +1345,13 @@ mod tests {
             let mut writer =
                 sf_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
 
+            // Reuse changeset vec to avoid repeated allocations
+            let mut changeset = Vec::with_capacity(1);
+
             for block_num in 0..TOTAL_BLOCKS {
-                let changeset =
-                    vec![AccountBeforeTx { address: addresses[block_num as usize], info: None }];
-                writer.append_account_changeset(changeset, block_num).unwrap();
+                changeset.clear();
+                changeset.push(AccountBeforeTx { address: make_address(block_num), info: None });
+                writer.append_account_changeset(changeset.clone(), block_num).unwrap();
             }
 
             writer.commit().unwrap();
@@ -1352,17 +1361,14 @@ mod tests {
         // in blocks 5001-15000 (i.e., blocks after the checkpoint)
         // These should be pruned by check_consistency
         for block_num in (CHECKPOINT_BLOCK + 1)..TOTAL_BLOCKS {
-            let addr = addresses[block_num as usize];
-            // Create a shard with highest_block_number = block_num
-            let key = ShardedKey::new(addr, block_num);
+            let key = ShardedKey::new(make_address(block_num), block_num);
             let block_list = BlockNumberList::new_pre_sorted([block_num]);
             rocksdb.put::<tables::AccountsHistory>(key, &block_list).unwrap();
         }
 
         // Also insert some valid entries for blocks <= 5000 that should NOT be pruned
         for block_num in [100u64, 500, 1000, 2500, 5000] {
-            let addr = addresses[block_num as usize];
-            let key = ShardedKey::new(addr, block_num);
+            let key = ShardedKey::new(make_address(block_num), block_num);
             let block_list = BlockNumberList::new_pre_sorted([block_num]);
             rocksdb.put::<tables::AccountsHistory>(key, &block_list).unwrap();
         }
