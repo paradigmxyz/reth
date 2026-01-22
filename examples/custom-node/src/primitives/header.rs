@@ -141,6 +141,10 @@ impl alloy_consensus::BlockHeader for CustomHeader {
     fn extra_data(&self) -> &Bytes {
         self.inner.extra_data()
     }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.inner.slot_number()
+    }
 }
 
 impl InMemorySize for CustomHeader {
