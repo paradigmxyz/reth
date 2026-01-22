@@ -1207,27 +1207,24 @@ impl<'a> RocksDBBatch<'a> {
     }
 
     fn maybe_auto_commit(&mut self) -> ProviderResult<()> {
-        if let Some(threshold) = self.auto_commit_threshold {
-            if self.inner.size_in_bytes() as u64 >= threshold {
-                tracing::debug!(
-                    target: "providers::rocksdb",
-                    batch_size = self.inner.size_in_bytes(),
-                    threshold,
-                    "Auto-committing RocksDB batch"
-                );
-                let old_batch = std::mem::replace(
-                    &mut self.inner,
-                    WriteBatchWithTransaction::<true>::default(),
-                );
-                self.provider.0.db_rw().write_opt(old_batch, &WriteOptions::default()).map_err(
-                    |e| {
-                        ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                            message: e.to_string().into(),
-                            code: -1,
-                        }))
-                    },
-                )?;
-            }
+        if let Some(threshold) = self.auto_commit_threshold &&
+            self.inner.size_in_bytes() as u64 >= threshold
+        {
+            tracing::debug!(
+                target: "providers::rocksdb",
+                batch_size = self.inner.size_in_bytes(),
+                threshold,
+                "Auto-committing RocksDB batch"
+            );
+            let old_batch = std::mem::take(&mut self.inner);
+            self.provider.0.db_rw().write_opt(old_batch, &WriteOptions::default()).map_err(
+                |e| {
+                    ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                },
+            )?;
         }
         Ok(())
     }
