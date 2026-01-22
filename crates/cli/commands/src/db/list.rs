@@ -84,8 +84,8 @@ impl Command {
             min_value_size: self.min_value_size,
             reverse: self.reverse,
             only_count: self.count,
-        }
-    })
+        })
+    }
 }
 
 struct ListTableViewer<'a, N: NodeTypes> {
