@@ -639,7 +639,7 @@ impl RocksDBProvider {
             provider: self,
             inner: WriteBatchWithTransaction::<true>::default(),
             buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
-            auto_commit_threshold: Some(4 * 1024 * 1024 * 1024),
+            auto_commit_threshold: Some(4 * 1024 * 1024 * 1024), // 4GB
         }
     }
 
