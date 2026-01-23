@@ -147,6 +147,7 @@ where
             Ok(((), writer.into_raw_rocksdb_batch()))
         })?;
 
+        #[cfg(all(unix, feature = "rocksdb"))]
         if use_rocksdb {
             provider.commit_pending_rocksdb_batches()?;
             provider.rocksdb_provider().flush(&[tables::StoragesHistory::NAME])?;
