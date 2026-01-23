@@ -274,7 +274,8 @@ impl AccountHistory {
 
         provider.with_rocksdb_batch(|mut batch| {
             for (address, highest_block) in &sorted_accounts {
-                match batch.prune_account_history_to(*address, *highest_block)? {
+                let prune_to = (*highest_block).min(last_changeset_pruned_block);
+                match batch.prune_account_history_to(*address, prune_to)? {
                     PruneShardOutcome::Deleted => deleted_shards += 1,
                     PruneShardOutcome::Updated => updated_shards += 1,
                     PruneShardOutcome::Unchanged => {}

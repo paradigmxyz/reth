@@ -271,12 +271,6 @@ impl StorageHistory {
             limiter.increment_deleted_entries_count();
         }
 
-        // Delete static file jars below the pruned block
-        if let Some(last_block) = last_changeset_pruned_block {
-            provider
-                .static_file_provider()
-                .delete_segment_below_block(StaticFileSegment::StorageChangeSets, last_block + 1)?;
-        }
         trace!(target: "pruner", processed = %changesets_processed, %done, "Scanned storage changesets from static files");
 
         let last_changeset_pruned_block = last_changeset_pruned_block
@@ -287,9 +281,14 @@ impl StorageHistory {
         let mut deleted_shards = 0usize;
         let mut updated_shards = 0usize;
 
+        // Sort by (address, storage_key) for better RocksDB cache locality
+        let mut sorted_storages: Vec<_> = highest_deleted_storages.into_iter().collect();
+        sorted_storages.sort_unstable_by_key(|((addr, key), _)| (*addr, *key));
+
         provider.with_rocksdb_batch(|mut batch| {
-            for ((address, storage_key), highest_block) in &highest_deleted_storages {
-                match batch.prune_storage_history_to(*address, *storage_key, *highest_block)? {
+            for ((address, storage_key), highest_block) in &sorted_storages {
+                let prune_to = (*highest_block).min(last_changeset_pruned_block);
+                match batch.prune_storage_history_to(*address, *storage_key, prune_to)? {
                     PruneShardOutcome::Deleted => deleted_shards += 1,
                     PruneShardOutcome::Updated => updated_shards += 1,
                     PruneShardOutcome::Unchanged => {}
@@ -300,11 +299,21 @@ impl StorageHistory {
 
         trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned storage history (RocksDB indices)");
 
+        // Delete static file jars AFTER RocksDB batch is queued. This ensures that if we crash
+        // after jar deletion but before checkpoint commit, we can still recover because the
+        // RocksDB batch will be committed atomically with the checkpoint.
+        if done {
+            provider.static_file_provider().delete_segment_below_block(
+                StaticFileSegment::StorageChangeSets,
+                last_changeset_pruned_block + 1,
+            )?;
+        }
+
         let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
             progress,
-            pruned: deleted_shards + updated_shards,
+            pruned: changesets_processed + deleted_shards + updated_shards,
             checkpoint: Some(SegmentOutputCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
                 tx_number: None,
