@@ -17,7 +17,10 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, TrieInputSorted};
+use reth_trie::{
+    updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData,
+    TrieInputSorted,
+};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -948,22 +951,30 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
         match blocks {
             [] => Chain::default(),
             [first, rest @ ..] => {
+                let first = first.clone();
                 let mut chain = Chain::from_block(
                     first.recovered_block().clone(),
                     ExecutionOutcome::from((
                         first.execution_outcome().clone(),
                         first.block_number(),
                     )),
-                    LazyTrieData::ready(first.hashed_state(), first.trie_updates()),
+                    LazyTrieData::deferred(move || SortedTrieData {
+                        hashed_state: first.hashed_state(),
+                        trie_updates: first.trie_updates(),
+                    }),
                 );
                 for exec in rest {
+                    let exec = exec.clone();
                     chain.append_block(
                         exec.recovered_block().clone(),
                         ExecutionOutcome::from((
                             exec.execution_outcome().clone(),
                             exec.block_number(),
                         )),
-                        LazyTrieData::ready(exec.hashed_state(), exec.trie_updates()),
+                        LazyTrieData::deferred(move || SortedTrieData {
+                            hashed_state: exec.hashed_state(),
+                            trie_updates: exec.trie_updates(),
+                        }),
                     );
                 }
                 chain
