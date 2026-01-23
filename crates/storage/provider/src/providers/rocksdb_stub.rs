@@ -92,7 +92,7 @@ impl RocksDBProvider {
     /// Flushes all pending writes to disk (stub implementation).
     ///
     /// This is a no-op since there is no `RocksDB` when the feature is disabled.
-    pub const fn flush(&self) -> ProviderResult<()> {
+    pub const fn flush(&self, _tables: &[&'static str]) -> ProviderResult<()> {
         Ok(())
     }
 }

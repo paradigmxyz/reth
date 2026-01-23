@@ -833,18 +833,18 @@ impl RocksDBProvider {
         self.0.table_stats()
     }
 
-    /// Flushes all pending writes to disk.
+    /// Flushes pending writes for the specified tables to disk.
     ///
-    /// This performs a full flush of:
+    /// This performs a flush of:
     /// 1. The Write-Ahead Log (WAL) with sync
-    /// 2. All column family memtables to SST files
+    /// 2. The column family memtables for the specified table names to SST files
     ///
-    /// After this call completes, all data is durably persisted to disk.
+    /// After this call completes, all data for the specified tables is durably persisted to disk.
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
-    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
-    pub fn flush(&self) -> ProviderResult<()> {
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(tables = ?tables))]
+    pub fn flush(&self, tables: &[&'static str]) -> ProviderResult<()> {
         let db = self.0.db_rw();
 
         db.flush_wal(true).map_err(|e| {
@@ -856,7 +856,7 @@ impl RocksDBProvider {
             })))
         })?;
 
-        for cf_name in ROCKSDB_TABLES {
+        for cf_name in tables {
             if let Some(cf) = db.cf_handle(cf_name) {
                 db.flush_cf(&cf).map_err(|e| {
                     ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
@@ -1261,9 +1261,9 @@ impl<'a> RocksDBBatch<'a> {
     /// This is called after each `put` or `delete` operation to prevent unbounded memory growth.
     /// Returns immediately if auto-commit is disabled or threshold not reached.
     ///
-    /// When the `edge` feature is enabled, this also flushes the WAL and memtables to disk
-    /// after committing. Since data is inserted in sorted order, this results in trivial
-    /// compaction moves rather than expensive merge operations.
+    /// This also flushes the WAL and memtables to disk after committing. Since data is inserted
+    /// in sorted order, this results in trivial compaction moves rather than expensive merge
+    /// operations.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_size = self.inner.size_in_bytes()))]
     fn maybe_auto_commit(&mut self) -> ProviderResult<()> {
         if let Some(threshold) = self.auto_commit_threshold &&
@@ -1284,40 +1284,12 @@ impl<'a> RocksDBBatch<'a> {
                 }))
             })?;
 
-            #[cfg(feature = "edge")]
-            {
-                db.flush_wal(true).map_err(|e| {
-                    ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
-                        info: DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
-                        operation: DatabaseWriteOperation::Flush,
-                        table_name: "WAL",
-                        key: Vec::new(),
-                    })))
-                })?;
+            self.provider.flush(ROCKSDB_TABLES)?;
 
-                for cf_name in ROCKSDB_TABLES {
-                    if let Some(cf) = db.cf_handle(cf_name) {
-                        db.flush_cf(&cf).map_err(|e| {
-                            ProviderError::Database(DatabaseError::Write(Box::new(
-                                DatabaseWriteError {
-                                    info: DatabaseErrorInfo {
-                                        message: e.to_string().into(),
-                                        code: -1,
-                                    },
-                                    operation: DatabaseWriteOperation::Flush,
-                                    table_name: cf_name,
-                                    key: Vec::new(),
-                                },
-                            )))
-                        })?;
-                    }
-                }
-
-                tracing::info!(
-                    target: "providers::rocksdb",
-                    "Flushed RocksDB WAL and memtables after auto-commit"
-                );
-            }
+            tracing::info!(
+                target: "providers::rocksdb",
+                "Flushed RocksDB WAL and memtables after auto-commit"
+            );
         }
         Ok(())
     }
