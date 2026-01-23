@@ -138,9 +138,10 @@ impl StorageHistory {
 
         if done {
             if let Some(last_block) = last_changeset_pruned_block {
-                provider
-                    .static_file_provider()
-                    .delete_segment_below_block(StaticFileSegment::StorageChangeSets, last_block + 1)?;
+                provider.static_file_provider().delete_segment_below_block(
+                    StaticFileSegment::StorageChangeSets,
+                    last_block + 1,
+                )?;
             }
         }
         trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned storage history (changesets from static files)");
