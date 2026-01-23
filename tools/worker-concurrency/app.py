@@ -113,12 +113,13 @@ def extract_block_number(trace: dict) -> int | None:
     return None
 
 
-def extract_tx_execution_spans(trace: dict) -> tuple[list[tuple[int, int]], int]:
+def extract_tx_execution_spans(trace: dict) -> tuple[list[tuple[int, int]], int, list[dict]]:
     """
     Extract transaction execution spans to track execution progress.
-    Returns tuple of (list of (start_ns, end_ns) tuples, total_gas_used).
+    Returns tuple of (list of (start_ns, end_ns) tuples, total_gas_used, tx_details).
     """
     tx_spans = []
+    tx_details = []
     total_gas = 0
     
     def collect_spans(batches):
@@ -133,13 +134,35 @@ def extract_tx_execution_spans(trace: dict) -> tuple[list[tuple[int, int]], int]
                         end_ns = int(span.get("endTimeUnixNano", 0))
                         if start_ns and end_ns:
                             tx_spans.append((start_ns, end_ns))
-                        # Extract gas_used attribute
+                        
+                        # Extract tx details
+                        tx_hash = None
+                        gas_used = 0
+                        tx_index = None
                         for attr in span.get("attributes", []):
-                            if attr.get("key") == "gas_used":
-                                val = attr.get("value", {})
+                            key = attr.get("key", "")
+                            val = attr.get("value", {})
+                            if key == "gas_used":
                                 gas = val.get("intValue") or val.get("stringValue")
                                 if gas:
-                                    total_gas += int(gas)
+                                    gas_used = int(gas)
+                                    total_gas += gas_used
+                            elif key == "tx_hash":
+                                tx_hash = val.get("stringValue")
+                            elif key == "tx_index":
+                                idx = val.get("intValue") or val.get("stringValue")
+                                if idx is not None:
+                                    tx_index = int(idx)
+                        
+                        if tx_hash:
+                            duration_ms = (end_ns - start_ns) / 1_000_000
+                            tx_details.append({
+                                "tx_index": tx_index,
+                                "tx_hash": tx_hash,
+                                "duration_ms": round(duration_ms, 3),
+                                "gas_used": gas_used,
+                                "type": "execute"
+                            })
 
     if "batches" in trace:
         collect_spans(trace["batches"])
@@ -148,15 +171,16 @@ def extract_tx_execution_spans(trace: dict) -> tuple[list[tuple[int, int]], int]
     
     # Sort by end time to get completion order
     tx_spans.sort(key=lambda x: x[1])
-    return tx_spans, total_gas
+    return tx_spans, total_gas, tx_details
 
 
-def extract_prewarm_spans(trace: dict) -> list[tuple[int, int]]:
+def extract_prewarm_spans(trace: dict) -> tuple[list[tuple[int, int]], list[dict]]:
     """
     Extract prewarm transaction spans.
-    Returns list of (start_ns, end_ns) tuples for each prewarmed transaction.
+    Returns tuple of (list of (start_ns, end_ns) tuples, prewarm_details).
     """
     prewarm_spans = []
+    prewarm_details = []
     
     def collect_spans(batches):
         for batch in batches:
@@ -169,6 +193,20 @@ def extract_prewarm_spans(trace: dict) -> list[tuple[int, int]]:
                         end_ns = int(span.get("endTimeUnixNano", 0))
                         if start_ns and end_ns:
                             prewarm_spans.append((start_ns, end_ns))
+                        
+                        # Extract tx details
+                        tx_hash = None
+                        for attr in span.get("attributes", []):
+                            if attr.get("key") == "tx_hash":
+                                tx_hash = attr.get("value", {}).get("stringValue")
+                        
+                        if tx_hash:
+                            duration_ms = (end_ns - start_ns) / 1_000_000
+                            prewarm_details.append({
+                                "tx_hash": tx_hash,
+                                "duration_ms": round(duration_ms, 3),
+                                "type": "prewarm"
+                            })
 
     if "batches" in trace:
         collect_spans(trace["batches"])
@@ -176,7 +214,7 @@ def extract_prewarm_spans(trace: dict) -> list[tuple[int, int]]:
         collect_spans(trace["resourceSpans"])
     
     prewarm_spans.sort(key=lambda x: x[1])
-    return prewarm_spans
+    return prewarm_spans, prewarm_details
 
 
 def extract_main_phases(trace: dict) -> dict[str, tuple[int, int]]:
@@ -302,8 +340,8 @@ async def dashboard_data(trace_id: str):
 
     worker_spans = extract_worker_spans(trace)
     block_number = extract_block_number(trace)
-    tx_spans, total_gas = extract_tx_execution_spans(trace)
-    prewarm_spans = extract_prewarm_spans(trace)
+    tx_spans, total_gas, tx_details = extract_tx_execution_spans(trace)
+    prewarm_spans, prewarm_details = extract_prewarm_spans(trace)
     main_phases = extract_main_phases(trace)
 
     # Compute time range from all available spans (worker spans + phases)
@@ -365,6 +403,27 @@ async def dashboard_data(trace_id: str):
                 start_ns, end_ns = main_phases[phase_name]
                 phases_row[phase_name] = round((end_ns - start_ns) / 1_000_000, 2)
         result["phases"] = [phases_row]
+
+    # Merge tx details with prewarm details, matching by tx_hash
+    tx_map = {tx["tx_hash"]: tx.copy() for tx in tx_details}
+    for prewarm in prewarm_details:
+        tx_hash = prewarm["tx_hash"]
+        if tx_hash in tx_map:
+            tx_map[tx_hash]["prewarm_ms"] = prewarm["duration_ms"]
+        else:
+            tx_map[tx_hash] = {
+                "tx_hash": tx_hash,
+                "duration_ms": 0,
+                "gas_used": 0,
+                "prewarm_ms": prewarm["duration_ms"],
+            }
+    
+    # Sort by execution duration descending
+    result["transactions"] = sorted(
+        tx_map.values(),
+        key=lambda x: x.get("duration_ms", 0),
+        reverse=True
+    )
 
     return result
 
