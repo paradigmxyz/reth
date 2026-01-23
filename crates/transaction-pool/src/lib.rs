@@ -303,7 +303,7 @@ use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
-use reth_primitives_traits::{Block, Recovered};
+use reth_primitives_traits::Recovered;
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -328,8 +328,13 @@ mod traits;
 pub mod test_utils;
 
 /// Type alias for default ethereum transaction pool
-pub type EthTransactionPool<Client, S, T = EthPooledTransaction> = Pool<
-    TransactionValidationTaskExecutor<EthTransactionValidator<Client, T>>,
+pub type EthTransactionPool<
+    Client,
+    S,
+    T = EthPooledTransaction,
+    B = reth_ethereum_primitives::Block,
+> = Pool<
+    TransactionValidationTaskExecutor<EthTransactionValidator<Client, T, B>>,
     CoinbaseTipOrdering<T>,
     S,
 >;
@@ -776,16 +781,15 @@ where
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     S: BlobStore,
 {
+    type Block = V::Block;
+
     #[instrument(skip(self), target = "txpool")]
     fn set_block_info(&self, info: BlockInfo) {
         trace!(target: "txpool", "updating pool block info");
         self.pool.set_block_info(info)
     }
 
-    fn on_canonical_state_change<B>(&self, update: CanonicalStateUpdate<'_, B>)
-    where
-        B: Block,
-    {
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_, Self::Block>) {
         self.pool.on_canonical_state_change(update);
     }
 

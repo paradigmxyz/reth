@@ -9,7 +9,7 @@ use crate::{
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives_traits::{Recovered, SealedBlock};
+use reth_primitives_traits::{Block, Recovered, SealedBlock};
 use std::{fmt, fmt::Debug, future::Future, time::Instant};
 
 mod constants;
@@ -24,7 +24,6 @@ pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 pub use constants::{
     DEFAULT_MAX_TX_INPUT_BYTES, MAX_CODE_BYTE_SIZE, MAX_INIT_CODE_BYTE_SIZE, TX_SLOT_BYTE_SIZE,
 };
-use reth_primitives_traits::Block;
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
@@ -174,6 +173,9 @@ pub trait TransactionValidator: Debug + Send + Sync {
     /// The transaction type to validate.
     type Transaction: PoolTransaction;
 
+    /// The block type used for new head block notifications.
+    type Block: Block;
+
     /// Validates the transaction and returns a [`TransactionValidationOutcome`] describing the
     /// validity of the given transaction.
     ///
@@ -236,19 +238,16 @@ pub trait TransactionValidator: Debug + Send + Sync {
     /// Invoked when the head block changes.
     ///
     /// This can be used to update fork specific values (timestamp).
-    fn on_new_head_block<B>(&self, _new_tip_block: &SealedBlock<B>)
-    where
-        B: Block,
-    {
-    }
+    fn on_new_head_block(&self, _new_tip_block: &SealedBlock<Self::Block>) {}
 }
 
 impl<A, B> TransactionValidator for Either<A, B>
 where
     A: TransactionValidator,
-    B: TransactionValidator<Transaction = A::Transaction>,
+    B: TransactionValidator<Transaction = A::Transaction, Block = A::Block>,
 {
     type Transaction = A::Transaction;
+    type Block = A::Block;
 
     async fn validate_transaction(
         &self,
@@ -282,10 +281,7 @@ where
         }
     }
 
-    fn on_new_head_block<Bl>(&self, new_tip_block: &SealedBlock<Bl>)
-    where
-        Bl: Block,
-    {
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         match self {
             Self::Left(v) => v.on_new_head_block(new_tip_block),
             Self::Right(v) => v.on_new_head_block(new_tip_block),

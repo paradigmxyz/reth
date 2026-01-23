@@ -18,7 +18,7 @@ use reth_evm::{
 };
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
+    AddOnsContext, BlockTy, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
     PayloadAttributesBuilder, PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
@@ -53,8 +53,8 @@ use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
-    TransactionPool, TransactionValidationTaskExecutor,
+    blobstore::DiskFileBlobStore, EthPooledTransaction, EthTransactionPool, PoolPooledTx,
+    PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
 };
 use revm::context::TxEnv;
 use std::{marker::PhantomData, sync::Arc, time::SystemTime};
@@ -460,7 +460,8 @@ where
     >,
     Node: FullNodeTypes<Types = Types>,
 {
-    type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
+    type Pool =
+        EthTransactionPool<Node::Provider, DiskFileBlobStore, EthPooledTransaction, BlockTy<Types>>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let pool_config = ctx.pool_config();

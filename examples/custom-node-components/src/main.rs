@@ -6,14 +6,14 @@ use reth_ethereum::{
     chainspec::ChainSpec,
     cli::interface::Cli,
     node::{
-        api::{FullNodeTypes, NodeTypes},
+        api::{BlockTy, FullNodeTypes, NodeTypes},
         builder::{components::PoolBuilder, BuilderContext},
         node::EthereumAddOns,
         EthereumNode,
     },
     pool::{
-        blobstore::InMemoryBlobStore, EthTransactionPool, PoolConfig,
-        TransactionValidationTaskExecutor,
+        blobstore::InMemoryBlobStore, CoinbaseTipOrdering, EthPooledTransaction,
+        EthTransactionPool, Pool, PoolConfig, TransactionValidationTaskExecutor,
     },
     provider::CanonStateSubscriptions,
     EthPrimitives,
@@ -53,7 +53,12 @@ impl<Node> PoolBuilder<Node> for CustomPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type Pool = EthTransactionPool<Node::Provider, InMemoryBlobStore>;
+    type Pool = EthTransactionPool<
+        Node::Provider,
+        InMemoryBlobStore,
+        EthPooledTransaction,
+        BlockTy<Node::Types>,
+    >;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
@@ -62,10 +67,13 @@ where
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
             .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
+            .build_with_tasks::<_, _, _, BlockTy<Node::Types>>(
+                ctx.task_executor().clone(),
+                blob_store.clone(),
+            );
 
         let transaction_pool =
-            reth_ethereum::pool::Pool::eth_pool(validator, blob_store, self.pool_config);
+            Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, self.pool_config);
         info!(target: "reth::cli", "Transaction pool initialized");
         let transactions_path = data_dir.txpool_transactions();
 
