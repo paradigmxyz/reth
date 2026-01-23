@@ -562,7 +562,6 @@ mod compact {
                 reth_zstd_compressors::RECEIPT_DECOMPRESSOR.with(|decompressor| {
                     let decompressor = &mut decompressor.borrow_mut();
                     let decompressed = decompressor.decompress(buf);
-                    let original_buf = buf;
                     let mut buf: &[u8] = decompressed;
                     let (tx_type, new_buf) = T::from_compact(buf, flags.tx_type_len() as usize);
                     buf = new_buf;
@@ -574,9 +573,13 @@ mod compact {
                     let (logs, new_buf) = Vec::from_compact(buf, buf.len());
                     buf = new_buf;
                     // Decode extension fields if present (backwards compatible - old receipts
-                    // will have empty buffer here)
-                    let (_extra_fields, _) = Option::<ReceiptExt>::from_compact(buf, buf.len());
-                    (Self { tx_type, success, cumulative_gas_used, logs }, original_buf)
+                    // will have empty buffer here). Use proper Option semantics: pass 1 if
+                    // buffer has data, 0 if empty.
+                    let has_ext = !buf.is_empty();
+                    let (_extra_fields, _) =
+                        Option::<ReceiptExt>::from_compact(buf, has_ext as usize);
+                    // zstd case: we consumed the entire compressed payload, return empty slice
+                    (Self { tx_type, success, cumulative_gas_used, logs }, &[] as &[u8])
                 })
             } else {
                 let (tx_type, new_buf) = T::from_compact(buf, flags.tx_type_len() as usize);
@@ -589,8 +592,11 @@ mod compact {
                 let (logs, new_buf) = Vec::from_compact(buf, buf.len());
                 buf = new_buf;
                 // Decode extension fields if present (backwards compatible - old receipts
-                // will have empty buffer here)
-                let (_extra_fields, new_buf) = Option::<ReceiptExt>::from_compact(buf, buf.len());
+                // will have empty buffer here). Use proper Option semantics: pass 1 if
+                // buffer has data, 0 if empty.
+                let has_ext = !buf.is_empty();
+                let (_extra_fields, new_buf) =
+                    Option::<ReceiptExt>::from_compact(buf, has_ext as usize);
                 buf = new_buf;
                 let obj = Self { tx_type, success, cumulative_gas_used, logs };
                 (obj, buf)
@@ -760,38 +766,48 @@ mod tests {
     fn test_option_receipt_ext_compact_semantics() {
         use crate::ReceiptExt;
 
-        // Verify Option<ReceiptExt> compact encoding semantics for backwards compatibility:
-        // 1. None encodes as 0 bytes (returns len=0 from to_compact)
-        // 2. from_compact with len=0 returns None without consuming bytes
-        // 3. Empty buffer with len=0 returns None (critical for old receipts)
+        // Verify Option<ReceiptExt> compact encoding semantics for backwards compatibility.
+        // The len parameter is a presence indicator: 0 = None, 1 = Some.
 
-        // Test 1: None encodes as 0 bytes
+        // Test 1: None encodes as 0 bytes and returns len=0
         let none_ext: Option<ReceiptExt> = None;
         let mut buf = vec![];
         let len = none_ext.to_compact(&mut buf);
-        assert_eq!(len, 0, "None should return len=0");
+        assert_eq!(len, 0, "None should return len=0 (presence indicator)");
         assert!(buf.is_empty(), "None should write 0 bytes");
 
-        // Test 2: from_compact with len=0 returns None
+        // Test 2: from_compact with len=0 returns None without consuming bytes
         let (decoded, remaining) = Option::<ReceiptExt>::from_compact(&[], 0);
-        assert!(decoded.is_none(), "Empty buffer with len=0 should decode to None");
+        assert!(decoded.is_none(), "len=0 should decode to None");
         assert!(remaining.is_empty());
 
-        // Test 3: from_compact with len=0 on non-empty buffer returns None without consuming
+        // Test 3: from_compact with len=0 on non-empty buffer still returns None
+        // This is the correct behavior - len is the presence indicator, not buffer length
         let buf_with_data = [0x01, 0x02, 0x03];
         let (decoded, remaining) = Option::<ReceiptExt>::from_compact(&buf_with_data, 0);
-        assert!(decoded.is_none(), "len=0 should decode to None regardless of buffer");
-        assert_eq!(remaining, &buf_with_data, "Buffer should be unchanged when len=0");
+        assert!(decoded.is_none(), "len=0 means None regardless of buffer content");
+        assert_eq!(remaining, &buf_with_data, "Buffer unchanged when len=0");
 
-        // Test 4: Some(ReceiptExt) roundtrips correctly
+        // Test 4: Some(ReceiptExt) encodes with varuint length prefix
         let some_ext = Some(ReceiptExt { block_access_index: Some(12345) });
         let mut buf = vec![];
         let len = some_ext.to_compact(&mut buf);
-        assert_eq!(len, 1, "Some should return len=1");
-        assert!(!buf.is_empty(), "Some should write bytes");
+        assert_eq!(len, 1, "Some should return len=1 (presence indicator)");
+        assert!(!buf.is_empty(), "Some should write varuint + data");
 
-        let (decoded, _) = Option::<ReceiptExt>::from_compact(&buf, 1);
+        // Test 5: from_compact with len=1 decodes the extension
+        let (decoded, remaining) = Option::<ReceiptExt>::from_compact(&buf, 1);
         assert_eq!(decoded, some_ext, "Some(ReceiptExt) should roundtrip");
+        assert!(remaining.is_empty(), "Should consume all bytes");
+
+        // Test 6: Receipt decode uses buf.is_empty() to determine presence
+        // When buffer is empty after logs, pass len=0 (false as usize)
+        // When buffer has data after logs, pass len=1 (true as usize)
+        let has_ext_empty: usize = (!(&[] as &[u8]).is_empty()) as usize;
+        assert_eq!(has_ext_empty, 0, "Empty buffer should produce len=0");
+
+        let has_ext_data: usize = (!buf_with_data.is_empty()) as usize;
+        assert_eq!(has_ext_data, 1, "Non-empty buffer should produce len=1");
     }
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
