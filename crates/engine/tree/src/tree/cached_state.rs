@@ -768,13 +768,14 @@ impl ExecutionCache {
         Ok(())
     }
 
-    /// Clears all caches, resetting them to empty state.
+    /// Clears storage and account caches, resetting them to empty state.
+    ///
+    /// We do not clear the bytecodes cache, because its mapping can never change, as it's
+    /// `keccak256(bytecode) => bytecode`.
     pub(crate) fn clear(&self) {
-        self.code_cache.clear();
         self.storage_cache.clear();
         self.account_cache.clear();
 
-        self.code_stats.reset_size();
         self.storage_stats.reset_size();
         self.account_stats.reset_size();
     }
