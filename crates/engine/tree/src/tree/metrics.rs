@@ -22,6 +22,9 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) block_validation: BlockValidationMetrics,
     /// Canonical chain and reorg related metrics
     pub tree: TreeMetrics,
+    /// Metrics for EIP-7928 Block-Level Access Lists (BAL).
+    #[allow(dead_code)]
+    pub(crate) bal: BalMetrics,
 }
 
 impl EngineApiMetrics {
@@ -291,6 +294,33 @@ impl NewPayloadStatusMetrics {
         self.new_payload_latency.record(elapsed);
         self.new_payload_last.set(elapsed);
     }
+}
+
+/// Metrics for EIP-7928 Block-Level Access Lists (BAL).
+///
+/// See also <https://github.com/ethereum/execution-metrics/issues/5>
+#[allow(dead_code)]
+#[derive(Metrics, Clone)]
+#[metrics(scope = "execution.block_access_list")]
+pub(crate) struct BalMetrics {
+    /// Size of the BAL in bytes for the current block.
+    pub(crate) size_bytes: Gauge,
+    /// Total number of blocks with valid BALs.
+    pub(crate) valid_total: Counter,
+    /// Total number of blocks with invalid BALs.
+    pub(crate) invalid_total: Counter,
+    /// Time taken to validate the BAL against actual execution.
+    pub(crate) validation_time_seconds: Histogram,
+    /// Number of account changes in the BAL.
+    pub(crate) account_changes: Gauge,
+    /// Number of storage changes in the BAL.
+    pub(crate) storage_changes: Gauge,
+    /// Number of balance changes in the BAL.
+    pub(crate) balance_changes: Gauge,
+    /// Number of nonce changes in the BAL.
+    pub(crate) nonce_changes: Gauge,
+    /// Number of code changes in the BAL.
+    pub(crate) code_changes: Gauge,
 }
 
 /// Metrics for non-execution related block validation.
