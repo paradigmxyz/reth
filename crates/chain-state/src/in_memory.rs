@@ -951,29 +951,29 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
         match blocks {
             [] => Chain::default(),
             [first, rest @ ..] => {
-                let first = first.clone();
+                let trie_data_handle = first.trie_data_handle();
                 let mut chain = Chain::from_block(
                     first.recovered_block().clone(),
                     ExecutionOutcome::from((
                         first.execution_outcome().clone(),
                         first.block_number(),
                     )),
-                    LazyTrieData::deferred(move || SortedTrieData {
-                        hashed_state: first.hashed_state(),
-                        trie_updates: first.trie_updates(),
+                    LazyTrieData::deferred(move || {
+                        let trie_data = trie_data_handle.wait_cloned();
+                        SortedTrieData { hashed_state: trie_data.hashed_state, trie_updates: trie_data.trie_updates }
                     }),
                 );
                 for exec in rest {
-                    let exec = exec.clone();
+                let trie_data_handle = exec.trie_data_handle();
                     chain.append_block(
                         exec.recovered_block().clone(),
                         ExecutionOutcome::from((
                             exec.execution_outcome().clone(),
                             exec.block_number(),
                         )),
-                        LazyTrieData::deferred(move || SortedTrieData {
-                            hashed_state: exec.hashed_state(),
-                            trie_updates: exec.trie_updates(),
+                        LazyTrieData::deferred(move || {
+                            let trie_data = trie_data_handle.wait_cloned();
+                            SortedTrieData { hashed_state: trie_data.hashed_state, trie_updates: trie_data.trie_updates }
                         }),
                     );
                 }
