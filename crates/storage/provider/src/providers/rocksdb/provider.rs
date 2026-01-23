@@ -895,6 +895,45 @@ impl RocksDBProvider {
         self.0.db_stats()
     }
 
+    /// Flushes pending writes for the specified tables to disk.
+    ///
+    /// This performs a flush of:
+    /// 1. The Write-Ahead Log (WAL) with sync
+    /// 2. The column family memtables for the specified table names to SST files
+    ///
+    /// After this call completes, all data for the specified tables is durably persisted to disk.
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(tables = ?tables))]
+    pub fn flush(&self, tables: &[&'static str]) -> ProviderResult<()> {
+        let db = self.0.db_rw();
+
+        db.flush_wal(true).map_err(|e| {
+            ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
+                info: DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
+                operation: DatabaseWriteOperation::Flush,
+                table_name: "WAL",
+                key: Vec::new(),
+            })))
+        })?;
+
+        for cf_name in tables {
+            if let Some(cf) = db.cf_handle(cf_name) {
+                db.flush_cf(&cf).map_err(|e| {
+                    ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
+                        info: DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
+                        operation: DatabaseWriteOperation::Flush,
+                        table_name: cf_name,
+                        key: Vec::new(),
+                    })))
+                })?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Creates a raw iterator over all entries in the specified table.
     ///
     /// Returns raw `(key_bytes, value_bytes)` pairs without decoding.

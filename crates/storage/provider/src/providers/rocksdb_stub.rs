@@ -112,6 +112,13 @@ impl RocksDBProvider {
     pub const fn db_stats(&self) -> RocksDBStats {
         RocksDBStats { tables: Vec::new(), wal_size_bytes: 0 }
     }
+
+    /// Flushes all pending writes to disk (stub implementation).
+    ///
+    /// This is a no-op since there is no `RocksDB` when the feature is disabled.
+    pub const fn flush(&self, _tables: &[&'static str]) -> ProviderResult<()> {
+        Ok(())
+    }
 }
 
 impl DatabaseMetrics for RocksDBProvider {

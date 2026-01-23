@@ -339,26 +339,31 @@ where
     fn drop(&mut self) {
         // To be able to abort a timed out transaction, we need to renew it first.
         // Hence the usage of `txn_execute_renew_on_timeout` here.
-        self.txn
-            .txn_execute_renew_on_timeout(|txn| {
-                if !self.has_committed() {
-                    if K::IS_READ_ONLY {
-                        #[cfg(feature = "read-tx-timeouts")]
-                        self.env.txn_manager().remove_active_read_transaction(txn);
+        //
+        // We intentionally ignore errors here because Drop should never panic.
+        // MDBX can return errors (e.g., MDBX_PANIC) during abort if the environment
+        // is in a fatal state, but panicking in Drop can cause double-panics during
+        // unwinding which terminates the process.
+        let _ = self.txn.txn_execute_renew_on_timeout(|txn| {
+            if !self.has_committed() {
+                if K::IS_READ_ONLY {
+                    #[cfg(feature = "read-tx-timeouts")]
+                    self.env.txn_manager().remove_active_read_transaction(txn);
 
-                        unsafe {
-                            ffi::mdbx_txn_abort(txn);
-                        }
-                    } else {
-                        let (sender, rx) = sync_channel(0);
-                        self.env
-                            .txn_manager()
-                            .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
-                        rx.recv().unwrap().unwrap();
+                    unsafe {
+                        ffi::mdbx_txn_abort(txn);
+                    }
+                } else {
+                    let (sender, rx) = sync_channel(0);
+                    self.env
+                        .txn_manager()
+                        .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
+                    if let Ok(Err(e)) = rx.recv() {
+                        tracing::error!(target: "libmdbx", %e, "failed to abort transaction in drop");
                     }
                 }
-            })
-            .unwrap();
+            }
+        });
     }
 }
 

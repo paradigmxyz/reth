@@ -103,7 +103,10 @@ where
     N: NodeBuilderHelper,
 {
     E2ETestSetupBuilder::new(num_nodes, chain_spec, attributes_generator)
-        .with_tree_config_modifier(move |_| tree_config.clone())
+        .with_tree_config_modifier(move |base| {
+            // Apply caller's tree_config but preserve the small cache size from base
+            tree_config.clone().with_cross_block_cache_size(base.cross_block_cache_size())
+        })
         .with_node_config_modifier(move |config| config.set_dev(is_dev))
         .with_connect_nodes(connect_nodes)
         .build()

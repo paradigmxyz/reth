@@ -254,6 +254,10 @@ export const opRethCliSidebar: SidebarItem = {
                 {
                     text: "op-reth p2p bootnode",
                     link: "/cli/op-reth/p2p/bootnode"
+                },
+                {
+                    text: "op-reth p2p enode",
+                    link: "/cli/op-reth/p2p/enode"
                 }
             ]
         },
