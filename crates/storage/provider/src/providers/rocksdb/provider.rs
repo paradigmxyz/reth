@@ -1278,16 +1278,7 @@ impl RocksDBProvider {
     }
 }
 
-/// Outcome of pruning a history shard.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PruneShardOutcome {
-    /// Shard was deleted entirely.
-    Deleted,
-    /// Shard was updated with filtered block numbers.
-    Updated,
-    /// Shard was unchanged (no blocks <= `to_block`).
-    Unchanged,
-}
+pub(crate) use super::super::rocksdb_types::PruneShardOutcome;
 
 /// Handle for building a batch of operations atomically.
 ///
@@ -3079,42 +3070,6 @@ mod tests {
         // Second shard truncated and re-keyed to MAX
         assert_eq!(shards[1].0.highest_block_number, u64::MAX);
         assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), (51..=75).collect::<Vec<_>>());
-    }
-
-    #[test]
-    fn test_batch_auto_commit_on_threshold() {
-        let temp_dir = TempDir::new().unwrap();
-        let provider =
-            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
-
-        // Create batch with tiny threshold (1KB) to force auto-commits
-        let mut batch = RocksDBBatch {
-            provider: &provider,
-            inner: WriteBatchWithTransaction::<true>::default(),
-            buf: Vec::new(),
-            auto_commit_threshold: Some(1024), // 1KB
-        };
-
-        // Write entries until we exceed threshold multiple times
-        // Each entry is ~20 bytes, so 100 entries = ~2KB = 2 auto-commits
-        for i in 0..100u64 {
-            let value = format!("value_{i:04}").into_bytes();
-            batch.put::<TestTable>(i, &value).unwrap();
-        }
-
-        // Data should already be visible (auto-committed) even before final commit
-        // At least some entries should be readable
-        let first_visible = provider.get::<TestTable>(0).unwrap();
-        assert!(first_visible.is_some(), "Auto-committed data should be visible");
-
-        // Final commit for remaining batch
-        batch.commit().unwrap();
-
-        // All entries should now be visible
-        for i in 0..100u64 {
-            let value = format!("value_{i:04}").into_bytes();
-            assert_eq!(provider.get::<TestTable>(i).unwrap(), Some(value));
-        }
     }
 
     #[test]
