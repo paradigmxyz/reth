@@ -1262,7 +1262,7 @@ where
 
 /// Returns the metrics hooks for the node.
 pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) -> Hooks {
-    let mut builder = Hooks::builder()
+    Hooks::builder()
         .with_hook({
             let db = provider_factory.db_ref().clone();
             move || throttle!(Duration::from_secs(5 * 60), || db.report_metrics())
@@ -1276,15 +1276,17 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
                     }
                 })
             }
-        });
-
-    if provider_factory.cached_storage_settings().any_in_rocksdb() {
-        let rocksdb = provider_factory.rocksdb_provider();
-        builder = builder
-            .with_hook(move || throttle!(Duration::from_secs(5 * 60), || rocksdb.report_metrics()));
-    }
-
-    builder.build()
+        })
+        .with_hook({
+            let rocksdb = provider_factory.rocksdb_provider();
+            let any_in_rocksdb = provider_factory.cached_storage_settings().any_in_rocksdb();
+            move || {
+                if any_in_rocksdb {
+                    throttle!(Duration::from_secs(5 * 60), || rocksdb.report_metrics())
+                }
+            }
+        })
+        .build()
 }
 
 #[cfg(test)]
