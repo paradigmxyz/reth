@@ -35,44 +35,58 @@ pub struct Command {
 
 #[derive(clap::Subcommand, Debug)]
 enum Subcommand {
+    /// Gets the content of a database table for the given key
     Mdbx {
         table: tables::Tables,
 
+        /// The key to get content for
         #[arg(value_parser = maybe_json_value_parser)]
         key: String,
 
+        /// The subkey to get content for
         #[arg(value_parser = maybe_json_value_parser)]
         subkey: Option<String>,
 
+        /// Optional end key for range query (exclusive upper bound)
         #[arg(value_parser = maybe_json_value_parser)]
         end_key: Option<String>,
 
+        /// Optional end subkey for range query (exclusive upper bound)
         #[arg(value_parser = maybe_json_value_parser)]
         end_subkey: Option<String>,
 
+        /// Output bytes instead of human-readable decoded value
         #[arg(long)]
         raw: bool,
     },
+    /// Gets the content of a static file segment for the given key
     StaticFile {
         segment: StaticFileSegment,
 
+        /// The key to get content for
         #[arg(value_parser = maybe_json_value_parser)]
         key: String,
 
+        /// The subkey to get content for, for example address in changeset
         #[arg(value_parser = maybe_json_value_parser)]
         subkey: Option<String>,
 
+        /// Output bytes instead of human-readable decoded value
         #[arg(long)]
         raw: bool,
     },
+    /// Gets the content of a RocksDB table for the given key
     #[cfg(all(unix, feature = "edge"))]
     Rocksdb {
+        /// The RocksDB table
         #[arg(value_enum)]
         table: RocksDbTable,
 
+        /// The key to get content for
         #[arg(value_parser = maybe_json_value_parser)]
         key: String,
 
+        /// Output bytes instead of human-readable decoded value
         #[arg(long)]
         raw: bool,
     },
