@@ -1,9 +1,7 @@
 use super::collect_account_history_indices;
 use crate::stages::utils::{collect_history_indices, load_account_history};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
-#[cfg(all(unix, feature = "rocksdb"))]
-use reth_db_api::table::Table;
-use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
+use reth_db_api::{models::ShardedKey, table::Table, tables, transaction::DbTxMut};
 use reth_provider::{
     DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
     RocksDBProviderFactory, StorageSettingsCache,
@@ -113,7 +111,6 @@ where
                 // but this is safe for first_sync because if we crash before commit, the
                 // checkpoint stays at 0 and we'll just clear and rebuild again on restart. The
                 // source data (changesets) is intact.
-                #[cfg(all(unix, feature = "rocksdb"))]
                 provider.rocksdb_provider().clear::<tables::AccountsHistory>()?;
             } else {
                 provider.tx_ref().clear::<tables::AccountsHistory>()?;
@@ -145,7 +142,6 @@ where
             Ok(((), writer.into_raw_rocksdb_batch()))
         })?;
 
-        #[cfg(all(unix, feature = "rocksdb"))]
         if use_rocksdb {
             provider.rocksdb_provider().flush(&[tables::AccountsHistory::NAME])?;
         }
