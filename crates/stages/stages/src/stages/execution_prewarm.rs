@@ -245,3 +245,60 @@ pub struct PrewarmMetrics {
     /// Duration of prewarm execution
     pub prewarm_duration: Histogram,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stages::execution_cache::ExecutionCacheBuilder;
+    use reth_evm_ethereum::EthEvmConfig;
+
+    #[test]
+    fn test_prewarm_controller_creation() {
+        let cache = Arc::new(ExecutionCacheBuilder::default().build_caches(1_000_000));
+        let evm_config = EthEvmConfig::mainnet();
+        let controller = PrewarmController::new(cache.clone(), evm_config);
+
+        assert!(!controller.is_active());
+        assert!(Arc::ptr_eq(&controller.cache(), &cache));
+    }
+
+    #[test]
+    fn test_prewarm_controller_cancel_when_inactive() {
+        let cache = Arc::new(ExecutionCacheBuilder::default().build_caches(1_000_000));
+        let evm_config = EthEvmConfig::mainnet();
+        let mut controller = PrewarmController::new(cache, evm_config);
+
+        // Cancelling when no task is active should not panic
+        controller.cancel();
+        assert!(!controller.is_active());
+    }
+
+    #[test]
+    fn test_prewarm_controller_drop_cancels_task() {
+        let cache = Arc::new(ExecutionCacheBuilder::default().build_caches(1_000_000));
+        let evm_config = EthEvmConfig::mainnet();
+        let controller = PrewarmController::new(cache, evm_config);
+
+        // Dropping should not panic
+        drop(controller);
+    }
+
+    #[test]
+    fn test_prewarm_error_display() {
+        let provider_err = PrewarmError::Provider("connection failed".to_string());
+        assert!(provider_err.to_string().contains("connection failed"));
+
+        let exec_err = PrewarmError::Execution("out of gas".to_string());
+        assert!(exec_err.to_string().contains("out of gas"));
+    }
+
+    #[test]
+    fn test_prewarm_metrics_default() {
+        // Verify metrics can be created
+        let metrics = PrewarmMetrics::default();
+        metrics.prewarm_blocks_started.increment(1);
+        metrics.prewarm_blocks_completed.increment(1);
+        metrics.prewarm_transactions_executed.increment(10);
+        metrics.prewarm_duration.record(0.5);
+    }
+}
