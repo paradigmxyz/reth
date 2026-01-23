@@ -11,7 +11,7 @@ use reth_db_api::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
     },
-    table::{Compress, Decode, Decompress, DupSort, Encode, SliceBuf, Table},
+    table::{Compress, Decode, Decompress, DupSort, Encode, IntoVec, SliceBuf, Table},
 };
 use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
@@ -203,14 +203,14 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
         let start = match (key, subkey) {
             (Some(key), Some(subkey)) => {
                 // encode key and decode it after.
-                let key: Vec<u8> = key.encode().into();
+                let key: Vec<u8> = key.encode().into_vec();
                 self.inner
                     .get_both_range(key.as_ref(), subkey.encode().as_ref())
                     .map_err(|e| DatabaseError::Read(e.into()))?
                     .map(|val| decoder::<T>((Cow::Owned(key), val)))
             }
             (Some(key), None) => {
-                let key: Vec<u8> = key.encode().into();
+                let key: Vec<u8> = key.encode().into_vec();
                 self.inner
                     .set(key.as_ref())
                     .map_err(|e| DatabaseError::Read(e.into()))?
@@ -218,7 +218,7 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
             }
             (None, Some(subkey)) => {
                 if let Some((key, _)) = self.first()? {
-                    let key: Vec<u8> = key.encode().into();
+                    let key: Vec<u8> = key.encode().into_vec();
                     self.inner
                         .get_both_range(key.as_ref(), subkey.encode().as_ref())
                         .map_err(|e| DatabaseError::Read(e.into()))?
@@ -293,7 +293,7 @@ impl<T: Table> Cursor<RW, T> {
                         info: e.into(),
                         operation: write_operation,
                         table_name: T::NAME,
-                        key: key.into(),
+                        key: key.into_vec(),
                     }
                     .into()
                 })
@@ -312,7 +312,7 @@ impl<T: Table> Cursor<RW, T> {
                         info: e.into(),
                         operation: write_operation,
                         table_name: T::NAME,
-                        key: key.into(),
+                        key: key.into_vec(),
                     }
                     .into()
                 })

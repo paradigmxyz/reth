@@ -6,7 +6,7 @@ use crate::{
     DatabaseError,
 };
 use reth_db_api::{
-    table::{Compress, DupSort, Encode, SliceBuf, Table, TableImporter},
+    table::{Compress, DupSort, Encode, IntoVec, SliceBuf, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
@@ -399,7 +399,7 @@ impl Tx<RW> {
                 Some(value_ref.len()),
                 |tx| {
                     tx.put(self.get_dbi::<T>()?, key.as_ref(), value_ref, flags)
-                        .map_err(|e| make_error(e, key.into()))
+                        .map_err(|e| make_error(e, key.into_vec()))
                 },
             );
         }
@@ -413,7 +413,7 @@ impl Tx<RW> {
                 Some(value.as_ref().len()),
                 |tx| {
                     tx.put(self.get_dbi::<T>()?, key.as_ref(), value.as_ref(), flags)
-                        .map_err(|e| make_error(e, key.into()))
+                        .map_err(|e| make_error(e, key.into_vec()))
                 },
             );
         }
@@ -423,9 +423,13 @@ impl Tx<RW> {
         self.execute_with_operation_metric::<T, _>(operation, Some(value_size), |tx| {
             let dbi = self.get_dbi::<T>()?;
 
-            let buf = tx
-                .reserve(dbi, key.as_ref(), value_size, flags)
-                .map_err(|e| make_error(e, key.as_ref().to_vec()))?;
+            // SAFETY: We write exactly `value_size` bytes to the reserved buffer via
+            // `compress_to_buf`, and `compressed_size()` is required to return the
+            // exact size that will be written.
+            let buf = unsafe {
+                tx.reserve(dbi, key.as_ref(), value_size, flags)
+                    .map_err(|e| make_error(e, key.as_ref().to_vec()))?
+            };
 
             let mut slice_buf = SliceBuf::new(buf);
             value.compress_to_buf(&mut slice_buf);

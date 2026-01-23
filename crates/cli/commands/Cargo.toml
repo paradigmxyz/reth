@@ -50,6 +50,7 @@ reth-stages-types = { workspace = true, optional = true }
 reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
 reth-tasks.workspace = true
+reth-storage-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-trie-common.workspace = true
@@ -131,4 +132,4 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
 ]
 
-edge = ["reth-db-common/edge", "reth-stages/rocksdb"]
+edge = ["reth-db-common/edge", "reth-stages/rocksdb", "reth-provider/rocksdb"]
