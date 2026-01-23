@@ -321,6 +321,15 @@ impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
     fn set_pending_rocksdb_batch(&self, batch: rocksdb::WriteBatchWithTransaction<true>) {
         self.pending_rocksdb_batches.lock().push(batch);
     }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
+        let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+        for batch in batches {
+            self.rocksdb_provider.commit_batch(batch)?;
+        }
+        Ok(())
+    }
 }
 
 impl<TX: Debug + Send, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
