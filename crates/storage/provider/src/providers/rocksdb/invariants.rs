@@ -316,14 +316,14 @@ impl RocksDBProvider {
     /// Prunes `StoragesHistory` entries where `highest_block_number` > `max_block`.
     ///
     /// Uses changeset-based pruning: queries the provider for storage slots that changed
-    /// in the excess block range (routes to static files when enabled), then only deletes
-    /// History entries for those specific slots. This is more efficient than iterating
-    /// the whole table.
+    /// in the excess block range (via `changed_storages_with_range`, which routes to static
+    /// files or MDBX based on storage settings), then only deletes History entries for those
+    /// specific slots. This is more efficient than iterating the whole table.
     ///
     /// Includes a defensive check after the optimized path to ensure no entries are missed
     /// (e.g., if changesets are incomplete for the excess block range).
     ///
-    /// If `max_block == 0`, falls back to clearing all entries (full table iteration).
+    /// If `max_block == 0`, falls back to clearing all non-sentinel entries.
     fn prune_storages_history_above<Provider>(
         &self,
         provider: &Provider,
@@ -424,9 +424,9 @@ impl RocksDBProvider {
         Ok(())
     }
 
-    /// Clears all `StoragesHistory` entries.
+    /// Clears all `StoragesHistory` entries except sentinel entries (`u64::MAX`).
     ///
-    /// Used when `max_block == 0` to reset the table.
+    /// Used when `max_block == 0` to reset the table while preserving active shards.
     fn prune_storages_history_all(&self) -> ProviderResult<()> {
         use reth_db_api::models::storage_sharded_key::StorageShardedKey;
 
@@ -545,14 +545,14 @@ impl RocksDBProvider {
     /// Prunes `AccountsHistory` entries where `highest_block_number` > `max_block`.
     ///
     /// Uses changeset-based pruning: queries the provider for accounts that changed
-    /// in the excess block range (routes to static files when enabled), then only deletes
-    /// History entries for those specific accounts. This is more efficient than iterating
-    /// the whole table.
+    /// in the excess block range (via `changed_accounts_with_range`, which routes to static
+    /// files or MDBX based on storage settings), then only deletes History entries for those
+    /// specific accounts. This is more efficient than iterating the whole table.
     ///
     /// Includes a defensive check after the optimized path to ensure no entries are missed
     /// (e.g., if changesets are incomplete for the excess block range).
     ///
-    /// If `max_block == 0`, falls back to clearing all entries (full table iteration).
+    /// If `max_block == 0`, falls back to clearing all non-sentinel entries.
     fn prune_accounts_history_above<Provider>(
         &self,
         provider: &Provider,
@@ -651,9 +651,9 @@ impl RocksDBProvider {
         Ok(())
     }
 
-    /// Clears all `AccountsHistory` entries.
+    /// Clears all `AccountsHistory` entries except sentinel entries (`u64::MAX`).
     ///
-    /// Used when `max_block == 0` to reset the table.
+    /// Used when `max_block == 0` to reset the table while preserving active shards.
     fn prune_accounts_history_all(&self) -> ProviderResult<()> {
         use alloy_primitives::Address;
         use reth_db_api::models::ShardedKey;
