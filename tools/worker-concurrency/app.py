@@ -221,29 +221,26 @@ def extract_main_phases(trace: dict) -> dict[str, tuple[int, int]]:
 def compute_execution_progress(
     tx_spans: list[tuple[int, int]],
     min_time_ns: int,
-    max_time_ns: int,
-    bucket_ms: int = 1,
 ) -> list[dict]:
     """
-    Compute cumulative transaction execution progress over time.
-    Returns series of {time_ms, completed} showing how many txs completed at each point.
+    Compute cumulative transaction execution progress using event-based approach.
+    Returns series of {time_ms, completed} at each completion point.
     """
     if not tx_spans:
         return []
 
-    num_buckets = (max_time_ns - min_time_ns) // 1_000_000 + 1
-    series = []
-
-    # Get sorted end times for cumulative count - O(N log N)
+    # Get sorted end times and emit a point at each completion
     end_times = sorted(span[1] for span in tx_spans)
-
-    # Use moving index for O(T + N) instead of O(T * N)
-    completed_idx = 0
-    for t in range(0, num_buckets, bucket_ms):
-        sample_ns = min_time_ns + t * 1_000_000
-        while completed_idx < len(end_times) and end_times[completed_idx] <= sample_ns:
-            completed_idx += 1
-        series.append({"time_ms": t, "completed": completed_idx})
+    
+    series = [{"time_ms": 0.0, "completed": 0}]
+    prev_time_ms = 0.0
+    for i, end_ns in enumerate(end_times):
+        time_ms = round((end_ns - min_time_ns) / 1_000_000, 3)
+        # Ensure strictly ascending by adding small offset for duplicates
+        if time_ms <= prev_time_ms:
+            time_ms = round(prev_time_ms + 0.001, 3)
+        series.append({"time_ms": time_ms, "completed": i + 1})
+        prev_time_ms = time_ms
 
     return series
 
@@ -251,41 +248,38 @@ def compute_execution_progress(
 def compute_concurrency_series(
     spans: list[tuple[int, int]],
     min_time_ns: int,
-    max_time_ns: int,
-    bucket_ms: int = 1,
 ) -> list[dict]:
     """
-    Compute active worker count over time using sweep-line algorithm.
-    O(N log N + T) instead of O(T * N).
+    Compute active worker count using event-based approach.
+    Returns series of {time_ms, active} at each transition point.
     """
     if not spans:
         return []
 
-    num_buckets = (max_time_ns - min_time_ns) // 1_000_000 + 1
-
-    # Build difference array: +1 at start bucket, -1 at end bucket
-    # This gives us O(N log N + T) complexity
-    deltas: dict[int, int] = defaultdict(int)
+    # Build events: +1 at start, -1 at end
+    events: list[tuple[int, int]] = []
     for start_ns, end_ns in spans:
-        start_bucket = (start_ns - min_time_ns) // 1_000_000
-        end_bucket = (end_ns - min_time_ns) // 1_000_000
-        # Clamp to valid range
-        start_bucket = max(0, start_bucket)
-        end_bucket = min(num_buckets, end_bucket)
-        deltas[start_bucket] += 1
-        deltas[end_bucket] -= 1
+        events.append((start_ns, 1))
+        events.append((end_ns, -1))
+    
+    # Sort by time, with -1 before +1 at same time (end before start)
+    events.sort(key=lambda e: (e[0], e[1]))
 
-    # Prefix sum to get active count at each bucket
-    series = []
+    # Emit a point at each transition, ensuring strictly ascending times
+    series = [{"time_ms": 0.0, "active": 0}]
     active = 0
-    for t in range(0, num_buckets, bucket_ms):
-        active += deltas.get(t, 0)
-        # For bucket_ms > 1, we need to accumulate intermediate deltas
-        if bucket_ms > 1:
-            for i in range(1, bucket_ms):
-                if t + i < num_buckets:
-                    active += deltas.get(t + i, 0)
-        series.append({"time_ms": t, "active": active})
+    prev_time_ms = 0.0
+    
+    for time_ns, delta in events:
+        time_ms = round((time_ns - min_time_ns) / 1_000_000, 3)
+        active += delta
+        # Only emit if value changed
+        if series[-1]["active"] != active:
+            # Ensure strictly ascending
+            if time_ms <= prev_time_ms:
+                time_ms = round(prev_time_ms + 0.001, 3)
+            series.append({"time_ms": time_ms, "active": active})
+            prev_time_ms = time_ms
 
     return series
 
@@ -312,15 +306,19 @@ async def dashboard_data(trace_id: str):
     prewarm_spans = extract_prewarm_spans(trace)
     main_phases = extract_main_phases(trace)
 
-    if not worker_spans:
-        raise HTTPException(status_code=404, detail="No worker spans found")
-
-    all_spans = [s for spans in worker_spans.values() for s in spans]
-    if not all_spans:
-        raise HTTPException(status_code=404, detail="No work spans found")
+    # Compute time range from all available spans (worker spans + phases)
+    all_times: list[int] = []
+    for spans in worker_spans.values():
+        for start, end in spans:
+            all_times.extend([start, end])
+    for start, end in main_phases.values():
+        all_times.extend([start, end])
+    
+    if not all_times:
+        raise HTTPException(status_code=404, detail="No spans found")
         
-    min_time_ns = min(s[0] for s in all_spans)
-    max_time_ns = max(s[1] for s in all_spans)
+    min_time_ns = min(all_times)
+    max_time_ns = max(all_times)
     duration_ms = (max_time_ns - min_time_ns) / 1_000_000
 
     result = {
@@ -333,27 +331,30 @@ async def dashboard_data(trace_id: str):
     }
 
     for worker_type, spans in worker_spans.items():
-        series = compute_concurrency_series(spans, min_time_ns, max_time_ns, 1)
-        result["series"][worker_type] = [
-            {"time": p["time_ms"], "active": p["active"]}
-            for p in series
-        ]
+        series = compute_concurrency_series(spans, min_time_ns)
+        points = [{"time": p["time_ms"], "active": p["active"]} for p in series]
+        # Add final point at trace end for consistent X axis
+        if points and points[-1]["time"] < duration_ms:
+            points.append({"time": round(duration_ms, 3), "active": 0})
+        result["series"][worker_type] = points
 
     # Add execution progress series
     if tx_spans:
-        progress_series = compute_execution_progress(tx_spans, min_time_ns, max_time_ns, 1)
-        result["series"]["execution_progress"] = [
-            {"time": p["time_ms"], "completed": p["completed"]}
-            for p in progress_series
-        ]
+        progress_series = compute_execution_progress(tx_spans, min_time_ns)
+        points = [{"time": p["time_ms"], "completed": p["completed"]} for p in progress_series]
+        # Add final point at trace end
+        if points and points[-1]["time"] < duration_ms:
+            points.append({"time": round(duration_ms, 3), "completed": points[-1]["completed"]})
+        result["series"]["execution_progress"] = points
 
     # Add prewarm progress series
     if prewarm_spans:
-        prewarm_progress = compute_execution_progress(prewarm_spans, min_time_ns, max_time_ns, 1)
-        result["series"]["prewarm_progress"] = [
-            {"time": p["time_ms"], "completed": p["completed"]}
-            for p in prewarm_progress
-        ]
+        prewarm_progress = compute_execution_progress(prewarm_spans, min_time_ns)
+        points = [{"time": p["time_ms"], "completed": p["completed"]} for p in prewarm_progress]
+        # Add final point at trace end
+        if points and points[-1]["time"] < duration_ms:
+            points.append({"time": round(duration_ms, 3), "completed": points[-1]["completed"]})
+        result["series"]["prewarm_progress"] = points
 
     # Add main phases for horizontal bar visualization
     if main_phases:
