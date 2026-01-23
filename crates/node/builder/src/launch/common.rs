@@ -68,7 +68,7 @@ use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
     ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
-    StaticFileProviderFactory, StorageSettingsCache,
+    StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -1279,12 +1279,7 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
         })
         .with_hook({
             let rocksdb = provider_factory.rocksdb_provider();
-            let any_in_rocksdb = provider_factory.cached_storage_settings().any_in_rocksdb();
-            move || {
-                if any_in_rocksdb {
-                    throttle!(Duration::from_secs(5 * 60), || rocksdb.report_metrics())
-                }
-            }
+            move || throttle!(Duration::from_secs(5 * 60), || rocksdb.report_metrics())
         })
         .build()
 }
