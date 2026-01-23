@@ -755,6 +755,45 @@ mod tests {
         }
     }
 
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_option_receipt_ext_compact_semantics() {
+        use crate::ReceiptExt;
+
+        // Verify Option<ReceiptExt> compact encoding semantics for backwards compatibility:
+        // 1. None encodes as 0 bytes (returns len=0 from to_compact)
+        // 2. from_compact with len=0 returns None without consuming bytes
+        // 3. Empty buffer with len=0 returns None (critical for old receipts)
+
+        // Test 1: None encodes as 0 bytes
+        let none_ext: Option<ReceiptExt> = None;
+        let mut buf = vec![];
+        let len = none_ext.to_compact(&mut buf);
+        assert_eq!(len, 0, "None should return len=0");
+        assert!(buf.is_empty(), "None should write 0 bytes");
+
+        // Test 2: from_compact with len=0 returns None
+        let (decoded, remaining) = Option::<ReceiptExt>::from_compact(&[], 0);
+        assert!(decoded.is_none(), "Empty buffer with len=0 should decode to None");
+        assert!(remaining.is_empty());
+
+        // Test 3: from_compact with len=0 on non-empty buffer returns None without consuming
+        let buf_with_data = [0x01, 0x02, 0x03];
+        let (decoded, remaining) = Option::<ReceiptExt>::from_compact(&buf_with_data, 0);
+        assert!(decoded.is_none(), "len=0 should decode to None regardless of buffer");
+        assert_eq!(remaining, &buf_with_data, "Buffer should be unchanged when len=0");
+
+        // Test 4: Some(ReceiptExt) roundtrips correctly
+        let some_ext = Some(ReceiptExt { block_access_index: Some(12345) });
+        let mut buf = vec![];
+        let len = some_ext.to_compact(&mut buf);
+        assert_eq!(len, 1, "Some should return len=1");
+        assert!(!buf.is_empty(), "Some should write bytes");
+
+        let (decoded, _) = Option::<ReceiptExt>::from_compact(&buf, 1);
+        assert_eq!(decoded, some_ext, "Some(ReceiptExt) should roundtrip");
+    }
+
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
     fn encode_legacy_receipt() {
