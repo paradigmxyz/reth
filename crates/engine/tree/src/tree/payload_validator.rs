@@ -792,12 +792,18 @@ where
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
         let mut transactions = transactions.into_iter();
+        let mut tx_index = 0usize;
+        let mut total_wait = std::time::Duration::ZERO;
         loop {
             // Measure time spent waiting for next transaction from iterator
             // (e.g., parallel signature recovery)
             let wait_start = Instant::now();
             let Some(tx_result) = transactions.next() else { break };
-            self.metrics.record_transaction_wait(wait_start.elapsed());
+            let wait_elapsed = wait_start.elapsed();
+            total_wait += wait_elapsed;
+            self.metrics.record_transaction_wait(wait_elapsed);
+            info!(target: "engine::tree", tx_index, ?wait_elapsed, "Transaction recovery wait");
+            tx_index += 1;
 
             let tx = tx_result.map_err(BlockExecutionError::other)?;
             let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
@@ -827,6 +833,7 @@ where
             enter.record("gas_used", gas_used);
         }
         drop(exec_span);
+        info!(target: "engine::tree", tx_count = tx_index, ?total_wait, "Total transaction recovery wait");
 
         Ok((executor, senders))
     }
