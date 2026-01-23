@@ -838,6 +838,183 @@ impl RocksDBProvider {
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
     }
 
+    /// Returns statistics for all column families in the database.
+    ///
+    /// Returns a vector of (`table_name`, `estimated_keys`, `estimated_size_bytes`) tuples.
+    pub fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        self.0.table_stats()
+    }
+
+    /// Creates a raw iterator over all entries in the specified table.
+    ///
+    /// Returns raw `(key_bytes, value_bytes)` pairs without decoding.
+    pub fn raw_iter<T: Table>(&self) -> ProviderResult<RocksDBRawIter<'_>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let iter = self.0.iterator_cf(cf, IteratorMode::Start);
+        Ok(RocksDBRawIter { inner: iter })
+    }
+
+    /// Returns all account history shards for the given address in ascending key order.
+    ///
+    /// This is used for unwind operations where we need to scan all shards for an address
+    /// and potentially delete or truncate them.
+    pub fn account_history_shards(
+        &self,
+        address: Address,
+    ) -> ProviderResult<Vec<(ShardedKey<Address>, BlockNumberList)>> {
+        // Get the column family handle for the AccountsHistory table.
+        let cf = self.get_cf_handle::<tables::AccountsHistory>()?;
+
+        // Build a seek key starting at the first shard (highest_block_number = 0) for this address.
+        // ShardedKey is (address, highest_block_number) so this positions us at the beginning.
+        let start_key = ShardedKey::new(address, 0u64);
+        let start_bytes = start_key.encode();
+
+        // Create a forward iterator starting from our seek position.
+        let iter = self
+            .0
+            .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
+
+        let mut result = Vec::new();
+        for item in iter {
+            match item {
+                Ok((key_bytes, value_bytes)) => {
+                    // Decode the sharded key to check if we're still on the same address.
+                    let key = ShardedKey::<Address>::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                    // Stop when we reach a different address (keys are sorted by address first).
+                    if key.key != address {
+                        break;
+                    }
+
+                    // Decompress the block number list stored in this shard.
+                    let value = BlockNumberList::decompress(&value_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                    result.push((key, value));
+                }
+                Err(e) => {
+                    return Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })));
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Returns all storage history shards for the given `(address, storage_key)` pair.
+    ///
+    /// Iterates through all shards in ascending `highest_block_number` order until
+    /// a different `(address, storage_key)` is encountered.
+    pub fn storage_history_shards(
+        &self,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
+        let cf = self.get_cf_handle::<tables::StoragesHistory>()?;
+
+        let start_key = StorageShardedKey::new(address, storage_key, 0u64);
+        let start_bytes = start_key.encode();
+
+        let iter = self
+            .0
+            .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
+
+        let mut result = Vec::new();
+        for item in iter {
+            match item {
+                Ok((key_bytes, value_bytes)) => {
+                    let key = StorageShardedKey::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                    if key.address != address || key.sharded_key.key != storage_key {
+                        break;
+                    }
+
+                    let value = BlockNumberList::decompress(&value_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                    result.push((key, value));
+                }
+                Err(e) => {
+                    return Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })));
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Unwinds account history indices for the given `(address, block_number)` pairs.
+    ///
+    /// Groups addresses by their minimum block number and calls the appropriate unwind
+    /// operations. For each address, keeps only blocks less than the minimum block
+    /// (i.e., removes the minimum block and all higher blocks).
+    ///
+    /// Returns a `WriteBatchWithTransaction` that can be committed later.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
+    pub fn unwind_account_history_indices(
+        &self,
+        last_indices: &[(Address, BlockNumber)],
+    ) -> ProviderResult<WriteBatchWithTransaction<true>> {
+        let mut address_min_block: HashMap<Address, BlockNumber> =
+            HashMap::with_capacity_and_hasher(last_indices.len(), Default::default());
+        for &(address, block_number) in last_indices {
+            address_min_block
+                .entry(address)
+                .and_modify(|min| *min = (*min).min(block_number))
+                .or_insert(block_number);
+        }
+
+        let mut batch = self.batch();
+        for (address, min_block) in address_min_block {
+            match min_block.checked_sub(1) {
+                Some(keep_to) => batch.unwind_account_history_to(address, keep_to)?,
+                None => batch.clear_account_history(address)?,
+            }
+        }
+
+        Ok(batch.into_inner())
+    }
+
+    /// Unwinds storage history indices for the given `(address, storage_key, block_number)` tuples.
+    ///
+    /// Groups by `(address, storage_key)` and finds the minimum block number for each.
+    /// For each key, keeps only blocks less than the minimum block
+    /// (i.e., removes the minimum block and all higher blocks).
+    ///
+    /// Returns a `WriteBatchWithTransaction` that can be committed later.
+    pub fn unwind_storage_history_indices(
+        &self,
+        storage_changesets: &[(Address, B256, BlockNumber)],
+    ) -> ProviderResult<WriteBatchWithTransaction<true>> {
+        let mut key_min_block: HashMap<(Address, B256), BlockNumber> =
+            HashMap::with_capacity_and_hasher(storage_changesets.len(), Default::default());
+        for &(address, storage_key, block_number) in storage_changesets {
+            key_min_block
+                .entry((address, storage_key))
+                .and_modify(|min| *min = (*min).min(block_number))
+                .or_insert(block_number);
+        }
+
+        let mut batch = self.batch();
+        for ((address, storage_key), min_block) in key_min_block {
+            match min_block.checked_sub(1) {
+                Some(keep_to) => batch.unwind_storage_history_to(address, storage_key, keep_to)?,
+                None => batch.clear_storage_history(address, storage_key)?,
+            }
+        }
+
+        Ok(batch.into_inner())
+    }
+
     /// Writes a batch of operations atomically.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>

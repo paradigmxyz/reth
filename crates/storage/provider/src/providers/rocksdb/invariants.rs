@@ -7,10 +7,14 @@
 use super::RocksDBProvider;
 use crate::StaticFileProviderFactory;
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{Address, BlockNumber};
 use rayon::prelude::*;
 use reth_db::cursor::DbCursorRO;
-use reth_db_api::{tables, transaction::DbTx};
+use reth_db_api::{
+    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    tables,
+    transaction::DbTx,
+};
 use reth_stages_types::StageId;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
@@ -18,6 +22,7 @@ use reth_storage_api::{
     StorageSettingsCache, TransactionsProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
+use std::collections::HashSet;
 
 impl RocksDBProvider {
     /// Checks consistency of `RocksDB` tables against MDBX stage checkpoints.
@@ -59,21 +64,18 @@ impl RocksDBProvider {
     {
         let mut unwind_target: Option<BlockNumber> = None;
 
-        // Check TransactionHashNumbers if stored in RocksDB
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
             let Some(target) = self.check_transaction_hash_numbers(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
-        // Check StoragesHistory if stored in RocksDB
         if provider.cached_storage_settings().storages_history_in_rocksdb &&
             let Some(target) = self.check_storages_history(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
-        // Check AccountsHistory if stored in RocksDB
         if provider.cached_storage_settings().account_history_in_rocksdb &&
             let Some(target) = self.check_accounts_history(provider)?
         {
@@ -329,14 +331,11 @@ impl RocksDBProvider {
     where
         Provider: StorageReader + BlockNumReader,
     {
-        use reth_db_api::models::storage_sharded_key::StorageShardedKey;
-
-        // Special case: clear all entries
         if max_block == 0 {
             return self.prune_storages_history_all();
         }
 
-        let mut to_delete: Vec<StorageShardedKey> = Vec::new();
+        let mut to_delete: HashSet<StorageShardedKey> = HashSet::new();
 
         // Try to get changesets for the optimized path.
         // Get the last block number to determine the range for changeset query.
@@ -354,7 +353,7 @@ impl RocksDBProvider {
                 let (key, _) = result?;
                 let highest_block = key.sharded_key.highest_block_number;
                 if highest_block != u64::MAX && highest_block > max_block {
-                    to_delete.push(key);
+                    to_delete.insert(key);
                 }
             }
         } else {
@@ -375,7 +374,7 @@ impl RocksDBProvider {
                         // Delete entries with highest_block > max_block (excluding sentinel)
                         let highest_block = key.sharded_key.highest_block_number;
                         if highest_block != u64::MAX && highest_block > max_block {
-                            to_delete.push(key);
+                            to_delete.insert(key);
                         }
                     }
                 }
@@ -399,21 +398,17 @@ impl RocksDBProvider {
                         let (key, _) = result?;
                         let highest_block = key.sharded_key.highest_block_number;
                         if highest_block != u64::MAX && highest_block > max_block {
-                            // Only add if not already in to_delete
-                            if !to_delete.contains(&key) {
-                                to_delete.push(key);
-                            }
+                            to_delete.insert(key);
                         }
                     }
                 }
             }
         }
 
-        let deleted = to_delete.len();
-        if deleted > 0 {
+        if !to_delete.is_empty() {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                deleted_count = deleted,
+                deleted_count = to_delete.len(),
                 max_block,
                 "Pruning StoragesHistory entries (changeset-based)"
             );
@@ -438,17 +433,15 @@ impl RocksDBProvider {
         for result in self.iter::<tables::StoragesHistory>()? {
             let (key, _) = result?;
             let highest_block = key.sharded_key.highest_block_number;
-            // Delete all except sentinel entries
             if highest_block != u64::MAX {
                 to_delete.push(key);
             }
         }
 
-        let deleted = to_delete.len();
-        if deleted > 0 {
+        if !to_delete.is_empty() {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                deleted_count = deleted,
+                deleted_count = to_delete.len(),
                 "Clearing all StoragesHistory entries"
             );
 
@@ -566,15 +559,11 @@ impl RocksDBProvider {
     where
         Provider: AccountExtReader + BlockNumReader,
     {
-        use alloy_primitives::Address;
-        use reth_db_api::models::ShardedKey;
-
-        // Special case: clear all entries
         if max_block == 0 {
             return self.prune_accounts_history_all();
         }
 
-        let mut to_delete: Vec<ShardedKey<Address>> = Vec::new();
+        let mut to_delete: HashSet<ShardedKey<Address>> = HashSet::new();
 
         // Try to get changesets for the optimized path.
         // Get the last block number to determine the range for changeset query.
@@ -592,7 +581,7 @@ impl RocksDBProvider {
                 let (key, _) = result?;
                 let highest_block = key.highest_block_number;
                 if highest_block != u64::MAX && highest_block > max_block {
-                    to_delete.push(key);
+                    to_delete.insert(key);
                 }
             }
         } else {
@@ -612,7 +601,7 @@ impl RocksDBProvider {
                     // Delete entries with highest_block > max_block (excluding sentinel)
                     let highest_block = key.highest_block_number;
                     if highest_block != u64::MAX && highest_block > max_block {
-                        to_delete.push(key);
+                        to_delete.insert(key);
                     }
                 }
             }
@@ -635,21 +624,17 @@ impl RocksDBProvider {
                         let (key, _) = result?;
                         let highest_block = key.highest_block_number;
                         if highest_block != u64::MAX && highest_block > max_block {
-                            // Only add if not already in to_delete
-                            if !to_delete.contains(&key) {
-                                to_delete.push(key);
-                            }
+                            to_delete.insert(key);
                         }
                     }
                 }
             }
         }
 
-        let deleted = to_delete.len();
-        if deleted > 0 {
+        if !to_delete.is_empty() {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                deleted_count = deleted,
+                deleted_count = to_delete.len(),
                 max_block,
                 "Pruning AccountsHistory entries (changeset-based)"
             );
@@ -675,17 +660,15 @@ impl RocksDBProvider {
         for result in self.iter::<tables::AccountsHistory>()? {
             let (key, _) = result?;
             let highest_block = key.highest_block_number;
-            // Delete all except sentinel entries
             if highest_block != u64::MAX {
                 to_delete.push(key);
             }
         }
 
-        let deleted = to_delete.len();
-        if deleted > 0 {
+        if !to_delete.is_empty() {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                deleted_count = deleted,
+                deleted_count = to_delete.len(),
                 "Clearing all AccountsHistory entries"
             );
 
