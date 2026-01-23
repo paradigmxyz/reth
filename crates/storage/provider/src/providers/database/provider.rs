@@ -80,7 +80,7 @@ use std::{
     thread,
     time::Instant,
 };
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, instrument, trace};
 
 /// Determines the commit order for database operations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -3516,15 +3516,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             {
                 let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
                 for batch in batches {
-                    if let Err(err) = self.rocksdb_provider.commit_batch(batch) {
-                        warn!(
-                            target: "providers::db",
-                            %err,
-                            "RocksDB batch commit failed after MDBX commit succeeded; \
-                             database state may be inconsistent"
-                        );
-                        return Err(err);
-                    }
+                    self.rocksdb_provider.commit_batch(batch)?;
                 }
             }
 

@@ -38,13 +38,10 @@ pub use consistent::ConsistentProvider;
 #[cfg_attr(not(all(unix, feature = "rocksdb")), path = "rocksdb_stub.rs")]
 pub(crate) mod rocksdb;
 
-mod rocksdb_types;
-
 pub use rocksdb::{
-    RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksDBRawIter, RocksDBStats, RocksDBTableStats,
-    RocksTx,
+    PruneShardOutcome, RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksDBRawIter,
+    RocksDBStats, RocksDBTableStats, RocksTx,
 };
-pub use rocksdb_types::PruneShardOutcome;
 
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy
 /// [`ProviderNodeTypes`].

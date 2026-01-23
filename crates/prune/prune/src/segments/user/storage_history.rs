@@ -102,6 +102,8 @@ impl StorageHistory {
             input.limiter
         };
 
+        // The limiter may already be exhausted from a previous segment in the same prune run.
+        // Early exit avoids unnecessary iteration when no budget remains.
         if limiter.is_limit_reached() {
             return Ok(SegmentOutput::not_done(
                 limiter.interrupt_reason(),

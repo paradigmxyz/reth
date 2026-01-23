@@ -1278,7 +1278,16 @@ impl RocksDBProvider {
     }
 }
 
-pub(crate) use super::super::rocksdb_types::PruneShardOutcome;
+/// Outcome of pruning a history shard in RocksDB.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneShardOutcome {
+    /// Shard was deleted entirely.
+    Deleted,
+    /// Shard was updated with filtered block numbers.
+    Updated,
+    /// Shard was unchanged (no blocks <= `to_block`).
+    Unchanged,
+}
 
 /// Handle for building a batch of operations atomically.
 ///
