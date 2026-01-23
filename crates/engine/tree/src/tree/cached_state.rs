@@ -694,28 +694,31 @@ impl ExecutionCache {
                 continue
             }
 
-            // If the account was destroyed (SELFDESTRUCT), we must clear the entire cache.
-            // The flat storage cache uses (Address, StorageKey) as key, so we cannot efficiently
-            // invalidate all storage slots for a single address. Rather than risk stale storage
-            // reads, we clear everything and let it repopulate.
+            // If the original account had code (was a contract), we must clear the entire cache
+            // because we can't efficiently invalidate all storage slots for a single address.
+            // This should only happen on pre-Dencun networks.
             //
-            // Note: Since EIP-6780, SELFDESTRUCT only works within the same transaction where the
-            // contract was created. This means the destroyed account/storage won't be in the cache
-            // anyway (created and destroyed in the same tx), so this path is never hit in
-            // live sync. It also will not be hit in pipeline sync, because we don't use execution
-            // cache there.
+            // If the original account had no code (was an EOA or a not yet deployed contract), we
+            // just remove the account from cache - no storage exists for it.
             if account.was_destroyed() {
-                self.selfdestruct_encountered.call_once(|| {
-                    warn!(
-                        target: "engine::caching",
-                        address = ?addr,
-                        info = ?account.info,
-                        original_info = ?account.original_info,
-                        "Encountered an inter-transaction SELFDESTRUCT that reset the execution cache. Are you running a pre-Dencun network?"
-                    );
-                });
-                self.clear();
-                return Ok(())
+                let had_code =
+                    account.original_info.as_ref().is_some_and(|info| !info.is_empty_code_hash());
+                if had_code {
+                    self.selfdestruct_encountered.call_once(|| {
+                        warn!(
+                            target: "engine::caching",
+                            address = ?addr,
+                            info = ?account.info,
+                            original_info = ?account.original_info,
+                            "Encountered an inter-transaction SELFDESTRUCT that reset the storage cache. Are you running a pre-Dencun network?"
+                        );
+                    });
+                    self.clear();
+                    return Ok(())
+                }
+
+                self.account_cache.remove(addr);
+                continue
             }
 
             // If we have an account that was modified, but it has a `None` account info, some wild
@@ -860,8 +863,10 @@ impl SavedCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::U256;
+    use alloy_primitives::{map::HashMap, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+    use reth_revm::db::{AccountStatus, BundleAccount};
+    use revm_state::AccountInfo;
 
     #[test]
     fn test_empty_storage_cached_state_provider() {
@@ -960,5 +965,134 @@ mod tests {
 
         drop(guard3);
         assert!(cache.is_available());
+    }
+
+    #[test]
+    fn test_insert_state_destroyed_account_with_code_clears_cache() {
+        let caches = ExecutionCache::new(1000);
+
+        // Pre-populate caches with some data
+        let addr1 = Address::random();
+        let addr2 = Address::random();
+        let storage_key = StorageKey::random();
+        caches.insert_account(addr1, Some(Account::default()));
+        caches.insert_account(addr2, Some(Account::default()));
+        caches.insert_storage(addr1, storage_key, Some(U256::from(42)));
+
+        // Verify caches are populated
+        assert!(caches.account_cache.get(&addr1).is_some());
+        assert!(caches.account_cache.get(&addr2).is_some());
+        assert!(caches.storage_cache.get(&(addr1, storage_key)).is_some());
+
+        let bundle = BundleState {
+            // BundleState with a destroyed contract (had code)
+            state: HashMap::from_iter([(
+                Address::random(),
+                BundleAccount::new(
+                    Some(AccountInfo {
+                        balance: U256::ZERO,
+                        nonce: 1,
+                        code_hash: B256::random(), // Non-empty code hash
+                        code: None,
+                        account_id: None,
+                    }),
+                    None, // Destroyed, so no current info
+                    Default::default(),
+                    AccountStatus::Destroyed,
+                ),
+            )]),
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        };
+
+        // Insert state should clear all caches because a contract was destroyed
+        let result = caches.insert_state(&bundle);
+        assert!(result.is_ok());
+
+        // Verify all caches were cleared
+        assert!(caches.account_cache.get(&addr1).is_none());
+        assert!(caches.account_cache.get(&addr2).is_none());
+        assert!(caches.storage_cache.get(&(addr1, storage_key)).is_none());
+    }
+
+    #[test]
+    fn test_insert_state_destroyed_account_without_code_removes_only_account() {
+        let caches = ExecutionCache::new(1000);
+
+        // Pre-populate caches with some data
+        let addr1 = Address::random();
+        let addr2 = Address::random();
+        let storage_key = StorageKey::random();
+        caches.insert_account(addr1, Some(Account::default()));
+        caches.insert_account(addr2, Some(Account::default()));
+        caches.insert_storage(addr1, storage_key, Some(U256::from(42)));
+
+        let bundle = BundleState {
+            // BundleState with a destroyed EOA (no code)
+            state: HashMap::from_iter([(
+                addr1,
+                BundleAccount::new(
+                    Some(AccountInfo {
+                        balance: U256::from(100),
+                        nonce: 1,
+                        code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
+                        code: None,
+                        account_id: None,
+                    }),
+                    None, // Destroyed
+                    Default::default(),
+                    AccountStatus::Destroyed,
+                ),
+            )]),
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        };
+
+        // Insert state should only remove the destroyed account
+        assert!(caches.insert_state(&bundle).is_ok());
+
+        // Verify only addr1 was removed, other data is still present
+        assert!(caches.account_cache.get(&addr1).is_none());
+        assert!(caches.account_cache.get(&addr2).is_some());
+        assert!(caches.storage_cache.get(&(addr1, storage_key)).is_some());
+    }
+
+    #[test]
+    fn test_insert_state_destroyed_account_no_original_info_removes_only_account() {
+        let caches = ExecutionCache::new(1000);
+
+        // Pre-populate caches
+        let addr1 = Address::random();
+        let addr2 = Address::random();
+        caches.insert_account(addr1, Some(Account::default()));
+        caches.insert_account(addr2, Some(Account::default()));
+
+        let bundle = BundleState {
+            // BundleState with a destroyed account (has no original info)
+            state: HashMap::from_iter([(
+                addr1,
+                BundleAccount::new(
+                    None, // No original info
+                    None, // Destroyed
+                    Default::default(),
+                    AccountStatus::Destroyed,
+                ),
+            )]),
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        };
+
+        // Insert state should only remove the destroyed account (no code = no full clear)
+        assert!(caches.insert_state(&bundle).is_ok());
+
+        // Verify only addr1 was removed
+        assert!(caches.account_cache.get(&addr1).is_none());
+        assert!(caches.account_cache.get(&addr2).is_some());
     }
 }
