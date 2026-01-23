@@ -485,6 +485,38 @@ mod compact {
 
     pub use flags::ReceiptFlags;
 
+    /// [`Receipt`] extension struct.
+    ///
+    /// All new fields should be added here in the form of a `Option<T>`, since `Option<ReceiptExt>`
+    /// is used as an extension field for backwards compatibility.
+    ///
+    /// More information: <https://github.com/paradigmxyz/reth/issues/7820> &
+    /// [`reth_codecs_derive::Compact`].
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
+    #[reth_codecs(crate = "reth_codecs")]
+    pub struct ReceiptExt {
+        // TODO(glam): Add new glam receipt fields here as Option<T>
+        // Example: `pub access_list_index: Option<u64>,`
+    }
+
+    impl ReceiptExt {
+        /// Converts into [`Some`] if any of the field exists. Otherwise, returns [`None`].
+        ///
+        /// Required since [`Receipt`] uses `Option<ReceiptExt>` as a field.
+        #[allow(clippy::unused_self)]
+        pub const fn into_option(self) -> Option<Self> {
+            // TODO(glam): Update this when fields are added
+            // if self.some_field.is_some() {
+            //     Some(self)
+            // } else {
+            //     None
+            // }
+            None
+        }
+    }
+
     impl<T: Compact> Compact for Receipt<T> {
         fn to_compact<B>(&self, buf: &mut B) -> usize
         where
@@ -585,6 +617,21 @@ mod tests {
         reth_codecs::test_utils::test_decode::<Receipt<TxType>>(&hex!(
             "c428b52ffd23fc42696156b10200f034792b6a94c3850215c2fef7aea361a0c31b79d9a32652eefc0d4e2e730036061cff7344b6fc6132b50cda0ed810a991ae58ef013150c12b2522533cb3b3a8b19b7786a8b5ff1d3cdc84225e22b02def168c8858df"
         ));
+    }
+
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_receipt_ext_backwards_compatibility() {
+        use crate::ReceiptExt;
+        use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
+
+        // Receipt has 0 unused bits - new fields must go through ReceiptExt
+        assert_eq!(Receipt::bitflag_unused_bits(), 0);
+
+        // ReceiptExt currently has no fields, so unused bits is 0.
+        // When the first glam field is added, update this to UnusedBits::NotZero
+        // to ensure future fields can still be added.
+        validate_bitflag_backwards_compat!(ReceiptExt, UnusedBits::Zero);
     }
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
