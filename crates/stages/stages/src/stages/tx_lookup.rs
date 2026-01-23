@@ -200,7 +200,9 @@ where
             }
         }
 
-        provider.rocksdb_provider().flush(&[tables::TransactionHashNumbers::NAME])?;
+        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+            provider.rocksdb_provider().flush(&[tables::TransactionHashNumbers::NAME])?;
+        }
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(input.target())
