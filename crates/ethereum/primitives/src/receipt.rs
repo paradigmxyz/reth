@@ -634,6 +634,119 @@ mod tests {
         validate_bitflag_backwards_compat!(ReceiptExt, UnusedBits::Zero);
     }
 
+    /// Test vectors generated from main branch to ensure backwards compatibility.
+    /// These test that receipts encoded before ReceiptExt was added can still be decoded.
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_backwards_compat_decode_legacy_receipt() {
+        // Small receipt: Legacy, success=true, gas=21000, no logs
+        // Generated on main branch before ReceiptExt: [0x14, 0x52, 0x08, 0x00]
+        const SMALL_LEGACY: &[u8] = &hex!("14520800");
+        let (decoded, _) = Receipt::<TxType>::from_compact(SMALL_LEGACY, SMALL_LEGACY.len());
+        assert_eq!(decoded.tx_type, TxType::Legacy);
+        assert!(decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 21000);
+        assert!(decoded.logs.is_empty());
+
+        // Re-encode and verify roundtrip
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), SMALL_LEGACY);
+    }
+
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_backwards_compat_decode_eip1559_receipt() {
+        // EIP-1559 receipt: success=true, gas=100000, no logs
+        // Generated on main branch: [1e, 01, 86, a0, 00]
+        const EIP1559_RECEIPT: &[u8] = &hex!("1e0186a000");
+        let (decoded, _) = Receipt::<TxType>::from_compact(EIP1559_RECEIPT, EIP1559_RECEIPT.len());
+        assert_eq!(decoded.tx_type, TxType::Eip1559);
+        assert!(decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 100000);
+        assert!(decoded.logs.is_empty());
+
+        // Re-encode and verify roundtrip
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), EIP1559_RECEIPT);
+    }
+
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_backwards_compat_decode_eip4844_failed_receipt() {
+        // EIP-4844 receipt: success=false, gas=500000, no logs
+        // Generated on main branch: [1b, 03, 07, a1, 20, 00]
+        const EIP4844_FAILED: &[u8] = &hex!("1b0307a12000");
+        let (decoded, _) = Receipt::<TxType>::from_compact(EIP4844_FAILED, EIP4844_FAILED.len());
+        assert_eq!(decoded.tx_type, TxType::Eip4844);
+        assert!(!decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 500000);
+        assert!(decoded.logs.is_empty());
+
+        // Re-encode and verify roundtrip
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), EIP4844_FAILED);
+    }
+
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_backwards_compat_decode_receipt_with_logs() {
+        // Receipt with one log - uses the existing test vector from test_decode_receipt
+        // This is a zstd-compressed receipt from main branch
+        const RECEIPT_WITH_LOGS: &[u8] = &hex!(
+            "c428b52ffd23fc42696156b10200f034792b6a94c3850215c2fef7aea361a0c31b79d9a32652eefc0d4e2e730036061cff7344b6fc6132b50cda0ed810a991ae58ef013150c12b2522533cb3b3a8b19b7786a8b5ff1d3cdc84225e22b02def168c8858df"
+        );
+        let (decoded, _) =
+            Receipt::<TxType>::from_compact(RECEIPT_WITH_LOGS, RECEIPT_WITH_LOGS.len());
+
+        // Verify it decoded successfully
+        assert!(!decoded.logs.is_empty());
+
+        // Re-encode and verify roundtrip
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), RECEIPT_WITH_LOGS);
+    }
+
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_backwards_compat_receipt_with_log_zstd() {
+        // EIP-1559 receipt with one log (zstd compressed)
+        // Generated on main branch
+        const RECEIPT_WITH_LOG: &[u8] =
+            &hex!("9e28b52ffd23fc4269613dc50000580186a0013811dead0100ff03fc9ecdc83800b4f6906001");
+        let (decoded, _) =
+            Receipt::<TxType>::from_compact(RECEIPT_WITH_LOG, RECEIPT_WITH_LOG.len());
+
+        assert_eq!(decoded.tx_type, TxType::Eip1559);
+        assert!(decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 100000);
+        assert_eq!(decoded.logs.len(), 1);
+
+        // Re-encode and verify roundtrip
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), RECEIPT_WITH_LOG);
+    }
+
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_backwards_compat_all_tx_types() {
+        // Test all transaction types can roundtrip
+        for tx_type in [TxType::Legacy, TxType::Eip2930, TxType::Eip1559, TxType::Eip4844] {
+            let receipt =
+                Receipt { tx_type, success: true, cumulative_gas_used: 50000, logs: vec![] };
+
+            let mut buf = vec![];
+            receipt.to_compact(&mut buf);
+
+            let (decoded, _) = Receipt::<TxType>::from_compact(&buf, buf.len());
+            assert_eq!(decoded, receipt, "Roundtrip failed for {:?}", tx_type);
+        }
+    }
+
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
     fn encode_legacy_receipt() {
