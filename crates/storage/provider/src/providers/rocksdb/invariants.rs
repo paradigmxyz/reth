@@ -381,20 +381,16 @@ impl RocksDBProvider {
                 }
             }
 
-            // Defensive check: after optimized path, verify no excess entries remain.
-            // This handles rare edge cases where MDBX doesn't have complete changeset data
-            // (e.g., if MDBX last_block < RocksDB max_highest_block due to data inconsistency).
+            // Defensive: if entries remain above max_block, fall back to full scan
             if let Some((last_key, _)) = self.last::<tables::StoragesHistory>()? {
                 let remaining_max = last_key.sharded_key.highest_block_number;
                 if remaining_max != u64::MAX && remaining_max > max_block {
-                    // Some entries might have been missed. Fall back to full scan for remaining.
                     tracing::debug!(
                         target: "reth::providers::rocksdb",
                         remaining_max,
                         max_block,
-                        "Defensive check: found remaining entries, scanning for missed ones"
+                        "Changeset incomplete, scanning full table"
                     );
-
                     for result in self.iter::<tables::StoragesHistory>()? {
                         let (key, _) = result?;
                         let highest_block = key.sharded_key.highest_block_number;
@@ -608,20 +604,16 @@ impl RocksDBProvider {
                 }
             }
 
-            // Defensive check: after optimized path, verify no excess entries remain.
-            // This handles rare edge cases where MDBX doesn't have complete changeset data
-            // (e.g., if MDBX last_block < RocksDB max_highest_block due to data inconsistency).
+            // Defensive: if entries remain above max_block, fall back to full scan
             if let Some((last_key, _)) = self.last::<tables::AccountsHistory>()? {
                 let remaining_max = last_key.highest_block_number;
                 if remaining_max != u64::MAX && remaining_max > max_block {
-                    // Some entries might have been missed. Fall back to full scan for remaining.
                     tracing::debug!(
                         target: "reth::providers::rocksdb",
                         remaining_max,
                         max_block,
-                        "Defensive check: found remaining entries, scanning for missed ones"
+                        "Changeset incomplete, scanning full table"
                     );
-
                     for result in self.iter::<tables::AccountsHistory>()? {
                         let (key, _) = result?;
                         let highest_block = key.highest_block_number;
