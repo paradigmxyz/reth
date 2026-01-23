@@ -1020,6 +1020,171 @@ mod tests {
         assert!(remaining.is_empty());
     }
 
+    /// Comprehensive backwards compatibility test with vectors generated from main branch.
+    /// These test that receipts encoded on main (before ReceiptExt) can be decoded correctly.
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_backwards_compat_main_vectors_no_logs() {
+        // All vectors generated from main branch commit before ReceiptExt was added.
+        // Tests decode AND re-encode to verify exact byte-for-byte compatibility.
+
+        // 1. Legacy, success=true, gas=21000, no logs
+        const LEGACY_SUCCESS_NO_LOGS: &[u8] = &hex!("14520800");
+        let (decoded, remaining) =
+            Receipt::<TxType>::from_compact(LEGACY_SUCCESS_NO_LOGS, LEGACY_SUCCESS_NO_LOGS.len());
+        assert!(remaining.is_empty());
+        assert_eq!(decoded.tx_type, TxType::Legacy);
+        assert!(decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 21000);
+        assert!(decoded.logs.is_empty());
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), LEGACY_SUCCESS_NO_LOGS, "Legacy success roundtrip mismatch");
+
+        // 2. Legacy, success=false, gas=21000, no logs
+        const LEGACY_FAILED_NO_LOGS: &[u8] = &hex!("10520800");
+        let (decoded, remaining) =
+            Receipt::<TxType>::from_compact(LEGACY_FAILED_NO_LOGS, LEGACY_FAILED_NO_LOGS.len());
+        assert!(remaining.is_empty());
+        assert_eq!(decoded.tx_type, TxType::Legacy);
+        assert!(!decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 21000);
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), LEGACY_FAILED_NO_LOGS, "Legacy failed roundtrip mismatch");
+
+        // 3. EIP-1559, success=true, gas=100000, no logs
+        const EIP1559_SUCCESS_NO_LOGS: &[u8] = &hex!("1e0186a000");
+        let (decoded, remaining) =
+            Receipt::<TxType>::from_compact(EIP1559_SUCCESS_NO_LOGS, EIP1559_SUCCESS_NO_LOGS.len());
+        assert!(remaining.is_empty());
+        assert_eq!(decoded.tx_type, TxType::Eip1559);
+        assert!(decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 100000);
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), EIP1559_SUCCESS_NO_LOGS, "EIP-1559 roundtrip mismatch");
+
+        // 4. EIP-4844, success=false, gas=500000, no logs
+        const EIP4844_FAILED_NO_LOGS: &[u8] = &hex!("1b0307a12000");
+        let (decoded, remaining) =
+            Receipt::<TxType>::from_compact(EIP4844_FAILED_NO_LOGS, EIP4844_FAILED_NO_LOGS.len());
+        assert!(remaining.is_empty());
+        assert_eq!(decoded.tx_type, TxType::Eip4844);
+        assert!(!decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 500000);
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), EIP4844_FAILED_NO_LOGS, "EIP-4844 failed roundtrip mismatch");
+
+        // 5. EIP-2930, success=true, gas=50000, no logs
+        const EIP2930_SUCCESS_NO_LOGS: &[u8] = &hex!("15c35000");
+        let (decoded, remaining) =
+            Receipt::<TxType>::from_compact(EIP2930_SUCCESS_NO_LOGS, EIP2930_SUCCESS_NO_LOGS.len());
+        assert!(remaining.is_empty());
+        assert_eq!(decoded.tx_type, TxType::Eip2930);
+        assert!(decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 50000);
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), EIP2930_SUCCESS_NO_LOGS, "EIP-2930 roundtrip mismatch");
+
+        // 9. Legacy, success=true, gas=u64::MAX/2, no logs (high gas value edge case)
+        const LEGACY_HIGH_GAS: &[u8] = &hex!("c428b52ffd23fc426961094900007fffffffffffffff00");
+        let (decoded, remaining) =
+            Receipt::<TxType>::from_compact(LEGACY_HIGH_GAS, LEGACY_HIGH_GAS.len());
+        assert!(remaining.is_empty());
+        assert_eq!(decoded.tx_type, TxType::Legacy);
+        assert!(decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, u64::MAX / 2);
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), LEGACY_HIGH_GAS, "Legacy high gas roundtrip mismatch");
+
+        // 10. EIP-7702, success=true, gas=42000, no logs
+        const EIP7702_SUCCESS_NO_LOGS: &[u8] = &hex!("1704a41000");
+        let (decoded, remaining) =
+            Receipt::<TxType>::from_compact(EIP7702_SUCCESS_NO_LOGS, EIP7702_SUCCESS_NO_LOGS.len());
+        assert!(remaining.is_empty());
+        assert_eq!(decoded.tx_type, TxType::Eip7702);
+        assert!(decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 42000);
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), EIP7702_SUCCESS_NO_LOGS, "EIP-7702 roundtrip mismatch");
+    }
+
+    /// Backwards compatibility test for receipts with logs (zstd compressed).
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_backwards_compat_main_vectors_with_logs() {
+        // These receipts have logs and are zstd compressed.
+        // All vectors generated from main branch.
+
+        // 6. Legacy, success=true, gas=50000, 1 log (zstd compressed)
+        const LEGACY_ONE_LOG: &[u8] =
+            &hex!("9428b52ffd23fc4269613cb5000050c350013811dead0100ff03fc9dcdc83867ed21f502");
+        let (decoded, remaining) =
+            Receipt::<TxType>::from_compact(LEGACY_ONE_LOG, LEGACY_ONE_LOG.len());
+        assert!(remaining.is_empty());
+        assert_eq!(decoded.tx_type, TxType::Legacy);
+        assert!(decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 50000);
+        assert_eq!(decoded.logs.len(), 1);
+        assert_eq!(decoded.logs[0].address, address!("0x0000000000000000000000000000000000000011"));
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), LEGACY_ONE_LOG, "Legacy one log roundtrip mismatch");
+
+        // 7. EIP-1559, success=true, gas=100000, 1 log (zstd compressed)
+        const EIP1559_ONE_LOG: &[u8] =
+            &hex!("9e28b52ffd23fc4269613dc50000580186a0013811dead0100ff03fc9ecdc83800b4f6906001");
+        let (decoded, remaining) =
+            Receipt::<TxType>::from_compact(EIP1559_ONE_LOG, EIP1559_ONE_LOG.len());
+        assert!(remaining.is_empty());
+        assert_eq!(decoded.tx_type, TxType::Eip1559);
+        assert!(decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 100000);
+        assert_eq!(decoded.logs.len(), 1);
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), EIP1559_ONE_LOG, "EIP-1559 one log roundtrip mismatch");
+
+        // 8. EIP-4844, success=true, gas=1000000, 3 logs (zstd compressed)
+        const EIP4844_THREE_LOGS: &[u8] =
+            &hex!("9f28b52ffd23fc426961b0f5000058030f4240033811dead010005fccb9160f6c0a4f56733329e4e6b3f5314");
+        let (decoded, remaining) =
+            Receipt::<TxType>::from_compact(EIP4844_THREE_LOGS, EIP4844_THREE_LOGS.len());
+        assert!(remaining.is_empty());
+        assert_eq!(decoded.tx_type, TxType::Eip4844);
+        assert!(decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 1000000);
+        assert_eq!(decoded.logs.len(), 3);
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(buf.as_slice(), EIP4844_THREE_LOGS, "EIP-4844 three logs roundtrip mismatch");
+
+        // 11. Legacy, success=false, gas=1, 1 log with 2 topics (zstd)
+        const LEGACY_LOG_TWO_TOPICS: &[u8] = &hex!(
+            "8828b52ffd23fc4269615be500005001011102debeef0100ff05fcc000e58451990fbe86533313fd4c0b"
+        );
+        let (decoded, remaining) =
+            Receipt::<TxType>::from_compact(LEGACY_LOG_TWO_TOPICS, LEGACY_LOG_TWO_TOPICS.len());
+        assert!(remaining.is_empty());
+        assert_eq!(decoded.tx_type, TxType::Legacy);
+        assert!(!decoded.success);
+        assert_eq!(decoded.cumulative_gas_used, 1);
+        assert_eq!(decoded.logs.len(), 1);
+        assert_eq!(decoded.logs[0].topics().len(), 2);
+        let mut buf = vec![];
+        decoded.to_compact(&mut buf);
+        assert_eq!(
+            buf.as_slice(),
+            LEGACY_LOG_TWO_TOPICS,
+            "Legacy log two topics roundtrip mismatch"
+        );
+    }
+
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
     fn encode_legacy_receipt() {
