@@ -157,8 +157,8 @@ impl TouchedKeys {
 
         // Check storage conflicts
         for (addr, slots) in &self.storages {
-            if let Some(other_slots) = other.storages.get(addr)
-                && slots.iter().any(|s| other_slots.contains(s))
+            if let Some(other_slots) = other.storages.get(addr) &&
+                slots.iter().any(|s| other_slots.contains(s))
             {
                 return true;
             }
@@ -209,12 +209,12 @@ impl ProofSequencer {
     /// Adds a proof with the corresponding state update and returns all proofs that can be
     /// delivered, potentially out of order if they don't conflict with pending earlier proofs.
     fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
-        let touched = TouchedKeys::from_state(&update.state);
-
         // Fast path: in-order delivery
         if sequence == self.next_to_deliver {
-            return self.deliver_with_consecutive(update, touched);
+            return self.deliver_with_consecutive(update);
         }
+
+        let touched = TouchedKeys::from_state(&update.state);
 
         // Out of order - check if we can still deliver it
         if sequence > self.next_to_deliver {
@@ -248,37 +248,15 @@ impl ProofSequencer {
     }
 
     /// Deliver an in-order proof and any consecutive proofs that follow
-    fn deliver_with_consecutive(
-        &mut self,
-        update: SparseTrieUpdate,
-        touched: TouchedKeys,
-    ) -> Vec<SparseTrieUpdate> {
+    fn deliver_with_consecutive(&mut self, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
         let mut result = Vec::with_capacity(1);
         result.push(update);
         self.next_to_deliver += 1;
 
-        // Track cumulative touched keys to detect conflicts
-        let mut cumulative_touched = touched;
-
         // Try to deliver consecutive pending proofs
         while let Some(pending) = self.pending_proofs.remove(&self.next_to_deliver) {
             result.push(pending.update);
-            cumulative_touched.extend(pending.touched);
             self.next_to_deliver += 1;
-        }
-
-        // Also check if any later pending proofs can now be delivered
-        // (they were waiting for us, and don't conflict with what we've delivered)
-        let remaining_seqs: Vec<_> = self.pending_proofs.keys().copied().collect();
-        for seq in remaining_seqs {
-            if let Some(pending) = self.pending_proofs.get(&seq)
-                && !pending.touched.conflicts_with(&cumulative_touched)
-            {
-                // Can deliver this one too
-                let pending = self.pending_proofs.remove(&seq).unwrap();
-                cumulative_touched.extend(pending.touched);
-                result.push(pending.update);
-            }
         }
 
         result
@@ -1712,8 +1690,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_proof_out_of_order_no_conflict() {
-        // With non-conflicting (empty) proofs, they can be delivered together
+    fn test_add_proof_out_of_order() {
         let mut sequencer = ProofSequencer::default();
         let proof1 = MultiProof::default();
         let proof2 = MultiProof::default();
@@ -1725,22 +1702,93 @@ mod tests {
         assert_eq!(ready.len(), 0);
         assert!(sequencer.has_pending());
 
-        // Proof 0 arrives - can deliver it, and since proof 2 doesn't conflict, deliver it too
+        // Proof 0 arrives - delivers only proof 0 (proof 1 is missing, can't deliver 2)
         let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1).unwrap());
-        assert_eq!(ready.len(), 2); // Both proof 0 and pending proof 2 (no conflicts)
+        assert_eq!(ready.len(), 1);
+        assert!(sequencer.has_pending());
+
+        // Proof 1 arrives - now we can deliver 1 and 2 (consecutive)
+        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2).unwrap());
+        assert_eq!(ready.len(), 2);
+        assert!(!sequencer.has_pending());
+    }
+
+    #[test]
+    fn test_add_proof_out_of_order_immediate_delivery() {
+        // When all prior proofs are pending and no conflicts, can deliver immediately
+        let mut sequencer = ProofSequencer::default();
+        sequencer.next_sequence = 3;
+
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+
+        // Create proof 0 that touches addr1
+        let mut state0 = HashedPostState::default();
+        state0.accounts.insert(addr1, Some(Default::default()));
+        let update0 = SparseTrieUpdate { state: state0, multiproof: ProofResult::empty_legacy() };
+
+        // Create proof 1 that touches addr1 (conflict with 0)
+        let mut state1 = HashedPostState::default();
+        state1.accounts.insert(addr1, Some(Default::default()));
+        let update1 = SparseTrieUpdate { state: state1, multiproof: ProofResult::empty_legacy() };
+
+        // Create proof 2 that touches addr2 (no conflict with 0 or 1)
+        let mut state2 = HashedPostState::default();
+        state2.accounts.insert(addr2, Some(Default::default()));
+        let update2 = SparseTrieUpdate { state: state2, multiproof: ProofResult::empty_legacy() };
+
+        // Proof 0 arrives first - delivers immediately
+        let ready = sequencer.add_proof(0, update0);
+        assert_eq!(ready.len(), 1);
         assert!(!sequencer.has_pending());
 
-        // Proof 1 arrives in order
-        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2).unwrap());
+        // Proof 2 arrives - all prior (just 1) are pending? No, 1 hasn't arrived, gap exists
+        // Must wait
+        let ready = sequencer.add_proof(2, update2);
+        assert_eq!(ready.len(), 0);
+        assert!(sequencer.has_pending());
+
+        // Proof 1 arrives - now 1 is in-order, and 2 follows consecutively
+        let ready = sequencer.add_proof(1, update1);
+        assert_eq!(ready.len(), 2); // Delivers 1 and 2
+        assert!(!sequencer.has_pending());
+    }
+
+    #[test]
+    fn test_add_proof_out_of_order_no_conflict_immediate() {
+        // When all prior proofs are pending and no conflicts, can deliver immediately
+        let mut sequencer = ProofSequencer::default();
+        sequencer.next_sequence = 2;
+
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+
+        // Create proof 0 that touches addr1
+        let mut state0 = HashedPostState::default();
+        state0.accounts.insert(addr1, Some(Default::default()));
+        let update0 = SparseTrieUpdate { state: state0, multiproof: ProofResult::empty_legacy() };
+
+        // Create proof 1 that touches addr2 (NO conflict with 0)
+        let mut state1 = HashedPostState::default();
+        state1.accounts.insert(addr2, Some(Default::default()));
+        let update1 = SparseTrieUpdate { state: state1, multiproof: ProofResult::empty_legacy() };
+
+        // Proof 0 arrives first - must wait? No, it's in-order (next_to_deliver=0)
+        let ready = sequencer.add_proof(0, update0);
+        assert_eq!(ready.len(), 1);
+        assert!(!sequencer.has_pending());
+
+        // Proof 1 arrives in-order (next_to_deliver=1)
+        let ready = sequencer.add_proof(1, update1);
         assert_eq!(ready.len(), 1);
         assert!(!sequencer.has_pending());
     }
 
     #[test]
-    fn test_add_proof_out_of_order_with_conflict() {
-        // When proofs conflict, ordering must be preserved
+    fn test_add_proof_conflict_forces_ordering() {
+        // When proofs conflict, they must wait for ordering
         let mut sequencer = ProofSequencer::default();
-        sequencer.next_sequence = 3;
+        sequencer.next_sequence = 2;
 
         let addr = B256::random();
 
@@ -1754,25 +1802,15 @@ mod tests {
         state1.accounts.insert(addr, Some(Default::default()));
         let update1 = SparseTrieUpdate { state: state1, multiproof: ProofResult::empty_legacy() };
 
-        // Create proof 2 with no conflict
-        let update2 = SparseTrieUpdate {
-            state: HashedPostState::default(),
-            multiproof: ProofResult::empty_legacy(),
-        };
-
-        // Proof 2 arrives first - must wait (gap)
-        let ready = sequencer.add_proof(2, update2);
-        assert_eq!(ready.len(), 0);
-        assert!(sequencer.has_pending());
-
-        // Proof 1 arrives - must wait (gap, and we don't know if proof 0 conflicts)
+        // Proof 1 arrives first - all prior (just 0) must be pending
+        // But 0 is not pending (gap), so must wait
         let ready = sequencer.add_proof(1, update1);
         assert_eq!(ready.len(), 0);
         assert!(sequencer.has_pending());
 
-        // Proof 0 arrives - delivers 0, then 1 (consecutive), then 2 (non-conflicting)
+        // Proof 0 arrives - delivers 0, then 1 (consecutive)
         let ready = sequencer.add_proof(0, update0);
-        assert_eq!(ready.len(), 3);
+        assert_eq!(ready.len(), 2);
         assert!(!sequencer.has_pending());
     }
 
