@@ -172,7 +172,8 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
 
     // Send another transaction to the contract address in a new block.
     // This tests cache behavior - if cache has stale data, execution would be incorrect.
-    // Post-Dencun: calling the contract should trigger SELFDESTRUCT again (but only transfer balance)
+    // Post-Dencun: calling the contract should trigger SELFDESTRUCT again (but only transfer
+    // balance)
     let call_again_tx = TransactionRequest::default()
         .with_from(signer.address())
         .with_to(contract_address)
@@ -216,8 +217,9 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
 ///
 /// This test verifies:
 /// 1. Contract selfdestructs during its constructor
-/// 2. Account IS destroyed (same-tx exception applies)
+/// 2. Contract is deleted (same-tx exception applies)
 /// 3. No code or storage remains
+/// 4. Since account never existed in DB before, bundle has no entry for it
 #[tokio::test]
 async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
@@ -231,9 +233,7 @@ async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
             .build(),
     );
 
-    let tree_config = TreeConfig::default()
-        .without_prewarming(true)
-        .without_state_cache(false);
+    let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
 
     let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
         1,
@@ -277,8 +277,8 @@ async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
     // Verify the output state: same-tx SELFDESTRUCT should destroy the account
     let account_state: Option<&BundleAccount> = execution_outcome.bundle.account(&contract_address);
     assert!(
-        account_state.is_some_and(|a: &BundleAccount| a.was_destroyed()),
-        "Post-Dencun same-tx: Account MUST be destroyed when SELFDESTRUCT in same tx as creation"
+        account_state.is_none(),
+        "Post-Dencun same-tx: Account was created and selfdestructed in the same transaction, no trace in bundle state"
     );
 
     // Verify via RPC that code and storage are cleared
@@ -455,6 +455,161 @@ async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
     // Verify the account now has the ETH balance we sent
     let balance = provider.get_balance(contract_address).await?;
     assert_eq!(balance, U256::from(1000), "Pre-Dencun: Account should have received ETH");
+
+    Ok(())
+}
+
+/// Tests SELFDESTRUCT in same transaction as creation, where account previously had ETH
+/// (post-Dencun).
+///
+/// Post-Dencun (EIP-6780):
+/// - The same-tx exception applies when the CONTRACT is created in that transaction
+/// - Even if the address previously had ETH (as an EOA), deploying a contract there and
+///   selfdestructing in the same tx DOES delete the contract
+/// - The "created in same tx" refers to contract creation, not account existence
+///
+/// This test verifies:
+/// 1. Send ETH to the future contract address (address has balance but no code)
+/// 2. Deploy contract that selfdestructs during constructor to that address
+/// 3. Contract is deleted (same-tx exception applies - contract was created this tx)
+/// 4. Code and storage are cleared
+/// 5. Since account existed in DB before (had ETH), bundle marks it as Destroyed
+#[tokio::test]
+async fn test_selfdestruct_same_tx_preexisting_account_post_dencun() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    // Cancun activated (post-Dencun, EIP-6780)
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
+
+    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec.clone(),
+        false,
+        tree_config,
+        eth_payload_attributes,
+    )
+    .await?;
+
+    let mut node = nodes.pop().unwrap();
+    let signer = wallet.inner.clone();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(signer.clone()))
+        .connect_http(node.rpc_url());
+
+    // Calculate where the contract will be deployed (CREATE uses sender + nonce)
+    // We'll use nonce 1 for deployment, so first send ETH with nonce 0
+    let future_contract_address = signer.address().create(1);
+
+    // Send ETH to the future contract address first (makes it a pre-existing account)
+    let send_eth_tx = TransactionRequest::default()
+        .with_from(signer.address())
+        .with_to(future_contract_address)
+        .with_nonce(0)
+        .with_value(U256::from(1000))
+        .with_gas_limit(21_000)
+        .with_max_fee_per_gas(20_000_000_000_u128)
+        .with_max_priority_fee_per_gas(1_000_000_000_u128);
+
+    let pending = provider.send_transaction(send_eth_tx).await?;
+    node.advance_block().await?;
+    let receipt = pending.get_receipt().await?;
+    assert!(receipt.status(), "ETH transfer should succeed");
+
+    // Consume the canonical notification
+    let _ = node.canonical_stream.next().await;
+
+    // Verify the account exists and has balance
+    let balance_before = provider.get_balance(future_contract_address).await?;
+    assert_eq!(balance_before, U256::from(1000), "Account should have ETH before deployment");
+
+    // Now deploy contract that selfdestructs during its constructor to the same address
+    let init_code = selfdestruct_in_constructor_init_code();
+    let deploy_tx = TransactionRequest::default()
+        .with_from(signer.address())
+        .with_nonce(1)
+        .with_gas_limit(500_000)
+        .with_max_fee_per_gas(20_000_000_000_u128)
+        .with_max_priority_fee_per_gas(1_000_000_000_u128)
+        .with_input(init_code)
+        .with_kind(TxKind::Create);
+
+    let pending = provider.send_transaction(deploy_tx).await?;
+    node.advance_block().await?;
+    let receipt = pending.get_receipt().await?;
+    assert!(receipt.status(), "Contract deployment with selfdestruct should succeed");
+
+    // Verify deployment went to the expected address
+    assert_eq!(
+        receipt.contract_address,
+        Some(future_contract_address),
+        "Contract should be deployed to pre-computed address"
+    );
+
+    // Get the canonical notification for the deployment block
+    let notification = node.canonical_stream.next().await.unwrap();
+    let chain = notification.committed();
+    let execution_outcome = chain.execution_outcome();
+
+    // Verify the output state: same-tx exception DOES apply because contract was created this tx
+    // The account should be marked as destroyed. Since it had prior state (ETH balance),
+    // the bundle will contain it with status Destroyed and original_info set.
+    let account_state: Option<&BundleAccount> =
+        execution_outcome.bundle.account(&future_contract_address);
+    assert!(
+        account_state.is_some_and(|a| a.was_destroyed()),
+        "Post-Dencun same-tx with prior ETH: Account MUST be marked as destroyed"
+    );
+
+    // Verify via RPC that code and storage are cleared
+    let code = provider.get_code_at(future_contract_address).await?;
+    assert!(code.is_empty(), "Post-Dencun same-tx: Contract code should be deleted");
+
+    let slot0 = provider.get_storage_at(future_contract_address, U256::ZERO).await?;
+    assert_eq!(slot0, U256::ZERO, "Post-Dencun same-tx: Storage should be cleared");
+
+    // Balance should be zero (sent to beneficiary during SELFDESTRUCT)
+    let balance_after = provider.get_balance(future_contract_address).await?;
+    assert_eq!(
+        balance_after,
+        U256::ZERO,
+        "Post-Dencun same-tx: Balance should be zero (sent to beneficiary)"
+    );
+
+    // Send ETH to the destroyed address to verify cache behavior
+    let send_eth_again_tx = TransactionRequest::default()
+        .with_from(signer.address())
+        .with_to(future_contract_address)
+        .with_nonce(2)
+        .with_value(U256::from(2000))
+        .with_gas_limit(21_000)
+        .with_max_fee_per_gas(20_000_000_000_u128)
+        .with_max_priority_fee_per_gas(1_000_000_000_u128);
+
+    let pending = provider.send_transaction(send_eth_again_tx).await?;
+    node.advance_block().await?;
+    let receipt = pending.get_receipt().await?;
+    assert!(receipt.status(), "ETH transfer should succeed");
+
+    // Consume notification
+    let _ = node.canonical_stream.next().await;
+
+    // Verify the account received ETH and has no code (it's now just an EOA)
+    let balance_final = provider.get_balance(future_contract_address).await?;
+    assert_eq!(balance_final, U256::from(2000), "Account should have received ETH");
+
+    let code_final = provider.get_code_at(future_contract_address).await?;
+    assert!(code_final.is_empty(), "Code should remain empty after ETH transfer");
+
+    let slot0_final = provider.get_storage_at(future_contract_address, U256::ZERO).await?;
+    assert_eq!(slot0_final, U256::ZERO, "Storage should remain cleared");
 
     Ok(())
 }
