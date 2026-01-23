@@ -833,6 +833,45 @@ impl RocksDBProvider {
         self.0.table_stats()
     }
 
+    /// Flushes all pending writes to disk.
+    ///
+    /// This performs a full flush of:
+    /// 1. The Write-Ahead Log (WAL) with sync
+    /// 2. All column family memtables to SST files
+    ///
+    /// After this call completes, all data is durably persisted to disk.
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
+    pub fn flush(&self) -> ProviderResult<()> {
+        let db = self.0.db_rw();
+
+        db.flush_wal(true).map_err(|e| {
+            ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
+                info: DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
+                operation: DatabaseWriteOperation::Flush,
+                table_name: "WAL",
+                key: Vec::new(),
+            })))
+        })?;
+
+        for cf_name in ROCKSDB_TABLES {
+            if let Some(cf) = db.cf_handle(cf_name) {
+                db.flush_cf(&cf).map_err(|e| {
+                    ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
+                        info: DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
+                        operation: DatabaseWriteOperation::Flush,
+                        table_name: cf_name,
+                        key: Vec::new(),
+                    })))
+                })?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Creates a raw iterator over all entries in the specified table.
     ///
     /// Returns raw `(key_bytes, value_bytes)` pairs without decoding.
@@ -1221,6 +1260,11 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// This is called after each `put` or `delete` operation to prevent unbounded memory growth.
     /// Returns immediately if auto-commit is disabled or threshold not reached.
+    ///
+    /// When the `edge` feature is enabled, this also flushes the WAL and memtables to disk
+    /// after committing. Since data is inserted in sorted order, this results in trivial
+    /// compaction moves rather than expensive merge operations.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_size = self.inner.size_in_bytes()))]
     fn maybe_auto_commit(&mut self) -> ProviderResult<()> {
         if let Some(threshold) = self.auto_commit_threshold &&
             self.inner.size_in_bytes() >= threshold
@@ -1232,14 +1276,48 @@ impl<'a> RocksDBBatch<'a> {
                 "Auto-committing RocksDB batch"
             );
             let old_batch = std::mem::take(&mut self.inner);
-            self.provider.0.db_rw().write_opt(old_batch, &WriteOptions::default()).map_err(
-                |e| {
-                    ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    }))
-                },
-            )?;
+            let db = self.provider.0.db_rw();
+            db.write_opt(old_batch, &WriteOptions::default()).map_err(|e| {
+                ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+
+            #[cfg(feature = "edge")]
+            {
+                db.flush_wal(true).map_err(|e| {
+                    ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
+                        info: DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
+                        operation: DatabaseWriteOperation::Flush,
+                        table_name: "WAL",
+                        key: Vec::new(),
+                    })))
+                })?;
+
+                for cf_name in ROCKSDB_TABLES {
+                    if let Some(cf) = db.cf_handle(cf_name) {
+                        db.flush_cf(&cf).map_err(|e| {
+                            ProviderError::Database(DatabaseError::Write(Box::new(
+                                DatabaseWriteError {
+                                    info: DatabaseErrorInfo {
+                                        message: e.to_string().into(),
+                                        code: -1,
+                                    },
+                                    operation: DatabaseWriteOperation::Flush,
+                                    table_name: cf_name,
+                                    key: Vec::new(),
+                                },
+                            )))
+                        })?;
+                    }
+                }
+
+                tracing::info!(
+                    target: "providers::rocksdb",
+                    "Flushed RocksDB WAL and memtables after auto-commit"
+                );
+            }
         }
         Ok(())
     }

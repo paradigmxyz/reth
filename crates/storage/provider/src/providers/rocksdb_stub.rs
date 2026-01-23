@@ -88,6 +88,13 @@ impl RocksDBProvider {
     pub const fn clear<T>(&self) -> ProviderResult<()> {
         Ok(())
     }
+
+    /// Flushes all pending writes to disk (stub implementation).
+    ///
+    /// This is a no-op since there is no `RocksDB` when the feature is disabled.
+    pub const fn flush(&self) -> ProviderResult<()> {
+        Ok(())
+    }
 }
 
 impl DatabaseMetrics for RocksDBProvider {
