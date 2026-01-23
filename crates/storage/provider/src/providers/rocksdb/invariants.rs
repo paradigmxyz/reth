@@ -320,10 +320,8 @@ impl RocksDBProvider {
     /// files or MDBX based on storage settings), then only deletes History entries for those
     /// specific slots. This is more efficient than iterating the whole table.
     ///
-    /// Includes a defensive check after the optimized path to ensure no entries are missed
-    /// (e.g., if changesets are incomplete for the excess block range).
-    ///
-    /// If `max_block == 0`, falls back to clearing all non-sentinel entries.
+    /// If no changesets are available, falls back to full table iteration.
+    /// If `max_block == 0`, clears all non-sentinel entries.
     fn prune_storages_history_above<Provider>(
         &self,
         provider: &Provider,
@@ -380,36 +378,6 @@ impl RocksDBProvider {
                     }
                 }
             }
-
-            // Defensive: scan to verify no entries above max_block were missed.
-            // We can't use last() because key ordering is (address, storage_key, block),
-            // so the lexicographically last key may not have the highest block number.
-            let mut needs_full_scan = false;
-            for result in self.iter::<tables::StoragesHistory>()? {
-                let (key, _) = result?;
-                let highest_block = key.sharded_key.highest_block_number;
-                if highest_block != u64::MAX && highest_block > max_block {
-                    if !to_delete.contains(&key) {
-                        needs_full_scan = true;
-                        break;
-                    }
-                }
-            }
-
-            if needs_full_scan {
-                tracing::debug!(
-                    target: "reth::providers::rocksdb",
-                    max_block,
-                    "Changeset incomplete, scanning full table"
-                );
-                for result in self.iter::<tables::StoragesHistory>()? {
-                    let (key, _) = result?;
-                    let highest_block = key.sharded_key.highest_block_number;
-                    if highest_block != u64::MAX && highest_block > max_block {
-                        to_delete.insert(key);
-                    }
-                }
-            }
         }
 
         if !to_delete.is_empty() {
@@ -417,7 +385,7 @@ impl RocksDBProvider {
                 target: "reth::providers::rocksdb",
                 deleted_count = to_delete.len(),
                 max_block,
-                "Pruning StoragesHistory entries (changeset-based)"
+                "Pruning StoragesHistory entries"
             );
 
             let mut batch = self.batch();
@@ -555,10 +523,8 @@ impl RocksDBProvider {
     /// files or MDBX based on storage settings), then only deletes History entries for those
     /// specific accounts. This is more efficient than iterating the whole table.
     ///
-    /// Includes a defensive check after the optimized path to ensure no entries are missed
-    /// (e.g., if changesets are incomplete for the excess block range).
-    ///
-    /// If `max_block == 0`, falls back to clearing all non-sentinel entries.
+    /// If no changesets are available, falls back to full table iteration.
+    /// If `max_block == 0`, clears all non-sentinel entries.
     fn prune_accounts_history_above<Provider>(
         &self,
         provider: &Provider,
@@ -613,36 +579,6 @@ impl RocksDBProvider {
                     }
                 }
             }
-
-            // Defensive: scan to verify no entries above max_block were missed.
-            // We can't use last() because key ordering is (address, block),
-            // so the lexicographically last key may not have the highest block number.
-            let mut needs_full_scan = false;
-            for result in self.iter::<tables::AccountsHistory>()? {
-                let (key, _) = result?;
-                let highest_block = key.highest_block_number;
-                if highest_block != u64::MAX && highest_block > max_block {
-                    if !to_delete.contains(&key) {
-                        needs_full_scan = true;
-                        break;
-                    }
-                }
-            }
-
-            if needs_full_scan {
-                tracing::debug!(
-                    target: "reth::providers::rocksdb",
-                    max_block,
-                    "Changeset incomplete, scanning full table"
-                );
-                for result in self.iter::<tables::AccountsHistory>()? {
-                    let (key, _) = result?;
-                    let highest_block = key.highest_block_number;
-                    if highest_block != u64::MAX && highest_block > max_block {
-                        to_delete.insert(key);
-                    }
-                }
-            }
         }
 
         if !to_delete.is_empty() {
@@ -650,7 +586,7 @@ impl RocksDBProvider {
                 target: "reth::providers::rocksdb",
                 deleted_count = to_delete.len(),
                 max_block,
-                "Pruning AccountsHistory entries (changeset-based)"
+                "Pruning AccountsHistory entries"
             );
 
             let mut batch = self.batch();
