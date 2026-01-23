@@ -148,6 +148,7 @@ where
         })?;
 
         if use_rocksdb {
+            provider.commit_pending_rocksdb_batches()?;
             provider.rocksdb_provider().flush(&[tables::StoragesHistory::NAME])?;
         }
 
