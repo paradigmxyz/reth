@@ -635,7 +635,7 @@ mod tests {
     }
 
     /// Test vectors generated from main branch to ensure backwards compatibility.
-    /// These test that receipts encoded before ReceiptExt was added can still be decoded.
+    /// These test that receipts encoded before [`ReceiptExt`] was added can still be decoded.
     #[test]
     #[cfg(feature = "reth-codec")]
     fn test_backwards_compat_decode_legacy_receipt() {
