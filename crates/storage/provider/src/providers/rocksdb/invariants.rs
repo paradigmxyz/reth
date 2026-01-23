@@ -381,22 +381,32 @@ impl RocksDBProvider {
                 }
             }
 
-            // Defensive: if entries remain above max_block, fall back to full scan
-            if let Some((last_key, _)) = self.last::<tables::StoragesHistory>()? {
-                let remaining_max = last_key.sharded_key.highest_block_number;
-                if remaining_max != u64::MAX && remaining_max > max_block {
-                    tracing::debug!(
-                        target: "reth::providers::rocksdb",
-                        remaining_max,
-                        max_block,
-                        "Changeset incomplete, scanning full table"
-                    );
-                    for result in self.iter::<tables::StoragesHistory>()? {
-                        let (key, _) = result?;
-                        let highest_block = key.sharded_key.highest_block_number;
-                        if highest_block != u64::MAX && highest_block > max_block {
-                            to_delete.insert(key);
-                        }
+            // Defensive: scan to verify no entries above max_block were missed.
+            // We can't use last() because key ordering is (address, storage_key, block),
+            // so the lexicographically last key may not have the highest block number.
+            let mut needs_full_scan = false;
+            for result in self.iter::<tables::StoragesHistory>()? {
+                let (key, _) = result?;
+                let highest_block = key.sharded_key.highest_block_number;
+                if highest_block != u64::MAX && highest_block > max_block {
+                    if !to_delete.contains(&key) {
+                        needs_full_scan = true;
+                        break;
+                    }
+                }
+            }
+
+            if needs_full_scan {
+                tracing::debug!(
+                    target: "reth::providers::rocksdb",
+                    max_block,
+                    "Changeset incomplete, scanning full table"
+                );
+                for result in self.iter::<tables::StoragesHistory>()? {
+                    let (key, _) = result?;
+                    let highest_block = key.sharded_key.highest_block_number;
+                    if highest_block != u64::MAX && highest_block > max_block {
+                        to_delete.insert(key);
                     }
                 }
             }
@@ -604,22 +614,32 @@ impl RocksDBProvider {
                 }
             }
 
-            // Defensive: if entries remain above max_block, fall back to full scan
-            if let Some((last_key, _)) = self.last::<tables::AccountsHistory>()? {
-                let remaining_max = last_key.highest_block_number;
-                if remaining_max != u64::MAX && remaining_max > max_block {
-                    tracing::debug!(
-                        target: "reth::providers::rocksdb",
-                        remaining_max,
-                        max_block,
-                        "Changeset incomplete, scanning full table"
-                    );
-                    for result in self.iter::<tables::AccountsHistory>()? {
-                        let (key, _) = result?;
-                        let highest_block = key.highest_block_number;
-                        if highest_block != u64::MAX && highest_block > max_block {
-                            to_delete.insert(key);
-                        }
+            // Defensive: scan to verify no entries above max_block were missed.
+            // We can't use last() because key ordering is (address, block),
+            // so the lexicographically last key may not have the highest block number.
+            let mut needs_full_scan = false;
+            for result in self.iter::<tables::AccountsHistory>()? {
+                let (key, _) = result?;
+                let highest_block = key.highest_block_number;
+                if highest_block != u64::MAX && highest_block > max_block {
+                    if !to_delete.contains(&key) {
+                        needs_full_scan = true;
+                        break;
+                    }
+                }
+            }
+
+            if needs_full_scan {
+                tracing::debug!(
+                    target: "reth::providers::rocksdb",
+                    max_block,
+                    "Changeset incomplete, scanning full table"
+                );
+                for result in self.iter::<tables::AccountsHistory>()? {
+                    let (key, _) = result?;
+                    let highest_block = key.highest_block_number;
+                    if highest_block != u64::MAX && highest_block > max_block {
+                        to_delete.insert(key);
                     }
                 }
             }
