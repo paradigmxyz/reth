@@ -175,6 +175,12 @@ impl RocksDBBuilder {
 
         options.set_log_level(log_level);
 
+        // Speed up WAL cleanup - delete obsolete files immediately after flush
+        // This ensures WAL files are removed as soon as all column families have flushed
+        options.set_delete_obsolete_files_period_micros(0);
+        options.set_wal_ttl_seconds(0);
+        options.set_wal_size_limit_mb(0);
+
         // Statistics can view from RocksDB log file
         if enable_statistics {
             options.enable_statistics();
