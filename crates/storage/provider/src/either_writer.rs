@@ -83,14 +83,17 @@ pub type RawRocksDBBatch = ();
 
 /// Helper type for `RocksDB` transaction reference argument in reader constructors.
 ///
-/// When `rocksdb` feature is enabled, this is a reference to a `RocksDB` transaction.
-/// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
+/// When `rocksdb` feature is enabled, this is an optional reference to a `RocksDB` transaction.
+/// The `Option` allows callers to skip transaction creation when `RocksDB` isn't needed
+/// (e.g., on legacy MDBX-only nodes).
+/// When `rocksdb` feature is disabled, it's `()` (unit type) to allow the same API without
+/// feature gates.
 #[cfg(all(unix, feature = "rocksdb"))]
-pub type RocksTxRefArg<'a> = &'a crate::providers::rocksdb::RocksTx<'a>;
+pub type RocksTxRefArg<'a> = Option<&'a crate::providers::rocksdb::RocksTx<'a>>;
 /// Helper type for `RocksDB` transaction reference argument in reader constructors.
 ///
-/// When `rocksdb` feature is enabled, this is a reference to a `RocksDB` transaction.
-/// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
+/// When `rocksdb` feature is disabled, it's `()` (unit type) to allow the same API without
+/// feature gates.
 #[cfg(not(all(unix, feature = "rocksdb")))]
 pub type RocksTxRefArg<'a> = ();
 
@@ -762,7 +765,9 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().storages_history_in_rocksdb {
-            return Ok(EitherReader::RocksDB(_rocksdb_tx));
+            return Ok(EitherReader::RocksDB(
+                _rocksdb_tx.expect("storages_history_in_rocksdb requires rocksdb tx"),
+            ));
         }
 
         Ok(EitherReader::Database(
@@ -782,7 +787,9 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            return Ok(EitherReader::RocksDB(_rocksdb_tx));
+            return Ok(EitherReader::RocksDB(
+                _rocksdb_tx.expect("transaction_hash_numbers_in_rocksdb requires rocksdb tx"),
+            ));
         }
 
         Ok(EitherReader::Database(
@@ -802,7 +809,9 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().account_history_in_rocksdb {
-            return Ok(EitherReader::RocksDB(_rocksdb_tx));
+            return Ok(EitherReader::RocksDB(
+                _rocksdb_tx.expect("account_history_in_rocksdb requires rocksdb tx"),
+            ));
         }
 
         Ok(EitherReader::Database(
@@ -1813,5 +1822,21 @@ mod rocksdb_tests {
             Some(tx_num2),
             "Data should be visible after provider.commit()"
         );
+    }
+
+    /// Test that `EitherReader::new_accounts_history` panics when settings require
+    /// `RocksDB` but no tx is provided (`None`). This is an invariant violation that
+    /// indicates a bug - `with_rocksdb_tx` should always provide a tx when needed.
+    #[test]
+    #[should_panic(expected = "account_history_in_rocksdb requires rocksdb tx")]
+    fn test_settings_mismatch_panics() {
+        let factory = create_test_provider_factory();
+
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+        );
+
+        let provider = factory.database_provider_ro().unwrap();
+        let _ = EitherReader::<(), ()>::new_accounts_history(&provider, None);
     }
 }

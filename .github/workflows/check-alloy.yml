@@ -60,7 +60,6 @@ jobs:
           tail -50 Cargo.toml
 
       - name: Check workspace
-        run: cargo check --workspace --all-features
-
-      - name: Check Optimism
-        run: cargo check -p reth-optimism-node --all-features
+        run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
+        env:
+          RUSTFLAGS: -D warnings
