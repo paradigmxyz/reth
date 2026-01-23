@@ -2,6 +2,8 @@ use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_db_api::table::Table;
 use reth_db_api::{
     table::{Decode, Decompress, Value},
     tables,
@@ -199,6 +201,9 @@ where
                 break;
             }
         }
+
+        #[cfg(all(unix, feature = "rocksdb"))]
+        provider.rocksdb_provider().flush(&[tables::TransactionHashNumbers::NAME])?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(input.target())

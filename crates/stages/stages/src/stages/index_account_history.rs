@@ -1,6 +1,8 @@
 use super::collect_account_history_indices;
 use crate::stages::utils::{collect_history_indices, load_account_history};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_db_api::table::Table;
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
 use reth_provider::{
     DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
@@ -142,6 +144,11 @@ where
                 .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
             Ok(((), writer.into_raw_rocksdb_batch()))
         })?;
+
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if use_rocksdb {
+            provider.rocksdb_provider().flush(&[tables::AccountsHistory::NAME])?;
+        }
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
