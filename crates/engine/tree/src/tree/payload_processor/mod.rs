@@ -2,9 +2,7 @@
 
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
-    cached_state::{
-        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache, SavedCache,
-    },
+    cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache, SavedCache},
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
         sparse_trie::StateRootComputeOutcome,
@@ -114,7 +112,7 @@ where
     /// The executor used by to spawn tasks.
     executor: WorkloadExecutor,
     /// The most recent cache used for execution.
-    execution_cache: ExecutionCache,
+    execution_cache: PayloadExecutionCache,
     /// Metrics for trie operations
     trie_metrics: MultiProofTaskMetrics,
     /// Cross-block cache size in bytes.
@@ -490,7 +488,7 @@ where
             cache
         } else {
             debug!("creating new execution cache on cache miss");
-            let cache = StateExecutionCache::new(self.cross_block_cache_size);
+            let cache = ExecutionCache::new(self.cross_block_cache_size);
             SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
                 .with_disable_cache_metrics(self.disable_cache_metrics)
         }
@@ -589,7 +587,7 @@ where
             let (caches, cache_metrics, _) = match cached.take() {
                 Some(existing) => existing.split(),
                 None => (
-                    StateExecutionCache::new(self.cross_block_cache_size),
+                    ExecutionCache::new(self.cross_block_cache_size),
                     CachedStateMetrics::zeroed(),
                     false,
                 ),
@@ -666,7 +664,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     }
 
     /// Returns a clone of the caches used by prewarming
-    pub(super) fn caches(&self) -> Option<StateExecutionCache> {
+    pub(super) fn caches(&self) -> Option<ExecutionCache> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
     }
 
@@ -770,29 +768,29 @@ impl<R> Drop for CacheTaskHandle<R> {
 /// ## Cache Safety
 ///
 /// **CRITICAL**: Cache update operations require exclusive access. All concurrent cache users
-/// (such as prewarming tasks) must be terminated before calling `update_with_guard`, otherwise
-/// the cache may be corrupted or cleared.
+/// (such as prewarming tasks) must be terminated before calling
+/// [`PayloadExecutionCache::update_with_guard`], otherwise the cache may be corrupted or cleared.
 ///
 /// ## Cache vs Prewarming Distinction
 ///
-/// **`ExecutionCache`**:
+/// **[`PayloadExecutionCache`]**:
 /// - Stores parent block's execution state after completion
 /// - Used to fetch parent data for next block's execution
 /// - Must be exclusively accessed during save operations
 ///
-/// **`PrewarmCacheTask`**:
+/// **[`PrewarmCacheTask`]**:
 /// - Speculatively loads accounts/storage that might be used in transaction execution
 /// - Prepares data for state root proof computation
 /// - Runs concurrently but must not interfere with cache saves
 #[derive(Clone, Debug, Default)]
-struct ExecutionCache {
+struct PayloadExecutionCache {
     /// Guarded cloneable cache identified by a block hash.
     inner: Arc<RwLock<Option<SavedCache>>>,
     /// Metrics for cache operations.
     metrics: ExecutionCacheMetrics,
 }
 
-impl ExecutionCache {
+impl PayloadExecutionCache {
     /// Returns the cache for `parent_hash` if it's available for use.
     ///
     /// A cache is considered available when:
@@ -908,9 +906,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::ExecutionCache;
+    use super::PayloadExecutionCache;
     use crate::tree::{
-        cached_state::{CachedStateMetrics, ExecutionCache as StateExecutionCache, SavedCache},
+        cached_state::{CachedStateMetrics, ExecutionCache, SavedCache},
         payload_processor::{
             evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
         },
@@ -940,13 +938,13 @@ mod tests {
     use std::sync::Arc;
 
     fn make_saved_cache(hash: B256) -> SavedCache {
-        let execution_cache = StateExecutionCache::new(1_000);
+        let execution_cache = ExecutionCache::new(1_000);
         SavedCache::new(hash, execution_cache, CachedStateMetrics::zeroed())
     }
 
     #[test]
     fn execution_cache_allows_single_checkout() {
-        let execution_cache = ExecutionCache::default();
+        let execution_cache = PayloadExecutionCache::default();
         let hash = B256::from([1u8; 32]);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
@@ -965,7 +963,7 @@ mod tests {
 
     #[test]
     fn execution_cache_checkout_releases_on_drop() {
-        let execution_cache = ExecutionCache::default();
+        let execution_cache = PayloadExecutionCache::default();
         let hash = B256::from([2u8; 32]);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
@@ -982,7 +980,7 @@ mod tests {
 
     #[test]
     fn execution_cache_mismatch_parent_clears_and_returns() {
-        let execution_cache = ExecutionCache::default();
+        let execution_cache = PayloadExecutionCache::default();
         let hash = B256::from([3u8; 32]);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
@@ -995,7 +993,7 @@ mod tests {
 
     #[test]
     fn execution_cache_update_after_release_succeeds() {
-        let execution_cache = ExecutionCache::default();
+        let execution_cache = PayloadExecutionCache::default();
         let initial = B256::from([5u8; 32]);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(initial)));
