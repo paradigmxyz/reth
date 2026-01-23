@@ -32,6 +32,15 @@ pub struct RocksDBTableStats {
     pub pending_compaction_bytes: u64,
 }
 
+/// Database-level statistics for `RocksDB` - stub.
+#[derive(Debug, Clone)]
+pub struct RocksDBStats {
+    /// Statistics for each table (column family).
+    pub tables: Vec<RocksDBTableStats>,
+    /// Total size of WAL (Write-Ahead Log) files in bytes.
+    pub wal_size_bytes: u64,
+}
+
 /// Context for `RocksDB` block writes (stub).
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -87,6 +96,21 @@ impl RocksDBProvider {
     /// This is a no-op since there is no `RocksDB` when the feature is disabled.
     pub const fn clear<T>(&self) -> ProviderResult<()> {
         Ok(())
+    }
+
+    /// Returns the total size of WAL (Write-Ahead Log) files in bytes (stub implementation).
+    ///
+    /// Returns 0 since there is no `RocksDB` when the feature is disabled.
+    pub const fn wal_size_bytes(&self) -> u64 {
+        0
+    }
+
+    /// Returns database-level statistics including per-table stats and WAL size (stub
+    /// implementation).
+    ///
+    /// Returns empty stats since there is no `RocksDB` when the feature is disabled.
+    pub const fn db_stats(&self) -> RocksDBStats {
+        RocksDBStats { tables: Vec::new(), wal_size_bytes: 0 }
     }
 
     /// Flushes all pending writes to disk (stub implementation).
