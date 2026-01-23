@@ -1991,8 +1991,7 @@ mod tests {
                             block_changesets.iter().map(|(address, account, _)| {
                                 (*address, Some(Some((*account).into())), [])
                             })
-                        })
-                        .collect::<Vec<_>>(),
+                        }),
                     Vec::new(),
                 ),
                 first_block: first_database_block,
