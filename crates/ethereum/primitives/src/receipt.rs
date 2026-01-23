@@ -490,8 +490,7 @@ mod compact {
     /// All new fields should be added here in the form of a `Option<T>`, since `Option<ReceiptExt>`
     /// is used as an extension field for backwards compatibility.
     ///
-    /// More information: <https://github.com/paradigmxyz/reth/issues/7820> &
-    /// [`reth_codecs_derive::Compact`].
+    /// More information: <https://github.com/paradigmxyz/reth/issues/7820>
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
