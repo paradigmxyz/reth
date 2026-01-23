@@ -315,8 +315,8 @@ impl RocksDBBuilder {
             .map(|name| {
                 let cf_options = if name == tables::TransactionHashNumbers::NAME {
                     Self::tx_hash_numbers_column_family_options(&self.block_cache)
-                } else if name == tables::AccountsHistory::NAME
-                    || name == tables::StoragesHistory::NAME
+                } else if name == tables::AccountsHistory::NAME ||
+                    name == tables::StoragesHistory::NAME
                 {
                     Self::history_column_family_options(&self.block_cache)
                 } else {
@@ -2940,4 +2940,3 @@ mod tests {
         }
     }
 }
-
