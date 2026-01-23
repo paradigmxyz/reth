@@ -17,7 +17,7 @@ use crate::tree::{
         bal::{total_slots, BALSlotIter},
         executor::WorkloadExecutor,
         multiproof::{MultiProofMessage, VersionedMultiProofTargets},
-        ExecutionCache as PayloadExecutionCache,
+        PayloadExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
