@@ -87,17 +87,11 @@ where
                 let mut storage_proof_calculator =
                     proof_v2::ProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
+                let proof = storage_proof_calculator
+                    .storage_proof(hashed_address, &mut [B256::ZERO.into()])?;
                 let storage_root = storage_proof_calculator
-                    .storage_proof(hashed_address, &mut [B256::ZERO.into()])
-                    .map(|nodes| {
-                        let root_node =
-                            nodes.first().expect("storage_proof always returns at least the root");
-                        root_node.node.encode(buf);
-
-                        let storage_root = alloy_primitives::keccak256(buf.as_slice());
-                        buf.clear();
-                        storage_root
-                    })?;
+                    .compute_root_hash(&proof)?
+                    .expect("storage_proof with dummy target always returns root");
 
                 (account, storage_root)
             }
