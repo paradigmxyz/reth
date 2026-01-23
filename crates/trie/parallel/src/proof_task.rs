@@ -176,13 +176,18 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
+        // Capture the current span to propagate context to spawned workers
+        let caller_span = tracing::Span::current();
+
         // Spawn all worker pools in parallel to avoid blocking on sequential spawning
         {
             let task_ctx = task_ctx.clone();
             let storage_work_rx = storage_work_rx.clone();
             let storage_available_workers = storage_available_workers.clone();
             let cached_storage_roots = cached_storage_roots.clone();
+            let caller_span = caller_span.clone();
             executor.spawn_blocking(move || {
+                let _caller_guard = caller_span.enter();
                 let parent_span = debug_span!(
                     target: "trie::proof_task",
                     "storage proof workers",
@@ -236,7 +241,9 @@ impl ProofWorkerHandle {
             let account_storage_work_rx = account_storage_work_rx.clone();
             let account_storage_available_workers = account_storage_available_workers.clone();
             let cached_storage_roots = cached_storage_roots.clone();
+            let caller_span = caller_span.clone();
             executor.spawn_blocking(move || {
+                let _caller_guard = caller_span.enter();
                 let parent_span = debug_span!(
                     target: "trie::proof_task",
                     "account storage proof workers",
@@ -306,6 +313,7 @@ impl ProofWorkerHandle {
             let account_available_workers = account_available_workers.clone();
             let cached_storage_roots = cached_storage_roots.clone();
             executor.spawn_blocking(move || {
+                let _caller_guard = caller_span.enter();
                 let parent_span = debug_span!(
                     target: "trie::proof_task",
                     "account proof workers",
