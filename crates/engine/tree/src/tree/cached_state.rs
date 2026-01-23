@@ -261,16 +261,12 @@ impl CacheStatsHandler {
 
     /// Increments the size counter. Called on cache insert.
     pub(crate) fn increment_size(&self) {
-        let _ = self
-            .size
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |s| Some(s.saturating_add(1)));
+        let _ = self.size.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Decrements the size counter. Called on cache remove.
     pub(crate) fn decrement_size(&self) {
-        let _ = self
-            .size
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |s| Some(s.saturating_sub(1)));
+        let _ = self.size.fetch_sub(1, Ordering::Relaxed);
     }
 
     /// Resets size to zero. Called on cache clear.
