@@ -98,12 +98,13 @@ const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 /// reducing the first few reallocations without over-allocating.
 const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 
-/// Write buffer size for TransactionHashNumbers (8 MB).
+/// Write buffer size for `TransactionHashNumbers` (8 MB).
 /// Small, hash-based table with point lookups. Lower buffer reduces memory footprint.
 const TX_HASH_NUMBERS_WRITE_BUFFER_SIZE: usize = 8 << 20;
 
 /// Write buffer size for history tables (128 MB).
-/// State-like, write-heavy tables. Larger buffer reduces flush frequency and write amplification.
+/// State-like, write-heavy tables (`AccountsHistory`, `StoragesHistory`).
+/// Larger buffer reduces flush frequency and write amplification.
 const HISTORY_WRITE_BUFFER_SIZE: usize = 128 << 20;
 
 /// Max write buffer number for history tables.
@@ -240,8 +241,8 @@ impl RocksDBBuilder {
         cf_options
     }
 
-    /// Creates optimized column family options for history tables (AccountsHistory,
-    /// StoragesHistory).
+    /// Creates optimized column family options for history tables (`AccountsHistory`,
+    /// `StoragesHistory`).
     ///
     /// These tables are state-like and write-heavy:
     /// - Large write buffer (128 MB) reduces flush frequency and write amplification
