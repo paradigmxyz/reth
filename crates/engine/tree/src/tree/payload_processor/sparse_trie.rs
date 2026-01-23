@@ -81,8 +81,10 @@ where
         let now = Instant::now();
 
         let mut num_iterations = 0;
+        let mut idle_start = Instant::now();
 
         while let Ok(mut update) = self.updates.recv() {
+            self.metrics.sparse_trie_idle_duration_histogram.record(idle_start.elapsed());
             num_iterations += 1;
             let mut num_updates = 1;
             let _enter =
@@ -111,6 +113,8 @@ where
                     })?;
             self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
             trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
+
+            idle_start = Instant::now();
         }
 
         debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");

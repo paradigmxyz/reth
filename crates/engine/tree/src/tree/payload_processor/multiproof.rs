@@ -587,6 +587,8 @@ pub(crate) struct MultiProofTaskMetrics {
     pub first_update_wait_time_histogram: Histogram,
     /// Total time spent waiting for the last proof result.
     pub last_proof_wait_time_histogram: Histogram,
+    /// Total time spent idle waiting for updates in sparse trie task.
+    pub sparse_trie_idle_duration_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
