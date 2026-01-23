@@ -960,11 +960,14 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                     )),
                     LazyTrieData::deferred(move || {
                         let trie_data = trie_data_handle.wait_cloned();
-                        SortedTrieData { hashed_state: trie_data.hashed_state, trie_updates: trie_data.trie_updates }
+                        SortedTrieData {
+                            hashed_state: trie_data.hashed_state,
+                            trie_updates: trie_data.trie_updates,
+                        }
                     }),
                 );
                 for exec in rest {
-                let trie_data_handle = exec.trie_data_handle();
+                    let trie_data_handle = exec.trie_data_handle();
                     chain.append_block(
                         exec.recovered_block().clone(),
                         ExecutionOutcome::from((
@@ -973,7 +976,10 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                         )),
                         LazyTrieData::deferred(move || {
                             let trie_data = trie_data_handle.wait_cloned();
-                            SortedTrieData { hashed_state: trie_data.hashed_state, trie_updates: trie_data.trie_updates }
+                            SortedTrieData {
+                                hashed_state: trie_data.hashed_state,
+                                trie_updates: trie_data.trie_updates,
+                            }
                         }),
                     );
                 }
