@@ -152,8 +152,12 @@ impl ProofWorkerHandle {
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
+        // For account storage workers, use bounded(1) as minimum since bounded(0) creates a
+        // rendezvous channel where try_send always blocks. If count is 0, we'll drop the
+        // receiver immediately to disconnect the channel, causing try_send to return
+        // Disconnected and triggering synchronous fallback.
         let (account_storage_work_tx, account_storage_work_rx) =
-            crossbeam_channel::bounded::<StorageWorkerJob>(account_storage_worker_count);
+            crossbeam_channel::bounded::<StorageWorkerJob>(account_storage_worker_count.max(1));
 
         // Initialize availability counters at zero. Each worker will increment when it
         // successfully initializes, ensuring only healthy workers are counted.
@@ -226,8 +230,8 @@ impl ProofWorkerHandle {
             });
         }
 
-        // Spawn account storage workers in parallel
-        {
+        // Spawn account storage workers in parallel, or drop receiver if disabled
+        if account_storage_worker_count > 0 {
             let task_ctx = task_ctx.clone();
             let account_storage_work_rx = account_storage_work_rx.clone();
             let account_storage_available_workers = account_storage_available_workers.clone();
@@ -283,6 +287,14 @@ impl ProofWorkerHandle {
                 }
                 drop(parent_span);
             });
+        } else {
+            // Drop the receiver immediately to disconnect the channel. This causes try_send
+            // to return Disconnected, triggering synchronous storage root computation.
+            debug!(
+                target: "trie::proof_task",
+                "Account storage workers disabled, storage roots will be computed synchronously"
+            );
+            drop(account_storage_work_rx);
         }
 
         // Spawn account workers in parallel

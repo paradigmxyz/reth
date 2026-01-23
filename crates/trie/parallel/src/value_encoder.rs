@@ -260,25 +260,16 @@ where
                 storage_proof_results: None,
                 storage_wait_time: self.storage_wait_time.clone(),
             },
-            Err(crossbeam_channel::TrySendError::Full(_)) => {
-                // Channel is full, fall back to synchronous computation
+            Err(
+                crossbeam_channel::TrySendError::Full(_) |
+                crossbeam_channel::TrySendError::Disconnected(_),
+            ) => {
+                // Channel is full or workers are disabled, fall back to synchronous computation
                 AsyncAccountDeferredValueEncoder::Sync {
                     trie_cursor_factory: self.trie_cursor_factory.clone(),
                     hashed_cursor_factory: self.hashed_cursor_factory.clone(),
                     hashed_address,
                     account,
-                }
-            }
-            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
-                // Workers are unavailable, return an error via the dispatched variant
-                AsyncAccountDeferredValueEncoder::Dispatched {
-                    hashed_address,
-                    account,
-                    proof_result_rx: Err(DatabaseError::Other(
-                        "account storage workers unavailable".to_string(),
-                    )),
-                    storage_proof_results: None,
-                    storage_wait_time: self.storage_wait_time.clone(),
                 }
             }
         }
