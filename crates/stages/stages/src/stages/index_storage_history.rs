@@ -3,7 +3,6 @@ use crate::{stages::utils::load_storage_history, StageCheckpoint, StageId};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
-    table::Table,
     tables,
     transaction::DbTxMut,
 };

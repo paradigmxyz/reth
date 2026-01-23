@@ -3,7 +3,7 @@ use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db_api::{
-    table::{Decode, Decompress, Table, Value},
+    table::{Decode, Decompress, Value},
     tables,
     transaction::DbTxMut,
 };
