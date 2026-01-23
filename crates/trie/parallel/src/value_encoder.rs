@@ -20,6 +20,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use tracing::debug_span;
 
 /// Returned from [`AsyncAccountValueEncoder`], used to track an async storage root calculation.
 pub(crate) enum AsyncAccountDeferredValueEncoder<T, H> {
@@ -58,6 +59,12 @@ where
                 storage_proof_results,
                 storage_wait_time,
             } => {
+                let _guard = debug_span!(
+                    target: "trie::proof_task",
+                    "Waiting for storage proof",
+                    ?hashed_address,
+                )
+                .entered();
                 let wait_start = Instant::now();
                 let result = proof_result_rx?
                     .recv()
@@ -68,6 +75,7 @@ where
                     })?
                     .result?;
                 *storage_wait_time.borrow_mut() += wait_start.elapsed();
+                drop(_guard);
 
                 let StorageProofResult::V2 { root: Some(root), proof } = result else {
                     panic!("StorageProofResult is not V2 with root: {result:?}")
@@ -81,6 +89,12 @@ where
             }
             Self::FromCache { account, root } => (account, root),
             Self::Sync { trie_cursor_factory, hashed_cursor_factory, hashed_address, account } => {
+                let _guard = debug_span!(
+                    target: "trie::proof_task",
+                    "Sync storage proof",
+                    ?hashed_address,
+                )
+                .entered();
                 let trie_cursor = trie_cursor_factory.storage_trie_cursor(hashed_address)?;
                 let hashed_cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
 
@@ -92,6 +106,7 @@ where
                 let storage_root = storage_proof_calculator
                     .compute_root_hash(&proof)?
                     .expect("storage_proof with dummy target always returns root");
+                drop(_guard);
 
                 (account, storage_root)
             }
@@ -180,6 +195,12 @@ impl<T, H> AsyncAccountValueEncoder<T, H> {
 
         // Any remaining dispatched proofs need to have their results collected
         for (hashed_address, rx) in &self.dispatched {
+            let _guard = debug_span!(
+                target: "trie::proof_task",
+                "Waiting for storage proof",
+                ?hashed_address,
+            )
+            .entered();
             let wait_start = Instant::now();
             let result = rx
                 .recv()
@@ -190,6 +211,7 @@ impl<T, H> AsyncAccountValueEncoder<T, H> {
                 })?
                 .result?;
             storage_wait_time += wait_start.elapsed();
+            drop(_guard);
 
             let StorageProofResult::V2 { proof, .. } = result else {
                 panic!("StorageProofResult is not V2: {result:?}")
