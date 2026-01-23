@@ -284,8 +284,17 @@ impl DeferredTrieData {
         }
 
         // Extend with current block's sorted data last (takes precedence)
-        state_mut.extend_ref_and_sort(sorted_hashed_state);
-        nodes_mut.extend_ref_and_sort(sorted_trie_updates);
+        #[cfg(feature = "rayon")]
+        rayon::join(
+            || state_mut.extend_ref_and_sort(sorted_hashed_state),
+            || nodes_mut.extend_ref_and_sort(sorted_trie_updates),
+        );
+
+        #[cfg(not(feature = "rayon"))]
+        {
+            state_mut.extend_ref_and_sort(sorted_hashed_state);
+            nodes_mut.extend_ref_and_sort(sorted_trie_updates);
+        }
 
         overlay
     }
