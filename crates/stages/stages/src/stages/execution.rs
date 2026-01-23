@@ -32,12 +32,7 @@ use std::{
 };
 use tracing::*;
 
-use super::{
-    execution_cache::{
-        CachedStateMetrics, CachedStateProvider, ExecutionCache, ExecutionCacheBuilder,
-    },
-    execution_prewarm::PrewarmController,
-};
+use super::execution_cache::{CachedStateMetrics, ExecutionCache, ExecutionCacheBuilder};
 
 use super::missing_static_data_error;
 
@@ -97,12 +92,18 @@ where
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
-    /// Optional prewarm controller for cache warming during execution.
-    /// When enabled, spawns background threads to execute future blocks speculatively.
-    prewarm: Option<PrewarmController<E>>,
     /// Shared execution cache used by both main executor and prewarm threads.
+    /// When Some, enables cache warming during execution.
+    ///
+    /// NOTE: Currently unused in this POC - will be used when CachedStateProvider
+    /// integration is complete.
+    #[allow(dead_code)]
     execution_cache: Option<Arc<ExecutionCache>>,
     /// Metrics for the cached state provider.
+    ///
+    /// NOTE: Currently unused in this POC - will be used when CachedStateProvider
+    /// integration is complete.
+    #[allow(dead_code)]
     cache_metrics: CachedStateMetrics,
 }
 
@@ -127,7 +128,6 @@ where
             post_unwind_commit_input: None,
             exex_manager_handle,
             metrics: ExecutorMetrics::default(),
-            prewarm: None,
             execution_cache: None,
             cache_metrics: CachedStateMetrics::default(),
         }
@@ -138,12 +138,8 @@ where
     /// When enabled, the execution stage will spawn background threads to
     /// speculatively execute future blocks, warming the cache for faster
     /// main execution.
-    pub fn with_prewarm(mut self, cache_size_bytes: u64) -> Self
-    where
-        E: Clone + Send + Sync + 'static,
-    {
+    pub fn with_prewarm(mut self, cache_size_bytes: u64) -> Self {
         let cache = Arc::new(ExecutionCacheBuilder::default().build_caches(cache_size_bytes));
-        self.prewarm = Some(PrewarmController::new(Arc::clone(&cache), self.evm_config.clone()));
         self.execution_cache = Some(cache);
         self
     }
@@ -289,7 +285,7 @@ where
 
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
-    E: ConfigureEvm + 'static,
+    E: ConfigureEvm,
     Provider: DBProvider
         + BlockReader<
             Block = <E::Primitives as NodePrimitives>::Block,
@@ -377,27 +373,17 @@ where
 
             fetch_block_duration += fetch_block_start.elapsed();
 
-            // Spawn prewarm for next block while we execute this one.
-            // This allows the prewarm thread to speculatively execute the next block's
+            // TODO(prewarm): Spawn prewarm for next block while we execute this one.
+            // This would allow the prewarm thread to speculatively execute the next block's
             // transactions, warming the cache for faster main execution.
-            if let Some(ref mut prewarm) = self.prewarm {
-                let next_block_num = block_number + 1;
-                if next_block_num <= max_block {
-                    if let Ok(Some(next_block)) =
-                        provider.recovered_block(next_block_num.into(), TransactionVariant::NoHash)
-                    {
-                        trace!(
-                            target: "sync::stages::execution",
-                            current = block_number,
-                            next = next_block_num,
-                            "Spawning prewarm for next block"
-                        );
-                        // TODO(prewarm): Uncomment when provider factory is available.
-                        // prewarm.spawn_for(&next_block, provider_factory.clone());
-                        let _ = (prewarm, next_block); // Suppress unused warnings for POC
-                    }
-                }
-            }
+            //
+            // Implementation blocked on:
+            // 1. Need a StateProviderFactory that implements Clone + Send + Sync + 'static
+            // 2. The current `provider` reference doesn't satisfy these bounds
+            //
+            // When a provider factory is available, create PrewarmController here and call:
+            //   prewarm_controller.spawn_for(&next_block, provider_factory.clone());
+            let _ = &self.execution_cache; // Acknowledge cache exists for future use
 
             cumulative_gas += block.header().gas_used();
 
@@ -457,11 +443,6 @@ where
             ) {
                 break
             }
-        }
-
-        // Cancel any active prewarm before we commit (cache may become stale)
-        if let Some(ref mut prewarm) = self.prewarm {
-            prewarm.cancel();
         }
 
         // prepare execution output for writing

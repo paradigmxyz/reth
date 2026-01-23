@@ -30,7 +30,8 @@ use tracing::{debug, trace, warn};
 pub struct PrewarmController<E> {
     /// Shared execution cache
     cache: Arc<ExecutionCache>,
-    /// EVM configuration
+    /// EVM configuration (will be used when actual tx execution is implemented)
+    #[allow(dead_code)]
     evm_config: E,
     /// Flag to signal cancellation
     terminate: Arc<AtomicBool>,
