@@ -1,15 +1,49 @@
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
+use tracing::instrument;
 
 /// The finish stage.
 ///
 /// This stage does not write anything; it's checkpoint is used to denote the highest fully synced
 /// block.
+///
+/// When the `rocksdb` feature is enabled, this stage also flushes all pending RocksDB writes
+/// (WAL and memtables) to disk to ensure data durability at sync boundaries.
 #[derive(Default, Debug, Clone)]
 #[non_exhaustive]
 pub struct FinishStage;
 
+#[cfg(feature = "rocksdb")]
+impl<Provider> Stage<Provider> for FinishStage
+where
+    Provider: reth_provider::RocksDBProviderFactory,
+{
+    fn id(&self) -> StageId {
+        StageId::Finish
+    }
+
+    #[instrument(level = "debug", target = "sync::stages::finish", skip_all)]
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+        // Flush RocksDB to ensure all pending writes are persisted to disk
+        let rocksdb = provider.rocksdb_provider();
+        if !rocksdb.is_read_only() {
+            rocksdb.flush().map_err(StageError::DatabaseIntegrity)?;
+        }
+
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
+    }
+
+    fn unwind(
+        &mut self,
+        _provider: &Provider,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, StageError> {
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+    }
+}
+
+#[cfg(not(feature = "rocksdb"))]
 impl<Provider> Stage<Provider> for FinishStage {
     fn id(&self) -> StageId {
         StageId::Finish

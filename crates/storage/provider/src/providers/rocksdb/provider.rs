@@ -833,6 +833,58 @@ impl RocksDBProvider {
         self.0.table_stats()
     }
 
+    /// Flushes all pending writes to disk.
+    ///
+    /// This flushes:
+    /// - The WAL (Write-Ahead Log) with sync to ensure durability
+    /// - All column family memtables to SST files
+    ///
+    /// This is useful at sync boundaries (e.g., the Finish stage) to ensure all data
+    /// is persisted before marking a checkpoint as complete.
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
+    pub fn flush(&self) -> ProviderResult<()> {
+        match self.0.as_ref() {
+            RocksDBProviderInner::ReadWrite { db, .. } => {
+                // Flush WAL with sync
+                db.flush_wal(true).map_err(|e| {
+                    ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
+                        info: DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
+                        operation: DatabaseWriteOperation::Flush,
+                        table_name: "WAL",
+                        key: vec![],
+                    })))
+                })?;
+
+                // Flush all column family memtables
+                for cf_name in ROCKSDB_TABLES {
+                    if let Some(cf) = db.cf_handle(cf_name) {
+                        db.flush_cf(&cf).map_err(|e| {
+                            ProviderError::Database(DatabaseError::Write(Box::new(
+                                DatabaseWriteError {
+                                    info: DatabaseErrorInfo {
+                                        message: e.to_string().into(),
+                                        code: -1,
+                                    },
+                                    operation: DatabaseWriteOperation::Flush,
+                                    table_name: cf_name,
+                                    key: vec![],
+                                },
+                            )))
+                        })?;
+                    }
+                }
+
+                Ok(())
+            }
+            RocksDBProviderInner::ReadOnly { .. } => {
+                panic!("Cannot flush read-only RocksDB provider")
+            }
+        }
+    }
+
     /// Creates a raw iterator over all entries in the specified table.
     ///
     /// Returns raw `(key_bytes, value_bytes)` pairs without decoding.

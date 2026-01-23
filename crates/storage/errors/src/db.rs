@@ -115,6 +115,8 @@ pub enum DatabaseWriteOperation {
     PutUpsert,
     /// Put append.
     PutAppend,
+    /// Flush operation (WAL/memtable).
+    Flush,
 }
 
 /// Database log level.
