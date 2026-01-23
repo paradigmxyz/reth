@@ -10,11 +10,14 @@ use reth_db::{
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
-    table::{Compress, Decode, Decompress, DupSort, Table},
+    table::{Compress, Decompress, DupSort, Table},
     tables,
     transaction::DbTx,
     RawKey, RawTable, Receipts, TableViewer, Transactions,
 };
+
+#[cfg(all(unix, feature = "edge"))]
+use reth_db_api::table::Decode;
 use reth_db_common::DbTool;
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
@@ -25,7 +28,7 @@ use reth_storage_api::StorageChangeSetReader;
 use tracing::error;
 
 #[cfg(all(unix, feature = "edge"))]
-use {crate::db::checksum::rocksdb::RocksDbTable, reth_provider::RocksDBProviderFactory};
+use {crate::db::checksum::RocksDbTable, reth_provider::RocksDBProviderFactory};
 
 #[derive(Parser, Debug)]
 pub struct Command {
@@ -84,8 +87,8 @@ impl Command {
             Subcommand::Mdbx { table, key, subkey, end_key, end_subkey, raw } => {
                 table.view(&GetValueViewer { tool, key, subkey, end_key, end_subkey, raw })?
             }
-            Subcommand::StaticFile { segment, key, subkey, raw } => {
-                self.execute_static_file(tool, segment, key, subkey, raw)?
+            Subcommand::StaticFile { segment, key, ref subkey, raw } => {
+                self.execute_static_file(tool, segment, key, subkey.clone(), raw)?
             }
             #[cfg(all(unix, feature = "edge"))]
             Subcommand::Rocksdb { table, key, raw } => match table {

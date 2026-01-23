@@ -24,6 +24,8 @@ use tracing::{info, warn};
 
 #[cfg(all(unix, feature = "edge"))]
 mod rocksdb;
+#[cfg(all(unix, feature = "edge"))]
+pub use rocksdb::RocksDbTable;
 
 /// Interval for logging progress during checksum computation.
 const PROGRESS_LOG_INTERVAL: usize = 100_000;
