@@ -1,0 +1,86 @@
+# syntax=docker.io/docker/dockerfile:1.7-labs
+
+# Unified Dockerfile for reth and op-reth, optimized for Depot builds
+# Usage:
+#   reth:    --build-arg BINARY=reth
+#   op-reth: --build-arg BINARY=op-reth --build-arg MANIFEST_PATH=crates/optimism/bin
+
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
+WORKDIR /app
+
+LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
+LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"
+
+RUN apt-get update && apt-get install -y libclang-dev pkg-config
+
+# Install sccache for compilation caching
+RUN cargo install sccache --locked
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_DIR=/sccache
+
+# Builds a cargo-chef plan
+FROM chef AS planner
+COPY --exclude=.git . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+
+# Binary to build (reth or op-reth)
+ARG BINARY=reth
+
+# Manifest path for the binary
+ARG MANIFEST_PATH=bin/reth
+
+# Build profile, release by default
+ARG BUILD_PROFILE=release
+ENV BUILD_PROFILE=$BUILD_PROFILE
+
+# Extra Cargo flags
+ARG RUSTFLAGS=""
+ENV RUSTFLAGS="$RUSTFLAGS"
+
+# Extra Cargo features
+ARG FEATURES=""
+ENV FEATURES=$FEATURES
+
+# Build dependencies with cache mounts
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+    cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --locked --recipe-path recipe.json --manifest-path $MANIFEST_PATH/Cargo.toml
+
+# Build application with cache mounts
+COPY --exclude=.git . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+    cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $BINARY --manifest-path $MANIFEST_PATH/Cargo.toml
+
+# Copy binary to a known location (ARG not resolved in COPY)
+# Note: Custom profiles like maxperf/profiling output to target/<profile>/, not target/release/
+RUN cp /app/target/$BUILD_PROFILE/$BINARY /app/binary || \
+    cp /app/target/release/$BINARY /app/binary
+
+FROM ubuntu:24.04 AS runtime
+WORKDIR /app
+
+# Binary name for entrypoint
+ARG BINARY=reth
+
+# Install runtime dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy binary from build stage and create canonical symlink for entrypoint
+COPY --from=builder /app/binary /usr/local/bin/
+RUN mv /usr/local/bin/binary /usr/local/bin/$BINARY && \
+    ln -s /usr/local/bin/$BINARY /usr/local/bin/reth-binary && \
+    chmod +x /usr/local/bin/$BINARY
+
+# Copy licenses
+COPY LICENSE-* ./
+
+EXPOSE 30303 30303/udp 9001 8545 8546
+ENTRYPOINT ["/usr/local/bin/reth-binary"]
