@@ -1628,8 +1628,9 @@ impl<'a> RocksDBBatch<'a> {
         Ok(())
     }
 
-    /// Prunes account history for the given address, removing blocks <= `to_block`.
+    /// Prunes history shards, removing blocks <= `to_block`.
     ///
+    /// Generic implementation for both account and storage history pruning.
     /// Mirrors MDBX `prune_shard` semantics. After pruning, the last remaining shard
     /// (if any) will have the sentinel key (`u64::MAX`).
     #[allow(clippy::too_many_arguments)]
