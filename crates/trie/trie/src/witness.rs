@@ -115,9 +115,10 @@ where
         } else {
             self.get_proof_targets(&state)?
         };
+        let prefix_sets = core::mem::take(&mut self.prefix_sets);
         let multiproof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
-                .with_prefix_sets_mut(self.prefix_sets.clone())
+                .with_prefix_sets_mut(prefix_sets)
                 .multiproof(proof_targets.clone())?;
 
         // No need to reconstruct the rest of the trie, we just need to include
