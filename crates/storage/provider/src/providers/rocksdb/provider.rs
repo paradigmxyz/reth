@@ -98,6 +98,18 @@ const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 /// reducing the first few reallocations without over-allocating.
 const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 
+/// Write buffer size for TransactionHashNumbers (8 MB).
+/// Small, hash-based table with point lookups. Lower buffer reduces memory footprint.
+const TX_HASH_NUMBERS_WRITE_BUFFER_SIZE: usize = 8 << 20;
+
+/// Write buffer size for history tables (128 MB).
+/// State-like, write-heavy tables. Larger buffer reduces flush frequency and write amplification.
+const HISTORY_WRITE_BUFFER_SIZE: usize = 128 << 20;
+
+/// Max write buffer number for history tables.
+/// Allows 2 memtables in memory while one flushes, improving write throughput.
+const HISTORY_MAX_WRITE_BUFFER_NUMBER: i32 = 3;
+
 /// Default auto-commit threshold for batch writes (4 GiB).
 ///
 /// When a batch exceeds this size, it is automatically committed to prevent OOM
@@ -222,6 +234,29 @@ impl RocksDBBuilder {
         // varint-encoded u64 (a few bytes). Compression wastes CPU cycles for zero space savings.
         cf_options.set_compression_type(DBCompressionType::None);
         cf_options.set_bottommost_compression_type(DBCompressionType::None);
+        // Per-CF write buffer tuning: 8MB for small, hash-based table
+        cf_options.set_write_buffer_size(TX_HASH_NUMBERS_WRITE_BUFFER_SIZE);
+
+        cf_options
+    }
+
+    /// Creates optimized column family options for history tables (AccountsHistory, StoragesHistory).
+    ///
+    /// These tables are state-like and write-heavy:
+    /// - Large write buffer (128 MB) reduces flush frequency and write amplification
+    /// - Multiple memtables allow concurrent flush operations
+    fn history_column_family_options(cache: &Cache) -> Options {
+        let table_options = Self::default_table_options(cache);
+
+        let mut cf_options = Options::default();
+        cf_options.set_block_based_table_factory(&table_options);
+        cf_options.set_level_compaction_dynamic_level_bytes(true);
+        cf_options.set_compression_type(DBCompressionType::Lz4);
+        cf_options.set_bottommost_compression_type(DBCompressionType::Zstd);
+        cf_options.set_bottommost_zstd_max_train_bytes(0, true);
+        // Per-CF write buffer tuning: 128MB for write-heavy history tables
+        cf_options.set_write_buffer_size(HISTORY_WRITE_BUFFER_SIZE);
+        cf_options.set_max_write_buffer_number(HISTORY_MAX_WRITE_BUFFER_NUMBER);
 
         cf_options
     }
@@ -289,6 +324,10 @@ impl RocksDBBuilder {
             .map(|name| {
                 let cf_options = if name == tables::TransactionHashNumbers::NAME {
                     Self::tx_hash_numbers_column_family_options(&self.block_cache)
+                } else if name == tables::AccountsHistory::NAME
+                    || name == tables::StoragesHistory::NAME
+                {
+                    Self::history_column_family_options(&self.block_cache)
                 } else {
                     Self::default_column_family_options(&self.block_cache)
                 };
