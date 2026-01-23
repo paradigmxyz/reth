@@ -3,7 +3,7 @@ use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db_api::{
-    table::{Decode, Decompress, Value},
+    table::{Decode, Decompress, Table, Value},
     tables,
     transaction::DbTxMut,
 };
@@ -198,6 +198,10 @@ where
 
                 break;
             }
+        }
+
+        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+            provider.rocksdb_provider().flush(&[tables::TransactionHashNumbers::NAME])?;
         }
 
         Ok(ExecOutput {
