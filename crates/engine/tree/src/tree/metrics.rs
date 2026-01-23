@@ -254,6 +254,8 @@ pub(crate) struct NewPayloadStatusMetrics {
     pub(crate) time_between_new_payloads: Histogram,
     /// Time from previous payload start to current payload start (total interval).
     pub(crate) new_payload_interval: Histogram,
+    /// Time diff between forkchoice updated call response and the next new payload call request.
+    pub(crate) forkchoice_updated_new_payload_time_diff: Histogram,
 }
 
 impl NewPayloadStatusMetrics {
@@ -261,6 +263,7 @@ impl NewPayloadStatusMetrics {
     pub(crate) fn update_response_metrics(
         &mut self,
         start: Instant,
+        latest_forkchoice_updated_at: &mut Option<Instant>,
         result: &Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError>,
         gas_used: u64,
     ) {
@@ -293,6 +296,10 @@ impl NewPayloadStatusMetrics {
         self.new_payload_messages.increment(1);
         self.new_payload_latency.record(elapsed);
         self.new_payload_last.set(elapsed);
+        if let Some(latest_forkchoice_updated_at) = latest_forkchoice_updated_at.take() {
+            self.forkchoice_updated_new_payload_time_diff
+                .record(start - latest_forkchoice_updated_at);
+        }
     }
 }
 
