@@ -503,6 +503,7 @@ where
 
         let root_time = Instant::now();
         let mut maybe_state_root = None;
+        let mut state_root_task_failed = false;
 
         match strategy {
             StateRootStrategy::StateRootTask => {
@@ -521,10 +522,12 @@ where
                                 block_state_root = ?block.header().state_root(),
                                 "State root task returned incorrect state root"
                             );
+                            state_root_task_failed = true;
                         }
                     }
                     Err(error) => {
                         debug!(target: "engine::tree::payload_validator", %error, "State root task failed");
+                        state_root_task_failed = true;
                     }
                 }
             }
@@ -569,6 +572,11 @@ where
                 self.compute_state_root_serial(overlay_factory.clone(), &hashed_state),
                 block
             );
+
+            if state_root_task_failed {
+                self.metrics.block_validation.state_root_task_fallback_success_total.increment(1);
+            }
+
             (root, updates, root_time.elapsed())
         };
 
