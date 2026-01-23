@@ -4,7 +4,7 @@ use alloy_primitives::{
     Address, StorageKey, StorageValue, B256,
 };
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
-use metrics::Gauge;
+use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
@@ -131,6 +131,12 @@ impl<S> CachedStateProvider<S> {
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
 pub(crate) struct CachedStateMetrics {
+    /// Number of times a new execution cache was created
+    execution_cache_created_total: Counter,
+
+    /// Duration of execution cache creation in seconds
+    execution_cache_creation_duration_seconds: Histogram,
+
     /// Code cache hits
     code_cache_hits: Gauge,
 
@@ -202,6 +208,12 @@ impl CachedStateMetrics {
         zeroed.reset();
         zeroed
     }
+
+    /// Records a new execution cache creation with its duration.
+    pub(crate) fn record_cache_creation(&self, duration: Duration) {
+        self.execution_cache_created_total.increment(1);
+        self.execution_cache_creation_duration_seconds.record(duration.as_secs_f64());
+    }
 }
 
 /// A stats handler for fixed-cache that tracks collisions and approximate size.
@@ -255,9 +267,16 @@ impl CacheStatsHandler {
 
     /// Increments the size counter. Called on cache insert.
     pub(crate) fn increment_size(&self) {
-        let _ = self.size.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |s| {
-            Some(s.saturating_add(1).min(self.capacity))
-        });
+        let _ = self
+            .size
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |s| Some(s.saturating_add(1)));
+    }
+
+    /// Decrements the size counter. Called on cache remove.
+    pub(crate) fn decrement_size(&self) {
+        let _ = self
+            .size
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |s| Some(s.saturating_sub(1)));
     }
 
     /// Resets size to zero. Called on cache clear.
@@ -718,6 +737,7 @@ impl ExecutionCache {
                 }
 
                 self.account_cache.remove(addr);
+                self.account_stats.decrement_size();
                 continue
             }
 

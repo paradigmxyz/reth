@@ -488,8 +488,11 @@ where
             cache
         } else {
             debug!("creating new execution cache on cache miss");
+            let start = Instant::now();
             let cache = ExecutionCache::new(self.cross_block_cache_size);
-            SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
+            let metrics = CachedStateMetrics::zeroed();
+            metrics.record_cache_creation(start.elapsed());
+            SavedCache::new(parent_hash, cache, metrics)
                 .with_disable_cache_metrics(self.disable_cache_metrics)
         }
     }
