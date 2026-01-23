@@ -214,7 +214,7 @@ where
                         tries += 1;
                         bytes.extend(std::iter::repeat_n(0u8, 256));
                     } else {
-                        Err(err)?;
+                        return Err(err)?
                     }
                 }
             }
