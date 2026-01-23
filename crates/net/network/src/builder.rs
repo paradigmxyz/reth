@@ -2,6 +2,7 @@
 
 use crate::{
     eth_requests::EthRequestHandler,
+    metrics::NETWORK_POOL_TRANSACTIONS_SCOPE,
     transactions::{
         config::{
             AnnouncementFilteringPolicy, StrictEthAnnouncementFilter, TransactionPropagationKind,
@@ -12,6 +13,7 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
+use reth_metrics::common::mpsc::memory_bounded_channel;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::mpsc;
@@ -118,7 +120,11 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         announcement_policy: A,
     ) -> NetworkBuilder<TransactionsManager<Pool, N>, Eth, N> {
         let Self { mut network, request_handler, .. } = self;
-        let (tx, rx) = mpsc::unbounded_channel();
+        const TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES: usize = 1024 * 1024 * 1024; // 1GB
+        let (tx, rx) = memory_bounded_channel(
+            TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+            NETWORK_POOL_TRANSACTIONS_SCOPE,
+        );
         network.set_transactions(tx);
         let handle = network.handle().clone();
         let policies = NetworkPolicies::new(propagation_policy, announcement_policy);

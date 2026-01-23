@@ -13,7 +13,7 @@ use core::{fmt::Debug, mem};
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 use reth_ethereum_primitives::TransactionSigned;
-use reth_primitives_traits::{Block, SignedTransaction};
+use reth_primitives_traits::{Block, InMemorySize, SignedTransaction};
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -803,6 +803,19 @@ pub struct BlockRangeUpdate {
     pub latest: u64,
     /// Latest available block's hash.
     pub latest_hash: B256,
+}
+
+impl InMemorySize for NewPooledTransactionHashes {
+    fn size(&self) -> usize {
+        match self {
+            Self::Eth66(msg) => msg.0.len() * core::mem::size_of::<B256>(),
+            Self::Eth68(msg) => {
+                msg.types.len() * core::mem::size_of::<u8>() +
+                    msg.sizes.len() * core::mem::size_of::<usize>() +
+                    msg.hashes.len() * core::mem::size_of::<B256>()
+            }
+        }
+    }
 }
 
 #[cfg(test)]

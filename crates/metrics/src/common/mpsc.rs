@@ -4,8 +4,13 @@
 use crate::Metrics;
 use futures::Stream;
 use metrics::Counter;
+use reth_primitives_traits::InMemorySize;
 use std::{
     pin::Pin,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::{
@@ -398,4 +403,119 @@ struct MeteredPollSenderMetrics {
     messages_sent_total: Counter,
     /// Number of delayed message deliveries caused by a full channel
     back_pressure_total: Counter,
+}
+
+/// Shared state for tracking memory budget across sender and receiver.
+#[derive(Debug)]
+struct MemoryBudget {
+    /// Current number of bytes used by buffered messages.
+    used: AtomicUsize,
+    /// Maximum allowed bytes.
+    max_bytes: usize,
+}
+
+/// Guard that releases memory budget when dropped.
+///
+/// Holds the size of the message and a reference to the shared budget counter.
+/// When dropped, it atomically decreases the used counter.
+#[derive(Debug)]
+pub struct BudgetGuard {
+    size: usize,
+    budget: Arc<MemoryBudget>,
+}
+
+impl Drop for BudgetGuard {
+    fn drop(&mut self) {
+        self.budget.used.fetch_sub(self.size, Ordering::Release);
+    }
+}
+
+/// Message envelope that holds the memory budget until the message is dropped.
+#[derive(Debug)]
+pub struct Budgeted<T> {
+    /// The inner message.
+    pub msg: T,
+    /// Guard that releases budget when dropped.
+    _guard: BudgetGuard,
+}
+
+/// A sender that enforces a byte budget before enqueueing messages.
+///
+/// Uses a shared atomic counter to track memory usage. Each message's size is
+/// added to the counter on send and subtracted when the message is dropped.
+#[derive(Debug, Clone)]
+pub struct MemoryBoundedSender<T: InMemorySize> {
+    /// The underlying unbounded metered sender
+    inner: UnboundedMeteredSender<Budgeted<T>>,
+    /// Shared memory budget tracker
+    budget: Arc<MemoryBudget>,
+}
+
+impl<T: InMemorySize> MemoryBoundedSender<T> {
+    /// Tries to send a message if there is sufficient budget.
+    ///
+    /// Returns `TrySendError::Full` if insufficient budget is available.
+    pub fn try_send(&self, msg: T) -> Result<(), TrySendError<T>> {
+        let size = msg.size();
+
+        // Reserve budget: add first, check after
+        let prev = self.budget.used.fetch_add(size, Ordering::AcqRel);
+        if prev.saturating_add(size) > self.budget.max_bytes {
+            // Over budget, undo
+            self.budget.used.fetch_sub(size, Ordering::Release);
+            return Err(TrySendError::Full(msg));
+        }
+
+        let guard = BudgetGuard { size, budget: Arc::clone(&self.budget) };
+        let budgeted = Budgeted { msg, _guard: guard };
+
+        self.inner.send(budgeted).map_err(|e| {
+            // Guard will be dropped here, releasing the budget
+            TrySendError::Closed(e.0.msg)
+        })
+    }
+}
+
+/// A receiver for memory-bounded messages.
+#[derive(Debug)]
+pub struct MemoryBoundedReceiver<T> {
+    /// The underlying unbounded metered receiver
+    inner: UnboundedMeteredReceiver<Budgeted<T>>,
+}
+
+impl<T> MemoryBoundedReceiver<T> {
+    /// Receives the next message, returning `None` if the channel is closed.
+    pub async fn recv(&mut self) -> Option<Budgeted<T>> {
+        self.inner.recv().await
+    }
+
+    /// Polls to receive the next message on this channel.
+    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<Budgeted<T>>> {
+        self.inner.poll_recv(cx)
+    }
+}
+
+impl<T> Stream for MemoryBoundedReceiver<T> {
+    type Item = Budgeted<T>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.poll_recv(cx)
+    }
+}
+
+/// Creates a new memory-bounded channel with the given byte budget.
+///
+/// Messages are wrapped in [`Budgeted`] which tracks their size and automatically
+/// releases budget when dropped by the receiver.
+pub fn memory_bounded_channel<T: InMemorySize>(
+    max_bytes: usize,
+    scope: &'static str,
+) -> (MemoryBoundedSender<T>, MemoryBoundedReceiver<T>) {
+    let (tx, rx) = metered_unbounded_channel(scope);
+    let budget = Arc::new(MemoryBudget { used: AtomicUsize::new(0), max_bytes });
+
+    let sender = MemoryBoundedSender { inner: tx, budget };
+    let receiver = MemoryBoundedReceiver { inner: rx };
+
+    (sender, receiver)
 }

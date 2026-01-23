@@ -24,7 +24,7 @@ use crate::{
     import::{BlockImport, BlockImportEvent, BlockImportOutcome, BlockValidation, NewBlockEvent},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage},
-    metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
+    metrics::{DisconnectMetrics, NetworkMetrics},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::PeersManager,
     poll_nested_stream_with_budget,
@@ -41,7 +41,7 @@ use parking_lot::Mutex;
 use reth_chainspec::EnrForkIdEntry;
 use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
 use reth_fs_util::{self as fs, FsPathError};
-use reth_metrics::common::mpsc::UnboundedMeteredSender;
+use reth_metrics::common::mpsc::MemoryBoundedSender;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
     test_utils::PeersHandle,
@@ -49,6 +49,7 @@ use reth_network_api::{
 };
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::ReputationChangeKind;
+use reth_primitives_traits::InMemorySize;
 use reth_storage_api::BlockNumReader;
 use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventSender;
@@ -115,7 +116,7 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
     /// Sender half to send events to the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager) task, if configured.
-    to_transactions_manager: Option<UnboundedMeteredSender<NetworkTransactionEvent<N>>>,
+    to_transactions_manager: Option<MemoryBoundedSender<NetworkTransactionEvent<N>>>,
     /// Sender half to send events to the
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler) task, if configured.
     ///
@@ -160,12 +161,16 @@ impl NetworkManager {
     }
 }
 
-impl<N: NetworkPrimitives> NetworkManager<N> {
+impl<N: NetworkPrimitives> NetworkManager<N>
+where
+    N::BroadcastedTransaction: InMemorySize,
+    N::PooledTransaction: InMemorySize,
+{
     /// Sets the dedicated channel for events intended for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
     pub fn with_transactions(
         mut self,
-        tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>,
+        tx: MemoryBoundedSender<NetworkTransactionEvent<N>>,
     ) -> Self {
         self.set_transactions(tx);
         self
@@ -173,9 +178,8 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
     /// Sets the dedicated channel for events intended for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
-    pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>) {
-        self.to_transactions_manager =
-            Some(UnboundedMeteredSender::new(tx, NETWORK_POOL_TRANSACTIONS_SCOPE));
+    pub fn set_transactions(&mut self, tx: MemoryBoundedSender<NetworkTransactionEvent<N>>) {
+        self.to_transactions_manager = Some(tx);
     }
 
     /// Sets the dedicated channel for events intended for the
@@ -476,8 +480,16 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     /// Sends an event to the [`TransactionsManager`](crate::transactions::TransactionsManager) if
     /// configured.
     fn notify_tx_manager(&self, event: NetworkTransactionEvent<N>) {
-        if let Some(ref tx) = self.to_transactions_manager {
-            let _ = tx.send(event);
+        if let Some(ref tx) = self.to_transactions_manager &&
+            let Err(e) = tx.try_send(event)
+        {
+            match e {
+                TrySendError::Full(_) => {
+                    trace!(target: "net", "Transaction events channel at capacity, dropping event");
+                    self.metrics.total_dropped_tx_events_at_full_capacity.increment(1);
+                }
+                TrySendError::Closed(_) => {}
+            }
         }
     }
 
@@ -738,7 +750,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             NetworkHandleMessage::AddRlpxSubProtocol(proto) => self.add_rlpx_sub_protocol(proto),
             NetworkHandleMessage::GetTransactionsHandle(tx) => {
                 if let Some(ref tx_inner) = self.to_transactions_manager {
-                    let _ = tx_inner.send(NetworkTransactionEvent::GetTransactionsHandle(tx));
+                    let _ = tx_inner.try_send(NetworkTransactionEvent::GetTransactionsHandle(tx));
                 } else {
                     let _ = tx.send(None);
                 }
