@@ -18,7 +18,7 @@ use reth_evm::{
 };
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
+    AddOnsContext, BlockTy, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
     PayloadAttributesBuilder, PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
@@ -32,15 +32,15 @@ use reth_node_builder::{
         EngineValidatorBuilder, EthApiBuilder, EthApiCtx, Identity, PayloadValidatorBuilder,
         RethRpcAddOns, RpcAddOns, RpcHandle,
     },
-    BuilderContext, DebugNode, Node, NodeAdapter, PayloadBuilderConfig,
+    BuilderContext, DebugNode, Node, NodeAdapter,
 };
 use reth_payload_primitives::PayloadTypes;
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
-    ValidationApi,
+    TestingApi, ValidationApi,
 };
-use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
+use reth_rpc_api::servers::{BlockSubmissionValidationApiServer, TestingApiServer};
 use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
 use reth_rpc_eth_api::{
     helpers::{
@@ -53,8 +53,8 @@ use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
-    TransactionPool, TransactionValidationTaskExecutor,
+    blobstore::DiskFileBlobStore, EthPooledTransaction, EthTransactionPool, PoolPooledTx,
+    PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
 };
 use revm::context::TxEnv;
 use std::{marker::PhantomData, sync::Arc, time::SystemTime};
@@ -118,13 +118,14 @@ impl EthereumNode {
     /// use reth_chainspec::ChainSpecBuilder;
     /// use reth_db::open_db_read_only;
     /// use reth_node_ethereum::EthereumNode;
-    /// use reth_provider::providers::StaticFileProvider;
+    /// use reth_provider::providers::{RocksDBProvider, StaticFileProvider};
     /// use std::sync::Arc;
     ///
     /// let factory = EthereumNode::provider_factory_builder()
     ///     .db(Arc::new(open_db_read_only("db", Default::default()).unwrap()))
     ///     .chainspec(ChainSpecBuilder::mainnet().build().into())
     ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
+    ///     .rocksdb_provider(RocksDBProvider::builder("db/rocksdb").build().unwrap())
     ///     .build_provider_factory();
     /// ```
     pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
@@ -302,6 +303,8 @@ where
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
 
+        let testing_skip_invalid_transactions = ctx.config.rpc.testing_skip_invalid_transactions;
+
         self.inner
             .launch_add_ons_with(ctx, move |container| {
                 container.modules.merge_if_module_configured(
@@ -312,6 +315,19 @@ where
                 container
                     .modules
                     .merge_if_module_configured(RethRpcModule::Eth, eth_config.into_rpc())?;
+
+                // testing_buildBlockV1: only wire when the hidden testing module is explicitly
+                // requested on any transport. Default stays disabled to honor security guidance.
+                let mut testing_api = TestingApi::new(
+                    container.registry.eth_api().clone(),
+                    container.registry.evm_config().clone(),
+                );
+                if testing_skip_invalid_transactions {
+                    testing_api = testing_api.with_skip_invalid_transactions();
+                }
+                container
+                    .modules
+                    .merge_if_module_configured(RethRpcModule::Testing, testing_api.into_rpc())?;
 
                 Ok(())
             })
@@ -426,9 +442,7 @@ where
     type EVM = EthEvmConfig<Types::ChainSpec>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        let evm_config = EthEvmConfig::new(ctx.chain_spec())
-            .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
-        Ok(evm_config)
+        Ok(EthEvmConfig::new(ctx.chain_spec()))
     }
 }
 
@@ -450,7 +464,8 @@ where
     >,
     Node: FullNodeTypes<Types = Types>,
 {
-    type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
+    type Pool =
+        EthTransactionPool<Node::Provider, DiskFileBlobStore, EthPooledTransaction, BlockTy<Types>>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let pool_config = ctx.pool_config();

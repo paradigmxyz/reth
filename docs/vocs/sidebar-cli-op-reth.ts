@@ -44,7 +44,18 @@ export const opRethCliSidebar: SidebarItem = {
                 },
                 {
                     text: "op-reth db checksum",
-                    link: "/cli/op-reth/db/checksum"
+                    link: "/cli/op-reth/db/checksum",
+                    collapsed: true,
+                    items: [
+                        {
+                            text: "op-reth db checksum mdbx",
+                            link: "/cli/op-reth/db/checksum/mdbx"
+                        },
+                        {
+                            text: "op-reth db checksum static-file",
+                            link: "/cli/op-reth/db/checksum/static-file"
+                        }
+                    ]
                 },
                 {
                     text: "op-reth db diff",
@@ -126,12 +137,32 @@ export const opRethCliSidebar: SidebarItem = {
                             collapsed: true,
                             items: [
                                 {
-                                    text: "op-reth db settings set receipts_in_static_files",
-                                    link: "/cli/op-reth/db/settings/set/receipts_in_static_files"
+                                    text: "op-reth db settings set receipts",
+                                    link: "/cli/op-reth/db/settings/set/receipts"
                                 },
                                 {
-                                    text: "op-reth db settings set transaction_senders_in_static_files",
-                                    link: "/cli/op-reth/db/settings/set/transaction_senders_in_static_files"
+                                    text: "op-reth db settings set transaction_senders",
+                                    link: "/cli/op-reth/db/settings/set/transaction_senders"
+                                },
+                                {
+                                    text: "op-reth db settings set account_changesets",
+                                    link: "/cli/op-reth/db/settings/set/account_changesets"
+                                },
+                                {
+                                    text: "op-reth db settings set storages_history",
+                                    link: "/cli/op-reth/db/settings/set/storages_history"
+                                },
+                                {
+                                    text: "op-reth db settings set transaction_hash_numbers",
+                                    link: "/cli/op-reth/db/settings/set/transaction_hash_numbers"
+                                },
+                                {
+                                    text: "op-reth db settings set account_history",
+                                    link: "/cli/op-reth/db/settings/set/account_history"
+                                },
+                                {
+                                    text: "op-reth db settings set storage_changesets",
+                                    link: "/cli/op-reth/db/settings/set/storage_changesets"
                                 }
                             ]
                         }
@@ -223,6 +254,10 @@ export const opRethCliSidebar: SidebarItem = {
                 {
                     text: "op-reth p2p bootnode",
                     link: "/cli/op-reth/p2p/bootnode"
+                },
+                {
+                    text: "op-reth p2p enode",
+                    link: "/cli/op-reth/p2p/enode"
                 }
             ]
         },

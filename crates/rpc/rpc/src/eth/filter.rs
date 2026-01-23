@@ -185,7 +185,8 @@ where
     /// `stale_filter_ttl` at the given instant.
     pub async fn clear_stale_filters(&self, now: Instant) {
         trace!(target: "rpc::eth", "clear stale filters");
-        self.active_filters().inner.lock().await.retain(|id, filter| {
+        let mut filters = self.active_filters().inner.lock().await;
+        filters.retain(|id, filter| {
             let is_valid = (now - filter.last_poll_timestamp) < self.inner.stale_filter_ttl;
 
             if !is_valid {
@@ -193,7 +194,8 @@ where
             }
 
             is_valid
-        })
+        });
+        filters.shrink_to_fit();
     }
 }
 
@@ -267,7 +269,7 @@ where
                             .map(|num| self.provider().convert_block_number(num))
                             .transpose()?
                             .flatten();
-                        logs_utils::get_filter_block_range(from, to, start_block, info)
+                        logs_utils::get_filter_block_range(from, to, start_block, info)?
                     }
                     FilterBlockOption::AtBlockHash(_) => {
                         // blockHash is equivalent to fromBlock = toBlock = the block number with
@@ -481,6 +483,12 @@ where
                         .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?
                 };
 
+                // Check if the block has been pruned (EIP-4444)
+                let earliest_block = self.provider().earliest_block_number()?;
+                if header.number() < earliest_block {
+                    return Err(EthApiError::PrunedHistoryUnavailable.into());
+                }
+
                 let block_num_hash = BlockNumHash::new(header.number(), block_hash);
 
                 let mut all_logs = Vec::new();
@@ -546,6 +554,13 @@ where
                     .transpose()?
                     .flatten();
 
+                // Return error if toBlock exceeds current head
+                if let Some(t) = to &&
+                    t > info.best_number
+                {
+                    return Err(EthFilterError::BlockRangeExceedsHead);
+                }
+
                 if let Some(f) = from &&
                     f > info.best_number
                 {
@@ -554,7 +569,13 @@ where
                 }
 
                 let (from_block_number, to_block_number) =
-                    logs_utils::get_filter_block_range(from, to, start_block, info);
+                    logs_utils::get_filter_block_range(from, to, start_block, info)?;
+
+                // Check if the requested range overlaps with pruned history (EIP-4444)
+                let earliest_block = self.provider().earliest_block_number()?;
+                if from_block_number < earliest_block {
+                    return Err(EthApiError::PrunedHistoryUnavailable.into());
+                }
 
                 self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
                     .await
@@ -712,13 +733,13 @@ where
                     logs_found = all_logs.len(),
                     max_logs_per_response,
                     from_block,
-                    to_block = num_hash.number.saturating_sub(1),
+                    to_block = num_hash.number,
                     "Query exceeded max logs per response limit"
                 );
                 return Err(EthFilterError::QueryExceedsMaxResults {
                     max_logs: max_logs_per_response,
                     from_block,
-                    to_block: num_hash.number.saturating_sub(1),
+                    to_block: num_hash.number,
                 });
             }
         }
@@ -894,6 +915,9 @@ pub enum EthFilterError {
     /// Invalid block range.
     #[error("invalid block range params")]
     InvalidBlockRangeParams,
+    /// Block range extends beyond current head.
+    #[error("block range extends beyond current head block")]
+    BlockRangeExceedsHead,
     /// Query scope is too broad.
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
@@ -928,7 +952,8 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             EthFilterError::EthAPIError(err) => err.into(),
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |
-            EthFilterError::QueryExceedsMaxResults { .. }) => {
+            EthFilterError::QueryExceedsMaxResults { .. } |
+            EthFilterError::BlockRangeExceedsHead) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }
@@ -938,6 +963,15 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
 impl From<ProviderError> for EthFilterError {
     fn from(err: ProviderError) -> Self {
         Self::EthAPIError(err.into())
+    }
+}
+
+impl From<logs_utils::FilterBlockRangeError> for EthFilterError {
+    fn from(err: logs_utils::FilterBlockRangeError) -> Self {
+        match err {
+            logs_utils::FilterBlockRangeError::InvalidBlockRange => Self::InvalidBlockRangeParams,
+            logs_utils::FilterBlockRangeError::BlockRangeExceedsHead => Self::BlockRangeExceedsHead,
+        }
     }
 }
 
@@ -1230,7 +1264,7 @@ impl<
             let filter_inner = self.filter_inner.clone();
             let chunk_task = Box::pin(async move {
                 let chunk_task = tokio::task::spawn_blocking(move || {
-                    let mut chunk_results = Vec::new();
+                    let mut chunk_results = Vec::with_capacity(chunk_headers.len());
 
                     for header in chunk_headers {
                         // Fetch directly from provider - RangeMode is used for older blocks

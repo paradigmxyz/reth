@@ -19,8 +19,8 @@ use tracing::{debug, error, trace};
 ///
 /// Provides utilities for running a cli command to completion.
 #[derive(Debug)]
-#[non_exhaustive]
 pub struct CliRunner {
+    config: CliRunnerConfig,
     executor: RuntimeOrHandle,
 }
 
@@ -30,24 +30,33 @@ impl CliRunner {
     ///
     /// The default tokio runtime is multi-threaded, with both I/O and time drivers enabled.
     pub fn try_default_runtime() -> Result<Self, std::io::Error> {
-        Ok(Self { executor: RuntimeOrHandle::Runtime(tokio_runtime()?) })
+        Ok(Self {
+            config: CliRunnerConfig::default(),
+            executor: RuntimeOrHandle::Runtime(tokio_runtime()?),
+        })
     }
 
     /// Create a new [`CliRunner`] from a provided tokio [`Runtime`].
     pub const fn from_runtime(tokio_runtime: Runtime) -> Self {
-        Self { executor: RuntimeOrHandle::Runtime(tokio_runtime) }
+        Self { config: CliRunnerConfig::new(), executor: RuntimeOrHandle::Runtime(tokio_runtime) }
     }
 
     /// Create a new [`CliRunner`] from the current tokio runtime handle.
     /// Panics if not called from a tokio runtime context.
     pub fn current() -> Self {
-        Self { executor: RuntimeOrHandle::Handle(Handle::current()) }
+        Self {
+            config: CliRunnerConfig::default(),
+            executor: RuntimeOrHandle::Handle(Handle::current()),
+        }
     }
 
     /// Try to create a new [`CliRunner`] from the current tokio runtime handle.
     /// It does not panic if not called from a tokio runtime context.
     pub fn try_current() -> Option<Self> {
-        Handle::try_current().ok().map(|handle| Self { executor: RuntimeOrHandle::Handle(handle) })
+        Handle::try_current().ok().map(|handle| Self {
+            config: CliRunnerConfig::default(),
+            executor: RuntimeOrHandle::Handle(handle),
+        })
     }
 
     /// Create a new [`CliRunner`] from a tokio [`Handle`].
@@ -67,8 +76,14 @@ impl CliRunner {
     ///     runner.run_until_ctrl_c_with_handle(fut);
     /// });
     /// ```
-    pub const fn from_handle(handle: Handle) -> Self {
-        Self { executor: RuntimeOrHandle::Handle(handle) }
+    pub fn from_handle(handle: Handle) -> Self {
+        Self { config: CliRunnerConfig::default(), executor: RuntimeOrHandle::Handle(handle) }
+    }
+
+    /// Sets the [`CliRunnerConfig`] for this runner.
+    pub const fn with_config(mut self, config: CliRunnerConfig) -> Self {
+        self.config = config;
+        self
     }
 
     /// Returns the handle reference, regardless of whether this contains a runtime or handle
@@ -124,13 +139,65 @@ impl CliRunner {
             // after the command has finished or exit signal was received we shutdown the task
             // manager which fires the shutdown signal to all tasks spawned via the task
             // executor and awaiting on tasks spawned with graceful shutdown
-            task_manager.graceful_shutdown_with_timeout(Duration::from_secs(5));
+            task_manager.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);
         }
 
         // `drop(tokio_runtime)` would block the current thread until its pools
         // (including blocking pool) are shutdown. Since we want to exit as soon as possible, drop
         // it on a separate thread and wait for up to 5 seconds for this operation to
         // complete.
+        let (tx, rx) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("tokio-runtime-shutdown".to_string())
+            .spawn(move || {
+                drop(tokio_runtime);
+                let _ = tx.send(());
+            })
+            .unwrap();
+
+        let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
+            debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
+        });
+
+        command_res
+    }
+
+    /// Executes a command in a blocking context with access to `CliContext`.
+    ///
+    /// See [`Runtime::spawn_blocking`](tokio::runtime::Runtime::spawn_blocking).
+    pub fn run_blocking_command_until_exit<F, E>(
+        self,
+        command: impl FnOnce(CliContext) -> F + Send + 'static,
+    ) -> Result<(), E>
+    where
+        F: Future<Output = Result<(), E>> + Send + 'static,
+        E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
+    {
+        let tokio_runtime = self.executor.into_runtime("blocking commands")?;
+        let AsyncCliRunner { context, mut task_manager, tokio_runtime } =
+            AsyncCliRunner::new(tokio_runtime);
+
+        // Spawn the command on the blocking thread pool
+        let handle = tokio_runtime.handle().clone();
+        let command_handle =
+            tokio_runtime.handle().spawn_blocking(move || handle.block_on(command(context)));
+
+        // Wait for the command to complete or ctrl-c
+        let command_res = tokio_runtime.block_on(run_to_completion_or_panic(
+            &mut task_manager,
+            run_until_ctrl_c(
+                async move { command_handle.await.expect("Failed to join blocking task") },
+            ),
+        ));
+
+        if command_res.is_err() {
+            error!(target: "reth::cli", "shutting down due to error");
+        } else {
+            debug!(target: "reth::cli", "shutting down gracefully");
+            task_manager.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);
+        }
+
+        // Shutdown the runtime on a separate thread
         let (tx, rx) = mpsc::channel();
         std::thread::Builder::new()
             .name("tokio-runtime-shutdown".to_string())
@@ -212,8 +279,39 @@ pub struct CliContext {
     pub task_executor: TaskExecutor,
 }
 
-/// Creates a new default tokio multi-thread [Runtime] with all features
-/// enabled
+/// Default timeout for graceful shutdown of tasks.
+const DEFAULT_GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Configuration for [`CliRunner`].
+#[derive(Debug, Clone)]
+pub struct CliRunnerConfig {
+    /// Timeout for graceful shutdown of tasks.
+    ///
+    /// After the command completes, this is the maximum time to wait for spawned tasks
+    /// to finish before forcefully terminating them.
+    pub graceful_shutdown_timeout: Duration,
+}
+
+impl Default for CliRunnerConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CliRunnerConfig {
+    /// Creates a new config with default values.
+    pub const fn new() -> Self {
+        Self { graceful_shutdown_timeout: DEFAULT_GRACEFUL_SHUTDOWN_TIMEOUT }
+    }
+
+    /// Sets the graceful shutdown timeout.
+    pub const fn with_graceful_shutdown_timeout(mut self, timeout: Duration) -> Self {
+        self.graceful_shutdown_timeout = timeout;
+        self
+    }
+}
+
+/// Creates a new default tokio multi-thread [Runtime] with all features enabled
 pub fn tokio_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
     tokio::runtime::Builder::new_multi_thread().enable_all().build()
 }

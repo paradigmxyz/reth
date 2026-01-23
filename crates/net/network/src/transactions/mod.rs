@@ -1,6 +1,7 @@
 //! Transactions management for the p2p network.
 
 use alloy_consensus::transaction::TxHashRef;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Aggregation on configurable parameters for [`TransactionsManager`].
 pub mod config;
@@ -428,9 +429,20 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns
     /// `false` if [`TransactionsManager`] is operating close to full capacity.
     fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
-        self.pending_pool_imports_info
-            .has_capacity(self.pending_pool_imports_info.max_pending_pool_imports) &&
+        self.has_capacity_for_pending_pool_imports() &&
             self.transaction_fetcher.has_capacity_for_fetching_pending_hashes()
+    }
+
+    /// Returns `true` if [`TransactionsManager`] has capacity for more pending pool imports.
+    fn has_capacity_for_pending_pool_imports(&self) -> bool {
+        self.remaining_pool_import_capacity() > 0
+    }
+
+    /// Returns the remaining capacity for pending pool imports.
+    fn remaining_pool_import_capacity(&self) -> usize {
+        self.pending_pool_imports_info.max_pending_pool_imports.saturating_sub(
+            self.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed),
+        )
     }
 
     fn report_peer_bad_transactions(&self, peer_id: PeerId) {
@@ -636,7 +648,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         //
         // known txns have already been successfully fetched or received over gossip.
         //
-        // most hashes will be filtered out here since this the mempool protocol is a gossip
+        // most hashes will be filtered out here since the mempool protocol is a gossip
         // protocol, healthy peers will send many of the same hashes.
         //
         let hashes_count_pre_pool_filter = partially_valid_msg.len();
@@ -859,9 +871,8 @@ where
         peer_id: PeerId,
         propagation_mode: PropagationMode,
     ) -> Option<PropagatedTransactions> {
-        trace!(target: "net::tx", ?peer_id, "Propagating transactions to peer");
-
         let peer = self.peers.get_mut(&peer_id)?;
+        trace!(target: "net::tx", ?peer_id, "Propagating transactions to peer");
         let mut propagated = PropagatedTransactions::default();
 
         // filter all transactions unknown to the peer
@@ -1285,6 +1296,7 @@ where
                     trace!(target: "net::tx", peer_id=format!("{peer_id:#}"), policy=?self.config.ingress_policy, "Ignoring full transactions from peer blocked by ingress policy");
                     return;
                 }
+
                 // ensure we didn't receive any blob transactions as these are disallowed to be
                 // broadcasted in full
 
@@ -1335,8 +1347,16 @@ where
             return
         }
 
+        // Early return if we don't have capacity for any imports
+        if !self.has_capacity_for_pending_pool_imports() {
+            return
+        }
+
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
+        let client_version = peer.client_version.clone();
         let mut transactions = transactions.0;
+
+        let start = Instant::now();
 
         // mark the transactions as received
         self.transaction_fetcher
@@ -1366,51 +1386,61 @@ where
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
 
-        // 2. filter out transactions that are invalid or already pending import pre-size to avoid
-        //    reallocations
-        let mut new_txs = Vec::with_capacity(transactions.len());
-        for tx in transactions {
-            // recover transaction
-            let tx = match tx.try_into_recovered() {
-                Ok(tx) => tx,
+        // Remove known and invalid transactions
+        transactions.retain(|tx| {
+            if let Entry::Occupied(mut entry) = self.transactions_by_peers.entry(*tx.tx_hash()) {
+                entry.get_mut().insert(peer_id);
+                return false
+            }
+            if self.bad_imports.contains(tx.tx_hash()) {
+                trace!(target: "net::tx",
+                    peer_id=format!("{peer_id:#}"),
+                    hash=%tx.tx_hash(),
+                    %client_version,
+                    "received a known bad transaction from peer"
+                );
+                has_bad_transactions = true;
+                return false;
+            }
+            true
+        });
+
+        // Truncate to remaining capacity before recovery to avoid wasting CPU on transactions
+        // that won't be imported anyway.
+        let capacity = self.remaining_pool_import_capacity();
+        if transactions.len() > capacity {
+            let skipped = transactions.len() - capacity;
+            transactions.truncate(capacity);
+            self.metrics
+                .skipped_transactions_pending_pool_imports_at_capacity
+                .increment(skipped as u64);
+            trace!(target: "net::tx", skipped, capacity, "Truncated transactions batch to capacity");
+        }
+
+        let txs_len = transactions.len();
+
+        let new_txs = transactions
+            .into_par_iter()
+            .filter_map(|tx| match tx.try_into_recovered() {
+                Ok(tx) => Some(Pool::Transaction::from_pooled(tx)),
                 Err(badtx) => {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         hash=%badtx.tx_hash(),
-                        client_version=%peer.client_version,
+                        client_version=%client_version,
                         "failed ecrecovery for transaction"
                     );
-                    has_bad_transactions = true;
-                    continue
+                    None
                 }
-            };
+            })
+            .collect::<Vec<_>>();
 
-            match self.transactions_by_peers.entry(*tx.tx_hash()) {
-                Entry::Occupied(mut entry) => {
-                    // transaction was already inserted
-                    entry.get_mut().insert(peer_id);
-                }
-                Entry::Vacant(entry) => {
-                    if self.bad_imports.contains(tx.tx_hash()) {
-                        trace!(target: "net::tx",
-                            peer_id=format!("{peer_id:#}"),
-                            hash=%tx.tx_hash(),
-                            client_version=%peer.client_version,
-                            "received a known bad transaction from peer"
-                        );
-                        has_bad_transactions = true;
-                    } else {
-                        // this is a new transaction that should be imported into the pool
+        has_bad_transactions |= new_txs.len() != txs_len;
 
-                        let pool_transaction = Pool::Transaction::from_pooled(tx);
-                        new_txs.push(pool_transaction);
-
-                        entry.insert(HashSet::from([peer_id]));
-                    }
-                }
-            }
+        // Record the transactions as seen by the peer
+        for tx in &new_txs {
+            self.transactions_by_peers.insert(*tx.hash(), HashSet::from([peer_id]));
         }
-        new_txs.shrink_to_fit();
 
         // 3. import new transactions as a batch to minimize lock contention on the underlying
         // pool
@@ -1448,7 +1478,7 @@ where
             self.metrics
                 .occurrences_of_transaction_already_seen_by_peer
                 .increment(num_already_seen_by_peer);
-            trace!(target: "net::tx", num_txs=%num_already_seen_by_peer, ?peer_id, client=?peer.client_version, "Peer sent already seen transactions");
+            trace!(target: "net::tx", num_txs=%num_already_seen_by_peer, ?peer_id, client=%client_version, "Peer sent already seen transactions");
         }
 
         if has_bad_transactions {
@@ -1459,6 +1489,8 @@ where
         if num_already_seen_by_peer > 0 {
             self.report_already_seen(peer_id);
         }
+
+        self.metrics.pool_import_prepare_duration.record(start.elapsed());
     }
 
     /// Processes a [`FetchEvent`].
@@ -1921,14 +1953,22 @@ impl PooledTransactionsHashesBuilder {
     fn new(version: EthVersion) -> Self {
         match version {
             EthVersion::Eth66 | EthVersion::Eth67 => Self::Eth66(Default::default()),
-            EthVersion::Eth68 | EthVersion::Eth69 => Self::Eth68(Default::default()),
+            EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 => {
+                Self::Eth68(Default::default())
+            }
         }
     }
 
     fn build(self) -> NewPooledTransactionHashes {
         match self {
-            Self::Eth66(msg) => msg.into(),
-            Self::Eth68(msg) => msg.into(),
+            Self::Eth66(mut msg) => {
+                msg.0.shrink_to_fit();
+                msg.into()
+            }
+            Self::Eth68(mut msg) => {
+                msg.shrink_to_fit();
+                msg.into()
+            }
         }
     }
 }
@@ -1990,7 +2030,7 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
         &self.request_tx
     }
 
-    /// Return a
+    /// Returns a mutable reference to the seen transactions LRU cache.
     pub const fn seen_transactions_mut(&mut self) -> &mut LruCache<TxHash> {
         &mut self.seen_transactions
     }

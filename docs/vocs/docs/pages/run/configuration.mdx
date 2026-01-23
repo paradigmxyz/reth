@@ -406,9 +406,10 @@ No pruning, run as archive node.
 This configuration will:
 
 -   Run pruning every 5 blocks
--   Continuously prune all transaction senders, account history and storage history before the block `head-100_000`,
+-   Continuously prune all transaction senders, account history, storage history and bodies history before the block `head-100_000`,
     i.e. keep the data for the last `100_000` blocks
 -   Prune all receipts before the block 1920000, i.e. keep receipts from the block 1920000
+-   Keep the last 128 blocks of merkle changesets (default behavior)
 
 ```toml
 [prune]
@@ -430,6 +431,9 @@ account_history = { distance = 100_000 } # Prune all historical account states b
 
 # Storage History pruning configuration
 storage_history = { distance = 100_000 } # Prune all historical storage states before the block `head-100000`
+
+# Bodies History pruning configuration
+bodies_history = { distance = 100_000 } # Prune all historical block bodies before the block `head-100000`
 ```
 
 We can also prune receipts more granular, using the logs filtering:
@@ -457,6 +461,7 @@ headers = 8192
 transactions = 8192
 receipts = 8192
 transaction_senders = 8192
+account_change_sets = 8192
 ```
 
 [TOML]: https://toml.io/

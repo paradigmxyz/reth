@@ -23,8 +23,8 @@ use alloy_primitives::{Address, B256};
 use alloy_rpc_types::{
     engine::{
         ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-        ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadV1,
-        PayloadAttributes as EthPayloadAttributes, PayloadId,
+        ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
+        ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes, PayloadId,
     },
     Withdrawal,
 };
@@ -41,7 +41,7 @@ use reth_ethereum::{
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
             rpc::{PayloadValidatorBuilder, RpcAddOns},
-            BuilderContext, Node, NodeAdapter, NodeBuilder,
+            BuilderContext, Node, NodeAdapter, NodeBuilder, PayloadBuilderConfig,
         },
         core::{args::RpcServerArgs, node_config::NodeConfig},
         node::{
@@ -169,6 +169,7 @@ impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
     type ExecutionPayloadEnvelopeV5 = ExecutionPayloadEnvelopeV5;
+    type ExecutionPayloadEnvelopeV6 = ExecutionPayloadEnvelopeV6;
 }
 
 /// Custom engine validator
@@ -337,7 +338,8 @@ where
                 ctx.provider().clone(),
                 pool,
                 evm_config,
-                EthereumBuilderConfig::new(),
+                EthereumBuilderConfig::new()
+                    .with_extra_data(ctx.payload_builder_config().extra_data_bytes()),
             ),
         };
         Ok(payload_builder)
