@@ -217,27 +217,20 @@ impl CachedStateMetrics {
     }
 }
 
-/// A stats handler for fixed-cache that tracks collisions and approximate size.
+/// A stats handler for fixed-cache that tracks collisions and size.
 ///
 /// Note: Hits and misses are tracked directly by the [`CachedStateProvider`] via
 /// [`CachedStateMetrics`], not here. The stats handler is used for:
-/// - Collision detection (hash collisions causing eviction)
-/// - Approximate size tracking
+/// - Collision detection (hash collisions causing eviction of a different key)
+/// - Size tracking
 ///
 /// ## Size Tracking
 ///
-/// Size tracking is approximate. fixed-cache is a direct-mapped cache where each key hashes to
-/// exactly one bucket. When inserting, the bucket may be empty (size +1) or occupied (eviction,
-/// size unchanged). The cache API doesn't expose this distinction for direct `insert()` calls.
+/// Size is tracked via `on_insert` and `on_remove` callbacks:
+/// - `on_insert`: increment size only when inserting into an empty bucket (no eviction)
+/// - `on_remove`: always decrement size
 ///
-/// We handle this by:
-/// - Incrementing size on every insert
-/// - Decrementing on `on_collision` callback (called during get-before-insert in
-///   `get_or_try_insert_with`, indicating the subsequent insert will evict)
-/// - Capping size at capacity to prevent over-counting
-///
-/// This may slightly over-count for direct `insert()` calls that evict, but the cap ensures
-/// size never exceeds capacity, making it useful for observability ("is cache filling up?").
+/// Collisions (evicting a different key) don't change size since they replace an existing entry.
 #[derive(Debug)]
 pub(crate) struct CacheStatsHandler {
     collisions: AtomicU64,
