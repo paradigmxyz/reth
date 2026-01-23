@@ -329,26 +329,31 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             }
         }
 
+        let BlockNumHash { number: persisted_height, hash: _ } = persisted_num_hash;
+
+        // Collect blocks to retain while holding only a read lock.
+        // This avoids blocking readers during the expensive clone operations.
+        let mut old_blocks = {
+            let blocks = self.inner.in_memory_state.blocks.read();
+            blocks
+                .values()
+                .filter(|b| b.block_ref().recovered_block().number() > persisted_height)
+                .map(|b| b.block.clone())
+                .collect::<Vec<_>>()
+        };
+
+        // Sort blocks outside the lock to minimize lock hold time.
+        // This is the most expensive operation and doesn't need synchronization.
+        old_blocks.sort_unstable_by_key(|block| block.recovered_block().number());
+
         {
             // acquire locks, starting with the numbers lock
             let mut numbers = self.inner.in_memory_state.numbers.write();
             let mut blocks = self.inner.in_memory_state.blocks.write();
 
-            let BlockNumHash { number: persisted_height, hash: _ } = persisted_num_hash;
-
-            // clear all numbers
+            // clear all data structures
             numbers.clear();
-
-            // drain all blocks and only keep the ones that are not persisted (below the persisted
-            // height)
-            let mut old_blocks = blocks
-                .drain()
-                .filter(|(_, b)| b.block_ref().recovered_block().number() > persisted_height)
-                .map(|(_, b)| b.block.clone())
-                .collect::<Vec<_>>();
-
-            // sort the blocks by number so we can insert them back in natural order (low -> high)
-            old_blocks.sort_unstable_by_key(|block| block.recovered_block().number());
+            blocks.clear();
 
             // re-insert the blocks in natural order and connect them to their parent blocks
             for block in old_blocks {
