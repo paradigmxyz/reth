@@ -15,9 +15,6 @@ use reth_db_api::{
     transaction::DbTx,
     RawKey, RawTable, Receipts, TableViewer, Transactions,
 };
-
-#[cfg(all(unix, feature = "edge"))]
-use reth_db_api::table::Decode;
 use reth_db_common::DbTool;
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
@@ -87,21 +84,13 @@ impl Command {
             Subcommand::Mdbx { table, key, subkey, end_key, end_subkey, raw } => {
                 table.view(&GetValueViewer { tool, key, subkey, end_key, end_subkey, raw })?
             }
-            Subcommand::StaticFile { segment, key, ref subkey, raw } => {
-                self.execute_static_file(tool, segment, key, subkey.clone(), raw)?
+            Subcommand::StaticFile { segment, ref key, ref subkey, raw } => {
+                self.execute_static_file(tool, segment, key.clone(), subkey.clone(), raw)?
             }
             #[cfg(all(unix, feature = "edge"))]
-            Subcommand::Rocksdb { table, key, raw } => match table {
-                RocksDbTable::TransactionHashNumbers => {
-                    get_rocksdb::<tables::TransactionHashNumbers>(tool, &key, raw)
-                }
-                RocksDbTable::AccountsHistory => {
-                    get_rocksdb::<tables::AccountsHistory>(tool, &key, raw)
-                }
-                RocksDbTable::StoragesHistory => {
-                    get_rocksdb::<tables::StoragesHistory>(tool, &key, raw)
-                }
-            },
+            Subcommand::Rocksdb { table, ref key, raw } => {
+                get_rocksdb(tool, table, key, raw)?;
+            }
         }
 
         Ok(())
@@ -250,8 +239,28 @@ impl Command {
 }
 
 #[cfg(all(unix, feature = "edge"))]
-fn get_rocksdb<T: Table>(
-    tool: &DbTool<impl ProviderNodeTypes>,
+fn get_rocksdb<N: ProviderNodeTypes>(
+    tool: &DbTool<N>,
+    table: RocksDbTable,
+    key_str: &str,
+    raw: bool,
+) -> eyre::Result<()> {
+    match table {
+        RocksDbTable::TransactionHashNumbers => {
+            get_rocksdb_table::<tables::TransactionHashNumbers, _>(tool, key_str, raw)
+        }
+        RocksDbTable::AccountsHistory => {
+            get_rocksdb_table::<tables::AccountsHistory, _>(tool, key_str, raw)
+        }
+        RocksDbTable::StoragesHistory => {
+            get_rocksdb_table::<tables::StoragesHistory, _>(tool, key_str, raw)
+        }
+    }
+}
+
+#[cfg(all(unix, feature = "edge"))]
+fn get_rocksdb_table<T: Table, N: ProviderNodeTypes>(
+    tool: &DbTool<N>,
     key_str: &str,
     raw: bool,
 ) -> eyre::Result<()>
@@ -262,18 +271,13 @@ where
     let key = table_key::<T>(key_str)?;
     let rocksdb = tool.provider_factory.rocksdb_provider();
 
-    let value = rocksdb.get::<T>(&key)?;
+    let value = rocksdb.get::<T>(key.clone())?;
 
     match value {
         Some(value) => {
             if raw {
-                let encoded = T::Key::encode(key);
                 let compressed = value.compress();
-                let output = serde_json::json!({
-                    "key": hex::encode_prefixed(encoded.as_ref()),
-                    "val": hex::encode_prefixed(compressed.as_ref()),
-                });
-                println!("{}", serde_json::to_string_pretty(&output)?);
+                println!("{}", hex::encode_prefixed(compressed.as_ref()));
             } else {
                 let output = serde_json::json!({
                     "key": key,
