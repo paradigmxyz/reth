@@ -28,7 +28,7 @@ use alloy_eips::{
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives_traits::{
     constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Account, Block,
-    GotExpected, SealedBlock,
+    GotExpected,
 };
 use reth_storage_api::{AccountInfoReader, BytecodeReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -58,7 +58,7 @@ use tokio::sync::Mutex;
 ///
 /// And adheres to the configured [`LocalTransactionConfig`].
 #[derive(Debug)]
-pub struct EthTransactionValidator<Client, T> {
+pub struct EthTransactionValidator<Client, T, B = reth_ethereum_primitives::Block> {
     /// This type fetches account info from the db
     client: Client,
     /// Blobstore used for fetching re-injected blob transactions.
@@ -90,14 +90,14 @@ pub struct EthTransactionValidator<Client, T> {
     /// Disable balance checks during transaction validation
     disable_balance_check: bool,
     /// Marker for the transaction type
-    _marker: PhantomData<T>,
+    _marker: PhantomData<(T, B)>,
     /// Metrics for tsx pool validation
     validation_metrics: TxPoolValidationMetrics,
     /// Bitmap of custom transaction types that are allowed.
     other_tx_types: U256,
 }
 
-impl<Client, Tx> EthTransactionValidator<Client, Tx> {
+impl<Client, Tx, B: Block> EthTransactionValidator<Client, Tx, B> {
     /// Returns the configured chain spec
     pub fn chain_spec(&self) -> Arc<Client::ChainSpec>
     where
@@ -176,7 +176,7 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     }
 }
 
-impl<Client, Tx> EthTransactionValidator<Client, Tx>
+impl<Client, Tx, B: Block> EthTransactionValidator<Client, Tx, B>
 where
     Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
@@ -799,12 +799,14 @@ where
     }
 }
 
-impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
+impl<Client, Tx, B> TransactionValidator for EthTransactionValidator<Client, Tx, B>
 where
     Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
+    B: Block,
 {
     type Transaction = Tx;
+    type Block = B;
 
     async fn validate_transaction(
         &self,
@@ -829,11 +831,8 @@ where
         self.validate_batch_with_origin(origin, transactions)
     }
 
-    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
-    where
-        B: Block,
-    {
-        self.on_new_head_block(new_tip_block.header())
+    fn on_new_head_block(&self, new_tip_block: &reth_primitives_traits::SealedBlock<Self::Block>) {
+        Self::on_new_head_block(self, new_tip_block.header())
     }
 }
 
@@ -1105,9 +1104,10 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     }
 
     /// Builds a the [`EthTransactionValidator`] without spawning validator tasks.
-    pub fn build<Tx, S>(self, blob_store: S) -> EthTransactionValidator<Client, Tx>
+    pub fn build<Tx, S, B>(self, blob_store: S) -> EthTransactionValidator<Client, Tx, B>
     where
         S: BlobStore,
+        B: Block,
     {
         let Self {
             client,
@@ -1170,17 +1170,18 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     /// The validator will spawn `additional_tasks` additional tasks for validation.
     ///
     /// By default this will spawn 1 additional task.
-    pub fn build_with_tasks<Tx, T, S>(
+    pub fn build_with_tasks<Tx, T, S, B>(
         self,
         tasks: T,
         blob_store: S,
-    ) -> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
+    ) -> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx, B>>
     where
         T: TaskSpawner,
         S: BlobStore,
+        B: Block,
     {
         let additional_tasks = self.additional_tasks;
-        let validator = self.build(blob_store);
+        let validator = self.build::<Tx, S, B>(blob_store);
 
         let (tx, task) = ValidationTask::new();
 
@@ -1341,7 +1342,8 @@ mod tests {
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
         );
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider).build(blob_store.clone());
+        let validator: EthTransactionValidator<_, _> =
+            EthTransactionValidatorBuilder::new(provider).build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
 
@@ -1368,9 +1370,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider)
-            .set_block_gas_limit(1_000_000) // tx gas limit is 1_015_288
-            .build(blob_store.clone());
+        let validator: EthTransactionValidator<_, _> =
+            EthTransactionValidatorBuilder::new(provider)
+                .set_block_gas_limit(1_000_000) // tx gas limit is 1_015_288
+                .build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
 
@@ -1401,9 +1404,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider)
-            .set_tx_fee_cap(100) // 100 wei cap
-            .build(blob_store.clone());
+        let validator: EthTransactionValidator<_, _> =
+            EthTransactionValidatorBuilder::new(provider)
+                .set_tx_fee_cap(100) // 100 wei cap
+                .build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::Local, transaction.clone());
         assert!(outcome.is_invalid());
@@ -1438,9 +1442,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider)
-            .set_tx_fee_cap(0) // no cap
-            .build(blob_store);
+        let validator: EthTransactionValidator<_, _> =
+            EthTransactionValidatorBuilder::new(provider)
+                .set_tx_fee_cap(0) // no cap
+                .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::Local, transaction);
         assert!(outcome.is_valid());
@@ -1456,9 +1461,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider)
-            .set_tx_fee_cap(2e18 as u128) // 2 ETH cap
-            .build(blob_store);
+        let validator: EthTransactionValidator<_, _> =
+            EthTransactionValidatorBuilder::new(provider)
+                .set_tx_fee_cap(2e18 as u128) // 2 ETH cap
+                .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::Local, transaction);
         assert!(outcome.is_valid());
@@ -1474,9 +1480,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider)
-            .with_max_tx_gas_limit(Some(500_000)) // Set limit lower than transaction gas limit (1_015_288)
-            .build(blob_store.clone());
+        let validator: EthTransactionValidator<_, _> =
+            EthTransactionValidatorBuilder::new(provider)
+                .with_max_tx_gas_limit(Some(500_000)) // Set limit lower than transaction gas limit (1_015_288)
+                .build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
         assert!(outcome.is_invalid());
@@ -1506,9 +1513,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider)
-            .with_max_tx_gas_limit(None) // disabled
-            .build(blob_store);
+        let validator: EthTransactionValidator<_, _> =
+            EthTransactionValidatorBuilder::new(provider)
+                .with_max_tx_gas_limit(None) // disabled
+                .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid());
@@ -1524,9 +1532,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider)
-            .with_max_tx_gas_limit(Some(2_000_000)) // Set limit higher than transaction gas limit (1_015_288)
-            .build(blob_store);
+        let validator: EthTransactionValidator<_, _> =
+            EthTransactionValidatorBuilder::new(provider)
+                .with_max_tx_gas_limit(Some(2_000_000)) // Set limit higher than transaction gas limit (1_015_288)
+                .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid());
@@ -1727,8 +1736,9 @@ mod tests {
         );
 
         // Validate with balance check enabled
-        let validator = EthTransactionValidatorBuilder::new(provider.clone())
-            .build(InMemoryBlobStore::default());
+        let validator: EthTransactionValidator<_, _> =
+            EthTransactionValidatorBuilder::new(provider.clone())
+                .build(InMemoryBlobStore::default());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
         let expected_cost = *transaction.cost();
@@ -1743,9 +1753,10 @@ mod tests {
         }
 
         // Validate with balance check disabled
-        let validator = EthTransactionValidatorBuilder::new(provider)
-            .disable_balance_check() // This should allow the transaction through despite zero balance
-            .build(InMemoryBlobStore::default());
+        let validator: EthTransactionValidator<_, _> =
+            EthTransactionValidatorBuilder::new(provider)
+                .disable_balance_check()
+                .build(InMemoryBlobStore::default());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid()); // Should be valid because balance check is disabled
