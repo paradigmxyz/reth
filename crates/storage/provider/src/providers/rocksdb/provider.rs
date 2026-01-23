@@ -834,7 +834,6 @@ impl RocksDBProvider {
         let encoded_key = key.encode();
         let iter = self
             .0
-            .db
             .iterator_cf(cf, IteratorMode::From(encoded_key.as_ref(), rocksdb::Direction::Forward));
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
     }
