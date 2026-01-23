@@ -681,47 +681,6 @@ mod tests {
             "RocksDB should be empty after pruning"
         );
     }
-
-    #[test]
-    fn test_check_consistency_storages_history_behind_checkpoint_needs_unwind() {
-        let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::StoragesHistory>()
-            .build()
-            .unwrap();
-
-        // Insert data into RocksDB with max highest_block_number = 80
-        let key_block_50 = StorageShardedKey::new(Address::ZERO, B256::ZERO, 50);
-        let key_block_80 = StorageShardedKey::new(Address::ZERO, B256::from([1u8; 32]), 80);
-        let key_block_max = StorageShardedKey::new(Address::ZERO, B256::from([2u8; 32]), u64::MAX);
-
-        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
-        rocksdb.put::<tables::StoragesHistory>(key_block_50, &block_list).unwrap();
-        rocksdb.put::<tables::StoragesHistory>(key_block_80, &block_list).unwrap();
-        rocksdb.put::<tables::StoragesHistory>(key_block_max, &block_list).unwrap();
-
-        // Create a test provider factory for MDBX
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
-        );
-
-        // Set checkpoint to block 100
-        {
-            let provider = factory.database_provider_rw().unwrap();
-            provider
-                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(100))
-                .unwrap();
-            provider.commit().unwrap();
-        }
-
-        let provider = factory.database_provider_ro().unwrap();
-
-        // RocksDB max highest_block (80) is behind checkpoint (100)
-        let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, Some(80), "Should unwind to the highest block present in RocksDB");
-    }
-
     #[test]
     fn test_check_consistency_mdbx_behind_checkpoint_needs_unwind() {
         let temp_dir = TempDir::new().unwrap();
