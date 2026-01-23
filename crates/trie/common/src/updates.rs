@@ -1,6 +1,10 @@
-use crate::{utils::extend_sorted_vec, BranchNodeCompact, HashBuilder, Nibbles};
+use crate::{
+    utils::{extend_sorted_vec, kway_merge_sorted},
+    BranchNodeCompact, HashBuilder, Nibbles,
+};
 use alloc::{
     collections::{btree_map::BTreeMap, btree_set::BTreeSet},
+    sync::Arc,
     vec::Vec,
 };
 use alloy_primitives::{
@@ -23,6 +27,15 @@ pub struct TrieUpdates {
 }
 
 impl TrieUpdates {
+    /// Creates a new `TrieUpdates` with pre-allocated capacity.
+    pub fn with_capacity(account_nodes: usize, storage_tries: usize) -> Self {
+        Self {
+            account_nodes: HashMap::with_capacity_and_hasher(account_nodes, Default::default()),
+            removed_nodes: HashSet::with_capacity_and_hasher(account_nodes / 4, Default::default()),
+            storage_tries: B256Map::with_capacity_and_hasher(storage_tries, Default::default()),
+        }
+    }
+
     /// Returns `true` if the updates are empty.
     pub fn is_empty(&self) -> bool {
         self.account_nodes.is_empty() &&
@@ -194,7 +207,7 @@ impl TrieUpdates {
     }
 
     /// Converts trie updates into [`TrieUpdatesSortedRef`].
-    pub fn into_sorted_ref<'a>(&'a self) -> TrieUpdatesSortedRef<'a> {
+    pub fn into_sorted_ref(&self) -> TrieUpdatesSortedRef<'_> {
         let mut account_nodes = self.account_nodes.iter().collect::<Vec<_>>();
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
@@ -204,7 +217,7 @@ impl TrieUpdates {
             storage_tries: self
                 .storage_tries
                 .iter()
-                .map(|m| (*m.0, m.1.into_sorted_ref().clone()))
+                .map(|m| (*m.0, m.1.into_sorted_ref()))
                 .collect(),
         }
     }
@@ -593,7 +606,10 @@ impl TrieUpdatesSorted {
     /// This merges the account nodes and storage tries from `other` into `self`.
     /// Account nodes are merged and re-sorted, with `other`'s values taking precedence
     /// for duplicate keys.
-    pub fn extend_ref(&mut self, other: &Self) {
+    ///
+    /// Sorts the account nodes after extending. Sorts the storage tries after extending, for each
+    /// storage trie.
+    pub fn extend_ref_and_sort(&mut self, other: &Self) {
         // Extend account nodes
         extend_sorted_vec(&mut self.account_nodes, &other.account_nodes);
 
@@ -610,6 +626,107 @@ impl TrieUpdatesSorted {
     pub fn clear(&mut self) {
         self.account_nodes.clear();
         self.storage_tries.clear();
+    }
+
+    /// Batch-merge sorted trie updates. Iterator yields **newest to oldest**.
+    ///
+    /// For small batches, uses `extend_ref_and_sort` loop.
+    /// For large batches, uses k-way merge for O(n log k) complexity.
+    pub fn merge_batch<T: AsRef<Self> + From<Self>>(iter: impl IntoIterator<Item = T>) -> T {
+        const THRESHOLD: usize = 30;
+
+        let items: alloc::vec::Vec<_> = iter.into_iter().collect();
+        let k = items.len();
+
+        if k == 0 {
+            return Self::default().into();
+        }
+        if k == 1 {
+            return items.into_iter().next().expect("k == 1");
+        }
+
+        if k < THRESHOLD {
+            // Small k: extend loop, oldest-to-newest so newer overrides older.
+            let mut iter = items.iter().rev();
+            let mut acc = iter.next().expect("k > 0").as_ref().clone();
+            for next in iter {
+                acc.extend_ref_and_sort(next.as_ref());
+            }
+            return acc.into();
+        }
+
+        // Large k: k-way merge.
+        let account_nodes =
+            kway_merge_sorted(items.iter().map(|i| i.as_ref().account_nodes.as_slice()));
+
+        struct StorageAcc<'a> {
+            is_deleted: bool,
+            sealed: bool,
+            slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
+        }
+
+        let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
+
+        for item in &items {
+            for (addr, storage) in &item.as_ref().storage_tries {
+                let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
+                    is_deleted: false,
+                    sealed: false,
+                    slices: Vec::new(),
+                });
+
+                if entry.sealed {
+                    continue;
+                }
+
+                entry.slices.push(storage.storage_nodes.as_slice());
+
+                if storage.is_deleted {
+                    entry.is_deleted = true;
+                    entry.sealed = true;
+                }
+            }
+        }
+
+        let storage_tries = acc
+            .into_iter()
+            .map(|(addr, entry)| {
+                let storage_nodes = kway_merge_sorted(entry.slices);
+                (addr, StorageTrieUpdatesSorted { is_deleted: entry.is_deleted, storage_nodes })
+            })
+            .collect();
+
+        Self { account_nodes, storage_tries }.into()
+    }
+
+    /// Parallel batch-merge sorted trie updates. Slice is **oldest to newest**.
+    ///
+    /// This is more efficient than sequential `extend_ref` calls when merging many updates,
+    /// as it processes all updates in parallel with tree reduction using divide-and-conquer.
+    #[cfg(feature = "rayon")]
+    pub fn merge_parallel(updates: &[Arc<Self>]) -> Self {
+        fn parallel_merge_tree(updates: &[Arc<TrieUpdatesSorted>]) -> TrieUpdatesSorted {
+            match updates.len() {
+                0 => TrieUpdatesSorted::default(),
+                1 => updates[0].as_ref().clone(),
+                2 => {
+                    let mut acc = updates[0].as_ref().clone();
+                    acc.extend_ref_and_sort(&updates[1]);
+                    acc
+                }
+                n => {
+                    let mid = n / 2;
+                    let (mut left, right) = rayon::join(
+                        || parallel_merge_tree(&updates[..mid]),
+                        || parallel_merge_tree(&updates[mid..]),
+                    );
+                    left.extend_ref_and_sort(&right);
+                    left
+                }
+            }
+        }
+
+        parallel_merge_tree(updates)
     }
 }
 
@@ -702,6 +819,22 @@ impl StorageTrieUpdatesSorted {
         extend_sorted_vec(&mut self.storage_nodes, &other.storage_nodes);
         self.is_deleted = self.is_deleted || other.is_deleted;
     }
+
+    /// Batch-merge sorted storage trie updates. Iterator yields **newest to oldest**.
+    /// If any update is deleted, older data is discarded.
+    pub fn merge_batch<'a>(updates: impl IntoIterator<Item = &'a Self>) -> Self {
+        let updates: Vec<_> = updates.into_iter().collect();
+        if updates.is_empty() {
+            return Self::default();
+        }
+
+        // Discard updates older than the first deletion since the trie was wiped at that point.
+        let del_idx = updates.iter().position(|u| u.is_deleted);
+        let relevant = del_idx.map_or(&updates[..], |idx| &updates[..=idx]);
+        let storage_nodes = kway_merge_sorted(relevant.iter().map(|u| u.storage_nodes.as_slice()));
+
+        Self { is_deleted: del_idx.is_some(), storage_nodes }
+    }
 }
 
 /// Excludes empty nibbles from the given iterator.
@@ -743,7 +876,7 @@ mod tests {
         // Test extending with empty updates
         let mut updates1 = TrieUpdatesSorted::default();
         let updates2 = TrieUpdatesSorted::default();
-        updates1.extend_ref(&updates2);
+        updates1.extend_ref_and_sort(&updates2);
         assert_eq!(updates1.account_nodes.len(), 0);
         assert_eq!(updates1.storage_tries.len(), 0);
 
@@ -762,7 +895,7 @@ mod tests {
             ],
             storage_tries: B256Map::default(),
         };
-        updates1.extend_ref(&updates2);
+        updates1.extend_ref_and_sort(&updates2);
         assert_eq!(updates1.account_nodes.len(), 3);
         // Should be sorted: 0x01, 0x02, 0x03
         assert_eq!(updates1.account_nodes[0].0, Nibbles::from_nibbles_unchecked([0x01]));
@@ -798,7 +931,7 @@ mod tests {
                 (hashed_address2, storage_trie1),
             ]),
         };
-        updates1.extend_ref(&updates2);
+        updates1.extend_ref_and_sort(&updates2);
         assert_eq!(updates1.storage_tries.len(), 2);
         assert!(updates1.storage_tries.contains_key(&hashed_address1));
         assert!(updates1.storage_tries.contains_key(&hashed_address2));
@@ -1144,11 +1277,134 @@ pub mod serde_bincode_compat {
         }
     }
 
+    /// Bincode-compatible [`super::TrieUpdatesSorted`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_trie_common::{serde_bincode_compat, updates::TrieUpdatesSorted};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::updates::TrieUpdatesSorted")]
+    ///     trie_updates: TrieUpdatesSorted,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TrieUpdatesSorted<'a> {
+        account_nodes: Cow<'a, [(Nibbles, Option<BranchNodeCompact>)]>,
+        storage_tries: B256Map<StorageTrieUpdatesSorted<'a>>,
+    }
+
+    impl<'a> From<&'a super::TrieUpdatesSorted> for TrieUpdatesSorted<'a> {
+        fn from(value: &'a super::TrieUpdatesSorted) -> Self {
+            Self {
+                account_nodes: Cow::Borrowed(&value.account_nodes),
+                storage_tries: value.storage_tries.iter().map(|(k, v)| (*k, v.into())).collect(),
+            }
+        }
+    }
+
+    impl<'a> From<TrieUpdatesSorted<'a>> for super::TrieUpdatesSorted {
+        fn from(value: TrieUpdatesSorted<'a>) -> Self {
+            Self {
+                account_nodes: value.account_nodes.into_owned(),
+                storage_tries: value
+                    .storage_tries
+                    .into_iter()
+                    .map(|(k, v)| (k, v.into()))
+                    .collect(),
+            }
+        }
+    }
+
+    impl SerializeAs<super::TrieUpdatesSorted> for TrieUpdatesSorted<'_> {
+        fn serialize_as<S>(
+            source: &super::TrieUpdatesSorted,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            TrieUpdatesSorted::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::TrieUpdatesSorted> for TrieUpdatesSorted<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::TrieUpdatesSorted, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            TrieUpdatesSorted::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    /// Bincode-compatible [`super::StorageTrieUpdatesSorted`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_trie_common::{serde_bincode_compat, updates::StorageTrieUpdatesSorted};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::updates::StorageTrieUpdatesSorted")]
+    ///     trie_updates: StorageTrieUpdatesSorted,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct StorageTrieUpdatesSorted<'a> {
+        is_deleted: bool,
+        storage_nodes: Cow<'a, [(Nibbles, Option<BranchNodeCompact>)]>,
+    }
+
+    impl<'a> From<&'a super::StorageTrieUpdatesSorted> for StorageTrieUpdatesSorted<'a> {
+        fn from(value: &'a super::StorageTrieUpdatesSorted) -> Self {
+            Self {
+                is_deleted: value.is_deleted,
+                storage_nodes: Cow::Borrowed(&value.storage_nodes),
+            }
+        }
+    }
+
+    impl<'a> From<StorageTrieUpdatesSorted<'a>> for super::StorageTrieUpdatesSorted {
+        fn from(value: StorageTrieUpdatesSorted<'a>) -> Self {
+            Self { is_deleted: value.is_deleted, storage_nodes: value.storage_nodes.into_owned() }
+        }
+    }
+
+    impl SerializeAs<super::StorageTrieUpdatesSorted> for StorageTrieUpdatesSorted<'_> {
+        fn serialize_as<S>(
+            source: &super::StorageTrieUpdatesSorted,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            StorageTrieUpdatesSorted::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::StorageTrieUpdatesSorted> for StorageTrieUpdatesSorted<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::StorageTrieUpdatesSorted, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            StorageTrieUpdatesSorted::deserialize(deserializer).map(Into::into)
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use crate::{
             serde_bincode_compat,
-            updates::{StorageTrieUpdates, TrieUpdates},
+            updates::{
+                StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted,
+            },
             BranchNodeCompact, Nibbles,
         };
         use alloy_primitives::B256;
@@ -1215,6 +1471,78 @@ pub mod serde_bincode_compat {
                 Nibbles::from_nibbles_unchecked([0x0d, 0x0e, 0x0a, 0x0d]),
                 BranchNodeCompact::default(),
             );
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_trie_updates_sorted_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::updates::TrieUpdatesSorted")]
+                trie_updates: TrieUpdatesSorted,
+            }
+
+            let mut data = Data { trie_updates: TrieUpdatesSorted::default() };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.trie_updates.account_nodes.push((
+                Nibbles::from_nibbles_unchecked([0x0d, 0x0e, 0x0a, 0x0d]),
+                Some(BranchNodeCompact::default()),
+            ));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.trie_updates
+                .account_nodes
+                .push((Nibbles::from_nibbles_unchecked([0x0f, 0x0f, 0x0f, 0x0f]), None));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.trie_updates
+                .storage_tries
+                .insert(B256::default(), StorageTrieUpdatesSorted::default());
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_storage_trie_updates_sorted_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::updates::StorageTrieUpdatesSorted")]
+                trie_updates: StorageTrieUpdatesSorted,
+            }
+
+            let mut data = Data { trie_updates: StorageTrieUpdatesSorted::default() };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.trie_updates.storage_nodes.push((
+                Nibbles::from_nibbles_unchecked([0x0d, 0x0e, 0x0a, 0x0d]),
+                Some(BranchNodeCompact::default()),
+            ));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.trie_updates
+                .storage_nodes
+                .push((Nibbles::from_nibbles_unchecked([0x0a, 0x0a, 0x0a, 0x0a]), None));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.trie_updates.is_deleted = true;
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);

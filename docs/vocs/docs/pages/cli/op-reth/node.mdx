@@ -530,6 +530,11 @@ Gas Price Oracle:
 
           [default: 30s]
 
+      --testing.skip-invalid-transactions
+          Skip invalid transactions in `testing_buildBlockV1` instead of failing.
+
+          When enabled, transactions that fail execution will be skipped, and all subsequent transactions from the same sender will also be skipped.
+
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
           Max number of transaction in the pending sub-pool
@@ -824,6 +829,11 @@ Pruning:
       --full
           Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored
 
+      --minimal
+          Run minimal storage mode with maximum pruning and smaller static files.
+
+          This mode configures the node to use minimal disk space by: - Fully pruning sender recovery, transaction lookup, receipts - Leaving 10,064 blocks for account, storage history and block bodies - Using 10,000 blocks per static file segment
+
       --prune.block-interval <BLOCK_INTERVAL>
           Minimum pruning interval measured in blocks
 
@@ -886,6 +896,36 @@ Pruning:
 
       --prune.bodies.before <BLOCK_NUMBER>
           Prune storage history before the specified block number. The specified block number is not pruned
+
+RocksDB:
+      --rocksdb.all
+          Route all supported tables to `RocksDB` instead of MDBX.
+
+          This enables `RocksDB` for `tx-hash`, `storages-history`, and `account-history` tables. Cannot be combined with individual flags set to false.
+
+      --rocksdb.tx-hash <TX_HASH>
+          Route tx hash -> number table to `RocksDB` instead of MDBX.
+
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+
+          [default: false]
+          [possible values: true, false]
+
+      --rocksdb.storages-history <STORAGES_HISTORY>
+          Route storages history tables to `RocksDB` instead of MDBX.
+
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+
+          [default: false]
+          [possible values: true, false]
+
+      --rocksdb.account-history <ACCOUNT_HISTORY>
+          Route account history tables to `RocksDB` instead of MDBX.
+
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+
+          [default: false]
+          [possible values: true, false]
 
 Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
@@ -962,6 +1002,9 @@ Engine:
       --engine.enable-proof-v2
           Enable V2 storage proofs for state root calculations
 
+      --engine.disable-cache-metrics
+          Disable cache metrics recording, which can take up to 50ms with large cached state
+
 ERA:
       --era.enable
           Enable import from ERA1 files
@@ -993,26 +1036,48 @@ Static Files:
       --static-files.blocks-per-file.account-change-sets <BLOCKS_PER_FILE_ACCOUNT_CHANGE_SETS>
           Number of blocks per file for the account changesets segment
 
-      --static-files.receipts
+      --static-files.blocks-per-file.storage-change-sets <BLOCKS_PER_FILE_STORAGE_CHANGE_SETS>
+          Number of blocks per file for the storage changesets segment
+
+      --static-files.receipts <RECEIPTS>
           Store receipts in static files instead of the database.
 
           When enabled, receipts will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-      --static-files.transaction-senders
+          [default: false]
+          [possible values: true, false]
+
+      --static-files.transaction-senders <TRANSACTION_SENDERS>
           Store transaction senders in static files instead of the database.
 
           When enabled, transaction senders will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
-      --static-files.account-change-sets
+          [default: false]
+          [possible values: true, false]
+
+      --static-files.account-change-sets <ACCOUNT_CHANGESETS>
           Store account changesets in static files.
 
           When enabled, account changesets will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
+          [default: false]
+          [possible values: true, false]
+
+      --static-files.storage-change-sets <STORAGE_CHANGESETS>
+          Store storage changesets in static files.
+
+          When enabled, storage changesets will be written to static files on disk instead of the database.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
+          [default: false]
+          [possible values: true, false]
 
 Rollup:
       --rollup.sequencer <SEQUENCER>
@@ -1134,6 +1199,24 @@ Logging:
 
           [default: always]
 
+      --logs-otlp[=<URL>]
+          Enable `Opentelemetry` logs export to an OTLP endpoint.
+
+          If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/logs` - gRPC: `http://localhost:4317`
+
+          Example: --logs-otlp=http://collector:4318/v1/logs
+
+          [env: OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=]
+
+      --logs-otlp.filter <FILTER>
+          Set a filter directive for the OTLP logs exporter. This controls the verbosity of logs sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
+
+          Example: --logs-otlp.filter=info,reth=debug
+
+          Defaults to INFO if not specified.
+
+          [default: info]
+
 Display:
   -v, --verbosity...
           Set the minimum log level.
@@ -1158,9 +1241,9 @@ Tracing:
           [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
 
       --tracing-otlp-protocol <PROTOCOL>
-          OTLP transport protocol to use for exporting traces.
+          OTLP transport protocol to use for exporting traces and logs.
 
-          - `http`: expects endpoint path to end with `/v1/traces` - `grpc`: expects endpoint without a path
+          - `http`: expects endpoint path to end with `/v1/traces` or `/v1/logs` - `grpc`: expects endpoint without a path
 
           Defaults to HTTP if not specified.
 

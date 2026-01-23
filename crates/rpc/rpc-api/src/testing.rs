@@ -5,32 +5,24 @@
 //! disabled by default and never be exposed on public-facing RPC without an
 //! explicit operator flag.
 
-use alloy_primitives::{Bytes, B256};
-use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV5, PayloadAttributes as EthPayloadAttributes,
-};
+use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV5;
 use jsonrpsee::proc_macros::rpc;
-use serde::{Deserialize, Serialize};
 
-/// Capability string for `testing_buildBlockV1`.
-pub const TESTING_BUILD_BLOCK_V1: &str = "testing_buildBlockV1";
-
-/// Request payload for `testing_buildBlockV1`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TestingBuildBlockRequestV1 {
-    /// Parent block hash of the block to build.
-    pub parent_block_hash: B256,
-    /// Payload attributes (Cancun version).
-    pub payload_attributes: EthPayloadAttributes,
-    /// Raw signed transactions to force-include in order.
-    pub transactions: Vec<Bytes>,
-    /// Optional extra data for the block header.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub extra_data: Option<Bytes>,
-}
+pub use alloy_rpc_types_engine::{TestingBuildBlockRequestV1, TESTING_BUILD_BLOCK_V1};
 
 /// Testing RPC interface for building a block in a single call.
+///
+/// # Enabling
+///
+/// This namespace is disabled by default for security reasons. To enable it,
+/// add `testing` to the `--http.api` flag:
+///
+/// ```sh
+/// reth node --http --http.api eth,testing
+/// ```
+///
+/// **Warning:** Never expose this on public-facing RPC endpoints without proper
+/// authentication.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "testing"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "testing"))]
 pub trait TestingApi {

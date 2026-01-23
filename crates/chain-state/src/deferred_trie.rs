@@ -37,12 +37,19 @@ pub struct ComputedTrieData {
 
 /// Trie input bundled with its anchor hash.
 ///
-/// This is used to store the trie input and anchor hash for a block together.
+/// The `trie_input` contains the **cumulative** overlay of all in-memory ancestor blocks,
+/// not just this block's changes. Child blocks reuse the parent's overlay in O(1) by
+/// cloning the Arc-wrapped data.
+///
+/// The `anchor_hash` is metadata indicating which persisted base state this overlay
+/// sits on top of. It is CRITICAL for overlay reuse decisions: an overlay built on top
+/// of Anchor A cannot be reused for a block anchored to Anchor B, as it would result
+/// in an incorrect state.
 #[derive(Clone, Debug)]
 pub struct AnchoredTrieInput {
     /// The persisted ancestor hash this trie input is anchored to.
     pub anchor_hash: B256,
-    /// Trie input constructed from in-memory overlays.
+    /// Cumulative trie input overlay from all in-memory ancestors.
     pub trie_input: Arc<TrieInputSorted>,
 }
 
@@ -139,8 +146,9 @@ impl DeferredTrieData {
     ///
     /// # Process
     /// 1. Sort the current block's hashed state and trie updates
-    /// 2. Merge ancestor overlays (oldest -> newest, so later state takes precedence)
-    /// 3. Extend the merged overlay with this block's sorted data
+    /// 2. Reuse parent's cached overlay if available (O(1) - the common case)
+    /// 3. Otherwise, rebuild overlay from ancestors (rare fallback)
+    /// 4. Extend the overlay with this block's sorted data
     ///
     /// Used by both the async background task and the synchronous fallback path.
     ///
@@ -148,36 +156,77 @@ impl DeferredTrieData {
     /// * `hashed_state` - Unsorted hashed post-state (account/storage changes) from execution
     /// * `trie_updates` - Unsorted trie node updates from state root computation
     /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
-    /// * `ancestors` - Deferred trie data from ancestor blocks for merging
+    /// * `ancestors` - Deferred trie data from ancestor blocks for merging (oldest -> newest)
     pub fn sort_and_build_trie_input(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
         anchor_hash: B256,
         ancestors: &[Self],
     ) -> ComputedTrieData {
-        let sorted_hashed_state = match Arc::try_unwrap(hashed_state) {
-            Ok(state) => state.into_sorted(),
-            Err(arc) => arc.clone_into_sorted(),
+        #[cfg(feature = "rayon")]
+        let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
+            || match Arc::try_unwrap(hashed_state) {
+                Ok(state) => state.into_sorted(),
+                Err(arc) => arc.clone_into_sorted(),
+            },
+            || match Arc::try_unwrap(trie_updates) {
+                Ok(updates) => updates.into_sorted(),
+                Err(arc) => arc.clone_into_sorted(),
+            },
+        );
+
+        #[cfg(not(feature = "rayon"))]
+        let (sorted_hashed_state, sorted_trie_updates) = (
+            match Arc::try_unwrap(hashed_state) {
+                Ok(state) => state.into_sorted(),
+                Err(arc) => arc.clone_into_sorted(),
+            },
+            match Arc::try_unwrap(trie_updates) {
+                Ok(updates) => updates.into_sorted(),
+                Err(arc) => arc.clone_into_sorted(),
+            },
+        );
+
+        // Reuse parent's overlay if available and anchors match.
+        // We can only reuse the parent's overlay if it was built on top of the same
+        // persisted anchor. If the anchor has changed (e.g., due to persistence),
+        // the parent's overlay is relative to an old state and cannot be used.
+        let overlay = if let Some(parent) = ancestors.last() {
+            let parent_data = parent.wait_cloned();
+
+            match &parent_data.anchored_trie_input {
+                // Case 1: Parent has cached overlay AND anchors match.
+                Some(AnchoredTrieInput { anchor_hash: parent_anchor, trie_input })
+                    if *parent_anchor == anchor_hash =>
+                {
+                    // O(1): Reuse parent's overlay, extend with current block's data.
+                    let mut overlay = TrieInputSorted::new(
+                        Arc::clone(&trie_input.nodes),
+                        Arc::clone(&trie_input.state),
+                        Default::default(), // prefix_sets are per-block, not cumulative
+                    );
+                    // Only trigger COW clone if there's actually data to add.
+                    if !sorted_hashed_state.is_empty() {
+                        Arc::make_mut(&mut overlay.state).extend_ref_and_sort(&sorted_hashed_state);
+                    }
+                    if !sorted_trie_updates.is_empty() {
+                        Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(&sorted_trie_updates);
+                    }
+                    overlay
+                }
+                // Case 2: Parent exists but anchor mismatch or no cached overlay.
+                // We must rebuild from the ancestors list (which only contains unpersisted blocks).
+                _ => Self::merge_ancestors_into_overlay(
+                    ancestors,
+                    &sorted_hashed_state,
+                    &sorted_trie_updates,
+                ),
+            }
+        } else {
+            // Case 3: No in-memory ancestors (first block after persisted anchor).
+            // Build overlay with just this block's data.
+            Self::merge_ancestors_into_overlay(&[], &sorted_hashed_state, &sorted_trie_updates)
         };
-        let sorted_trie_updates = match Arc::try_unwrap(trie_updates) {
-            Ok(updates) => updates.into_sorted(),
-            Err(arc) => arc.clone_into_sorted(),
-        };
-
-        // Build overlay by merging ancestors oldest-to-newest, then this block's data last.
-        // Later entries take precedence, so this block's state overwrites any ancestor conflicts.
-        let mut overlay = TrieInputSorted::default();
-        let state_mut = Arc::make_mut(&mut overlay.state);
-        let nodes_mut = Arc::make_mut(&mut overlay.nodes);
-
-        for ancestor in ancestors {
-            let ancestor_data = ancestor.wait_cloned();
-            state_mut.extend_ref(ancestor_data.hashed_state.as_ref());
-            nodes_mut.extend_ref(ancestor_data.trie_updates.as_ref());
-        }
-
-        state_mut.extend_ref(&sorted_hashed_state);
-        nodes_mut.extend_ref(&sorted_trie_updates);
 
         ComputedTrieData::with_trie_input(
             Arc::new(sorted_hashed_state),
@@ -185,6 +234,83 @@ impl DeferredTrieData {
             anchor_hash,
             Arc::new(overlay),
         )
+    }
+
+    /// Merge all ancestors and current block's data into a single overlay.
+    ///
+    /// This is a rare fallback path, only used when no ancestor has a cached
+    /// `anchored_trie_input` (e.g., blocks created via alternative constructors).
+    /// In normal operation, the parent always has a cached overlay and this
+    /// function is never called.
+    ///
+    /// When the `rayon` feature is enabled, uses parallel collection and merge:
+    /// 1. Collects ancestor data in parallel (each `wait_cloned()` may compute)
+    /// 2. Merges hashed state and trie updates in parallel with each other
+    /// 3. Uses tree reduction within each merge for O(log n) depth
+    #[cfg(feature = "rayon")]
+    fn merge_ancestors_into_overlay(
+        ancestors: &[Self],
+        sorted_hashed_state: &HashedPostStateSorted,
+        sorted_trie_updates: &TrieUpdatesSorted,
+    ) -> TrieInputSorted {
+        // Early exit: no ancestors means just wrap current block's data
+        if ancestors.is_empty() {
+            return TrieInputSorted::new(
+                Arc::new(sorted_trie_updates.clone()),
+                Arc::new(sorted_hashed_state.clone()),
+                Default::default(),
+            );
+        }
+
+        // Collect ancestor data, unzipping states and updates into Arc slices
+        let (states, updates): (Vec<_>, Vec<_>) = ancestors
+            .iter()
+            .map(|a| {
+                let data = a.wait_cloned();
+                (data.hashed_state, data.trie_updates)
+            })
+            .unzip();
+
+        // Merge state and nodes in parallel with each other using tree reduction
+        let (state, nodes) = rayon::join(
+            || {
+                let mut merged = HashedPostStateSorted::merge_parallel(&states);
+                merged.extend_ref_and_sort(sorted_hashed_state);
+                merged
+            },
+            || {
+                let mut merged = TrieUpdatesSorted::merge_parallel(&updates);
+                merged.extend_ref_and_sort(sorted_trie_updates);
+                merged
+            },
+        );
+
+        TrieInputSorted::new(Arc::new(nodes), Arc::new(state), Default::default())
+    }
+
+    /// Merge all ancestors and current block's data into a single overlay (sequential fallback).
+    #[cfg(not(feature = "rayon"))]
+    fn merge_ancestors_into_overlay(
+        ancestors: &[Self],
+        sorted_hashed_state: &HashedPostStateSorted,
+        sorted_trie_updates: &TrieUpdatesSorted,
+    ) -> TrieInputSorted {
+        let mut overlay = TrieInputSorted::default();
+
+        let state_mut = Arc::make_mut(&mut overlay.state);
+        let nodes_mut = Arc::make_mut(&mut overlay.nodes);
+
+        for ancestor in ancestors {
+            let ancestor_data = ancestor.wait_cloned();
+            state_mut.extend_ref_and_sort(ancestor_data.hashed_state.as_ref());
+            nodes_mut.extend_ref_and_sort(ancestor_data.trie_updates.as_ref());
+        }
+
+        // Extend with current block's sorted data last (takes precedence)
+        state_mut.extend_ref_and_sort(sorted_hashed_state);
+        nodes_mut.extend_ref_and_sort(sorted_trie_updates);
+
+        overlay
     }
 
     /// Returns trie data, computing synchronously if the async task hasn't completed.
@@ -221,6 +347,11 @@ impl DeferredTrieData {
                     &inputs.ancestors,
                 );
                 *state = DeferredState::Ready(computed.clone());
+
+                // Release lock before inputs (and its ancestors) drop to avoid holding it
+                // while their potential last Arc refs drop (which could trigger recursive locking)
+                drop(state);
+
                 computed
             }
         }
@@ -440,5 +571,366 @@ mod tests {
         assert_eq!(overlay_state.len(), 1);
         let (_, account) = &overlay_state[0];
         assert_eq!(account.unwrap().nonce, 2);
+    }
+
+    /// Helper to create a ready block with anchored trie input containing specific state.
+    fn ready_block_with_state(
+        anchor_hash: B256,
+        accounts: Vec<(B256, Option<Account>)>,
+    ) -> DeferredTrieData {
+        let hashed_state = Arc::new(HashedPostStateSorted::new(accounts, B256Map::default()));
+        let trie_updates = Arc::default();
+        let mut overlay = TrieInputSorted::default();
+        Arc::make_mut(&mut overlay.state).extend_ref_and_sort(hashed_state.as_ref());
+
+        DeferredTrieData::ready(ComputedTrieData {
+            hashed_state,
+            trie_updates,
+            anchored_trie_input: Some(AnchoredTrieInput {
+                anchor_hash,
+                trie_input: Arc::new(overlay),
+            }),
+        })
+    }
+
+    /// Verifies that first block after anchor (no ancestors) creates empty base overlay.
+    #[test]
+    fn first_block_after_anchor_creates_empty_base() {
+        let anchor = B256::with_last_byte(1);
+        let key = B256::with_last_byte(42);
+        let account = Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None };
+
+        // First block after anchor - no ancestors
+        let first_block = DeferredTrieData::pending(
+            Arc::new(HashedPostState::default().with_accounts([(key, Some(account))])),
+            Arc::new(TrieUpdates::default()),
+            anchor,
+            vec![], // No ancestors
+        );
+
+        let result = first_block.wait_cloned();
+
+        // Should have overlay with just this block's data
+        let overlay = result.anchored_trie_input.as_ref().unwrap();
+        assert_eq!(overlay.anchor_hash, anchor);
+        assert_eq!(overlay.trie_input.state.accounts.len(), 1);
+        let (found_key, found_account) = &overlay.trie_input.state.accounts[0];
+        assert_eq!(*found_key, key);
+        assert_eq!(found_account.unwrap().nonce, 1);
+    }
+
+    /// Verifies that parent's overlay is reused regardless of anchor.
+    #[test]
+    fn reuses_parent_overlay() {
+        let anchor = B256::with_last_byte(1);
+        let key = B256::with_last_byte(42);
+        let account = Account { nonce: 100, balance: U256::ZERO, bytecode_hash: None };
+
+        // Create parent with anchored trie input
+        let parent = ready_block_with_state(anchor, vec![(key, Some(account))]);
+
+        // Create child - should reuse parent's overlay
+        let child = DeferredTrieData::pending(
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+            anchor,
+            vec![parent],
+        );
+
+        let result = child.wait_cloned();
+
+        // Verify parent's account is in the overlay
+        let overlay = result.anchored_trie_input.as_ref().unwrap();
+        assert_eq!(overlay.anchor_hash, anchor);
+        assert_eq!(overlay.trie_input.state.accounts.len(), 1);
+        let (found_key, found_account) = &overlay.trie_input.state.accounts[0];
+        assert_eq!(*found_key, key);
+        assert_eq!(found_account.unwrap().nonce, 100);
+    }
+
+    /// Verifies that parent's overlay is NOT reused when anchor changes (after persist).
+    /// The overlay data is dependent on the anchor, so it must be rebuilt from the
+    /// remaining ancestors.
+    #[test]
+    fn rebuilds_overlay_when_anchor_changes() {
+        let old_anchor = B256::with_last_byte(1);
+        let new_anchor = B256::with_last_byte(2);
+        let key = B256::with_last_byte(42);
+        let account = Account { nonce: 50, balance: U256::ZERO, bytecode_hash: None };
+
+        // Create parent with OLD anchor
+        let parent = ready_block_with_state(old_anchor, vec![(key, Some(account))]);
+
+        // Create child with NEW anchor (simulates after persist)
+        // Should NOT reuse parent's overlay because anchor changed
+        let child = DeferredTrieData::pending(
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+            new_anchor,
+            vec![parent],
+        );
+
+        let result = child.wait_cloned();
+
+        // Verify result uses new anchor
+        let overlay = result.anchored_trie_input.as_ref().unwrap();
+        assert_eq!(overlay.anchor_hash, new_anchor);
+
+        // Crucially, since we provided `parent` in ancestors but it has a different anchor,
+        // the code falls back to `merge_ancestors_into_overlay`.
+        // `merge_ancestors_into_overlay` reads `parent.hashed_state` (which has the account).
+        // So the account IS present, but it was obtained via REBUILD, not REUSE.
+        // We can check `DEFERRED_TRIE_METRICS` if we want to be sure, but functionally:
+        assert_eq!(overlay.trie_input.state.accounts.len(), 1);
+        let (found_key, found_account) = &overlay.trie_input.state.accounts[0];
+        assert_eq!(*found_key, key);
+        assert_eq!(found_account.unwrap().nonce, 50);
+    }
+
+    /// Verifies that parent without `anchored_trie_input` triggers rebuild path.
+    #[test]
+    fn rebuilds_when_parent_has_no_anchored_input() {
+        let anchor = B256::with_last_byte(1);
+        let key = B256::with_last_byte(42);
+        let account = Account { nonce: 25, balance: U256::ZERO, bytecode_hash: None };
+
+        // Create parent WITHOUT anchored trie input (e.g., from without_trie_input constructor)
+        let parent_state =
+            HashedPostStateSorted::new(vec![(key, Some(account))], B256Map::default());
+        let parent = DeferredTrieData::ready(ComputedTrieData {
+            hashed_state: Arc::new(parent_state),
+            trie_updates: Arc::default(),
+            anchored_trie_input: None, // No anchored input
+        });
+
+        // Create child - should rebuild from parent's hashed_state
+        let child = DeferredTrieData::pending(
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+            anchor,
+            vec![parent],
+        );
+
+        let result = child.wait_cloned();
+
+        // Verify overlay is built and contains parent's data
+        let overlay = result.anchored_trie_input.as_ref().unwrap();
+        assert_eq!(overlay.anchor_hash, anchor);
+        assert_eq!(overlay.trie_input.state.accounts.len(), 1);
+    }
+
+    /// Verifies that a chain of blocks with matching anchors builds correct cumulative overlay.
+    #[test]
+    fn chain_of_blocks_builds_cumulative_overlay() {
+        let anchor = B256::with_last_byte(1);
+        let key1 = B256::with_last_byte(1);
+        let key2 = B256::with_last_byte(2);
+        let key3 = B256::with_last_byte(3);
+
+        // Block 1: sets account at key1
+        let block1 = ready_block_with_state(
+            anchor,
+            vec![(key1, Some(Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None }))],
+        );
+
+        // Block 2: adds account at key2, ancestor is block1
+        let block2_hashed = HashedPostState::default().with_accounts([(
+            key2,
+            Some(Account { nonce: 2, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
+        let block2 = DeferredTrieData::pending(
+            Arc::new(block2_hashed),
+            Arc::new(TrieUpdates::default()),
+            anchor,
+            vec![block1.clone()],
+        );
+        // Compute block2's trie data
+        let block2_computed = block2.wait_cloned();
+        let block2_ready = DeferredTrieData::ready(block2_computed);
+
+        // Block 3: adds account at key3, ancestor is block2 (which includes block1)
+        let block3_hashed = HashedPostState::default().with_accounts([(
+            key3,
+            Some(Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
+        let block3 = DeferredTrieData::pending(
+            Arc::new(block3_hashed),
+            Arc::new(TrieUpdates::default()),
+            anchor,
+            vec![block1, block2_ready],
+        );
+
+        let result = block3.wait_cloned();
+
+        // Verify all three accounts are in the cumulative overlay
+        let overlay = result.anchored_trie_input.as_ref().unwrap();
+        assert_eq!(overlay.trie_input.state.accounts.len(), 3);
+
+        // Accounts should be sorted by key (B256 ordering)
+        let accounts = &overlay.trie_input.state.accounts;
+        assert!(accounts.iter().any(|(k, a)| *k == key1 && a.unwrap().nonce == 1));
+        assert!(accounts.iter().any(|(k, a)| *k == key2 && a.unwrap().nonce == 2));
+        assert!(accounts.iter().any(|(k, a)| *k == key3 && a.unwrap().nonce == 3));
+    }
+
+    /// Verifies that child block's state overwrites parent's state for the same key.
+    #[test]
+    fn child_state_overwrites_parent() {
+        let anchor = B256::with_last_byte(1);
+        let key = B256::with_last_byte(42);
+
+        // Parent sets nonce to 10
+        let parent = ready_block_with_state(
+            anchor,
+            vec![(key, Some(Account { nonce: 10, balance: U256::ZERO, bytecode_hash: None }))],
+        );
+
+        // Child overwrites nonce to 99
+        let child_hashed = HashedPostState::default().with_accounts([(
+            key,
+            Some(Account { nonce: 99, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
+        let child = DeferredTrieData::pending(
+            Arc::new(child_hashed),
+            Arc::new(TrieUpdates::default()),
+            anchor,
+            vec![parent],
+        );
+
+        let result = child.wait_cloned();
+
+        // Verify child's value wins (extend_ref uses later value)
+        let overlay = result.anchored_trie_input.as_ref().unwrap();
+        // Note: extend_ref may result in duplicate keys; check the last occurrence
+        let accounts = &overlay.trie_input.state.accounts;
+        let last_account = accounts.iter().rfind(|(k, _)| *k == key).unwrap();
+        assert_eq!(last_account.1.unwrap().nonce, 99);
+    }
+
+    /// Stress test: verify O(N) behavior by building a chain of many blocks.
+    /// This test ensures the fix doesn't regress - previously this would be O(N²).
+    #[test]
+    fn long_chain_builds_in_linear_time() {
+        let anchor = B256::with_last_byte(1);
+        let num_blocks = 50; // Enough to notice O(N²) vs O(N) difference
+
+        let mut ancestors: Vec<DeferredTrieData> = Vec::new();
+
+        let start = Instant::now();
+
+        for i in 0..num_blocks {
+            let key = B256::with_last_byte(i as u8);
+            let account = Account { nonce: i as u64, balance: U256::ZERO, bytecode_hash: None };
+            let hashed = HashedPostState::default().with_accounts([(key, Some(account))]);
+
+            let block = DeferredTrieData::pending(
+                Arc::new(hashed),
+                Arc::new(TrieUpdates::default()),
+                anchor,
+                ancestors.clone(),
+            );
+
+            // Compute and add to ancestors for next iteration
+            let computed = block.wait_cloned();
+            ancestors.push(DeferredTrieData::ready(computed));
+        }
+
+        let elapsed = start.elapsed();
+
+        // With O(N) fix, 50 blocks should complete quickly (< 1 second)
+        // With O(N²), this would take significantly longer
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "Chain of {num_blocks} blocks took {:?}, possible O(N²) regression",
+            elapsed
+        );
+
+        // Verify final overlay has all accounts
+        let final_result = ancestors.last().unwrap().wait_cloned();
+        let overlay = final_result.anchored_trie_input.as_ref().unwrap();
+        assert_eq!(overlay.trie_input.state.accounts.len(), num_blocks);
+    }
+
+    /// Verifies that a multi-ancestor overlay is rebuilt when anchor changes.
+    /// This simulates the "persist prefix then keep building" scenario where:
+    /// 1. A chain of blocks is built with anchor A
+    /// 2. Some blocks are persisted, changing anchor to B
+    /// 3. New blocks must rebuild the overlay from the remaining ancestors
+    #[test]
+    fn multi_ancestor_overlay_rebuilt_after_anchor_change() {
+        let old_anchor = B256::with_last_byte(1);
+        let new_anchor = B256::with_last_byte(2);
+        let key1 = B256::with_last_byte(1);
+        let key2 = B256::with_last_byte(2);
+        let key3 = B256::with_last_byte(3);
+        let key4 = B256::with_last_byte(4);
+
+        // Build a chain of 3 blocks with old_anchor
+        let block1 = ready_block_with_state(
+            old_anchor,
+            vec![(key1, Some(Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None }))],
+        );
+
+        let block2_hashed = HashedPostState::default().with_accounts([(
+            key2,
+            Some(Account { nonce: 2, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
+        let block2 = DeferredTrieData::pending(
+            Arc::new(block2_hashed),
+            Arc::new(TrieUpdates::default()),
+            old_anchor,
+            vec![block1.clone()],
+        );
+        let block2_ready = DeferredTrieData::ready(block2.wait_cloned());
+
+        let block3_hashed = HashedPostState::default().with_accounts([(
+            key3,
+            Some(Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
+        let block3 = DeferredTrieData::pending(
+            Arc::new(block3_hashed),
+            Arc::new(TrieUpdates::default()),
+            old_anchor,
+            vec![block1.clone(), block2_ready.clone()],
+        );
+        let block3_ready = DeferredTrieData::ready(block3.wait_cloned());
+
+        // Verify block3's overlay has all 3 accounts with old_anchor
+        let block3_overlay = block3_ready.wait_cloned().anchored_trie_input.unwrap();
+        assert_eq!(block3_overlay.anchor_hash, old_anchor);
+        assert_eq!(block3_overlay.trie_input.state.accounts.len(), 3);
+
+        // Now simulate persist: create block4 with NEW anchor but same ancestors.
+        // To verify correct rebuilding, we must provide ALL unpersisted ancestors.
+        // If we only provided block3, the rebuild would only see block3's state.
+        // We pass block1, block2, block3 to simulate that they are all still in memory
+        // but the anchor check forces a rebuild (e.g. artificial anchor change).
+        let block4_hashed = HashedPostState::default().with_accounts([(
+            key4,
+            Some(Account { nonce: 4, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
+        let block4 = DeferredTrieData::pending(
+            Arc::new(block4_hashed),
+            Arc::new(TrieUpdates::default()),
+            new_anchor, // Different anchor - simulates post-persist
+            vec![block1, block2_ready, block3_ready],
+        );
+
+        let result = block4.wait_cloned();
+
+        // Verify:
+        // 1. New anchor is used in result
+        assert_eq!(result.anchor_hash(), Some(new_anchor));
+
+        // 2. All 4 accounts are in the overlay (rebuilt from ancestors + extended)
+        let overlay = result.anchored_trie_input.as_ref().unwrap();
+        assert_eq!(overlay.trie_input.state.accounts.len(), 4);
+
+        // 3. All accounts have correct values
+        let accounts = &overlay.trie_input.state.accounts;
+        assert!(accounts.iter().any(|(k, a)| *k == key1 && a.unwrap().nonce == 1));
+        assert!(accounts.iter().any(|(k, a)| *k == key2 && a.unwrap().nonce == 2));
+        assert!(accounts.iter().any(|(k, a)| *k == key3 && a.unwrap().nonce == 3));
+        assert!(accounts.iter().any(|(k, a)| *k == key4 && a.unwrap().nonce == 4));
     }
 }

@@ -5,7 +5,7 @@ use crate::{
     BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider,
     ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
-    TransactionsProvider, TrieReader,
+    TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{
@@ -30,7 +30,6 @@ use reth_storage_api::{
     StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::updates::TrieUpdatesSorted;
 use revm_database::states::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
@@ -1308,7 +1307,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
             let changesets = state
                 .block()
                 .execution_output
-                .bundle
+                .state
                 .reverts
                 .clone()
                 .to_plain_state_reverts()
@@ -1348,6 +1347,138 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
             self.storage_provider.storage_changeset(block_number)
         }
     }
+
+    fn get_storage_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<Option<StorageEntry>> {
+        if let Some(state) =
+            self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
+        {
+            let changeset = state
+                .block_ref()
+                .execution_output
+                .state
+                .reverts
+                .clone()
+                .to_plain_state_reverts()
+                .storage
+                .into_iter()
+                .flatten()
+                .find_map(|revert: PlainStorageRevert| {
+                    if revert.address != address {
+                        return None
+                    }
+                    revert.storage_revert.into_iter().find_map(|(key, value)| {
+                        let key = key.into();
+                        (key == storage_key)
+                            .then(|| StorageEntry { key, value: value.to_previous_value() })
+                    })
+                });
+            Ok(changeset)
+        } else {
+            let storage_history_exists = self
+                .storage_provider
+                .get_prune_checkpoint(PruneSegment::StorageHistory)?
+                .and_then(|checkpoint| {
+                    checkpoint.block_number.map(|checkpoint| block_number > checkpoint)
+                })
+                .unwrap_or(true);
+
+            if !storage_history_exists {
+                return Err(ProviderError::StateAtBlockPruned(block_number))
+            }
+
+            self.storage_provider.get_storage_before_block(block_number, address, storage_key)
+        }
+    }
+
+    fn storage_changesets_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        let range = to_range(range);
+        let mut changesets = Vec::new();
+        let database_start = range.start;
+        let mut database_end = range.end;
+
+        if let Some(head_block) = &self.head_block {
+            database_end = head_block.anchor().number;
+
+            let chain = head_block.chain().collect::<Vec<_>>();
+            for state in chain {
+                let block_changesets = state
+                    .block_ref()
+                    .execution_output
+                    .state
+                    .reverts
+                    .clone()
+                    .to_plain_state_reverts()
+                    .storage
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|revert: PlainStorageRevert| {
+                        revert.storage_revert.into_iter().map(move |(key, value)| {
+                            (
+                                BlockNumberAddress((state.number(), revert.address)),
+                                StorageEntry { key: key.into(), value: value.to_previous_value() },
+                            )
+                        })
+                    });
+
+                changesets.extend(block_changesets);
+            }
+        }
+
+        if database_start < database_end {
+            let storage_history_exists = self
+                .storage_provider
+                .get_prune_checkpoint(PruneSegment::StorageHistory)?
+                .and_then(|checkpoint| {
+                    checkpoint.block_number.map(|checkpoint| database_start > checkpoint)
+                })
+                .unwrap_or(true);
+
+            if !storage_history_exists {
+                return Err(ProviderError::StateAtBlockPruned(database_start))
+            }
+
+            let db_changesets = self
+                .storage_provider
+                .storage_changesets_range(database_start..=database_end - 1)?;
+            changesets.extend(db_changesets);
+        }
+
+        changesets.sort_by_key(|(block_address, _)| block_address.block_number());
+
+        Ok(changesets)
+    }
+
+    fn storage_changeset_count(&self) -> ProviderResult<usize> {
+        let mut count = 0;
+        if let Some(head_block) = &self.head_block {
+            for state in head_block.chain() {
+                count += state
+                    .block_ref()
+                    .execution_output
+                    .state
+                    .reverts
+                    .clone()
+                    .to_plain_state_reverts()
+                    .storage
+                    .into_iter()
+                    .flatten()
+                    .map(|revert: PlainStorageRevert| revert.storage_revert.len())
+                    .sum::<usize>();
+            }
+        }
+
+        count += self.storage_provider.storage_changeset_count()?;
+
+        Ok(count)
+    }
 }
 
 impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
@@ -1361,7 +1492,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             let changesets = state
                 .block_ref()
                 .execution_output
-                .bundle
+                .state
                 .reverts
                 .clone()
                 .to_plain_state_reverts()
@@ -1407,7 +1538,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             let changeset = state
                 .block_ref()
                 .execution_output
-                .bundle
+                .state
                 .reverts
                 .clone()
                 .to_plain_state_reverts()
@@ -1461,7 +1592,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 let block_changesets = state
                     .block_ref()
                     .execution_output
-                    .bundle
+                    .state
                     .reverts
                     .clone()
                     .to_plain_state_reverts()
@@ -1509,7 +1640,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 count += state
                     .block_ref()
                     .execution_output
-                    .bundle
+                    .state
                     .reverts
                     .clone()
                     .to_plain_state_reverts()
@@ -1552,23 +1683,10 @@ impl<N: ProviderNodeTypes> StateReader for ConsistentProvider<N> {
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
         if let Some(state) = self.head_block.as_ref().and_then(|b| b.block_on_chain(block.into())) {
             let state = state.block_ref().execution_outcome().clone();
-            Ok(Some(state))
+            Ok(Some(ExecutionOutcome::from((state, block))))
         } else {
             Self::get_state(self, block..=block)
         }
-    }
-}
-
-impl<N: ProviderNodeTypes> TrieReader for ConsistentProvider<N> {
-    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
-        self.storage_provider.trie_reverts(from)
-    }
-
-    fn get_block_trie_updates(
-        &self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<TrieUpdatesSorted> {
-        self.storage_provider.get_block_trie_updates(block_number)
     }
 }
 
@@ -1585,7 +1703,7 @@ mod tests {
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
     use reth_db_api::models::AccountBeforeTx;
     use reth_ethereum_primitives::Block;
-    use reth_execution_types::ExecutionOutcome;
+    use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
     use reth_primitives_traits::{RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader};
     use reth_testing_utils::generators::{
@@ -1897,8 +2015,8 @@ mod tests {
                             block.clone(),
                             senders,
                         )),
-                        execution_output: Arc::new(ExecutionOutcome {
-                            bundle: BundleState::new(
+                        execution_output: Arc::new(BlockExecutionOutput {
+                            state: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
                                     (address, None, Some(account.into()), Default::default())
                                 }),
@@ -1907,8 +2025,12 @@ mod tests {
                                 })],
                                 [],
                             ),
-                            first_block: first_in_memory_block,
-                            ..Default::default()
+                            result: BlockExecutionResult {
+                                receipts: Default::default(),
+                                requests: Default::default(),
+                                gas_used: 0,
+                                blob_gas_used: 0,
+                            },
                         }),
                         ..Default::default()
                     }

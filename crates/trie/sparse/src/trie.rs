@@ -546,40 +546,43 @@ impl SparseTrieInterface for SerialSparseTrie {
                     self.reveal_node_or_hash(child_path, &ext.child)?;
                 }
             },
-            TrieNode::Leaf(leaf) => match self.nodes.entry(path) {
-                Entry::Occupied(mut entry) => match entry.get() {
-                    // Replace a hash node with a revealed leaf node and store leaf node value.
-                    SparseNode::Hash(hash) => {
-                        let mut full = *entry.key();
-                        full.extend(&leaf.key);
-                        self.values.insert(full, leaf.value.clone());
-                        entry.insert(SparseNode::Leaf {
-                            key: leaf.key,
-                            // Memoize the hash of a previously blinded node in a new leaf
-                            // node.
-                            hash: Some(*hash),
-                        });
-                    }
-                    // Left node already exists.
-                    SparseNode::Leaf { .. } => {}
-                    // All other node types can't be handled.
-                    node @ (SparseNode::Empty |
-                    SparseNode::Extension { .. } |
-                    SparseNode::Branch { .. }) => {
-                        return Err(SparseTrieErrorKind::Reveal {
-                            path: *entry.key(),
-                            node: Box::new(node.clone()),
+            TrieNode::Leaf(leaf) => {
+                let (leaf_key, leaf_value) = (leaf.key, leaf.value);
+                match self.nodes.entry(path) {
+                    Entry::Occupied(mut entry) => match entry.get() {
+                        // Replace a hash node with a revealed leaf node and store leaf node value.
+                        SparseNode::Hash(hash) => {
+                            let mut full = *entry.key();
+                            full.extend(&leaf_key);
+                            self.values.insert(full, leaf_value);
+                            entry.insert(SparseNode::Leaf {
+                                key: leaf_key,
+                                // Memoize the hash of a previously blinded node in a new leaf
+                                // node.
+                                hash: Some(*hash),
+                            });
                         }
-                        .into())
+                        // Left node already exists.
+                        SparseNode::Leaf { .. } => {}
+                        // All other node types can't be handled.
+                        node @ (SparseNode::Empty |
+                        SparseNode::Extension { .. } |
+                        SparseNode::Branch { .. }) => {
+                            return Err(SparseTrieErrorKind::Reveal {
+                                path: *entry.key(),
+                                node: Box::new(node.clone()),
+                            }
+                            .into())
+                        }
+                    },
+                    Entry::Vacant(entry) => {
+                        let mut full = *entry.key();
+                        full.extend(&leaf_key);
+                        entry.insert(SparseNode::new_leaf(leaf_key));
+                        self.values.insert(full, leaf_value);
                     }
-                },
-                Entry::Vacant(entry) => {
-                    let mut full = *entry.key();
-                    full.extend(&leaf.key);
-                    entry.insert(SparseNode::new_leaf(leaf.key));
-                    self.values.insert(full, leaf.value.clone());
                 }
-            },
+            }
         }
 
         Ok(())

@@ -48,7 +48,18 @@ export const rethCliSidebar: SidebarItem = {
                 },
                 {
                     text: "reth db checksum",
-                    link: "/cli/reth/db/checksum"
+                    link: "/cli/reth/db/checksum",
+                    collapsed: true,
+                    items: [
+                        {
+                            text: "reth db checksum mdbx",
+                            link: "/cli/reth/db/checksum/mdbx"
+                        },
+                        {
+                            text: "reth db checksum static-file",
+                            link: "/cli/reth/db/checksum/static-file"
+                        }
+                    ]
                 },
                 {
                     text: "reth db diff",
@@ -140,6 +151,22 @@ export const rethCliSidebar: SidebarItem = {
                                 {
                                     text: "reth db settings set account_changesets",
                                     link: "/cli/reth/db/settings/set/account_changesets"
+                                },
+                                {
+                                    text: "reth db settings set storages_history",
+                                    link: "/cli/reth/db/settings/set/storages_history"
+                                },
+                                {
+                                    text: "reth db settings set transaction_hash_numbers",
+                                    link: "/cli/reth/db/settings/set/transaction_hash_numbers"
+                                },
+                                {
+                                    text: "reth db settings set account_history",
+                                    link: "/cli/reth/db/settings/set/account_history"
+                                },
+                                {
+                                    text: "reth db settings set storage_changesets",
+                                    link: "/cli/reth/db/settings/set/storage_changesets"
                                 }
                             ]
                         }

@@ -44,7 +44,18 @@ export const opRethCliSidebar: SidebarItem = {
                 },
                 {
                     text: "op-reth db checksum",
-                    link: "/cli/op-reth/db/checksum"
+                    link: "/cli/op-reth/db/checksum",
+                    collapsed: true,
+                    items: [
+                        {
+                            text: "op-reth db checksum mdbx",
+                            link: "/cli/op-reth/db/checksum/mdbx"
+                        },
+                        {
+                            text: "op-reth db checksum static-file",
+                            link: "/cli/op-reth/db/checksum/static-file"
+                        }
+                    ]
                 },
                 {
                     text: "op-reth db diff",
@@ -136,6 +147,22 @@ export const opRethCliSidebar: SidebarItem = {
                                 {
                                     text: "op-reth db settings set account_changesets",
                                     link: "/cli/op-reth/db/settings/set/account_changesets"
+                                },
+                                {
+                                    text: "op-reth db settings set storages_history",
+                                    link: "/cli/op-reth/db/settings/set/storages_history"
+                                },
+                                {
+                                    text: "op-reth db settings set transaction_hash_numbers",
+                                    link: "/cli/op-reth/db/settings/set/transaction_hash_numbers"
+                                },
+                                {
+                                    text: "op-reth db settings set account_history",
+                                    link: "/cli/op-reth/db/settings/set/account_history"
+                                },
+                                {
+                                    text: "op-reth db settings set storage_changesets",
+                                    link: "/cli/op-reth/db/settings/set/storage_changesets"
                                 }
                             ]
                         }

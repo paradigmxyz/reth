@@ -85,7 +85,9 @@ pub use primitives::*;
 mod block_indices;
 pub use block_indices::*;
 
+#[cfg(feature = "std")]
 mod block_writer;
+#[cfg(feature = "std")]
 pub use block_writer::*;
 
 mod state_writer;
