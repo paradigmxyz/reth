@@ -497,23 +497,21 @@ mod compact {
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
     #[reth_codecs(crate = "reth_codecs")]
     pub struct ReceiptExt {
-        // TODO(glam): Add new glam receipt fields here as Option<T>
-        // Example: `pub access_list_index: Option<u64>,`
+        /// Placeholder field for glam hardfork receipt extensions.
+        /// Replace with actual glam fields when specified.
+        pub block_access_index: Option<u64>,
     }
 
     impl ReceiptExt {
         /// Converts into [`Some`] if any of the field exists. Otherwise, returns [`None`].
         ///
         /// Required since [`Receipt`] uses `Option<ReceiptExt>` as a field.
-        #[allow(clippy::unused_self)]
         pub const fn into_option(self) -> Option<Self> {
-            // TODO(glam): Update this when fields are added
-            // if self.some_field.is_some() {
-            //     Some(self)
-            // } else {
-            //     None
-            // }
-            None
+            if self.block_access_index.is_some() {
+                Some(self)
+            } else {
+                None
+            }
         }
     }
 
@@ -533,6 +531,11 @@ mod compact {
             let cumulative_gas_used_len = self.cumulative_gas_used.to_compact(&mut buffer);
             flags.set_cumulative_gas_used_len(cumulative_gas_used_len as u8);
             self.logs.to_compact(&mut buffer);
+
+            // Extension fields are appended after logs for backwards compatibility.
+            // Old receipts without extension fields will have empty buffer after logs,
+            // which decodes as None.
+            ReceiptExt::default().into_option().to_compact(&mut buffer);
 
             let zstd = buffer.len() > 7;
             if zstd {
@@ -569,7 +572,11 @@ mod compact {
                     let (cumulative_gas_used, new_buf) =
                         u64::from_compact(buf, flags.cumulative_gas_used_len() as usize);
                     buf = new_buf;
-                    let (logs, _) = Vec::from_compact(buf, buf.len());
+                    let (logs, new_buf) = Vec::from_compact(buf, buf.len());
+                    buf = new_buf;
+                    // Decode extension fields if present (backwards compatible - old receipts
+                    // will have empty buffer here)
+                    let (_extra_fields, _) = Option::<ReceiptExt>::from_compact(buf, buf.len());
                     (Self { tx_type, success, cumulative_gas_used, logs }, original_buf)
                 })
             } else {
@@ -581,6 +588,10 @@ mod compact {
                     u64::from_compact(buf, flags.cumulative_gas_used_len() as usize);
                 buf = new_buf;
                 let (logs, new_buf) = Vec::from_compact(buf, buf.len());
+                buf = new_buf;
+                // Decode extension fields if present (backwards compatible - old receipts
+                // will have empty buffer here)
+                let (_extra_fields, new_buf) = Option::<ReceiptExt>::from_compact(buf, buf.len());
                 buf = new_buf;
                 let obj = Self { tx_type, success, cumulative_gas_used, logs };
                 (obj, buf)
@@ -628,10 +639,8 @@ mod tests {
         // Receipt has 0 unused bits - new fields must go through ReceiptExt
         assert_eq!(Receipt::bitflag_unused_bits(), 0);
 
-        // ReceiptExt currently has no fields, so unused bits is 0.
-        // When the first glam field is added, update this to UnusedBits::NotZero
-        // to ensure future fields can still be added.
-        validate_bitflag_backwards_compat!(ReceiptExt, UnusedBits::Zero);
+        // ReceiptExt has unused bits available for future fields
+        validate_bitflag_backwards_compat!(ReceiptExt, UnusedBits::NotZero);
     }
 
     /// Test vectors generated from main branch to ensure backwards compatibility.
