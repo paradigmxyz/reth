@@ -3,7 +3,9 @@
 //! This command fetches transactions from existing blocks and packs them into a single
 //! large block using the `testing_buildBlockV1` RPC endpoint.
 
-use crate::authenticated_transport::AuthenticatedTransportConnect;
+use crate::{
+    authenticated_transport::AuthenticatedTransportConnect, bench::helpers::parse_gas_limit,
+};
 use alloy_eips::{BlockNumberOrTag, Typed2718};
 use alloy_primitives::{Bytes, B256};
 use alloy_provider::{ext::EngineApi, network::AnyNetwork, Provider, RootProvider};
@@ -202,7 +204,9 @@ pub struct Command {
     jwt_secret: std::path::PathBuf,
 
     /// Target gas to pack into the block.
-    #[arg(long, value_name = "TARGET_GAS", default_value = "30000000")]
+    /// Accepts short notation: K for thousand, M for million, G for billion (e.g., 1G = 1
+    /// billion).
+    #[arg(long, value_name = "TARGET_GAS", default_value = "30000000", value_parser = parse_gas_limit)]
     target_gas: u64,
 
     /// Starting block number to fetch transactions from.
