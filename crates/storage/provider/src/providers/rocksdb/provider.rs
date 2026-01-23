@@ -57,6 +57,19 @@ pub struct RocksDBTableStats {
     pub pending_compaction_bytes: u64,
 }
 
+/// Database-level statistics for `RocksDB`.
+///
+/// Contains both per-table statistics and DB-level metrics like WAL size.
+#[derive(Debug, Clone)]
+pub struct RocksDBStats {
+    /// Statistics for each table (column family).
+    pub tables: Vec<RocksDBTableStats>,
+    /// Total size of WAL (Write-Ahead Log) files in bytes.
+    ///
+    /// WAL is shared across all tables and not included in per-table metrics.
+    pub wal_size_bytes: u64,
+}
+
 /// Context for `RocksDB` block writes.
 #[derive(Clone)]
 pub(crate) struct RocksDBWriteCtx {
@@ -457,6 +470,31 @@ impl RocksDBProviderInner {
         }
     }
 
+    /// Returns the path to the database directory.
+    fn path(&self) -> &Path {
+        match self {
+            Self::ReadWrite { db, .. } => db.path(),
+            Self::ReadOnly { db, .. } => db.path(),
+        }
+    }
+
+    /// Returns the total size of WAL (Write-Ahead Log) files in bytes.
+    ///
+    /// WAL files have a `.log` extension in the `RocksDB` directory.
+    fn wal_size_bytes(&self) -> u64 {
+        let path = self.path();
+
+        match std::fs::read_dir(path) {
+            Ok(entries) => entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "log"))
+                .filter_map(|e| e.metadata().ok())
+                .map(|m| m.len())
+                .sum(),
+            Err(_) => 0,
+        }
+    }
+
     /// Returns statistics for all column families in the database.
     fn table_stats(&self) -> Vec<RocksDBTableStats> {
         let mut stats = Vec::new();
@@ -514,6 +552,11 @@ impl RocksDBProviderInner {
         }
 
         stats
+    }
+
+    /// Returns database-level statistics including per-table stats and WAL size.
+    fn db_stats(&self) -> RocksDBStats {
+        RocksDBStats { tables: self.table_stats(), wal_size_bytes: self.wal_size_bytes() }
     }
 }
 
@@ -594,6 +637,9 @@ impl DatabaseMetrics for RocksDBProvider {
                 vec![Label::new("table", stat.name)],
             ));
         }
+
+        // WAL size (DB-level, shared across all tables)
+        metrics.push(("rocksdb.wal_size", self.wal_size_bytes() as f64, vec![]));
 
         metrics
     }
@@ -836,6 +882,22 @@ impl RocksDBProvider {
     /// Returns a vector of (`table_name`, `estimated_keys`, `estimated_size_bytes`) tuples.
     pub fn table_stats(&self) -> Vec<RocksDBTableStats> {
         self.0.table_stats()
+    }
+
+    /// Returns the total size of WAL (Write-Ahead Log) files in bytes.
+    ///
+    /// This scans the `RocksDB` directory for `.log` files and sums their sizes.
+    /// WAL files can be significant (e.g., 2.7GB observed) and are not included
+    /// in `table_size`, `sst_size`, or `memtable_size` metrics.
+    pub fn wal_size_bytes(&self) -> u64 {
+        self.0.wal_size_bytes()
+    }
+
+    /// Returns database-level statistics including per-table stats and WAL size.
+    ///
+    /// This combines [`Self::table_stats`] and [`Self::wal_size_bytes`] into a single struct.
+    pub fn db_stats(&self) -> RocksDBStats {
+        self.0.db_stats()
     }
 
     /// Flushes pending writes for the specified tables to disk.

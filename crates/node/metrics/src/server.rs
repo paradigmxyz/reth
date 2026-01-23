@@ -257,6 +257,11 @@ fn describe_rocksdb_metrics() {
         Unit::Bytes,
         "The size of memtables for a RocksDB table"
     );
+    describe_gauge!(
+        "rocksdb.wal_size",
+        Unit::Bytes,
+        "The total size of WAL (Write-Ahead Log) files. Important: this is not included in table_size or sst_size metrics"
+    );
 }
 
 #[cfg(all(feature = "jemalloc", unix))]
