@@ -121,7 +121,7 @@ where
         let mut storage_proof_calculator = ProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
         // Compute storage root directly (more efficient than building a proof with dummy target)
-        let storage_root = storage_proof_calculator.compute_storage_root(self.hashed_address)?;
+        let storage_root = storage_proof_calculator.storage_root(self.hashed_address)?;
 
         // Combine account with storage root to create TrieAccount
         let trie_account = self.account.into_trie_account(storage_root);

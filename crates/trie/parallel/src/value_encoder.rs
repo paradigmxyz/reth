@@ -109,7 +109,7 @@ where
                 let mut storage_proof_calculator =
                     proof_v2::ProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
-                let storage_root = storage_proof_calculator.compute_storage_root(hashed_address)?;
+                let storage_root = storage_proof_calculator.storage_root(hashed_address)?;
 
                 // Cache the computed root for potential reuse
                 cached_storage_roots.insert(hashed_address, storage_root);

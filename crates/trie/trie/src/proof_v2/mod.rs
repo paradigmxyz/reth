@@ -15,10 +15,7 @@ use alloy_primitives::{keccak256, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
-use reth_trie_common::{
-    BranchNode, BranchNodeMasks, HashBuilder, Nibbles, ProofTrieNode, RlpNode, TrieNode,
-    EMPTY_ROOT_HASH,
-};
+use reth_trie_common::{BranchNode, BranchNodeMasks, Nibbles, ProofTrieNode, RlpNode, TrieNode};
 use std::cmp::Ordering;
 use tracing::{instrument, trace};
 
@@ -1395,27 +1392,26 @@ where
     /// This is more efficient than calling `storage_proof` followed by `compute_root_hash`
     /// when only the root hash is needed, as it avoids constructing and retaining proof nodes.
     #[instrument(target = TRACE_TARGET, level = "trace", skip(self))]
-    pub fn compute_storage_root(&mut self, hashed_address: B256) -> Result<B256, StateProofError> {
-        self.hashed_cursor.set_hashed_address(hashed_address);
+    pub fn storage_root(&mut self, hashed_address: B256) -> Result<B256, StateProofError> {
+        // Initialize the variables which track the state of the two cursors. Both indicated the
+        // cursors are unseeked.
+        let mut trie_cursor_state = TrieCursorState::unseeked();
+        let mut hashed_cursor_current: Option<(Nibbles, StorageDeferredValueEncoder)> = None;
+        let mut storage_value_encoder = StorageValueEncoder;
+        let sub_trie_targets =
+            SubTrieTargets { prefix: Nibbles::default(), targets: &[], retain_root: true };
 
-        // Shortcut: check if storage is empty
-        if self.hashed_cursor.is_storage_empty()? {
-            return Ok(EMPTY_ROOT_HASH);
-        }
+        self.proof_subtrie(
+            &mut storage_value_encoder,
+            &mut trie_cursor_state,
+            &mut hashed_cursor_current,
+            sub_trie_targets,
+        )?;
 
-        // Use a HashBuilder to compute the root by iterating all storage slots
-        let mut hash_builder = HashBuilder::default();
+        let proofs = core::mem::take(&mut self.retained_proofs);
+        debug_assert_eq!(proofs.len(), 1);
 
-        self.hashed_cursor.reset();
-        self.hashed_cursor.set_hashed_address(hashed_address);
-        while let Some((hashed_slot, value)) = self.hashed_cursor.next()? {
-            hash_builder.add_leaf(
-                Nibbles::unpack(hashed_slot),
-                alloy_rlp::encode_fixed_size(&value).as_ref(),
-            );
-        }
-
-        Ok(hash_builder.root())
+        self.compute_root_hash(&proofs).map(|hash| hash.expect("root node is definitely retained"))
     }
 }
 
