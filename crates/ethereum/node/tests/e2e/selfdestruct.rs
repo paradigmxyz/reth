@@ -9,16 +9,71 @@
 
 use crate::utils::{eth_payload_attributes, eth_payload_attributes_shanghai};
 use alloy_network::{EthereumWallet, TransactionBuilder};
-use alloy_primitives::{bytes, Bytes, TxKind, U256};
+use alloy_primitives::{bytes, Address, Bytes, TxKind, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_eth::TransactionRequest;
 use futures::StreamExt;
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::setup_engine;
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::EthereumNode;
 use reth_revm::db::BundleAccount;
 use std::sync::Arc;
+
+const MAX_FEE_PER_GAS: u128 = 20_000_000_000;
+const MAX_PRIORITY_FEE_PER_GAS: u128 = 1_000_000_000;
+
+fn cancun_spec() -> Arc<ChainSpec> {
+    Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    )
+}
+
+fn shanghai_spec() -> Arc<ChainSpec> {
+    Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .shanghai_activated()
+            .build(),
+    )
+}
+
+fn deploy_tx(from: Address, nonce: u64, init_code: Bytes) -> TransactionRequest {
+    TransactionRequest::default()
+        .with_from(from)
+        .with_nonce(nonce)
+        .with_gas_limit(500_000)
+        .with_max_fee_per_gas(MAX_FEE_PER_GAS)
+        .with_max_priority_fee_per_gas(MAX_PRIORITY_FEE_PER_GAS)
+        .with_input(init_code)
+        .with_kind(TxKind::Create)
+}
+
+fn call_tx(from: Address, to: Address, nonce: u64) -> TransactionRequest {
+    TransactionRequest::default()
+        .with_from(from)
+        .with_to(to)
+        .with_nonce(nonce)
+        .with_gas_limit(100_000)
+        .with_max_fee_per_gas(MAX_FEE_PER_GAS)
+        .with_max_priority_fee_per_gas(MAX_PRIORITY_FEE_PER_GAS)
+}
+
+fn transfer_tx(from: Address, to: Address, nonce: u64, value: U256) -> TransactionRequest {
+    TransactionRequest::default()
+        .with_from(from)
+        .with_to(to)
+        .with_nonce(nonce)
+        .with_value(value)
+        .with_gas_limit(21_000)
+        .with_max_fee_per_gas(MAX_FEE_PER_GAS)
+        .with_max_priority_fee_per_gas(MAX_PRIORITY_FEE_PER_GAS)
+}
 
 /// Creates init code for a contract that selfdestructs during deployment (same tx).
 /// This tests the EIP-6780 exception where SELFDESTRUCT in same tx as creation still works.
@@ -86,30 +141,10 @@ fn selfdestruct_contract_init_code() -> Bytes {
 async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    // Cancun activated (post-Dencun, EIP-6780)
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-
-    let tree_config = TreeConfig::default()
-        // Disable prewarming
-        .without_prewarming(true)
-        // Enable state cache
-        .without_state_cache(false);
-
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec.clone(),
-        false,
-        tree_config,
-        eth_payload_attributes,
-    )
-    .await?;
-
+    let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
+    let (mut nodes, _tasks, wallet) =
+        setup_engine::<EthereumNode>(1, cancun_spec(), false, tree_config, eth_payload_attributes)
+            .await?;
     let mut node = nodes.pop().unwrap();
     let signer = wallet.inner.clone();
     let provider = ProviderBuilder::new()
@@ -117,17 +152,9 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
         .connect_http(node.rpc_url());
 
     // Deploy contract that stores 0x42 at slot 0 and selfdestructs on any call
-    let init_code = selfdestruct_contract_init_code();
-    let deploy_tx = TransactionRequest::default()
-        .with_from(signer.address())
-        .with_nonce(0)
-        .with_gas_limit(500_000)
-        .with_max_fee_per_gas(20_000_000_000_u128)
-        .with_max_priority_fee_per_gas(1_000_000_000_u128)
-        .with_input(init_code)
-        .with_kind(TxKind::Create);
-
-    let pending = provider.send_transaction(deploy_tx).await?;
+    let pending = provider
+        .send_transaction(deploy_tx(signer.address(), 0, selfdestruct_contract_init_code()))
+        .await?;
     node.advance_block().await?;
     let receipt = pending.get_receipt().await?;
     assert!(receipt.status(), "Contract deployment should succeed");
@@ -138,15 +165,7 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
     let _ = node.canonical_stream.next().await;
 
     // Trigger SELFDESTRUCT by calling the contract
-    let selfdestruct_tx = TransactionRequest::default()
-        .with_from(signer.address())
-        .with_to(contract_address)
-        .with_nonce(1)
-        .with_gas_limit(100_000)
-        .with_max_fee_per_gas(20_000_000_000_u128)
-        .with_max_priority_fee_per_gas(1_000_000_000_u128);
-
-    let pending = provider.send_transaction(selfdestruct_tx).await?;
+    let pending = provider.send_transaction(call_tx(signer.address(), contract_address, 1)).await?;
     node.advance_block().await?;
     let receipt = pending.get_receipt().await?;
     assert!(receipt.status(), "Selfdestruct tx should succeed");
@@ -174,15 +193,7 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
     // This tests cache behavior - if cache has stale data, execution would be incorrect.
     // Post-Dencun: calling the contract should trigger SELFDESTRUCT again (but only transfer
     // balance)
-    let call_again_tx = TransactionRequest::default()
-        .with_from(signer.address())
-        .with_to(contract_address)
-        .with_nonce(2)
-        .with_gas_limit(100_000)
-        .with_max_fee_per_gas(20_000_000_000_u128)
-        .with_max_priority_fee_per_gas(1_000_000_000_u128);
-
-    let pending = provider.send_transaction(call_again_tx).await?;
+    let pending = provider.send_transaction(call_tx(signer.address(), contract_address, 2)).await?;
     node.advance_block().await?;
     let receipt = pending.get_receipt().await?;
     assert!(receipt.status(), "Second call to contract should succeed");
@@ -224,26 +235,10 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
 async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    // Cancun activated (post-Dencun, EIP-6780)
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-
     let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
-
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec.clone(),
-        false,
-        tree_config,
-        eth_payload_attributes,
-    )
-    .await?;
-
+    let (mut nodes, _tasks, wallet) =
+        setup_engine::<EthereumNode>(1, cancun_spec(), false, tree_config, eth_payload_attributes)
+            .await?;
     let mut node = nodes.pop().unwrap();
     let signer = wallet.inner.clone();
     let provider = ProviderBuilder::new()
@@ -251,17 +246,9 @@ async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
         .connect_http(node.rpc_url());
 
     // Deploy contract that selfdestructs during its constructor
-    let init_code = selfdestruct_in_constructor_init_code();
-    let deploy_tx = TransactionRequest::default()
-        .with_from(signer.address())
-        .with_nonce(0)
-        .with_gas_limit(500_000)
-        .with_max_fee_per_gas(20_000_000_000_u128)
-        .with_max_priority_fee_per_gas(1_000_000_000_u128)
-        .with_input(init_code)
-        .with_kind(TxKind::Create);
-
-    let pending = provider.send_transaction(deploy_tx).await?;
+    let pending = provider
+        .send_transaction(deploy_tx(signer.address(), 0, selfdestruct_in_constructor_init_code()))
+        .await?;
     node.advance_block().await?;
     let receipt = pending.get_receipt().await?;
     assert!(receipt.status(), "Contract deployment with selfdestruct should succeed");
@@ -289,16 +276,9 @@ async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
     assert_eq!(slot0, U256::ZERO, "Post-Dencun same-tx: Storage should be cleared");
 
     // Send ETH to the destroyed address in a new block to test cache behavior
-    let send_eth_tx = TransactionRequest::default()
-        .with_from(signer.address())
-        .with_to(contract_address)
-        .with_nonce(1)
-        .with_value(U256::from(1000))
-        .with_gas_limit(21_000)
-        .with_max_fee_per_gas(20_000_000_000_u128)
-        .with_max_priority_fee_per_gas(1_000_000_000_u128);
-
-    let pending = provider.send_transaction(send_eth_tx).await?;
+    let pending = provider
+        .send_transaction(transfer_tx(signer.address(), contract_address, 1, U256::from(1000)))
+        .await?;
     node.advance_block().await?;
     let receipt = pending.get_receipt().await?;
     assert!(receipt.status(), "ETH transfer to destroyed address should succeed");
@@ -330,30 +310,15 @@ async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
 async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    // Shanghai activated (pre-Dencun, original SELFDESTRUCT behavior)
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .shanghai_activated()
-            .build(),
-    );
-
-    let tree_config = TreeConfig::default()
-        // Disable prewarming
-        .without_prewarming(true)
-        // Enable state cache
-        .without_state_cache(false);
-
+    let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
     let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
         1,
-        chain_spec.clone(),
+        shanghai_spec(),
         false,
         tree_config,
         eth_payload_attributes_shanghai,
     )
     .await?;
-
     let mut node = nodes.pop().unwrap();
     let signer = wallet.inner.clone();
     let provider = ProviderBuilder::new()
@@ -361,17 +326,9 @@ async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
         .connect_http(node.rpc_url());
 
     // Deploy contract that stores 0x42 at slot 0 and selfdestructs on any call
-    let init_code = selfdestruct_contract_init_code();
-    let deploy_tx = TransactionRequest::default()
-        .with_from(signer.address())
-        .with_nonce(0)
-        .with_gas_limit(500_000)
-        .with_max_fee_per_gas(20_000_000_000_u128)
-        .with_max_priority_fee_per_gas(1_000_000_000_u128)
-        .with_input(init_code)
-        .with_kind(TxKind::Create);
-
-    let pending = provider.send_transaction(deploy_tx).await?;
+    let pending = provider
+        .send_transaction(deploy_tx(signer.address(), 0, selfdestruct_contract_init_code()))
+        .await?;
     node.advance_block().await?;
     let receipt = pending.get_receipt().await?;
     assert!(receipt.status(), "Contract deployment should succeed");
@@ -382,15 +339,7 @@ async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
     let _ = node.canonical_stream.next().await;
 
     // Trigger SELFDESTRUCT by calling the contract
-    let selfdestruct_tx = TransactionRequest::default()
-        .with_from(signer.address())
-        .with_to(contract_address)
-        .with_nonce(1)
-        .with_gas_limit(100_000)
-        .with_max_fee_per_gas(20_000_000_000_u128)
-        .with_max_priority_fee_per_gas(1_000_000_000_u128);
-
-    let pending = provider.send_transaction(selfdestruct_tx).await?;
+    let pending = provider.send_transaction(call_tx(signer.address(), contract_address, 1)).await?;
     node.advance_block().await?;
     let receipt = pending.get_receipt().await?;
     assert!(receipt.status(), "Selfdestruct tx should succeed");
@@ -417,16 +366,9 @@ async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
     // Send ETH to the destroyed contract address in a new block.
     // This tests cache behavior - the cache should correctly reflect the account was destroyed.
     // Pre-Dencun: the contract no longer exists, so this is just a plain ETH transfer.
-    let send_eth_tx = TransactionRequest::default()
-        .with_from(signer.address())
-        .with_to(contract_address)
-        .with_nonce(2)
-        .with_value(U256::from(1000))
-        .with_gas_limit(21_000)
-        .with_max_fee_per_gas(20_000_000_000_u128)
-        .with_max_priority_fee_per_gas(1_000_000_000_u128);
-
-    let pending = provider.send_transaction(send_eth_tx).await?;
+    let pending = provider
+        .send_transaction(transfer_tx(signer.address(), contract_address, 2, U256::from(1000)))
+        .await?;
     node.advance_block().await?;
     let receipt = pending.get_receipt().await?;
     assert!(receipt.status(), "ETH transfer to destroyed contract address should succeed");
@@ -478,26 +420,10 @@ async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
 async fn test_selfdestruct_same_tx_preexisting_account_post_dencun() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    // Cancun activated (post-Dencun, EIP-6780)
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-
     let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
-
-    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec.clone(),
-        false,
-        tree_config,
-        eth_payload_attributes,
-    )
-    .await?;
-
+    let (mut nodes, _tasks, wallet) =
+        setup_engine::<EthereumNode>(1, cancun_spec(), false, tree_config, eth_payload_attributes)
+            .await?;
     let mut node = nodes.pop().unwrap();
     let signer = wallet.inner.clone();
     let provider = ProviderBuilder::new()
@@ -509,16 +435,14 @@ async fn test_selfdestruct_same_tx_preexisting_account_post_dencun() -> eyre::Re
     let future_contract_address = signer.address().create(1);
 
     // Send ETH to the future contract address first (makes it a pre-existing account)
-    let send_eth_tx = TransactionRequest::default()
-        .with_from(signer.address())
-        .with_to(future_contract_address)
-        .with_nonce(0)
-        .with_value(U256::from(1000))
-        .with_gas_limit(21_000)
-        .with_max_fee_per_gas(20_000_000_000_u128)
-        .with_max_priority_fee_per_gas(1_000_000_000_u128);
-
-    let pending = provider.send_transaction(send_eth_tx).await?;
+    let pending = provider
+        .send_transaction(transfer_tx(
+            signer.address(),
+            future_contract_address,
+            0,
+            U256::from(1000),
+        ))
+        .await?;
     node.advance_block().await?;
     let receipt = pending.get_receipt().await?;
     assert!(receipt.status(), "ETH transfer should succeed");
@@ -531,17 +455,9 @@ async fn test_selfdestruct_same_tx_preexisting_account_post_dencun() -> eyre::Re
     assert_eq!(balance_before, U256::from(1000), "Account should have ETH before deployment");
 
     // Now deploy contract that selfdestructs during its constructor to the same address
-    let init_code = selfdestruct_in_constructor_init_code();
-    let deploy_tx = TransactionRequest::default()
-        .with_from(signer.address())
-        .with_nonce(1)
-        .with_gas_limit(500_000)
-        .with_max_fee_per_gas(20_000_000_000_u128)
-        .with_max_priority_fee_per_gas(1_000_000_000_u128)
-        .with_input(init_code)
-        .with_kind(TxKind::Create);
-
-    let pending = provider.send_transaction(deploy_tx).await?;
+    let pending = provider
+        .send_transaction(deploy_tx(signer.address(), 1, selfdestruct_in_constructor_init_code()))
+        .await?;
     node.advance_block().await?;
     let receipt = pending.get_receipt().await?;
     assert!(receipt.status(), "Contract deployment with selfdestruct should succeed");
@@ -584,16 +500,14 @@ async fn test_selfdestruct_same_tx_preexisting_account_post_dencun() -> eyre::Re
     );
 
     // Send ETH to the destroyed address to verify cache behavior
-    let send_eth_again_tx = TransactionRequest::default()
-        .with_from(signer.address())
-        .with_to(future_contract_address)
-        .with_nonce(2)
-        .with_value(U256::from(2000))
-        .with_gas_limit(21_000)
-        .with_max_fee_per_gas(20_000_000_000_u128)
-        .with_max_priority_fee_per_gas(1_000_000_000_u128);
-
-    let pending = provider.send_transaction(send_eth_again_tx).await?;
+    let pending = provider
+        .send_transaction(transfer_tx(
+            signer.address(),
+            future_contract_address,
+            2,
+            U256::from(2000),
+        ))
+        .await?;
     node.advance_block().await?;
     let receipt = pending.get_receipt().await?;
     assert!(receipt.status(), "ETH transfer should succeed");
