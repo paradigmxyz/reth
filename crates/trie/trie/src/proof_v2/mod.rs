@@ -15,7 +15,10 @@ use alloy_primitives::{keccak256, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
-use reth_trie_common::{BranchNode, BranchNodeMasks, Nibbles, ProofTrieNode, RlpNode, TrieNode};
+use reth_trie_common::{
+    BranchNode, BranchNodeMasks, HashBuilder, Nibbles, ProofTrieNode, RlpNode, TrieNode,
+    EMPTY_ROOT_HASH,
+};
 use std::cmp::Ordering;
 use tracing::{instrument, trace};
 
@@ -1385,6 +1388,34 @@ where
         let root_hash = keccak256(&self.rlp_encode_buf);
 
         Ok(Some(root_hash))
+    }
+
+    /// Computes the storage root hash directly without building proof nodes.
+    ///
+    /// This is more efficient than calling `storage_proof` followed by `compute_root_hash`
+    /// when only the root hash is needed, as it avoids constructing and retaining proof nodes.
+    #[instrument(target = TRACE_TARGET, level = "trace", skip(self))]
+    pub fn compute_storage_root(&mut self, hashed_address: B256) -> Result<B256, StateProofError> {
+        self.hashed_cursor.set_hashed_address(hashed_address);
+
+        // Shortcut: check if storage is empty
+        if self.hashed_cursor.is_storage_empty()? {
+            return Ok(EMPTY_ROOT_HASH);
+        }
+
+        // Use a HashBuilder to compute the root by iterating all storage slots
+        let mut hash_builder = HashBuilder::default();
+
+        self.hashed_cursor.reset();
+        self.hashed_cursor.set_hashed_address(hashed_address);
+        while let Some((hashed_slot, value)) = self.hashed_cursor.next()? {
+            hash_builder.add_leaf(
+                Nibbles::unpack(hashed_slot),
+                alloy_rlp::encode_fixed_size(&value).as_ref(),
+            );
+        }
+
+        Ok(hash_builder.root())
     }
 }
 

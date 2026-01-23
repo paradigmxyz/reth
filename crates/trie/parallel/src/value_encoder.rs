@@ -42,6 +42,8 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<T, H> {
         hashed_cursor_factory: Rc<H>,
         hashed_address: B256,
         account: Account,
+        /// Cache to store computed storage roots for future reuse.
+        cached_storage_roots: Arc<DashMap<B256, B256>>,
     },
 }
 
@@ -88,7 +90,13 @@ where
                 (account, root)
             }
             Self::FromCache { account, root } => (account, root),
-            Self::Sync { trie_cursor_factory, hashed_cursor_factory, hashed_address, account } => {
+            Self::Sync {
+                trie_cursor_factory,
+                hashed_cursor_factory,
+                hashed_address,
+                account,
+                cached_storage_roots,
+            } => {
                 let _guard = debug_span!(
                     target: "trie::proof_task",
                     "Sync storage proof",
@@ -101,11 +109,11 @@ where
                 let mut storage_proof_calculator =
                     proof_v2::ProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
-                let proof = storage_proof_calculator
-                    .storage_proof(hashed_address, &mut [B256::ZERO.into()])?;
-                let storage_root = storage_proof_calculator
-                    .compute_root_hash(&proof)?
-                    .expect("storage_proof with dummy target always returns root");
+                let storage_root = storage_proof_calculator.compute_storage_root(hashed_address)?;
+
+                // Cache the computed root for potential reuse
+                cached_storage_roots.insert(hashed_address, storage_root);
+
                 drop(_guard);
 
                 (account, storage_root)
@@ -286,6 +294,7 @@ where
                     hashed_cursor_factory: self.hashed_cursor_factory.clone(),
                     hashed_address,
                     account,
+                    cached_storage_roots: self.cached_storage_roots.clone(),
                 }
             }
         }

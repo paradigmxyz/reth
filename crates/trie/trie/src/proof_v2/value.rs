@@ -120,23 +120,8 @@ where
         // Create storage proof calculator with StorageValueEncoder
         let mut storage_proof_calculator = ProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
-        // Compute storage root by calling storage_proof with the root path as a target.
-        // This returns just the root node of the storage trie.
-        let storage_root = storage_proof_calculator
-            .storage_proof(self.hashed_address, &mut [B256::ZERO.into()])
-            .map(|nodes| {
-                // Encode the root node to RLP and hash it
-                let root_node =
-                    nodes.first().expect("storage_proof always returns at least the root");
-                root_node.node.encode(buf);
-
-                let storage_root = alloy_primitives::keccak256(buf.as_slice());
-
-                // Clear the buffer so we can re-use it to encode the TrieAccount
-                buf.clear();
-
-                storage_root
-            })?;
+        // Compute storage root directly (more efficient than building a proof with dummy target)
+        let storage_root = storage_proof_calculator.compute_storage_root(self.hashed_address)?;
 
         // Combine account with storage root to create TrieAccount
         let trie_account = self.account.into_trie_account(storage_root);
