@@ -810,6 +810,216 @@ mod tests {
         assert_eq!(has_ext_data, 1, "Non-empty buffer should produce len=1");
     }
 
+    /// Comprehensive test matrix for Receipt compact encoding with ReceiptExt.
+    /// Tests all combinations of: tx types × success × logs × extension fields.
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_receipt_compact_roundtrip_matrix() {
+        // Test matrix: tx_type × success × logs × produces comprehensive coverage
+        let tx_types = [TxType::Legacy, TxType::Eip2930, TxType::Eip1559, TxType::Eip4844];
+        let success_values = [true, false];
+        let gas_values = [0u64, 21000, 100000, u64::MAX];
+
+        for tx_type in tx_types {
+            for success in success_values {
+                for gas in gas_values {
+                    // Test with no logs (small, uncompressed)
+                    let receipt_no_logs =
+                        Receipt { tx_type, success, cumulative_gas_used: gas, logs: vec![] };
+
+                    let mut buf = vec![];
+                    receipt_no_logs.to_compact(&mut buf);
+                    let (decoded, remaining) = Receipt::<TxType>::from_compact(&buf, buf.len());
+
+                    assert_eq!(
+                        decoded, receipt_no_logs,
+                        "Roundtrip failed for {:?}, success={}, gas={}, no logs",
+                        tx_type, success, gas
+                    );
+                    assert!(remaining.is_empty(), "Should consume all bytes");
+                }
+            }
+        }
+    }
+
+    /// Test receipts with logs - these trigger zstd compression when large enough.
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_receipt_compact_with_logs() {
+        // Single log - may or may not trigger zstd depending on size
+        let single_log = Log::new_unchecked(
+            address!("0x0000000000000000000000000000000000000011"),
+            vec![b256!("0x000000000000000000000000000000000000000000000000000000000000dead")],
+            bytes!("0100ff"),
+        );
+
+        let receipt_one_log = Receipt {
+            tx_type: TxType::Eip1559,
+            success: true,
+            cumulative_gas_used: 50000,
+            logs: vec![single_log.clone()],
+        };
+
+        let mut buf = vec![];
+        receipt_one_log.to_compact(&mut buf);
+        let (decoded, remaining) = Receipt::<TxType>::from_compact(&buf, buf.len());
+        assert_eq!(decoded, receipt_one_log, "Single log roundtrip failed");
+        assert!(remaining.is_empty());
+
+        // Multiple logs - should trigger zstd compression
+        let receipt_many_logs = Receipt {
+            tx_type: TxType::Eip4844,
+            success: false,
+            cumulative_gas_used: 1000000,
+            logs: vec![single_log.clone(); 5],
+        };
+
+        let mut buf = vec![];
+        receipt_many_logs.to_compact(&mut buf);
+        // Verify zstd flag is set (first byte has bit 0 set for zstd)
+        assert!(!buf.is_empty());
+        let (decoded, remaining) = Receipt::<TxType>::from_compact(&buf, buf.len());
+        assert_eq!(decoded, receipt_many_logs, "Multiple logs roundtrip failed");
+        assert!(remaining.is_empty());
+    }
+
+    /// Test that ReceiptExt with field set roundtrips correctly.
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_receipt_ext_field_set() {
+        use crate::ReceiptExt;
+
+        // ReceiptExt with block_access_index set
+        let ext_with_field = ReceiptExt { block_access_index: Some(42) };
+        let mut buf = vec![];
+        ext_with_field.to_compact(&mut buf);
+        assert!(!buf.is_empty(), "ReceiptExt with field should write bytes");
+
+        let (decoded, remaining) = ReceiptExt::from_compact(&buf, buf.len());
+        assert_eq!(decoded, ext_with_field, "ReceiptExt roundtrip failed");
+        assert!(remaining.is_empty());
+
+        // ReceiptExt with None field
+        let ext_no_field = ReceiptExt { block_access_index: None };
+        let mut buf = vec![];
+        ext_no_field.to_compact(&mut buf);
+
+        let (decoded, remaining) = ReceiptExt::from_compact(&buf, buf.len());
+        assert_eq!(decoded, ext_no_field, "ReceiptExt with None field roundtrip failed");
+        assert!(remaining.is_empty());
+
+        // Test into_option behavior
+        assert!(ext_with_field.into_option().is_some());
+        assert!(ext_no_field.into_option().is_none());
+    }
+
+    /// Test that Option<ReceiptExt> with various values roundtrips correctly.
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_option_receipt_ext_variants() {
+        use crate::ReceiptExt;
+
+        // None
+        let none: Option<ReceiptExt> = None;
+        let mut buf = vec![];
+        let len = none.to_compact(&mut buf);
+        assert_eq!(len, 0);
+        assert!(buf.is_empty());
+
+        let (decoded, _) = Option::<ReceiptExt>::from_compact(&buf, 0);
+        assert!(decoded.is_none());
+
+        // Some with field = None (encodes to Some but field is empty)
+        let some_empty = Some(ReceiptExt { block_access_index: None });
+        let mut buf = vec![];
+        let len = some_empty.to_compact(&mut buf);
+        assert_eq!(len, 1);
+        assert!(!buf.is_empty());
+
+        let (decoded, _) = Option::<ReceiptExt>::from_compact(&buf, 1);
+        assert_eq!(decoded, some_empty);
+
+        // Some with field = Some(value)
+        let some_with_value = Some(ReceiptExt { block_access_index: Some(999999) });
+        let mut buf = vec![];
+        let len = some_with_value.to_compact(&mut buf);
+        assert_eq!(len, 1);
+
+        let (decoded, _) = Option::<ReceiptExt>::from_compact(&buf, 1);
+        assert_eq!(decoded, some_with_value);
+
+        // Edge case: large value
+        let some_large = Some(ReceiptExt { block_access_index: Some(u64::MAX) });
+        let mut buf = vec![];
+        some_large.to_compact(&mut buf);
+
+        let (decoded, _) = Option::<ReceiptExt>::from_compact(&buf, 1);
+        assert_eq!(decoded, some_large);
+    }
+
+    /// Test zstd compression path specifically.
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_receipt_zstd_compression_path() {
+        // Create a receipt large enough to trigger zstd (> 7 bytes after flags)
+        let large_log = Log::new_unchecked(
+            address!("0x1234567890123456789012345678901234567890"),
+            vec![
+                b256!("0x1111111111111111111111111111111111111111111111111111111111111111"),
+                b256!("0x2222222222222222222222222222222222222222222222222222222222222222"),
+            ],
+            Bytes::from(vec![0xab; 100]),
+        );
+
+        let receipt = Receipt {
+            tx_type: TxType::Eip1559,
+            success: true,
+            cumulative_gas_used: 500000,
+            logs: vec![large_log],
+        };
+
+        let mut buf = vec![];
+        receipt.to_compact(&mut buf);
+
+        // Check that zstd flag is set (bit 0 of flags byte)
+        assert!(!buf.is_empty());
+        let flags_byte = buf[0];
+        let zstd_flag = (flags_byte >> 7) & 1; // __zstd is the last bit
+        assert_eq!(zstd_flag, 1, "Large receipt should be zstd compressed");
+
+        // Verify roundtrip
+        let (decoded, remaining) = Receipt::<TxType>::from_compact(&buf, buf.len());
+        assert_eq!(decoded, receipt, "zstd compressed receipt roundtrip failed");
+        assert!(remaining.is_empty(), "zstd path should return empty slice");
+    }
+
+    /// Test uncompressed path (small receipts).
+    #[test]
+    #[cfg(feature = "reth-codec")]
+    fn test_receipt_uncompressed_path() {
+        // Small receipt - should not trigger zstd
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            success: true,
+            cumulative_gas_used: 21000,
+            logs: vec![],
+        };
+
+        let mut buf = vec![];
+        receipt.to_compact(&mut buf);
+
+        // Check that zstd flag is NOT set
+        assert!(!buf.is_empty());
+        let flags_byte = buf[0];
+        let zstd_flag = (flags_byte >> 7) & 1;
+        assert_eq!(zstd_flag, 0, "Small receipt should not be zstd compressed");
+
+        // Verify roundtrip
+        let (decoded, remaining) = Receipt::<TxType>::from_compact(&buf, buf.len());
+        assert_eq!(decoded, receipt, "Uncompressed receipt roundtrip failed");
+        assert!(remaining.is_empty());
+    }
+
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
     fn encode_legacy_receipt() {
