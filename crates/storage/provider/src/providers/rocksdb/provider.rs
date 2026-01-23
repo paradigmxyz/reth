@@ -1274,8 +1274,7 @@ impl<'a> RocksDBBatch<'a> {
                 "Auto-committing RocksDB batch"
             );
             let old_batch = std::mem::take(&mut self.inner);
-            let db = self.provider.0.db_rw();
-            db.write_opt(old_batch, &WriteOptions::default()).map_err(|e| {
+            self.provider.0.db_rw().write_opt(old_batch, &WriteOptions::default()).map_err(|e| {
                 ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                     message: e.to_string().into(),
                     code: -1,
