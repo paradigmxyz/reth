@@ -834,13 +834,14 @@ impl PayloadExecutionCache {
             );
 
             if available {
+                // If the has is available (no other threads are using it), but has a mismatching
+                // parent hash, we can just clear it and keep using without re-creating from
+                // scratch.
                 if !hash_matches {
                     c.clear();
                 }
                 return Some(c.clone())
-            }
-
-            if hash_matches && !available {
+            } else if hash_matches {
                 self.metrics.execution_cache_in_use.increment(1);
             }
         } else {
