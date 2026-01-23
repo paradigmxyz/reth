@@ -1,7 +1,9 @@
 use super::collect_account_history_indices;
 use crate::stages::utils::{collect_history_indices, load_account_history};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
-use reth_db_api::{models::ShardedKey, table::Table, tables, transaction::DbTxMut};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_db_api::Tables;
+use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
 use reth_provider::{
     DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
     RocksDBProviderFactory, StorageSettingsCache,
@@ -142,8 +144,10 @@ where
             Ok(((), writer.into_raw_rocksdb_batch()))
         })?;
 
+        #[cfg(all(unix, feature = "rocksdb"))]
         if use_rocksdb {
-            provider.rocksdb_provider().flush(&[tables::AccountsHistory::NAME])?;
+            provider.commit_pending_rocksdb_batches()?;
+            provider.rocksdb_provider().flush(&[Tables::AccountsHistory.name()])?;
         }
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
