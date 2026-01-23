@@ -148,6 +148,41 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
     let slot0_after = provider.get_storage_at(contract_address, U256::ZERO).await?;
     assert_eq!(slot0_after, U256::from(0x42), "Post-Dencun: Storage should persist");
 
+    // Send another transaction to the contract address in a new block.
+    // This tests cache behavior - if cache has stale data, execution would be incorrect.
+    // Post-Dencun: calling the contract should trigger SELFDESTRUCT again (but only transfer balance)
+    let call_again_tx = TransactionRequest::default()
+        .with_from(signer.address())
+        .with_to(contract_address)
+        .with_nonce(2)
+        .with_gas_limit(100_000)
+        .with_max_fee_per_gas(20_000_000_000_u128)
+        .with_max_priority_fee_per_gas(1_000_000_000_u128);
+
+    let pending = provider.send_transaction(call_again_tx).await?;
+    node.advance_block().await?;
+    let receipt = pending.get_receipt().await?;
+    assert!(receipt.status(), "Second call to contract should succeed");
+
+    // Consume the canonical notification
+    let notification = node.canonical_stream.next().await.unwrap();
+    let chain = notification.committed();
+    let execution_outcome = chain.execution_outcome();
+
+    // Verify the output state still shows account NOT destroyed
+    let account_state: Option<&BundleAccount> = execution_outcome.bundle.account(&contract_address);
+    assert!(
+        account_state.is_none() || !account_state.unwrap().was_destroyed(),
+        "Post-Dencun: Account should still NOT be destroyed after second SELFDESTRUCT call"
+    );
+
+    // Verify code and storage still persist after the second call
+    let code_final = provider.get_code_at(contract_address).await?;
+    assert!(!code_final.is_empty(), "Post-Dencun: Contract code should still persist");
+
+    let slot0_final = provider.get_storage_at(contract_address, U256::ZERO).await?;
+    assert_eq!(slot0_final, U256::from(0x42), "Post-Dencun: Storage should still persist");
+
     Ok(())
 }
 
@@ -248,6 +283,48 @@ async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
 
     let slot0_after = provider.get_storage_at(contract_address, U256::ZERO).await?;
     assert_eq!(slot0_after, U256::ZERO, "Pre-Dencun: Storage should be cleared");
+
+    // Send ETH to the destroyed contract address in a new block.
+    // This tests cache behavior - the cache should correctly reflect the account was destroyed.
+    // Pre-Dencun: the contract no longer exists, so this is just a plain ETH transfer.
+    let send_eth_tx = TransactionRequest::default()
+        .with_from(signer.address())
+        .with_to(contract_address)
+        .with_nonce(2)
+        .with_value(U256::from(1000))
+        .with_gas_limit(21_000)
+        .with_max_fee_per_gas(20_000_000_000_u128)
+        .with_max_priority_fee_per_gas(1_000_000_000_u128);
+
+    let pending = provider.send_transaction(send_eth_tx).await?;
+    node.advance_block().await?;
+    let receipt = pending.get_receipt().await?;
+    assert!(receipt.status(), "ETH transfer to destroyed contract address should succeed");
+
+    // Consume the canonical notification
+    let notification = node.canonical_stream.next().await.unwrap();
+    let chain = notification.committed();
+    let execution_outcome = chain.execution_outcome();
+
+    // Verify the output state shows the account exists (received ETH) but has no code
+    let account_state: Option<&BundleAccount> = execution_outcome.bundle.account(&contract_address);
+    // After receiving ETH, the account should exist with balance but no code
+    assert!(
+        account_state.is_some(),
+        "Pre-Dencun: Account should exist after receiving ETH (even though contract was destroyed)"
+    );
+
+    // Verify code is still empty (contract was destroyed, only ETH was received)
+    let code_final = provider.get_code_at(contract_address).await?;
+    assert!(code_final.is_empty(), "Pre-Dencun: Contract code should remain deleted");
+
+    // Verify storage is still cleared
+    let slot0_final = provider.get_storage_at(contract_address, U256::ZERO).await?;
+    assert_eq!(slot0_final, U256::ZERO, "Pre-Dencun: Storage should remain cleared");
+
+    // Verify the account now has the ETH balance we sent
+    let balance = provider.get_balance(contract_address).await?;
+    assert_eq!(balance, U256::from(1000), "Pre-Dencun: Account should have received ETH");
 
     Ok(())
 }
