@@ -373,6 +373,7 @@ pub struct MockTransactionValidator<T> {
 
 impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T> {
     type Transaction = T;
+    type Block = reth_ethereum_primitives::Block;
 
     async fn validate_transaction(
         &self,
