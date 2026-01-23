@@ -1260,9 +1260,6 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// This is called after each `put` or `delete` operation to prevent unbounded memory growth.
     /// Returns immediately if auto-commit is disabled or threshold not reached.
-    ///
-    /// This also flushes the WAL and memtables to disk after committing.
-    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_size = self.inner.size_in_bytes()))]
     fn maybe_auto_commit(&mut self) -> ProviderResult<()> {
         if let Some(threshold) = self.auto_commit_threshold &&
             self.inner.size_in_bytes() >= threshold
@@ -1282,13 +1279,6 @@ impl<'a> RocksDBBatch<'a> {
                     }))
                 },
             )?;
-
-            self.provider.flush(ROCKSDB_TABLES)?;
-
-            tracing::info!(
-                target: "providers::rocksdb",
-                "Flushed RocksDB WAL and memtables after auto-commit"
-            );
         }
         Ok(())
     }
