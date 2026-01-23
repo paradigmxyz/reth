@@ -447,7 +447,7 @@ dependencies = [
  "cfg-if",
  "const-hex",
  "derive_more",
- "fixed-cache",
+ "fixed-cache 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "foldhash 0.2.0",
  "getrandom 0.3.4",
  "hashbrown 0.16.1",
@@ -4044,6 +4044,14 @@ name = "fixed-cache"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4818d9731e8b1fbc95a5a09b7cb2cda660a994c3198aa0fcdd8f49c5b0768048"
+dependencies = [
+ "equivalent",
+]
+
+[[package]]
+name = "fixed-cache"
+version = "0.1.6"
+source = "git+https://github.com/shekhirin/fixed-cache?branch=alexey%2Finsert-update-callbacks#d98b4582fac8d3d0c1b0ad8549323db674448784"
 dependencies = [
  "equivalent",
  "typeid",
@@ -8402,7 +8410,7 @@ dependencies = [
  "dashmap",
  "derive_more",
  "eyre",
- "fixed-cache",
+ "fixed-cache 0.1.6 (git+https://github.com/shekhirin/fixed-cache?branch=alexey%2Finsert-update-callbacks)",
  "futures",
  "metrics",
  "metrics-util",

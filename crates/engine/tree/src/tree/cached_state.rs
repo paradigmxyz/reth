@@ -291,18 +291,29 @@ impl CacheStatsHandler {
     }
 }
 
-impl<K, V> StatsHandler<K, V> for CacheStatsHandler {
+impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
     fn on_hit(&self, _key: &K, _value: &V) {}
 
     fn on_miss(&self, _key: AnyRef<'_>) {}
 
-    fn on_collision(&self, _new_key: AnyRef<'_>, _existing_key: &K, _existing_value: &V) {
-        self.collisions.fetch_add(1, Ordering::Relaxed);
-        // Collision means we're replacing an existing entry, not adding a new one.
-        // Since we increment size before the insert, we need to decrement here to compensate.
-        let _ = self
-            .size
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |s| Some(s.saturating_sub(1)));
+    fn on_insert(&self, key: &K, _value: &V, evicted: Option<(&K, &V)>) {
+        match evicted {
+            None => {
+                // Inserting into an empty bucket
+                self.increment_size();
+            }
+            Some((evicted_key, _)) if evicted_key != key => {
+                // Collision: evicting a different key
+                self.collisions.fetch_add(1, Ordering::Relaxed);
+            }
+            Some(_) => {
+                // Updating the same key, size unchanged
+            }
+        }
+    }
+
+    fn on_remove(&self, _key: &K, _value: &V) {
+        self.decrement_size();
     }
 }
 
@@ -599,7 +610,6 @@ impl ExecutionCache {
         })?;
 
         if miss {
-            self.code_stats.increment_size();
             Ok(CachedStatus::NotCached(result))
         } else {
             Ok(CachedStatus::Cached(result))
@@ -620,7 +630,6 @@ impl ExecutionCache {
         })?;
 
         if miss {
-            self.storage_stats.increment_size();
             Ok(CachedStatus::NotCached(result))
         } else {
             Ok(CachedStatus::Cached(result))
@@ -640,7 +649,6 @@ impl ExecutionCache {
         })?;
 
         if miss {
-            self.account_stats.increment_size();
             Ok(CachedStatus::NotCached(result))
         } else {
             Ok(CachedStatus::Cached(result))
@@ -655,19 +663,16 @@ impl ExecutionCache {
         value: Option<StorageValue>,
     ) {
         self.storage_cache.insert((address, key), value.unwrap_or_default());
-        self.storage_stats.increment_size();
     }
 
     /// Insert code into cache.
     fn insert_code(&self, hash: B256, code: Option<Bytecode>) {
         self.code_cache.insert(hash, code);
-        self.code_stats.increment_size();
     }
 
     /// Insert account into cache.
     fn insert_account(&self, address: Address, account: Option<Account>) {
         self.account_cache.insert(address, account);
-        self.account_stats.increment_size();
     }
 
     /// Inserts the post-execution state changes into the cache.
