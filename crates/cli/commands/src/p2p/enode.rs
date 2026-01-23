@@ -12,7 +12,6 @@ use std::{
 #[derive(Parser, Debug)]
 pub struct Command {
     /// Path to the secret key file for discovery.
-    #[arg(long, value_name = "PATH", required = true)]
     pub discovery_secret: PathBuf,
 
     /// Optional IP address to include in the enode URL.

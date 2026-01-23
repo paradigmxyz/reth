@@ -236,18 +236,12 @@ mod tests {
     #[test]
     fn parse_enode_cmd() {
         let _args: Command<EthereumChainSpecParser> =
-            Command::parse_from(["reth", "enode", "--discovery-secret", "/tmp/secret"]);
+            Command::parse_from(["reth", "enode", "/tmp/secret"]);
     }
 
     #[test]
     fn parse_enode_cmd_with_ip() {
-        let _args: Command<EthereumChainSpecParser> = Command::parse_from([
-            "reth",
-            "enode",
-            "--discovery-secret",
-            "/tmp/secret",
-            "--ip",
-            "192.168.1.1",
-        ]);
+        let _args: Command<EthereumChainSpecParser> =
+            Command::parse_from(["reth", "enode", "/tmp/secret", "--ip", "192.168.1.1"]);
     }
 }
