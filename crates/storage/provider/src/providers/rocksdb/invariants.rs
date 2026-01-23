@@ -315,12 +315,13 @@ impl RocksDBProvider {
 
     /// Prunes `StoragesHistory` entries where `highest_block_number` > `max_block`.
     ///
-    /// Uses changeset-based pruning: queries MDBX for storage slots that changed in the
-    /// excess block range, then only deletes History entries for those specific slots.
-    /// This is more efficient than iterating the whole table.
+    /// Uses changeset-based pruning: queries the provider for storage slots that changed
+    /// in the excess block range (routes to static files when enabled), then only deletes
+    /// History entries for those specific slots. This is more efficient than iterating
+    /// the whole table.
     ///
     /// Includes a defensive check after the optimized path to ensure no entries are missed
-    /// (e.g., if MDBX doesn't have complete changeset data for all excess blocks in `RocksDB`).
+    /// (e.g., if changesets are incomplete for the excess block range).
     ///
     /// If `max_block == 0`, falls back to clearing all entries (full table iteration).
     fn prune_storages_history_above<Provider>(
@@ -543,12 +544,13 @@ impl RocksDBProvider {
 
     /// Prunes `AccountsHistory` entries where `highest_block_number` > `max_block`.
     ///
-    /// Uses changeset-based pruning: queries MDBX for accounts that changed in the
-    /// excess block range, then only deletes History entries for those specific accounts.
-    /// This is more efficient than iterating the whole table.
+    /// Uses changeset-based pruning: queries the provider for accounts that changed
+    /// in the excess block range (routes to static files when enabled), then only deletes
+    /// History entries for those specific accounts. This is more efficient than iterating
+    /// the whole table.
     ///
     /// Includes a defensive check after the optimized path to ensure no entries are missed
-    /// (e.g., if MDBX doesn't have complete changeset data for all excess blocks in `RocksDB`).
+    /// (e.g., if changesets are incomplete for the excess block range).
     ///
     /// If `max_block == 0`, falls back to clearing all entries (full table iteration).
     fn prune_accounts_history_above<Provider>(
