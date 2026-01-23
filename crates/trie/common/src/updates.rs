@@ -4,6 +4,7 @@ use crate::{
 };
 use alloc::{
     collections::{btree_map::BTreeMap, btree_set::BTreeSet},
+    sync::Arc,
     vec::Vec,
 };
 use alloy_primitives::{
@@ -206,7 +207,7 @@ impl TrieUpdates {
     }
 
     /// Converts trie updates into [`TrieUpdatesSortedRef`].
-    pub fn into_sorted_ref<'a>(&'a self) -> TrieUpdatesSortedRef<'a> {
+    pub fn into_sorted_ref(&self) -> TrieUpdatesSortedRef<'_> {
         let mut account_nodes = self.account_nodes.iter().collect::<Vec<_>>();
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
@@ -216,7 +217,7 @@ impl TrieUpdates {
             storage_tries: self
                 .storage_tries
                 .iter()
-                .map(|m| (*m.0, m.1.into_sorted_ref().clone()))
+                .map(|m| (*m.0, m.1.into_sorted_ref()))
                 .collect(),
         }
     }
@@ -696,6 +697,36 @@ impl TrieUpdatesSorted {
             .collect();
 
         Self { account_nodes, storage_tries }.into()
+    }
+
+    /// Parallel batch-merge sorted trie updates. Slice is **oldest to newest**.
+    ///
+    /// This is more efficient than sequential `extend_ref` calls when merging many updates,
+    /// as it processes all updates in parallel with tree reduction using divide-and-conquer.
+    #[cfg(feature = "rayon")]
+    pub fn merge_parallel(updates: &[Arc<Self>]) -> Self {
+        fn parallel_merge_tree(updates: &[Arc<TrieUpdatesSorted>]) -> TrieUpdatesSorted {
+            match updates.len() {
+                0 => TrieUpdatesSorted::default(),
+                1 => updates[0].as_ref().clone(),
+                2 => {
+                    let mut acc = updates[0].as_ref().clone();
+                    acc.extend_ref_and_sort(&updates[1]);
+                    acc
+                }
+                n => {
+                    let mid = n / 2;
+                    let (mut left, right) = rayon::join(
+                        || parallel_merge_tree(&updates[..mid]),
+                        || parallel_merge_tree(&updates[mid..]),
+                    );
+                    left.extend_ref_and_sort(&right);
+                    left
+                }
+            }
+        }
+
+        parallel_merge_tree(updates)
     }
 }
 
