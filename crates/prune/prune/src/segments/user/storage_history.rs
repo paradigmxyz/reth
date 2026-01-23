@@ -1,10 +1,12 @@
 use crate::{
     db_ext::DbTxPruneExt,
-    segments::{user::history::prune_history_indices, PruneInput, Segment},
+    segments::{
+        user::history::{finalize_history_prune, HistoryPruneResult},
+        PruneInput, Segment,
+    },
     PrunerError,
 };
-use alloy_primitives::BlockNumber;
-use itertools::Itertools;
+use alloy_primitives::{Address, BlockNumber, B256};
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
     tables,
@@ -132,42 +134,23 @@ impl StorageHistory {
         }
         trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned storage history (changesets from static files)");
 
-        let last_changeset_pruned_block = last_changeset_pruned_block
-            // If there's more storage changesets to prune, set the checkpoint block number to
-            // previous, so we could finish pruning its storage changesets on the next run.
-            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
-            .unwrap_or(range_end);
-
-        // Sort highest deleted block numbers by account address and storage key and turn them into
-        // sharded keys.
-        // We did not use `BTreeMap` from the beginning, because it's inefficient for hashes.
-        let highest_sharded_keys = highest_deleted_storages
-            .into_iter()
-            .sorted_unstable() // Unstable is fine because no equal keys exist in the map
-            .map(|((address, storage_key), block_number)| {
-                StorageShardedKey::new(
-                    address,
-                    storage_key,
-                    block_number.min(last_changeset_pruned_block),
-                )
-            });
-        let outcomes = prune_history_indices::<Provider, tables::StoragesHistory, _>(
+        let result = HistoryPruneResult {
+            highest_deleted: highest_deleted_storages,
+            last_pruned_block: last_changeset_pruned_block,
+            pruned_count: pruned_changesets,
+            done,
+        };
+        finalize_history_prune::<_, tables::StoragesHistory, (Address, B256), _>(
             provider,
-            highest_sharded_keys,
+            result,
+            range_end,
+            &limiter,
+            |(address, storage_key), block_number| {
+                StorageShardedKey::new(address, storage_key, block_number)
+            },
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
-        )?;
-        trace!(target: "pruner", ?outcomes, %done, "Pruned storage history (indices)");
-
-        let progress = limiter.progress(done);
-
-        Ok(SegmentOutput {
-            progress,
-            pruned: pruned_changesets + outcomes.deleted,
-            checkpoint: Some(SegmentOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block),
-                tx_number: None,
-            }),
-        })
+        )
+        .map_err(Into::into)
     }
 
     fn prune_database<Provider>(
@@ -193,7 +176,6 @@ impl StorageHistory {
             ))
         }
 
-        let mut last_changeset_pruned_block = None;
         // Deleted storage changeset keys (account addresses and storage slots) with the highest
         // block number deleted for that key.
         //
@@ -202,6 +184,7 @@ impl StorageHistory {
         // / 2`, so 8750 entries. Each entry is `160 bit + 256 bit + 64 bit`, so the total
         // size should be up to ~0.5MB + some hashmap overhead. `blocks_since_last_run` is
         // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
+        let mut last_changeset_pruned_block = None;
         let mut highest_deleted_storages = FxHashMap::default();
         let (pruned_changesets, done) =
             provider.tx_ref().prune_table_with_range::<tables::StorageChangeSets>(
@@ -215,42 +198,23 @@ impl StorageHistory {
             )?;
         trace!(target: "pruner", deleted = %pruned_changesets, %done, "Pruned storage history (changesets)");
 
-        let last_changeset_pruned_block = last_changeset_pruned_block
-            // If there's more storage changesets to prune, set the checkpoint block number to
-            // previous, so we could finish pruning its storage changesets on the next run.
-            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
-            .unwrap_or(range_end);
-
-        // Sort highest deleted block numbers by account address and storage key and turn them into
-        // sharded keys.
-        // We did not use `BTreeMap` from the beginning, because it's inefficient for hashes.
-        let highest_sharded_keys = highest_deleted_storages
-            .into_iter()
-            .sorted_unstable() // Unstable is fine because no equal keys exist in the map
-            .map(|((address, storage_key), block_number)| {
-                StorageShardedKey::new(
-                    address,
-                    storage_key,
-                    block_number.min(last_changeset_pruned_block),
-                )
-            });
-        let outcomes = prune_history_indices::<Provider, tables::StoragesHistory, _>(
+        let result = HistoryPruneResult {
+            highest_deleted: highest_deleted_storages,
+            last_pruned_block: last_changeset_pruned_block,
+            pruned_count: pruned_changesets,
+            done,
+        };
+        finalize_history_prune::<_, tables::StoragesHistory, (Address, B256), _>(
             provider,
-            highest_sharded_keys,
+            result,
+            range_end,
+            &limiter,
+            |(address, storage_key), block_number| {
+                StorageShardedKey::new(address, storage_key, block_number)
+            },
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
-        )?;
-        trace!(target: "pruner", ?outcomes, %done, "Pruned storage history (indices)");
-
-        let progress = limiter.progress(done);
-
-        Ok(SegmentOutput {
-            progress,
-            pruned: pruned_changesets + outcomes.deleted,
-            checkpoint: Some(SegmentOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block),
-                tx_number: None,
-            }),
-        })
+        )
+        .map_err(Into::into)
     }
 }
 

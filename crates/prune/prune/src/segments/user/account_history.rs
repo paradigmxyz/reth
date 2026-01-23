@@ -1,10 +1,12 @@
 use crate::{
     db_ext::DbTxPruneExt,
-    segments::{user::history::prune_history_indices, PruneInput, Segment},
+    segments::{
+        user::history::{finalize_history_prune, HistoryPruneResult},
+        PruneInput, Segment,
+    },
     PrunerError,
 };
 use alloy_primitives::BlockNumber;
-use itertools::Itertools;
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
 use reth_provider::{
     changeset_walker::StaticFileAccountChangesetWalker, DBProvider, EitherWriter,
@@ -101,9 +103,9 @@ impl AccountHistory {
 
         // The size of this map it's limited by `prune_delete_limit * blocks_since_last_run /
         // ACCOUNT_HISTORY_TABLES_TO_PRUNE`, and with current default it's usually `3500 * 5
-        // / 2`, so 8750 entries. Each entry is `160 bit + 256 bit + 64 bit`, so the total
-        // size should be up to 0.5MB + some hashmap overhead. `blocks_since_last_run` is
-        // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
+        // / 2`, so 8750 entries. Each entry is `160 bit + 64 bit`, so the total size should
+        // be up to ~0.25MB + some hashmap overhead. `blocks_since_last_run` is additionally
+        // limited by the `max_reorg_depth`, so no OOM is expected here.
         let mut highest_deleted_accounts: FxHashMap<_, _> = FxHashMap::default();
         let mut last_changeset_pruned_block = None;
         let mut pruned_changesets = 0;
@@ -130,37 +132,21 @@ impl AccountHistory {
         }
         trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets from static files)");
 
-        let last_changeset_pruned_block = last_changeset_pruned_block
-            // If there's more account changesets to prune, set the checkpoint block number to
-            // previous, so we could finish pruning its account changesets on the next run.
-            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
-            .unwrap_or(range_end);
-
-        // Sort highest deleted block numbers by account address and turn them into sharded keys.
-        // We did not use `BTreeMap` from the beginning, because it's inefficient for hashes.
-        let highest_sharded_keys = highest_deleted_accounts
-            .into_iter()
-            .sorted_unstable() // Unstable is fine because no equal keys exist in the map
-            .map(|(address, block_number)| {
-                ShardedKey::new(address, block_number.min(last_changeset_pruned_block))
-            });
-        let outcomes = prune_history_indices::<Provider, tables::AccountsHistory, _>(
+        let result = HistoryPruneResult {
+            highest_deleted: highest_deleted_accounts,
+            last_pruned_block: last_changeset_pruned_block,
+            pruned_count: pruned_changesets,
+            done,
+        };
+        finalize_history_prune::<_, tables::AccountsHistory, _, _>(
             provider,
-            highest_sharded_keys,
+            result,
+            range_end,
+            &limiter,
+            |address, block_number| ShardedKey::new(address, block_number),
             |a, b| a.key == b.key,
-        )?;
-        trace!(target: "pruner", ?outcomes, %done, "Pruned account history (indices)");
-
-        let progress = limiter.progress(done);
-
-        Ok(SegmentOutput {
-            progress,
-            pruned: pruned_changesets + outcomes.deleted,
-            checkpoint: Some(SegmentOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block),
-                tx_number: None,
-            }),
-        })
+        )
+        .map_err(Into::into)
     }
 
     fn prune_database<Provider>(
@@ -186,15 +172,15 @@ impl AccountHistory {
             ))
         }
 
-        let mut last_changeset_pruned_block = None;
         // Deleted account changeset keys (account addresses) with the highest block number deleted
         // for that key.
         //
         // The size of this map it's limited by `prune_delete_limit * blocks_since_last_run /
         // ACCOUNT_HISTORY_TABLES_TO_PRUNE`, and with current default it's usually `3500 * 5
-        // / 2`, so 8750 entries. Each entry is `160 bit + 256 bit + 64 bit`, so the total
-        // size should be up to 0.5MB + some hashmap overhead. `blocks_since_last_run` is
-        // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
+        // / 2`, so 8750 entries. Each entry is `160 bit + 64 bit`, so the total size should
+        // be up to ~0.25MB + some hashmap overhead. `blocks_since_last_run` is additionally
+        // limited by the `max_reorg_depth`, so no OOM is expected here.
+        let mut last_changeset_pruned_block = None;
         let mut highest_deleted_accounts = FxHashMap::default();
         let (pruned_changesets, done) =
             provider.tx_ref().prune_table_with_range::<tables::AccountChangeSets>(
@@ -208,37 +194,21 @@ impl AccountHistory {
             )?;
         trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets from database)");
 
-        let last_changeset_pruned_block = last_changeset_pruned_block
-            // If there's more account changesets to prune, set the checkpoint block number to
-            // previous, so we could finish pruning its account changesets on the next run.
-            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
-            .unwrap_or(range_end);
-
-        // Sort highest deleted block numbers by account address and turn them into sharded keys.
-        // We did not use `BTreeMap` from the beginning, because it's inefficient for hashes.
-        let highest_sharded_keys = highest_deleted_accounts
-            .into_iter()
-            .sorted_unstable() // Unstable is fine because no equal keys exist in the map
-            .map(|(address, block_number)| {
-                ShardedKey::new(address, block_number.min(last_changeset_pruned_block))
-            });
-        let outcomes = prune_history_indices::<Provider, tables::AccountsHistory, _>(
+        let result = HistoryPruneResult {
+            highest_deleted: highest_deleted_accounts,
+            last_pruned_block: last_changeset_pruned_block,
+            pruned_count: pruned_changesets,
+            done,
+        };
+        finalize_history_prune::<_, tables::AccountsHistory, _, _>(
             provider,
-            highest_sharded_keys,
+            result,
+            range_end,
+            &limiter,
+            |address, block_number| ShardedKey::new(address, block_number),
             |a, b| a.key == b.key,
-        )?;
-        trace!(target: "pruner", ?outcomes, %done, "Pruned account history (indices)");
-
-        let progress = limiter.progress(done);
-
-        Ok(SegmentOutput {
-            progress,
-            pruned: pruned_changesets + outcomes.deleted,
-            checkpoint: Some(SegmentOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block),
-                tx_number: None,
-            }),
-        })
+        )
+        .map_err(Into::into)
     }
 }
 
