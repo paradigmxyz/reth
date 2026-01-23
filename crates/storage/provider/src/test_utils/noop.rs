@@ -31,7 +31,9 @@ impl<C: Send + Sync, N: NodePrimitives> RocksDBProviderFactory for NoopProvider<
     }
 
     #[cfg(all(unix, feature = "rocksdb"))]
-    fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {
-        // No-op for NoopProvider
+    fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {}
+
+    fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
+        Ok(())
     }
 }
