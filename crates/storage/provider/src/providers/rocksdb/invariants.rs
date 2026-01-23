@@ -22,7 +22,6 @@ use reth_storage_api::{
     StorageSettingsCache, TransactionsProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use std::collections::HashSet;
 
 impl RocksDBProvider {
     /// Checks consistency of `RocksDB` tables against MDBX stage checkpoints.
@@ -315,12 +314,6 @@ impl RocksDBProvider {
 
     /// Prunes `StoragesHistory` entries where `highest_block_number` > `max_block`.
     ///
-    /// Uses changeset-based pruning: queries the provider for storage slots that changed
-    /// in the excess block range (via `changed_storages_with_range`, which routes to static
-    /// files or MDBX based on storage settings), then only deletes History entries for those
-    /// specific slots. This is more efficient than iterating the whole table.
-    ///
-    /// If no changesets are available, falls back to full table iteration.
     /// If `max_block == 0`, clears all non-sentinel entries.
     fn prune_storages_history_above<Provider>(
         &self,
@@ -330,53 +323,19 @@ impl RocksDBProvider {
     where
         Provider: StorageReader + BlockNumReader,
     {
+        let _ = provider;
+
         if max_block == 0 {
             return self.prune_storages_history_all();
         }
 
-        let mut to_delete: HashSet<StorageShardedKey> = HashSet::new();
+        let mut to_delete: Vec<StorageShardedKey> = Vec::new();
 
-        // Try to get changesets for the optimized path.
-        // Get the last block number to determine the range for changeset query.
-        let last_block = provider.last_block_number()?;
-        let changed = if last_block > max_block {
-            provider.changed_storages_with_range((max_block + 1)..=last_block)?
-        } else {
-            Default::default()
-        };
-
-        if changed.is_empty() {
-            // Fallback: no changesets found (e.g., MDBX empty, already pruned, or test scenario).
-            // Use full table iteration to ensure correctness.
-            for result in self.iter::<tables::StoragesHistory>()? {
-                let (key, _) = result?;
-                let highest_block = key.sharded_key.highest_block_number;
-                if highest_block != u64::MAX && highest_block > max_block {
-                    to_delete.insert(key);
-                }
-            }
-        } else {
-            // Optimized path: only check entries for changed (address, storage_key) pairs
-            for (address, storage_keys) in changed {
-                for storage_key in storage_keys {
-                    // Seek to entries starting from (address, storage_key, max_block + 1)
-                    let start_key = StorageShardedKey::new(address, storage_key, max_block + 1);
-
-                    for result in self.iter_from::<tables::StoragesHistory>(start_key)? {
-                        let (key, _) = result?;
-
-                        // Stop if we've moved past this (address, storage_key) pair
-                        if key.address != address || key.sharded_key.key != storage_key {
-                            break;
-                        }
-
-                        // Delete entries with highest_block > max_block (excluding sentinel)
-                        let highest_block = key.sharded_key.highest_block_number;
-                        if highest_block != u64::MAX && highest_block > max_block {
-                            to_delete.insert(key);
-                        }
-                    }
-                }
+        for result in self.iter::<tables::StoragesHistory>()? {
+            let (key, _) = result?;
+            let highest_block = key.sharded_key.highest_block_number;
+            if highest_block != u64::MAX && highest_block > max_block {
+                to_delete.push(key);
             }
         }
 
@@ -518,12 +477,6 @@ impl RocksDBProvider {
 
     /// Prunes `AccountsHistory` entries where `highest_block_number` > `max_block`.
     ///
-    /// Uses changeset-based pruning: queries the provider for accounts that changed
-    /// in the excess block range (via `changed_accounts_with_range`, which routes to static
-    /// files or MDBX based on storage settings), then only deletes History entries for those
-    /// specific accounts. This is more efficient than iterating the whole table.
-    ///
-    /// If no changesets are available, falls back to full table iteration.
     /// If `max_block == 0`, clears all non-sentinel entries.
     fn prune_accounts_history_above<Provider>(
         &self,
@@ -533,51 +486,19 @@ impl RocksDBProvider {
     where
         Provider: AccountExtReader + BlockNumReader,
     {
+        let _ = provider;
+
         if max_block == 0 {
             return self.prune_accounts_history_all();
         }
 
-        let mut to_delete: HashSet<ShardedKey<Address>> = HashSet::new();
+        let mut to_delete: Vec<ShardedKey<Address>> = Vec::new();
 
-        // Try to get changesets for the optimized path.
-        // Get the last block number to determine the range for changeset query.
-        let last_block = provider.last_block_number()?;
-        let changed = if last_block > max_block {
-            provider.changed_accounts_with_range((max_block + 1)..=last_block)?
-        } else {
-            Default::default()
-        };
-
-        if changed.is_empty() {
-            // Fallback: no changesets found (e.g., MDBX empty, already pruned, or test scenario).
-            // Use full table iteration to ensure correctness.
-            for result in self.iter::<tables::AccountsHistory>()? {
-                let (key, _) = result?;
-                let highest_block = key.highest_block_number;
-                if highest_block != u64::MAX && highest_block > max_block {
-                    to_delete.insert(key);
-                }
-            }
-        } else {
-            // Optimized path: only check entries for changed addresses
-            for address in changed {
-                // Seek to entries starting from (address, max_block + 1)
-                let start_key = ShardedKey::new(address, max_block + 1);
-
-                for result in self.iter_from::<tables::AccountsHistory>(start_key)? {
-                    let (key, _) = result?;
-
-                    // Stop if we've moved past this address
-                    if key.key != address {
-                        break;
-                    }
-
-                    // Delete entries with highest_block > max_block (excluding sentinel)
-                    let highest_block = key.highest_block_number;
-                    if highest_block != u64::MAX && highest_block > max_block {
-                        to_delete.insert(key);
-                    }
-                }
+        for result in self.iter::<tables::AccountsHistory>()? {
+            let (key, _) = result?;
+            let highest_block = key.highest_block_number;
+            if highest_block != u64::MAX && highest_block > max_block {
+                to_delete.push(key);
             }
         }
 
