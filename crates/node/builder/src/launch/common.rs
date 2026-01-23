@@ -68,7 +68,7 @@ use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
     ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
-    StaticFileProviderFactory,
+    StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -1262,7 +1262,7 @@ where
 
 /// Returns the metrics hooks for the node.
 pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) -> Hooks {
-    Hooks::builder()
+    let mut builder = Hooks::builder()
         .with_hook({
             let db = provider_factory.db_ref().clone();
             move || throttle!(Duration::from_secs(5 * 60), || db.report_metrics())
@@ -1276,12 +1276,15 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
                     }
                 })
             }
-        })
-        .with_hook({
-            let rocksdb = provider_factory.rocksdb_provider();
-            move || throttle!(Duration::from_secs(5 * 60), || rocksdb.report_metrics())
-        })
-        .build()
+        });
+
+    if provider_factory.cached_storage_settings().any_in_rocksdb() {
+        let rocksdb = provider_factory.rocksdb_provider();
+        builder = builder
+            .with_hook(move || throttle!(Duration::from_secs(5 * 60), || rocksdb.report_metrics()));
+    }
+
+    builder.build()
 }
 
 #[cfg(test)]
