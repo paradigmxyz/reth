@@ -708,8 +708,10 @@ impl ExecutionCache {
                 self.selfdestruct_encountered.call_once(|| {
                     warn!(
                         target: "engine::caching",
-                        "Encountered an inter-transaction SELFDESTRUCT that reset the execution cache.
-                        Are you running a pre-Dencun network?"
+                        address = ?addr,
+                        info = ?account.info,
+                        original_info = ?account.original_info,
+                        "Encountered an inter-transaction SELFDESTRUCT that reset the execution cache. Are you running a pre-Dencun network?"
                     );
                 });
                 self.clear();
