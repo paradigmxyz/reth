@@ -136,10 +136,12 @@ impl StorageHistory {
             limiter.increment_deleted_entries_count();
         }
 
-        if let Some(last_block) = last_changeset_pruned_block {
-            provider
-                .static_file_provider()
-                .delete_segment_below_block(StaticFileSegment::StorageChangeSets, last_block + 1)?;
+        if done {
+            if let Some(last_block) = last_changeset_pruned_block {
+                provider
+                    .static_file_provider()
+                    .delete_segment_below_block(StaticFileSegment::StorageChangeSets, last_block + 1)?;
+            }
         }
         trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned storage history (changesets from static files)");
 
@@ -300,9 +302,11 @@ impl StorageHistory {
 
         trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned storage history (RocksDB indices)");
 
-        // Delete static file jars AFTER RocksDB batch is queued. This ensures that if we crash
-        // after jar deletion but before checkpoint commit, we can still recover because the
-        // RocksDB batch will be committed atomically with the checkpoint.
+        // Delete static file jars only when fully processed. During provider.commit(), RocksDB
+        // batch is committed before the MDBX checkpoint. If crash occurs after RocksDB commit
+        // but before MDBX commit, on restart the pruner checkpoint indicates data needs
+        // re-pruning, but the RocksDB shards are already pruned - this is safe because pruning
+        // is idempotent (re-pruning already-pruned shards is a no-op).
         if done {
             provider.static_file_provider().delete_segment_below_block(
                 StaticFileSegment::StorageChangeSets,
@@ -314,7 +318,7 @@ impl StorageHistory {
 
         Ok(SegmentOutput {
             progress,
-            pruned: changesets_processed + deleted_shards + updated_shards,
+            pruned: changesets_processed + deleted_shards,
             checkpoint: Some(SegmentOutputCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
                 tx_number: None,
