@@ -107,7 +107,8 @@ where
         + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
         + 'static,
-    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>, Block = N::Block>
+        + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
@@ -133,7 +134,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
         + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
         + 'static,
-    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>, Block = N::Block>
+        + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
@@ -855,7 +857,8 @@ mod tests {
     use super::*;
     use crate::{
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
-        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
+        CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool,
+        TransactionOrigin,
     };
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
@@ -889,7 +892,8 @@ mod tests {
         let sender = hex!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326").into();
         provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider).build(blob_store.clone());
+        let validator: EthTransactionValidator<_, _, reth_ethereum_primitives::Block> =
+            EthTransactionValidatorBuilder::new(provider).build(blob_store.clone());
 
         let txpool = Pool::new(
             validator,
