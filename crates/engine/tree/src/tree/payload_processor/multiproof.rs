@@ -127,7 +127,67 @@ pub(super) enum MultiProofMessage {
     FinishedStateUpdates,
 }
 
-/// Handle to track proof calculation ordering.
+/// Keys touched by a pending proof update, used for conflict detection.
+#[derive(Debug, Default)]
+struct TouchedKeys {
+    /// Account keys touched by this update
+    accounts: HashSet<B256>,
+    /// Storage keys touched by this update (account -> slots)
+    storages: B256Map<HashSet<B256>>,
+}
+
+impl TouchedKeys {
+    /// Create from a [`HashedPostState`]
+    fn from_state(state: &HashedPostState) -> Self {
+        let accounts: HashSet<B256> = state.accounts.keys().copied().collect();
+        let storages: B256Map<HashSet<B256>> = state
+            .storages
+            .iter()
+            .map(|(addr, storage)| (*addr, storage.storage.keys().copied().collect()))
+            .collect();
+        Self { accounts, storages }
+    }
+
+    /// Check if this update conflicts with another (touches any of the same keys)
+    fn conflicts_with(&self, other: &Self) -> bool {
+        // Check account conflicts
+        if self.accounts.iter().any(|k| other.accounts.contains(k)) {
+            return true;
+        }
+
+        // Check storage conflicts
+        for (addr, slots) in &self.storages {
+            if let Some(other_slots) = other.storages.get(addr)
+                && slots.iter().any(|s| other_slots.contains(s))
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Merge another [`TouchedKeys`] into this one
+    fn extend(&mut self, other: Self) {
+        self.accounts.extend(other.accounts);
+        for (addr, slots) in other.storages {
+            self.storages.entry(addr).or_default().extend(slots);
+        }
+    }
+}
+
+/// A pending proof with its touched keys for conflict detection
+#[derive(Debug)]
+struct PendingProof {
+    update: SparseTrieUpdate,
+    touched: TouchedKeys,
+}
+
+/// Handle to track proof calculation ordering with conflict-aware out-of-order delivery.
+///
+/// This sequencer allows proofs to be delivered out of order when they don't conflict
+/// (i.e., touch different accounts/storage slots). When conflicts exist, ordering is
+/// preserved to maintain correct last-write-wins semantics.
 #[derive(Debug, Default)]
 struct ProofSequencer {
     /// The next proof sequence number to be produced.
@@ -135,7 +195,7 @@ struct ProofSequencer {
     /// The next sequence number expected to be delivered.
     next_to_deliver: u64,
     /// Buffer for out-of-order proofs and corresponding state updates
-    pending_proofs: BTreeMap<u64, SparseTrieUpdate>,
+    pending_proofs: BTreeMap<u64, PendingProof>,
 }
 
 impl ProofSequencer {
@@ -146,30 +206,82 @@ impl ProofSequencer {
         seq
     }
 
-    /// Adds a proof with the corresponding state update and returns all sequential proofs and state
-    /// updates if we have a continuous sequence
+    /// Adds a proof with the corresponding state update and returns all proofs that can be
+    /// delivered, potentially out of order if they don't conflict with pending earlier proofs.
     fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
-        // Optimization: fast path for in-order delivery to avoid BTreeMap overhead.
-        // If this is the expected sequence, return it immediately without buffering.
+        let touched = TouchedKeys::from_state(&update.state);
+
+        // Fast path: in-order delivery
         if sequence == self.next_to_deliver {
-            let mut consecutive_proofs = Vec::with_capacity(1);
-            consecutive_proofs.push(update);
-            self.next_to_deliver += 1;
-
-            // Check if we have subsequent proofs in the pending buffer
-            while let Some(pending) = self.pending_proofs.remove(&self.next_to_deliver) {
-                consecutive_proofs.push(pending);
-                self.next_to_deliver += 1;
-            }
-
-            return consecutive_proofs;
+            return self.deliver_with_consecutive(update, touched);
         }
 
+        // Out of order - check if we can still deliver it
         if sequence > self.next_to_deliver {
-            self.pending_proofs.insert(sequence, update);
+            // Count how many sequences are pending between next_to_deliver and this sequence
+            let pending_count = self.pending_proofs.range(self.next_to_deliver..sequence).count();
+            let expected_count = (sequence - self.next_to_deliver) as usize;
+
+            // If there's any gap (missing in-flight proofs we haven't seen yet), we must wait
+            // because we don't know what keys those proofs will touch
+            if pending_count < expected_count {
+                self.pending_proofs.insert(sequence, PendingProof { update, touched });
+                return Vec::new();
+            }
+
+            // All prior sequences are pending - check for conflicts
+            let has_conflict = self
+                .pending_proofs
+                .range(self.next_to_deliver..sequence)
+                .any(|(_, pending)| touched.conflicts_with(&pending.touched));
+
+            if !has_conflict {
+                // No conflicts with older pending proofs - safe to deliver out of order
+                return vec![update];
+            }
+
+            // Has conflicts - must buffer and wait
+            self.pending_proofs.insert(sequence, PendingProof { update, touched });
         }
 
         Vec::new()
+    }
+
+    /// Deliver an in-order proof and any consecutive proofs that follow
+    fn deliver_with_consecutive(
+        &mut self,
+        update: SparseTrieUpdate,
+        touched: TouchedKeys,
+    ) -> Vec<SparseTrieUpdate> {
+        let mut result = Vec::with_capacity(1);
+        result.push(update);
+        self.next_to_deliver += 1;
+
+        // Track cumulative touched keys to detect conflicts
+        let mut cumulative_touched = touched;
+
+        // Try to deliver consecutive pending proofs
+        while let Some(pending) = self.pending_proofs.remove(&self.next_to_deliver) {
+            result.push(pending.update);
+            cumulative_touched.extend(pending.touched);
+            self.next_to_deliver += 1;
+        }
+
+        // Also check if any later pending proofs can now be delivered
+        // (they were waiting for us, and don't conflict with what we've delivered)
+        let remaining_seqs: Vec<_> = self.pending_proofs.keys().copied().collect();
+        for seq in remaining_seqs {
+            if let Some(pending) = self.pending_proofs.get(&seq)
+                && !pending.touched.conflicts_with(&cumulative_touched)
+            {
+                // Can deliver this one too
+                let pending = self.pending_proofs.remove(&seq).unwrap();
+                cumulative_touched.extend(pending.touched);
+                result.push(pending.update);
+            }
+        }
+
+        result
     }
 
     /// Returns true if we still have pending proofs
@@ -1600,23 +1712,67 @@ mod tests {
     }
 
     #[test]
-    fn test_add_proof_out_of_order() {
+    fn test_add_proof_out_of_order_no_conflict() {
+        // With non-conflicting (empty) proofs, they can be delivered together
         let mut sequencer = ProofSequencer::default();
         let proof1 = MultiProof::default();
         let proof2 = MultiProof::default();
         let proof3 = MultiProof::default();
         sequencer.next_sequence = 3;
 
+        // Proof 2 arrives first - must wait (gap before it)
         let ready = sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proof3).unwrap());
         assert_eq!(ready.len(), 0);
         assert!(sequencer.has_pending());
 
+        // Proof 0 arrives - can deliver it, and since proof 2 doesn't conflict, deliver it too
         let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1).unwrap());
+        assert_eq!(ready.len(), 2); // Both proof 0 and pending proof 2 (no conflicts)
+        assert!(!sequencer.has_pending());
+
+        // Proof 1 arrives in order
+        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2).unwrap());
         assert_eq!(ready.len(), 1);
+        assert!(!sequencer.has_pending());
+    }
+
+    #[test]
+    fn test_add_proof_out_of_order_with_conflict() {
+        // When proofs conflict, ordering must be preserved
+        let mut sequencer = ProofSequencer::default();
+        sequencer.next_sequence = 3;
+
+        let addr = B256::random();
+
+        // Create proof 0 that touches addr
+        let mut state0 = HashedPostState::default();
+        state0.accounts.insert(addr, Some(Default::default()));
+        let update0 = SparseTrieUpdate { state: state0, multiproof: ProofResult::empty_legacy() };
+
+        // Create proof 1 that also touches addr (conflict!)
+        let mut state1 = HashedPostState::default();
+        state1.accounts.insert(addr, Some(Default::default()));
+        let update1 = SparseTrieUpdate { state: state1, multiproof: ProofResult::empty_legacy() };
+
+        // Create proof 2 with no conflict
+        let update2 = SparseTrieUpdate {
+            state: HashedPostState::default(),
+            multiproof: ProofResult::empty_legacy(),
+        };
+
+        // Proof 2 arrives first - must wait (gap)
+        let ready = sequencer.add_proof(2, update2);
+        assert_eq!(ready.len(), 0);
         assert!(sequencer.has_pending());
 
-        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2).unwrap());
-        assert_eq!(ready.len(), 2);
+        // Proof 1 arrives - must wait (gap, and we don't know if proof 0 conflicts)
+        let ready = sequencer.add_proof(1, update1);
+        assert_eq!(ready.len(), 0);
+        assert!(sequencer.has_pending());
+
+        // Proof 0 arrives - delivers 0, then 1 (consecutive), then 2 (non-conflicting)
+        let ready = sequencer.add_proof(0, update0);
+        assert_eq!(ready.len(), 3);
         assert!(!sequencer.has_pending());
     }
 
@@ -1651,15 +1807,30 @@ mod tests {
 
     #[test]
     fn test_add_proof_batch_processing() {
+        // Non-conflicting proofs can be delivered in batches
         let mut sequencer = ProofSequencer::default();
         let proofs: Vec<_> = (0..5).map(|_| MultiProof::default()).collect();
         sequencer.next_sequence = 5;
 
-        sequencer.add_proof(4, SparseTrieUpdate::from_multiproof(proofs[4].clone()).unwrap());
-        sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proofs[2].clone()).unwrap());
-        sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proofs[1].clone()).unwrap());
-        sequencer.add_proof(3, SparseTrieUpdate::from_multiproof(proofs[3].clone()).unwrap());
+        // Add proofs out of order - all are empty (non-conflicting)
+        let ready =
+            sequencer.add_proof(4, SparseTrieUpdate::from_multiproof(proofs[4].clone()).unwrap());
+        assert_eq!(ready.len(), 0); // Gap before it
 
+        let ready =
+            sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proofs[2].clone()).unwrap());
+        assert_eq!(ready.len(), 0); // Gap before it
+
+        let ready =
+            sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proofs[1].clone()).unwrap());
+        assert_eq!(ready.len(), 0); // Gap before it (seq 0 missing)
+
+        let ready =
+            sequencer.add_proof(3, SparseTrieUpdate::from_multiproof(proofs[3].clone()).unwrap());
+        assert_eq!(ready.len(), 0); // Still waiting for seq 0
+
+        // When seq 0 arrives, it unlocks the consecutive chain 0->1->2->3
+        // and then 4 can also be delivered (no conflicts)
         let ready =
             sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proofs[0].clone()).unwrap());
         assert_eq!(ready.len(), 5);

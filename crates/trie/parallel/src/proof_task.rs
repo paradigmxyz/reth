@@ -620,9 +620,14 @@ impl ProofResult {
         if v2_enabled {
             Self::V2(DecodedMultiProofV2::default())
         } else {
-            let stats = ParallelTrieTracker::default().finish();
-            Self::Legacy(DecodedMultiProof::default(), stats)
+            Self::empty_legacy()
         }
+    }
+
+    /// Creates an empty legacy [`ProofResult`].
+    pub fn empty_legacy() -> Self {
+        let stats = ParallelTrieTracker::default().finish();
+        Self::Legacy(DecodedMultiProof::default(), stats)
     }
 
     /// Returns true if the result contains no proofs
