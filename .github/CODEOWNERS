@@ -37,7 +37,7 @@ crates/storage/db/          @joshieDo
 crates/storage/errors/      @joshieDo
 crates/storage/libmdbx-rs/  @shekhirin
 crates/storage/nippy-jar/   @joshieDo @shekhirin
-crates/storage/provider/    @joshieDo @shekhirin
+crates/storage/provider/    @joshieDo @shekhirin @yongkangc
 crates/storage/storage-api/ @joshieDo
 crates/tasks/               @mattsse
 crates/tokio-util/          @mattsse 

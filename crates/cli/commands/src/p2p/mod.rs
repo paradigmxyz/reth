@@ -18,6 +18,7 @@ use reth_node_core::{
 };
 
 pub mod bootnode;
+pub mod enode;
 pub mod rlpx;
 
 /// `reth p2p` command
@@ -85,6 +86,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             Subcommands::Bootnode(command) => {
                 command.execute().await?;
             }
+            Subcommands::Enode(command) => {
+                command.execute()?;
+            }
         }
 
         Ok(())
@@ -99,6 +103,7 @@ impl<C: ChainSpecParser> Command<C> {
             Subcommands::Body { args, .. } => Some(&args.chain),
             Subcommands::Rlpx(_) => None,
             Subcommands::Bootnode(_) => None,
+            Subcommands::Enode(_) => None,
         }
     }
 }
@@ -126,6 +131,8 @@ pub enum Subcommands<C: ChainSpecParser> {
     Rlpx(rlpx::Command),
     /// Bootnode command
     Bootnode(bootnode::Command),
+    /// Print enode identifier
+    Enode(enode::Command),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -224,5 +231,17 @@ mod tests {
     fn parse_body_cmd() {
         let _args: Command<EthereumChainSpecParser> =
             Command::parse_from(["reth", "body", "--chain", "mainnet", "1000"]);
+    }
+
+    #[test]
+    fn parse_enode_cmd() {
+        let _args: Command<EthereumChainSpecParser> =
+            Command::parse_from(["reth", "enode", "/tmp/secret"]);
+    }
+
+    #[test]
+    fn parse_enode_cmd_with_ip() {
+        let _args: Command<EthereumChainSpecParser> =
+            Command::parse_from(["reth", "enode", "/tmp/secret", "--ip", "192.168.1.1"]);
     }
 }
