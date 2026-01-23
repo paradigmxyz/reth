@@ -44,7 +44,14 @@ export const rethCliSidebar: SidebarItem = {
                 },
                 {
                     text: "reth db list",
-                    link: "/cli/reth/db/list"
+                    link: "/cli/reth/db/list",
+                    collapsed: true,
+                    items: [
+                        {
+                            text: "reth db list mdbx",
+                            link: "/cli/reth/db/list/mdbx"
+                        }
+                    ]
                 },
                 {
                     text: "reth db checksum",

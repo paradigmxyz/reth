@@ -1,4 +1,5 @@
 use super::tui::DbListTUI;
+use crate::common::CliNodeTypes;
 use alloy_primitives::hex;
 use clap::Parser;
 use eyre::WrapErr;
@@ -6,7 +7,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_db::{transaction::DbTx, DatabaseEnv};
 use reth_db_api::{database::Database, table::Table, RawValue, TableViewer, Tables};
 use reth_db_common::{DbTool, ListFilter};
-use reth_node_builder::{NodeTypes, NodeTypesWithDBAdapter};
+use reth_node_builder::NodeTypesWithDBAdapter;
 use std::{cell::RefCell, sync::Arc};
 use tracing::error;
 
@@ -64,15 +65,11 @@ enum Subcommand {
         min_value_size: usize,
         #[arg(long, short)]
         count: bool,
-        #[arg(long, short)]
-        json: bool,
-        #[arg(long)]
-        raw: bool,
     },
 }
 
 impl Command {
-    pub fn execute<N: NodeTypes<ChainSpec: EthereumHardforks>>(
+    pub fn execute<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         self,
         tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
     ) -> eyre::Result<()> {
@@ -116,8 +113,6 @@ impl Command {
                 min_key_size,
                 min_value_size,
                 count,
-                json,
-                raw,
             } => {
                 let args = rocksdb::RocksDbArgs {
                     skip,
@@ -128,8 +123,6 @@ impl Command {
                     min_key_size,
                     min_value_size,
                     count,
-                    json,
-                    raw,
                 };
                 rocksdb::list_rocksdb(tool, table, args)
             }
@@ -180,12 +173,12 @@ impl MdbxArgs {
     }
 }
 
-struct ListTableViewer<'a, N: NodeTypes> {
+struct ListTableViewer<'a, N: CliNodeTypes> {
     tool: &'a DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
     args: &'a MdbxArgs,
 }
 
-impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
+impl<N: CliNodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
