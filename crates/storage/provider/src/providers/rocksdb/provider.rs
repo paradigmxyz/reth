@@ -1206,6 +1206,8 @@ impl RocksDBProvider {
     }
 
     /// Writes account history indices for the given blocks.
+    ///
+    /// Derives history indices from reverts (same source as changesets) to ensure consistency.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_account_history<N: reth_node_types::NodePrimitives>(
         &self,
@@ -1214,11 +1216,17 @@ impl RocksDBProvider {
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
         let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let bundle = &block.execution_outcome().state;
-            for &address in bundle.state().keys() {
-                account_history.entry(address).or_default().push(block_number);
+            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+
+            // Iterate through account reverts - these are exactly the accounts that have
+            // changesets written, ensuring history indices match changeset entries.
+            for account_block_reverts in reverts.accounts {
+                for (address, _) in account_block_reverts {
+                    account_history.entry(address).or_default().push(block_number);
+                }
             }
         }
 
@@ -1231,6 +1239,8 @@ impl RocksDBProvider {
     }
 
     /// Writes storage history indices for the given blocks.
+    ///
+    /// Derives history indices from reverts (same source as changesets) to ensure consistency.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     fn write_storage_history<N: reth_node_types::NodePrimitives>(
         &self,
@@ -1239,13 +1249,22 @@ impl RocksDBProvider {
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
         let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let bundle = &block.execution_outcome().state;
-            for (&address, account) in bundle.state() {
-                for &slot in account.storage.keys() {
-                    let key = B256::new(slot.to_be_bytes());
-                    storage_history.entry((address, key)).or_default().push(block_number);
+            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+
+            // Iterate through storage reverts - these are exactly the slots that have
+            // changesets written, ensuring history indices match changeset entries.
+            for storage_block_reverts in reverts.storage {
+                for revert in storage_block_reverts {
+                    for (slot, _) in revert.storage_revert {
+                        let key = B256::new(slot.to_be_bytes());
+                        storage_history
+                            .entry((revert.address, key))
+                            .or_default()
+                            .push(block_number);
+                    }
                 }
             }
         }
