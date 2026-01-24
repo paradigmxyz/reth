@@ -97,8 +97,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
 
-                // Track previous block number for validation
+                // Track previous block number and timestamp for validation
                 let mut prev_block_number = parent.number();
+                let mut prev_timestamp = parent.timestamp();
 
                 for block in block_state_calls {
                     // Validate block number ordering if overridden
@@ -111,6 +112,19 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             })
                             .into());
                         }
+                    }
+                    // Validate timestamp ordering if overridden
+                    if let Some(time) = block
+                        .block_overrides
+                        .as_ref()
+                        .and_then(|o| o.time)
+                        .filter(|&t| t <= prev_timestamp)
+                    {
+                        return Err(EthApiError::other(EthSimulateError::BlockTimestampInvalid {
+                            got: time,
+                            parent: prev_timestamp,
+                        })
+                        .into());
                     }
 
                     let mut evm_env = this
@@ -252,6 +266,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     // Update tracking for next iteration's validation
                     prev_block_number = parent.number();
+                    prev_timestamp = parent.timestamp();
 
                     let block = simulate::build_simulated_block::<Self::Error, _>(
                         result.block,

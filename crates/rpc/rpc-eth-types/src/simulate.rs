@@ -46,9 +46,14 @@ pub enum EthSimulateError {
         /// The parent block number.
         parent: u64,
     },
-    /// Block timestamp in sequence did not increase or stay the same.
-    #[error("Block timestamp in sequence did not increase")]
-    BlockTimestampInvalid,
+    /// Block timestamp in sequence did not increase.
+    #[error("block timestamps must be in order: {got} <= {parent}")]
+    BlockTimestampInvalid {
+        /// The block timestamp that was provided.
+        got: u64,
+        /// The parent block timestamp.
+        parent: u64,
+    },
     /// Transaction nonce is too low.
     #[error("nonce too low: next nonce {state}, tx nonce {tx}")]
     NonceTooLow {
@@ -102,7 +107,7 @@ impl EthSimulateError {
             Self::InsufficientFunds { .. } => -38014,
             Self::BlockGasLimitExceeded => -38015,
             Self::BlockNumberInvalid { .. } => -38020,
-            Self::BlockTimestampInvalid => -38021,
+            Self::BlockTimestampInvalid { .. } => -38021,
             Self::PrecompileSelfReference => -38022,
             Self::PrecompileDuplicateAddress => -38023,
             Self::SenderNotEOA => -38024,
