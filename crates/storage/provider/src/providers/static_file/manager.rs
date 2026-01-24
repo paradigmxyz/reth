@@ -277,15 +277,24 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let provider = self.clone();
         std::thread::spawn(move || {
             let (tx, rx) = std::sync::mpsc::channel();
-            let mut watcher = RecommendedWatcher::new(
-                move |res| tx.send(res).unwrap(),
+            let mut watcher = match RecommendedWatcher::new(
+                move |res| {
+                    // Ignore send errors if receiver is dropped.
+                    let _ = tx.send(res);
+                },
                 notify::Config::default(),
-            )
-            .expect("failed to create watcher");
+            ) {
+                Ok(watcher) => watcher,
+                Err(err) => {
+                    warn!(target: "providers::watcher", %err, "failed to create watcher");
+                    return;
+                }
+            };
 
-            watcher
-                .watch(&provider.path, RecursiveMode::NonRecursive)
-                .expect("failed to watch path");
+            if let Err(err) = watcher.watch(&provider.path, RecursiveMode::NonRecursive) {
+                warn!(target: "providers::watcher", %err, "failed to watch path");
+                return;
+            }
 
             // Some backends send repeated modified events
             let mut last_event_timestamp = None;
@@ -317,11 +326,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                             }
 
                             // Ensure it's well formatted static file name
-                            if StaticFileSegment::parse_filename(
-                                &segment.file_stem().expect("qed").to_string_lossy(),
-                            )
-                            .is_none()
-                            {
+                            let Some(file_stem) = segment.file_stem().and_then(|s| s.to_str())
+                            else {
+                                continue;
+                            };
+                            if StaticFileSegment::parse_filename(file_stem).is_none() {
                                 continue;
                             }
 
