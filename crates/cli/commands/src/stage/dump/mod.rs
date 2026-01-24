@@ -131,7 +131,12 @@ pub(crate) fn setup<N: NodeTypesWithDB>(
     output_db: &PathBuf,
     db_tool: &DbTool<N>,
 ) -> eyre::Result<(DatabaseEnv, u64)> {
-    assert!(from < to, "FROM block should be lower than TO block.");
+    eyre::ensure!(from < to, "FROM block should be lower than TO block.");
+
+    // We subtract 1 from `from` and add 1 to `to` below for the import range.
+    // If `from == 0`, we start from the beginning (`None`) instead of underflowing.
+    let from_prev = from.checked_sub(1);
+    let to_next = to.checked_add(1).ok_or_else(|| eyre::eyre!("TO block is too large"))?;
 
     info!(target: "reth::cli", ?output_db, "Creating separate db");
 
@@ -140,8 +145,8 @@ pub(crate) fn setup<N: NodeTypesWithDB>(
     output_datadir.update(|tx| {
         tx.import_table_with_range::<tables::BlockBodyIndices, _>(
             &db_tool.provider_factory.db_ref().tx()?,
-            Some(from - 1),
-            to + 1,
+            from_prev,
+            to_next,
         )
     })??;
 
@@ -149,7 +154,7 @@ pub(crate) fn setup<N: NodeTypesWithDB>(
         .provider_factory
         .db_ref()
         .view(|tx| tx.cursor_read::<tables::BlockBodyIndices>()?.last())??
-        .expect("some");
+        .ok_or_else(|| eyre::eyre!("BlockBodyIndices table is empty"))?;
 
     Ok((output_datadir, tip_block_number))
 }
