@@ -1360,12 +1360,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         }
     }
 
-    /// Returns an iterator over all _unique_ hashes in the pool
-    #[expect(dead_code)]
-    pub(crate) fn hashes_iter(&self) -> impl Iterator<Item = TxHash> + '_ {
-        self.by_hash.keys().copied()
-    }
-
     /// Returns an iterator over all transactions in the pool
     pub(crate) fn transactions_iter(
         &self,
