@@ -47,11 +47,10 @@ where
 }
 
 /// Sets up a clear database at `bench_db_path`.
-#[expect(clippy::ptr_arg)]
 #[allow(dead_code)]
 pub(crate) fn set_up_db<T>(
     bench_db_path: &Path,
-    pair: &Vec<(<T as Table>::Key, Bytes, <T as Table>::Value, Bytes)>,
+    pair: &[(<T as Table>::Key, Bytes, <T as Table>::Value, Bytes)],
 ) -> DatabaseEnv
 where
     T: Table,
