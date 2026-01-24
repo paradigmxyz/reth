@@ -10,7 +10,7 @@ use alloy_primitives::BlockNumber;
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
 use reth_provider::{
     changeset_walker::StaticFileAccountChangesetWalker, DBProvider, EitherWriter,
-    RocksDBProviderFactory, StaticFileProviderFactory,
+    PruneShardOutcome, RocksDBProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
@@ -237,8 +237,6 @@ impl AccountHistory {
     where
         Provider: DBProvider + StaticFileProviderFactory + ChangeSetReader + RocksDBProviderFactory,
     {
-        use reth_provider::PruneShardOutcome;
-
         // Unlike MDBX path, we don't divide the limit by 2 because RocksDB path only prunes
         // history shards (no separate changeset table to delete from). The changesets are in
         // static files which are deleted separately.

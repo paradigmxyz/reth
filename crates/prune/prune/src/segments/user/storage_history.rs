@@ -12,7 +12,9 @@ use reth_db_api::{
     tables,
     transaction::DbTxMut,
 };
-use reth_provider::{DBProvider, EitherWriter, RocksDBProviderFactory, StaticFileProviderFactory};
+use reth_provider::{
+    DBProvider, EitherWriter, PruneShardOutcome, RocksDBProviderFactory, StaticFileProviderFactory,
+};
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
@@ -241,8 +243,6 @@ impl StorageHistory {
     where
         Provider: DBProvider + StaticFileProviderFactory + RocksDBProviderFactory,
     {
-        use reth_provider::PruneShardOutcome;
-
         let mut limiter = input.limiter;
 
         if limiter.is_limit_reached() {
