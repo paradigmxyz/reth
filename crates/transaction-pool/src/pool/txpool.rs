@@ -483,7 +483,11 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Returns all transactions from parked pools
     pub(crate) fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.basefee_pool.all().chain(self.queued_pool.all()).collect()
+        let total_len = self.basefee_pool.len() + self.queued_pool.len();
+        let mut transactions = Vec::with_capacity(total_len);
+        transactions.extend(self.basefee_pool.all());
+        transactions.extend(self.queued_pool.all());
+        transactions
     }
 
     /// Returns an iterator over all transactions from parked pools
