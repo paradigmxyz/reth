@@ -254,9 +254,7 @@ impl AccountHistory {
         let mut changesets_processed = 0usize;
         let mut done = true;
 
-        // Collect affected accounts from changesets in static files.
-        // We track the highest block number each account was modified at,
-        // which determines how far to prune each account's history shards.
+        // Walk changesets to find which accounts were modified and their highest pruned block.
         let walker = StaticFileAccountChangesetWalker::new(provider, range);
         for result in walker {
             if limiter.is_limit_reached() {

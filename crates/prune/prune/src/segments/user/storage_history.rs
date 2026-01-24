@@ -257,9 +257,7 @@ impl StorageHistory {
         let mut changesets_processed = 0usize;
         let mut done = true;
 
-        // Collect affected storage slots from changesets in static files.
-        // We track the highest block number each (address, storage_key) was modified at,
-        // which determines how far to prune each slot's history shards.
+        // Walk changesets to find which storage slots were modified and their highest pruned block.
         let walker = provider.static_file_provider().walk_storage_changeset_range(range);
         for result in walker {
             if limiter.is_limit_reached() {
