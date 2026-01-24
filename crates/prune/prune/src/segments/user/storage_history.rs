@@ -106,7 +106,7 @@ impl StorageHistory {
         // / 2`, so 8750 entries. Each entry is `160 bit + 256 bit + 64 bit`, so the total
         // size should be up to ~0.5MB + some hashmap overhead. `blocks_since_last_run` is
         // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
-        let mut highest_deleted_storages: FxHashMap<_, _> = FxHashMap::default();
+        let mut highest_deleted_storages = FxHashMap::default();
         let mut last_changeset_pruned_block = None;
         let mut pruned_changesets = 0;
         let mut done = true;
