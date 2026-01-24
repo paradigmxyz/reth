@@ -25,6 +25,10 @@ reth-stages-types.workspace = true
 
 alloy-primitives.workspace = true
 
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
 # misc
 tracing.workspace = true
 rayon.workspace = true

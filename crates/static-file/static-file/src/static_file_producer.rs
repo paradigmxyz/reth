@@ -1,6 +1,8 @@
 //! Support for producing static files.
 
-use crate::{segments, segments::Segment, StaticFileProducerEvent};
+use crate::{
+    metrics::StaticFileProducerMetrics, segments, segments::Segment, StaticFileProducerEvent,
+};
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -128,6 +130,7 @@ where
 
         debug!(target: "static_file", ?targets, "StaticFileProducer started");
         let start = Instant::now();
+        let metrics = StaticFileProducerMetrics::default();
 
         let mut segments =
             Vec::<(Box<dyn Segment<Provider::Provider>>, RangeInclusive<BlockNumber>)>::new();
@@ -145,7 +148,8 @@ where
             let provider = self.provider.database_provider_ro()?.disable_long_read_transaction_safety();
             segment.copy_to_static_files(provider,  block_range.clone())?;
 
-            let elapsed = start.elapsed(); // TODO(alexey): track in metrics
+            let elapsed = start.elapsed();
+            metrics.segment_duration_seconds.record(elapsed.as_secs_f64());
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, ?elapsed, "Finished StaticFileProducer segment");
 
             Ok(())
@@ -158,7 +162,8 @@ where
                 .update_index(segment.segment(), Some(*block_range.end()))?;
         }
 
-        let elapsed = start.elapsed(); // TODO(alexey): track in metrics
+        let elapsed = start.elapsed();
+        metrics.run_duration_seconds.record(elapsed.as_secs_f64());
         debug!(target: "static_file", ?targets, ?elapsed, "StaticFileProducer finished");
 
         self.event_sender
