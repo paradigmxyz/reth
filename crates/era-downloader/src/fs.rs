@@ -52,7 +52,7 @@ pub fn read_dir(
         checksums.next().transpose()?.ok_or_eyre("Got less checksums than ERA files")?;
     }
 
-    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+    entries.sort_by_key(|(left, _)| *left);
 
     Ok(stream::iter(entries.into_iter().skip_while(move |(n, _)| *n < start_index).map(
         move |(_, path)| {
