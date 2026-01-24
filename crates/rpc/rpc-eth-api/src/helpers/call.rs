@@ -116,6 +116,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     let SimBlock { block_overrides, state_overrides, calls } = block;
 
+                    // Set prevrandao to zero for simulated blocks by default,
+                    // matching spec behavior where MixDigest is zero-initialized.
+                    // If user provides an override, it will be applied by apply_block_overrides.
+                    evm_env.block_env.inner_mut().prevrandao = Some(B256::ZERO);
+
                     if let Some(block_overrides) = block_overrides {
                         // ensure we don't allow uncapped gas limit per block
                         if let Some(gas_limit_override) = block_overrides.gas_limit &&
