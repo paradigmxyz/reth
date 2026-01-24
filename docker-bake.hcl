@@ -20,6 +20,19 @@ variable "FEATURES" {
   default = "jemalloc asm-keccak min-debug-logs"
 }
 
+// Git info for vergen (since .git is excluded from Docker context)
+variable "VERGEN_GIT_SHA" {
+  default = ""
+}
+
+variable "VERGEN_GIT_DESCRIBE" {
+  default = ""
+}
+
+variable "VERGEN_GIT_DIRTY" {
+  default = "false"
+}
+
 // Common settings for all targets
 group "default" {
   targets = ["ethereum", "optimism"]
@@ -34,8 +47,11 @@ target "_base" {
   dockerfile = "Dockerfile.depot"
   platforms  = ["linux/amd64", "linux/arm64"]
   args = {
-    BUILD_PROFILE = "${BUILD_PROFILE}"
-    FEATURES      = "${FEATURES}"
+    BUILD_PROFILE      = "${BUILD_PROFILE}"
+    FEATURES           = "${FEATURES}"
+    VERGEN_GIT_SHA     = "${VERGEN_GIT_SHA}"
+    VERGEN_GIT_DESCRIBE = "${VERGEN_GIT_DESCRIBE}"
+    VERGEN_GIT_DIRTY   = "${VERGEN_GIT_DIRTY}"
   }
 }
 
