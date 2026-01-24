@@ -228,7 +228,7 @@ impl RocksDBBuilder {
 
     /// Creates optimized column family options for history tables with Bloom filters.
     ///
-    /// AccountsHistory and StoragesHistory tables use sharded keys and frequently
+    /// `AccountsHistory` and `StoragesHistory` tables use sharded keys and frequently
     /// perform point lookups. Adding a 15-bit Bloom filter reduces unnecessary disk reads
     /// when a key does not exist in a shard (common during historical queries).
     ///
