@@ -68,7 +68,7 @@ where
     let mut num = high;
 
     while low <= high {
-        let mid = (low + high) / 2;
+        let mid = low + (high - low) / 2;
         if check(mid).await? {
             high = mid - 1;
             num = mid;
