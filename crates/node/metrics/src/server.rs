@@ -122,6 +122,7 @@ impl MetricServer {
         // Describe metrics after recorder installation
         describe_db_metrics();
         describe_static_file_metrics();
+        describe_rocksdb_metrics();
         Collector::default().describe();
         describe_memory_stats();
         describe_io_stats();
@@ -261,6 +262,31 @@ fn describe_static_file_metrics() {
     describe_gauge!(
         "static_files.segment_entries",
         "The number of entries for a static file segment"
+    );
+}
+
+fn describe_rocksdb_metrics() {
+    describe_gauge!(
+        "rocksdb.table_size",
+        Unit::Bytes,
+        "The estimated size of a RocksDB table (SST + memtable)"
+    );
+    describe_gauge!("rocksdb.table_entries", "The estimated number of keys in a RocksDB table");
+    describe_gauge!(
+        "rocksdb.pending_compaction_bytes",
+        Unit::Bytes,
+        "Bytes pending compaction for a RocksDB table"
+    );
+    describe_gauge!("rocksdb.sst_size", Unit::Bytes, "The size of SST files for a RocksDB table");
+    describe_gauge!(
+        "rocksdb.memtable_size",
+        Unit::Bytes,
+        "The size of memtables for a RocksDB table"
+    );
+    describe_gauge!(
+        "rocksdb.wal_size",
+        Unit::Bytes,
+        "The total size of WAL (Write-Ahead Log) files. Important: this is not included in table_size or sst_size metrics"
     );
 }
 

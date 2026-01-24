@@ -180,7 +180,7 @@ impl Command {
             .filter_map(|e| e.ok())
             .filter(|e| {
                 e.path().extension().and_then(|s| s.to_str()) == Some("json") &&
-                    e.file_name().to_string_lossy().starts_with("payload_")
+                    e.file_name().to_string_lossy().starts_with("payload_block_")
             })
             .collect();
 
@@ -191,7 +191,7 @@ impl Command {
                 let name = e.file_name();
                 let name_str = name.to_string_lossy();
                 // Extract index from "payload_NNN.json"
-                let index_str = name_str.strip_prefix("payload_")?.strip_suffix(".json")?;
+                let index_str = name_str.strip_prefix("payload_block_")?.strip_suffix(".json")?;
                 let index: u64 = index_str.parse().ok()?;
                 Some((index, e.path()))
             })

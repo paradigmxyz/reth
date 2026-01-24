@@ -16,8 +16,8 @@ use crate::tree::{
     payload_processor::{
         bal::{total_slots, BALSlotIter},
         executor::WorkloadExecutor,
-        multiproof::MultiProofMessage,
-        ExecutionCache as PayloadExecutionCache,
+        multiproof::{MultiProofMessage, VersionedMultiProofTargets},
+        PayloadExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
@@ -29,7 +29,7 @@ use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
@@ -237,7 +237,7 @@ where
     }
 
     /// If configured and the tx returned proof targets, emit the targets the transaction produced
-    fn send_multi_proof_targets(&self, targets: Option<MultiProofTargets>) {
+    fn send_multi_proof_targets(&self, targets: Option<VersionedMultiProofTargets>) {
         if self.is_execution_terminated() {
             // if execution is already terminated then we dont need to send more proof fetch
             // messages
@@ -278,8 +278,9 @@ where
             execution_cache.update_with_guard(|cached| {
                 // consumes the `SavedCache` held by the prewarming task, which releases its usage
                 // guard
-                let (caches, cache_metrics) = saved_cache.split();
-                let new_cache = SavedCache::new(hash, caches, cache_metrics);
+                let (caches, cache_metrics, disable_cache_metrics) = saved_cache.split();
+                let new_cache = SavedCache::new(hash, caches, cache_metrics)
+                    .with_disable_cache_metrics(disable_cache_metrics);
 
                 // Insert state into cache while holding the lock
                 // Access the BundleState through the shared ExecutionOutcome
@@ -296,6 +297,11 @@ where
                     // Replace the shared cache with the new one; the previous cache (if any) is
                     // dropped.
                     *cached = Some(new_cache);
+                } else {
+                    // Block was invalid; caches were already mutated by insert_state above,
+                    // so we must clear to prevent using polluted state
+                    *cached = None;
+                    debug!(target: "engine::caching", "cleared execution cache on invalid block");
                 }
             });
 
@@ -478,6 +484,8 @@ where
     pub(super) terminate_execution: Arc<AtomicBool>,
     pub(super) precompile_cache_disabled: bool,
     pub(super) precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    /// Whether V2 proof calculation is enabled.
+    pub(super) v2_proofs_enabled: bool,
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -486,10 +494,12 @@ where
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
-    /// Splits this context into an evm, an evm config, metrics, and the atomic bool for terminating
-    /// execution.
+    /// Splits this context into an evm, an evm config, metrics, the atomic bool for terminating
+    /// execution, and whether V2 proofs are enabled.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn evm_for_ctx(self) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>)> {
+    fn evm_for_ctx(
+        self,
+    ) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>, bool)> {
         let Self {
             env,
             evm_config,
@@ -499,6 +509,7 @@ where
             terminate_execution,
             precompile_cache_disabled,
             precompile_cache_map,
+            v2_proofs_enabled,
         } = self;
 
         let mut state_provider = match provider.build() {
@@ -548,7 +559,7 @@ where
             });
         }
 
-        Some((evm, metrics, terminate_execution))
+        Some((evm, metrics, terminate_execution, v2_proofs_enabled))
     }
 
     /// Accepts an [`mpsc::Receiver`] of transactions and a handle to prewarm task. Executes
@@ -569,16 +580,24 @@ where
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
-        let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
+        let Some((mut evm, metrics, terminate_execution, v2_proofs_enabled)) = self.evm_for_ctx()
+        else {
+            return
+        };
 
         while let Ok(IndexedTransaction { index, tx }) = {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", "recv tx")
                 .entered();
             txs.recv()
         } {
-            let enter =
-                debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm tx", index, tx_hash=%tx.tx().tx_hash())
-                    .entered();
+            let enter = debug_span!(
+                target: "engine::tree::payload_processor::prewarm",
+                "prewarm tx",
+                index,
+                tx_hash = %tx.tx().tx_hash(),
+                is_success = tracing::field::Empty,
+            )
+            .entered();
 
             // create the tx env
             let start = Instant::now();
@@ -590,7 +609,8 @@ where
                 break
             }
 
-            let res = match evm.transact(&tx) {
+            let (tx_env, tx) = tx.into_parts();
+            let res = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
@@ -627,7 +647,8 @@ where
                 let _enter =
                     debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm outcome", index, tx_hash=%tx.tx().tx_hash())
                         .entered();
-                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+                let (targets, storage_targets) =
+                    multiproof_targets_from_state(res.state, v2_proofs_enabled);
                 metrics.prefetch_storage_targets.record(storage_targets as f64);
                 let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
                 drop(_enter);
@@ -772,9 +793,22 @@ where
     }
 }
 
-/// Returns a set of [`MultiProofTargets`] and the total amount of storage targets, based on the
+/// Returns a set of [`VersionedMultiProofTargets`] and the total amount of storage targets, based
+/// on the given state.
+fn multiproof_targets_from_state(
+    state: EvmState,
+    v2_enabled: bool,
+) -> (VersionedMultiProofTargets, usize) {
+    if v2_enabled {
+        multiproof_targets_v2_from_state(state)
+    } else {
+        multiproof_targets_legacy_from_state(state)
+    }
+}
+
+/// Returns legacy [`MultiProofTargets`] and the total amount of storage targets, based on the
 /// given state.
-fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) {
+fn multiproof_targets_legacy_from_state(state: EvmState) -> (VersionedMultiProofTargets, usize) {
     let mut targets = MultiProofTargets::with_capacity(state.len());
     let mut storage_targets = 0;
     for (addr, account) in state {
@@ -804,7 +838,50 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) 
         targets.insert(keccak256(addr), storage_set);
     }
 
-    (targets, storage_targets)
+    (VersionedMultiProofTargets::Legacy(targets), storage_targets)
+}
+
+/// Returns V2 [`reth_trie_parallel::targets_v2::MultiProofTargetsV2`] and the total amount of
+/// storage targets, based on the given state.
+fn multiproof_targets_v2_from_state(state: EvmState) -> (VersionedMultiProofTargets, usize) {
+    use reth_trie::proof_v2;
+    use reth_trie_parallel::targets_v2::MultiProofTargetsV2;
+
+    let mut targets = MultiProofTargetsV2::default();
+    let mut storage_target_count = 0;
+    for (addr, account) in state {
+        // if the account was not touched, or if the account was selfdestructed, do not
+        // fetch proofs for it
+        //
+        // Since selfdestruct can only happen in the same transaction, we can skip
+        // prefetching proofs for selfdestructed accounts
+        //
+        // See: https://eips.ethereum.org/EIPS/eip-6780
+        if !account.is_touched() || account.is_selfdestructed() {
+            continue
+        }
+
+        let hashed_address = keccak256(addr);
+        targets.account_targets.push(hashed_address.into());
+
+        let mut storage_slots = Vec::with_capacity(account.storage.len());
+        for (key, slot) in account.storage {
+            // do nothing if unchanged
+            if !slot.is_changed() {
+                continue
+            }
+
+            let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
+            storage_slots.push(proof_v2::Target::from(hashed_slot));
+        }
+
+        storage_target_count += storage_slots.len();
+        if !storage_slots.is_empty() {
+            targets.storage_targets.insert(hashed_address, storage_slots);
+        }
+    }
+
+    (VersionedMultiProofTargets::V2(targets), storage_target_count)
 }
 
 /// The events the pre-warm task can handle.
@@ -829,7 +906,7 @@ pub(super) enum PrewarmTaskEvent<R> {
     /// The outcome of a pre-warm task
     Outcome {
         /// The prepared proof targets based on the evm state outcome
-        proof_targets: Option<MultiProofTargets>,
+        proof_targets: Option<VersionedMultiProofTargets>,
     },
     /// Finished executing all transactions
     FinishedTxExecution {

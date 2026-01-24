@@ -19,7 +19,7 @@ use reth_node_builder::{
     Node, NodeComponents, NodeComponentsBuilder, NodeTypes, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
-    args::{DatabaseArgs, DatadirArgs, StaticFilesArgs},
+    args::{DatabaseArgs, DatadirArgs, RocksDbArgs, StaticFilesArgs},
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
@@ -27,7 +27,7 @@ use reth_provider::{
         BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
         StaticFileProviderBuilder,
     },
-    ProviderFactory, StaticFileProviderFactory,
+    ProviderFactory, StaticFileProviderFactory, StorageSettings,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
@@ -66,9 +66,24 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     /// All static files related arguments
     #[command(flatten)]
     pub static_files: StaticFilesArgs,
+
+    /// All `RocksDB` related arguments
+    #[command(flatten)]
+    pub rocksdb: RocksDbArgs,
 }
 
 impl<C: ChainSpecParser> EnvironmentArgs<C> {
+    /// Returns the effective storage settings derived from static-file and `RocksDB` CLI args.
+    pub fn storage_settings(&self) -> StorageSettings {
+        StorageSettings::base()
+            .with_receipts_in_static_files(self.static_files.receipts)
+            .with_transaction_senders_in_static_files(self.static_files.transaction_senders)
+            .with_account_changesets_in_static_files(self.static_files.account_changesets)
+            .with_transaction_hash_numbers_in_rocksdb(self.rocksdb.all || self.rocksdb.tx_hash)
+            .with_storages_history_in_rocksdb(self.rocksdb.all || self.rocksdb.storages_history)
+            .with_account_history_in_rocksdb(self.rocksdb.all || self.rocksdb.account_history)
+    }
+
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
     pub fn init<N: CliNodeTypes>(&self, access: AccessRights) -> eyre::Result<Environment<N>>
@@ -121,17 +136,17 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                 })
             }
         };
-        // TransactionDB only support read-write mode
         let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
             .with_default_tables()
             .with_database_log_level(self.db.log_level)
+            .with_read_only(!access.is_read_write())
             .build()?;
 
         let provider_factory =
             self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
-            init_genesis_with_settings(&provider_factory, self.static_files.to_settings())?;
+            init_genesis_with_settings(&provider_factory, self.storage_settings())?;
         }
 
         Ok(Environment { config, provider_factory, data_dir })
