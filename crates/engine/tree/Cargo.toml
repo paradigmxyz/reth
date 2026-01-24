@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chain-state.workspace = true
+reth-chain-state = { workspace = true, features = ["rayon"] }
 reth-chainspec = { workspace = true, optional = true }
 reth-consensus.workspace = true
 reth-db.workspace = true
@@ -34,6 +34,7 @@ reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
 reth-trie-sparse-parallel = { workspace = true, features = ["std"] }
 reth-trie.workspace = true
+reth-trie-common.workspace = true
 reth-trie-db.workspace = true
 
 # alloy
@@ -52,7 +53,7 @@ revm-primitives.workspace = true
 futures.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
-mini-moka = { workspace = true, features = ["sync"] }
+fixed-cache.workspace = true
 moka = { workspace = true, features = ["sync"] }
 smallvec.workspace = true
 
@@ -134,6 +135,7 @@ test-utils = [
     "reth-static-file",
     "reth-tracing",
     "reth-trie/test-utils",
+    "reth-trie-common/test-utils",
     "reth-trie-db/test-utils",
     "reth-trie-sparse/test-utils",
     "reth-prune-types?/test-utils",

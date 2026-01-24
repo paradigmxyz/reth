@@ -10,7 +10,9 @@
 use crate::{DatabaseHashedPostState, DatabaseStateRoot, DatabaseTrieCursorFactory};
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
-use reth_storage_api::{BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader};
+use reth_storage_api::{
+    BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader, StorageChangeSetReader,
+};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     changesets::compute_trie_changesets,
@@ -65,7 +67,11 @@ pub fn compute_block_trie_changesets<Provider>(
     block_number: BlockNumber,
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
-    Provider: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+    Provider: DBProvider
+        + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader,
 {
     debug!(
         target: "trie::changeset_cache",
@@ -87,7 +93,7 @@ where
 
     // This reverts all changes from db tip back to just after block-1 was processed
     let mut cumulative_state_revert_prev = cumulative_state_revert.clone();
-    cumulative_state_revert_prev.extend_ref(&individual_state_revert);
+    cumulative_state_revert_prev.extend_ref_and_sort(&individual_state_revert);
 
     // Step 2: Calculate cumulative trie updates revert for block-1
     // This gives us the trie state as it was after block-1 was processed
@@ -175,7 +181,11 @@ pub fn compute_block_trie_updates<Provider>(
     block_number: BlockNumber,
 ) -> ProviderResult<TrieUpdatesSorted>
 where
-    Provider: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+    Provider: DBProvider
+        + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader,
 {
     let tx = provider.tx_ref();
 
@@ -323,7 +333,11 @@ impl ChangesetCache {
         provider: &P,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
-        P: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+        P: DBProvider
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader,
     {
         // Try cache first (with read lock)
         {
@@ -408,7 +422,11 @@ impl ChangesetCache {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<TrieUpdatesSorted>
     where
-        P: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+        P: DBProvider
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader,
     {
         // Get the database tip block number
         let db_tip_block = provider
@@ -469,7 +487,7 @@ impl ChangesetCache {
             // Since we iterate newest to oldest, older values are added last
             // and overwrite any conflicting newer values (oldest changeset values take
             // precedence).
-            accumulated_reverts.extend_ref(&changesets);
+            accumulated_reverts.extend_ref_and_sort(&changesets);
         }
 
         let elapsed = timer.elapsed();

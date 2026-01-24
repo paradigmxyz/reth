@@ -231,8 +231,14 @@ where
         .map_err(|e| StatelessValidationError::StatelessExecutionFailed(e.to_string()))?;
 
     // Post validation checks
-    validate_block_post_execution(&current_block, &chain_spec, &output.receipts, &output.requests)
-        .map_err(StatelessValidationError::ConsensusValidationFailed)?;
+    validate_block_post_execution(
+        &current_block,
+        &chain_spec,
+        &output.receipts,
+        &output.requests,
+        None,
+    )
+    .map_err(StatelessValidationError::ConsensusValidationFailed)?;
 
     // Compute and check the post state root
     let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);

@@ -104,6 +104,16 @@ pub enum ProviderError {
     /// State is not available for the given block number because it is pruned.
     #[error("state at block #{_0} is pruned")]
     StateAtBlockPruned(BlockNumber),
+    /// Block data is not available because history has expired.
+    ///
+    /// The requested block number is below the earliest available block.
+    #[error("block #{requested} is not available, history has expired (earliest available: #{earliest_available})")]
+    BlockExpired {
+        /// The block number that was requested.
+        requested: BlockNumber,
+        /// The earliest available block number.
+        earliest_available: BlockNumber,
+    },
     /// Provider does not support this particular request.
     #[error("this provider does not support this request")]
     UnsupportedProvider,

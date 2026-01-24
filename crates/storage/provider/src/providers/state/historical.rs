@@ -14,7 +14,7 @@ use reth_db_api::{
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, StateProofProvider,
-    StorageRootProvider, StorageSettingsCache,
+    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -26,8 +26,8 @@ use reth_trie::{
     TrieInputSorted,
 };
 use reth_trie_db::{
-    DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
-    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
+    hashed_storage_from_reverts_with_provider, DatabaseHashedPostState, DatabaseProof,
+    DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
 };
 
 use std::fmt::Debug;
@@ -109,7 +109,7 @@ pub struct HistoricalStateProviderRef<'b, Provider> {
     lowest_available_blocks: LowestAvailableBlocks,
 }
 
-impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
+impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumReader>
     HistoricalStateProviderRef<'b, Provider>
 {
     /// Create new `StateProvider` for historical block number
@@ -210,7 +210,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
             );
         }
 
-        Ok(HashedStorage::from_reverts(self.tx(), address, self.block_number)?)
+        hashed_storage_from_reverts_with_provider(self.provider, address, self.block_number)
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -242,6 +242,7 @@ impl<
         Provider: DBProvider
             + BlockNumReader
             + ChangeSetReader
+            + StorageChangeSetReader
             + StorageSettingsCache
             + RocksDBProviderFactory
             + NodePrimitivesProvider,
@@ -285,13 +286,13 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader> BlockHashReader
     }
 }
 
-impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StateRootProvider
-    for HistoricalStateProviderRef<'_, Provider>
+impl<Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumReader>
+    StateRootProvider for HistoricalStateProviderRef<'_, Provider>
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         let hashed_state_sorted = hashed_state.into_sorted();
-        revert_state.extend_ref(&hashed_state_sorted);
+        revert_state.extend_ref_and_sort(&hashed_state_sorted);
         Ok(StateRoot::overlay_root(self.tx(), &revert_state)?)
     }
 
@@ -306,7 +307,7 @@ impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StateRootProvider
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
         let hashed_state_sorted = hashed_state.into_sorted();
-        revert_state.extend_ref(&hashed_state_sorted);
+        revert_state.extend_ref_and_sort(&hashed_state_sorted);
         Ok(StateRoot::overlay_root_with_updates(self.tx(), &revert_state)?)
     }
 
@@ -322,8 +323,8 @@ impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StateRootProvider
     }
 }
 
-impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StorageRootProvider
-    for HistoricalStateProviderRef<'_, Provider>
+impl<Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumReader>
+    StorageRootProvider for HistoricalStateProviderRef<'_, Provider>
 {
     fn storage_root(
         &self,
@@ -361,8 +362,8 @@ impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StorageRootProvide
     }
 }
 
-impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StateProofProvider
-    for HistoricalStateProviderRef<'_, Provider>
+impl<Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumReader>
+    StateProofProvider for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get account and storage proofs.
     fn proof(
@@ -405,6 +406,7 @@ impl<
             + BlockNumReader
             + BlockHashReader
             + ChangeSetReader
+            + StorageChangeSetReader
             + StorageSettingsCache
             + RocksDBProviderFactory
             + NodePrimitivesProvider,
@@ -418,18 +420,16 @@ impl<
     ) -> ProviderResult<Option<StorageValue>> {
         match self.storage_history_lookup(address, storage_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
-            HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
-                self.tx()
-                    .cursor_dup_read::<tables::StorageChangeSets>()?
-                    .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
-                    .filter(|entry| entry.key == storage_key)
-                    .ok_or_else(|| ProviderError::StorageChangesetNotFound {
-                        block_number: changeset_block_number,
-                        address,
-                        storage_key: Box::new(storage_key),
-                    })?
-                    .value,
-            )),
+            HistoryInfo::InChangeset(changeset_block_number) => self
+                .provider
+                .get_storage_before_block(changeset_block_number, address, storage_key)?
+                .ok_or_else(|| ProviderError::StorageChangesetNotFound {
+                    block_number: changeset_block_number,
+                    address,
+                    storage_key: Box::new(storage_key),
+                })
+                .map(|entry| entry.value)
+                .map(Some),
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
                 .tx()
                 .cursor_dup_read::<tables::PlainStorageState>()?
@@ -462,7 +462,9 @@ pub struct HistoricalStateProvider<Provider> {
     lowest_available_blocks: LowestAvailableBlocks,
 }
 
-impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> HistoricalStateProvider<Provider> {
+impl<Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumReader>
+    HistoricalStateProvider<Provider>
+{
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: Provider, block_number: BlockNumber) -> Self {
         Self { provider, block_number, lowest_available_blocks: Default::default() }
@@ -498,7 +500,7 @@ impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> HistoricalStatePro
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-reth_storage_api::macros::delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider]);
+reth_storage_api::macros::delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader + StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -631,7 +633,7 @@ mod tests {
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
         BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        NodePrimitivesProvider, StorageSettingsCache,
+        NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
     };
     use reth_storage_errors::provider::ProviderError;
 
@@ -647,6 +649,7 @@ mod tests {
             + BlockNumReader
             + BlockHashReader
             + ChangeSetReader
+            + StorageChangeSetReader
             + StorageSettingsCache
             + RocksDBProviderFactory
             + NodePrimitivesProvider,

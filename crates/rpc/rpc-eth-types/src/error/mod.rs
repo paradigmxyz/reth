@@ -491,6 +491,7 @@ impl From<reth_errors::ProviderError> for EthApiError {
             ProviderError::BlockNumberForTransactionIndexNotFound => Self::UnknownBlockOrTxIndex,
             ProviderError::FinalizedBlockNotFound => Self::HeaderNotFound(BlockId::finalized()),
             ProviderError::SafeBlockNotFound => Self::HeaderNotFound(BlockId::safe()),
+            ProviderError::BlockExpired { .. } => Self::PrunedHistoryUnavailable,
             err => Self::Internal(err.into()),
         }
     }

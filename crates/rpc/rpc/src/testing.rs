@@ -15,6 +15,7 @@
 //! on public-facing RPC endpoints without proper authentication.
 
 use alloy_consensus::{Header, Transaction};
+use alloy_eips::eip2718::Decodable2718;
 use alloy_evm::Evm;
 use alloy_primitives::{map::HashSet, Address, U256};
 use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV5;
@@ -24,11 +25,14 @@ use reth_errors::RethError;
 use reth_ethereum_engine_primitives::EthBuiltPayload;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm, NextBlockEnvAttributes};
-use reth_primitives_traits::{AlloyBlockHeader as BlockTrait, Recovered, TxTy};
+use reth_primitives_traits::{
+    transaction::{recover::try_recover_signers, signed::RecoveryError},
+    AlloyBlockHeader as BlockTrait, TxTy,
+};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
 use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
+use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{BlockReader, HeaderProvider};
 use revm::context::Block;
 use revm_primitives::map::DefaultHashBuilder;
@@ -106,11 +110,16 @@ where
 
                 let mut invalid_senders: HashSet<Address, DefaultHashBuilder> = HashSet::default();
 
-                for (idx, tx) in request.transactions.iter().enumerate() {
-                    let tx: Recovered<TxTy<Evm::Primitives>> = recover_raw_transaction(tx)?;
-                    let sender = tx.signer();
+                // Decode and recover all transactions in parallel
+                let recovered_txs = try_recover_signers(&request.transactions, |tx| {
+                    TxTy::<Evm::Primitives>::decode_2718_exact(tx.as_ref())
+                        .map_err(RecoveryError::from_source)
+                })
+                .or(Err(EthApiError::InvalidTransactionSignature))?;
 
-                    if skip_invalid_transactions && invalid_senders.contains(&sender) {
+                for (idx, tx) in recovered_txs.into_iter().enumerate() {
+                    let signer = tx.signer();
+                    if skip_invalid_transactions && invalid_senders.contains(&signer) {
                         continue;
                     }
 
@@ -122,17 +131,17 @@ where
                                 debug!(
                                     target: "rpc::testing",
                                     tx_idx = idx,
-                                    ?sender,
+                                    ?signer,
                                     error = ?err,
                                     "Skipping invalid transaction"
                                 );
-                                invalid_senders.insert(sender);
+                                invalid_senders.insert(signer);
                                 continue;
                             }
                             debug!(
                                 target: "rpc::testing",
                                 tx_idx = idx,
-                                ?sender,
+                                ?signer,
                                 error = ?err,
                                 "Transaction execution failed"
                             );
