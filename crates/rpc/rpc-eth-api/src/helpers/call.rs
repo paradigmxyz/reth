@@ -152,7 +152,17 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         }
 
                         if txs_without_gas_limit > 0 {
-                            (block_gas_limit - total_specified_gas) / txs_without_gas_limit as u64
+                            // Per spec: "gasLimit: blockGasLimit - soFarUsedGasInBlock"
+                            // Divide remaining gas equally among transactions without gas
+                            let gas_per_tx = (block_gas_limit - total_specified_gas) /
+                                txs_without_gas_limit as u64;
+                            // Cap to RPC gas limit, matching spec behavior
+                            let call_gas_limit = this.call_gas_limit();
+                            if call_gas_limit > 0 {
+                                gas_per_tx.min(call_gas_limit)
+                            } else {
+                                gas_per_tx
+                            }
                         } else {
                             0
                         }
