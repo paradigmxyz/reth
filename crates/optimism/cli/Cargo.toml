@@ -44,7 +44,6 @@ reth-optimism-evm.workspace = true
 reth-cli-runner.workspace = true
 reth-node-builder = { workspace = true, features = ["op"] }
 reth-tracing.workspace = true
-reth-tracing-otlp.workspace = true
 
 # eth
 alloy-eips.workspace = true
@@ -56,7 +55,6 @@ alloy-rlp.workspace = true
 futures-util.workspace = true
 derive_more.workspace = true
 serde.workspace = true
-url.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
@@ -78,8 +76,9 @@ reth-optimism-chainspec = { workspace = true, features = ["std", "superchain-con
 [features]
 default = []
 
-# Opentelemtry feature to activate metrics export
+# Opentelemetry feature to activate tracing and logs export
 otlp = ["reth-tracing/otlp", "reth-node-core/otlp"]
+otlp-logs = ["reth-tracing/otlp-logs", "reth-node-core/otlp-logs"]
 
 asm-keccak = [
     "alloy-primitives/asm-keccak",
@@ -87,11 +86,27 @@ asm-keccak = [
     "reth-optimism-node/asm-keccak",
 ]
 
+keccak-cache-global = [
+    "alloy-primitives/keccak-cache-global",
+    "reth-node-core/keccak-cache-global",
+    "reth-optimism-node/keccak-cache-global",
+]
+
 # Jemalloc feature for vergen to generate correct env vars
 jemalloc = [
     "reth-node-core/jemalloc",
     "reth-node-metrics/jemalloc",
 ]
+jemalloc-prof = [
+    "jemalloc",
+    "reth-node-metrics/jemalloc-prof",
+]
+jemalloc-symbols = [
+    "jemalloc-prof",
+    "reth-node-metrics/jemalloc-symbols",
+]
+
+tracy = ["reth-tracing/tracy", "reth-node-core/tracy"]
 
 dev = [
     "dep:proptest",
@@ -107,5 +122,6 @@ serde = [
     "reth-optimism-primitives/serde",
     "reth-primitives-traits/serde",
     "reth-optimism-chainspec/serde",
-    "url/serde",
 ]
+
+edge = ["reth-cli-commands/edge", "reth-node-core/edge"]

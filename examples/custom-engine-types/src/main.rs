@@ -23,8 +23,8 @@ use alloy_primitives::{Address, B256};
 use alloy_rpc_types::{
     engine::{
         ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-        ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadV1,
-        PayloadAttributes as EthPayloadAttributes, PayloadId,
+        ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
+        ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes, PayloadId,
     },
     Withdrawal,
 };
@@ -41,7 +41,7 @@ use reth_ethereum::{
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
             rpc::{PayloadValidatorBuilder, RpcAddOns},
-            BuilderContext, Node, NodeAdapter, NodeBuilder,
+            BuilderContext, Node, NodeAdapter, NodeBuilder, PayloadBuilderConfig,
         },
         core::{args::RpcServerArgs, node_config::NodeConfig},
         node::{
@@ -51,7 +51,7 @@ use reth_ethereum::{
         EthEvmConfig, EthereumEthApiBuilder,
     },
     pool::{PoolTransaction, TransactionPool},
-    primitives::{Block, RecoveredBlock, SealedBlock},
+    primitives::{Block, SealedBlock},
     provider::{EthStorage, StateProviderFactory},
     rpc::types::engine::ExecutionPayload,
     tasks::TaskManager,
@@ -169,6 +169,7 @@ impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
     type ExecutionPayloadEnvelopeV5 = ExecutionPayloadEnvelopeV5;
+    type ExecutionPayloadEnvelopeV6 = ExecutionPayloadEnvelopeV6;
 }
 
 /// Custom engine validator
@@ -193,12 +194,11 @@ impl CustomEngineValidator {
 impl PayloadValidator<CustomEngineTypes> for CustomEngineValidator {
     type Block = reth_ethereum::Block;
 
-    fn ensure_well_formed_payload(
+    fn convert_payload_to_block(
         &self,
         payload: ExecutionData,
-    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
-        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+        self.inner.ensure_well_formed_payload(payload).map_err(Into::into)
     }
 
     fn validate_payload_attributes_against_header(
@@ -338,7 +338,8 @@ where
                 ctx.provider().clone(),
                 pool,
                 evm_config,
-                EthereumBuilderConfig::new(),
+                EthereumBuilderConfig::new()
+                    .with_extra_data(ctx.payload_builder_config().extra_data_bytes()),
             ),
         };
         Ok(payload_builder)

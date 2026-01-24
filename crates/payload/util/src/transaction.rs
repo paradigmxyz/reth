@@ -44,7 +44,7 @@ impl<T: Clone> PayloadTransactions for PayloadTransactionsFixed<T> {
 /// `PayloadTransactions` iterators and keeps track of the gas for both of iterators.
 ///
 /// We can't use [`Iterator::chain`], because:
-/// (a) we need to propagate the `mark_invalid` and `no_updates`
+/// (a) we need to propagate the `mark_invalid`
 /// (b) we need to keep track of the gas
 ///
 /// Notes that [`PayloadTransactionsChain`] fully drains the first iterator

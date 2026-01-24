@@ -185,7 +185,8 @@ where
     /// `stale_filter_ttl` at the given instant.
     pub async fn clear_stale_filters(&self, now: Instant) {
         trace!(target: "rpc::eth", "clear stale filters");
-        self.active_filters().inner.lock().await.retain(|id, filter| {
+        let mut filters = self.active_filters().inner.lock().await;
+        filters.retain(|id, filter| {
             let is_valid = (now - filter.last_poll_timestamp) < self.inner.stale_filter_ttl;
 
             if !is_valid {
@@ -193,7 +194,8 @@ where
             }
 
             is_valid
-        })
+        });
+        filters.shrink_to_fit();
     }
 }
 
@@ -267,7 +269,7 @@ where
                             .map(|num| self.provider().convert_block_number(num))
                             .transpose()?
                             .flatten();
-                        logs_utils::get_filter_block_range(from, to, start_block, info)
+                        logs_utils::get_filter_block_range(from, to, start_block, info)?
                     }
                     FilterBlockOption::AtBlockHash(_) => {
                         // blockHash is equivalent to fromBlock = toBlock = the block number with
@@ -359,7 +361,7 @@ where
                 let stream = self.pool().new_pending_pool_transactions_listener();
                 let full_txs_receiver = FullTransactionsReceiver::new(
                     stream,
-                    dyn_clone::clone(self.inner.eth_api.tx_resp_builder()),
+                    dyn_clone::clone(self.inner.eth_api.converter()),
                 );
                 FilterKind::PendingTransaction(PendingTransactionKind::FullTransaction(Arc::new(
                     full_txs_receiver,
@@ -465,22 +467,29 @@ where
     ) -> Result<Vec<Log>, EthFilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
-                // for all matching logs in the block
-                // get the block header with the hash
-                let header = self
-                    .provider()
-                    .header_by_hash_or_number(block_hash.into())?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
+                // First try to get cached block and receipts, as it's likely they're already cached
+                let Some((receipts, maybe_block)) =
+                    self.eth_cache().get_receipts_and_maybe_block(block_hash).await?
+                else {
+                    return Err(ProviderError::HeaderNotFound(block_hash.into()).into())
+                };
+
+                // Get header - from cached block if available, otherwise from provider
+                let header = if let Some(block) = &maybe_block {
+                    block.header().clone()
+                } else {
+                    self.provider()
+                        .header_by_hash_or_number(block_hash.into())?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?
+                };
+
+                // Check if the block has been pruned (EIP-4444)
+                let earliest_block = self.provider().earliest_block_number()?;
+                if header.number() < earliest_block {
+                    return Err(EthApiError::PrunedHistoryUnavailable.into());
+                }
 
                 let block_num_hash = BlockNumHash::new(header.number(), block_hash);
-
-                // we also need to ensure that the receipts are available and return an error if
-                // not, in case the block hash been reorged
-                let (receipts, maybe_block) = self
-                    .eth_cache()
-                    .get_receipts_and_maybe_block(block_num_hash.hash)
-                    .await?
-                    .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
 
                 let mut all_logs = Vec::new();
                 append_matching_block_logs(
@@ -545,6 +554,13 @@ where
                     .transpose()?
                     .flatten();
 
+                // Return error if toBlock exceeds current head
+                if let Some(t) = to &&
+                    t > info.best_number
+                {
+                    return Err(EthFilterError::BlockRangeExceedsHead);
+                }
+
                 if let Some(f) = from &&
                     f > info.best_number
                 {
@@ -553,7 +569,13 @@ where
                 }
 
                 let (from_block_number, to_block_number) =
-                    logs_utils::get_filter_block_range(from, to, start_block, info);
+                    logs_utils::get_filter_block_range(from, to, start_block, info)?;
+
+                // Check if the requested range overlaps with pruned history (EIP-4444)
+                let earliest_block = self.provider().earliest_block_number()?;
+                if from_block_number < earliest_block {
+                    return Err(EthApiError::PrunedHistoryUnavailable.into());
+                }
 
                 self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
                     .await
@@ -711,13 +733,13 @@ where
                     logs_found = all_logs.len(),
                     max_logs_per_response,
                     from_block,
-                    to_block = num_hash.number.saturating_sub(1),
+                    to_block = num_hash.number,
                     "Query exceeded max logs per response limit"
                 );
                 return Err(EthFilterError::QueryExceedsMaxResults {
                     max_logs: max_logs_per_response,
                     from_block,
-                    to_block: num_hash.number.saturating_sub(1),
+                    to_block: num_hash.number,
                 });
             }
         }
@@ -779,7 +801,7 @@ impl PendingTransactionsReceiver {
 #[derive(Debug, Clone)]
 struct FullTransactionsReceiver<T: PoolTransaction, TxCompat> {
     txs_stream: Arc<Mutex<NewSubpoolTransactionStream<T>>>,
-    tx_resp_builder: TxCompat,
+    converter: TxCompat,
 }
 
 impl<T, TxCompat> FullTransactionsReceiver<T, TxCompat>
@@ -788,8 +810,8 @@ where
     TxCompat: RpcConvert<Primitives: NodePrimitives<SignedTx = T::Consensus>>,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
-    fn new(stream: NewSubpoolTransactionStream<T>, tx_resp_builder: TxCompat) -> Self {
-        Self { txs_stream: Arc::new(Mutex::new(stream)), tx_resp_builder }
+    fn new(stream: NewSubpoolTransactionStream<T>, converter: TxCompat) -> Self {
+        Self { txs_stream: Arc::new(Mutex::new(stream)), converter }
     }
 
     /// Returns all new pending transactions received since the last poll.
@@ -798,7 +820,7 @@ where
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            match self.tx_resp_builder.fill_pending(tx.transaction.to_consensus()) {
+            match self.converter.fill_pending(tx.transaction.to_consensus()) {
                 Ok(tx) => pending_txs.push(tx),
                 Err(err) => {
                     error!(target: "rpc",
@@ -893,6 +915,9 @@ pub enum EthFilterError {
     /// Invalid block range.
     #[error("invalid block range params")]
     InvalidBlockRangeParams,
+    /// Block range extends beyond current head.
+    #[error("block range extends beyond current head block")]
+    BlockRangeExceedsHead,
     /// Query scope is too broad.
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
@@ -927,7 +952,8 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             EthFilterError::EthAPIError(err) => err.into(),
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |
-            EthFilterError::QueryExceedsMaxResults { .. }) => {
+            EthFilterError::QueryExceedsMaxResults { .. } |
+            EthFilterError::BlockRangeExceedsHead) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }
@@ -937,6 +963,15 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
 impl From<ProviderError> for EthFilterError {
     fn from(err: ProviderError) -> Self {
         Self::EthAPIError(err.into())
+    }
+}
+
+impl From<logs_utils::FilterBlockRangeError> for EthFilterError {
+    fn from(err: logs_utils::FilterBlockRangeError) -> Self {
+        match err {
+            logs_utils::FilterBlockRangeError::InvalidBlockRange => Self::InvalidBlockRangeParams,
+            logs_utils::FilterBlockRangeError::BlockRangeExceedsHead => Self::BlockRangeExceedsHead,
+        }
     }
 }
 
@@ -1138,7 +1173,7 @@ impl<
 
                 let expected_next = last_header.number() + 1;
                 if peeked.number() != expected_next {
-                    debug!(
+                    trace!(
                         target: "rpc::eth::filter",
                         last_block = last_header.number(),
                         next_block = peeked.number(),
@@ -1229,7 +1264,7 @@ impl<
             let filter_inner = self.filter_inner.clone();
             let chunk_task = Box::pin(async move {
                 let chunk_task = tokio::task::spawn_blocking(move || {
-                    let mut chunk_results = Vec::new();
+                    let mut chunk_results = Vec::with_capacity(chunk_headers.len());
 
                     for header in chunk_headers {
                         // Fetch directly from provider - RangeMode is used for older blocks

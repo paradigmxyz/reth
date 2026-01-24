@@ -431,7 +431,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
             // we prefer removing transactions with lower ordering
             let mut worst_transactions = self.highest_nonces.values().collect::<Vec<_>>();
-            worst_transactions.sort();
+            worst_transactions.sort_unstable();
 
             // loop through the highest nonces set, removing transactions until we reach the limit
             for tx in worst_transactions {
@@ -983,6 +983,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     #[should_panic(expected = "transaction already included")]
     fn test_handle_duplicates() {
         let mut f = MockTransactionFactory::default();

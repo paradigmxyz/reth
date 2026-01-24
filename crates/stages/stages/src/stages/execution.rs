@@ -3,7 +3,7 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::Chain;
@@ -11,9 +11,9 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter,
-    StaticFileProviderFactory, StatsReader, TransactionVariant,
+    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -23,7 +23,8 @@ use reth_stages_api::{
 };
 use reth_static_file_types::StaticFileSegment;
 use std::{
-    cmp::Ordering,
+    cmp::{max, Ordering},
+    collections::BTreeMap,
     ops::RangeInclusive,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -69,7 +70,7 @@ where
     /// The stage's internal block executor
     evm_config: E,
     /// The consensus instance for validating blocks.
-    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<E::Primitives>>,
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// The highest threshold (in number of blocks) for switching between incremental
@@ -98,7 +99,7 @@ where
     /// Create new execution stage with specified config.
     pub fn new(
         evm_config: E,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         exex_manager_handle: ExExManagerHandle<E::Primitives>,
@@ -120,7 +121,7 @@ where
     /// The commit threshold will be set to [`MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD`].
     pub fn new_with_executor(
         evm_config: E,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
     ) -> Self {
         Self::new(
             evm_config,
@@ -134,7 +135,7 @@ where
     /// Create new instance of [`ExecutionStage`] from configuration.
     pub fn from_config(
         evm_config: E,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
         config: ExecutionConfig,
         external_clean_threshold: u64,
     ) -> Self {
@@ -185,11 +186,15 @@ where
         unwind_to: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
+        Provider: StaticFileProviderFactory
+            + DBProvider
+            + BlockReader
+            + HeaderProvider
+            + StorageSettingsCache,
     {
-        // If there's any receipts pruning configured, receipts are written directly to database and
-        // inconsistencies are expected.
-        if provider.prune_modes_ref().has_receipts_pruning() {
+        // On old nodes, if there's any receipts pruning configured, receipts are written directly
+        // to database and inconsistencies are expected.
+        if EitherWriter::receipts_destination(provider).is_database() {
             return Ok(())
         }
 
@@ -205,16 +210,23 @@ where
             .map(|num| num + 1)
             .unwrap_or(0);
 
+        // Get highest block number in static files for receipts
+        let static_file_block_num = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Receipts)
+            .unwrap_or(0);
+
         // Check if we had any unexpected shutdown after committing to static files, but
         // NOT committing to database.
-        match next_static_file_receipt_num.cmp(&next_receipt_num) {
+        match static_file_block_num.cmp(&checkpoint) {
             // It can be equal when it's a chain of empty blocks, but we still need to update the
             // last block in the range.
             Ordering::Greater | Ordering::Equal => {
                 let mut static_file_producer =
                     static_file_provider.latest_writer(StaticFileSegment::Receipts)?;
-                static_file_producer
-                    .prune_receipts(next_static_file_receipt_num - next_receipt_num, checkpoint)?;
+                static_file_producer.prune_receipts(
+                    next_static_file_receipt_num.saturating_sub(next_receipt_num),
+                    checkpoint,
+                )?;
                 // Since this is a database <-> static file inconsistency, we commit the change
                 // straight away.
                 static_file_producer.commit()?;
@@ -222,19 +234,14 @@ where
             Ordering::Less => {
                 // If we are already in the process of unwind, this might be fine because we will
                 // fix the inconsistency right away.
-                if let Some(unwind_to) = unwind_to {
-                    let next_receipt_num_after_unwind = provider
-                        .block_body_indices(unwind_to)?
-                        .map(|b| b.next_tx_num())
-                        .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?;
-
-                    if next_receipt_num_after_unwind > next_static_file_receipt_num {
-                        // This means we need a deeper unwind.
-                    } else {
-                        return Ok(())
-                    }
+                if let Some(unwind_to) = unwind_to &&
+                    unwind_to <= static_file_block_num
+                {
+                    return Ok(())
                 }
 
+                // Otherwise, this is a real inconsistency - database has more blocks than static
+                // files
                 return Err(missing_static_data_error(
                     next_static_file_receipt_num.saturating_sub(1),
                     &static_file_provider,
@@ -259,7 +266,8 @@ where
             Primitives: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
         > + StatsReader
         + BlockHashReader
-        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>,
+        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
+        + StorageSettingsCache,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -343,7 +351,7 @@ where
                 })
             })?;
 
-            if let Err(err) = self.consensus.validate_block_post_execution(&block, &result) {
+            if let Err(err) = self.consensus.validate_block_post_execution(&block, &result, None) {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),
@@ -411,8 +419,11 @@ where
         // Note: Since we only write to `blocks` if there are any ExExes, we don't need to perform
         // the `has_exexs` check here as well
         if !blocks.is_empty() {
-            let previous_input =
-                self.post_execute_commit_input.replace(Chain::new(blocks, state.clone(), None));
+            let previous_input = self.post_execute_commit_input.replace(Chain::new(
+                blocks,
+                state.clone(),
+                BTreeMap::new(),
+            ));
 
             if previous_input.is_some() {
                 // Not processing the previous post execute commit input is a critical error, as it
@@ -451,7 +462,7 @@ where
         }
 
         // write output
-        provider.write_state(&state, OriginalValuesKnown::Yes)?;
+        provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         let db_write_duration = time.elapsed();
         debug!(
@@ -512,7 +523,7 @@ where
             let previous_input = self.post_unwind_commit_input.replace(Chain::new(
                 blocks,
                 bundle_state_with_receipts,
-                None,
+                BTreeMap::new(),
             ));
 
             debug_assert!(
@@ -613,7 +624,11 @@ where
         // Otherwise, we recalculate the whole stage checkpoint including the amount of gas
         // already processed, if there's any.
         _ => {
-            let processed = calculate_gas_used_from_headers(provider, 0..=start_block - 1)?;
+            let genesis_block_number = provider.genesis_block_number();
+            let processed = calculate_gas_used_from_headers(
+                provider,
+                genesis_block_number..=max(start_block - 1, genesis_block_number),
+            )?;
 
             ExecutionCheckpoint {
                 block_range: CheckpointBlockRange { from: start_block, to: max_block },
@@ -646,8 +661,9 @@ where
         *range.start()..*range.end() + 1,
         |cursor, number| cursor.get_one::<HeaderMask<N::BlockHeader>>(number.into()),
     )? {
-        let entry = entry?;
-        gas_total += entry.gas_used();
+        if let Some(entry) = entry? {
+            gas_total += entry.gas_used();
+        }
     }
 
     let duration = start.elapsed();
@@ -660,12 +676,12 @@ where
 mod tests {
     use super::*;
     use crate::{stages::MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD, test_utils::TestStageDB};
-    use alloy_primitives::{address, hex_literal::hex, keccak256, B256, U256};
+    use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_api::{
-        models::AccountBeforeTx,
+        models::{metadata::StorageSettings, AccountBeforeTx},
         transaction::{DbTx, DbTxMut},
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
@@ -677,7 +693,10 @@ mod tests {
         DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory,
     };
     use reth_prune::PruneModes;
+    use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
     use reth_stages_api::StageUnitCheckpoint;
+    use reth_testing_utils::generators;
+    use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthEvmConfig> {
         let evm_config =
@@ -733,8 +752,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_block(block.clone().try_recover().unwrap()).unwrap();
+        provider.insert_block(&genesis.try_recover().unwrap()).unwrap();
+        provider.insert_block(&block.clone().try_recover().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -774,8 +793,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_block(block.clone().try_recover().unwrap()).unwrap();
+        provider.insert_block(&genesis.try_recover().unwrap()).unwrap();
+        provider.insert_block(&block.clone().try_recover().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -815,8 +834,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_block(block.clone().try_recover().unwrap()).unwrap();
+        provider.insert_block(&genesis.try_recover().unwrap()).unwrap();
+        provider.insert_block(&block.clone().try_recover().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -848,8 +867,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_block(block.clone().try_recover().unwrap()).unwrap();
+        provider.insert_block(&genesis.try_recover().unwrap()).unwrap();
+        provider.insert_block(&block.clone().try_recover().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -894,10 +913,19 @@ mod tests {
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
         let modes = [None, Some(PruneModes::default())];
+        let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
+            Address::random(),
+            PruneMode::Distance(100000),
+        )]));
 
         // Tests node with database and node with static files
-        for mode in modes {
+        for mut mode in modes {
             let mut provider = factory.database_provider_rw().unwrap();
+
+            if let Some(mode) = &mut mode {
+                // Simulating a full node where we write receipts to database
+                mode.receipts_log_filter = random_filter.clone();
+            }
 
             let mut execution_stage = stage();
             provider.set_prune_modes(mode.clone().unwrap_or_default());
@@ -981,8 +1009,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_block(block.clone().try_recover().unwrap()).unwrap();
+        provider.insert_block(&genesis.try_recover().unwrap()).unwrap();
+        provider.insert_block(&block.clone().try_recover().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -1022,9 +1050,18 @@ mod tests {
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
         let modes = [None, Some(PruneModes::default())];
+        let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
+            Address::random(),
+            PruneMode::Before(100000),
+        )]));
 
         // Tests node with database and node with static files
-        for mode in modes {
+        for mut mode in modes {
+            if let Some(mode) = &mut mode {
+                // Simulating a full node where we write receipts to database
+                mode.receipts_log_filter = random_filter.clone();
+            }
+
             // Test Execution
             let mut execution_stage = stage();
             provider.set_prune_modes(mode.clone().unwrap_or_default());
@@ -1082,8 +1119,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_block(block.clone().try_recover().unwrap()).unwrap();
+        provider.insert_block(&genesis.try_recover().unwrap()).unwrap();
+        provider.insert_block(&block.clone().try_recover().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -1215,5 +1252,69 @@ mod tests {
                 )
             ]
         );
+    }
+
+    #[test]
+    fn test_ensure_consistency_with_skipped_receipts() {
+        // Test that ensure_consistency allows the case where receipts are intentionally
+        // skipped. When receipts are skipped, blocks are still incremented in static files
+        // but no receipt data is written.
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_receipts_in_static_files(true),
+        );
+
+        // Setup with block 1
+        let provider_rw = factory.database_provider_rw().unwrap();
+        let mut rng = generators::rng();
+        let genesis = generators::random_block(&mut rng, 0, Default::default());
+        provider_rw
+            .insert_block(&genesis.try_recover().unwrap())
+            .expect("failed to insert genesis");
+        let block = generators::random_block(
+            &mut rng,
+            1,
+            generators::BlockParams { tx_count: Some(2), ..Default::default() },
+        );
+        provider_rw.insert_block(&block.try_recover().unwrap()).expect("failed to insert block");
+
+        let static_file_provider = provider_rw.static_file_provider();
+        static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap().commit().unwrap();
+
+        // Simulate skipped receipts: increment block in receipts static file but don't write
+        // receipts
+        {
+            let mut receipts_writer =
+                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts_writer.increment_block(0).unwrap();
+            receipts_writer.increment_block(1).unwrap();
+            receipts_writer.commit().unwrap();
+        } // Explicitly drop receipts_writer here
+
+        provider_rw.commit().expect("failed to commit");
+
+        // Verify blocks are incremented but no receipts written
+        assert_eq!(
+            factory
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Receipts),
+            Some(1)
+        );
+        assert_eq!(
+            factory.static_file_provider().get_highest_static_file_tx(StaticFileSegment::Receipts),
+            None
+        );
+
+        // Create execution stage
+        let stage = stage();
+
+        // Run ensure_consistency - should NOT error
+        // Block numbers match (both at 1), but tx numbers don't (database has txs, static files
+        // don't) This is fine - receipts are being skipped
+        let provider = factory.provider().unwrap();
+        stage
+            .ensure_consistency(&provider, 1, None)
+            .expect("ensure_consistency should succeed when receipts are intentionally skipped");
     }
 }

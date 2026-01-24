@@ -4,7 +4,7 @@ use crate::tree::payload_processor::multiproof::{MultiProofTaskMetrics, SparseTr
 use alloy_primitives::B256;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_trie::{updates::TrieUpdates, Nibbles};
-use reth_trie_parallel::root::ParallelStateRootError;
+use reth_trie_parallel::{proof_task::ProofResult, root::ParallelStateRootError};
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
@@ -97,8 +97,8 @@ where
             debug!(
                 target: "engine::root",
                 num_updates,
-                account_proofs = update.multiproof.account_subtree.len(),
-                storage_proofs = update.multiproof.storages.len(),
+                account_proofs = update.multiproof.account_proofs_len(),
+                storage_proofs = update.multiproof.storage_proofs_len(),
                 "Updating sparse trie"
             );
 
@@ -121,8 +121,9 @@ where
                 ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
             })?;
 
-        self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
-        self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
+        let end = Instant::now();
+        self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
+        self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
@@ -156,7 +157,14 @@ where
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
-    trie.reveal_decoded_multiproof(multiproof)?;
+    match multiproof {
+        ProofResult::Legacy(decoded, _) => {
+            trie.reveal_decoded_multiproof(decoded)?;
+        }
+        ProofResult::V2(decoded_v2) => {
+            trie.reveal_decoded_multiproof_v2(decoded_v2)?;
+        }
+    }
     let reveal_multiproof_elapsed = started_at.elapsed();
     trace!(
         target: "engine::root::sparse",
@@ -166,15 +174,14 @@ where
 
     // Update storage slots with new values and calculate storage roots.
     let span = tracing::Span::current();
-    let (tx, rx) = mpsc::channel();
-    state
+    let results: Vec<_> = state
         .storages
         .into_iter()
         .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
         .par_bridge()
         .map(|(address, storage, storage_trie)| {
             let _enter =
-                debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: span.clone(), "storage trie", ?address)
+                debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie", ?address)
                     .entered();
 
             trace!(target: "engine::tree::payload_processor::sparse_trie", "Updating storage");
@@ -217,13 +224,7 @@ where
 
             SparseStateTrieResult::Ok((address, storage_trie))
         })
-        .for_each_init(
-            || tx.clone(),
-            |tx, result| {
-                let _ = tx.send(result);
-            },
-        );
-    drop(tx);
+        .collect();
 
     // Defer leaf removals until after updates/additions, so that we don't delete an intermediate
     // branch node during a removal and then re-add that branch back during a later leaf addition.
@@ -235,7 +236,7 @@ where
     let _enter =
         tracing::debug_span!(target: "engine::tree::payload_processor::sparse_trie", "account trie")
             .entered();
-    for result in rx {
+    for result in results {
         let (address, storage_trie) = result?;
         trie.insert_storage_trie(address, storage_trie);
 

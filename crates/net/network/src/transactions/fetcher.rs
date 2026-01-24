@@ -188,13 +188,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let TxFetchMetadata { fallback_peers, .. } =
             self.hashes_fetch_inflight_and_pending_fetch.peek(&hash)?;
 
-        for peer_id in fallback_peers.iter() {
-            if self.is_idle(peer_id) {
-                return Some(peer_id)
-            }
-        }
-
-        None
+        fallback_peers.iter().find(|peer_id| self.is_idle(peer_id))
     }
 
     /// Returns any idle peer for any hash pending fetch. If one is found, the corresponding
@@ -423,7 +417,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         &mut self,
         peers: &HashMap<PeerId, PeerMetadata<N>>,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
-    ) {
+    ) -> bool {
         let mut hashes_to_request = RequestTxHashes::with_capacity(
             DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
         );
@@ -440,7 +434,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     budget_find_idle_fallback_peer,
                 ) else {
                     // no peers are idle or budget is depleted
-                    return
+                    return false
                 };
 
                 peer_id
@@ -449,7 +443,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         );
 
         // peer should always exist since `is_session_active` already checked
-        let Some(peer) = peers.get(&peer_id) else { return };
+        let Some(peer) = peers.get(&peer_id) else { return false };
         let conn_eth_version = peer.version;
 
         // fill the request with more hashes pending fetch that have been announced by the peer.
@@ -493,7 +487,10 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             );
 
             self.buffer_hashes(failed_to_request_hashes, Some(peer_id));
+            return false
         }
+
+        true
     }
 
     /// Filters out hashes that have been seen before. For hashes that have already been seen, the

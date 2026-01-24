@@ -49,6 +49,7 @@ impl Command {
             auth_provider,
             mut next_block,
             is_optimism,
+            ..
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let buffer_size = self.rpc_block_buffer_size;
@@ -72,19 +73,9 @@ impl Command {
                         break;
                     }
                 };
-                let header = block.header.clone();
-
-                let (version, params) = match block_to_new_payload(block, is_optimism) {
-                    Ok(result) => result,
-                    Err(e) => {
-                        tracing::error!("Failed to convert block to new payload: {e}");
-                        let _ = error_sender.send(e);
-                        break;
-                    }
-                };
 
                 next_block += 1;
-                if let Err(e) = sender.send((header, version, params)).await {
+                if let Err(e) = sender.send(block).await {
                     tracing::error!("Failed to send block data: {e}");
                     break;
                 }
@@ -96,22 +87,19 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((header, version, params)) = {
+        while let Some(block) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
             result
         } {
-            // just put gas used here
-            let gas_used = header.gas_used;
+            let block_number = block.header.number;
+            let transaction_count = block.transactions.len() as u64;
+            let gas_used = block.header.gas_used;
 
-            let block_number = header.number;
+            debug!(number=?block.header.number, "Sending payload to engine");
 
-            debug!(
-                target: "reth-bench",
-                number=?header.number,
-                "Sending payload to engine",
-            );
+            let (version, params) = block_to_new_payload(block, is_optimism)?;
 
             let start = Instant::now();
             call_new_payload(&auth_provider, version, params).await?;
@@ -124,7 +112,8 @@ impl Command {
             let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
 
             // record the current result
-            let row = TotalGasRow { block_number, gas_used, time: current_duration };
+            let row =
+                TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((row, new_payload_result));
         }
 

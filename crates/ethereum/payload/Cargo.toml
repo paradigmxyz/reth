@@ -24,15 +24,15 @@ reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-evm.workspace = true
-reth-evm-ethereum.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-errors.workspace = true
 reth-chainspec.workspace = true
 reth-payload-validator.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
-revm.workspace = true
 alloy-rpc-types-engine.workspace = true
+revm.workspace = true
 
 # alloy
 alloy-eips.workspace = true

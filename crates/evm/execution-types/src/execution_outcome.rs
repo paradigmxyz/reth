@@ -144,7 +144,12 @@ impl<T> ExecutionOutcome<T> {
         bundle: BundleState,
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
-        let mut value = Self { bundle, first_block, receipts: Vec::new(), requests: Vec::new() };
+        let mut value = Self {
+            bundle,
+            first_block,
+            receipts: Vec::with_capacity(results.len()),
+            requests: Vec::with_capacity(results.len()),
+        };
         for result in results {
             value.receipts.push(result.receipts);
             value.requests.push(result.requests);
@@ -180,6 +185,11 @@ impl<T> ExecutionOutcome<T> {
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
         self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
+    }
+
+    /// Returns the state [`BundleAccount`] for the given account.
+    pub fn account_state(&self, address: &Address) -> Option<&BundleAccount> {
+        self.bundle.account(address)
     }
 
     /// Get storage if value is known.
@@ -237,6 +247,14 @@ impl<T> ExecutionOutcome<T> {
     pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[T] {
         let Some(index) = self.block_number_to_index(block_number) else { return &[] };
         &self.receipts[index]
+    }
+
+    /// Returns an iterator over receipt slices, one per block.
+    ///
+    /// This is a more ergonomic alternative to `receipts()` that yields slices
+    /// instead of requiring indexing into a nested `Vec<Vec<T>>`.
+    pub fn receipts_iter(&self) -> impl Iterator<Item = &[T]> + '_ {
+        self.receipts.iter().map(|v| v.as_slice())
     }
 
     /// Is execution outcome empty.
@@ -332,7 +350,7 @@ impl<T> ExecutionOutcome<T> {
     /// Prepends present the state with the given `BundleState`.
     /// It adds changes from the given state but does not override any existing changes.
     ///
-    /// Reverts  and receipts are not updated.
+    /// Reverts and receipts are not updated.
     pub fn prepend_state(&mut self, mut other: BundleState) {
         let other_len = other.reverts.len();
         // take this bundle
@@ -386,7 +404,7 @@ impl ExecutionOutcome {
     /// Returns the ethereum receipt root for all recorded receipts.
     ///
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
-    /// of receipt. This is a expensive operation.
+    /// of receipt. This is an expensive operation.
     pub fn ethereum_receipts_root(&self, block_number: BlockNumber) -> Option<B256> {
         self.generic_receipts_root_slow(
             block_number,
@@ -924,10 +942,20 @@ mod tests {
         let address3 = Address::random();
 
         // Set up account info with some changes
-        let account_info1 =
-            AccountInfo { nonce: 1, balance: U256::from(100), code_hash: B256::ZERO, code: None };
-        let account_info2 =
-            AccountInfo { nonce: 2, balance: U256::from(200), code_hash: B256::ZERO, code: None };
+        let account_info1 = AccountInfo {
+            nonce: 1,
+            balance: U256::from(100),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        };
+        let account_info2 = AccountInfo {
+            nonce: 2,
+            balance: U256::from(200),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        };
 
         // Set up the bundle state with these accounts
         let mut bundle_state = BundleState::default();

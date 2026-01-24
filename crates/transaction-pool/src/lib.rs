@@ -303,7 +303,7 @@ use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
-use reth_primitives_traits::{Block, Recovered};
+use reth_primitives_traits::Recovered;
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -328,8 +328,13 @@ mod traits;
 pub mod test_utils;
 
 /// Type alias for default ethereum transaction pool
-pub type EthTransactionPool<Client, S, T = EthPooledTransaction> = Pool<
-    TransactionValidationTaskExecutor<EthTransactionValidator<Client, T>>,
+pub type EthTransactionPool<
+    Client,
+    S,
+    T = EthPooledTransaction,
+    B = reth_ethereum_primitives::Block,
+> = Pool<
+    TransactionValidationTaskExecutor<EthTransactionValidator<Client, T, B>>,
     CoinbaseTipOrdering<T>,
     S,
 >;
@@ -354,14 +359,19 @@ where
         Self { pool: Arc::new(PoolInner::new(validator, ordering, blob_store, config)) }
     }
 
-    /// Returns the wrapped pool.
-    pub(crate) fn inner(&self) -> &PoolInner<V, T, S> {
+    /// Returns the wrapped pool internals.
+    pub fn inner(&self) -> &PoolInner<V, T, S> {
         &self.pool
     }
 
     /// Get the config the pool was configured with.
     pub fn config(&self) -> &PoolConfig {
         self.inner().config()
+    }
+
+    /// Get the validator reference.
+    pub fn validator(&self) -> &V {
+        self.inner().validator()
     }
 
     /// Validates the given transaction
@@ -382,23 +392,6 @@ where
         transactions: impl IntoIterator<Item = V::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<V::Transaction>> {
         self.pool.validator().validate_transactions_with_origin(origin, transactions).await
-    }
-
-    /// Validates all transactions with their individual origins.
-    ///
-    /// This returns the validated transactions in the same order as input.
-    async fn validate_all_with_origins(
-        &self,
-        transactions: Vec<(TransactionOrigin, V::Transaction)>,
-    ) -> Vec<(TransactionOrigin, TransactionValidationOutcome<V::Transaction>)> {
-        if transactions.len() == 1 {
-            let (origin, tx) = transactions.into_iter().next().unwrap();
-            let res = self.pool.validator().validate_transaction(origin, tx).await;
-            return vec![(origin, res)]
-        }
-        let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
-        let tx_outcomes = self.pool.validator().validate_transactions(transactions).await;
-        origins.into_iter().zip(tx_outcomes).collect()
     }
 
     /// Number of transactions in the entire pool
@@ -516,18 +509,6 @@ where
         self.pool.add_transactions(origin, validated.into_iter())
     }
 
-    async fn add_transactions_with_origins(
-        &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
-        if transactions.is_empty() {
-            return Vec::new()
-        }
-        let validated = self.validate_all_with_origins(transactions).await;
-
-        self.pool.add_transactions_with_origins(validated)
-    }
-
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
         self.pool.add_transaction_event_listener(tx_hash)
     }
@@ -556,7 +537,7 @@ where
     }
 
     fn pooled_transaction_hashes_max(&self, max: usize) -> Vec<TxHash> {
-        self.pooled_transaction_hashes().into_iter().take(max).collect()
+        self.pool.pooled_transactions_hashes_max(max)
     }
 
     fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
@@ -576,6 +557,15 @@ where
         limit: GetPooledTransactionLimit,
     ) -> Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled> {
         self.pool.get_pooled_transaction_elements(tx_hashes, limit)
+    }
+
+    fn append_pooled_transaction_elements(
+        &self,
+        tx_hashes: &[TxHash],
+        limit: GetPooledTransactionLimit,
+        out: &mut Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>,
+    ) {
+        self.pool.append_pooled_transaction_elements(tx_hashes, limit, out)
     }
 
     fn get_pooled_transaction_element(
@@ -775,6 +765,13 @@ where
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
         self.pool.blob_store().get_by_versioned_hashes_v2(versioned_hashes)
     }
+
+    fn get_blobs_for_versioned_hashes_v3(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+        self.pool.blob_store().get_by_versioned_hashes_v3(versioned_hashes)
+    }
 }
 
 impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
@@ -784,16 +781,15 @@ where
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     S: BlobStore,
 {
+    type Block = V::Block;
+
     #[instrument(skip(self), target = "txpool")]
     fn set_block_info(&self, info: BlockInfo) {
         trace!(target: "txpool", "updating pool block info");
         self.pool.set_block_info(info)
     }
 
-    fn on_canonical_state_change<B>(&self, update: CanonicalStateUpdate<'_, B>)
-    where
-        B: Block,
-    {
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_, Self::Block>) {
         self.pool.on_canonical_state_change(update);
     }
 

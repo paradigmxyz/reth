@@ -1,10 +1,10 @@
 //! Configured sparse trie enum for switching between serial and parallel implementations.
 
 use alloy_primitives::B256;
-use reth_trie::{Nibbles, TrieNode};
+use reth_trie::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 use reth_trie_sparse::{
     errors::SparseTrieResult, provider::TrieNodeProvider, LeafLookup, LeafLookupError,
-    RevealedSparseNode, SerialSparseTrie, SparseTrieInterface, SparseTrieUpdates, TrieMasks,
+    SerialSparseTrie, SparseTrieInterface, SparseTrieUpdates,
 };
 use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::borrow::Cow;
@@ -44,7 +44,7 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
     fn with_root(
         self,
         root: TrieNode,
-        masks: TrieMasks,
+        masks: Option<BranchNodeMasks>,
         retain_updates: bool,
     ) -> SparseTrieResult<Self> {
         match self {
@@ -75,7 +75,7 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
         &mut self,
         path: Nibbles,
         node: TrieNode,
-        masks: TrieMasks,
+        masks: Option<BranchNodeMasks>,
     ) -> SparseTrieResult<()> {
         match self {
             Self::Serial(trie) => trie.reveal_node(path, node, masks),
@@ -83,7 +83,7 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
         }
     }
 
-    fn reveal_nodes(&mut self, nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()> {
+    fn reveal_nodes(&mut self, nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()> {
         match self {
             Self::Serial(trie) => trie.reveal_nodes(nodes),
             Self::Parallel(trie) => trie.reveal_nodes(nodes),
