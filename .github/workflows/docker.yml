@@ -50,6 +50,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Get git info for vergen
+        id: git
+        run: |
+          echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "describe=$(git describe --always --tags)" >> "$GITHUB_OUTPUT"
+          echo "dirty=false" >> "$GITHUB_OUTPUT"
+
       - name: Determine build parameters
         id: params
         run: |
@@ -82,6 +89,10 @@ jobs:
 
       - name: Build and push images
         uses: depot/bake-action@v1
+        env:
+          VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
+          VERGEN_GIT_DESCRIBE: ${{ steps.git.outputs.describe }}
+          VERGEN_GIT_DIRTY: ${{ steps.git.outputs.dirty }}
         with:
           project: ${{ vars.DEPOT_PROJECT_ID }}
           files: docker-bake.hcl

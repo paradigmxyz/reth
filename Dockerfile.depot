@@ -44,6 +44,14 @@ ENV RUSTFLAGS="$RUSTFLAGS"
 ARG FEATURES=""
 ENV FEATURES=$FEATURES
 
+# Git info for vergen (since .git is excluded from Docker context)
+ARG VERGEN_GIT_SHA=""
+ARG VERGEN_GIT_DESCRIBE=""
+ARG VERGEN_GIT_DIRTY="false"
+ENV VERGEN_GIT_SHA=$VERGEN_GIT_SHA
+ENV VERGEN_GIT_DESCRIBE=$VERGEN_GIT_DESCRIBE
+ENV VERGEN_GIT_DIRTY=$VERGEN_GIT_DIRTY
+
 # Build dependencies with cache mounts
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
