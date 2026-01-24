@@ -1386,33 +1386,6 @@ where
 
         Ok(Some(root_hash))
     }
-
-    /// Computes the storage root hash directly without building proof nodes.
-    ///
-    /// This is more efficient than calling `storage_proof` followed by `compute_root_hash`
-    /// when only the root hash is needed, as it avoids constructing and retaining proof nodes.
-    #[instrument(target = TRACE_TARGET, level = "trace", skip(self))]
-    pub fn storage_root(&mut self, hashed_address: B256) -> Result<B256, StateProofError> {
-        // Initialize the variables which track the state of the two cursors. Both indicated the
-        // cursors are unseeked.
-        let mut trie_cursor_state = TrieCursorState::unseeked();
-        let mut hashed_cursor_current: Option<(Nibbles, StorageDeferredValueEncoder)> = None;
-        let mut storage_value_encoder = StorageValueEncoder;
-        let sub_trie_targets =
-            SubTrieTargets { prefix: Nibbles::default(), targets: &[], retain_root: true };
-
-        self.proof_subtrie(
-            &mut storage_value_encoder,
-            &mut trie_cursor_state,
-            &mut hashed_cursor_current,
-            sub_trie_targets,
-        )?;
-
-        let proofs = core::mem::take(&mut self.retained_proofs);
-        debug_assert_eq!(proofs.len(), 1);
-
-        self.compute_root_hash(&proofs).map(|hash| hash.expect("root node is definitely retained"))
-    }
 }
 
 /// Helper type wrapping a slice of [`Target`]s, primarily used to iterate through targets in
