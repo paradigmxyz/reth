@@ -96,7 +96,23 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             self.spawn_with_state_at_block(block, move |this, mut db| {
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
+
+                // Track previous block number for validation
+                let mut prev_block_number = parent.number();
+
                 for block in block_state_calls {
+                    // Validate block number ordering if overridden
+                    if let Some(number) = block.block_overrides.as_ref().and_then(|o| o.number) {
+                        let number: u64 = number.try_into().unwrap_or(u64::MAX);
+                        if number <= prev_block_number {
+                            return Err(EthApiError::other(EthSimulateError::BlockNumberInvalid {
+                                got: number,
+                                parent: prev_block_number,
+                            })
+                            .into());
+                        }
+                    }
+
                     let mut evm_env = this
                         .evm_config()
                         .next_evm_env(&parent, &this.next_env_attributes(&parent)?)
@@ -200,6 +216,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     };
 
                     parent = result.block.clone_sealed_header();
+
+                    // Update tracking for next iteration's validation
+                    prev_block_number = parent.number();
 
                     let block = simulate::build_simulated_block::<Self::Error, _>(
                         result.block,
