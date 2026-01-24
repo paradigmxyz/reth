@@ -41,7 +41,7 @@ pub fn maybe_generate_tests(
             roundtrips.push(quote! {
                 {
                     let mut buf = vec![];
-                    let len = field.clone().to_compact(&mut buf);
+                    let len = field.to_compact(&mut buf);
                     let (decoded, _): (super::#type_ident, _) = Compact::from_compact(&buf, len);
                     assert_eq!(field, decoded, "maybe_generate_tests::compact");
                 }
