@@ -3260,7 +3260,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         let highest_static_file_block = self
             .static_file_provider()
             .get_highest_static_file_block(StaticFileSegment::Headers)
-            .expect("todo: error handling, headers should exist");
+            .ok_or(ProviderError::MissingHighestStaticFileBlock(StaticFileSegment::Headers))?;
 
         // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
         // we remove only what is ABOVE the block.
