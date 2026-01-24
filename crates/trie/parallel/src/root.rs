@@ -17,6 +17,7 @@ use reth_trie::{
     HashBuilder, Nibbles, StorageRoot, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use std::{
+    cmp::Reverse,
     collections::HashMap,
     sync::{mpsc, OnceLock},
     time::Duration,
@@ -100,8 +101,11 @@ where
         // Get runtime handle once outside the loop
         let handle = get_runtime_handle();
 
-        for (hashed_address, prefix_set) in
-            storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
+        // Sort by prefix_set size descending to schedule largest storage changes first,
+        // improving parallel work distribution. Tie-break by address for determinism.
+        for (hashed_address, prefix_set) in storage_root_targets
+            .into_iter()
+            .sorted_unstable_by_key(|(address, ps)| (Reverse(ps.len()), *address))
         {
             let factory = self.factory.clone();
             #[cfg(feature = "metrics")]
