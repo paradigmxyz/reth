@@ -1,9 +1,10 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ExecutedBlock, ExecutionTimingStats};
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
+use reth_evm::metrics::{is_slow_block, is_slow_block_logging_enabled};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
@@ -16,7 +17,7 @@ use std::{
     time::Instant,
 };
 use thiserror::Error;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
@@ -146,6 +147,13 @@ where
         let block_count = blocks.len();
         debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
 
+        // Extract timing stats before consuming blocks (for slow block logging after commit)
+        let timing_stats_list: Vec<ExecutionTimingStats> = if is_slow_block_logging_enabled() {
+            blocks.iter().filter_map(|b| b.timing_stats().cloned()).collect()
+        } else {
+            Vec::new()
+        };
+
         let start_time = Instant::now();
 
         if last_block.is_some() {
@@ -155,12 +163,82 @@ where
             provider_rw.commit()?;
         }
 
+        let commit_duration = start_time.elapsed();
+        let commit_ms = commit_duration.as_secs_f64() * 1000.0;
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         self.metrics.save_blocks_block_count.record(block_count as f64);
-        self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
+        self.metrics.save_blocks_duration_seconds.record(commit_duration);
+
+        // Emit unified slow block logs after commit completes
+        for stats in timing_stats_list {
+            let total_ms =
+                stats.execution_ms + stats.state_read_ms + stats.state_hash_ms + commit_ms;
+
+            // Check if total time exceeds threshold
+            if is_slow_block(total_ms) {
+                self.log_slow_block(&stats, commit_ms, total_ms);
+            }
+        }
 
         Ok(last_block)
+    }
+
+    /// Logs slow block execution in JSON format for cross-client performance analysis.
+    ///
+    /// This method outputs a standardized log entry when block execution
+    /// exceeds the slow block threshold, including all timing phases.
+    fn log_slow_block(&self, stats: &ExecutionTimingStats, commit_ms: f64, total_ms: f64) {
+        use reth_evm::metrics::calculate_hit_rate;
+
+        let mgas_per_sec = if stats.execution_ms > 0.0 {
+            (stats.gas_used as f64 / 1_000_000.0) / (stats.execution_ms / 1000.0)
+        } else {
+            0.0
+        };
+
+        // Calculate cache hit rates
+        let account_hit_rate =
+            calculate_hit_rate(stats.account_cache_hits, stats.account_cache_misses);
+        let storage_hit_rate =
+            calculate_hit_rate(stats.storage_cache_hits, stats.storage_cache_misses);
+        let code_hit_rate = calculate_hit_rate(stats.code_cache_hits, stats.code_cache_misses);
+
+        warn!(
+            target: "reth::slow_block",
+            message = "Slow block",
+            block.number = stats.block_number,
+            block.hash = stats.block_hash,
+            block.gas_used = stats.gas_used,
+            block.tx_count = stats.tx_count,
+            timing.execution_ms = format!("{:.3}", stats.execution_ms),
+            timing.state_read_ms = format!("{:.3}", stats.state_read_ms),
+            timing.state_hash_ms = format!("{:.3}", stats.state_hash_ms),
+            timing.commit_ms = format!("{:.3}", commit_ms),
+            timing.total_ms = format!("{:.3}", total_ms),
+            throughput.mgas_per_sec = format!("{:.2}", mgas_per_sec),
+            state_reads.accounts = stats.accounts_read,
+            state_reads.storage_slots = stats.storage_read,
+            state_reads.code = stats.code_read,
+            state_reads.code_bytes = stats.code_bytes_read,
+            state_writes.accounts = stats.accounts_changed,
+            state_writes.accounts_deleted = stats.accounts_deleted,
+            state_writes.storage_slots = stats.storage_slots_changed,
+            state_writes.storage_slots_deleted = stats.storage_slots_deleted,
+            state_writes.code = stats.bytecodes_changed,
+            state_writes.code_bytes = stats.code_bytes_written,
+            state_writes.eip7702_delegations_set = stats.eip7702_delegations_set,
+            state_writes.eip7702_delegations_cleared = stats.eip7702_delegations_cleared,
+            cache.account.hits = stats.account_cache_hits,
+            cache.account.misses = stats.account_cache_misses,
+            cache.account.hit_rate = format!("{:.2}", account_hit_rate),
+            cache.storage.hits = stats.storage_cache_hits,
+            cache.storage.misses = stats.storage_cache_misses,
+            cache.storage.hit_rate = format!("{:.2}", storage_hit_rate),
+            cache.code.hits = stats.code_cache_hits,
+            cache.code.misses = stats.code_cache_misses,
+            cache.code.hit_rate = format!("{:.2}", code_hit_rate),
+        );
     }
 }
 

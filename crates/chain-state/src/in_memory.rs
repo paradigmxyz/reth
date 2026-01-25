@@ -2,7 +2,8 @@
 
 use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainInfoTracker, ComputedTrieData, DeferredTrieData, MemoryOverlayStateProvider,
+    ChainInfoTracker, ComputedTrieData, DeferredTrieData, ExecutionTimingStats,
+    MemoryOverlayStateProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
@@ -328,7 +329,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         {
             if self.inner.in_memory_state.blocks.read().get(&persisted_num_hash.hash).is_none() {
                 // do nothing
-                return
+                return;
             }
         }
 
@@ -567,7 +568,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             if let Some(tx) =
                 block_state.block_ref().recovered_block().body().transaction_by_hash(&hash)
             {
-                return Some(tx.clone())
+                return Some(tx.clone());
             }
         }
         None
@@ -760,6 +761,12 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// This allows deferring the computation of the trie data which can be expensive.
     /// The data can be populated asynchronously after the block was validated.
     pub trie_data: DeferredTrieData,
+    /// Optional timing statistics for slow block logging.
+    ///
+    /// When slow block logging is enabled, these statistics are populated during
+    /// block validation and used by the persistence service to emit a unified log
+    /// after database commit.
+    pub timing_stats: Option<ExecutionTimingStats>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -776,6 +783,7 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
                 state: Default::default(),
             }),
             trie_data: DeferredTrieData::ready(ComputedTrieData::default()),
+            timing_stats: None,
         }
     }
 }
@@ -783,8 +791,8 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
 impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
     fn eq(&self, other: &Self) -> bool {
         // Trie data is computed asynchronously and doesn't define block identity.
-        self.recovered_block == other.recovered_block &&
-            self.execution_output == other.execution_output
+        self.recovered_block == other.recovered_block
+            && self.execution_output == other.execution_output
     }
 }
 
@@ -798,7 +806,12 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: ComputedTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data: DeferredTrieData::ready(trie_data) }
+        Self {
+            recovered_block,
+            execution_output,
+            trie_data: DeferredTrieData::ready(trie_data),
+            timing_stats: None,
+        }
     }
 
     /// Create a new [`ExecutedBlock`] with deferred trie data.
@@ -820,7 +833,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: DeferredTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data }
+        Self { recovered_block, execution_output, trie_data, timing_stats: None }
     }
 
     /// Returns a reference to an inner [`SealedBlock`]
@@ -876,6 +889,20 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     #[inline]
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
         self.trie_data().trie_updates
+    }
+
+    /// Sets the timing statistics for slow block logging.
+    ///
+    /// This should be called after block validation to attach timing statistics
+    /// that will be used by persistence to emit a unified slow block log.
+    pub fn with_timing_stats(mut self, timing_stats: ExecutionTimingStats) -> Self {
+        self.timing_stats = Some(timing_stats);
+        self
+    }
+
+    /// Returns a reference to the timing statistics, if set.
+    pub fn timing_stats(&self) -> Option<&ExecutionTimingStats> {
+        self.timing_stats.as_ref()
     }
 
     /// Returns the trie input anchored to the persisted ancestor.
