@@ -20,8 +20,8 @@ use alloy_rpc_types_eth::{
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
-    env::BlockEnvironment, ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor, InspectorFor,
-    TransactionEnv, TxEnvFor,
+    env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor,
+    InspectorFor, TransactionEnv, TxEnvFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -130,8 +130,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             evm_env.block_env.inner_mut(),
                         );
                     }
-                    if let Some(state_overrides) = state_overrides {
-                        apply_state_overrides(state_overrides, &mut db)
+                    if let Some(ref state_overrides) = state_overrides {
+                        apply_state_overrides(state_overrides.clone(), &mut db)
                             .map_err(Self::Error::from_eth_err)?;
                     }
 
@@ -177,7 +177,16 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         let evm = this
                             .evm_config()
                             .evm_with_env_and_inspector(&mut db, evm_env, inspector);
-                        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+                        let mut builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+
+                        if let Some(ref state_overrides) = state_overrides {
+                            simulate::apply_precompile_overrides(
+                                state_overrides,
+                                builder.evm_mut().precompiles_mut(),
+                            )
+                            .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
+                        }
+
                         simulate::execute_transactions(
                             builder,
                             calls,
@@ -188,7 +197,16 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .map_err(map_err)?
                     } else {
                         let evm = this.evm_config().evm_with_env(&mut db, evm_env);
-                        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+                        let mut builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+
+                        if let Some(ref state_overrides) = state_overrides {
+                            simulate::apply_precompile_overrides(
+                                state_overrides,
+                                builder.evm_mut().precompiles_mut(),
+                            )
+                            .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
+                        }
+
                         simulate::execute_transactions(
                             builder,
                             calls,
