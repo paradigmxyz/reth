@@ -19,6 +19,14 @@ pub trait RocksDBProviderFactory {
     #[cfg(all(unix, feature = "rocksdb"))]
     fn set_pending_rocksdb_batch(&self, batch: rocksdb::WriteBatchWithTransaction<true>);
 
+    /// Takes all pending `RocksDB` batches and commits them.
+    ///
+    /// This drains the pending batches from the lock and commits each one using the `RocksDB`
+    /// provider. Can be called before flush to persist `RocksDB` writes independently of the
+    /// full commit path.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()>;
+
     /// Executes a closure with a `RocksDB` transaction for reading.
     ///
     /// This helper encapsulates all the cfg-gated `RocksDB` transaction handling for reads.
@@ -154,6 +162,10 @@ mod tests {
         }
 
         fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {}
+
+        fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
+            Ok(())
+        }
     }
 
     #[test]

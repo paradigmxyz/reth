@@ -262,6 +262,10 @@ export const rethCliSidebar: SidebarItem = {
                 {
                     text: "reth p2p bootnode",
                     link: "/cli/reth/p2p/bootnode"
+                },
+                {
+                    text: "reth p2p enode",
+                    link: "/cli/reth/p2p/enode"
                 }
             ]
         },

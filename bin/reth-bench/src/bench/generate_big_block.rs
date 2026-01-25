@@ -3,7 +3,9 @@
 //! This command fetches transactions from existing blocks and packs them into a single
 //! large block using the `testing_buildBlockV1` RPC endpoint.
 
-use crate::authenticated_transport::AuthenticatedTransportConnect;
+use crate::{
+    authenticated_transport::AuthenticatedTransportConnect, bench::helpers::parse_gas_limit,
+};
 use alloy_eips::{BlockNumberOrTag, Typed2718};
 use alloy_primitives::{Bytes, B256};
 use alloy_provider::{ext::EngineApi, network::AnyNetwork, Provider, RootProvider};
@@ -202,13 +204,26 @@ pub struct Command {
     jwt_secret: std::path::PathBuf,
 
     /// Target gas to pack into the block.
-    #[arg(long, value_name = "TARGET_GAS", default_value = "30000000")]
+    /// Accepts short notation: K for thousand, M for million, G for billion (e.g., 1G = 1
+    /// billion).
+    #[arg(long, value_name = "TARGET_GAS", default_value = "30000000", value_parser = parse_gas_limit)]
     target_gas: u64,
 
-    /// Starting block number to fetch transactions from.
-    /// If not specified, starts from the engine's latest block.
+    /// Block number to start fetching transactions from (required).
+    ///
+    /// This must be the last canonical block BEFORE any gas limit ramping was performed.
+    /// The command collects transactions from historical blocks starting at this number
+    /// to pack into large blocks.
+    ///
+    /// How to determine this value:
+    /// - If starting from a fresh node (no gas limit ramp yet): use the current chain tip
+    /// - If gas limit ramping has already been performed: use the block number that was the chain
+    ///   tip BEFORE ramping began (you must track this yourself)
+    ///
+    /// Using a block after ramping started will cause transaction collection to fail
+    /// because those blocks contain synthetic transactions that cannot be replayed.
     #[arg(long, value_name = "FROM_BLOCK")]
-    from_block: Option<u64>,
+    from_block: u64,
 
     /// Execute the payload (call newPayload + forkchoiceUpdated).
     /// If false, only builds the payload and prints it.
@@ -284,7 +299,7 @@ impl Command {
             format!("Failed to create output directory: {:?}", self.output_dir)
         })?;
 
-        let start_block = self.from_block.unwrap_or(parent_number);
+        let start_block = self.from_block;
 
         // Use pipelined execution when generating multiple payloads
         if self.count > 1 {

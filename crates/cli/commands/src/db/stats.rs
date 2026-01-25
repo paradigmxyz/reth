@@ -205,6 +205,16 @@ impl Command {
                 .add_cell(Cell::new(human_bytes(total_size as f64)))
                 .add_cell(Cell::new(human_bytes(total_pending as f64)));
             table.add_row(row);
+
+            let wal_size = tool.provider_factory.rocksdb_provider().wal_size_bytes();
+            let mut row = Row::new();
+            row.add_cell(Cell::new("WAL"))
+                .add_cell(Cell::new(""))
+                .add_cell(Cell::new(""))
+                .add_cell(Cell::new(""))
+                .add_cell(Cell::new(human_bytes(wal_size as f64)))
+                .add_cell(Cell::new(""));
+            table.add_row(row);
         }
 
         table
