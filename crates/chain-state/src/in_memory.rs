@@ -901,7 +901,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     }
 
     /// Returns a reference to the timing statistics, if set.
-    pub fn timing_stats(&self) -> Option<&ExecutionTimingStats> {
+    pub const fn timing_stats(&self) -> Option<&ExecutionTimingStats> {
         self.timing_stats.as_ref()
     }
 
