@@ -97,8 +97,8 @@ impl fmt::Debug for RocksDBWriteCtx {
 /// Default cache size for `RocksDB` block cache (128 MB).
 const DEFAULT_CACHE_SIZE: usize = 128 << 20;
 
-/// Default block size for `RocksDB` tables (16 KB).
-const DEFAULT_BLOCK_SIZE: usize = 16 * 1024;
+/// Default block size for `RocksDB` tables (4 KB).
+const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
 
 /// Default max background jobs for `RocksDB` compaction and flushing.
 const DEFAULT_MAX_BACKGROUND_JOBS: i32 = 6;
