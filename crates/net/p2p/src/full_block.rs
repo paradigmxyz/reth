@@ -751,10 +751,11 @@ mod tests {
     use reth_ethereum_primitives::BlockBody;
 
     use super::*;
-    use crate::error::RequestError;
-    use crate::test_utils::TestFullBlockClient;
-    use std::ops::Range;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use crate::{error::RequestError, test_utils::TestFullBlockClient};
+    use std::{
+        ops::Range,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
     use tokio::time::{timeout, Duration};
 
     #[tokio::test]
@@ -909,12 +910,10 @@ mod tests {
         let body_requests = Arc::clone(&client.body_requests);
         let client = FullBlockClient::test_client(client);
 
-        let received = timeout(
-            Duration::from_secs(1),
-            client.get_full_block_range(header.hash(), 3),
-        )
-        .await
-        .expect("body request retry should complete");
+        let received =
+            timeout(Duration::from_secs(1), client.get_full_block_range(header.hash(), 3))
+                .await
+                .expect("body request retry should complete");
 
         assert_eq!(received.len(), 3);
         assert_eq!(body_requests.load(Ordering::SeqCst), 3);
