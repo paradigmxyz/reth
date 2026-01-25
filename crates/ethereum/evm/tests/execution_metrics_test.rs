@@ -18,8 +18,10 @@ use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET}
 use reth_ethereum_primitives::{Block, BlockBody, Transaction, TransactionSigned};
 use reth_evm::execute::{BasicBlockExecutor, Executor};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::crypto::secp256k1::{public_key_to_address, sign_message};
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{
+    crypto::secp256k1::{public_key_to_address, sign_message},
+    Block as _,
+};
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
 use revm::{
     database::{CacheDB, EmptyDB},
@@ -1108,8 +1110,8 @@ fn test_eip7702_delegation_cleared_via_execution() {
     // After clearing, the account should have no code (KECCAK_EMPTY)
     // Note: In EIP-7702, delegating to Address::ZERO removes the delegation
     assert!(
-        delegator_info.code.is_none()
-            || delegator_info.code.as_ref().map(|c| c.is_empty()).unwrap_or(true),
+        delegator_info.code.is_none() ||
+            delegator_info.code.as_ref().map(|c| c.is_empty()).unwrap_or(true),
         "Delegator should have no code after clearing delegation"
     );
 }
