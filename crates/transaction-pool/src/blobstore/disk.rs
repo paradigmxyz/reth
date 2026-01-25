@@ -150,6 +150,7 @@ impl BlobStore for DiskFileBlobStore {
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {
         if self.inner.contains(tx)? {
             self.inner.txs_to_delete.write().insert(tx);
+            self.inner.blob_cache.lock().remove(&tx);
         }
         Ok(())
     }
@@ -159,6 +160,12 @@ impl BlobStore for DiskFileBlobStore {
             return Ok(())
         }
         let txs = self.inner.retain_existing(txs)?;
+        {
+            let mut cache = self.inner.blob_cache.lock();
+            for tx in &txs {
+                cache.remove(tx);
+            }
+        }
         self.inner.txs_to_delete.write().extend(txs);
         Ok(())
     }
@@ -189,10 +196,16 @@ impl BlobStore for DiskFileBlobStore {
     }
 
     fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
+        if self.inner.txs_to_delete.read().contains(&tx) {
+            return Ok(None)
+        }
         self.inner.get_one(tx)
     }
 
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError> {
+        if self.inner.txs_to_delete.read().contains(&tx) {
+            return Ok(false)
+        }
         self.inner.contains(tx)
     }
 
@@ -203,7 +216,11 @@ impl BlobStore for DiskFileBlobStore {
         if txs.is_empty() {
             return Ok(Vec::new())
         }
-        self.inner.get_all(txs)
+        let pending_deletes = self.inner.txs_to_delete.read();
+        let filtered: Vec<B256> =
+            txs.into_iter().filter(|tx| !pending_deletes.contains(tx)).collect();
+        drop(pending_deletes);
+        self.inner.get_all(filtered)
     }
 
     fn get_exact(
@@ -213,7 +230,11 @@ impl BlobStore for DiskFileBlobStore {
         if txs.is_empty() {
             return Ok(Vec::new())
         }
-        self.inner.get_exact(txs)
+        let pending_deletes = self.inner.txs_to_delete.read();
+        let filtered: Vec<B256> =
+            txs.into_iter().filter(|tx| !pending_deletes.contains(tx)).collect();
+        drop(pending_deletes);
+        self.inner.get_exact(filtered)
     }
 
     fn get_by_versioned_hashes_v1(
@@ -791,17 +812,13 @@ mod tests {
 
         store.delete(tx).unwrap();
         assert!(store.inner.txs_to_delete.read().contains(&tx));
+        assert!(!store.is_cached(&tx));
+        assert!(store.get(tx).unwrap().is_none());
+
         store.cleanup();
 
-        let result = store.get(tx).unwrap();
-        assert_eq!(
-            result,
-            Some(Arc::new(BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar {
-                blobs: vec![],
-                commitments: vec![],
-                proofs: vec![]
-            })))
-        );
+        assert!(store.get(tx).unwrap().is_none());
+        assert!(!store.contains(tx).unwrap());
     }
 
     #[test]
@@ -817,18 +834,17 @@ mod tests {
         }
 
         store.delete_all(txs.clone()).unwrap();
+
+        for tx in &txs {
+            assert!(!store.is_cached(tx));
+            assert!(store.get(*tx).unwrap().is_none());
+        }
+
         store.cleanup();
 
         for tx in txs {
-            let result = store.get(tx).unwrap();
-            assert_eq!(
-                result,
-                Some(Arc::new(BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar {
-                    blobs: vec![],
-                    commitments: vec![],
-                    proofs: vec![]
-                })))
-            );
+            assert!(store.get(tx).unwrap().is_none());
+            assert!(!store.contains(tx).unwrap());
         }
     }
 
@@ -928,5 +944,53 @@ mod tests {
 
         let v3 = store.get_by_versioned_hashes_v3(&[versioned_hash]).unwrap();
         assert_eq!(v3, vec![Some(expected)]);
+    }
+
+    #[test]
+    fn disk_deleted_blob_not_readable_before_cleanup() {
+        let (store, _dir) = tmp_store();
+
+        let (tx, blob) = rng_blobs(1).into_iter().next().unwrap();
+        store.insert(tx, blob).unwrap();
+        assert!(store.contains(tx).unwrap());
+
+        store.delete(tx).unwrap();
+
+        assert!(!store.contains(tx).unwrap());
+        assert!(store.get(tx).unwrap().is_none());
+        assert!(store.get_all(vec![tx]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn disk_delete_evicts_from_cache() {
+        let (store, _dir) = tmp_store();
+
+        let (tx, blob) = rng_blobs(1).into_iter().next().unwrap();
+        store.insert(tx, blob).unwrap();
+        assert!(store.is_cached(&tx));
+
+        store.delete(tx).unwrap();
+
+        assert!(!store.is_cached(&tx));
+    }
+
+    #[test]
+    fn disk_delete_all_evicts_from_cache() {
+        let (store, _dir) = tmp_store();
+
+        let blobs = rng_blobs(3);
+        let all_hashes: Vec<B256> = blobs.iter().map(|(tx, _)| *tx).collect();
+        store.insert_all(blobs).unwrap();
+
+        for tx in &all_hashes {
+            assert!(store.is_cached(tx));
+        }
+
+        store.delete_all(all_hashes.clone()).unwrap();
+
+        for tx in &all_hashes {
+            assert!(!store.is_cached(tx));
+            assert!(!store.contains(*tx).unwrap());
+        }
     }
 }
