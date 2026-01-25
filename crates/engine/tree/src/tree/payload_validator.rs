@@ -767,8 +767,22 @@ where
         )?;
         drop(receipt_tx);
 
+        // Finish execution and get the result
+        let post_exec_start = Instant::now();
+        let (_evm, result) = debug_span!(target: "engine::tree", "finish")
+            .in_scope(|| executor.finish())
+            .map(|(evm, result)| (evm.into_db(), result))?;
+        self.metrics.record_post_execution(post_exec_start.elapsed());
+
+        // Merge transitions into bundle state
+        debug_span!(target: "engine::tree", "merge transitions")
+            .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
+
+        let output = BlockExecutionOutput { result, state: db.take_bundle() };
+
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
+        self.metrics.record_block_execution(&output, execution_time);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_time, "Executed block");
 
         // Log slow block for cross-client performance analysis

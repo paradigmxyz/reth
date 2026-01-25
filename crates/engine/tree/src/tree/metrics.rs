@@ -1,9 +1,5 @@
-use crate::tree::{error::InsertBlockFatalError, MeteredStateHook, TreeOutcome};
-use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef};
-use alloy_evm::{
-    block::{BlockExecutor, ExecutableTx},
-    Evm,
-};
+use crate::tree::{error::InsertBlockFatalError, TreeOutcome};
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
 use reth_engine_primitives::{ForkchoiceStatus, OnForkChoiceUpdated};
 use reth_errors::ProviderError;
@@ -71,6 +67,7 @@ impl EngineApiMetrics {
         self.executor.storage_slots_updated_histogram.record(storage_slots as f64);
         self.executor.bytecodes_updated_histogram.record(bytecodes as f64);
         self.executor.code_bytes_read.set(code_bytes as f64);
+    }
 
     /// Returns a reference to the executor metrics for use in state hooks.
     pub(crate) const fn executor_metrics(&self) -> &ExecutorMetrics {

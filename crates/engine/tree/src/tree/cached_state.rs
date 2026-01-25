@@ -18,7 +18,6 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use revm_primitives::map::DefaultHashBuilder;
 use revm_primitives::eip7907::MAX_CODE_SIZE;
 use std::{
     sync::{
@@ -204,6 +203,9 @@ pub(crate) struct CachedStateMetrics {
     /// Account cache misses
     account_cache_misses: Gauge,
 
+    /// Account cache size (number of entries)
+    account_cache_size: Gauge,
+
     /// Account cache capacity (maximum entries)
     account_cache_capacity: Gauge,
 
@@ -252,6 +254,20 @@ impl CachedStateMetrics {
     pub(crate) fn record_cache_creation(&self, duration: Duration) {
         self.execution_cache_created_total.increment(1);
         self.execution_cache_creation_duration_seconds.record(duration.as_secs_f64());
+    }
+
+    /// Returns cache statistics as a tuple for slow block logging.
+    ///
+    /// Returns (account_hits, account_misses, storage_hits, storage_misses, code_hits, code_misses).
+    pub(crate) fn get_cache_stats(&self) -> (u64, u64, u64, u64, u64, u64) {
+        (
+            self.readable_stats.account_hits.load(Ordering::Relaxed),
+            self.readable_stats.account_misses.load(Ordering::Relaxed),
+            self.readable_stats.storage_hits.load(Ordering::Relaxed),
+            self.readable_stats.storage_misses.load(Ordering::Relaxed),
+            self.readable_stats.code_hits.load(Ordering::Relaxed),
+            self.readable_stats.code_misses.load(Ordering::Relaxed),
+        )
     }
 }
 
@@ -346,15 +362,6 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
 
 impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        if let Some(res) = self.caches.account_cache.get(address) {
-            self.metrics.inc_account_hit();
-            return Ok(res)
-        }
-
-        self.metrics.inc_account_miss();
-
-        let res = self.state_provider.basic_account(address)?;
-
         if self.is_prewarm() {
             match self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
@@ -409,17 +416,6 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
                     // explicitly set to zero. We return `None` in both cases.
                     Ok(Some(value).filter(|v| !v.is_zero()))
                 }
-
-                self.metrics.inc_storage_miss();
-                Ok(final_res)
-            }
-            (SlotStatus::Empty, _) => {
-                self.metrics.inc_storage_hit();
-                Ok(None)
-            }
-            (SlotStatus::Value(value), _) => {
-                self.metrics.inc_storage_hit();
-                Ok(Some(value))
             }
         } else if let Some(value) = self.caches.storage_cache.get(&(account, storage_key)) {
             self.metrics.storage_cache_hits.increment(1);
@@ -433,15 +429,6 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
 
 impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        if let Some(res) = self.caches.code_cache.get(code_hash) {
-            self.metrics.inc_code_hit();
-            return Ok(res)
-        }
-
-        self.metrics.inc_code_miss();
-
-        let final_res = self.state_provider.bytecode_by_hash(code_hash)?;
-
         if self.is_prewarm() {
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)
