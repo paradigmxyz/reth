@@ -791,8 +791,8 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
 impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
     fn eq(&self, other: &Self) -> bool {
         // Trie data is computed asynchronously and doesn't define block identity.
-        self.recovered_block == other.recovered_block
-            && self.execution_output == other.execution_output
+        self.recovered_block == other.recovered_block &&
+            self.execution_output == other.execution_output
     }
 }
 
