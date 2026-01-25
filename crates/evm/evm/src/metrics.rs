@@ -3,15 +3,32 @@ use alloy_consensus::BlockHeader;
 use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Block, RecoveredBlock};
-use std::{cell::Cell, time::Instant};
+use std::{
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    time::Instant,
+};
 use tracing::warn;
 
 /// Default threshold in milliseconds for slow block logging (1 second).
 pub const DEFAULT_SLOW_BLOCK_THRESHOLD_MS: u64 = 1000;
 
-// Thread-local slow block threshold (allows runtime configuration)
-thread_local! {
-    static SLOW_BLOCK_THRESHOLD_MS: Cell<u64> = const { Cell::new(DEFAULT_SLOW_BLOCK_THRESHOLD_MS) };
+/// Global slow block threshold (allows runtime configuration across threads).
+static SLOW_BLOCK_THRESHOLD_MS: AtomicU64 = AtomicU64::new(DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
+
+/// Global flag to enable/disable slow block logging.
+static SLOW_BLOCK_LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// Sets whether slow block logging is enabled.
+///
+/// When enabled, blocks that exceed the threshold will be logged with detailed metrics.
+/// When disabled (default), no slow block logs are emitted regardless of threshold.
+pub fn set_slow_block_logging_enabled(enabled: bool) {
+    SLOW_BLOCK_LOGGING_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+/// Returns true if slow block logging is enabled.
+pub fn is_slow_block_logging_enabled() -> bool {
+    SLOW_BLOCK_LOGGING_ENABLED.load(Ordering::Relaxed)
 }
 
 /// Sets the slow block threshold in milliseconds.
@@ -19,21 +36,23 @@ thread_local! {
 /// Blocks that take longer than this threshold to execute will be logged.
 /// Set to 0 to log all blocks (useful for debugging/profiling).
 pub fn set_slow_block_threshold(threshold_ms: u64) {
-    SLOW_BLOCK_THRESHOLD_MS.with(|t| t.set(threshold_ms));
+    SLOW_BLOCK_THRESHOLD_MS.store(threshold_ms, Ordering::Relaxed);
 }
 
 /// Returns the current slow block threshold in milliseconds.
 pub fn slow_block_threshold() -> u64 {
-    SLOW_BLOCK_THRESHOLD_MS.with(|t| t.get())
+    SLOW_BLOCK_THRESHOLD_MS.load(Ordering::Relaxed)
 }
 
-/// Returns true if the given execution time exceeds the slow block threshold.
+/// Returns true if slow block logging is enabled and the given execution time exceeds the threshold.
 pub fn is_slow_block(execution_ms: f64) -> bool {
-    execution_ms > slow_block_threshold() as f64
+    is_slow_block_logging_enabled() && execution_ms > slow_block_threshold() as f64
 }
 
 /// Calculates the cache hit rate as a percentage (0-100).
-fn calculate_hit_rate(hits: u64, misses: u64) -> f64 {
+///
+/// Returns 0.0 if there's no cache activity (both hits and misses are 0).
+pub fn calculate_hit_rate(hits: u64, misses: u64) -> f64 {
     let total = hits + misses;
     if total > 0 {
         (hits as f64 / total as f64) * 100.0
@@ -91,6 +110,12 @@ pub struct ExecutorMetrics {
     // Code bytes tracking
     /// Total bytes of code read in the latest block.
     pub code_bytes_read: Gauge,
+
+    // Deletion tracking (cross-client metrics)
+    /// Number of accounts deleted (selfdestructed) in the latest block.
+    pub accounts_deleted: Gauge,
+    /// Number of storage slots deleted (set to zero) in the latest block.
+    pub storage_slots_deleted: Gauge,
 
     // Cache statistics
     /// Account cache hits.
@@ -150,7 +175,9 @@ impl ExecutorMetrics {
         code_loaded: usize,
         code_bytes_read: usize,
         accounts_updated: usize,
+        accounts_deleted: usize,
         storage_slots_updated: usize,
+        storage_slots_deleted: usize,
         code_updated: usize,
         code_bytes_written: usize,
         eip7702_delegations_set: usize,
@@ -193,7 +220,9 @@ impl ExecutorMetrics {
                 state_reads.code = code_loaded,
                 state_reads.code_bytes = code_bytes_read,
                 state_writes.accounts = accounts_updated,
+                state_writes.accounts_deleted = accounts_deleted,
                 state_writes.storage_slots = storage_slots_updated,
+                state_writes.storage_slots_deleted = storage_slots_deleted,
                 state_writes.code = code_updated,
                 state_writes.code_bytes = code_bytes_written,
                 state_writes.eip7702_delegations_set = eip7702_delegations_set,
@@ -274,6 +303,9 @@ mod tests {
 
     #[test]
     fn test_slow_block_threshold() {
+        // Enable slow block logging for this test
+        set_slow_block_logging_enabled(true);
+
         // Default is 1000ms (1s)
         assert_eq!(slow_block_threshold(), DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
         assert!(!is_slow_block(500.0));
@@ -287,11 +319,26 @@ mod tests {
 
         // Reset to default
         set_slow_block_threshold(DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
+        set_slow_block_logging_enabled(false);
         assert_eq!(slow_block_threshold(), DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
     }
 
     #[test]
+    fn test_slow_block_logging_disabled_by_default() {
+        // When logging is disabled, is_slow_block should always return false
+        assert!(!is_slow_block_logging_enabled());
+        set_slow_block_threshold(0);
+        assert!(!is_slow_block(1500.0)); // Would be slow, but logging is disabled
+
+        // Reset threshold
+        set_slow_block_threshold(DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
+    }
+
+    #[test]
     fn test_slow_block_threshold_zero() {
+        // Enable slow block logging for this test
+        set_slow_block_logging_enabled(true);
+
         // Setting threshold to 0 should log all blocks (any execution > 0 is slow)
         set_slow_block_threshold(0);
         assert!(is_slow_block(1.0));
@@ -299,6 +346,7 @@ mod tests {
 
         // Reset to default
         set_slow_block_threshold(DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
+        set_slow_block_logging_enabled(false);
     }
 
     #[test]
@@ -308,7 +356,8 @@ mod tests {
         // The actual log output depends on tracing subscriber configuration.
         let metrics = ExecutorMetrics::default();
 
-        // Set threshold to 0 so any execution time triggers logging
+        // Enable slow block logging and set threshold to 0 so any execution time triggers logging
+        set_slow_block_logging_enabled(true);
         set_slow_block_threshold(0);
 
         // Call log_slow_block with sample data
@@ -318,31 +367,34 @@ mod tests {
             "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678", // block_hash
             30_000_000,                                                         // gas_used
             200,                                                                // tx_count
-            1500.0,                                                             // execution_ms (f64)
-            320.0,                                                              // state_read_ms (f64)
-            150.0,                                                              // state_hash_ms (f64)
-            75.0,                                                               // commit_ms (f64)
-            1545.0,                                                             // total_ms (f64)
-            100,                                                                // accounts_loaded
-            500,   // storage_slots_loaded
-            20,    // code_loaded
-            10240, // code_bytes_read
-            50,    // accounts_updated
-            200,   // storage_slots_updated
-            0,     // code_updated
-            0,     // code_bytes_written
-            3,     // eip7702_delegations_set
-            1,     // eip7702_delegations_cleared
-            4,     // account_cache_hits
-            6,     // account_cache_misses
-            0,     // storage_cache_hits
-            11,    // storage_cache_misses
-            4,     // code_cache_hits
-            0,     // code_cache_misses
+            1500.0, // execution_ms (f64)
+            320.0,  // state_read_ms (f64)
+            150.0,  // state_hash_ms (f64)
+            75.0,   // commit_ms (f64)
+            1545.0, // total_ms (f64)
+            100,    // accounts_loaded
+            500,    // storage_slots_loaded
+            20,     // code_loaded
+            10240,  // code_bytes_read
+            50,     // accounts_updated
+            2,      // accounts_deleted
+            200,    // storage_slots_updated
+            15,     // storage_slots_deleted
+            0,      // code_updated
+            0,      // code_bytes_written
+            3,      // eip7702_delegations_set
+            1,      // eip7702_delegations_cleared
+            4,      // account_cache_hits
+            6,      // account_cache_misses
+            0,      // storage_cache_hits
+            11,     // storage_cache_misses
+            4,      // code_cache_hits
+            0,      // code_cache_misses
         );
 
-        // Reset threshold
+        // Reset threshold and logging flag
         set_slow_block_threshold(DEFAULT_SLOW_BLOCK_THRESHOLD_MS);
+        set_slow_block_logging_enabled(false);
 
         // Verify mgas_per_sec calculation: 30_000_000 / 1_000_000 / (1500 / 1000) = 30 / 1.5 = 20.0
         // This is verified in the log output format
