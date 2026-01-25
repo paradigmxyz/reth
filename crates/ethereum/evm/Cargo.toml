@@ -63,6 +63,11 @@ std = [
     "derive_more?/std",
     "alloy-rpc-types-engine/std",
     "reth-storage-errors/std",
+    "reth-revm/std",
+    "revm-bytecode/std",
+    "revm-database/std",
+    "revm-primitives/std",
+    "tracing-subscriber/std",
 ]
 test-utils = [
     "dep:parking_lot",
@@ -71,4 +76,5 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-evm/test-utils",
     "reth-primitives-traits/test-utils",
+    "reth-revm/test-utils",
 ]

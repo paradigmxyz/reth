@@ -44,7 +44,8 @@ pub fn slow_block_threshold() -> u64 {
     SLOW_BLOCK_THRESHOLD_MS.load(Ordering::Relaxed)
 }
 
-/// Returns true if slow block logging is enabled and the given execution time exceeds the threshold.
+/// Returns true if slow block logging is enabled and the given execution time exceeds the
+/// threshold.
 pub fn is_slow_block(execution_ms: f64) -> bool {
     is_slow_block_logging_enabled() && execution_ms > slow_block_threshold() as f64
 }
@@ -367,7 +368,8 @@ mod tests {
             "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678", // block_hash
             30_000_000,                                                         // gas_used
             200,                                                                // tx_count
-            1500.0, // execution_ms (f64)
+            1500.0,                                                             /* execution_ms
+                                                                                 * (f64) */
             320.0,  // state_read_ms (f64)
             150.0,  // state_hash_ms (f64)
             75.0,   // commit_ms (f64)
