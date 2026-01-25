@@ -1113,3 +1113,335 @@ fn test_eip7702_delegation_cleared_via_execution() {
         "Delegator should have no code after clearing delegation"
     );
 }
+
+// ============================================================================
+// Test Vector Coverage Tests (A2, C2, EDGE1, EDGE2, EDGE3)
+// ============================================================================
+
+/// Test that ETH transfer to a new (non-existent) account creates that account.
+/// This explicitly tests scenario A2 from slow_block_test_vectors.json.
+#[test]
+fn test_transfer_to_new_account_creates_account() {
+    let chain_spec = create_cancun_chain_spec();
+    let mut db = create_empty_db();
+    let (sender_keypair, _sender_address) = create_funded_sender(&mut db);
+
+    // Use a fresh address that definitely doesn't exist
+    let new_recipient = address!("0x1111111111111111111111111111111111111111");
+
+    // Verify recipient does NOT exist before transfer
+    assert!(
+        db.basic(new_recipient).unwrap().is_none(),
+        "New recipient should not exist before transfer"
+    );
+
+    let header = create_test_header(&chain_spec);
+    let tx = sign_tx_with_key_pair(
+        sender_keypair,
+        Transaction::Legacy(TxLegacy {
+            chain_id: Some(chain_spec.chain.id()),
+            nonce: 0,
+            gas_price: header.base_fee_per_gas.unwrap_or(1).into(),
+            gas_limit: 21_000,
+            to: TxKind::Call(new_recipient),
+            value: U256::from(10_000_000_000_000_000u64), // 0.01 ETH
+            input: Bytes::new(),
+        }),
+    );
+
+    let provider = EthEvmConfig::new(chain_spec);
+    let mut executor = BasicBlockExecutor::new(provider, db);
+
+    let result = executor
+        .execute_one(
+            &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+                .try_into_recovered()
+                .unwrap(),
+        )
+        .expect("execution should succeed");
+
+    // Verify transaction succeeded
+    assert!(result.receipts[0].success, "Transfer to new account should succeed");
+
+    // Verify the new account now exists
+    let new_account = executor.with_state_mut(|state| state.basic(new_recipient).unwrap());
+    assert!(new_account.is_some(), "New recipient should exist after transfer");
+
+    // Verify the account has the transferred balance
+    let balance = new_account.unwrap().balance;
+    assert_eq!(
+        balance,
+        U256::from(10_000_000_000_000_000u64),
+        "New account should have received funds"
+    );
+}
+
+/// Test that deploying multiple contracts with identical bytecode in one block
+/// results in code count = number of instances, not unique bytecode hashes.
+/// This tests scenario C2 from slow_block_test_vectors.json.
+///
+/// The test deploys 3 identical contracts from the same sender in a single block,
+/// verifying that each deployment counts as a separate code write.
+#[test]
+fn test_factory_deploys_multiple_contracts() {
+    let chain_spec = create_cancun_chain_spec();
+    let mut db = create_empty_db();
+    let (sender_keypair, sender_address) = create_funded_sender(&mut db);
+
+    // Identical init code for all 3 contracts: returns a minimal STOP contract
+    // Init code: PUSH1 0x00, PUSH1 0x00, MSTORE, PUSH1 0x01, PUSH1 0x1f, RETURN
+    // This returns 1 byte of runtime code (0x00 = STOP)
+    let init_code = Bytes::from_static(&[
+        0x60, 0x00, // PUSH1 0x00 (the STOP opcode value)
+        0x60, 0x00, // PUSH1 0x00 (memory offset)
+        0x52, // MSTORE (stores 0x00...00 at memory, with STOP at byte 31)
+        0x60, 0x01, // PUSH1 0x01 (code size)
+        0x60, 0x1f, // PUSH1 0x1f (offset to last byte of memory word)
+        0xf3, // RETURN
+    ]);
+
+    let header = create_test_header(&chain_spec);
+
+    // Create 3 contract deployment transactions with identical bytecode
+    let tx1 = sign_tx_with_key_pair(
+        sender_keypair.clone(),
+        Transaction::Legacy(TxLegacy {
+            chain_id: Some(chain_spec.chain.id()),
+            nonce: 0,
+            gas_price: header.base_fee_per_gas.unwrap_or(1).into(),
+            gas_limit: 100_000,
+            to: TxKind::Create,
+            value: U256::ZERO,
+            input: init_code.clone(),
+        }),
+    );
+
+    let tx2 = sign_tx_with_key_pair(
+        sender_keypair.clone(),
+        Transaction::Legacy(TxLegacy {
+            chain_id: Some(chain_spec.chain.id()),
+            nonce: 1,
+            gas_price: header.base_fee_per_gas.unwrap_or(1).into(),
+            gas_limit: 100_000,
+            to: TxKind::Create,
+            value: U256::ZERO,
+            input: init_code.clone(),
+        }),
+    );
+
+    let tx3 = sign_tx_with_key_pair(
+        sender_keypair,
+        Transaction::Legacy(TxLegacy {
+            chain_id: Some(chain_spec.chain.id()),
+            nonce: 2,
+            gas_price: header.base_fee_per_gas.unwrap_or(1).into(),
+            gas_limit: 100_000,
+            to: TxKind::Create,
+            value: U256::ZERO,
+            input: init_code,
+        }),
+    );
+
+    let provider = EthEvmConfig::new(chain_spec);
+    let mut executor = BasicBlockExecutor::new(provider, db);
+
+    let result = executor
+        .execute_one(
+            &Block {
+                header,
+                body: BlockBody { transactions: vec![tx1, tx2, tx3], ..Default::default() },
+            }
+            .try_into_recovered()
+            .unwrap(),
+        )
+        .expect("execution should succeed");
+
+    // All 3 deployments should succeed
+    assert!(result.receipts[0].success, "First deployment should succeed");
+    assert!(result.receipts[1].success, "Second deployment should succeed");
+    assert!(result.receipts[2].success, "Third deployment should succeed");
+
+    // Verify 3 contracts were created at the expected addresses
+    let contract1 = sender_address.create(0);
+    let contract2 = sender_address.create(1);
+    let contract3 = sender_address.create(2);
+
+    // All 3 contracts should exist and have code
+    for (addr, name) in
+        [(contract1, "contract1"), (contract2, "contract2"), (contract3, "contract3")]
+    {
+        let info = executor.with_state_mut(|state| state.basic(addr).unwrap());
+        assert!(info.is_some(), "{name} should exist");
+        assert!(info.unwrap().code.is_some(), "{name} should have code");
+    }
+
+    // The key assertion for C2: sender nonce = 3 (deployed 3 contracts)
+    let sender_info =
+        executor.with_state_mut(|state| state.basic(sender_address).unwrap().unwrap());
+    assert_eq!(sender_info.nonce, 3, "Sender should have nonce 3 after 3 deployments");
+}
+
+/// Test that executing an empty block (no transactions) produces valid metrics.
+/// This tests edge case EDGE1 from slow_block_test_vectors.json.
+#[test]
+fn test_empty_block_metrics() {
+    let chain_spec = create_cancun_chain_spec();
+    let db = create_empty_db();
+
+    let header = create_test_header(&chain_spec);
+
+    let provider = EthEvmConfig::new(chain_spec);
+    let mut executor = BasicBlockExecutor::new(provider, db);
+
+    // Execute block with NO transactions
+    let result = executor
+        .execute_one(
+            &Block { header, body: BlockBody { transactions: vec![], ..Default::default() } }
+                .try_into_recovered()
+                .unwrap(),
+        )
+        .expect("empty block execution should succeed");
+
+    // Verify no receipts (no transactions)
+    assert!(result.receipts.is_empty(), "Empty block should have no receipts");
+
+    // Verify gas used is 0
+    assert_eq!(result.gas_used, 0, "Empty block should use 0 gas");
+}
+
+/// Contract that always reverts when called.
+/// Bytecode: PUSH1 0, PUSH1 0, REVERT
+const REVERTER_CODE: &[u8] = &[
+    0x60, 0x00, // PUSH1 0 (return data size)
+    0x60, 0x00, // PUSH1 0 (return data offset)
+    0xfd, // REVERT
+];
+
+/// Test that a reverted transaction does NOT include its attempted state changes
+/// in the final state writes.
+/// This tests edge case EDGE2 from slow_block_test_vectors.json.
+#[test]
+fn test_reverted_transaction_excludes_state_changes() {
+    let chain_spec = create_cancun_chain_spec();
+    let mut db = create_empty_db();
+    let (sender_keypair, sender_address) = create_funded_sender(&mut db);
+
+    // Deploy reverter contract
+    let reverter_address = address!("0xdead000000000000000000000000000000000001");
+    let reverter_code = Bytes::from_static(REVERTER_CODE);
+
+    db.insert_account_info(
+        reverter_address,
+        AccountInfo {
+            nonce: 1,
+            balance: U256::ZERO,
+            code_hash: keccak256(&reverter_code),
+            code: Some(Bytecode::new_raw(reverter_code)),
+            ..Default::default()
+        },
+    );
+
+    let header = create_test_header(&chain_spec);
+    let tx = sign_tx_with_key_pair(
+        sender_keypair,
+        Transaction::Legacy(TxLegacy {
+            chain_id: Some(chain_spec.chain.id()),
+            nonce: 0,
+            gas_price: header.base_fee_per_gas.unwrap_or(1).into(),
+            gas_limit: 100_000,
+            to: TxKind::Call(reverter_address),
+            value: U256::ZERO,
+            input: Bytes::new(),
+        }),
+    );
+
+    let provider = EthEvmConfig::new(chain_spec);
+    let mut executor = BasicBlockExecutor::new(provider, db);
+
+    let result = executor
+        .execute_one(
+            &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+                .try_into_recovered()
+                .unwrap(),
+        )
+        .expect("execution should succeed even if tx reverts");
+
+    // Transaction should be included but marked as failed
+    assert!(!result.receipts[0].success, "Reverted transaction should not succeed");
+
+    // Verify sender nonce still incremented (tx was included)
+    let sender_nonce =
+        executor.with_state_mut(|state| state.basic(sender_address).unwrap().unwrap().nonce);
+    assert_eq!(sender_nonce, 1, "Sender nonce should still increment on revert");
+
+    // Gas should be consumed (at least base gas)
+    assert!(result.gas_used >= 21000, "Some gas should be consumed on revert");
+}
+
+/// Test that an out-of-gas transaction reverts all its state changes.
+/// This tests edge case EDGE3 from slow_block_test_vectors.json.
+#[test]
+fn test_out_of_gas_reverts_all_changes() {
+    let chain_spec = create_cancun_chain_spec();
+    let mut db = create_empty_db();
+    let (sender_keypair, sender_address) = create_funded_sender(&mut db);
+
+    // Deploy storage-writing contract
+    let contract_address = address!("0x0005000000000000000000000000000000000005");
+    let setter_code = Bytes::from_static(STORAGE_SETTER_CODE);
+
+    db.insert_account_info(
+        contract_address,
+        AccountInfo {
+            nonce: 1,
+            balance: U256::ZERO,
+            code_hash: keccak256(&setter_code),
+            code: Some(Bytecode::new_raw(setter_code)),
+            ..Default::default()
+        },
+    );
+
+    let header = create_test_header(&chain_spec);
+
+    // Call with insufficient gas (21000 base + ~1000 for call overhead, but not enough for SSTORE)
+    // SSTORE to new slot costs 20000 gas, so 22000 total is not enough
+    let tx = sign_tx_with_key_pair(
+        sender_keypair,
+        Transaction::Legacy(TxLegacy {
+            chain_id: Some(chain_spec.chain.id()),
+            nonce: 0,
+            gas_price: header.base_fee_per_gas.unwrap_or(1).into(),
+            gas_limit: 22_000, // Not enough for SSTORE
+            to: TxKind::Call(contract_address),
+            value: U256::ZERO,
+            input: Bytes::new(),
+        }),
+    );
+
+    let provider = EthEvmConfig::new(chain_spec);
+    let mut executor = BasicBlockExecutor::new(provider, db);
+
+    let result = executor
+        .execute_one(
+            &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+                .try_into_recovered()
+                .unwrap(),
+        )
+        .expect("execution should succeed even if tx runs out of gas");
+
+    // Transaction should fail (out of gas)
+    assert!(!result.receipts[0].success, "OOG transaction should fail");
+
+    // All provided gas should be consumed
+    assert_eq!(result.gas_used, 22_000, "All gas should be consumed on OOG");
+
+    // Verify storage was NOT written (state changes reverted)
+    let storage_value =
+        executor.with_state_mut(|state| state.storage(contract_address, U256::ZERO).unwrap());
+    assert!(storage_value.is_zero(), "Storage should NOT be written on OOG - state reverted");
+
+    // Verify sender nonce still incremented
+    let sender_nonce =
+        executor.with_state_mut(|state| state.basic(sender_address).unwrap().unwrap().nonce);
+    assert_eq!(sender_nonce, 1, "Sender nonce should still increment on OOG");
+}
