@@ -299,6 +299,7 @@ where
                             log_index: Some(log_index - 1),
                             transaction_index: Some(index as u64),
                             transaction_hash: Some(*tx.tx_hash()),
+                            block_hash: Some(block.hash()),
                             block_number: Some(block.header().number()),
                             block_timestamp: Some(block.header().timestamp()),
                             ..Default::default()
