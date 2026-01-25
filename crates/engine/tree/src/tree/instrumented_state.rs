@@ -13,12 +13,123 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
 /// Nanoseconds per second
 const NANOS_PER_SEC: u32 = 1_000_000_000;
+
+/// Shared handle to read statistics that can be cloned before the provider is consumed.
+///
+/// This allows getting read stats after the `InstrumentedStateProvider` is moved/dropped.
+#[derive(Debug, Clone, Default)]
+pub struct ReadStatsHandle {
+    inner: Arc<ReadStatsInner>,
+}
+
+#[derive(Debug, Default)]
+struct ReadStatsInner {
+    account_reads: AtomicUsize,
+    storage_reads: AtomicUsize,
+    code_reads: AtomicUsize,
+    code_bytes_read: AtomicUsize,
+}
+
+impl ReadStatsHandle {
+    /// Creates a new handle with zero counters.
+    pub fn new() -> Self {
+        Self { inner: Arc::new(ReadStatsInner::default()) }
+    }
+
+    /// Returns (account_reads, storage_reads, code_reads, code_bytes_read).
+    pub fn get_stats(&self) -> (usize, usize, usize, usize) {
+        (
+            self.inner.account_reads.load(Ordering::Relaxed),
+            self.inner.storage_reads.load(Ordering::Relaxed),
+            self.inner.code_reads.load(Ordering::Relaxed),
+            self.inner.code_bytes_read.load(Ordering::Relaxed),
+        )
+    }
+
+    fn increment_account_reads(&self) {
+        self.inner.account_reads.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn increment_storage_reads(&self) {
+        self.inner.storage_reads.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn increment_code_reads(&self) {
+        self.inner.code_reads.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn add_code_bytes_read(&self, bytes: usize) {
+        self.inner.code_bytes_read.fetch_add(bytes, Ordering::Relaxed);
+    }
+}
+
+/// Shared handle to timing statistics that can be cloned before the provider is consumed.
+///
+/// This allows getting timing stats after the `InstrumentedStateProvider` is moved/dropped.
+/// Timing is tracked in nanoseconds to avoid floating-point operations during the hot path.
+#[derive(Debug, Clone, Default)]
+pub struct TimingStatsHandle {
+    inner: Arc<TimingStatsInner>,
+}
+
+#[derive(Debug, Default)]
+struct TimingStatsInner {
+    /// Total time spent fetching accounts (nanoseconds).
+    account_fetch_ns: AtomicU64,
+    /// Total time spent fetching storage (nanoseconds).
+    storage_fetch_ns: AtomicU64,
+    /// Total time spent fetching bytecode (nanoseconds).
+    code_fetch_ns: AtomicU64,
+}
+
+impl TimingStatsHandle {
+    /// Creates a new handle with zero timing counters.
+    pub fn new() -> Self {
+        Self { inner: Arc::new(TimingStatsInner::default()) }
+    }
+
+    /// Returns (account_fetch_ms, storage_fetch_ms, code_fetch_ms) as milliseconds.
+    pub fn get_timing_ms(&self) -> (f64, f64, f64) {
+        let account_ns = self.inner.account_fetch_ns.load(Ordering::Relaxed);
+        let storage_ns = self.inner.storage_fetch_ns.load(Ordering::Relaxed);
+        let code_ns = self.inner.code_fetch_ns.load(Ordering::Relaxed);
+        (
+            account_ns as f64 / 1_000_000.0,
+            storage_ns as f64 / 1_000_000.0,
+            code_ns as f64 / 1_000_000.0,
+        )
+    }
+
+    /// Returns total state read time in milliseconds (sum of all fetch times).
+    ///
+    /// This corresponds to Geth's `state_read_ms` metric which aggregates all
+    /// state access operations (account reads, storage reads, and code reads).
+    pub fn total_read_ms(&self) -> f64 {
+        let (account_ms, storage_ms, code_ms) = self.get_timing_ms();
+        account_ms + storage_ms + code_ms
+    }
+
+    fn add_account_fetch_ns(&self, nanos: u64) {
+        self.inner.account_fetch_ns.fetch_add(nanos, Ordering::Relaxed);
+    }
+
+    fn add_storage_fetch_ns(&self, nanos: u64) {
+        self.inner.storage_fetch_ns.fetch_add(nanos, Ordering::Relaxed);
+    }
+
+    fn add_code_fetch_ns(&self, nanos: u64) {
+        self.inner.code_fetch_ns.fetch_add(nanos, Ordering::Relaxed);
+    }
+}
 
 /// An atomic version of [`Duration`], using an [`AtomicU64`] to store the total nanoseconds in the
 /// duration.
@@ -75,6 +186,12 @@ pub struct InstrumentedStateProvider<S> {
 
     /// The total time we spend fetching accounts over the lifetime of this state provider
     total_account_fetch_latency: AtomicDuration,
+
+    /// Shared handle for read statistics - can be cloned before provider is consumed
+    read_stats: ReadStatsHandle,
+
+    /// Shared handle for timing statistics - can be cloned before provider is consumed
+    timing_stats: TimingStatsHandle,
 }
 
 impl<S> InstrumentedStateProvider<S>
@@ -84,13 +201,59 @@ where
     /// Creates a new [`InstrumentedStateProvider`] from a state provider with the provided label
     /// for metrics.
     pub fn new(state_provider: S, source: &'static str) -> Self {
+        Self::with_stats_handles(
+            state_provider,
+            source,
+            ReadStatsHandle::new(),
+            TimingStatsHandle::new(),
+        )
+    }
+
+    /// Creates a new [`InstrumentedStateProvider`] with a pre-existing [`ReadStatsHandle`].
+    ///
+    /// Use this when you need to access read statistics after the provider is consumed/dropped.
+    pub fn with_read_stats(
+        state_provider: S,
+        source: &'static str,
+        read_stats: ReadStatsHandle,
+    ) -> Self {
+        Self::with_stats_handles(state_provider, source, read_stats, TimingStatsHandle::new())
+    }
+
+    /// Creates a new [`InstrumentedStateProvider`] with pre-existing stats handles.
+    ///
+    /// Use this when you need to access both read and timing statistics after the provider
+    /// is consumed/dropped.
+    pub fn with_stats_handles(
+        state_provider: S,
+        source: &'static str,
+        read_stats: ReadStatsHandle,
+        timing_stats: TimingStatsHandle,
+    ) -> Self {
         Self {
             state_provider,
             metrics: StateProviderMetrics::new_with_labels(&[("source", source)]),
             total_storage_fetch_latency: AtomicDuration::zero(),
             total_code_fetch_latency: AtomicDuration::zero(),
             total_account_fetch_latency: AtomicDuration::zero(),
+            read_stats,
+            timing_stats,
         }
+    }
+
+    /// Returns a cloneable handle to read statistics.
+    ///
+    /// Clone this handle before the provider is consumed to access stats afterward.
+    pub fn read_stats_handle(&self) -> ReadStatsHandle {
+        self.read_stats.clone()
+    }
+
+    /// Returns a cloneable handle to timing statistics.
+    ///
+    /// Clone this handle before the provider is consumed to access timing data afterward.
+    /// The timing handle tracks the total time spent on account, storage, and code fetches.
+    pub fn timing_stats_handle(&self) -> TimingStatsHandle {
+        self.timing_stats.clone()
     }
 }
 
@@ -100,6 +263,9 @@ impl<S> InstrumentedStateProvider<S> {
     fn record_storage_fetch(&self, latency: Duration) {
         self.metrics.storage_fetch_latency.record(latency);
         self.total_storage_fetch_latency.add_duration(latency);
+        // Also update the shared timing handle (uses nanoseconds for precision)
+        let nanos = latency.as_secs() * NANOS_PER_SEC as u64 + latency.subsec_nanos() as u64;
+        self.timing_stats.add_storage_fetch_ns(nanos);
     }
 
     /// Records the latency for a code fetch, and increments the duration counter for the code
@@ -107,6 +273,9 @@ impl<S> InstrumentedStateProvider<S> {
     fn record_code_fetch(&self, latency: Duration) {
         self.metrics.code_fetch_latency.record(latency);
         self.total_code_fetch_latency.add_duration(latency);
+        // Also update the shared timing handle (uses nanoseconds for precision)
+        let nanos = latency.as_secs() * NANOS_PER_SEC as u64 + latency.subsec_nanos() as u64;
+        self.timing_stats.add_code_fetch_ns(nanos);
     }
 
     /// Records the latency for an account fetch, and increments the duration counter for the
@@ -114,6 +283,9 @@ impl<S> InstrumentedStateProvider<S> {
     fn record_account_fetch(&self, latency: Duration) {
         self.metrics.account_fetch_latency.record(latency);
         self.total_account_fetch_latency.add_duration(latency);
+        // Also update the shared timing handle (uses nanoseconds for precision)
+        let nanos = latency.as_secs() * NANOS_PER_SEC as u64 + latency.subsec_nanos() as u64;
+        self.timing_stats.add_account_fetch_ns(nanos);
     }
 
     /// Records the total latencies into their respective gauges and histograms.
@@ -181,6 +353,7 @@ pub(crate) struct StateProviderMetrics {
 
 impl<S: AccountReader> AccountReader for InstrumentedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        self.read_stats.increment_account_reads();
         let start = Instant::now();
         let res = self.state_provider.basic_account(address);
         self.record_account_fetch(start.elapsed());
@@ -194,6 +367,7 @@ impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
+        self.read_stats.increment_storage_reads();
         let start = Instant::now();
         let res = self.state_provider.storage(account, storage_key);
         self.record_storage_fetch(start.elapsed());
@@ -203,9 +377,14 @@ impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {
 
 impl<S: BytecodeReader> BytecodeReader for InstrumentedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        self.read_stats.increment_code_reads();
         let start = Instant::now();
         let res = self.state_provider.bytecode_by_hash(code_hash);
         self.record_code_fetch(start.elapsed());
+        // Track code bytes read if bytecode was found
+        if let Ok(Some(ref bytecode)) = res {
+            self.read_stats.add_code_bytes_read(bytecode.len());
+        }
         res
     }
 }

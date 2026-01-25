@@ -1,4 +1,9 @@
-use crate::tree::{error::InsertBlockFatalError, TreeOutcome};
+use crate::tree::{error::InsertBlockFatalError, MeteredStateHook, TreeOutcome};
+use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef};
+use alloy_evm::{
+    block::{BlockExecutor, ExecutableTx},
+    Evm,
+};
 use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
 use reth_engine_primitives::{ForkchoiceStatus, OnForkChoiceUpdated};
 use reth_errors::ProviderError;
@@ -51,10 +56,16 @@ impl EngineApiMetrics {
         let accounts = output.state.state.len();
         let storage_slots =
             output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
-        let bytecodes = output.state.contracts.len();
-        // Sum up total code bytes from all contracts
-        let code_bytes: usize =
-            output.state.contracts.values().map(|bytecode| bytecode.original_bytes().len()).sum();
+        // Filter out KECCAK_EMPTY (empty code accessed during EOA operations like ETH transfers)
+        let bytecodes = output.state.contracts.keys().filter(|hash| **hash != KECCAK_EMPTY).count();
+        // Sum up total code bytes from all contracts (excluding KECCAK_EMPTY)
+        let code_bytes: usize = output
+            .state
+            .contracts
+            .iter()
+            .filter(|(hash, _)| **hash != KECCAK_EMPTY)
+            .map(|(_, bytecode)| bytecode.original_bytes().len())
+            .sum();
 
         self.executor.accounts_updated_histogram.record(accounts as f64);
         self.executor.storage_slots_updated_histogram.record(storage_slots as f64);
