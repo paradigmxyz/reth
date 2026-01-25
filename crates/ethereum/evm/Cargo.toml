@@ -34,9 +34,15 @@ derive_more = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-testing-utils.workspace = true
-reth-evm = { workspace = true, features = ["test-utils"] }
+reth-evm = { workspace = true, features = ["test-utils", "metrics"] }
+reth-revm.workspace = true
+reth-execution-types.workspace = true
 secp256k1.workspace = true
 alloy-genesis.workspace = true
+revm-bytecode.workspace = true
+revm-database.workspace = true
+revm-primitives.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [features]
 default = ["std"]

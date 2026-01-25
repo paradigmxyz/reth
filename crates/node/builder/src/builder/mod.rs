@@ -702,7 +702,11 @@ where
     {
         let Self { builder, task_executor } = self;
 
-        let engine_tree_config = builder.config.engine.tree_config();
+        let mut engine_tree_config = builder.config.engine.tree_config();
+        // Auto-enable state provider metrics when slow block logging is explicitly enabled
+        if builder.config.debug.slow_block_threshold.is_some() {
+            engine_tree_config = engine_tree_config.with_state_provider_metrics(true);
+        }
 
         let launcher = DebugNodeLauncher::new(EngineNodeLauncher::new(
             task_executor,
@@ -715,7 +719,11 @@ where
     /// Returns an [`EngineNodeLauncher`] that can be used to launch the node with engine API
     /// support.
     pub fn engine_api_launcher(&self) -> EngineNodeLauncher {
-        let engine_tree_config = self.builder.config.engine.tree_config();
+        let mut engine_tree_config = self.builder.config.engine.tree_config();
+        // Auto-enable state provider metrics when slow block logging is explicitly enabled
+        if self.builder.config.debug.slow_block_threshold.is_some() {
+            engine_tree_config = engine_tree_config.with_state_provider_metrics(true);
+        }
         EngineNodeLauncher::new(
             self.task_executor.clone(),
             self.builder.config.datadir(),

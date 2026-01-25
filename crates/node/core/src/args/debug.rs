@@ -108,6 +108,15 @@ pub struct DebugArgs {
     /// the backfill, but did not yet receive any new blocks.
     #[arg(long = "debug.startup-sync-state-idle", help_heading = "Debug")]
     pub startup_sync_state_idle: bool,
+
+    /// Configure the slow block logging threshold in milliseconds.
+    ///
+    /// When set, blocks that take longer than this threshold to execute will be logged
+    /// with detailed metrics including timing, state operations, and cache statistics.
+    /// Set to 0 to log all blocks (useful for debugging/profiling).
+    /// When not set, slow block logging is disabled (default).
+    #[arg(long = "debug.slow-block-threshold", help_heading = "Debug")]
+    pub slow_block_threshold: Option<u64>,
 }
 
 impl Default for DebugArgs {
@@ -127,6 +136,7 @@ impl Default for DebugArgs {
             healthy_node_rpc_url: None,
             ethstats: None,
             startup_sync_state_idle: false,
+            slow_block_threshold: None,
         }
     }
 }
@@ -236,7 +246,7 @@ impl FromStr for InvalidBlockSelection {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
-            return Ok(Self(Default::default()))
+            return Ok(Self(Default::default()));
         }
         let hooks = s.split(',').map(str::trim).peekable();
         Self::try_from_selection(hooks)
@@ -420,5 +430,24 @@ mod tests {
         ])
         .args;
         assert_eq!(args, expected_args);
+    }
+
+    #[test]
+    fn test_parse_slow_block_threshold() {
+        // Test default value (None - disabled)
+        let args = CommandParser::<DebugArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.slow_block_threshold, None);
+
+        // Test setting to 0 (log all blocks)
+        let args =
+            CommandParser::<DebugArgs>::parse_from(["reth", "--debug.slow-block-threshold", "0"])
+                .args;
+        assert_eq!(args.slow_block_threshold, Some(0));
+
+        // Test setting to custom value
+        let args =
+            CommandParser::<DebugArgs>::parse_from(["reth", "--debug.slow-block-threshold", "500"])
+                .args;
+        assert_eq!(args.slow_block_threshold, Some(500));
     }
 }
