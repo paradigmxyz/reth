@@ -1,10 +1,13 @@
-//! Contains a precompile cache backed by `schnellru::LruMap` (LRU by length).
+//! Contains a precompile cache backed by `moka` with concurrent insertion deduplication.
+//!
+//! When prewarm starts computing a precompile result and execution arrives with the same
+//! calldata, execution will wait for prewarm's result instead of recomputing.
 
 use alloy_primitives::Bytes;
 use dashmap::DashMap;
 use moka::policy::EvictionPolicy;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
-use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
+use revm::precompile::{PrecompileError, PrecompileId, PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
 use std::{hash::Hash, sync::Arc};
 
@@ -60,13 +63,24 @@ impl<S> PrecompileCache<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
-    fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
-        self.0.get(input).filter(|e| e.spec == spec)
+    /// Gets the cached result or computes it using the provided closure.
+    ///
+    /// If another thread is already computing the result for this input, this will wait
+    /// for that computation to complete instead of running the closure again.
+    fn get_or_try_insert_with<E>(
+        &self,
+        input: Bytes,
+        spec: S,
+        init: impl FnOnce() -> Result<PrecompileOutput, E>,
+    ) -> Result<CacheEntry<S>, Arc<E>>
+    where
+        E: Send + Sync + 'static,
+    {
+        self.0
+            .try_get_with(input, || init().map(|output| CacheEntry { output, spec }))
     }
 
-    /// Inserts the given key and value into the cache, returning the new cache size.
-    fn insert(&self, input: Bytes, value: CacheEntry<S>) -> usize {
-        self.0.insert(input, value);
+    fn entry_count(&self) -> usize {
         self.0.entry_count() as usize
     }
 }
@@ -138,12 +152,6 @@ where
         }
     }
 
-    fn increment_by_one_precompile_cache_misses(&self) {
-        if let Some(metrics) = &self.metrics {
-            metrics.precompile_cache_misses.increment(1);
-        }
-    }
-
     fn set_precompile_cache_size_metric(&self, to: f64) {
         if let Some(metrics) = &self.metrics {
             metrics.precompile_cache_size.set(to);
@@ -166,30 +174,28 @@ where
     }
 
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
-        if let Some(entry) = &self.cache.get(input.data, self.spec_id.clone()) {
-            self.increment_by_one_precompile_cache_hits();
-            if input.gas >= entry.gas_used() {
-                return entry.to_precompile_result()
-            }
-        }
+        let gas_limit = input.gas;
+        let calldata = Bytes::copy_from_slice(input.data);
 
-        let calldata = input.data;
-        let result = self.precompile.call(input);
+        let result = self
+            .cache
+            .get_or_try_insert_with(calldata, self.spec_id.clone(), || self.precompile.call(input));
 
-        match &result {
-            Ok(output) => {
-                let size = self.cache.insert(
-                    Bytes::copy_from_slice(calldata),
-                    CacheEntry { output: output.clone(), spec: self.spec_id.clone() },
-                );
-                self.set_precompile_cache_size_metric(size as f64);
-                self.increment_by_one_precompile_cache_misses();
+        match result {
+            Ok(entry) => {
+                self.set_precompile_cache_size_metric(self.cache.entry_count() as f64);
+                if gas_limit >= entry.gas_used() {
+                    self.increment_by_one_precompile_cache_hits();
+                    entry.to_precompile_result()
+                } else {
+                    Err(PrecompileError::OutOfGas)
+                }
             }
-            _ => {
+            Err(err) => {
                 self.increment_by_one_precompile_errors();
+                Err(Arc::unwrap_or_clone(err))
             }
         }
-        result
     }
 }
 
@@ -199,9 +205,6 @@ where
 pub(crate) struct CachedPrecompileMetrics {
     /// Precompile cache hits
     precompile_cache_hits: metrics::Counter,
-
-    /// Precompile cache misses
-    precompile_cache_misses: metrics::Counter,
 
     /// Precompile cache size. Uses the LRU cache length as the size metric.
     precompile_cache_size: metrics::Gauge,
@@ -230,33 +233,36 @@ mod tests {
 
     #[test]
     fn test_precompile_cache_basic() {
-        let dyn_precompile: DynPrecompile = (|_input: PrecompileInput<'_>| -> PrecompileResult {
-            Ok(PrecompileOutput {
-                gas_used: 0,
-                gas_refunded: 0,
-                bytes: Bytes::default(),
-                reverted: false,
-            })
-        })
-        .into();
-
-        let cache =
-            CachedPrecompile::new(dyn_precompile, PrecompileCache::default(), SpecId::PRAGUE, None);
-
-        let output = PrecompileOutput {
+        let expected_output = PrecompileOutput {
             gas_used: 50,
             gas_refunded: 0,
             bytes: alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
             reverted: false,
         };
 
-        let input = b"test_input";
-        let expected = CacheEntry { output, spec: SpecId::PRAGUE };
-        cache.cache.insert(input.into(), expected.clone());
+        let cache: PrecompileCache<SpecId> = PrecompileCache::default();
 
-        let actual = cache.cache.get(input, SpecId::PRAGUE).unwrap();
+        let result = cache
+            .get_or_try_insert_with(Bytes::from_static(b"test_input"), SpecId::PRAGUE, || {
+                Ok::<_, PrecompileError>(expected_output.clone())
+            })
+            .unwrap();
 
-        assert_eq!(actual, expected);
+        assert_eq!(result.output, expected_output);
+        assert_eq!(result.spec, SpecId::PRAGUE);
+
+        // Second call should return cached result without calling init
+        let result2 = cache
+            .get_or_try_insert_with(
+                Bytes::from_static(b"test_input"),
+                SpecId::PRAGUE,
+                || -> Result<PrecompileOutput, PrecompileError> {
+                    panic!("should not be called - result should be cached")
+                },
+            )
+            .unwrap();
+
+        assert_eq!(result2.output, expected_output);
     }
 
     #[test]
@@ -364,5 +370,56 @@ mod tests {
             .into_output()
             .unwrap();
         assert_eq!(result3.as_ref(), b"output_from_precompile_1");
+    }
+
+    #[test]
+    fn test_concurrent_deduplication() {
+        use std::{
+            sync::atomic::{AtomicUsize, Ordering},
+            thread,
+            time::Duration,
+        };
+
+        let cache: PrecompileCache<SpecId> = PrecompileCache::default();
+        let cache = Arc::new(cache);
+        let call_count = Arc::new(AtomicUsize::new(0));
+
+        let expected_output = PrecompileOutput {
+            gas_used: 100,
+            gas_refunded: 0,
+            bytes: alloy_primitives::Bytes::copy_from_slice(b"result"),
+            reverted: false,
+        };
+
+        let mut handles = vec![];
+
+        for _ in 0..10 {
+            let cache = Arc::clone(&cache);
+            let call_count = Arc::clone(&call_count);
+            let expected = expected_output.clone();
+
+            handles.push(thread::spawn(move || {
+                cache
+                    .get_or_try_insert_with(
+                        Bytes::from_static(b"same_input"),
+                        SpecId::PRAGUE,
+                        || {
+                            call_count.fetch_add(1, Ordering::SeqCst);
+                            // Small delay to increase chance of concurrent access
+                            thread::sleep(Duration::from_millis(10));
+                            Ok::<_, PrecompileError>(expected.clone())
+                        },
+                    )
+                    .unwrap()
+            }));
+        }
+
+        for handle in handles {
+            let result = handle.join().unwrap();
+            assert_eq!(result.output, expected_output);
+        }
+
+        // With concurrent deduplication, init should only be called once
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
     }
 }
