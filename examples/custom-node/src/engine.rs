@@ -112,7 +112,7 @@ impl PayloadAttributes for CustomPayloadAttributes {
     }
 
     fn slot_number(&self) -> Option<u64> {
-       self.inner.slot_number()
+        self.inner.slot_number()
     }
 }
 
