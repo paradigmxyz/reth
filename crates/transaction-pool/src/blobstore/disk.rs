@@ -392,6 +392,10 @@ impl DiskFileBlobStoreInner {
 
         self.blob_cache.lock().insert(tx, Arc::new(data));
 
+        // Remove from pending deletes if present, since we're inserting a new blob for this tx.
+        // This can happen during blob format conversion (e.g., EIP-4844 to EIP-7594).
+        self.txs_to_delete.write().remove(&tx);
+
         let size = self.write_one_encoded(tx, &buf)?;
 
         self.size_tracker.add_size(size);
@@ -423,11 +427,22 @@ impl DiskFileBlobStoreInner {
             }
         }
 
+        let tx_hashes: Vec<B256> = txs.iter().map(|(tx, _)| *tx).collect();
+
         {
             // cache blobs
             let mut cache = self.blob_cache.lock();
             for (tx, data) in txs {
                 cache.insert(tx, Arc::new(data));
+            }
+        }
+
+        // Remove from pending deletes if present, since we're inserting new blobs for these txs.
+        // This can happen during blob format conversion (e.g., EIP-4844 to EIP-7594).
+        {
+            let mut pending_deletes = self.txs_to_delete.write();
+            for tx in &tx_hashes {
+                pending_deletes.remove(tx);
             }
         }
 
