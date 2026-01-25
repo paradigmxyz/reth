@@ -27,6 +27,16 @@ use revm::{
     Database,
 };
 
+/// Error code for execution reverted in `eth_simulateV1`.
+///
+/// <https://github.com/ethereum/execution-apis>
+pub const SIMULATE_REVERT_CODE: i32 = -32000;
+
+/// Error code for VM execution errors (e.g., out of gas) in `eth_simulateV1`.
+///
+/// <https://github.com/ethereum/execution-apis>
+pub const SIMULATE_VM_ERROR_CODE: i32 = -32015;
+
 /// Errors which may occur during `eth_simulateV1` execution.
 #[derive(Debug, thiserror::Error)]
 pub enum EthSimulateError {
@@ -263,7 +273,7 @@ where
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
                         message: error.to_string(),
-                        code: error.into().code(),
+                        code: SIMULATE_VM_ERROR_CODE,
                         ..SimulateError::invalid_params()
                     }),
                     gas_used,
@@ -278,7 +288,7 @@ where
                     return_data: output,
                     error: Some(SimulateError {
                         message: error.to_string(),
-                        code: error.into().code(),
+                        code: SIMULATE_REVERT_CODE,
                         ..SimulateError::invalid_params()
                     }),
                     gas_used,
