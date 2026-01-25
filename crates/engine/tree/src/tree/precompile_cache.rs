@@ -63,6 +63,11 @@ impl<S> PrecompileCache<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
+    /// Fast path: check if result is already cached.
+    fn get(&self, input: &[u8]) -> Option<CacheEntry<S>> {
+        self.0.get(input)
+    }
+
     /// Gets the cached result or computes it using the provided closure.
     ///
     /// If another thread is already computing the result for this input, this will wait
@@ -76,8 +81,7 @@ where
     where
         E: Send + Sync + 'static,
     {
-        self.0
-            .try_get_with(input, || init().map(|output| CacheEntry { output, spec }))
+        self.0.try_get_with(input, || init().map(|output| CacheEntry { output, spec }))
     }
 
     fn entry_count(&self) -> usize {
@@ -174,8 +178,15 @@ where
     }
 
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
-        let gas_limit = input.gas;
+        // Fast path: check cache without allocation
+        if let Some(entry) = self.cache.get(input.data).filter(|e| input.gas >= e.gas_used()) {
+            self.increment_by_one_precompile_cache_hits();
+            return entry.to_precompile_result();
+        }
+
+        // Slow path: compute result, waiting for in-flight computation if another thread started
         let calldata = Bytes::copy_from_slice(input.data);
+        let gas_limit = input.gas;
 
         let result = self
             .cache
