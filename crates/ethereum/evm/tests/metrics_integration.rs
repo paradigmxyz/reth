@@ -258,7 +258,13 @@ fn test_eip7702_delegations_set_count() {
 /// This verifies the threshold logic used to decide when to log slow blocks.
 #[test]
 fn test_slow_block_threshold_filtering() {
-    use reth_evm::metrics::{is_slow_block, set_slow_block_threshold, slow_block_threshold};
+    use reth_evm::metrics::{
+        is_slow_block, set_slow_block_logging_enabled, set_slow_block_threshold,
+        slow_block_threshold,
+    };
+
+    // Enable slow block logging for this test
+    set_slow_block_logging_enabled(true);
 
     // Test with default threshold (1000ms)
     set_slow_block_threshold(1000);
@@ -284,6 +290,7 @@ fn test_slow_block_threshold_filtering() {
 
     // Reset to default
     set_slow_block_threshold(1000);
+    set_slow_block_logging_enabled(false);
 }
 
 /// Test that cache hit rate calculation is correct.
