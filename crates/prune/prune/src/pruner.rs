@@ -77,7 +77,7 @@ impl<PF> Pruner<PF::ProviderRW, PF>
 where
     PF: DatabaseProviderFactory,
 {
-    /// Crates a new pruner with the given provider factory.
+    /// Creates a new pruner with the given provider factory.
     pub fn new_with_factory(
         provider_factory: PF,
         segments: Vec<Box<dyn Segment<PF::ProviderRW>>>,
