@@ -813,5 +813,5 @@ revm-handler = { git = "https://github.com/bluealloy/revm", rev = "0dc217a9d2c47
 revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "0dc217a9d2c470c533ef8d7a51396e4fb2b02008" }
 op-revm = { git = "https://github.com/bluealloy/revm", rev = "0dc217a9d2c470c533ef8d7a51396e4fb2b02008" }
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "fccc4ac50775f5eac9a766725507dc3d6a47804b" }
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "625ccc0f7d89b30a9ccd8880331e275c9772892d" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "625ccc0f7d89b30a9ccd8880331e275c9772892d" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "33e82b9777d99ad8ce1ccd8c59817999fa0dfdec" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "33e82b9777d99ad8ce1ccd8c59817999fa0dfdec" }
