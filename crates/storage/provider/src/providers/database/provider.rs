@@ -1358,7 +1358,7 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
             self.tx
                 .cursor_dup_read::<tables::StorageChangeSets>()?
                 .walk_range(storage_range)?
-                .map(|result| -> ProviderResult<_> { Ok(result?) })
+                .map(|r| r.map_err(Into::into))
                 .collect()
         }
     }
@@ -1391,7 +1391,7 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
             self.tx
                 .cursor_dup_read::<tables::StorageChangeSets>()?
                 .walk_range(BlockNumberAddress::range(range))?
-                .map(|result| -> ProviderResult<_> { Ok(result?) })
+                .map(|r| r.map_err(Into::into))
                 .collect()
         }
     }
@@ -1448,32 +1448,15 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
-        let range = to_range(range);
-        let mut changesets = Vec::new();
-        if self.cached_storage_settings().account_changesets_in_static_files &&
-            let Some(highest) = self
-                .static_file_provider
-                .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
-        {
-            let static_end = range.end.min(highest + 1);
-            if range.start < static_end {
-                for block in range.start..static_end {
-                    let block_changesets = self.account_block_changeset(block)?;
-                    for changeset in block_changesets {
-                        changesets.push((block, changeset));
-                    }
-                }
-            }
+        if self.cached_storage_settings().account_changesets_in_static_files {
+            self.static_file_provider.account_changesets_range(range)
         } else {
-            // Fetch from database for blocks not in static files
-            let mut cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
-            for entry in cursor.walk_range(range)? {
-                let (block_num, account_before) = entry?;
-                changesets.push((block_num, account_before));
-            }
+            self.tx
+                .cursor_read::<tables::AccountChangeSets>()?
+                .walk_range(to_range(range))?
+                .map(|r| r.map_err(Into::into))
+                .collect()
         }
-
-        Ok(changesets)
     }
 
     fn account_changeset_count(&self) -> ProviderResult<usize> {
