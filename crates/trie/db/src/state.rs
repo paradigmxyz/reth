@@ -298,7 +298,8 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
             .into_iter()
             .map(|(address, mut slots)| {
                 slots.sort_unstable_by_key(|(slot, _)| *slot);
-                (address, HashedStorageSorted { storage_slots: slots, wiped: false })
+                let has_non_zero = slots.iter().any(|(_, v)| *v != U256::ZERO);
+                (address, HashedStorageSorted { storage_slots: slots, wiped: false, has_non_zero })
             })
             .collect();
 
