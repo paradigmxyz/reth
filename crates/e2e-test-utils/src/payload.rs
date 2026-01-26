@@ -1,8 +1,8 @@
 use futures_util::StreamExt;
-use reth_node_api::{BlockBody, PayloadKind};
+use reth_node_api::PayloadKind;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadId};
 use reth_payload_builder_primitives::Events;
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadTypes};
+use reth_payload_primitives::{PayloadBuilderAttributes, PayloadTypes};
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Helper for payload operations
@@ -54,22 +54,26 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
         Ok(())
     }
 
-    /// Wait until the best built payload is ready
+    /// Wait until the best built payload is ready (including empty blocks)
     pub async fn wait_for_built_payload(&self, payload_id: PayloadId) {
+        let start = std::time::Instant::now();
         loop {
             let payload =
                 self.payload_builder.best_payload(payload_id).await.transpose().ok().flatten();
-            if payload.is_none_or(|p| p.block().body().transactions().is_empty()) {
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                continue
+            if payload.is_some() {
+                // Resolve payload once its built
+                self.payload_builder
+                    .resolve_kind(payload_id, PayloadKind::Earliest)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                break;
             }
-            // Resolve payload once its built
-            self.payload_builder
-                .resolve_kind(payload_id, PayloadKind::Earliest)
-                .await
-                .unwrap()
-                .unwrap();
-            break;
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(30),
+                "wait_for_built_payload timed out after 30s"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
     }
 

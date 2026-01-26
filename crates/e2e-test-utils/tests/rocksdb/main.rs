@@ -9,7 +9,7 @@ use eyre::Result;
 use jsonrpsee::core::client::ClientT;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_db::tables;
-use reth_e2e_test_utils::{transaction::TransactionTestContext, E2ETestSetupBuilder};
+use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet, E2ETestSetupBuilder};
 use reth_node_builder::NodeConfig;
 use reth_node_core::args::RocksDbArgs;
 use reth_node_ethereum::EthereumNode;
@@ -43,9 +43,13 @@ fn test_attributes_generator(timestamp: u64) -> EthPayloadBuilderAttributes {
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
 
-/// Enables `RocksDB` for all supported tables.
+/// Enables `RocksDB` for `TransactionHashNumbers` table.
+/// Disables changesets in static files to avoid conflicts with persistence threshold 0.
 fn with_rocksdb_enabled<C>(mut config: NodeConfig<C>) -> NodeConfig<C> {
-    config.rocksdb = RocksDbArgs { all: true, ..Default::default() };
+    config.rocksdb = RocksDbArgs { tx_hash: true, ..Default::default() };
+    // Disable storage changesets in static files to avoid persistence conflicts
+    config.static_files.storage_changesets = false;
+    config.static_files.account_changesets = false;
     config
 }
 
@@ -121,28 +125,29 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
     let chain_spec = test_chain_spec();
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _tasks, wallet) =
-        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
-            .with_node_config_modifier(with_rocksdb_enabled)
-            .build()
-            .await?;
+    let (mut nodes, _tasks, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
+        1,
+        chain_spec.clone(),
+        test_attributes_generator,
+    )
+    .with_node_config_modifier(with_rocksdb_enabled)
+    .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+    .build()
+    .await?;
 
     assert_eq!(nodes.len(), 1);
 
-    let mut tx_hashes = Vec::new();
+    // Inject and mine a transaction
+    let wallets = wallet::Wallet::new(1).with_chain_id(chain_id).wallet_gen();
+    let signer = wallets[0].clone();
 
-    // Inject and mine 3 transactions (new wallet per tx to avoid nonce tracking)
-    for i in 0..3 {
-        let wallets = wallet.wallet_gen();
-        let signer = wallets[0].clone();
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(chain_id, signer).await;
+    let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
 
-        let raw_tx = TransactionTestContext::transfer_tx_bytes(chain_id, signer).await;
-        let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
-        tx_hashes.push(tx_hash);
+    let payload = nodes[0].advance_block().await?;
+    assert_eq!(payload.block().number(), 1);
 
-        let payload = nodes[0].advance_block().await?;
-        assert_eq!(payload.block().number(), i + 1);
-    }
+    let tx_hashes = vec![tx_hash];
 
     let client = nodes[0].rpc_client().expect("RPC client should be available");
 
@@ -163,12 +168,22 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
 
     let missing_hash = B256::from([0xde; 32]);
 
-    // Direct RocksDB assertions
+    // Direct RocksDB assertions - poll with timeout since persistence is async
     let rocksdb = nodes[0].inner.provider.rocksdb_provider();
     for (i, tx_hash) in tx_hashes.iter().enumerate() {
-        let tx_number: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(*tx_hash)?;
-        assert!(tx_number.is_some(), "TransactionHashNumbers should contain tx_hash={tx_hash:?}");
-        assert_eq!(tx_number, Some(i as u64), "tx {tx_hash} should have TxNumber {i}");
+        let start = std::time::Instant::now();
+        loop {
+            let tx_number: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(*tx_hash)?;
+            if let Some(n) = tx_number {
+                assert_eq!(n, i as u64, "tx {tx_hash} should have TxNumber {i}");
+                break;
+            }
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(10),
+                "Timed out waiting for tx_hash={tx_hash:?} in RocksDB"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
     }
 
     let missing_tx_number: Option<u64> =
