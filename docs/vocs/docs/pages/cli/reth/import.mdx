@@ -187,6 +187,13 @@ RocksDB:
       --chunk-len <CHUNK_LEN>
           Chunk byte length to read from file.
 
+      --fail-on-invalid-block
+          Fail immediately when an invalid block is encountered.
+
+          By default, the import will stop at the last valid block if an invalid block is
+          encountered during execution or validation, leaving the database at the last valid
+          block state. When this flag is set, the import will instead fail with an error.
+
   <IMPORT_PATH>...
           The path(s) to block file(s) for import.
 
