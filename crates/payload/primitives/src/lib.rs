@@ -492,7 +492,7 @@ where
         version,
         payload_or_attrs.message_validation_kind(),
         payload_or_attrs.timestamp(),
-        payload_or_attrs.parent_beacon_block_root().is_some(),
+        payload_or_attrs.slot_number().is_some(),
     )
 }
 

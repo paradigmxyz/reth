@@ -39,6 +39,7 @@ pub(crate) fn eth_payload_attributes_shanghai(timestamp: u64) -> EthPayloadBuild
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: None,
+        slot_number: None,
     };
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
