@@ -2,6 +2,7 @@
 
 use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_evm::overrides::apply_state_overrides;
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
@@ -26,7 +27,6 @@ use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GA
 use revm::{
     context::Block,
     context_interface::{result::ExecutionResult, Transaction},
-    primitives::KECCAK_EMPTY,
 };
 use tracing::trace;
 
@@ -87,7 +87,12 @@ pub trait EstimateCall: Call {
             .unwrap_or(max_gas_limit);
 
         // Configure the evm env
-        let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
+        let mut db = State::builder()
+            .with_database(StateProviderDatabase::new(state))
+            .with_bal_builder()
+            .build();
+        db.bal_state.bal_index = 0;
+        db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
 
         // Apply any state overrides if specified.
         if let Some(state_override) = state_override {

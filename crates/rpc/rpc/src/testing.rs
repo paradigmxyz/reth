@@ -164,6 +164,7 @@ where
                     Arc::new(outcome.block.into_sealed_block()),
                     total_fees,
                     requests,
+                    None,
                 )
                 .try_into_v5()
                 .map_err(RethError::other)

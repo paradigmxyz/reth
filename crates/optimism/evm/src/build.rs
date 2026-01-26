@@ -46,7 +46,14 @@ impl<ChainSpec: OpHardforks> OpBlockAssembler<ChainSpec> {
             evm_env,
             execution_ctx: ctx,
             transactions,
-            output: BlockExecutionResult { receipts, gas_used, blob_gas_used, requests: _ },
+            output:
+                BlockExecutionResult {
+                    receipts,
+                    gas_used,
+                    blob_gas_used,
+                    requests: _,
+                    block_access_list: _,
+                },
             bundle_state,
             state_root,
             state_provider,
@@ -112,6 +119,7 @@ impl<ChainSpec: OpHardforks> OpBlockAssembler<ChainSpec> {
             blob_gas_used,
             excess_blob_gas,
             requests_hash,
+            block_access_list_hash: None,
         };
 
         Ok(Block::new(

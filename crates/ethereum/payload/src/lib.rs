@@ -153,10 +153,14 @@ where
     let PayloadConfig { parent_header, attributes } = config;
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
-    let state = StateProviderDatabase::new(state_provider.as_ref());
-    let mut db =
-        State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
-
+    let state = StateProviderDatabase::new(&state_provider);
+    let mut db = State::builder()
+        .with_database(cached_reads.as_db_mut(state))
+        .with_bundle_update()
+        .with_bal_builder()
+        .build();
+    db.bal_state.bal_index = 0;
+    db.bal_state.bal_builder = Some(revm::state::bal::Bal::new());
     let mut builder = evm_config
         .builder_for_next_block(
             &mut db,
@@ -377,9 +381,19 @@ where
         }));
     }
 
-    let payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests)
-        // add blob sidecars from the executed txs
-        .with_sidecars(blob_sidecars);
+    let block_access_list = chain_spec
+        .is_amsterdam_active_at_timestamp(attributes.timestamp)
+        .then_some(execution_result.block_access_list);
+
+    let payload = EthBuiltPayload::new(
+        attributes.id,
+        sealed_block,
+        total_fees,
+        requests,
+        block_access_list.unwrap_or_default(),
+    )
+    // add blob sidecars from the executed txs
+    .with_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }

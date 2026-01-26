@@ -81,6 +81,7 @@ where
             &self.chain_spec,
             &result.receipts,
             &result.requests,
+            &result.block_access_list,
             receipt_root_bloom,
         )
     }
@@ -181,6 +182,15 @@ where
         } else if header.requests_hash().is_some() {
             return Err(ConsensusError::RequestsHashUnexpected)
         }
+        // if self.chain_spec.is_amsterdam_active_at_timestamp(header.timestamp()) &&
+        //     header.block_access_list_hash().is_none()
+        // {
+        //     return Err(ConsensusError::BlockAccessListHashMissing)
+        // } else if !self.chain_spec.is_amsterdam_active_at_timestamp(header.timestamp()) &&
+        //     header.block_access_list_hash().is_some()
+        // {
+        //     return Err(ConsensusError::BlockAccessListHashUnexpected)
+        // }
 
         Ok(())
     }

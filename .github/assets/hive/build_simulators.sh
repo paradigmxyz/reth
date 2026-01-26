@@ -11,14 +11,17 @@ go build .
 
 # Run each hive command in the background for each simulator and wait
 echo "Building images"
-# TODO: test code has been moved from https://github.com/ethereum/execution-spec-tests to https://github.com/ethereum/execution-specs  we need to pin eels branch with `--sim.buildarg branch=<release-branch-name>` once we have the fusaka release tagged on the new repo
-./hive -client reth --sim "ethereum/eels" --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz -sim.timelimit 1s || true &
+./hive -client reth --sim "ethereum/eels" \
+  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal@v3.0.1/fixtures_bal.tar.gz \
+  --sim.buildarg branch=eips/amsterdam/eip-7928 \
+  --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
 ./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 1s || true &
 ./hive -client reth --sim "smoke/genesis" -sim.timelimit 1s || true &
 ./hive -client reth --sim "smoke/network" -sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/sync" -sim.timelimit 1s || true &
+
 wait
 
 # Run docker save in parallel, wait and exit on error
@@ -37,7 +40,7 @@ for pid in "${saving_pids[@]}"; do
     wait "$pid" || exit
 done
 
-# Make sure we don't rebuild images on the CI jobs
+# Make sure we don't rebuild images on the CI  jobs
 git apply ../.github/assets/hive/no_sim_build.diff
 go build .
 mv ./hive ../hive_assets/

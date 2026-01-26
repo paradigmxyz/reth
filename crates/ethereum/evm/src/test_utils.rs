@@ -136,6 +136,7 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
                 reqs
             }),
             gas_used: 0,
+            block_access_list: None,
             blob_gas_used: 0,
         };
 
