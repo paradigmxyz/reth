@@ -312,14 +312,8 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
             match self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
             })? {
-                CachedStatus::NotCached(value) => {
-                    self.metrics.account_cache_misses.increment(1);
-                    Ok(value)
-                }
-                CachedStatus::Cached(value) => {
-                    self.metrics.account_cache_hits.increment(1);
-                    Ok(value)
-                }
+                CachedStatus::NotCached(value) => Ok(value),
+                CachedStatus::Cached(value) => Ok(value),
             }
         } else if let Some(account) = self.caches.account_cache.get(address) {
             self.metrics.account_cache_hits.increment(1);
@@ -351,13 +345,11 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
             })? {
                 CachedStatus::NotCached(value) => {
-                    self.metrics.storage_cache_misses.increment(1);
                     // The slot that was never written to is indistinguishable from a slot
                     // explicitly set to zero. We return `None` in both cases.
                     Ok(Some(value).filter(|v| !v.is_zero()))
                 }
                 CachedStatus::Cached(value) => {
-                    self.metrics.storage_cache_hits.increment(1);
                     // The slot that was never written to is indistinguishable from a slot
                     // explicitly set to zero. We return `None` in both cases.
                     Ok(Some(value).filter(|v| !v.is_zero()))
@@ -379,14 +371,8 @@ impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)
             })? {
-                CachedStatus::NotCached(code) => {
-                    self.metrics.code_cache_misses.increment(1);
-                    Ok(code)
-                }
-                CachedStatus::Cached(code) => {
-                    self.metrics.code_cache_hits.increment(1);
-                    Ok(code)
-                }
+                CachedStatus::NotCached(code) => Ok(code),
+                CachedStatus::Cached(code) => Ok(code),
             }
         } else if let Some(code) = self.caches.code_cache.get(code_hash) {
             self.metrics.code_cache_hits.increment(1);
