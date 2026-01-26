@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::sync::Arc;
 use alloy_consensus::{
     proofs::{self, calculate_receipt_root},
     Block, BlockBody, BlockHeader, Header, TxReceipt, EMPTY_OMMER_ROOT_HASH,
@@ -112,8 +112,8 @@ where
             blob_gas_used: block_blob_gas_used,
             excess_blob_gas,
             requests_hash,
-            block_access_list_hash: None,
-            slot_number: None,
+            block_access_list_hash: None, // TODO: compute from BAL when Amsterdam is active
+            slot_number: ctx.slot_number,
         };
 
         Ok(Block {

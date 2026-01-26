@@ -97,6 +97,7 @@ where
                     parent_beacon_block_root: request.payload_attributes.parent_beacon_block_root,
                     withdrawals: request.payload_attributes.withdrawals.map(Into::into),
                     extra_data: request.extra_data.unwrap_or_default(),
+                    slot_number: None,
                 };
 
                 let mut builder = evm_config
