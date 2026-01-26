@@ -39,8 +39,13 @@ pub enum EthSimulateError {
     #[error("Client adjustable limit reached")]
     GasLimitReached,
     /// Block number in sequence did not increase.
-    #[error("Block number in sequence did not increase")]
-    BlockNumberInvalid,
+    #[error("block numbers must be in order: {got} <= {parent}")]
+    BlockNumberInvalid {
+        /// The block number that was provided.
+        got: u64,
+        /// The parent block number.
+        parent: u64,
+    },
     /// Block timestamp in sequence did not increase or stay the same.
     #[error("Block timestamp in sequence did not increase")]
     BlockTimestampInvalid,
@@ -96,7 +101,7 @@ impl EthSimulateError {
             Self::IntrinsicGasTooLow => -38013,
             Self::InsufficientFunds { .. } => -38014,
             Self::BlockGasLimitExceeded => -38015,
-            Self::BlockNumberInvalid => -38020,
+            Self::BlockNumberInvalid { .. } => -38020,
             Self::BlockTimestampInvalid => -38021,
             Self::PrecompileSelfReference => -38022,
             Self::PrecompileDuplicateAddress => -38023,
