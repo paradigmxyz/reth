@@ -1,7 +1,7 @@
-//! E2E tests for `RocksDB` provider functionality.
+//! `E2E` tests for `RocksDB` provider functionality.
 //!
 //! These tests verify that reth can start and operate correctly with `RocksDB`
-//! enabled for various tables instead of the default `MDBX` storage.
+//! enabled for various tables instead of the default MDBX storage.
 
 #![cfg(all(feature = "edge", unix))]
 
@@ -20,9 +20,9 @@ use std::sync::Arc;
 
 /// Helper function to enable `RocksDB` for all supported tables.
 ///
-/// This modifies the node configuration to route tx-hash, storages-history,
-/// and account-history tables to `RocksDB` instead of `MDBX`.
-fn with_rocksdb_enabled<C>(mut config: NodeConfig<C>) -> NodeConfig<C> {
+/// This modifies the node configuration to route `tx-hash`, `storages-history`,
+/// and `account-history` tables to `RocksDB` instead of MDBX.
+const fn with_rocksdb_enabled<C>(mut config: NodeConfig<C>) -> NodeConfig<C> {
     config.rocksdb =
         RocksDbArgs { all: true, tx_hash: true, storages_history: true, account_history: true };
     config
