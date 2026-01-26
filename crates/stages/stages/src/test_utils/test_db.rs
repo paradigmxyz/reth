@@ -38,15 +38,17 @@ use tempfile::TempDir;
 pub struct TestStageDB {
     pub factory: ProviderFactory<MockNodeTypesWithDB>,
     pub temp_static_files_dir: TempDir,
+    pub temp_rocksdb_dir: TempDir,
 }
 
 impl Default for TestStageDB {
     /// Create a new instance of [`TestStageDB`]
     fn default() -> Self {
         let (static_dir, static_dir_path) = create_test_static_files_dir();
-        let (_, rocksdb_dir_path) = create_test_rocksdb_dir();
+        let (rocksdb_dir, rocksdb_dir_path) = create_test_rocksdb_dir();
         Self {
             temp_static_files_dir: static_dir,
+            temp_rocksdb_dir: rocksdb_dir,
             factory: ProviderFactory::new(
                 create_test_rw_db(),
                 MAINNET.clone(),
@@ -61,10 +63,11 @@ impl Default for TestStageDB {
 impl TestStageDB {
     pub fn new(path: &Path) -> Self {
         let (static_dir, static_dir_path) = create_test_static_files_dir();
-        let (_, rocksdb_dir_path) = create_test_rocksdb_dir();
+        let (rocksdb_dir, rocksdb_dir_path) = create_test_rocksdb_dir();
 
         Self {
             temp_static_files_dir: static_dir,
+            temp_rocksdb_dir: rocksdb_dir,
             factory: ProviderFactory::new(
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
