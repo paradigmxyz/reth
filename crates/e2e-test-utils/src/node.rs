@@ -110,33 +110,53 @@ where
     /// expects a payload attribute event and waits until the payload is built.
     ///
     /// It triggers the resolve payload via engine api and expects the built payload event.
+    /// This accepts empty blocks; use [`Self::new_payload_non_empty`] if transactions are required.
     pub async fn new_payload(&mut self) -> eyre::Result<Payload::BuiltPayload> {
-        // trigger new payload building draining the pool
         let eth_attr = self.payload.new_payload().await.unwrap();
-        // first event is the payload attributes
         self.payload.expect_attr_event(eth_attr.clone()).await?;
-        // wait for the payload builder to have finished building
         self.payload.wait_for_built_payload(eth_attr.payload_id()).await;
-        // ensure we're also receiving the built payload as event
+        Ok(self.payload.expect_built_payload().await?)
+    }
+
+    /// Creates a new payload that must contain at least one transaction.
+    ///
+    /// Use this after injecting transactions to ensure they are included in the block.
+    pub async fn new_payload_non_empty(&mut self) -> eyre::Result<Payload::BuiltPayload> {
+        let eth_attr = self.payload.new_payload().await.unwrap();
+        self.payload.expect_attr_event(eth_attr.clone()).await?;
+        self.payload.wait_for_non_empty_payload(eth_attr.payload_id()).await;
         Ok(self.payload.expect_built_payload().await?)
     }
 
     /// Triggers payload building job and submits it to the engine.
     pub async fn build_and_submit_payload(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let payload = self.new_payload().await?;
-
         self.submit_payload(payload.clone()).await?;
-
         Ok(payload)
     }
 
-    /// Advances the node forward one block
+    /// Triggers payload building job (requiring transactions) and submits it to the engine.
+    pub async fn build_and_submit_payload_non_empty(
+        &mut self,
+    ) -> eyre::Result<Payload::BuiltPayload> {
+        let payload = self.new_payload_non_empty().await?;
+        self.submit_payload(payload.clone()).await?;
+        Ok(payload)
+    }
+
+    /// Advances the node forward one block (accepts empty blocks).
     pub async fn advance_block(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let payload = self.build_and_submit_payload().await?;
-
-        // trigger forkchoice update via engine api to commit the block to the blockchain
         self.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
+        Ok(payload)
+    }
 
+    /// Advances the node forward one block, requiring at least one transaction.
+    ///
+    /// Use this after injecting transactions to ensure they are included in the block.
+    pub async fn advance_block_with_tx(&mut self) -> eyre::Result<Payload::BuiltPayload> {
+        let payload = self.build_and_submit_payload_non_empty().await?;
+        self.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
         Ok(payload)
     }
 

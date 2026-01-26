@@ -17,15 +17,6 @@ use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_provider::RocksDBProviderFactory;
 use std::sync::Arc;
 
-/// Creates a signed transfer transaction with a specific nonce.
-async fn transfer_tx_with_nonce(
-    chain_id: u64,
-    signer: alloy_signer_local::PrivateKeySigner,
-    nonce: u64,
-) -> alloy_primitives::Bytes {
-    TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer, nonce).await
-}
-
 /// Returns the test chain spec for `RocksDB` tests.
 fn test_chain_spec() -> Arc<ChainSpec> {
     Arc::new(
@@ -153,48 +144,40 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
     let raw_tx = TransactionTestContext::transfer_tx_bytes(chain_id, signer).await;
     let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
 
-    let payload = nodes[0].advance_block().await?;
+    let payload = nodes[0].advance_block_with_tx().await?;
     assert_eq!(payload.block().number(), 1);
-
-    let tx_hashes = vec![tx_hash];
 
     let client = nodes[0].rpc_client().expect("RPC client should be available");
 
-    // Query each transaction by hash
-    for (i, tx_hash) in tx_hashes.iter().enumerate() {
-        let expected_block_number = (i + 1) as u64;
+    // Query transaction by hash
+    let tx: Option<Transaction> = client.request("eth_getTransactionByHash", [tx_hash]).await?;
+    let tx = tx.expect("Transaction should be found");
+    assert_eq!(tx.block_number, Some(1));
 
-        let tx: Option<Transaction> = client.request("eth_getTransactionByHash", [tx_hash]).await?;
-        let tx = tx.expect("Transaction should be found");
-        assert_eq!(tx.block_number, Some(expected_block_number));
+    let receipt: Option<TransactionReceipt> =
+        client.request("eth_getTransactionReceipt", [tx_hash]).await?;
+    let receipt = receipt.expect("Receipt should be found");
+    assert_eq!(receipt.block_number, Some(1));
+    assert!(receipt.status());
 
-        let receipt: Option<TransactionReceipt> =
-            client.request("eth_getTransactionReceipt", [tx_hash]).await?;
-        let receipt = receipt.expect("Receipt should be found");
-        assert_eq!(receipt.block_number, Some(expected_block_number));
-        assert!(receipt.status());
-    }
-
-    let missing_hash = B256::from([0xde; 32]);
-
-    // Direct RocksDB assertions - poll with timeout since persistence is async
+    // Direct RocksDB assertion - poll with timeout since persistence is async
     let rocksdb = nodes[0].inner.provider.rocksdb_provider();
-    for (i, tx_hash) in tx_hashes.iter().enumerate() {
-        let start = std::time::Instant::now();
-        loop {
-            let tx_number: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(*tx_hash)?;
-            if let Some(n) = tx_number {
-                assert_eq!(n, i as u64, "tx {tx_hash} should have TxNumber {i}");
-                break;
-            }
-            assert!(
-                start.elapsed() < std::time::Duration::from_secs(10),
-                "Timed out waiting for tx_hash={tx_hash:?} in RocksDB"
-            );
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let start = std::time::Instant::now();
+    loop {
+        let tx_number: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(tx_hash)?;
+        if let Some(n) = tx_number {
+            assert_eq!(n, 0, "First tx should have TxNumber 0");
+            break;
         }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(10),
+            "Timed out waiting for tx_hash={tx_hash:?} in RocksDB"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
+    // Verify missing hash returns None
+    let missing_hash = B256::from([0xde; 32]);
     let missing_tx_number: Option<u64> =
         rocksdb.get::<tables::TransactionHashNumbers>(missing_hash)?;
     assert!(missing_tx_number.is_none());
@@ -234,13 +217,15 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
 
     let mut tx_hashes = Vec::new();
     for nonce in 0..3 {
-        let raw_tx = transfer_tx_with_nonce(chain_id, signer.clone(), nonce).await;
+        let raw_tx =
+            TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), nonce)
+                .await;
         let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
         tx_hashes.push(tx_hash);
     }
 
     // Mine one block containing all 3 txs
-    let payload = nodes[0].advance_block().await?;
+    let payload = nodes[0].advance_block_with_tx().await?;
     assert_eq!(payload.block().number(), 1);
 
     let client = nodes[0].rpc_client().expect("RPC client");
@@ -287,7 +272,7 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
     Ok(())
 }
 
-/// Transactions across multiple blocks have globally continuous tx_numbers.
+/// Transactions across multiple blocks have globally continuous `tx_numbers`.
 #[tokio::test]
 async fn test_rocksdb_txs_across_blocks() -> Result<()> {
     reth_tracing::init_test_tracing();
@@ -310,19 +295,31 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
     let client = nodes[0].rpc_client().expect("RPC client");
 
     // Block 1: 2 transactions
-    let tx_hash_0 =
-        nodes[0].rpc.inject_tx(transfer_tx_with_nonce(chain_id, signer.clone(), 0).await).await?;
-    let tx_hash_1 =
-        nodes[0].rpc.inject_tx(transfer_tx_with_nonce(chain_id, signer.clone(), 1).await).await?;
+    let tx_hash_0 = nodes[0]
+        .rpc
+        .inject_tx(
+            TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 0).await,
+        )
+        .await?;
+    let tx_hash_1 = nodes[0]
+        .rpc
+        .inject_tx(
+            TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 1).await,
+        )
+        .await?;
 
-    let payload1 = nodes[0].advance_block().await?;
+    let payload1 = nodes[0].advance_block_with_tx().await?;
     assert_eq!(payload1.block().number(), 1);
 
     // Block 2: 1 transaction
-    let tx_hash_2 =
-        nodes[0].rpc.inject_tx(transfer_tx_with_nonce(chain_id, signer.clone(), 2).await).await?;
+    let tx_hash_2 = nodes[0]
+        .rpc
+        .inject_tx(
+            TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 2).await,
+        )
+        .await?;
 
-    let payload2 = nodes[0].advance_block().await?;
+    let payload2 = nodes[0].advance_block_with_tx().await?;
     assert_eq!(payload2.block().number(), 2);
 
     // Verify block contents via RPC
@@ -373,7 +370,7 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
     Ok(())
 }
 
-/// Pending transactions should NOT appear in RocksDB until mined.
+/// Pending transactions should NOT appear in `RocksDB` until mined.
 #[tokio::test]
 async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     reth_tracing::init_test_tracing();
@@ -421,7 +418,7 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     }
 
     // Now mine the block
-    let payload = nodes[0].advance_block().await?;
+    let payload = nodes[0].advance_block_with_tx().await?;
     assert_eq!(payload.block().number(), 1);
 
     // Poll until tx appears in RocksDB
