@@ -1368,7 +1368,7 @@ mod tests {
         let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
         assert!(res.is_ok());
 
-        let provider = MockEthProvider::default();
+        let provider = MockEthProvider::default().with_genesis_block();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1395,7 +1395,7 @@ mod tests {
     async fn invalid_on_gas_limit_too_high() {
         let transaction = get_transaction();
 
-        let provider = MockEthProvider::default();
+        let provider = MockEthProvider::default().with_genesis_block();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1428,7 +1428,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_on_fee_cap_exceeded() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default();
+        let provider = MockEthProvider::default().with_genesis_block();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1465,7 +1465,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_zero_fee_cap() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default();
+        let provider = MockEthProvider::default().with_genesis_block();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1483,7 +1483,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_normal_fee_cap() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default();
+        let provider = MockEthProvider::default().with_genesis_block();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1501,7 +1501,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_on_max_tx_gas_limit_exceeded() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default();
+        let provider = MockEthProvider::default().with_genesis_block();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1533,7 +1533,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_max_tx_gas_limit_disabled() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default();
+        let provider = MockEthProvider::default().with_genesis_block();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1551,7 +1551,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_max_tx_gas_limit_within_limit() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default();
+        let provider = MockEthProvider::default().with_genesis_block();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1569,7 +1569,7 @@ mod tests {
     // Helper function to set up common test infrastructure for priority fee tests
     fn setup_priority_fee_test() -> (EthPooledTransaction, MockEthProvider) {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default();
+        let provider = MockEthProvider::default().with_genesis_block();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1739,7 +1739,7 @@ mod tests {
     fn reject_oversized_tx() {
         let mut transaction = get_transaction();
         transaction.encoded_length = DEFAULT_MAX_TX_INPUT_BYTES + 1;
-        let provider = MockEthProvider::default();
+        let provider = MockEthProvider::default().with_genesis_block();
 
         // No minimum priority fee set (default is None)
         let validator = create_validator_with_minimum_fee(provider, None, None);
@@ -1752,7 +1752,7 @@ mod tests {
     #[tokio::test]
     async fn valid_with_disabled_balance_check() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default();
+        let provider = MockEthProvider::default().with_genesis_block();
 
         // Set account with 0 balance
         provider.add_account(
