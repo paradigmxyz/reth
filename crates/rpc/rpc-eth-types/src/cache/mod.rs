@@ -15,9 +15,7 @@ use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use schnellru::{ByLength, Limiter, LruMap};
 use std::{
     future::Future,
-    ops::Deref,
     pin::Pin,
-    rc::Rc,
     sync::Arc,
     task::{Context, Poll},
 };
@@ -26,43 +24,6 @@ use tokio::sync::{
     oneshot, Semaphore,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-
-/// A wrapper around `Rc<T>` that implements `Send`.
-///
-/// This is used in `EthStateCacheService` where the `Rc` is only ever accessed from within
-/// the service's single-threaded poll loop.
-#[derive(Debug)]
-struct SendRc<T>(Rc<T>);
-
-impl<T> SendRc<T> {
-    fn new(value: T) -> Self {
-        Self(Rc::new(value))
-    }
-}
-
-impl<T> Clone for SendRc<T> {
-    fn clone(&self) -> Self {
-        Self(Rc::clone(&self.0))
-    }
-}
-
-impl<T> Deref for SendRc<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<T> AsRef<T> for SendRc<T> {
-    fn as_ref(&self) -> &T {
-        &self.0
-    }
-}
-
-// SAFETY: Only used within `EthStateCacheService` where all access is confined to a single
-// task's poll loop.
-unsafe impl<T> Send for SendRc<T> {}
 
 pub mod config;
 pub mod db;
@@ -379,7 +340,7 @@ pub(crate) struct EthStateCacheService<
     /// This restricts the max concurrent fetch tasks at the same time.
     rate_limiter: Arc<Semaphore>,
     /// LRU index mapping transaction hashes to their block hash and index within the block.
-    tx_hash_index: LruMap<TxHash, (SendRc<B256>, usize), ByLength>,
+    tx_hash_index: LruMap<TxHash, (B256, usize), ByLength>,
 }
 
 impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
@@ -389,17 +350,24 @@ where
 {
     /// Indexes all transactions in a block by transaction hash.
     fn index_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
-        let block_hash = SendRc::new(block.hash());
+        let block_hash = block.hash();
         for (tx_idx, tx) in block.body().transactions().iter().enumerate() {
-            self.tx_hash_index.insert(*tx.tx_hash(), (block_hash.clone(), tx_idx));
+            self.tx_hash_index.insert(*tx.tx_hash(), (block_hash, tx_idx));
         }
     }
 
     /// Removes transaction index entries for a reorged block.
-    /// This iterates the block's transactions to remove their index entries.
+    ///
+    /// Only removes entries that still point to this block, preserving mappings for transactions
+    /// that were re-mined in a new canonical block.
     fn remove_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
+        let block_hash = block.hash();
         for tx in block.body().transactions() {
-            self.tx_hash_index.remove(tx.tx_hash());
+            if let Some((mapped_hash, _)) = self.tx_hash_index.get(tx.tx_hash()) {
+                if *mapped_hash == block_hash {
+                    self.tx_hash_index.remove(tx.tx_hash());
+                }
+            }
         }
     }
 
@@ -682,10 +650,8 @@ where
                         CacheAction::GetTransactionByHash { tx_hash, response_tx } => {
                             let result =
                                 this.tx_hash_index.get(&tx_hash).and_then(|(block_hash, idx)| {
-                                    let block =
-                                        this.full_block_cache.get(block_hash.as_ref()).cloned()?;
-                                    let receipts =
-                                        this.receipts_cache.get(block_hash.as_ref()).cloned();
+                                    let block = this.full_block_cache.get(block_hash).cloned()?;
+                                    let receipts = this.receipts_cache.get(block_hash).cloned();
                                     Some(CachedTransaction::new(block, *idx, receipts))
                                 });
                             let _ = response_tx.send(result);

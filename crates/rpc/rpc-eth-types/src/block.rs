@@ -5,7 +5,8 @@ use std::sync::Arc;
 use alloy_consensus::{transaction::TxHashRef, TxReceipt};
 use alloy_primitives::TxHash;
 use reth_primitives_traits::{
-    Block, BlockBody, BlockTy, IndexedTx, NodePrimitives, ReceiptTy, RecoveredBlock, SealedBlock,
+    Block, BlockBody, BlockTy, IndexedTx, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock,
+    SealedBlock,
 };
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcTypes};
 
@@ -30,6 +31,11 @@ impl<B: Block, R> CachedTransaction<B, R> {
         receipts: Option<Arc<Vec<R>>>,
     ) -> Self {
         Self { block, tx_index, receipts }
+    }
+
+    /// Returns the `Recovered<&T>` transaction at the cached index.
+    pub fn recovered_transaction(&self) -> Option<Recovered<&<B::Body as BlockBody>::Transaction>> {
+        self.block.recovered_transaction(self.tx_index)
     }
 
     /// Converts this cached transaction into an RPC receipt using the given converter.

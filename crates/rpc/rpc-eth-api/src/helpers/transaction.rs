@@ -621,15 +621,10 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         async move {
             // First, try the RPC cache
             if let Some(cached) = self.cache().get_transaction_by_hash(hash).await &&
-                let Some(tx) = cached.block.body().transactions().get(cached.tx_index)
+                let Some(tx) = cached.recovered_transaction()
             {
-                let transaction = tx
-                    .clone()
-                    .try_into_recovered_unchecked()
-                    .map_err(|_| EthApiError::InvalidTransactionSignature)?;
-
                 return Ok(Some(TransactionSource::Block {
-                    transaction,
+                    transaction: tx.cloned(),
                     index: cached.tx_index as u64,
                     block_hash: cached.block.hash(),
                     block_number: cached.block.number(),
