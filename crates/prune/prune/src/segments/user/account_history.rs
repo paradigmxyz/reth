@@ -8,9 +8,11 @@ use crate::{
 };
 use alloy_primitives::BlockNumber;
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::PruneShardOutcome;
 use reth_provider::{
     changeset_walker::StaticFileAccountChangesetWalker, DBProvider, EitherWriter,
-    PruneShardOutcome, RocksDBProviderFactory, StaticFileProviderFactory,
+    RocksDBProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,

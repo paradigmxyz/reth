@@ -12,9 +12,9 @@ use reth_db_api::{
     tables,
     transaction::DbTxMut,
 };
-use reth_provider::{
-    DBProvider, EitherWriter, PruneShardOutcome, RocksDBProviderFactory, StaticFileProviderFactory,
-};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::PruneShardOutcome;
+use reth_provider::{DBProvider, EitherWriter, RocksDBProviderFactory, StaticFileProviderFactory};
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
