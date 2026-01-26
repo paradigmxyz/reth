@@ -84,6 +84,22 @@ use crate::proof_task_metrics::{
 
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
+/// Type alias for the V2 account proof calculator.
+type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
+    <Provider as TrieCursorFactory>::AccountTrieCursor<'a>,
+    <Provider as HashedCursorFactory>::AccountCursor<'a>,
+    AsyncAccountValueEncoder<
+        <Provider as TrieCursorFactory>::StorageTrieCursor<'a>,
+        <Provider as HashedCursorFactory>::StorageCursor<'a>,
+    >,
+>;
+
+/// Type alias for the V2 storage proof calculator.
+type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
+    <Provider as TrieCursorFactory>::StorageTrieCursor<'a>,
+    <Provider as HashedCursorFactory>::StorageCursor<'a>,
+>;
+
 /// A handle that provides type-safe access to proof worker pools.
 ///
 /// The handle stores direct senders to both storage and account worker pools,
@@ -1295,7 +1311,7 @@ where
             self.metrics.record_account_nodes(account_nodes_processed as usize);
             self.metrics.record_account_worker_idle_time(total_idle_time);
             self.cursor_metrics.record(&mut cursor_metrics_cache);
-            proof_calculator_metrics_cache.record();
+            self.metrics.record_account_proof_calculator_metrics(&proof_calculator_metrics_cache);
         }
 
         Ok(())
@@ -1367,25 +1383,10 @@ where
         Ok((ProofResult::Legacy(result, stats), storage_wait_time))
     }
 
-    #[allow(clippy::type_complexity)]
     fn compute_v2_account_multiproof<'a, Provider>(
         &self,
-        v2_account_calculator: &mut proof_v2::ProofCalculator<
-            <Provider as TrieCursorFactory>::AccountTrieCursor<'a>,
-            <Provider as HashedCursorFactory>::AccountCursor<'a>,
-            AsyncAccountValueEncoder<
-                <Provider as TrieCursorFactory>::StorageTrieCursor<'a>,
-                <Provider as HashedCursorFactory>::StorageCursor<'a>,
-            >,
-        >,
-        v2_storage_calculator: Rc<
-            RefCell<
-                proof_v2::StorageProofCalculator<
-                    <Provider as TrieCursorFactory>::StorageTrieCursor<'a>,
-                    <Provider as HashedCursorFactory>::StorageCursor<'a>,
-                >,
-            >,
-        >,
+        v2_account_calculator: &mut V2AccountProofCalculator<'a, Provider>,
+        v2_storage_calculator: Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>,
         targets: MultiProofTargetsV2,
     ) -> Result<(ProofResult, ValueEncoderMetrics), ParallelStateRootError>
     where
@@ -1426,30 +1427,11 @@ where
     /// Processes an account multiproof request.
     ///
     /// Returns metrics from the value encoder used during proof computation.
-    #[allow(clippy::type_complexity)]
     fn process_account_multiproof<'a, Provider>(
         &self,
         provider: &Provider,
-        v2_account_calculator: Option<
-            &mut proof_v2::ProofCalculator<
-                <Provider as TrieCursorFactory>::AccountTrieCursor<'a>,
-                <Provider as HashedCursorFactory>::AccountCursor<'a>,
-                AsyncAccountValueEncoder<
-                    <Provider as TrieCursorFactory>::StorageTrieCursor<'a>,
-                    <Provider as HashedCursorFactory>::StorageCursor<'a>,
-                >,
-            >,
-        >,
-        v2_storage_calculator: Option<
-            Rc<
-                RefCell<
-                    proof_v2::StorageProofCalculator<
-                        <Provider as TrieCursorFactory>::StorageTrieCursor<'a>,
-                        <Provider as HashedCursorFactory>::StorageCursor<'a>,
-                    >,
-                >,
-            >,
-        >,
+        v2_account_calculator: Option<&mut V2AccountProofCalculator<'a, Provider>>,
+        v2_storage_calculator: Option<Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>>,
         input: AccountMultiproofInput,
         account_proofs_processed: &mut u64,
         cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
