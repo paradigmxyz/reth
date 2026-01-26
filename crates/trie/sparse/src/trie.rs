@@ -1057,8 +1057,8 @@ impl SparseTrieTrait for SerialSparseTrie {
     /// Prunes the trie by converting nodes beyond `max_depth` into hash stubs,
     /// then removing all their descendants.
     fn prune(&mut self, max_depth: usize) -> usize {
-        // DFS traversal to find all nodes at exactly max_depth.
-        // These become the "prune roots" - nodes that will be converted to Hash stubs.
+        // DFS to collect children of nodes at max_depth. These children (at depth max_depth+1)
+        // become "prune roots" - converted to Hash stubs with their descendants removed.
         let mut pruned_roots = Vec::<Nibbles>::new();
         let mut stack = vec![(Nibbles::default(), 0usize)];
 
@@ -1126,9 +1126,13 @@ impl SparseTrieTrait for SerialSparseTrie {
         }
         self.prefix_set.clear();
 
-        // Remove all descendants of pruned roots.
-        // Sort for efficient binary search lookups.
+        // Sort for binary search. Roots are prefix-free by construction (all at same node-depth),
+        // which is required for partition_point ancestor detection to work correctly.
         effective_pruned_roots.sort_unstable();
+        debug_assert!(
+            effective_pruned_roots.windows(2).all(|w| !w[1].starts_with(&w[0])),
+            "prune roots must be prefix-free"
+        );
 
         // Returns true if `p` is a strict descendant of any pruned root (same prefix, longer path).
         let is_strict_descendant = |p: &Nibbles| -> bool {
