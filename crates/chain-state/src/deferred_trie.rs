@@ -206,11 +206,33 @@ impl DeferredTrieData {
                         Default::default(), // prefix_sets are per-block, not cumulative
                     );
                     // Only trigger COW clone if there's actually data to add.
-                    if !sorted_hashed_state.is_empty() {
-                        Arc::make_mut(&mut overlay.state).extend_ref_and_sort(&sorted_hashed_state);
+                    #[cfg(feature = "rayon")]
+                    {
+                        rayon::join(
+                            || {
+                                if !sorted_hashed_state.is_empty() {
+                                    Arc::make_mut(&mut overlay.state)
+                                        .extend_ref_and_sort(&sorted_hashed_state);
+                                }
+                            },
+                            || {
+                                if !sorted_trie_updates.is_empty() {
+                                    Arc::make_mut(&mut overlay.nodes)
+                                        .extend_ref_and_sort(&sorted_trie_updates);
+                                }
+                            },
+                        );
                     }
-                    if !sorted_trie_updates.is_empty() {
-                        Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(&sorted_trie_updates);
+                    #[cfg(not(feature = "rayon"))]
+                    {
+                        if !sorted_hashed_state.is_empty() {
+                            Arc::make_mut(&mut overlay.state)
+                                .extend_ref_and_sort(&sorted_hashed_state);
+                        }
+                        if !sorted_trie_updates.is_empty() {
+                            Arc::make_mut(&mut overlay.nodes)
+                                .extend_ref_and_sort(&sorted_trie_updates);
+                        }
                     }
                     overlay
                 }
@@ -262,8 +284,17 @@ impl DeferredTrieData {
         }
 
         // Extend with current block's sorted data last (takes precedence)
-        state_mut.extend_ref_and_sort(sorted_hashed_state);
-        nodes_mut.extend_ref_and_sort(sorted_trie_updates);
+        #[cfg(feature = "rayon")]
+        rayon::join(
+            || state_mut.extend_ref_and_sort(sorted_hashed_state),
+            || nodes_mut.extend_ref_and_sort(sorted_trie_updates),
+        );
+
+        #[cfg(not(feature = "rayon"))]
+        {
+            state_mut.extend_ref_and_sort(sorted_hashed_state);
+            nodes_mut.extend_ref_and_sort(sorted_trie_updates);
+        }
 
         overlay
     }

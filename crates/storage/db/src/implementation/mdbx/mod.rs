@@ -560,6 +560,35 @@ impl DatabaseEnv {
         Ok(handles)
     }
 
+    /// Drops an orphaned table by name.
+    ///
+    /// This is used to clean up tables that are no longer defined in the schema but may still
+    /// exist on disk from previous versions.
+    ///
+    /// Returns `Ok(true)` if the table existed and was dropped, `Ok(false)` if the table was not
+    /// found.
+    ///
+    /// # Safety
+    /// This permanently deletes the table and all its data. Only use for tables that are
+    /// confirmed to be obsolete.
+    pub fn drop_orphan_table(&self, name: &str) -> Result<bool, DatabaseError> {
+        let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
+
+        match tx.open_db(Some(name)) {
+            Ok(db) => {
+                // SAFETY: We just opened the db handle and will commit immediately after dropping.
+                // No other cursors or handles exist for this table.
+                unsafe {
+                    tx.drop_db(db.dbi()).map_err(|e| DatabaseError::Delete(e.into()))?;
+                }
+                tx.commit().map_err(|e| DatabaseError::Commit(e.into()))?;
+                Ok(true)
+            }
+            Err(reth_libmdbx::Error::NotFound) => Ok(false),
+            Err(e) => Err(DatabaseError::Open(e.into())),
+        }
+    }
+
     /// Records version that accesses the database with write privileges.
     pub fn record_client_version(&self, version: ClientVersion) -> Result<(), DatabaseError> {
         if version.is_empty() {
@@ -644,6 +673,46 @@ mod tests {
     #[test]
     fn db_creation() {
         create_test_db(DatabaseEnvKind::RW);
+    }
+
+    #[test]
+    fn db_drop_orphan_table() {
+        let path = tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep();
+        let db = create_test_db_with_path(DatabaseEnvKind::RW, &path);
+
+        // Create an orphan table by manually creating it
+        let orphan_table_name = "OrphanTestTable";
+        {
+            let tx = db.inner.begin_rw_txn().expect(ERROR_INIT_TX);
+            tx.create_db(Some(orphan_table_name), DatabaseFlags::empty())
+                .expect("Failed to create orphan table");
+            tx.commit().expect(ERROR_COMMIT);
+        }
+
+        // Verify the table exists by opening it
+        {
+            let tx = db.inner.begin_ro_txn().expect(ERROR_INIT_TX);
+            assert!(tx.open_db(Some(orphan_table_name)).is_ok(), "Orphan table should exist");
+        }
+
+        // Drop the orphan table
+        let result = db.drop_orphan_table(orphan_table_name);
+        assert!(result.is_ok(), "drop_orphan_table should succeed");
+        assert!(result.unwrap(), "drop_orphan_table should return true for existing table");
+
+        // Verify the table no longer exists
+        {
+            let tx = db.inner.begin_ro_txn().expect(ERROR_INIT_TX);
+            assert!(
+                tx.open_db(Some(orphan_table_name)).is_err(),
+                "Orphan table should no longer exist"
+            );
+        }
+
+        // Dropping a non-existent table should return Ok(false)
+        let result = db.drop_orphan_table("NonExistentTable");
+        assert!(result.is_ok(), "drop_orphan_table should succeed for non-existent table");
+        assert!(!result.unwrap(), "drop_orphan_table should return false for non-existent table");
     }
 
     #[test]

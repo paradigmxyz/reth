@@ -74,7 +74,9 @@ pub trait EngineApi<Engine: EngineTypes> {
         execution_requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus>;
 
-    /// For BAL.
+    /// Post Amsterdam payload handler
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
     #[method(name = "newPayloadV5")]
     async fn new_payload_v5(
         &self,
@@ -203,7 +205,13 @@ pub trait EngineApi<Engine: EngineTypes> {
         payload_id: PayloadId,
     ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV5>;
 
-    /// payload v6
+    /// Post Amsterdam payload handler.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6>
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call. Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
     #[method(name = "getPayloadV6")]
     async fn get_payload_v6(
         &self,

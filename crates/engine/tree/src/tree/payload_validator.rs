@@ -39,7 +39,7 @@ use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader,
+    StateProviderFactory, StateReader, StorageChangeSetReader,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, State};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
@@ -144,6 +144,7 @@ where
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
+                          + StorageChangeSetReader
                           + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
@@ -479,11 +480,15 @@ where
         let block = self.convert_to_block(input)?.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
-        let receipt_root_bloom = Some(
-            receipt_root_rx
-                .blocking_recv()
-                .expect("receipt root task dropped sender without result"),
-        );
+        let receipt_root_bloom = receipt_root_rx
+            .blocking_recv()
+            .inspect_err(|_| {
+                tracing::error!(
+                    target: "engine::tree::payload_validator",
+                    "Receipt root task dropped sender without result, receipt root calculation likely aborted"
+                );
+            })
+            .ok();
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(
@@ -498,6 +503,7 @@ where
 
         let root_time = Instant::now();
         let mut maybe_state_root = None;
+        let mut state_root_task_failed = false;
 
         match strategy {
             StateRootStrategy::StateRootTask => {
@@ -516,10 +522,12 @@ where
                                 block_state_root = ?block.header().state_root(),
                                 "State root task returned incorrect state root"
                             );
+                            state_root_task_failed = true;
                         }
                     }
                     Err(error) => {
                         debug!(target: "engine::tree::payload_validator", %error, "State root task failed");
+                        state_root_task_failed = true;
                     }
                 }
             }
@@ -564,6 +572,11 @@ where
                 self.compute_state_root_serial(overlay_factory.clone(), &hashed_state),
                 block
             );
+
+            if state_root_task_failed {
+                self.metrics.block_validation.state_root_task_fallback_success_total.increment(1);
+            }
+
             (root, updates, root_time.elapsed())
         };
 
@@ -1334,6 +1347,7 @@ where
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
+                          + StorageChangeSetReader
                           + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory

@@ -438,6 +438,8 @@ pub struct BlocksPerFileConfig {
     pub transaction_senders: Option<u64>,
     /// Number of blocks per file for the account changesets segment.
     pub account_change_sets: Option<u64>,
+    /// Number of blocks per file for the storage changesets segment.
+    pub storage_change_sets: Option<u64>,
 }
 
 impl StaticFilesConfig {
@@ -451,6 +453,7 @@ impl StaticFilesConfig {
             receipts,
             transaction_senders,
             account_change_sets,
+            storage_change_sets,
         } = self.blocks_per_file;
         eyre::ensure!(headers != Some(0), "Headers segment blocks per file must be greater than 0");
         eyre::ensure!(
@@ -469,6 +472,10 @@ impl StaticFilesConfig {
             account_change_sets != Some(0),
             "Account changesets segment blocks per file must be greater than 0"
         );
+        eyre::ensure!(
+            storage_change_sets != Some(0),
+            "Storage changesets segment blocks per file must be greater than 0"
+        );
         Ok(())
     }
 
@@ -480,6 +487,7 @@ impl StaticFilesConfig {
             receipts,
             transaction_senders,
             account_change_sets,
+            storage_change_sets,
         } = self.blocks_per_file;
 
         let mut map = StaticFileMap::default();
@@ -492,6 +500,7 @@ impl StaticFilesConfig {
                 StaticFileSegment::Receipts => receipts,
                 StaticFileSegment::TransactionSenders => transaction_senders,
                 StaticFileSegment::AccountChangeSets => account_change_sets,
+                StaticFileSegment::StorageChangeSets => storage_change_sets,
             };
 
             if let Some(blocks_per_file) = blocks_per_file {

@@ -34,6 +34,11 @@ fn default_account_worker_count() -> usize {
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
 
+/// The size of proof targets chunk to spawn in one multiproof calculation when V2 proofs are
+/// enabled. This is 4x the default chunk size to take advantage of more efficient V2 proof
+/// computation.
+pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2: usize = DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE * 4;
+
 /// Default number of reserved CPU cores for non-reth processes.
 ///
 /// This will be deducted from the thread count of main reth global threadpool.
@@ -45,7 +50,17 @@ pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
-const DEFAULT_CROSS_BLOCK_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+const DEFAULT_CROSS_BLOCK_CACHE_SIZE: usize = default_cross_block_cache_size();
+
+const fn default_cross_block_cache_size() -> usize {
+    if cfg!(test) {
+        1024 * 1024 // 1 MB in tests
+    } else if cfg!(target_pointer_width = "32") {
+        usize::MAX // max possible on wasm32 / 32-bit
+    } else {
+        4 * 1024 * 1024 * 1024 // 4 GB on 64-bit
+    }
+}
 
 /// Determines if the host has enough parallelism to run the payload processor.
 ///
@@ -100,7 +115,7 @@ pub struct TreeConfig {
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
-    cross_block_cache_size: u64,
+    cross_block_cache_size: usize,
     /// Whether the host has enough parallelism to run state root task.
     has_enough_parallelism: bool,
     /// Whether multiproof task should chunk proof targets.
@@ -188,7 +203,7 @@ impl TreeConfig {
         disable_prewarming: bool,
         disable_parallel_sparse_trie: bool,
         state_provider_metrics: bool,
-        cross_block_cache_size: u64,
+        cross_block_cache_size: usize,
         has_enough_parallelism: bool,
         multiproof_chunking_enabled: bool,
         multiproof_chunk_size: usize,
@@ -267,6 +282,17 @@ impl TreeConfig {
         self.multiproof_chunk_size
     }
 
+    /// Return the multiproof task chunk size, using the V2 default if V2 proofs are enabled
+    /// and the chunk size is at the default value.
+    pub const fn effective_multiproof_chunk_size(&self) -> usize {
+        if self.enable_proof_v2 && self.multiproof_chunk_size == DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE
+        {
+            DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2
+        } else {
+            self.multiproof_chunk_size
+        }
+    }
+
     /// Return the number of reserved CPU cores for non-reth processes
     pub const fn reserved_cpu_cores(&self) -> usize {
         self.reserved_cpu_cores
@@ -305,7 +331,7 @@ impl TreeConfig {
     }
 
     /// Returns the cross-block cache size.
-    pub const fn cross_block_cache_size(&self) -> u64 {
+    pub const fn cross_block_cache_size(&self) -> usize {
         self.cross_block_cache_size
     }
 
@@ -408,7 +434,7 @@ impl TreeConfig {
     }
 
     /// Setter for cross block cache size.
-    pub const fn with_cross_block_cache_size(mut self, cross_block_cache_size: u64) -> Self {
+    pub const fn with_cross_block_cache_size(mut self, cross_block_cache_size: usize) -> Self {
         self.cross_block_cache_size = cross_block_cache_size;
         self
     }

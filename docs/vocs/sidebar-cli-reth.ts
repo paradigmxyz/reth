@@ -163,6 +163,10 @@ export const rethCliSidebar: SidebarItem = {
                                 {
                                     text: "reth db settings set account_history",
                                     link: "/cli/reth/db/settings/set/account_history"
+                                },
+                                {
+                                    text: "reth db settings set storage_changesets",
+                                    link: "/cli/reth/db/settings/set/storage_changesets"
                                 }
                             ]
                         }
@@ -258,6 +262,10 @@ export const rethCliSidebar: SidebarItem = {
                 {
                     text: "reth p2p bootnode",
                     link: "/cli/reth/p2p/bootnode"
+                },
+                {
+                    text: "reth p2p enode",
+                    link: "/cli/reth/p2p/enode"
                 }
             ]
         },

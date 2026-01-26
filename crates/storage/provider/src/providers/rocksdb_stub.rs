@@ -5,8 +5,9 @@
 //! All method calls are cfg-guarded in the calling code, so only type definitions are needed here.
 
 use alloy_primitives::BlockNumber;
+use metrics::Label;
 use parking_lot::Mutex;
-use reth_db_api::models::StorageSettings;
+use reth_db_api::{database_metrics::DatabaseMetrics, models::StorageSettings};
 use reth_prune_types::PruneMode;
 use reth_storage_errors::{db::LogLevel, provider::ProviderResult};
 use std::{path::Path, sync::Arc};
@@ -17,6 +18,10 @@ pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<()>>>;
 /// Statistics for a single `RocksDB` table (column family) - stub.
 #[derive(Debug, Clone)]
 pub struct RocksDBTableStats {
+    /// Size of SST files on disk in bytes.
+    pub sst_size_bytes: u64,
+    /// Size of memtables in memory in bytes.
+    pub memtable_size_bytes: u64,
     /// Name of the table/column family.
     pub name: String,
     /// Estimated number of keys in the table.
@@ -25,6 +30,15 @@ pub struct RocksDBTableStats {
     pub estimated_size_bytes: u64,
     /// Estimated bytes pending compaction (reclaimable space).
     pub pending_compaction_bytes: u64,
+}
+
+/// Database-level statistics for `RocksDB` - stub.
+#[derive(Debug, Clone)]
+pub struct RocksDBStats {
+    /// Statistics for each table (column family).
+    pub tables: Vec<RocksDBTableStats>,
+    /// Total size of WAL (Write-Ahead Log) files in bytes.
+    pub wal_size_bytes: u64,
 }
 
 /// Context for `RocksDB` block writes (stub).
@@ -75,6 +89,41 @@ impl RocksDBProvider {
     /// Returns an empty vector since there is no `RocksDB` when the feature is disabled.
     pub const fn table_stats(&self) -> Vec<RocksDBTableStats> {
         Vec::new()
+    }
+
+    /// Clears all entries from the specified table (stub implementation).
+    ///
+    /// This is a no-op since there is no `RocksDB` when the feature is disabled.
+    pub const fn clear<T>(&self) -> ProviderResult<()> {
+        Ok(())
+    }
+
+    /// Returns the total size of WAL (Write-Ahead Log) files in bytes (stub implementation).
+    ///
+    /// Returns 0 since there is no `RocksDB` when the feature is disabled.
+    pub const fn wal_size_bytes(&self) -> u64 {
+        0
+    }
+
+    /// Returns database-level statistics including per-table stats and WAL size (stub
+    /// implementation).
+    ///
+    /// Returns empty stats since there is no `RocksDB` when the feature is disabled.
+    pub const fn db_stats(&self) -> RocksDBStats {
+        RocksDBStats { tables: Vec::new(), wal_size_bytes: 0 }
+    }
+
+    /// Flushes all pending writes to disk (stub implementation).
+    ///
+    /// This is a no-op since there is no `RocksDB` when the feature is disabled.
+    pub const fn flush(&self, _tables: &[&'static str]) -> ProviderResult<()> {
+        Ok(())
+    }
+}
+
+impl DatabaseMetrics for RocksDBProvider {
+    fn gauge_metrics(&self) -> Vec<(&'static str, f64, Vec<Label>)> {
+        vec![]
     }
 }
 
