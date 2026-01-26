@@ -342,7 +342,7 @@ mod tests {
         txn.commit().unwrap();
 
         // Read data back
-        let mut txn = TxUnsync::<RO>::new(env.clone()).unwrap();
+        let mut txn = TxUnsync::<RO>::new(env).unwrap();
         let db = txn.open_db(None).unwrap();
         let value: Option<Vec<u8>> = txn.get(db.dbi(), b"key1").unwrap();
         assert_eq!(value.as_deref(), Some(b"value1".as_slice()));
@@ -368,7 +368,7 @@ mod tests {
         }
 
         // Data should not be visible
-        let mut txn = TxUnsync::<RO>::new(env.clone()).unwrap();
+        let mut txn = TxUnsync::<RO>::new(env).unwrap();
         let db = txn.open_db(None).unwrap();
         let value: Option<Vec<u8>> = txn.get(db.dbi(), b"key").unwrap();
         assert!(value.is_none());
@@ -393,7 +393,7 @@ mod tests {
         txn.commit().unwrap();
 
         // Verify deleted
-        let mut txn = TxUnsync::<RO>::new(env.clone()).unwrap();
+        let mut txn = TxUnsync::<RO>::new(env).unwrap();
         let db = txn.open_db(None).unwrap();
         let value: Option<Vec<u8>> = txn.get(db.dbi(), b"key").unwrap();
         assert!(value.is_none());

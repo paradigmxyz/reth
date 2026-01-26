@@ -10,7 +10,7 @@
 //! - All operations on a transaction must be totally ordered and non-concurrent
 //! - Read-write transactions can only be used from the thread that created them
 //!
-//! The synchronized implementation ([`TransactionPtr`]) uses a `Mutex` to enforce
+//! The synchronized implementation ([`crate::TransactionPtr`]) uses a `Mutex` to enforce
 //! these requirements at runtime. This is correct and safe, but the synchronization
 //! overhead adds up in hot paths (100 reads = 100 lock acquisitions).
 //!
