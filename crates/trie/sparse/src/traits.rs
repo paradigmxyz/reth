@@ -230,6 +230,36 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Shrink the capacity of the sparse trie's value storage to the given size.
     /// This will reduce memory usage if the current capacity is higher than the given size.
     fn shrink_values_to(&mut self, size: usize);
+
+    /// Returns the number of revealed (non-Hash) nodes in the trie.
+    fn revealed_node_count(&self) -> usize;
+
+    /// Prunes the trie by un-revealing nodes beyond the given depth.
+    ///
+    /// Nodes at depths greater than `max_depth` are replaced with `Hash` variant
+    /// nodes containing their pre-computed hash. This must be called after `root()`
+    /// has been called so that all node hashes are available.
+    ///
+    /// **IMPORTANT**: Depth is counted as the number of nodes traversed, NOT nibble path length.
+    ///
+    /// Example depth counting:
+    /// ```text
+    /// Root (Branch) ──────────────────────────── depth 0
+    ///   └─ Extension (0xab) ──────────────────── depth 1
+    ///        └─ Branch ───────────────────────── depth 2
+    ///             ├─ child 0: Leaf ───────────── depth 3
+    ///             └─ child f: Extension (0xcd) ─ depth 3
+    ///                           └─ Branch ────── depth 4
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `max_depth` - Maximum depth to retain. Nodes at depth > `max_depth` are pruned.
+    ///
+    /// # Panics
+    ///
+    /// May panic if called before `root()` has been called (hashes not available).
+    fn prune(&mut self, max_depth: usize);
 }
 
 /// Tracks modifications to the sparse trie structure.

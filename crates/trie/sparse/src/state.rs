@@ -970,6 +970,62 @@ where
         storage_trie.remove_leaf(slot, provider)?;
         Ok(())
     }
+
+    /// Prunes the account trie and selected storage tries to reduce memory usage.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_depth` - Maximum depth to retain in pruned tries
+    /// * `max_storage_tries` - Maximum number of storage tries to keep (largest by node count)
+    ///
+    /// Storage tries not in the top `max_storage_tries` by revealed node count are cleared
+    /// entirely.
+    pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
+        if let SparseTrie::Revealed(trie) = &mut self.state {
+            trie.prune(max_depth);
+        }
+        self.revealed_account_paths.clear();
+
+        let mut storage_trie_counts: Vec<(B256, usize)> = self
+            .storage
+            .tries
+            .iter()
+            .map(|(hash, trie)| {
+                let count = match trie {
+                    SparseTrie::Revealed(t) => t.revealed_node_count(),
+                    SparseTrie::Blind(_) => 0,
+                };
+                (*hash, count)
+            })
+            .collect();
+
+        storage_trie_counts.sort_by(|a, b| b.1.cmp(&a.1));
+
+        let tries_to_keep: HashSet<B256> =
+            storage_trie_counts.iter().take(max_storage_tries).map(|(hash, _)| *hash).collect();
+
+        // Collect keys to avoid borrow conflict
+        let tries_to_clear: Vec<B256> = self
+            .storage
+            .tries
+            .keys()
+            .filter(|hash| !tries_to_keep.contains(*hash))
+            .copied()
+            .collect();
+
+        for hash in tries_to_clear {
+            if let Some(trie) = self.storage.tries.remove(&hash) {
+                self.storage.cleared_tries.push(trie.clear());
+            }
+            self.storage.revealed_paths.remove(&hash);
+        }
+
+        for hash in &tries_to_keep {
+            if let Some(SparseTrie::Revealed(trie)) = self.storage.tries.get_mut(hash) {
+                trie.prune(max_depth);
+            }
+        }
+    }
 }
 
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
