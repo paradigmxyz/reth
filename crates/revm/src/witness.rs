@@ -70,9 +70,8 @@ impl ExecutionWitnessRecord {
                 }
             }
         }
-        // BlockHashCache is now a fixed-size circular buffer without key iteration
-        // Set to None as we can't determine the lowest block number from the new structure
-        self.lowest_block_number = None
+        // Get the lowest block number from the cache
+        self.lowest_block_number = statedb.block_hashes.lowest().map(|(n, _)| n)
     }
 
     /// Creates the record from the state after execution.
