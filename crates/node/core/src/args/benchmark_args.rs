@@ -21,29 +21,34 @@ pub struct BenchmarkArgs {
     #[arg(long, conflicts_with_all = &["from", "to"], verbatim_doc_comment)]
     pub advance: Option<u64>,
 
-    /// Path to a JWT secret to use for the authenticated engine-API RPC server.
+    /// Path(s) to JWT secret(s) to use for the authenticated engine-API RPC server(s).
     ///
-    /// This will perform JWT authentication for all requests to the given engine RPC url.
-    ///
-    /// If no path is provided, a secret will be generated and stored in the datadir under
-    /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
+    /// This will perform JWT authentication for all requests to the given engine RPC url(s).
+    /// When multiple engine-rpc-urls are provided, you can either:
+    /// - Provide one JWT secret (used for all engine URLs)
+    /// - Provide the same number of JWT secrets (one per engine URL, in order)
     #[arg(
         long = "jwt-secret",
         alias = "jwtsecret",
         value_name = "PATH",
         global = true,
-        required = false
+        required = false,
+        action = clap::ArgAction::Append
     )]
-    pub auth_jwtsecret: Option<PathBuf>,
+    pub auth_jwtsecret: Vec<PathBuf>,
 
-    /// The RPC url to use for sending engine requests.
+    /// The RPC url(s) to use for sending engine requests.
+    ///
+    /// Can be specified multiple times to broadcast payloads to multiple nodes.
+    /// All nodes must be at the same block height before benchmarking begins.
     #[arg(
         long,
         value_name = "ENGINE_RPC_URL",
         verbatim_doc_comment,
-        default_value = "http://localhost:8551"
+        default_value = "http://localhost:8551",
+        action = clap::ArgAction::Append
     )]
-    pub engine_rpc_url: String,
+    pub engine_rpc_url: Vec<String>,
 
     /// The `WebSocket` RPC URL to use for persistence subscriptions.
     ///
@@ -75,10 +80,42 @@ mod tests {
     #[test]
     fn test_parse_benchmark_args() {
         let default_args = BenchmarkArgs {
-            engine_rpc_url: "http://localhost:8551".to_string(),
+            engine_rpc_url: vec!["http://localhost:8551".to_string()],
             ..Default::default()
         };
         let args = CommandParser::<BenchmarkArgs>::parse_from(["reth-bench"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_parse_multiple_engine_urls() {
+        let args = CommandParser::<BenchmarkArgs>::parse_from([
+            "reth-bench",
+            "--engine-rpc-url",
+            "http://localhost:8551",
+            "--engine-rpc-url",
+            "http://localhost:8552",
+        ])
+        .args;
+        assert_eq!(
+            args.engine_rpc_url,
+            vec!["http://localhost:8551".to_string(), "http://localhost:8552".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_multiple_jwt_secrets() {
+        let args = CommandParser::<BenchmarkArgs>::parse_from([
+            "reth-bench",
+            "--jwt-secret",
+            "/path/to/jwt1.hex",
+            "--jwt-secret",
+            "/path/to/jwt2.hex",
+        ])
+        .args;
+        assert_eq!(
+            args.auth_jwtsecret,
+            vec![PathBuf::from("/path/to/jwt1.hex"), PathBuf::from("/path/to/jwt2.hex")]
+        );
     }
 }

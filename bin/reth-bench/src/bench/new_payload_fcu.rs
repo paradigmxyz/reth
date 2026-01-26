@@ -20,7 +20,7 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_network::Ethereum;
-use alloy_provider::{Provider, RootProvider};
+use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_pubsub::SubscriptionStream;
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -118,11 +118,13 @@ impl Command {
         let BenchContext {
             benchmark_mode,
             block_provider,
-            auth_provider,
+            auth_providers,
             mut next_block,
             is_optimism,
             ..
-        } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
+        } = BenchContext::new(&self.benchmark, self.rpc_url.clone()).await?;
+
+        info!("Broadcasting payloads to {} engine(s)", auth_providers.len());
 
         let buffer_size = self.rpc_block_buffer_size;
 
@@ -201,11 +203,14 @@ impl Command {
 
             let (version, params) = block_to_new_payload(block, is_optimism)?;
             let start = Instant::now();
-            call_new_payload(&auth_provider, version, params).await?;
+
+            // Broadcast newPayload to all engines in parallel
+            broadcast_new_payload(&auth_providers, version, params.clone()).await?;
 
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
 
-            call_forkchoice_updated(&auth_provider, version, forkchoice_state, None).await?;
+            // Broadcast forkchoiceUpdated to all engines in parallel
+            broadcast_forkchoice_updated(&auth_providers, version, forkchoice_state).await?;
 
             let total_latency = start.elapsed();
             let fcu_latency = total_latency - new_payload_result.latency;
@@ -265,7 +270,7 @@ impl Command {
     ///
     /// Preference:
     /// - If `--ws-rpc-url` is provided, use it directly.
-    /// - Otherwise, derive a WS RPC URL from `--engine-rpc-url`.
+    /// - Otherwise, derive a WS RPC URL from the first `--engine-rpc-url`.
     ///
     /// The persistence subscription endpoint (`reth_subscribePersistedBlock`) is exposed on
     /// the regular RPC server (WS port, usually 8546), not on the engine API port (usually 8551).
@@ -279,10 +284,16 @@ impl Command {
             info!(target: "reth-bench", ws_url = %parsed, "Using provided WebSocket RPC URL");
             Ok(parsed)
         } else {
-            let derived = engine_url_to_ws_url(&self.benchmark.engine_rpc_url)?;
+            // Use the first engine URL for deriving the WS URL
+            let first_engine_url = self
+                .benchmark
+                .engine_rpc_url
+                .first()
+                .ok_or_else(|| eyre::eyre!("At least one --engine-rpc-url is required"))?;
+            let derived = engine_url_to_ws_url(first_engine_url)?;
             debug!(
                 target: "reth-bench",
-                engine_url = %self.benchmark.engine_rpc_url,
+                engine_url = %first_engine_url,
                 %derived,
                 "Derived WebSocket RPC URL from engine RPC URL"
             );
@@ -311,6 +322,59 @@ impl Command {
 
         Ok(PersistenceSubscription::new(provider, subscription.into_stream()))
     }
+}
+
+/// Broadcast `newPayload` to all engine providers in parallel.
+async fn broadcast_new_payload(
+    providers: &[RootProvider<AnyNetwork>],
+    version: reth_node_api::EngineApiMessageVersion,
+    params: serde_json::Value,
+) -> eyre::Result<()> {
+    let futures: Vec<_> = providers
+        .iter()
+        .enumerate()
+        .map(|(i, provider)| {
+            let params = params.clone();
+            async move {
+                call_new_payload(provider, version, params)
+                    .await
+                    .map_err(|e| eyre::eyre!("Engine {} newPayload failed: {}", i, e))
+            }
+        })
+        .collect();
+
+    let results = futures::future::join_all(futures).await;
+
+    for result in results {
+        result?;
+    }
+
+    Ok(())
+}
+
+/// Broadcast `forkchoiceUpdated` to all engine providers in parallel.
+async fn broadcast_forkchoice_updated(
+    providers: &[RootProvider<AnyNetwork>],
+    version: reth_node_api::EngineApiMessageVersion,
+    forkchoice_state: ForkchoiceState,
+) -> eyre::Result<()> {
+    let futures: Vec<_> = providers
+        .iter()
+        .enumerate()
+        .map(|(i, provider)| async move {
+            call_forkchoice_updated(provider, version, forkchoice_state, None)
+                .await
+                .map_err(|e| eyre::eyre!("Engine {} forkchoiceUpdated failed: {}", i, e))
+        })
+        .collect();
+
+    let results = futures::future::join_all(futures).await;
+
+    for result in results {
+        result?;
+    }
+
+    Ok(())
 }
 
 /// Converts an engine API URL to the default RPC websocket URL.
