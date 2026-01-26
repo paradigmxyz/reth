@@ -65,6 +65,7 @@ use reth_trie_common::{
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
+    collections::VecDeque,
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc::{channel, Receiver, Sender},
@@ -1553,7 +1554,12 @@ where
 
     let mut storage_proof_receivers = ctx.storage_proof_receivers;
 
+    let mut nodes = VecDeque::new();
     while let Some(account_node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
+        nodes.push_back(account_node);
+    }
+
+    while let Some(account_node) = nodes.pop_front() {
         match account_node {
             TrieElement::Branch(node) => {
                 hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
