@@ -186,6 +186,11 @@ impl<N: ProviderNodeTypes> RocksDBProviderFactory for BlockchainProvider<N> {
     fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {
         unimplemented!("BlockchainProvider wraps ProviderFactory - use DatabaseProvider::set_pending_rocksdb_batch instead")
     }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
+        unimplemented!("BlockchainProvider wraps ProviderFactory - use DatabaseProvider::commit_pending_rocksdb_batches instead")
+    }
 }
 
 impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
@@ -711,6 +716,26 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         self.consistent_provider()?.storage_changeset(block_number)
     }
+
+    fn get_storage_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<Option<StorageEntry>> {
+        self.consistent_provider()?.get_storage_before_block(block_number, address, storage_key)
+    }
+
+    fn storage_changesets_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        self.consistent_provider()?.storage_changesets_range(range)
+    }
+
+    fn storage_changeset_count(&self) -> ProviderResult<usize> {
+        self.consistent_provider()?.storage_changeset_count()
+    }
 }
 
 impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
@@ -782,7 +807,6 @@ mod tests {
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use itertools::Itertools;
     use rand::Rng;
-    use reth_chain::Chain;
     use reth_chain_state::{
         test_utils::TestBlockBuilder, CanonStateNotification, CanonStateSubscriptions,
         CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
@@ -791,7 +815,9 @@ mod tests {
     use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
-    use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
+    use reth_execution_types::{
+        BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
+    };
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SignerRecoverable};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
@@ -1347,33 +1373,24 @@ mod tests {
 
         // Send and receive commit notifications.
         let block_2 = test_block_builder.generate_random_block(1, block_hash_1).try_recover()?;
-        let chain = Chain::new(vec![block_2.clone()], ExecutionOutcome::default(), BTreeMap::new());
+        let chain = Chain::new(vec![block_2], ExecutionOutcome::default(), BTreeMap::new());
         let commit = CanonStateNotification::Commit { new: Arc::new(chain.clone()) };
         in_memory_state.notify_canon_state(commit.clone());
         let (notification_1, notification_2) = tokio::join!(rx_1.recv(), rx_2.recv());
-        // Verify both subscribers received commit notifications with matching tip
-        let n1 = notification_1.unwrap();
-        let n2 = notification_2.unwrap();
-        assert_eq!(*n1.tip(), block_2);
-        assert_eq!(*n2.tip(), block_2);
+        assert_eq!(notification_1, Ok(commit.clone()));
+        assert_eq!(notification_2, Ok(commit.clone()));
 
         // Send and receive re-org notifications.
         let block_3 = test_block_builder.generate_random_block(1, block_hash_1).try_recover()?;
         let block_4 = test_block_builder.generate_random_block(2, block_3.hash()).try_recover()?;
-        let new_chain = Chain::new(
-            vec![block_3, block_4.clone()],
-            ExecutionOutcome::default(),
-            BTreeMap::new(),
-        );
+        let new_chain =
+            Chain::new(vec![block_3, block_4], ExecutionOutcome::default(), BTreeMap::new());
         let re_org =
             CanonStateNotification::Reorg { old: Arc::new(chain), new: Arc::new(new_chain) };
         in_memory_state.notify_canon_state(re_org.clone());
         let (notification_1, notification_2) = tokio::join!(rx_1.recv(), rx_2.recv());
-        // Verify both subscribers received reorg notifications with matching tip
-        let n1 = notification_1.unwrap();
-        let n2 = notification_2.unwrap();
-        assert_eq!(*n1.tip(), block_4);
-        assert_eq!(*n2.tip(), block_4);
+        assert_eq!(notification_1, Ok(re_org.clone()));
+        assert_eq!(notification_2, Ok(re_org.clone()));
 
         Ok(())
     }
@@ -1685,14 +1702,11 @@ mod tests {
                     database_state.into_iter().map(|(address, (account, _))| {
                         (address, None, Some(account.into()), Default::default())
                     }),
-                    database_changesets
-                        .iter()
-                        .map(|block_changesets| {
-                            block_changesets.iter().map(|(address, account, _)| {
-                                (*address, Some(Some((*account).into())), [])
-                            })
+                    database_changesets.iter().map(|block_changesets| {
+                        block_changesets.iter().map(|(address, account, _)| {
+                            (*address, Some(Some((*account).into())), [])
                         })
-                        .collect::<Vec<_>>(),
+                    }),
                     Vec::new(),
                 ),
                 first_block: first_database_block,

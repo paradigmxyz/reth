@@ -8,7 +8,7 @@ use crate::{
     TransactionValidator,
 };
 use futures_util::{lock::Mutex, StreamExt};
-use reth_primitives_traits::{Block, SealedBlock};
+use reth_primitives_traits::SealedBlock;
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{
@@ -171,7 +171,7 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
     {
         EthTransactionValidatorBuilder::new(client)
             .with_additional_tasks(num_additional_tasks)
-            .build_with_tasks::<Tx, T, S>(tasks, blob_store)
+            .build_with_tasks(tasks, blob_store)
     }
 }
 
@@ -197,6 +197,7 @@ where
     V: TransactionValidator + 'static,
 {
     type Transaction = <V as TransactionValidator>::Transaction;
+    type Block = V::Block;
 
     async fn validate_transaction(
         &self,
@@ -284,10 +285,7 @@ where
         self.validate_transactions(transactions.into_iter().map(|tx| (origin, tx)).collect()).await
     }
 
-    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
-    where
-        B: Block,
-    {
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         self.validator.on_new_head_block(new_tip_block)
     }
 }
@@ -307,6 +305,7 @@ mod tests {
 
     impl TransactionValidator for NoopValidator {
         type Transaction = MockTransaction;
+        type Block = reth_ethereum_primitives::Block;
 
         async fn validate_transaction(
             &self,

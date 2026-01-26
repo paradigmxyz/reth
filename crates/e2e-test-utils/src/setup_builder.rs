@@ -112,11 +112,13 @@ where
             ..NetworkArgs::default()
         };
 
-        // Apply tree config modifier if present
+        // Apply tree config modifier if present, with test-appropriate defaults
+        let base_tree_config =
+            reth_node_api::TreeConfig::default().with_cross_block_cache_size(1024 * 1024);
         let tree_config = if let Some(modifier) = self.tree_config_modifier {
-            modifier(reth_node_api::TreeConfig::default())
+            modifier(base_tree_config)
         } else {
-            reth_node_api::TreeConfig::default()
+            base_tree_config
         };
 
         let mut nodes = (0..self.num_nodes)

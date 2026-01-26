@@ -24,7 +24,7 @@ pub struct DefaultEngineValues {
     prewarming_disabled: bool,
     parallel_sparse_trie_disabled: bool,
     state_provider_metrics: bool,
-    cross_block_cache_size: u64,
+    cross_block_cache_size: usize,
     state_root_task_compare_updates: bool,
     accept_execution_requests_hash: bool,
     multiproof_chunking_enabled: bool,
@@ -37,6 +37,7 @@ pub struct DefaultEngineValues {
     storage_worker_count: Option<usize>,
     account_worker_count: Option<usize>,
     enable_proof_v2: bool,
+    cache_metrics_disabled: bool,
 }
 
 impl DefaultEngineValues {
@@ -93,7 +94,7 @@ impl DefaultEngineValues {
     }
 
     /// Set the default cross-block cache size in MB
-    pub const fn with_cross_block_cache_size(mut self, v: u64) -> Self {
+    pub const fn with_cross_block_cache_size(mut self, v: usize) -> Self {
         self.cross_block_cache_size = v;
         self
     }
@@ -172,6 +173,12 @@ impl DefaultEngineValues {
         self.enable_proof_v2 = v;
         self
     }
+
+    /// Set whether to disable cache metrics by default
+    pub const fn with_cache_metrics_disabled(mut self, v: bool) -> Self {
+        self.cache_metrics_disabled = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -197,6 +204,7 @@ impl Default for DefaultEngineValues {
             storage_worker_count: None,
             account_worker_count: None,
             enable_proof_v2: false,
+            cache_metrics_disabled: false,
         }
     }
 }
@@ -254,7 +262,7 @@ pub struct EngineArgs {
 
     /// Configure the size of cross-block cache in megabytes
     #[arg(long = "engine.cross-block-cache-size", default_value_t = DefaultEngineValues::get_global().cross_block_cache_size)]
-    pub cross_block_cache_size: u64,
+    pub cross_block_cache_size: usize,
 
     /// Enable comparing trie updates from the state root task to the trie updates from the regular
     /// state root calculation.
@@ -320,6 +328,10 @@ pub struct EngineArgs {
     /// Enable V2 storage proofs for state root calculations
     #[arg(long = "engine.enable-proof-v2", default_value_t = DefaultEngineValues::get_global().enable_proof_v2)]
     pub enable_proof_v2: bool,
+
+    /// Disable cache metrics recording, which can take up to 50ms with large cached state.
+    #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
+    pub cache_metrics_disabled: bool,
 }
 
 #[allow(deprecated)]
@@ -346,6 +358,7 @@ impl Default for EngineArgs {
             storage_worker_count,
             account_worker_count,
             enable_proof_v2,
+            cache_metrics_disabled,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -371,6 +384,7 @@ impl Default for EngineArgs {
             storage_worker_count,
             account_worker_count,
             enable_proof_v2,
+            cache_metrics_disabled,
         }
     }
 }
@@ -407,6 +421,7 @@ impl EngineArgs {
         }
 
         config = config.with_enable_proof_v2(self.enable_proof_v2);
+        config = config.without_cache_metrics(self.cache_metrics_disabled);
 
         config
     }
@@ -458,6 +473,7 @@ mod tests {
             storage_worker_count: Some(16),
             account_worker_count: Some(8),
             enable_proof_v2: false,
+            cache_metrics_disabled: true,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -488,6 +504,7 @@ mod tests {
             "16",
             "--engine.account-worker-count",
             "8",
+            "--engine.disable-cache-metrics",
         ])
         .args;
 

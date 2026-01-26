@@ -54,7 +54,7 @@ pub use dev::DevArgs;
 
 /// PruneArgs for configuring the pruning and full node
 mod pruning;
-pub use pruning::PruningArgs;
+pub use pruning::{DefaultPruningValues, PruningArgs};
 
 /// DatadirArgs for configuring data storage paths
 mod datadir_args;
@@ -79,6 +79,10 @@ pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
 /// `StaticFilesArgs` for configuring static files.
 mod static_files;
 pub use static_files::{StaticFilesArgs, MINIMAL_BLOCKS_PER_FILE};
+
+/// `RocksDbArgs` for configuring RocksDB table routing.
+mod rocksdb;
+pub use rocksdb::{RocksDbArgs, RocksDbArgsError};
 
 mod error;
 pub mod types;

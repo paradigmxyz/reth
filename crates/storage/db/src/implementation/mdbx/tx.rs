@@ -6,7 +6,7 @@ use crate::{
     DatabaseError,
 };
 use reth_db_api::{
-    table::{Compress, DupSort, Encode, Table, TableImporter},
+    table::{Compress, DupSort, Encode, IntoVec, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
@@ -387,7 +387,7 @@ impl Tx<RW> {
                     info: e.into(),
                     operation: write_operation,
                     table_name: T::NAME,
-                    key: key.into(),
+                    key: key.into_vec(),
                 }
                 .into()
             })
