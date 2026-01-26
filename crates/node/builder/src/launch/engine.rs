@@ -18,7 +18,7 @@ use reth_engine_tree::{
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
-use reth_evm::metrics::{set_slow_block_logging_enabled, set_slow_block_threshold};
+
 use reth_exex::ExExManagerHandle;
 use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
@@ -134,12 +134,6 @@ impl EngineNodeLauncher {
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
         let node_config = ctx.node_config();
-
-        // Apply slow block logging threshold from CLI args (only when explicitly set)
-        if let Some(threshold) = node_config.debug.slow_block_threshold {
-            set_slow_block_threshold(threshold);
-            set_slow_block_logging_enabled(true);
-        }
 
         // We always assume that node is syncing after a restart
         network_handle.update_sync_state(SyncState::Syncing);

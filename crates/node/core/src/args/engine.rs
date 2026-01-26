@@ -43,6 +43,7 @@ pub struct DefaultEngineValues {
     disable_trie_cache: bool,
     sparse_trie_prune_depth: usize,
     sparse_trie_max_storage_tries: usize,
+    slow_block_threshold: Option<u64>,
 }
 
 impl DefaultEngineValues {
@@ -196,6 +197,12 @@ impl DefaultEngineValues {
         self.sparse_trie_max_storage_tries = v;
         self
     }
+
+    /// Set the default slow block threshold in milliseconds
+    pub const fn with_slow_block_threshold(mut self, v: Option<u64>) -> Self {
+        self.slow_block_threshold = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -224,6 +231,7 @@ impl Default for DefaultEngineValues {
             disable_trie_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            slow_block_threshold: None,
         }
     }
 }
@@ -363,6 +371,15 @@ pub struct EngineArgs {
     /// Maximum number of storage tries to retain after sparse trie pruning.
     #[arg(long = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_storage_tries)]
     pub sparse_trie_max_storage_tries: usize,
+
+    /// Configure the slow block logging threshold in milliseconds.
+    ///
+    /// When set, blocks that take longer than this threshold to execute will be logged
+    /// with detailed metrics including timing, state operations, and cache statistics.
+    /// Set to 0 to log all blocks (useful for debugging/profiling).
+    /// When not set, slow block logging is disabled (default).
+    #[arg(long = "engine.slow-block-threshold", default_value = Resettable::from(DefaultEngineValues::get_global().slow_block_threshold.map(|v| v.to_string().into())))]
+    pub slow_block_threshold: Option<u64>,
 }
 
 #[allow(deprecated)]
@@ -392,6 +409,7 @@ impl Default for EngineArgs {
             disable_trie_cache,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            slow_block_threshold,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -421,6 +439,7 @@ impl Default for EngineArgs {
             disable_trie_cache,
             sparse_trie_prune_depth,
             sparse_trie_max_storage_tries,
+            slow_block_threshold,
         }
     }
 }
@@ -453,6 +472,7 @@ impl EngineArgs {
             .with_disable_trie_cache(self.disable_trie_cache)
             .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
             .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
+            .with_slow_block_threshold(self.slow_block_threshold.map(std::time::Duration::from_millis))
     }
 }
 
@@ -506,6 +526,7 @@ mod tests {
             disable_trie_cache: true,
             sparse_trie_prune_depth: 10,
             sparse_trie_max_storage_tries: 100,
+            slow_block_threshold: None,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -545,5 +566,27 @@ mod tests {
         .args;
 
         assert_eq!(parsed_args, args);
+    }
+
+    #[test]
+    fn test_parse_slow_block_threshold() {
+        // Test default value (None - disabled)
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.slow_block_threshold, None);
+
+        // Test setting to 0 (log all blocks)
+        let args =
+            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.slow-block-threshold", "0"])
+                .args;
+        assert_eq!(args.slow_block_threshold, Some(0));
+
+        // Test setting to custom value
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.slow-block-threshold",
+            "500",
+        ])
+        .args;
+        assert_eq!(args.slow_block_threshold, Some(500));
     }
 }

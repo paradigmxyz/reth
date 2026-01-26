@@ -130,32 +130,19 @@ impl<S> CachedStateProvider<S> {
 /// This struct combines both the provider-level metrics (hits/misses tracked by the provider)
 /// and the fixed-cache internal stats (collisions, size, capacity).
 #[derive(Debug, Default)]
-pub(crate) struct ReadableCacheStats {
-    /// Account cache hits (readable)
-    pub account_hits: AtomicU64,
-    /// Account cache misses (readable)
-    pub account_misses: AtomicU64,
-    /// Storage cache hits (readable)
-    pub storage_hits: AtomicU64,
-    /// Storage cache misses (readable)
-    pub storage_misses: AtomicU64,
-    /// Code cache hits (readable)
-    pub code_hits: AtomicU64,
-    /// Code cache misses (readable)
-    pub code_misses: AtomicU64,
-}
-
-impl Clone for ReadableCacheStats {
-    fn clone(&self) -> Self {
-        Self {
-            account_hits: AtomicU64::new(self.account_hits.load(Ordering::Relaxed)),
-            account_misses: AtomicU64::new(self.account_misses.load(Ordering::Relaxed)),
-            storage_hits: AtomicU64::new(self.storage_hits.load(Ordering::Relaxed)),
-            storage_misses: AtomicU64::new(self.storage_misses.load(Ordering::Relaxed)),
-            code_hits: AtomicU64::new(self.code_hits.load(Ordering::Relaxed)),
-            code_misses: AtomicU64::new(self.code_misses.load(Ordering::Relaxed)),
-        }
-    }
+pub(crate) struct CacheStats {
+    /// Account cache hits
+    account_hits: AtomicUsize,
+    /// Account cache misses
+    account_misses: AtomicUsize,
+    /// Storage cache hits
+    storage_hits: AtomicUsize,
+    /// Storage cache misses
+    storage_misses: AtomicUsize,
+    /// Code cache hits
+    code_hits: AtomicUsize,
+    /// Code cache misses
+    code_misses: AtomicUsize,
 }
 
 /// Metrics for the cached state provider, showing hits / misses for each cache
@@ -213,9 +200,9 @@ pub struct CachedStateMetrics {
     /// Account cache collisions (hash collisions causing eviction)
     account_cache_collisions: Gauge,
 
-    /// Readable cache statistics for runtime access (e.g., slow block logging)
+    // Cache statistics
     #[metric(skip)]
-    readable_stats: Arc<ReadableCacheStats>,
+    stats: Arc<CacheStats>,
 }
 
 impl CachedStateMetrics {
@@ -236,12 +223,12 @@ impl CachedStateMetrics {
         self.account_cache_misses.set(0);
 
         // readable stats
-        self.readable_stats.account_hits.store(0, Ordering::Relaxed);
-        self.readable_stats.account_misses.store(0, Ordering::Relaxed);
-        self.readable_stats.storage_hits.store(0, Ordering::Relaxed);
-        self.readable_stats.storage_misses.store(0, Ordering::Relaxed);
-        self.readable_stats.code_hits.store(0, Ordering::Relaxed);
-        self.readable_stats.code_misses.store(0, Ordering::Relaxed);
+        self.stats.account_hits.store(0, Ordering::Relaxed);
+        self.stats.account_misses.store(0, Ordering::Relaxed);
+        self.stats.storage_hits.store(0, Ordering::Relaxed);
+        self.stats.storage_misses.store(0, Ordering::Relaxed);
+        self.stats.code_hits.store(0, Ordering::Relaxed);
+        self.stats.code_misses.store(0, Ordering::Relaxed);
     }
 
     /// Returns a new zeroed-out instance of [`CachedStateMetrics`].
@@ -257,19 +244,52 @@ impl CachedStateMetrics {
         self.execution_cache_creation_duration_seconds.record(duration.as_secs_f64());
     }
 
-    /// Returns cache statistics as a tuple for slow block logging.
-    ///
-    /// Returns (account_hits, account_misses, storage_hits, storage_misses, code_hits,
-    /// code_misses).
-    pub(crate) fn get_cache_stats(&self) -> (u64, u64, u64, u64, u64, u64) {
-        (
-            self.readable_stats.account_hits.load(Ordering::Relaxed),
-            self.readable_stats.account_misses.load(Ordering::Relaxed),
-            self.readable_stats.storage_hits.load(Ordering::Relaxed),
-            self.readable_stats.storage_misses.load(Ordering::Relaxed),
-            self.readable_stats.code_hits.load(Ordering::Relaxed),
-            self.readable_stats.code_misses.load(Ordering::Relaxed),
-        )
+    fn record_account_hit(&self) {
+        self.stats.account_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_account_miss(&self) {
+        self.stats.account_misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_storage_hit(&self) {
+        self.stats.storage_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_storage_miss(&self) {
+        self.stats.storage_misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_code_hit(&self) {
+        self.stats.code_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_code_miss(&self) {
+        self.stats.code_misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn account_hits(&self) -> usize {
+        self.stats.account_hits.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn account_misses(&self) -> usize {
+        self.stats.account_misses.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn storage_hits(&self) -> usize {
+        self.stats.storage_hits.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn storage_misses(&self) -> usize {
+        self.stats.storage_misses.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn code_hits(&self) -> usize {
+        self.stats.code_hits.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn code_misses(&self) -> usize {
+        self.stats.code_misses.load(Ordering::Relaxed)
     }
 }
 
@@ -371,10 +391,10 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
                 CachedStatus::NotCached(value) | CachedStatus::Cached(value) => Ok(value),
             }
         } else if let Some(account) = self.caches.0.account_cache.get(address) {
-            self.metrics.account_cache_hits.increment(1);
+            self.metrics.record_account_hit();
             Ok(account)
         } else {
-            self.metrics.account_cache_misses.increment(1);
+            self.metrics.record_account_miss();
             self.state_provider.basic_account(address)
         }
     }
@@ -406,10 +426,10 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
                 }
             }
         } else if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
-            self.metrics.storage_cache_hits.increment(1);
+            self.metrics.record_storage_hit();
             Ok(Some(value).filter(|v| !v.is_zero()))
         } else {
-            self.metrics.storage_cache_misses.increment(1);
+            self.metrics.record_storage_miss();
             self.state_provider.storage(account, storage_key)
         }
     }
@@ -424,10 +444,10 @@ impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
                 CachedStatus::NotCached(code) | CachedStatus::Cached(code) => Ok(code),
             }
         } else if let Some(code) = self.caches.0.code_cache.get(code_hash) {
-            self.metrics.code_cache_hits.increment(1);
+            self.metrics.record_code_hit();
             Ok(code)
         } else {
-            self.metrics.code_cache_misses.increment(1);
+            self.metrics.record_code_miss();
             self.state_provider.bytecode_by_hash(code_hash)
         }
     }

@@ -95,8 +95,12 @@ where
 
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-        let persistence_handle =
-            PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
+        let persistence_handle = PersistenceHandle::<N::Primitives>::spawn_service(
+            provider,
+            pruner,
+            sync_metrics_tx,
+            tree_config.slow_block_threshold(),
+        );
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
