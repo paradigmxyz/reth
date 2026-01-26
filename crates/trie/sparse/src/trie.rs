@@ -1,4 +1,5 @@
 use crate::{
+    leaf_removal::{branch_changes_on_leaf_removal, extension_changes_on_leaf_removal},
     provider::{RevealedNode, TrieNodeProvider},
     LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
 };
@@ -797,36 +798,16 @@ impl SparseTrieTrait for SerialSparseTrie {
                 SparseNode::Extension { key, .. } => {
                     // If the node is an extension node, we need to look at its child to see if we
                     // need to merge them.
-                    match &child.node {
-                        SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
-                        &SparseNode::Hash(hash) => {
-                            return Err(
-                                SparseTrieErrorKind::BlindedNode { path: child.path, hash }.into()
-                            )
-                        }
-                        // For a leaf node, we collapse the extension node into a leaf node,
-                        // extending the key. While it's impossible to encounter an extension node
-                        // followed by a leaf node in a complete trie, it's possible here because we
-                        // could have downgraded the extension node's child into a leaf node from
-                        // another node type.
-                        SparseNode::Leaf { key: leaf_key, .. } => {
-                            self.nodes.remove(&child.path);
-
-                            let mut new_key = *key;
-                            new_key.extend(leaf_key);
-                            SparseNode::new_leaf(new_key)
-                        }
-                        // For an extension node, we collapse them into one extension node,
-                        // extending the key
-                        SparseNode::Extension { key: extension_key, .. } => {
-                            self.nodes.remove(&child.path);
-
-                            let mut new_key = *key;
-                            new_key.extend(extension_key);
-                            SparseNode::new_ext(new_key)
-                        }
-                        // For a branch node, we just leave the extension node as-is.
-                        SparseNode::Branch { .. } => removed_node.node,
+                    if let Some(new_node) = extension_changes_on_leaf_removal(
+                        &removed_path,
+                        key,
+                        &child.path,
+                        &child.node,
+                    ) {
+                        self.nodes.remove(&child.path);
+                        new_node
+                    } else {
+                        removed_node.node
                     }
                 }
                 &SparseNode::Branch { mut state_mask, hash: _, store_in_db_trie: _ } => {
@@ -850,49 +831,18 @@ impl SparseTrieTrait for SerialSparseTrie {
 
                         // If the remaining child node is not yet revealed then we have to reveal
                         // it here, otherwise it's not possible to know how to collapse the branch.
-                        let child = self.reveal_remaining_child_on_leaf_removal(
+                        let remaining_child = self.reveal_remaining_child_on_leaf_removal(
                             &provider,
                             full_path,
                             &child_path,
                             true, // recurse_into_extension
                         )?;
 
-                        let mut delete_child = false;
-                        let new_node = match &child {
-                            SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
-                            &SparseNode::Hash(hash) => {
-                                return Err(SparseTrieErrorKind::BlindedNode {
-                                    path: child_path,
-                                    hash,
-                                }
-                                .into())
-                            }
-                            // If the only child is a leaf node, we downgrade the branch node into a
-                            // leaf node, prepending the nibble to the key, and delete the old
-                            // child.
-                            SparseNode::Leaf { key, .. } => {
-                                delete_child = true;
-
-                                let mut new_key = Nibbles::from_nibbles_unchecked([child_nibble]);
-                                new_key.extend(key);
-                                SparseNode::new_leaf(new_key)
-                            }
-                            // If the only child node is an extension node, we downgrade the branch
-                            // node into an even longer extension node, prepending the nibble to the
-                            // key, and delete the old child.
-                            SparseNode::Extension { key, .. } => {
-                                delete_child = true;
-
-                                let mut new_key = Nibbles::from_nibbles_unchecked([child_nibble]);
-                                new_key.extend(key);
-                                SparseNode::new_ext(new_key)
-                            }
-                            // If the only child is a branch node, we downgrade the current branch
-                            // node into a one-nibble extension node.
-                            SparseNode::Branch { .. } => {
-                                SparseNode::new_ext(Nibbles::from_nibbles_unchecked([child_nibble]))
-                            }
-                        };
+                        let (new_node, delete_child) = branch_changes_on_leaf_removal(
+                            &removed_path,
+                            &child_path,
+                            &remaining_child,
+                        );
 
                         if delete_child {
                             self.nodes.remove(&child_path);
