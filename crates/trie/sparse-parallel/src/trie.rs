@@ -14,7 +14,7 @@ use reth_trie_common::{
 };
 use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrieInterface,
+    LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrie,
     SparseTrieUpdates,
 };
 use smallvec::SmallVec;
@@ -147,7 +147,7 @@ impl Default for ParallelSparseTrie {
     }
 }
 
-impl SparseTrieInterface for ParallelSparseTrie {
+impl SparseTrie for ParallelSparseTrie {
     fn with_root(
         mut self,
         root: TrieNode,
@@ -2704,8 +2704,7 @@ mod tests {
     use reth_trie_db::DatabaseTrieCursorFactory;
     use reth_trie_sparse::{
         provider::{DefaultTrieNodeProvider, RevealedNode, TrieNodeProvider},
-        LeafLookup, LeafLookupError, SerialSparseTrie, SparseNode, SparseTrieInterface,
-        SparseTrieUpdates,
+        LeafLookup, LeafLookupError, SerialSparseTrie, SparseNode, SparseTrie, SparseTrieUpdates,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
