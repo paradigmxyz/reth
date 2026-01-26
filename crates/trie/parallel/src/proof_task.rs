@@ -94,30 +94,19 @@ pub struct ProofWorkerHandle {
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Direct sender to account worker pool
     account_work_tx: CrossbeamSender<AccountWorkerJob>,
-    /// Direct sender to account storage worker pool. This pool is used exclusively for
-    /// on-demand storage root proofs that are triggered during account proof iteration,
-    /// preventing them from being blocked behind pre-dispatched target storage proofs.
-    /// Cloned to account workers during spawn; keeping the sender open ensures the channel
-    /// remains active.
-    #[allow(dead_code)]
-    account_storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+
     /// Counter tracking available storage workers. Workers decrement when starting work,
     /// increment when finishing. Used to determine whether to chunk multiproofs.
     storage_available_workers: Arc<AtomicUsize>,
     /// Counter tracking available account workers. Workers decrement when starting work,
     /// increment when finishing. Used to determine whether to chunk multiproofs.
     account_available_workers: Arc<AtomicUsize>,
-    /// Counter tracking available account storage workers. Shared with spawned workers; held
-    /// here to keep the Arc alive.
-    #[allow(dead_code)]
-    account_storage_available_workers: Arc<AtomicUsize>,
+
     /// Total number of storage workers spawned
     storage_worker_count: usize,
     /// Total number of account workers spawned
     account_worker_count: usize,
-    /// Total number of account storage workers spawned. Currently only tracked for debugging.
-    #[allow(dead_code)]
-    account_storage_worker_count: usize,
+
     /// Whether V2 storage proofs are enabled
     v2_proofs_enabled: bool,
 }
@@ -133,15 +122,12 @@ impl ProofWorkerHandle {
     /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `storage_worker_count`: Number of storage workers to spawn
     /// - `account_worker_count`: Number of account workers to spawn
-    /// - `account_storage_worker_count`: Number of account storage workers to spawn (used for
-    ///   on-demand storage root proofs triggered during account iteration)
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
     pub fn new<Factory>(
         executor: Handle,
         task_ctx: ProofTaskCtx<Factory>,
         storage_worker_count: usize,
         account_worker_count: usize,
-        account_storage_worker_count: usize,
         v2_proofs_enabled: bool,
     ) -> Self
     where
@@ -152,18 +138,11 @@ impl ProofWorkerHandle {
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
-        // For account storage workers, use bounded(1) as minimum since bounded(0) creates a
-        // rendezvous channel where try_send always blocks. If count is 0, we'll drop the
-        // receiver immediately to disconnect the channel, causing try_send to return
-        // Disconnected and triggering synchronous fallback.
-        let (account_storage_work_tx, account_storage_work_rx) =
-            crossbeam_channel::bounded::<StorageWorkerJob>(account_storage_worker_count.max(1));
 
         // Initialize availability counters at zero. Each worker will increment when it
         // successfully initializes, ensuring only healthy workers are counted.
         let storage_available_workers = Arc::new(AtomicUsize::new(0));
         let account_available_workers = Arc::new(AtomicUsize::new(0));
-        let account_storage_available_workers = Arc::new(AtomicUsize::new(0));
 
         let cached_storage_roots = Arc::new(DashMap::new());
 
@@ -171,7 +150,6 @@ impl ProofWorkerHandle {
             target: "trie::proof_task",
             storage_worker_count,
             account_worker_count,
-            account_storage_worker_count,
             ?v2_proofs_enabled,
             "Spawning proof worker pools"
         );
@@ -235,81 +213,11 @@ impl ProofWorkerHandle {
             });
         }
 
-        // Spawn account storage workers in parallel, or drop receiver if disabled
-        if account_storage_worker_count > 0 {
-            let task_ctx = task_ctx.clone();
-            let account_storage_work_rx = account_storage_work_rx.clone();
-            let account_storage_available_workers = account_storage_available_workers.clone();
-            let cached_storage_roots = cached_storage_roots.clone();
-            let caller_span = caller_span.clone();
-            executor.spawn_blocking(move || {
-                let _caller_guard = caller_span.enter();
-                let parent_span = debug_span!(
-                    target: "trie::proof_task",
-                    "account storage proof workers",
-                    ?account_storage_worker_count
-                )
-                .entered();
-                for worker_id in 0..account_storage_worker_count {
-                    let span = debug_span!(
-                        target: "trie::proof_task",
-                        "account storage worker",
-                        ?worker_id
-                    );
-                    let task_ctx_clone = task_ctx.clone();
-                    let work_rx_clone = account_storage_work_rx.clone();
-                    let account_storage_available_workers_clone =
-                        account_storage_available_workers.clone();
-                    let cached_storage_roots = cached_storage_roots.clone();
-
-                    std::thread::spawn(move || {
-                        #[cfg(feature = "metrics")]
-                        let metrics = ProofTaskTrieMetrics::default();
-                        #[cfg(feature = "metrics")]
-                        let cursor_metrics = ProofTaskCursorMetrics::new();
-
-                        let _guard = span.enter();
-                        let worker = StorageProofWorker::new(
-                            task_ctx_clone,
-                            work_rx_clone,
-                            worker_id,
-                            account_storage_available_workers_clone,
-                            cached_storage_roots,
-                            #[cfg(feature = "metrics")]
-                            metrics,
-                            #[cfg(feature = "metrics")]
-                            cursor_metrics,
-                        )
-                        .with_v2_proofs(v2_proofs_enabled)
-                        .as_account_storage_worker();
-                        if let Err(error) = worker.run() {
-                            error!(
-                                target: "trie::proof_task",
-                                worker_id,
-                                ?error,
-                                "Account storage worker failed"
-                            );
-                        }
-                    });
-                }
-                drop(parent_span);
-            });
-        } else {
-            // Drop the receiver immediately to disconnect the channel. This causes try_send
-            // to return Disconnected, triggering synchronous storage root computation.
-            debug!(
-                target: "trie::proof_task",
-                "Account storage workers disabled, storage roots will be computed synchronously"
-            );
-            drop(account_storage_work_rx);
-        }
-
         // Spawn account workers in parallel
         {
             let task_ctx = task_ctx.clone();
             let account_work_rx = account_work_rx.clone();
             let storage_work_tx = storage_work_tx.clone();
-            let account_storage_work_tx = account_storage_work_tx.clone();
             let account_available_workers = account_available_workers.clone();
             let cached_storage_roots = cached_storage_roots.clone();
             executor.spawn_blocking(move || {
@@ -326,7 +234,6 @@ impl ProofWorkerHandle {
                     let task_ctx_clone = task_ctx.clone();
                     let work_rx_clone = account_work_rx.clone();
                     let storage_work_tx_clone = storage_work_tx.clone();
-                    let account_storage_work_tx_clone = account_storage_work_tx.clone();
                     let account_available_workers_clone = account_available_workers.clone();
                     let cached_storage_roots = cached_storage_roots.clone();
 
@@ -342,7 +249,6 @@ impl ProofWorkerHandle {
                             work_rx_clone,
                             worker_id,
                             storage_work_tx_clone,
-                            account_storage_work_tx_clone,
                             account_available_workers_clone,
                             cached_storage_roots,
                             #[cfg(feature = "metrics")]
@@ -368,13 +274,10 @@ impl ProofWorkerHandle {
         Self {
             storage_work_tx,
             account_work_tx,
-            account_storage_work_tx,
             storage_available_workers,
             account_available_workers,
-            account_storage_available_workers,
             storage_worker_count,
             account_worker_count,
-            account_storage_worker_count,
             v2_proofs_enabled,
         }
     }
@@ -933,8 +836,6 @@ struct StorageProofWorker<Factory> {
     cursor_metrics: ProofTaskCursorMetrics,
     /// Set to true if V2 proofs are enabled.
     v2_enabled: bool,
-    /// Whether this is an account storage worker (for metrics differentiation).
-    is_account_storage_worker: bool,
 }
 
 impl<Factory> StorageProofWorker<Factory>
@@ -962,19 +863,12 @@ where
             #[cfg(feature = "metrics")]
             cursor_metrics,
             v2_enabled: false,
-            is_account_storage_worker: false,
         }
     }
 
     /// Changes whether or not V2 proofs are enabled.
     const fn with_v2_proofs(mut self, v2_enabled: bool) -> Self {
         self.v2_enabled = v2_enabled;
-        self
-    }
-
-    /// Marks this worker as an account storage worker (for metrics differentiation).
-    const fn as_account_storage_worker(mut self) -> Self {
-        self.is_account_storage_worker = true;
         self
     }
 
@@ -1071,11 +965,7 @@ where
         #[cfg(feature = "metrics")]
         {
             self.metrics.record_storage_nodes(storage_nodes_processed as usize);
-            if self.is_account_storage_worker {
-                self.metrics.record_account_storage_worker_idle_time(total_idle_time);
-            } else {
-                self.metrics.record_storage_worker_idle_time(total_idle_time);
-            }
+            self.metrics.record_storage_worker_idle_time(total_idle_time);
             self.cursor_metrics.record(&mut cursor_metrics_cache);
         }
 
@@ -1241,9 +1131,6 @@ struct AccountProofWorker<Factory> {
     worker_id: usize,
     /// Channel for dispatching storage proof work (for pre-dispatched target proofs)
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
-    /// Channel for dispatching on-demand storage root proofs during account iteration.
-    /// This uses a separate worker pool to avoid blocking behind pre-dispatched target proofs.
-    account_storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Counter tracking worker availability
     available_workers: Arc<AtomicUsize>,
     /// Cached storage roots
@@ -1269,7 +1156,6 @@ where
         work_rx: CrossbeamReceiver<AccountWorkerJob>,
         worker_id: usize,
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
-        account_storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         available_workers: Arc<AtomicUsize>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
@@ -1280,7 +1166,6 @@ where
             work_rx,
             worker_id,
             storage_work_tx,
-            account_storage_work_tx,
             available_workers,
             cached_storage_roots,
             #[cfg(feature = "metrics")]
@@ -1499,7 +1384,6 @@ where
         let mut value_encoder = AsyncAccountValueEncoder::new(
             storage_proof_receivers,
             self.cached_storage_roots.clone(),
-            self.account_storage_work_tx.clone(),
             provider.clone(),
             provider.clone(),
         );

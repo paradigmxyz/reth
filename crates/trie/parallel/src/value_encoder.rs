@@ -1,17 +1,15 @@
-use crate::proof_task::{
-    StorageProofInput, StorageProofResult, StorageProofResultMessage, StorageWorkerJob,
-};
+use crate::proof_task::{StorageProofResult, StorageProofResultMessage};
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
-use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use crossbeam_channel::Receiver as CrossbeamReceiver;
 use dashmap::DashMap;
 use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
-    proof_v2::{self, DeferredValueEncoder, LeafValueEncoder, Target},
+    proof_v2::{self, DeferredValueEncoder, LeafValueEncoder},
     trie_cursor::TrieCursorFactory,
     ProofTrieNode,
 };
@@ -36,7 +34,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<T, H> {
     },
     /// The storage root was found in cache.
     FromCache { account: Account, root: B256 },
-    /// Fall back to synchronous storage root computation when the worker pool is busy.
+    /// Synchronous storage root computation.
     Sync {
         trie_cursor_factory: Rc<T>,
         hashed_cursor_factory: Rc<H>,
@@ -145,13 +143,9 @@ pub(crate) struct AsyncAccountValueEncoder<T, H> {
     /// Tracks storage proof results received from the storage workers. [`Rc`] + [`RefCell`] is
     /// required because [`DeferredValueEncoder`] cannot have a lifetime.
     storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNode>>>>,
-    /// Channel for dispatching on-demand storage root proofs during account iteration.
-    /// This uses a separate worker pool to avoid blocking behind pre-dispatched target proofs.
-    /// The channel is bounded to the number of workers.
-    account_storage_work_tx: CrossbeamSender<StorageWorkerJob>,
-    /// Factory for creating trie cursors (for synchronous fallback).
+    /// Factory for creating trie cursors (for synchronous computation).
     trie_cursor_factory: Rc<T>,
-    /// Factory for creating hashed cursors (for synchronous fallback).
+    /// Factory for creating hashed cursors (for synchronous computation).
     hashed_cursor_factory: Rc<H>,
     /// Accumulated time spent waiting for storage proof results.
     storage_wait_time: Rc<RefCell<Duration>>,
@@ -159,19 +153,16 @@ pub(crate) struct AsyncAccountValueEncoder<T, H> {
 
 impl<T, H> AsyncAccountValueEncoder<T, H> {
     /// Initializes a [`Self`] using cursor factories which will be used to calculate storage
-    /// roots synchronously when the worker pool is busy.
+    /// roots synchronously.
     ///
     /// # Parameters
     /// - `dispatched`: Pre-dispatched storage proof receivers for target accounts
     /// - `cached_storage_roots`: Shared cache of already-computed storage roots
-    /// - `account_storage_work_tx`: Bounded channel for on-demand storage root proofs (uses
-    ///   separate worker pool to avoid blocking behind pre-dispatched target proofs)
-    /// - `trie_cursor_factory`: Factory for creating trie cursors (for synchronous fallback)
-    /// - `hashed_cursor_factory`: Factory for creating hashed cursors (for synchronous fallback)
+    /// - `trie_cursor_factory`: Factory for creating trie cursors (for synchronous computation)
+    /// - `hashed_cursor_factory`: Factory for creating hashed cursors (for synchronous computation)
     pub(crate) fn new(
         dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
-        account_storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         trie_cursor_factory: Rc<T>,
         hashed_cursor_factory: Rc<H>,
     ) -> Self {
@@ -179,7 +170,6 @@ impl<T, H> AsyncAccountValueEncoder<T, H> {
             dispatched,
             cached_storage_roots,
             storage_proof_results: Default::default(),
-            account_storage_work_tx,
             trie_cursor_factory,
             hashed_cursor_factory,
             storage_wait_time: Default::default(),
@@ -268,38 +258,13 @@ where
             return AsyncAccountDeferredValueEncoder::FromCache { account, root: *root }
         }
 
-        // Create a proof input which targets a bogus key, so that we calculate the root as a
-        // side-effect. Use the account storage worker pool to avoid blocking behind pre-dispatched
-        // target storage proofs.
-        let input = StorageProofInput::new(hashed_address, vec![Target::new(B256::ZERO)]);
-        let (tx, rx) = crossbeam_channel::bounded(1);
-
-        // Try to dispatch to the worker pool. If the channel is full, fall back to synchronous
-        // computation to avoid blocking.
-        match self
-            .account_storage_work_tx
-            .try_send(StorageWorkerJob::StorageProof { input, proof_result_sender: tx })
-        {
-            Ok(()) => AsyncAccountDeferredValueEncoder::Dispatched {
-                hashed_address,
-                account,
-                proof_result_rx: Ok(rx),
-                storage_proof_results: None,
-                storage_wait_time: self.storage_wait_time.clone(),
-            },
-            Err(
-                crossbeam_channel::TrySendError::Full(_) |
-                crossbeam_channel::TrySendError::Disconnected(_),
-            ) => {
-                // Channel is full or workers are disabled, fall back to synchronous computation
-                AsyncAccountDeferredValueEncoder::Sync {
-                    trie_cursor_factory: self.trie_cursor_factory.clone(),
-                    hashed_cursor_factory: self.hashed_cursor_factory.clone(),
-                    hashed_address,
-                    account,
-                    cached_storage_roots: self.cached_storage_roots.clone(),
-                }
-            }
+        // Compute storage root synchronously
+        AsyncAccountDeferredValueEncoder::Sync {
+            trie_cursor_factory: self.trie_cursor_factory.clone(),
+            hashed_cursor_factory: self.hashed_cursor_factory.clone(),
+            hashed_address,
+            account,
+            cached_storage_roots: self.cached_storage_roots.clone(),
         }
     }
 }

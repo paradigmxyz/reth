@@ -31,15 +31,6 @@ fn default_account_worker_count() -> usize {
     default_storage_worker_count()
 }
 
-/// Returns the default number of account storage worker threads.
-///
-/// Account storage workers handle on-demand storage root proofs triggered during account
-/// iteration. They use a separate pool to avoid blocking behind pre-dispatched target
-/// storage proofs. Default is equal to account worker count.
-fn default_account_storage_worker_count() -> usize {
-    default_account_worker_count()
-}
-
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
 
@@ -159,10 +150,6 @@ pub struct TreeConfig {
     storage_worker_count: usize,
     /// Number of account proof worker threads.
     account_worker_count: usize,
-    /// Number of account storage proof worker threads. These handle on-demand storage root proofs
-    /// triggered during account iteration, using a separate pool to avoid blocking behind
-    /// pre-dispatched target storage proofs.
-    account_storage_worker_count: usize,
     /// Whether to enable V2 storage proofs.
     enable_proof_v2: bool,
     /// Whether to disable cache metrics recording (can be expensive with large cached state).
@@ -195,7 +182,6 @@ impl Default for TreeConfig {
             allow_unwind_canonical_header: false,
             storage_worker_count: default_storage_worker_count(),
             account_worker_count: default_account_worker_count(),
-            account_storage_worker_count: default_account_storage_worker_count(),
             enable_proof_v2: false,
             disable_cache_metrics: false,
         }
@@ -229,7 +215,6 @@ impl TreeConfig {
         allow_unwind_canonical_header: bool,
         storage_worker_count: usize,
         account_worker_count: usize,
-        account_storage_worker_count: usize,
         enable_proof_v2: bool,
         disable_cache_metrics: bool,
     ) -> Self {
@@ -257,7 +242,6 @@ impl TreeConfig {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-            account_storage_worker_count,
             enable_proof_v2,
             disable_cache_metrics,
         }
@@ -550,20 +534,6 @@ impl TreeConfig {
     /// Setter for the number of account proof worker threads.
     pub fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
         self.account_worker_count = account_worker_count.max(MIN_WORKER_COUNT);
-        self
-    }
-
-    /// Return the number of account storage proof worker threads.
-    pub const fn account_storage_worker_count(&self) -> usize {
-        self.account_storage_worker_count
-    }
-
-    /// Setter for the number of account storage proof worker threads.
-    pub const fn with_account_storage_worker_count(
-        mut self,
-        account_storage_worker_count: usize,
-    ) -> Self {
-        self.account_storage_worker_count = account_storage_worker_count;
         self
     }
 

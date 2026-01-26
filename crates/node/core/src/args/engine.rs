@@ -36,7 +36,6 @@ pub struct DefaultEngineValues {
     allow_unwind_canonical_header: bool,
     storage_worker_count: Option<usize>,
     account_worker_count: Option<usize>,
-    account_storage_worker_count: Option<usize>,
     enable_proof_v2: bool,
     cache_metrics_disabled: bool,
 }
@@ -169,12 +168,6 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set the default account storage worker count
-    pub const fn with_account_storage_worker_count(mut self, v: Option<usize>) -> Self {
-        self.account_storage_worker_count = v;
-        self
-    }
-
     /// Set whether to enable proof V2 by default
     pub const fn with_enable_proof_v2(mut self, v: bool) -> Self {
         self.enable_proof_v2 = v;
@@ -210,7 +203,6 @@ impl Default for DefaultEngineValues {
             allow_unwind_canonical_header: false,
             storage_worker_count: None,
             account_worker_count: None,
-            account_storage_worker_count: None,
             enable_proof_v2: false,
             cache_metrics_disabled: false,
         }
@@ -333,14 +325,6 @@ pub struct EngineArgs {
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
 
-    /// Configure the number of account storage proof workers. These handle on-demand storage
-    /// root proofs triggered during account iteration, using a separate pool to avoid blocking
-    /// behind pre-dispatched target storage proofs.
-    /// If not specified, defaults to the same count as account workers.
-    /// If explicitly set to 0, account proofs will synchronously compute storage leaves.
-    #[arg(long = "engine.account-storage-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_storage_worker_count.map(|v| v.to_string().into())))]
-    pub account_storage_worker_count: Option<usize>,
-
     /// Enable V2 storage proofs for state root calculations
     #[arg(long = "engine.enable-proof-v2", default_value_t = DefaultEngineValues::get_global().enable_proof_v2)]
     pub enable_proof_v2: bool,
@@ -373,7 +357,6 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-            account_storage_worker_count,
             enable_proof_v2,
             cache_metrics_disabled,
         } = DefaultEngineValues::get_global().clone();
@@ -400,7 +383,6 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-            account_storage_worker_count,
             enable_proof_v2,
             cache_metrics_disabled,
         }
@@ -436,10 +418,6 @@ impl EngineArgs {
 
         if let Some(count) = self.account_worker_count {
             config = config.with_account_worker_count(count);
-        }
-
-        if let Some(count) = self.account_storage_worker_count {
-            config = config.with_account_storage_worker_count(count);
         }
 
         config = config.with_enable_proof_v2(self.enable_proof_v2);
@@ -494,7 +472,6 @@ mod tests {
             allow_unwind_canonical_header: true,
             storage_worker_count: Some(16),
             account_worker_count: Some(8),
-            account_storage_worker_count: Some(4),
             enable_proof_v2: false,
             cache_metrics_disabled: true,
         };
@@ -527,8 +504,6 @@ mod tests {
             "16",
             "--engine.account-worker-count",
             "8",
-            "--engine.account-storage-worker-count",
-            "4",
             "--engine.disable-cache-metrics",
         ])
         .args;

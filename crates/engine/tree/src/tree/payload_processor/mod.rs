@@ -283,13 +283,11 @@ where
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let account_storage_worker_count = config.account_storage_worker_count();
         let proof_handle = ProofWorkerHandle::new(
             self.executor.handle().clone(),
             task_ctx,
             storage_worker_count,
             account_worker_count,
-            account_storage_worker_count,
             v2_proofs_enabled,
         );
 
