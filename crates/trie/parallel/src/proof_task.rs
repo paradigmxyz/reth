@@ -95,19 +95,16 @@ pub struct ProofWorkerHandle {
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Direct sender to account worker pool
     account_work_tx: CrossbeamSender<AccountWorkerJob>,
-
     /// Counter tracking available storage workers. Workers decrement when starting work,
     /// increment when finishing. Used to determine whether to chunk multiproofs.
     storage_available_workers: Arc<AtomicUsize>,
     /// Counter tracking available account workers. Workers decrement when starting work,
     /// increment when finishing. Used to determine whether to chunk multiproofs.
     account_available_workers: Arc<AtomicUsize>,
-
     /// Total number of storage workers spawned
     storage_worker_count: usize,
     /// Total number of account workers spawned
     account_worker_count: usize,
-
     /// Whether V2 storage proofs are enabled
     v2_proofs_enabled: bool,
 }
@@ -161,7 +158,7 @@ impl ProofWorkerHandle {
         // Spawn all worker pools in parallel to avoid blocking on sequential spawning
         {
             let task_ctx = task_ctx.clone();
-            let storage_work_rx = storage_work_rx.clone();
+            let storage_work_rx = storage_work_rx;
             let storage_available_workers = storage_available_workers.clone();
             let cached_storage_roots = cached_storage_roots.clone();
             let caller_span = caller_span.clone();
@@ -216,11 +213,11 @@ impl ProofWorkerHandle {
 
         // Spawn account workers in parallel
         {
-            let task_ctx = task_ctx.clone();
-            let account_work_rx = account_work_rx.clone();
+            let task_ctx = task_ctx;
+            let account_work_rx = account_work_rx;
             let storage_work_tx = storage_work_tx.clone();
             let account_available_workers = account_available_workers.clone();
-            let cached_storage_roots = cached_storage_roots.clone();
+            let cached_storage_roots = cached_storage_roots;
             executor.spawn_blocking(move || {
                 let _caller_guard = caller_span.enter();
                 let parent_span = debug_span!(
@@ -1201,9 +1198,7 @@ where
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        // Create provider from factory and wrap in Rc for sharing with AsyncAccountValueEncoder
-        let provider_rc: Rc<Factory::Provider> =
-            Rc::new(self.task_ctx.factory.database_provider_ro()?);
+        let provider = self.task_ctx.factory.database_provider_ro()?;
 
         trace!(
             target: "trie::proof_task",
@@ -1218,11 +1213,11 @@ where
         // Create both account and storage calculators for V2 proofs.
         // The storage calculator is wrapped in Rc<RefCell<...>> for sharing with value encoders.
         let (mut v2_account_calculator, v2_storage_calculator) = if self.v2_enabled {
-            let account_trie_cursor = provider_rc.account_trie_cursor()?;
-            let account_hashed_cursor = provider_rc.hashed_account_cursor()?;
+            let account_trie_cursor = provider.account_trie_cursor()?;
+            let account_hashed_cursor = provider.hashed_account_cursor()?;
 
-            let storage_trie_cursor = provider_rc.storage_trie_cursor(B256::ZERO)?;
-            let storage_hashed_cursor = provider_rc.hashed_storage_cursor(B256::ZERO)?;
+            let storage_trie_cursor = provider.storage_trie_cursor(B256::ZERO)?;
+            let storage_hashed_cursor = provider.hashed_storage_cursor(B256::ZERO)?;
 
             (
                 Some(proof_v2::ProofCalculator::<
@@ -1258,7 +1253,7 @@ where
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
                     let proof_calculator_metrics = self.process_account_multiproof(
-                        &provider_rc,
+                        &provider,
                         v2_account_calculator.as_mut(),
                         v2_storage_calculator.clone(),
                         *input,
@@ -1272,7 +1267,7 @@ where
                 AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
                     Self::process_blinded_node(
                         self.worker_id,
-                        &provider_rc,
+                        &provider,
                         path,
                         result_sender,
                         &mut account_nodes_processed,
@@ -1372,6 +1367,7 @@ where
         Ok((ProofResult::Legacy(result, stats), storage_wait_time))
     }
 
+    #[allow(clippy::type_complexity)]
     fn compute_v2_account_multiproof<'a, Provider>(
         &self,
         v2_account_calculator: &mut proof_v2::ProofCalculator<
@@ -1430,9 +1426,10 @@ where
     /// Processes an account multiproof request.
     ///
     /// Returns metrics from the value encoder used during proof computation.
+    #[allow(clippy::type_complexity)]
     fn process_account_multiproof<'a, Provider>(
         &self,
-        provider_rc: &Rc<Provider>,
+        provider: &Provider,
         v2_account_calculator: Option<
             &mut proof_v2::ProofCalculator<
                 <Provider as TrieCursorFactory>::AccountTrieCursor<'a>,
@@ -1473,7 +1470,7 @@ where
             } => {
                 let (result, proof_calculator_metrics) = match self
                     .compute_legacy_account_multiproof(
-                        provider_rc.as_ref(),
+                        provider,
                         targets,
                         prefix_sets,
                         collect_branch_node_masks,
@@ -1559,7 +1556,7 @@ where
     /// Processes a blinded account node lookup request.
     fn process_blinded_node<Provider>(
         worker_id: usize,
-        provider_rc: &Rc<Provider>,
+        provider: &Provider,
         path: Nibbles,
         result_sender: Sender<TrieNodeProviderResult>,
         account_nodes_processed: &mut u64,
@@ -1580,8 +1577,7 @@ where
         );
 
         let start = Instant::now();
-        let account_node_provider =
-            ProofBlindedAccountProvider::new(provider_rc.as_ref(), provider_rc.as_ref());
+        let account_node_provider = ProofBlindedAccountProvider::new(provider, provider);
         let result = account_node_provider.trie_node(&path);
         let elapsed = start.elapsed();
 

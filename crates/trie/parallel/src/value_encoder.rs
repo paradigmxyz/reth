@@ -66,8 +66,8 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         hashed_address: B256,
         account: Account,
         proof_result_rx: Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError>,
-        /// None if results shouldn't be retained for this dispatched proof.
-        storage_proof_results: Option<Rc<RefCell<B256Map<Vec<ProofTrieNode>>>>>,
+        /// Shared storage proof results.
+        storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNode>>>>,
         /// Shared accumulator for storage wait time.
         storage_wait_time: Rc<RefCell<Duration>>,
     },
@@ -120,9 +120,7 @@ where
                     panic!("StorageProofResult is not V2 with root: {result:?}")
                 };
 
-                if let Some(storage_proof_results) = storage_proof_results.as_ref() {
-                    storage_proof_results.borrow_mut().insert(hashed_address, proof);
-                }
+                storage_proof_results.borrow_mut().insert(hashed_address, proof);
 
                 (account, root)
             }
@@ -280,7 +278,7 @@ where
                 hashed_address,
                 account,
                 proof_result_rx: Ok(rx),
-                storage_proof_results: Some(self.storage_proof_results.clone()),
+                storage_proof_results: self.storage_proof_results.clone(),
                 storage_wait_time: self.storage_wait_time.clone(),
             }
         }
