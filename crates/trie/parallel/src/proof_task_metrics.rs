@@ -48,11 +48,11 @@ impl ProofTaskTrieMetrics {
 
     /// Record account proof calculator metrics (from value encoder).
     pub(crate) fn record_account_proof_calculator_metrics(&self, metrics: &ValueEncoderMetrics) {
-        counter!("trie.proof_task.deferred_encoder_variant", "variant" => "dispatched")
+        counter!("trie.proof_task.deferred_encoder_variant_total", "variant" => "dispatched")
             .increment(metrics.dispatched_count);
-        counter!("trie.proof_task.deferred_encoder_variant", "variant" => "from_cache")
+        counter!("trie.proof_task.deferred_encoder_variant_total", "variant" => "from_cache")
             .increment(metrics.from_cache_count);
-        counter!("trie.proof_task.deferred_encoder_variant", "variant" => "sync")
+        counter!("trie.proof_task.deferred_encoder_variant_total", "variant" => "sync")
             .increment(metrics.sync_count);
     }
 }
