@@ -582,6 +582,7 @@ where
                 index,
                 tx_hash = %tx.tx().tx_hash(),
                 is_success = tracing::field::Empty,
+                gas_used = tracing::field::Empty,
             )
             .entered();
 

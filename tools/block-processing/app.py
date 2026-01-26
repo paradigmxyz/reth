@@ -103,9 +103,15 @@ def extract_worker_spans(trace: dict) -> dict[str, list[tuple[int, int]]]:
     # Second pass: find child spans of worker spans (the actual work)
     workers = defaultdict(list)
     
+    # Exclude metric/logging spans that don't represent actual work
+    excluded_spans = {"trie cursor metrics", "hashed cursor metrics"}
+    
     for span in all_spans.values():
         parent_id = span.get("parentSpanId", "")
         if parent_id in worker_span_ids:
+            name = span.get("name", "").lower()
+            if name in excluded_spans:
+                continue
             worker_type = worker_span_ids[parent_id]
             start_ns = int(span.get("startTimeUnixNano", 0))
             end_ns = int(span.get("endTimeUnixNano", 0))
@@ -232,16 +238,25 @@ def extract_prewarm_spans(trace: dict) -> tuple[list[tuple[int, int]], list[dict
                         
                         # Extract tx details
                         tx_hash = None
+                        is_success = None
+                        gas_used = None
                         for attr in span.get("attributes", []):
                             if attr.get("key") == "tx_hash":
                                 tx_hash = attr.get("value", {}).get("stringValue")
+                            elif attr.get("key") == "is_success":
+                                is_success = attr.get("value", {}).get("boolValue")
+                            elif attr.get("key") == "gas_used":
+                                val = attr.get("value", {})
+                                gas_used = val.get("intValue") or val.get("stringValue")
                         
                         if tx_hash:
                             duration_ms = (end_ns - start_ns) / 1_000_000
                             prewarm_details.append({
                                 "tx_hash": tx_hash,
                                 "duration_ms": round(duration_ms, 3),
-                                "type": "prewarm"
+                                "type": "prewarm",
+                                "is_success": is_success,
+                                "gas_used": int(gas_used) if gas_used else None,
                             })
 
     if "batches" in trace:
@@ -511,8 +526,15 @@ async def dashboard_data(trace_id: str):
     tx_map = {tx["tx_hash"]: tx.copy() for tx in tx_details}
     for prewarm in prewarm_details:
         tx_hash = prewarm["tx_hash"]
+        is_success = prewarm.get("is_success")
+        if is_success is True:
+            status = "✓"
+        else:
+            status = "✗"
+        
         if tx_hash in tx_map:
             tx_map[tx_hash]["prewarm_ms"] = prewarm["duration_ms"]
+            tx_map[tx_hash]["prewarm_status"] = status
         else:
             tx_map[tx_hash] = {
                 "tx_index": None,
@@ -520,6 +542,7 @@ async def dashboard_data(trace_id: str):
                 "duration_ms": 0,
                 "gas_used": 0,
                 "prewarm_ms": prewarm["duration_ms"],
+                "prewarm_status": status,
             }
     
     # Sort by execution duration descending

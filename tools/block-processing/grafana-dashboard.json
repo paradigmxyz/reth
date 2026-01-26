@@ -106,6 +106,7 @@
           "id": "organize",
           "options": {
             "excludeByName": {
+              "name": true,
               "nestedSetLeft": true,
               "nestedSetParent": true,
               "nestedSetRight": true,
@@ -1102,6 +1103,18 @@
               {
                 "matcher": {
                   "id": "byName",
+                  "options": "prewarm_status"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Prewarm"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
                   "options": "prewarm_ms"
                 },
                 "properties": [
@@ -1164,6 +1177,11 @@
                   "type": "number"
                 },
                 {
+                  "selector": "prewarm_status",
+                  "text": "prewarm_status",
+                  "type": "string"
+                },
+                {
                   "selector": "gas_used",
                   "text": "gas_used",
                   "type": "number"
@@ -1189,8 +1207,9 @@
               "options": {
                 "indexByName": {
                   "duration_ms": 2,
-                  "gas_used": 4,
                   "prewarm_ms": 3,
+                  "prewarm_status": 4,
+                  "gas_used": 5,
                   "tx_hash": 1,
                   "tx_index": 0
                 }
