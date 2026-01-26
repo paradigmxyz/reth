@@ -37,6 +37,7 @@ pub struct DefaultEngineValues {
     account_worker_count: Option<usize>,
     enable_proof_v2: bool,
     cache_metrics_disabled: bool,
+    slow_block_threshold: Option<u64>,
 }
 
 impl DefaultEngineValues {
@@ -172,6 +173,12 @@ impl DefaultEngineValues {
         self.cache_metrics_disabled = v;
         self
     }
+
+    /// Set the default slow block threshold in milliseconds
+    pub const fn with_slow_block_threshold(mut self, v: Option<u64>) -> Self {
+        self.slow_block_threshold = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -197,6 +204,7 @@ impl Default for DefaultEngineValues {
             account_worker_count: None,
             enable_proof_v2: false,
             cache_metrics_disabled: false,
+            slow_block_threshold: None,
         }
     }
 }
@@ -324,6 +332,15 @@ pub struct EngineArgs {
     /// Disable cache metrics recording, which can take up to 50ms with large cached state.
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
+
+    /// Configure the slow block logging threshold in milliseconds.
+    ///
+    /// When set, blocks that take longer than this threshold to execute will be logged
+    /// with detailed metrics including timing, state operations, and cache statistics.
+    /// Set to 0 to log all blocks (useful for debugging/profiling).
+    /// When not set, slow block logging is disabled (default).
+    #[arg(long = "engine.slow-block-threshold", default_value = Resettable::from(DefaultEngineValues::get_global().slow_block_threshold.map(|v| v.to_string().into())))]
+    pub slow_block_threshold: Option<u64>,
 }
 
 #[allow(deprecated)]
@@ -350,6 +367,7 @@ impl Default for EngineArgs {
             account_worker_count,
             enable_proof_v2,
             cache_metrics_disabled,
+            slow_block_threshold,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -376,6 +394,7 @@ impl Default for EngineArgs {
             account_worker_count,
             enable_proof_v2,
             cache_metrics_disabled,
+            slow_block_threshold,
         }
     }
 }
@@ -412,6 +431,8 @@ impl EngineArgs {
 
         config = config.with_enable_proof_v2(self.enable_proof_v2);
         config = config.without_cache_metrics(self.cache_metrics_disabled);
+        config = config
+            .with_slow_block_threshold(self.slow_block_threshold.map(std::time::Duration::from_millis));
 
         config
     }
@@ -464,6 +485,7 @@ mod tests {
             account_worker_count: Some(8),
             enable_proof_v2: false,
             cache_metrics_disabled: true,
+            slow_block_threshold: None,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -498,5 +520,27 @@ mod tests {
         .args;
 
         assert_eq!(parsed_args, args);
+    }
+
+    #[test]
+    fn test_parse_slow_block_threshold() {
+        // Test default value (None - disabled)
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.slow_block_threshold, None);
+
+        // Test setting to 0 (log all blocks)
+        let args =
+            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.slow-block-threshold", "0"])
+                .args;
+        assert_eq!(args.slow_block_threshold, Some(0));
+
+        // Test setting to custom value
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.slow-block-threshold",
+            "500",
+        ])
+        .args;
+        assert_eq!(args.slow_block_threshold, Some(500));
     }
 }

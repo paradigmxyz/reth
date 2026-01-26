@@ -895,14 +895,14 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     ///
     /// This should be called after block validation to attach timing statistics
     /// that will be used by persistence to emit a unified slow block log.
-    pub fn with_timing_stats(mut self, timing_stats: ExecutionTimingStats) -> Self {
+    pub const fn with_timing_stats(mut self, timing_stats: ExecutionTimingStats) -> Self {
         self.timing_stats = Some(timing_stats);
         self
     }
 
-    /// Returns a reference to the timing statistics, if set.
-    pub const fn timing_stats(&self) -> Option<&ExecutionTimingStats> {
-        self.timing_stats.as_ref()
+    /// Returns timing statistics, if set.
+    pub const fn timing_stats(&self) -> Option<ExecutionTimingStats> {
+        self.timing_stats
     }
 
     /// Returns the trie input anchored to the persisted ancestor.

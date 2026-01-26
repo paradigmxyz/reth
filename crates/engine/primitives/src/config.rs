@@ -1,6 +1,7 @@
 //! Engine tree configuration.
 
 use alloy_eips::merge::EPOCH_SLOTS;
+use core::time::Duration;
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
@@ -147,6 +148,8 @@ pub struct TreeConfig {
     enable_proof_v2: bool,
     /// Whether to disable cache metrics recording (can be expensive with large cached state).
     disable_cache_metrics: bool,
+    /// Threshold for logging slow blocks during persistence.
+    slow_block_threshold: Option<Duration>,
 }
 
 impl Default for TreeConfig {
@@ -176,6 +179,7 @@ impl Default for TreeConfig {
             account_worker_count: default_account_worker_count(),
             enable_proof_v2: false,
             disable_cache_metrics: false,
+            slow_block_threshold: None,
         }
     }
 }
@@ -208,6 +212,7 @@ impl TreeConfig {
         account_worker_count: usize,
         enable_proof_v2: bool,
         disable_cache_metrics: bool,
+        slow_block_threshold: Option<Duration>,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -234,6 +239,7 @@ impl TreeConfig {
             account_worker_count,
             enable_proof_v2,
             disable_cache_metrics,
+            slow_block_threshold,
         }
     }
 
@@ -521,6 +527,17 @@ impl TreeConfig {
     /// Setter for whether to disable cache metrics recording.
     pub const fn without_cache_metrics(mut self, disable_cache_metrics: bool) -> Self {
         self.disable_cache_metrics = disable_cache_metrics;
+        self
+    }
+
+    /// Returns the slow block threshold.
+    pub const fn slow_block_threshold(&self) -> Option<Duration> {
+        self.slow_block_threshold
+    }
+
+    /// Setter for slow block threshold.
+    pub const fn with_slow_block_threshold(mut self, slow_block_threshold: Option<Duration>) -> Self {
+        self.slow_block_threshold = slow_block_threshold;
         self
     }
 }

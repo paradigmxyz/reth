@@ -6,7 +6,6 @@
 //! - EIP-7702 delegations set and cleared
 
 use alloy_primitives::{address, map::HashMap, Address, Bytes, U256};
-use reth_evm::metrics::calculate_hit_rate;
 use reth_revm::db::BundleAccount;
 use revm::state::AccountInfo;
 use revm_bytecode::Bytecode;
@@ -248,131 +247,6 @@ fn test_eip7702_delegations_set_count() {
     let eip7702_delegations_set = contracts.iter().filter(|bc| bc.is_eip7702()).count();
 
     assert_eq!(eip7702_delegations_set, 2, "Should count 2 EIP-7702 delegations set");
-}
-
-// ============================================================================
-// JSON Output Schema Validation Tests
-// ============================================================================
-
-/// Test that slow block threshold filtering works correctly.
-/// This verifies the threshold logic used to decide when to log slow blocks.
-#[test]
-fn test_slow_block_threshold_filtering() {
-    use reth_evm::metrics::{
-        is_slow_block, set_slow_block_logging_enabled, set_slow_block_threshold,
-        slow_block_threshold,
-    };
-
-    // Enable slow block logging for this test
-    set_slow_block_logging_enabled(true);
-
-    // Test with default threshold (1000ms)
-    set_slow_block_threshold(1000);
-    assert_eq!(slow_block_threshold(), 1000);
-
-    // Below threshold - should NOT be considered slow
-    assert!(!is_slow_block(500.0), "500ms should not be slow with 1000ms threshold");
-    assert!(!is_slow_block(999.9), "999.9ms should not be slow with 1000ms threshold");
-
-    // Above threshold - SHOULD be considered slow
-    assert!(is_slow_block(1000.1), "1000.1ms should be slow with 1000ms threshold");
-    assert!(is_slow_block(1500.0), "1500ms should be slow with 1000ms threshold");
-
-    // Test with custom threshold
-    set_slow_block_threshold(500);
-    assert!(!is_slow_block(400.0), "400ms should not be slow with 500ms threshold");
-    assert!(is_slow_block(600.0), "600ms should be slow with 500ms threshold");
-
-    // Test with zero threshold (log all blocks)
-    set_slow_block_threshold(0);
-    assert!(is_slow_block(1.0), "Any positive time should be slow with 0 threshold");
-    assert!(!is_slow_block(0.0), "0ms should not be slow even with 0 threshold");
-
-    // Reset to default
-    set_slow_block_threshold(1000);
-    set_slow_block_logging_enabled(false);
-}
-
-/// Test that cache hit rate calculation is correct.
-/// This verifies the math used in the slow block JSON output.
-#[test]
-fn test_cache_hit_rate_calculation() {
-    // Uses calculate_hit_rate from reth_evm::metrics
-
-    // No cache activity - 0% hit rate
-    assert_eq!(calculate_hit_rate(0, 0), 0.0);
-
-    // 100% hit rate
-    assert!((calculate_hit_rate(10, 0) - 100.0).abs() < 0.01);
-
-    // 0% hit rate (all misses)
-    assert!((calculate_hit_rate(0, 10) - 0.0).abs() < 0.01);
-
-    // 50% hit rate
-    assert!((calculate_hit_rate(5, 5) - 50.0).abs() < 0.01);
-
-    // 40% hit rate (4 hits, 6 misses)
-    assert!((calculate_hit_rate(4, 6) - 40.0).abs() < 0.01);
-
-    // 66.67% hit rate (2 hits, 1 miss)
-    assert!((calculate_hit_rate(2, 1) - 66.666).abs() < 0.01);
-}
-
-/// Test that all metrics fields are accepted by log_slow_block.
-/// This verifies the function signature matches the expected JSON schema.
-#[test]
-fn test_log_slow_block_accepts_all_metrics() {
-    use reth_evm::metrics::{set_slow_block_threshold, ExecutorMetrics};
-
-    let metrics = ExecutorMetrics::default();
-
-    // Set threshold to 0 so any execution time triggers logging
-    set_slow_block_threshold(0);
-
-    // This test verifies all fields are accepted - if any field is missing
-    // or has the wrong type, this won't compile.
-    // The function signature enforces the JSON schema.
-    metrics.log_slow_block(
-        // Block info
-        12345,                                                              // block_number
-        "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678", // block_hash
-        30_000_000,                                                         // gas_used
-        200,                                                                // tx_count
-        // Timing metrics
-        1500.0, // execution_ms
-        320.0,  // state_read_ms
-        150.0,  // state_hash_ms
-        75.0,   // commit_ms
-        1545.0, // total_ms
-        // State read metrics
-        100,   // accounts_loaded
-        500,   // storage_slots_loaded
-        20,    // code_loaded
-        10240, // code_bytes_read
-        // State write metrics
-        50,   // accounts_updated
-        2,    // accounts_deleted (cross-client metric)
-        200,  // storage_slots_updated
-        15,   // storage_slots_deleted (cross-client metric)
-        5,    // code_updated
-        2048, // code_bytes_written
-        // EIP-7702 metrics
-        3, // eip7702_delegations_set (cross-client metric)
-        1, // eip7702_delegations_cleared (cross-client metric)
-        // Cache metrics
-        80,  // account_cache_hits
-        20,  // account_cache_misses
-        300, // storage_cache_hits
-        100, // storage_cache_misses
-        45,  // code_cache_hits
-        5,   // code_cache_misses
-    );
-
-    // Reset threshold
-    set_slow_block_threshold(1000);
-
-    // If we get here without panic, the test passes
-    // The actual JSON output is tested by examining logs in production
 }
 
 /// Test combined scenario with accounts and storage deletions.
