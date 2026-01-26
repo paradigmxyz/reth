@@ -18,10 +18,7 @@ use reth_trie_sparse::{
     SparseTrieUpdates,
 };
 use smallvec::SmallVec;
-use std::{
-    cmp::{Ord, Ordering, PartialOrd},
-    ops::Not,
-};
+use std::cmp::{Ord, Ordering, PartialOrd};
 use tracing::{debug, instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
@@ -1019,24 +1016,23 @@ impl SparseTrie for ParallelSparseTrie {
         self.upper_subtrie.nodes.retain(|p, _| !is_strict_descendant(p));
         self.upper_subtrie.inner.values.retain(|p, _| !starts_with_pruned(p));
 
-        if !self.is_prune_parallelism_enabled(nodes_converted) {
-            for subtrie in &mut self.lower_subtries {
+        #[cfg(feature = "std")]
+        {
+            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+
+            self.lower_subtries.par_iter_mut().for_each(|subtrie| {
                 if let Some(s) = subtrie.as_revealed_mut() {
                     s.nodes.retain(|p, _| !is_strict_descendant(p));
                     s.inner.values.retain(|p, _| !starts_with_pruned(p));
                 }
-            }
-        } else {
-            #[cfg(feature = "std")]
-            {
-                use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+            });
+        }
 
-                self.lower_subtries.par_iter_mut().for_each(|subtrie| {
-                    if let Some(s) = subtrie.as_revealed_mut() {
-                        s.nodes.retain(|p, _| is_strict_descendant(p).not());
-                        s.inner.values.retain(|p, _| starts_with_pruned(p).not());
-                    }
-                });
+        #[cfg(not(feature = "std"))]
+        for subtrie in &mut self.lower_subtries {
+            if let Some(s) = subtrie.as_revealed_mut() {
+                s.nodes.retain(|p, _| !is_strict_descendant(p));
+                s.inner.values.retain(|p, _| !starts_with_pruned(p));
             }
         }
 
@@ -1074,15 +1070,6 @@ impl ParallelSparseTrie {
         return false;
 
         num_changed_keys >= self.parallelism_thresholds.min_updated_nodes
-    }
-
-    /// Returns true if parallelism should be enabled for pruning with the given number
-    /// of pruned roots. Will always return false in nostd builds.
-    const fn is_prune_parallelism_enabled(&self, num_pruned_roots: usize) -> bool {
-        #[cfg(not(feature = "std"))]
-        return false;
-
-        num_pruned_roots >= self.parallelism_thresholds.min_pruned_roots
     }
 
     /// Creates a new revealed sparse trie from the given root node.
@@ -2816,8 +2803,8 @@ enum SparseTrieUpdatesAction {
 #[cfg(test)]
 mod tests {
     use super::{
-        path_subtrie_index_unchecked, LowerSparseSubtrie, ParallelSparseTrie,
-        ParallelismThresholds, SparseSubtrie, SparseSubtrieType,
+        path_subtrie_index_unchecked, LowerSparseSubtrie, ParallelSparseTrie, SparseSubtrie,
+        SparseSubtrieType,
     };
     use crate::trie::ChangedSubtrie;
     use alloy_primitives::{
@@ -7448,13 +7435,11 @@ mod tests {
     }
 
     #[test]
-    fn test_prune_parallel_vs_serial_processing() {
-        // Test that parallel prune processing produces identical results to serial processing.
-        // Creates a trie with many lower subtries to ensure parallel code path is exercised.
+    fn test_prune_many_lower_subtries() {
+        // Test prune with keys spanning all 256 lower subtries to exercise parallel code path.
 
         let provider = DefaultTrieNodeProvider;
 
-        // Large value to ensure hashes are computed
         let large_value = {
             let account = Account {
                 nonce: 0x123456789abcdef,
@@ -7466,8 +7451,7 @@ mod tests {
             buf
         };
 
-        // Create keys that span many different lower subtries (first 2 nibbles determine subtrie)
-        // This ensures we have enough work for parallel processing to be meaningful
+        // Create keys spanning all 256 lower subtries (first 2 nibbles determine subtrie index)
         let mut keys = Vec::new();
         for first in 0..16u8 {
             for second in 0..16u8 {
@@ -7475,110 +7459,31 @@ mod tests {
             }
         }
 
-        // Test with parallelism disabled (threshold = usize::MAX)
-        let mut serial_parallel =
-            ParallelSparseTrie::default().with_parallelism_thresholds(ParallelismThresholds {
-                min_pruned_roots: usize::MAX,
-                ..Default::default()
-            });
+        let mut parallel = ParallelSparseTrie::default();
+        let mut serial = SerialSparseTrie::default();
 
-        // Test with parallelism enabled (threshold = 0)
-        let mut parallel =
-            ParallelSparseTrie::default().with_parallelism_thresholds(ParallelismThresholds {
-                min_pruned_roots: 0,
-                ..Default::default()
-            });
-
-        // Insert all keys
         for key in &keys {
-            serial_parallel.update_leaf(key.clone(), large_value.clone(), &provider).unwrap();
             parallel.update_leaf(key.clone(), large_value.clone(), &provider).unwrap();
+            serial.update_leaf(key.clone(), large_value.clone(), &provider).unwrap();
         }
 
-        // Compute hashes
-        let root_before_serial = serial_parallel.root();
-        let root_before_parallel = parallel.root();
-        assert_eq!(root_before_serial, root_before_parallel, "roots should match before prune");
+        let root_before = parallel.root();
+        assert_eq!(root_before, serial.root());
 
-        // Prune at depth 1 to affect many lower subtries
-        let pruned_serial = serial_parallel.prune(1);
         let pruned_parallel = parallel.prune(1);
+        let pruned_serial = serial.prune(1);
 
-        assert_eq!(pruned_serial, pruned_parallel, "same number of nodes should be pruned");
-
-        // Roots should still match after prune
-        let root_after_serial = serial_parallel.root();
-        let root_after_parallel = parallel.root();
-        assert_eq!(root_after_serial, root_after_parallel, "roots should match after prune");
-
-        // Revealed node counts should match
+        assert_eq!(pruned_parallel, pruned_serial, "same number of nodes should be pruned");
+        assert_eq!(parallel.root(), serial.root(), "roots should match after prune");
         assert_eq!(
-            serial_parallel.revealed_node_count(),
             parallel.revealed_node_count(),
+            serial.revealed_node_count(),
             "revealed node counts should match"
         );
 
-        // All original values should be inaccessible (pruned away)
+        // All values should be pruned away
         for key in &keys {
-            assert!(
-                serial_parallel.get_leaf_value(key).is_none(),
-                "serial: value at {:?} should be pruned",
-                key
-            );
-            assert!(
-                parallel.get_leaf_value(key).is_none(),
-                "parallel: value at {:?} should be pruned",
-                key
-            );
+            assert!(parallel.get_leaf_value(key).is_none(), "value should be pruned");
         }
-    }
-
-    #[test]
-    fn test_prune_parallel_threshold() {
-        // Test that the parallelism threshold is respected
-
-        let provider = DefaultTrieNodeProvider;
-        let value = vec![0x80, 0x81, 0x82, 0x83, 0x84];
-
-        // Create a trie with a moderate number of keys
-        let keys: Vec<Nibbles> =
-            (0..8u8).map(|i| Nibbles::from_nibbles([i, 0x1, 0x2, 0x3])).collect();
-
-        // Test 1: With threshold higher than pruned nodes - should use serial
-        let mut trie_high_threshold =
-            ParallelSparseTrie::default().with_parallelism_thresholds(ParallelismThresholds {
-                min_pruned_roots: 1000,
-                ..Default::default()
-            });
-
-        // Test 2: With threshold of 0 - should use parallel
-        let mut trie_low_threshold =
-            ParallelSparseTrie::default().with_parallelism_thresholds(ParallelismThresholds {
-                min_pruned_roots: 0,
-                ..Default::default()
-            });
-
-        for key in &keys {
-            trie_high_threshold.update_leaf(key.clone(), value.clone(), &provider).unwrap();
-            trie_low_threshold.update_leaf(key.clone(), value.clone(), &provider).unwrap();
-        }
-
-        trie_high_threshold.root();
-        trie_low_threshold.root();
-
-        trie_high_threshold.prune(0);
-        trie_low_threshold.prune(0);
-
-        // Both should produce the same result regardless of threshold
-        assert_eq!(
-            trie_high_threshold.root(),
-            trie_low_threshold.root(),
-            "prune results should be identical regardless of parallelism threshold"
-        );
-        assert_eq!(
-            trie_high_threshold.revealed_node_count(),
-            trie_low_threshold.revealed_node_count(),
-            "revealed node counts should match"
-        );
     }
 }
