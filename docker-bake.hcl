@@ -33,6 +33,11 @@ variable "VERGEN_GIT_DIRTY" {
   default = "false"
 }
 
+// Enable PGO+BOLT optimization (Linux only)
+variable "USE_PGO_BOLT" {
+  default = "true"
+}
+
 // Common settings for all targets
 group "default" {
   targets = ["ethereum", "optimism"]
@@ -47,11 +52,12 @@ target "_base" {
   dockerfile = "Dockerfile.depot"
   platforms  = ["linux/amd64", "linux/arm64"]
   args = {
-    BUILD_PROFILE      = "${BUILD_PROFILE}"
-    FEATURES           = "${FEATURES}"
-    VERGEN_GIT_SHA     = "${VERGEN_GIT_SHA}"
+    BUILD_PROFILE       = "${BUILD_PROFILE}"
+    FEATURES            = "${FEATURES}"
+    VERGEN_GIT_SHA      = "${VERGEN_GIT_SHA}"
     VERGEN_GIT_DESCRIBE = "${VERGEN_GIT_DESCRIBE}"
-    VERGEN_GIT_DIRTY   = "${VERGEN_GIT_DIRTY}"
+    VERGEN_GIT_DIRTY    = "${VERGEN_GIT_DIRTY}"
+    USE_PGO_BOLT        = "${USE_PGO_BOLT}"
   }
 }
 

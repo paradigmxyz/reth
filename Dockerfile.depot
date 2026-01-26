@@ -1,9 +1,11 @@
 # syntax=docker.io/docker/dockerfile:1.7-labs
 
 # Unified Dockerfile for reth and op-reth, optimized for Depot builds
+# Supports PGO+BOLT optimization for maximum performance
 # Usage:
 #   reth:    --build-arg BINARY=reth
 #   op-reth: --build-arg BINARY=op-reth --build-arg MANIFEST_PATH=crates/optimism/bin
+#   PGO+BOLT: --build-arg USE_PGO_BOLT=true (Linux x86_64/aarch64 only)
 
 FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
 WORKDIR /app
@@ -52,6 +54,10 @@ ENV VERGEN_GIT_SHA=$VERGEN_GIT_SHA
 ENV VERGEN_GIT_DESCRIBE=$VERGEN_GIT_DESCRIBE
 ENV VERGEN_GIT_DIRTY=$VERGEN_GIT_DIRTY
 
+# Enable PGO+BOLT optimization (Linux only)
+ARG USE_PGO_BOLT=false
+ENV USE_PGO_BOLT=$USE_PGO_BOLT
+
 # Build dependencies with cache mounts
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
@@ -63,7 +69,15 @@ COPY --exclude=.git . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
-    cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $BINARY --manifest-path $MANIFEST_PATH/Cargo.toml
+    if [ "$USE_PGO_BOLT" = "true" ]; then \
+        # Install dependencies for PGO+BOLT
+        apt-get update && apt-get install -y -qq lsb-release wget sudo && \
+        # Run PGO+BOLT build script
+        BINARY="$BINARY" PROFILE="$BUILD_PROFILE" FEATURES="$FEATURES" \
+            ./.github/scripts/build_pgo_bolt.sh; \
+    else \
+        cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $BINARY --manifest-path $MANIFEST_PATH/Cargo.toml; \
+    fi
 
 # Copy binary to a known location (ARG not resolved in COPY)
 # Note: Custom profiles like maxperf/profiling output to target/<profile>/, not target/release/
