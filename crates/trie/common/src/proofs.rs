@@ -1,7 +1,10 @@
 //! Merkle trie proofs.
-
+#[allow(missing_docs)]
 use crate::{BranchNodeMasksMap, Nibbles, ProofTrieNode, TrieAccount};
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::{
+    borrow::Cow,
+    vec::{IntoIter, Vec},
+};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
@@ -14,13 +17,14 @@ use alloy_trie::{
     proof::{verify_proof, DecodedProofNodes, ProofNodes, ProofVerificationError},
     EMPTY_ROOT_HASH,
 };
+use core::iter::Peekable;
 use derive_more::{Deref, DerefMut, IntoIterator};
 use itertools::Itertools;
 use reth_primitives_traits::Account;
 
 /// Proof targets map.
 #[derive(Deref, DerefMut, IntoIterator, Clone, PartialEq, Eq, Default, Debug)]
-pub struct MultiProofTargets(B256Map<B256Set>);
+pub struct MultiProofTargets(pub B256Map<B256Set>);
 
 impl FromIterator<(B256, B256Set)> for MultiProofTargets {
     fn from_iter<T: IntoIterator<Item = (B256, B256Set)>>(iter: T) -> Self {
@@ -123,7 +127,7 @@ pub struct ChunkedMultiProofTargets {
 }
 
 impl ChunkedMultiProofTargets {
-    fn new(targets: MultiProofTargets, size: usize) -> Self {
+    pub fn new(targets: MultiProofTargets, size: usize) -> Self {
         let flattened_targets = targets
             .into_iter()
             .flat_map(|(address, slots)| {
@@ -162,6 +166,103 @@ impl Iterator for ChunkedMultiProofTargets {
             None
         } else {
             Some(chunk)
+        }
+    }
+}
+
+/// Iterator that respects account boundaries and enforces chunk limits.
+///
+/// - Small accounts are never split (preventing double-seeking).
+/// - Large accounts are split into multiple full chunks.
+#[derive(Debug)]
+pub struct SmartChunkedMultiProofTargets {
+    /// List of accounts to process.
+    accounts: Peekable<IntoIter<(B256, B256Set)>>,
+    /// If an account was too big, its remaining slots wait here for the next pass.
+    /// stored as: (Address, Sorted List of Slots)
+    pending_large_account: Option<(B256, Vec<B256>)>,
+    /// Chunk size limit.
+    chunk_size: usize,
+}
+
+impl SmartChunkedMultiProofTargets {
+    pub fn new(targets: MultiProofTargets, size: usize) -> Self {
+        // Flatten and Sort Accounts
+        let mut accounts_vec: Vec<(B256, B256Set)> = targets.0.into_iter().collect();
+        accounts_vec.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        Self {
+            accounts: accounts_vec.into_iter().peekable(),
+            pending_large_account: None,
+            chunk_size: size,
+        }
+    }
+}
+
+impl Iterator for SmartChunkedMultiProofTargets {
+    type Item = MultiProofTargets;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut current_chunk = MultiProofTargets::default();
+        let mut current_load = 0;
+
+        // Handle leftovers from a previous big account
+        if let Some((addr, mut remaining_slots)) = self.pending_large_account.take() {
+            let take_count = self.chunk_size;
+
+            if remaining_slots.len() > take_count {
+                // Still doesn't fit
+                // Slice off `chunk_size` slots
+                let chunk_slots: Vec<B256> = remaining_slots.drain(0..take_count).collect();
+                // Add to chunk
+                current_chunk.0.insert(addr, chunk_slots.into_iter().collect());
+                // Put the rest back in pending
+                self.pending_large_account = Some((addr, remaining_slots));
+
+                return Some(current_chunk);
+            } else {
+                // It fits. Logic proceeds to fill the rest of the chunk with other accounts
+                current_load += remaining_slots.len();
+                current_chunk.0.insert(addr, remaining_slots.into_iter().collect());
+            }
+        }
+
+        // Process normal accounts
+        while let Some((_address, slots)) = self.accounts.peek() {
+            let account_cost = if slots.is_empty() { 1 } else { slots.len() };
+
+            // Check fit
+            if current_load + account_cost > self.chunk_size {
+                if current_load == 0 {
+                    // The chunk is empty, but the account is big.
+                    let (addr, slots_set) = self.accounts.next().unwrap();
+                    // Convert Set to Sorted Vec (deterministic splitting)
+                    let mut sorted_slots: Vec<B256> = slots_set.into_iter().collect();
+                    sorted_slots.sort_unstable();
+                    // Take what fits
+                    let take_count = self.chunk_size;
+                    let chunk_slots: Vec<B256> = sorted_slots.drain(0..take_count).collect();
+                    // Save the rest
+                    self.pending_large_account = Some((addr, sorted_slots));
+
+                    current_chunk.0.insert(addr, chunk_slots.into_iter().collect());
+                    return Some(current_chunk);
+                } else {
+                    // Chunk has data, account doesn't fit.
+                    return Some(current_chunk);
+                }
+            }
+
+            // It fits. Consume it.
+            let (addr, slots) = self.accounts.next().unwrap();
+            current_load += account_cost;
+            current_chunk.0.insert(addr, slots);
+        }
+
+        if current_chunk.0.is_empty() {
+            None
+        } else {
+            Some(current_chunk)
         }
     }
 }
