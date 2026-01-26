@@ -158,7 +158,7 @@ pub fn apply_precompile_overrides(
         return Ok(());
     }
 
-    for (source, _dest) in &moves {
+    for (source, _) in &moves {
         if precompiles.get(source).is_none() {
             return Err(EthSimulateError::NotAPrecompile(*source));
         }
@@ -182,7 +182,7 @@ pub fn apply_precompile_overrides(
         }
     }
 
-    for (_source, dest, precompile) in extracted {
+    for (_, dest, precompile) in extracted {
         precompiles.apply_precompile(&dest, |_| Some(precompile));
     }
 
