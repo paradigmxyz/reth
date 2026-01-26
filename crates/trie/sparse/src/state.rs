@@ -980,11 +980,17 @@ where
     ///
     /// Storage tries not in the top `max_storage_tries` by revealed node count are cleared
     /// entirely.
+    ///
+    /// # Preconditions
+    ///
+    /// Node hashes must be computed (via `root()` or `update_subtrie_hashes()`) before calling
+    /// this method. Otherwise, nodes cannot be converted to hash stubs and pruning will have
+    /// no effect.
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
         #[cfg(feature = "metrics")]
         let account_nodes_converted: u64;
 
-        if let SparseTrie::Revealed(trie) = &mut self.state {
+        if let RevealableSparseTrie::Revealed(trie) = &mut self.state {
             #[cfg(feature = "metrics")]
             {
                 account_nodes_converted = trie.prune(max_depth) as u64;
@@ -1007,8 +1013,8 @@ where
             .iter()
             .map(|(hash, trie)| {
                 let count = match trie {
-                    SparseTrie::Revealed(t) => t.revealed_node_count(),
-                    SparseTrie::Blind(_) => 0,
+                    RevealableSparseTrie::Revealed(t) => t.revealed_node_count(),
+                    RevealableSparseTrie::Blind(_) => 0,
                 };
                 (*hash, count)
             })
@@ -1045,7 +1051,7 @@ where
         let mut storage_nodes_converted = 0u64;
 
         for hash in &tries_to_keep {
-            if let Some(SparseTrie::Revealed(trie)) = self.storage.tries.get_mut(hash) {
+            if let Some(RevealableSparseTrie::Revealed(trie)) = self.storage.tries.get_mut(hash) {
                 #[cfg(feature = "metrics")]
                 {
                     storage_nodes_converted += trie.prune(max_depth) as u64;

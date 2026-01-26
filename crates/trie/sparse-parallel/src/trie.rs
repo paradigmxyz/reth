@@ -990,7 +990,13 @@ impl SparseTrie for ParallelSparseTrie {
         }
         self.prefix_set.clear();
 
+        // Sort for binary search. Roots are prefix-free by construction (all at same node-depth),
+        // which is required for partition_point ancestor detection to work correctly.
         effective_pruned_roots.sort_unstable();
+        debug_assert!(
+            effective_pruned_roots.windows(2).all(|w| !w[1].starts_with(&w[0])),
+            "prune roots must be prefix-free"
+        );
 
         let is_strict_descendant = |p: &Nibbles| -> bool {
             let idx = effective_pruned_roots.partition_point(|root| root <= p);
