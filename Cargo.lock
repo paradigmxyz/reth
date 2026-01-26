@@ -8465,6 +8465,7 @@ name = "reth-engine-util"
 version = "1.10.2"
 dependencies = [
  "alloy-consensus",
+ "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",
  "futures",
