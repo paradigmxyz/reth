@@ -1,8 +1,5 @@
 use crate::value_encoder::ValueEncoderMetrics;
-use reth_metrics::{
-    metrics::{counter, Histogram},
-    Metrics,
-};
+use reth_metrics::{metrics::Histogram, Metrics};
 use reth_trie::{
     hashed_cursor::{HashedCursorMetrics, HashedCursorMetricsCache},
     trie_cursor::{TrieCursorMetrics, TrieCursorMetricsCache},
@@ -23,6 +20,12 @@ pub struct ProofTaskTrieMetrics {
     /// Histogram for account worker idle time in seconds (waiting for proof jobs + storage
     /// results).
     account_worker_idle_time_seconds: Histogram,
+    /// Histogram for dispatched deferred encoder variant count.
+    deferred_encoder_dispatched: Histogram,
+    /// Histogram for from_cache deferred encoder variant count.
+    deferred_encoder_from_cache: Histogram,
+    /// Histogram for sync deferred encoder variant count.
+    deferred_encoder_sync: Histogram,
 }
 
 impl ProofTaskTrieMetrics {
@@ -48,12 +51,9 @@ impl ProofTaskTrieMetrics {
 
     /// Record account proof calculator metrics (from value encoder).
     pub(crate) fn record_account_proof_calculator_metrics(&self, metrics: &ValueEncoderMetrics) {
-        counter!("trie.proof_task.deferred_encoder_variant_total", "variant" => "dispatched")
-            .increment(metrics.dispatched_count);
-        counter!("trie.proof_task.deferred_encoder_variant_total", "variant" => "from_cache")
-            .increment(metrics.from_cache_count);
-        counter!("trie.proof_task.deferred_encoder_variant_total", "variant" => "sync")
-            .increment(metrics.sync_count);
+        self.deferred_encoder_dispatched.record(metrics.dispatched_count as f64);
+        self.deferred_encoder_from_cache.record(metrics.from_cache_count as f64);
+        self.deferred_encoder_sync.record(metrics.sync_count as f64);
     }
 }
 
