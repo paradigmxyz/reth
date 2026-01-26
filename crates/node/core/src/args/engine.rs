@@ -446,6 +446,8 @@ mod tests {
             caching_and_prewarming_enabled: true,
             state_cache_disabled: true,
             prewarming_disabled: true,
+            parallel_sparse_trie_enabled: true,
+            parallel_sparse_trie_disabled: false,
             state_provider_metrics: true,
             cross_block_cache_size: 256,
             state_root_task_compare_updates: true,
