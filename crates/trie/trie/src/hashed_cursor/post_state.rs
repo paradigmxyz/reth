@@ -106,6 +106,9 @@ where
     seeked: bool,
     /// Reference to the full post state.
     post_state: &'a HashedPostStateSorted,
+    /// Whether the storage has any non-zero values in post state.
+    /// Used for O(1) emptiness checks. Only meaningful for storage cursors.
+    has_non_zero: bool,
 }
 
 impl<'a, C> HashedPostStateCursor<'a, C, Option<Account>>
@@ -123,6 +126,7 @@ where
             last_key: None,
             seeked: false,
             post_state,
+            has_non_zero: false, // Not used for account cursors
         }
     }
 }
@@ -138,7 +142,7 @@ where
         post_state: &'a HashedPostStateSorted,
         hashed_address: B256,
     ) -> Self {
-        let (post_state_cursor, cursor_wiped) =
+        let (post_state_cursor, cursor_wiped, has_non_zero) =
             Self::get_storage_overlay(post_state, hashed_address);
         Self {
             cursor,
@@ -148,19 +152,22 @@ where
             last_key: None,
             seeked: false,
             post_state,
+            has_non_zero,
         }
     }
 
-    /// Returns the storage overlay for `hashed_address` and whether it was wiped.
+    /// Returns the storage overlay for `hashed_address`, whether it was wiped,
+    /// and whether it has any non-zero values.
     fn get_storage_overlay(
         post_state: &'a HashedPostStateSorted,
         hashed_address: B256,
-    ) -> (ForwardInMemoryCursor<'a, B256, U256>, bool) {
+    ) -> (ForwardInMemoryCursor<'a, B256, U256>, bool, bool) {
         let post_state_storage = post_state.storages.get(&hashed_address);
         let cursor_wiped = post_state_storage.is_some_and(|u| u.is_wiped());
+        let has_non_zero = post_state_storage.is_some_and(|u| u.has_non_zero());
         let storage_slots = post_state_storage.map(|u| u.storage_slots_ref()).unwrap_or(&[]);
 
-        (ForwardInMemoryCursor::new(storage_slots), cursor_wiped)
+        (ForwardInMemoryCursor::new(storage_slots), cursor_wiped, has_non_zero)
     }
 }
 
@@ -327,6 +334,7 @@ where
             last_key,
             seeked,
             post_state: _,
+            has_non_zero: _,
         } = self;
 
         cursor.reset();
@@ -350,8 +358,8 @@ where
     /// This function should be called before attempting to call [`HashedCursor::seek`] or
     /// [`HashedCursor::next`].
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
-        // Storage is not empty if it has non-zero slots.
-        if self.post_state_cursor.has_any(|(_, value)| value.into_option().is_some()) {
+        // O(1) check: storage is not empty if post-state has any non-zero slots.
+        if self.has_non_zero {
             return Ok(false);
         }
 
@@ -363,7 +371,7 @@ where
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.reset();
         self.cursor.set_hashed_address(hashed_address);
-        (self.post_state_cursor, self.cursor_wiped) =
+        (self.post_state_cursor, self.cursor_wiped, self.has_non_zero) =
             HashedPostStateCursor::<C, U256>::get_storage_overlay(self.post_state, hashed_address);
     }
 }
@@ -488,9 +496,11 @@ mod tests {
 
                 // Create a HashedPostStateSorted with the storage data
                 let hashed_address = B256::ZERO;
+                let has_non_zero = post_state_nodes.iter().any(|(_, v)| *v != U256::ZERO);
                 let storage_sorted = reth_trie_common::HashedStorageSorted {
                     storage_slots: post_state_nodes,
                     wiped: false,
+                    has_non_zero,
                 };
                 let mut storages = alloy_primitives::map::B256Map::default();
                 storages.insert(hashed_address, storage_sorted);

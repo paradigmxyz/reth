@@ -526,8 +526,9 @@ impl HashedStorage {
     pub fn into_sorted(self) -> HashedStorageSorted {
         let mut storage_slots: Vec<_> = self.storage.into_iter().collect();
         storage_slots.sort_unstable_by_key(|(key, _)| *key);
+        let has_non_zero = storage_slots.iter().any(|(_, v)| *v != U256::ZERO);
 
-        HashedStorageSorted { storage_slots, wiped: self.wiped }
+        HashedStorageSorted { storage_slots, wiped: self.wiped, has_non_zero }
     }
 
     /// Creates a sorted copy without consuming self.
@@ -535,8 +536,9 @@ impl HashedStorage {
     pub fn clone_into_sorted(&self) -> HashedStorageSorted {
         let mut storage_slots: Vec<_> = self.storage.iter().map(|(&k, &v)| (k, v)).collect();
         storage_slots.sort_unstable_by_key(|(key, _)| *key);
+        let has_non_zero = storage_slots.iter().any(|(_, v)| *v != U256::ZERO);
 
-        HashedStorageSorted { storage_slots, wiped: self.wiped }
+        HashedStorageSorted { storage_slots, wiped: self.wiped, has_non_zero }
     }
 }
 
@@ -698,7 +700,8 @@ impl HashedPostStateSorted {
             .into_iter()
             .map(|(addr, entry)| {
                 let storage_slots = kway_merge_sorted(entry.slices);
-                (addr, HashedStorageSorted { wiped: entry.wiped, storage_slots })
+                let has_non_zero = storage_slots.iter().any(|(_, v)| *v != U256::ZERO);
+                (addr, HashedStorageSorted { wiped: entry.wiped, storage_slots, has_non_zero })
             })
             .collect();
 
@@ -726,6 +729,10 @@ pub struct HashedStorageSorted {
     pub storage_slots: Vec<(B256, U256)>,
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,
+    /// Flag indicating whether any storage slot has a non-zero value.
+    /// Used for O(1) emptiness checks in `is_storage_empty()`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub has_non_zero: bool,
 }
 
 impl HashedStorageSorted {
@@ -759,11 +766,14 @@ impl HashedStorageSorted {
             self.wiped = true;
             self.storage_slots.clear();
             self.storage_slots.extend(other.storage_slots.iter().copied());
+            self.has_non_zero = other.has_non_zero;
             return;
         }
 
         // Extend the sorted non-zero valued slots
         extend_sorted_vec(&mut self.storage_slots, &other.storage_slots);
+        // After merge, either side having non-zero means result has non-zero
+        self.has_non_zero = self.has_non_zero || other.has_non_zero;
     }
 
     /// Batch-merge sorted hashed storage. Iterator yields **newest to oldest**.
@@ -777,8 +787,14 @@ impl HashedStorageSorted {
         let wipe_idx = updates.iter().position(|u| u.wiped);
         let relevant = wipe_idx.map_or(&updates[..], |idx| &updates[..=idx]);
         let storage_slots = kway_merge_sorted(relevant.iter().map(|u| u.storage_slots.as_slice()));
+        let has_non_zero = relevant.iter().any(|u| u.has_non_zero);
 
-        Self { wiped: wipe_idx.is_some(), storage_slots }
+        Self { wiped: wipe_idx.is_some(), storage_slots, has_non_zero }
+    }
+
+    /// Returns `true` if any storage slot has a non-zero value.
+    pub const fn has_non_zero(&self) -> bool {
+        self.has_non_zero
     }
 }
 
@@ -1456,6 +1472,7 @@ mod tests {
                 (B256::from([5; 32]), U256::ZERO),
             ],
             wiped: false,
+            has_non_zero: true,
         };
 
         let storage2 = HashedStorageSorted {
@@ -1466,6 +1483,7 @@ mod tests {
                 (B256::from([6; 32]), U256::ZERO),
             ],
             wiped: false,
+            has_non_zero: true,
         };
 
         storage1.extend_ref(&storage2);
@@ -1492,6 +1510,7 @@ mod tests {
                 (B256::from([2; 32]), U256::ZERO),
             ],
             wiped: false,
+            has_non_zero: true,
         };
 
         let storage4 = HashedStorageSorted {
@@ -1500,6 +1519,7 @@ mod tests {
                 (B256::from([4; 32]), U256::ZERO),
             ],
             wiped: true,
+            has_non_zero: true,
         };
 
         storage3.extend_ref(&storage4);
@@ -1560,6 +1580,7 @@ mod tests {
         let sorted = HashedStorageSorted {
             storage_slots: vec![(slot2, U256::from(200)), (slot3, U256::ZERO)],
             wiped: false,
+            has_non_zero: true,
         };
 
         storage.extend_from_sorted(&sorted);
@@ -1579,8 +1600,11 @@ mod tests {
 
         let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
 
-        let sorted =
-            HashedStorageSorted { storage_slots: vec![(slot2, U256::from(200))], wiped: true };
+        let sorted = HashedStorageSorted {
+            storage_slots: vec![(slot2, U256::from(200))],
+            wiped: true,
+            has_non_zero: true,
+        };
 
         storage.extend_from_sorted(&sorted);
 
@@ -1924,17 +1948,27 @@ pub mod serde_bincode_compat {
     pub struct HashedStorageSorted<'a> {
         storage_slots: Cow<'a, [(B256, U256)]>,
         wiped: bool,
+        #[serde(default)]
+        has_non_zero: bool,
     }
 
     impl<'a> From<&'a super::HashedStorageSorted> for HashedStorageSorted<'a> {
         fn from(value: &'a super::HashedStorageSorted) -> Self {
-            Self { storage_slots: Cow::Borrowed(&value.storage_slots), wiped: value.wiped }
+            Self {
+                storage_slots: Cow::Borrowed(&value.storage_slots),
+                wiped: value.wiped,
+                has_non_zero: value.has_non_zero,
+            }
         }
     }
 
     impl<'a> From<HashedStorageSorted<'a>> for super::HashedStorageSorted {
         fn from(value: HashedStorageSorted<'a>) -> Self {
-            Self { storage_slots: value.storage_slots.into_owned(), wiped: value.wiped }
+            Self {
+                storage_slots: value.storage_slots.into_owned(),
+                wiped: value.wiped,
+                has_non_zero: value.has_non_zero,
+            }
         }
     }
 
@@ -2049,6 +2083,7 @@ pub mod serde_bincode_compat {
                 HashedStorageSorted {
                     storage_slots: vec![(B256::from([1; 32]), U256::from(10))],
                     wiped: false,
+                    has_non_zero: true,
                 },
             );
             let encoded = bincode::serialize(&data).unwrap();
@@ -2066,7 +2101,11 @@ pub mod serde_bincode_compat {
             }
 
             let mut data = Data {
-                hashed_storage: HashedStorageSorted { storage_slots: Vec::new(), wiped: false },
+                hashed_storage: HashedStorageSorted {
+                    storage_slots: Vec::new(),
+                    wiped: false,
+                    has_non_zero: false,
+                },
             };
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
