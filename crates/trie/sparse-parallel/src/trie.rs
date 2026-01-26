@@ -13,6 +13,7 @@ use reth_trie_common::{
     ProofTrieNode, RlpNode, TrieNode, CHILD_INDEX_RANGE,
 };
 use reth_trie_sparse::{
+    leaf_removal::{branch_changes_on_leaf_removal, extension_changes_on_leaf_removal},
     provider::{RevealedNode, TrieNodeProvider},
     LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrie,
     SparseTrieExt, SparseTrieUpdates,
@@ -635,7 +636,7 @@ impl SparseTrie for ParallelSparseTrie {
                     true, // recurse_into_extension
                 )?;
 
-                let (new_branch_node, remove_child) = Self::branch_changes_on_leaf_removal(
+                let (new_branch_node, remove_child) = branch_changes_on_leaf_removal(
                     branch_path,
                     &remaining_child_path,
                     &remaining_child_node,
@@ -676,7 +677,7 @@ impl SparseTrie for ParallelSparseTrie {
             let ext_subtrie = self.subtrie_for_path_mut(&ext_path);
             let branch_path = branch_parent_path.as_ref().unwrap();
 
-            if let Some(new_ext_node) = Self::extension_changes_on_leaf_removal(
+            if let Some(new_ext_node) = extension_changes_on_leaf_removal(
                 &ext_path,
                 shortkey,
                 branch_path,
@@ -1036,7 +1037,7 @@ impl SparseTrie for ParallelSparseTrie {
             }
         }
 
-        self.branch_node_masks.retain(|p, _| !starts_with_pruned(p));
+        self.branch_node_masks.retain(|p, _| !is_strict_descendant(p));
 
         nodes_converted
     }
@@ -1433,100 +1434,6 @@ impl ParallelSparseTrie {
                 }
             }
             _ => panic!("Expected to remove a leaf or extension, but removed {node:?}"),
-        }
-    }
-
-    /// Given the path to a parent branch node and a child node which is the sole remaining child on
-    /// that branch after removing a leaf, returns a node to replace the parent branch node and a
-    /// boolean indicating if the child should be deleted.
-    ///
-    /// ## Panics
-    ///
-    /// - If either parent or child node is not already revealed.
-    /// - If parent's path is not a prefix of the child's path.
-    fn branch_changes_on_leaf_removal(
-        parent_path: &Nibbles,
-        remaining_child_path: &Nibbles,
-        remaining_child_node: &SparseNode,
-    ) -> (SparseNode, bool) {
-        debug_assert!(remaining_child_path.len() > parent_path.len());
-        debug_assert!(remaining_child_path.starts_with(parent_path));
-
-        let remaining_child_nibble = remaining_child_path.get_unchecked(parent_path.len());
-
-        // If we swap the branch node out either an extension or leaf, depending on
-        // what its remaining child is.
-        match remaining_child_node {
-            SparseNode::Empty | SparseNode::Hash(_) => {
-                panic!("remaining child must have been revealed already")
-            }
-            // If the only child is a leaf node, we downgrade the branch node into a
-            // leaf node, prepending the nibble to the key, and delete the old
-            // child.
-            SparseNode::Leaf { key, .. } => {
-                let mut new_key = Nibbles::from_nibbles_unchecked([remaining_child_nibble]);
-                new_key.extend(key);
-                (SparseNode::new_leaf(new_key), true)
-            }
-            // If the only child node is an extension node, we downgrade the branch
-            // node into an even longer extension node, prepending the nibble to the
-            // key, and delete the old child.
-            SparseNode::Extension { key, .. } => {
-                let mut new_key = Nibbles::from_nibbles_unchecked([remaining_child_nibble]);
-                new_key.extend(key);
-                (SparseNode::new_ext(new_key), true)
-            }
-            // If the only child is a branch node, we downgrade the current branch
-            // node into a one-nibble extension node.
-            SparseNode::Branch { .. } => (
-                SparseNode::new_ext(Nibbles::from_nibbles_unchecked([remaining_child_nibble])),
-                false,
-            ),
-        }
-    }
-
-    /// Given the path to a parent extension and its key, and a child node (not necessarily on this
-    /// subtrie), returns an optional replacement parent node. If a replacement is returned then the
-    /// child node should be deleted.
-    ///
-    /// ## Panics
-    ///
-    /// - If either parent or child node is not already revealed.
-    /// - If parent's path is not a prefix of the child's path.
-    fn extension_changes_on_leaf_removal(
-        parent_path: &Nibbles,
-        parent_key: &Nibbles,
-        child_path: &Nibbles,
-        child: &SparseNode,
-    ) -> Option<SparseNode> {
-        debug_assert!(child_path.len() > parent_path.len());
-        debug_assert!(child_path.starts_with(parent_path));
-
-        // If the parent node is an extension node, we need to look at its child to see
-        // if we need to merge it.
-        match child {
-            SparseNode::Empty | SparseNode::Hash(_) => {
-                panic!("child must be revealed")
-            }
-            // For a leaf node, we collapse the extension node into a leaf node,
-            // extending the key. While it's impossible to encounter an extension node
-            // followed by a leaf node in a complete trie, it's possible here because we
-            // could have downgraded the extension node's child into a leaf node from a
-            // branch in a previous call to `branch_changes_on_leaf_removal`.
-            SparseNode::Leaf { key, .. } => {
-                let mut new_key = *parent_key;
-                new_key.extend(key);
-                Some(SparseNode::new_leaf(new_key))
-            }
-            // Similar to the leaf node, for an extension node, we collapse them into one
-            // extension node, extending the key.
-            SparseNode::Extension { key, .. } => {
-                let mut new_key = *parent_key;
-                new_key.extend(key);
-                Some(SparseNode::new_ext(new_key))
-            }
-            // For a branch node, we just leave the extension node as-is.
-            SparseNode::Branch { .. } => None,
         }
     }
 
