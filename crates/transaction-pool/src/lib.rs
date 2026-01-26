@@ -195,7 +195,7 @@
 //!
 //! Listen for new transactions and print them:
 //!
-//! ```
+//! ```ignore
 //! use reth_chainspec::MAINNET;
 //! use reth_storage_api::StateProviderFactory;
 //! use reth_tasks::TokioTaskExecutor;
@@ -224,7 +224,7 @@
 //!
 //! Spawn maintenance task to keep the pool updated
 //!
-//! ```
+//! ```ignore
 //! use futures_util::Stream;
 //! use reth_chain_state::CanonStateNotification;
 //! use reth_chainspec::{MAINNET, ChainSpecProvider, ChainSpec};
@@ -302,9 +302,11 @@ use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
+use reth_evm::ConfigureEvm;
+use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::ChangedAccount;
-use reth_primitives_traits::Recovered;
-use reth_storage_api::StateProviderFactory;
+use reth_primitives_traits::{HeaderTy, Recovered};
+use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
@@ -328,13 +330,8 @@ mod traits;
 pub mod test_utils;
 
 /// Type alias for default ethereum transaction pool
-pub type EthTransactionPool<
-    Client,
-    S,
-    T = EthPooledTransaction,
-    B = reth_ethereum_primitives::Block,
-> = Pool<
-    TransactionValidationTaskExecutor<EthTransactionValidator<Client, T, B>>,
+pub type EthTransactionPool<Client, S, Evm = EthEvmConfig, T = EthPooledTransaction> = Pool<
+    TransactionValidationTaskExecutor<EthTransactionValidator<Client, T, Evm>>,
     CoinbaseTipOrdering<T>,
     S,
 >;
@@ -415,18 +412,22 @@ where
     }
 }
 
-impl<Client, S> EthTransactionPool<Client, S>
+impl<Client, S, Evm> EthTransactionPool<Client, S, Evm>
 where
-    Client:
-        ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static,
+    Client: ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + StateProviderFactory
+        + Clone
+        + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>
+        + 'static,
     S: BlobStore,
+    Evm: ConfigureEvm + 'static,
 {
     /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when
     /// validating [`EthPooledTransaction`]s and ords via [`CoinbaseTipOrdering`]
     ///
     /// # Example
     ///
-    /// ```
+    /// ```ignore
     /// use reth_chainspec::MAINNET;
     /// use reth_storage_api::StateProviderFactory;
     /// use reth_tasks::TokioTaskExecutor;
@@ -450,7 +451,7 @@ where
     /// ```
     pub fn eth_pool(
         validator: TransactionValidationTaskExecutor<
-            EthTransactionValidator<Client, EthPooledTransaction>,
+            EthTransactionValidator<Client, EthPooledTransaction, Evm>,
         >,
         blob_store: S,
         config: PoolConfig,

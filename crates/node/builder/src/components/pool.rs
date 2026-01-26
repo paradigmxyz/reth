@@ -12,7 +12,7 @@ use reth_transaction_pool::{
 use std::{collections::HashSet, future::Future};
 
 /// A type that knows how to build the transaction pool.
-pub trait PoolBuilder<Node: FullNodeTypes>: Send {
+pub trait PoolBuilder<Node: FullNodeTypes, Evm>: Send {
     /// The transaction pool to build.
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
@@ -22,16 +22,17 @@ pub trait PoolBuilder<Node: FullNodeTypes>: Send {
     fn build_pool(
         self,
         ctx: &BuilderContext<Node>,
+        evm_config: Evm,
     ) -> impl Future<Output = eyre::Result<Self::Pool>> + Send;
 }
 
-impl<Node, F, Fut, Pool> PoolBuilder<Node> for F
+impl<Node, F, Fut, Pool, Evm> PoolBuilder<Node, Evm> for F
 where
     Node: FullNodeTypes,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
+    F: FnOnce(&BuilderContext<Node>, Evm) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Pool>> + Send,
 {
     type Pool = Pool;
@@ -39,8 +40,9 @@ where
     fn build_pool(
         self,
         ctx: &BuilderContext<Node>,
+        evm_config: Evm,
     ) -> impl Future<Output = eyre::Result<Self::Pool>> {
-        self(ctx)
+        self(ctx, evm_config)
     }
 }
 
