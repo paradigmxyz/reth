@@ -496,9 +496,10 @@ mod compact {
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
     #[reth_codecs(crate = "reth_codecs")]
     pub struct ReceiptExt {
-        /// Placeholder field for glam hardfork receipt extensions.
-        /// Replace with actual glam fields when specified.
-        pub block_access_index: Option<u64>,
+        /// Gas actually spent by the transaction after refunds (what the user pays).
+        ///
+        /// See [EIP-7778](https://eips.ethereum.org/EIPS/eip-7778).
+        pub gas_spent: Option<u64>,
     }
 
     impl ReceiptExt {
@@ -506,7 +507,7 @@ mod compact {
         ///
         /// Required since [`Receipt`] uses `Option<ReceiptExt>` as a field.
         pub const fn into_option(self) -> Option<Self> {
-            if self.block_access_index.is_some() {
+            if self.gas_spent.is_some() {
                 Some(self)
             } else {
                 None
@@ -789,7 +790,7 @@ mod tests {
         assert_eq!(remaining, &buf_with_data, "Buffer unchanged when len=0");
 
         // Test 4: Some(ReceiptExt) encodes with varuint length prefix
-        let some_ext = Some(ReceiptExt { block_access_index: Some(12345) });
+        let some_ext = Some(ReceiptExt { gas_spent: Some(12345) });
         let mut buf = vec![];
         let len = some_ext.to_compact(&mut buf);
         assert_eq!(len, 1, "Some should return len=1 (presence indicator)");
@@ -889,8 +890,8 @@ mod tests {
     fn test_receipt_ext_field_set() {
         use crate::ReceiptExt;
 
-        // ReceiptExt with block_access_index set
-        let ext_with_field = ReceiptExt { block_access_index: Some(42) };
+        // ReceiptExt with gas_spent set
+        let ext_with_field = ReceiptExt { gas_spent: Some(42) };
         let mut buf = vec![];
         ext_with_field.to_compact(&mut buf);
         assert!(!buf.is_empty(), "ReceiptExt with field should write bytes");
@@ -900,7 +901,7 @@ mod tests {
         assert!(remaining.is_empty());
 
         // ReceiptExt with None field
-        let ext_no_field = ReceiptExt { block_access_index: None };
+        let ext_no_field = ReceiptExt { gas_spent: None };
         let mut buf = vec![];
         ext_no_field.to_compact(&mut buf);
 
@@ -930,7 +931,7 @@ mod tests {
         assert!(decoded.is_none());
 
         // Some with field = None (encodes to Some but field is empty)
-        let some_empty = Some(ReceiptExt { block_access_index: None });
+        let some_empty = Some(ReceiptExt { gas_spent: None });
         let mut buf = vec![];
         let len = some_empty.to_compact(&mut buf);
         assert_eq!(len, 1);
@@ -940,7 +941,7 @@ mod tests {
         assert_eq!(decoded, some_empty);
 
         // Some with field = Some(value)
-        let some_with_value = Some(ReceiptExt { block_access_index: Some(999999) });
+        let some_with_value = Some(ReceiptExt { gas_spent: Some(999999) });
         let mut buf = vec![];
         let len = some_with_value.to_compact(&mut buf);
         assert_eq!(len, 1);
@@ -949,7 +950,7 @@ mod tests {
         assert_eq!(decoded, some_with_value);
 
         // Edge case: large value
-        let some_large = Some(ReceiptExt { block_access_index: Some(u64::MAX) });
+        let some_large = Some(ReceiptExt { gas_spent: Some(u64::MAX) });
         let mut buf = vec![];
         some_large.to_compact(&mut buf);
 
