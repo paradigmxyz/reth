@@ -13,18 +13,24 @@ use std::{
 use alloy_primitives::map::foldhash::fast::FixedState;
 use clap::Parser;
 use eyre::Result;
+use rayon::prelude::*;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx, DatabaseEnv};
+use reth_db::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    tables,
+    transaction::DbTx,
+    DatabaseEnv,
+};
 use reth_db_api::{RawKey, RawTable, RawValue};
 use reth_primitives_traits::BlockNumber;
 use reth_provider::{
-    BlockNumReader, BlockReader, DBProvider, HeaderProvider, ProviderFactory, ReceiptProvider,
+    BlockNumReader, BlockReader, DBProvider, EitherWriter, ProviderFactory,
     StaticFileProviderFactory, StaticFileWriter, TransactionsProvider,
 };
 use reth_static_file_types::StaticFileSegment;
-use tracing::{debug, error, info};
+use tracing::{error, info, warn};
 
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 
@@ -69,6 +75,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         let provider = provider_factory.provider()?;
         let chain_tip = provider.best_block_number()?;
+        let prune_modes = provider.prune_modes_ref().clone();
         drop(provider);
 
         let to_block = self.to_block.unwrap_or(chain_tip);
@@ -88,41 +95,44 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             "Migration parameters"
         );
 
-        let mut progress = MigrationProgress::new(total_blocks);
+        // Check if receipts can be migrated (no contract log pruning)
+        let can_migrate_receipts = prune_modes.receipts_log_filter.is_empty();
+        if !can_migrate_receipts {
+            warn!(target: "reth::cli", "Receipts will NOT be migrated due to contract log pruning configuration");
+        }
+
         let start_time = Instant::now();
 
-        // Phase 1: Migrate to static files
+        // Phase 1: Migrate to static files (parallel)
         if !self.skip_static_files {
-            info!(target: "reth::cli", "Phase 1: Migrating finalized data to static files");
-            self.migrate_to_static_files::<N>(
+            info!(target: "reth::cli", "Phase 1: Migrating data to static files (parallel)");
+            self.migrate_to_static_files_parallel::<N>(
                 &provider_factory,
                 self.from_block,
                 to_block,
-                self.batch_size,
-                &mut progress,
+                can_migrate_receipts,
             )?;
         } else {
             info!(target: "reth::cli", "Skipping static file migration");
         }
 
-        // Phase 2: Migrate indexes to RocksDB
+        // Phase 2: Migrate indexes to RocksDB (parallel)
         if !self.skip_rocksdb {
-            info!(target: "reth::cli", "Phase 2: Migrating indexes to RocksDB");
-            self.migrate_to_rocksdb::<N>(&provider_factory, self.batch_size, &mut progress)?;
+            info!(target: "reth::cli", "Phase 2: Migrating indexes to RocksDB (parallel)");
+            self.migrate_to_rocksdb_parallel::<N>(&provider_factory, self.batch_size)?;
         } else {
             info!(target: "reth::cli", "Skipping RocksDB migration");
         }
 
-        // Phase 3: Verify checksums before updating settings
+        // Phase 3: Verify checksums
         info!(target: "reth::cli", "Phase 3: Verifying data integrity with checksums");
-        self.verify_checksums::<N>(&provider_factory)?;
+        self.verify_checksums::<N>(&provider_factory, can_migrate_receipts)?;
 
         // Phase 4: Update storage settings
         info!(target: "reth::cli", "Phase 4: Updating storage settings");
-        self.update_storage_settings::<N>(&provider_factory)?;
+        self.update_storage_settings::<N>(&provider_factory, can_migrate_receipts)?;
 
         let elapsed = start_time.elapsed();
-        progress.finish();
 
         info!(
             target: "reth::cli",
@@ -134,62 +144,39 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         Ok(())
     }
 
-    fn migrate_to_static_files<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    fn migrate_to_static_files_parallel<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         provider_factory: &ProviderFactory<
             reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
         >,
         from_block: BlockNumber,
         to_block: BlockNumber,
-        batch_size: u64,
-        progress: &mut MigrationProgress,
+        can_migrate_receipts: bool,
     ) -> Result<()> {
-        let static_file_provider = provider_factory.static_file_provider();
-        let segments = [
-            StaticFileSegment::Headers,
-            StaticFileSegment::Transactions,
-            StaticFileSegment::Receipts,
+        // Build list of segments to migrate
+        let mut segments = vec![
+            StaticFileSegment::TransactionSenders,
+            StaticFileSegment::AccountChangeSets,
+            StaticFileSegment::StorageChangeSets,
         ];
-
-        for segment in segments {
-            info!(target: "reth::cli", ?segment, "Migrating segment to static files");
-
-            let highest_static =
-                static_file_provider.get_highest_static_file_block(segment).unwrap_or(0);
-
-            if highest_static >= to_block {
-                info!(target: "reth::cli", ?segment, highest_static, "Segment already up to date");
-                continue;
-            }
-
-            let start_block = highest_static.max(from_block);
-            let mut current_block = start_block;
-
-            while current_block <= to_block {
-                let batch_end = (current_block + batch_size - 1).min(to_block);
-
-                debug!(
-                    target: "reth::cli",
-                    ?segment,
-                    from = current_block,
-                    to = batch_end,
-                    "Processing batch"
-                );
-
-                self.copy_segment_batch(provider_factory, segment, current_block, batch_end)?;
-
-                progress.update(batch_end - current_block + 1);
-                progress.set_phase(&format!("Static files: {:?}", segment));
-                progress.log_progress();
-
-                current_block = batch_end + 1;
-            }
+        if can_migrate_receipts {
+            segments.push(StaticFileSegment::Receipts);
         }
+
+        // Run each segment migration in parallel
+        segments.into_par_iter().try_for_each(|segment| {
+            self.migrate_segment_to_static_file::<N>(
+                provider_factory,
+                segment,
+                from_block,
+                to_block,
+            )
+        })?;
 
         Ok(())
     }
 
-    fn copy_segment_batch<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    fn migrate_segment_to_static_file<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         provider_factory: &ProviderFactory<
             reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
@@ -198,70 +185,129 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         from_block: BlockNumber,
         to_block: BlockNumber,
     ) -> Result<()> {
-        let provider = provider_factory.provider()?;
         let static_file_provider = provider_factory.static_file_provider();
+        let provider = provider_factory.provider()?;
+
+        let highest_static =
+            static_file_provider.get_highest_static_file_block(segment).unwrap_or(0);
+
+        if highest_static >= to_block {
+            info!(target: "reth::cli", ?segment, highest_static, "Segment already up to date");
+            return Ok(());
+        }
+
+        let start_block = highest_static.saturating_add(1).max(from_block);
+        info!(target: "reth::cli", ?segment, from = start_block, to = to_block, "Migrating segment");
+
+        let mut writer = static_file_provider.latest_writer(segment)?;
 
         match segment {
-            StaticFileSegment::Headers => {
-                let mut writer = static_file_provider.latest_writer(segment)?;
-                for block_num in from_block..=to_block {
-                    if let Some(header) = provider.header_by_number(block_num)? {
-                        let hash = provider
-                            .block_hash(block_num)?
-                            .ok_or_else(|| eyre::eyre!("Missing hash for block {}", block_num))?;
-                        let td = provider
-                            .header_td_by_number(block_num)?
-                            .ok_or_else(|| eyre::eyre!("Missing TD for block {}", block_num))?;
-                        writer.append_header(&header, td, &hash)?;
-                    }
-                }
-                writer.commit()?;
-            }
-            StaticFileSegment::Transactions => {
-                let mut writer = static_file_provider.latest_writer(segment)?;
-                for block_num in from_block..=to_block {
+            StaticFileSegment::TransactionSenders => {
+                for block_num in start_block..=to_block {
                     if let Some(body) = provider.block_body_indices(block_num)? {
-                        let txs = provider.transactions_by_tx_range(
+                        let senders = provider.senders_by_tx_range(
                             body.first_tx_num..body.first_tx_num + body.tx_count as u64,
                         )?;
-                        for (idx, tx) in txs.into_iter().enumerate() {
-                            writer.append_transaction(body.first_tx_num + idx as u64, &tx)?;
+                        for (idx, sender) in senders.into_iter().enumerate() {
+                            writer.append_sender(body.first_tx_num + idx as u64, sender)?;
                         }
                     }
                 }
-                writer.commit()?;
+            }
+            StaticFileSegment::AccountChangeSets => {
+                let tx = provider.tx_ref();
+                let mut cursor = tx.cursor_dup_read::<tables::AccountChangeSets>()?;
+
+                for result in cursor.walk_range(start_block..=to_block)? {
+                    let (block_num, changeset) = result?;
+                    writer.append_account_changeset(block_num, changeset)?;
+                }
+            }
+            StaticFileSegment::StorageChangeSets => {
+                let tx = provider.tx_ref();
+                let mut cursor = tx.cursor_dup_read::<tables::StorageChangeSets>()?;
+
+                let start_key =
+                    reth_db_api::models::BlockNumberAddress((start_block, Default::default()));
+                let end_key = reth_db_api::models::BlockNumberAddress((
+                    to_block,
+                    alloy_primitives::Address::MAX,
+                ));
+
+                for result in cursor.walk_range(start_key..=end_key)? {
+                    let (key, changeset) = result?;
+                    writer.append_storage_changeset(
+                        key.block_number(),
+                        key.address(),
+                        changeset,
+                    )?;
+                }
             }
             StaticFileSegment::Receipts => {
-                let mut writer = static_file_provider.latest_writer(segment)?;
-                for block_num in from_block..=to_block {
-                    if let Some(receipts) = provider.receipts_by_block(block_num.into())? {
-                        for receipt in receipts {
-                            writer.append_receipt(block_num, &receipt)?;
+                let tx = provider.tx_ref();
+                let mut cursor = tx.cursor_read::<tables::Receipts<_>>()?;
+
+                for block_num in start_block..=to_block {
+                    if let Some(body) = provider.block_body_indices(block_num)? {
+                        for tx_num in body.first_tx_num..body.first_tx_num + body.tx_count as u64 {
+                            if let Some(receipt) = cursor.seek_exact(tx_num)?.map(|(_, r)| r) {
+                                writer.append_receipt(tx_num, &receipt)?;
+                            }
                         }
                     }
                 }
-                writer.commit()?;
             }
             _ => {}
         }
 
+        writer.commit()?;
+        info!(target: "reth::cli", ?segment, "Segment migration complete");
+
         Ok(())
     }
 
-    fn migrate_to_rocksdb<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    fn migrate_to_rocksdb_parallel<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         provider_factory: &ProviderFactory<
             reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
         >,
         batch_size: u64,
-        progress: &mut MigrationProgress,
+    ) -> Result<()> {
+        // Run RocksDB migrations in parallel
+        let results: Vec<Result<()>> = ["tx_hash_numbers", "accounts_history", "storages_history"]
+            .into_par_iter()
+            .map(|table| match table {
+                "tx_hash_numbers" => {
+                    self.migrate_tx_hash_numbers::<N>(provider_factory, batch_size)
+                }
+                "accounts_history" => {
+                    self.migrate_accounts_history::<N>(provider_factory, batch_size)
+                }
+                "storages_history" => {
+                    self.migrate_storages_history::<N>(provider_factory, batch_size)
+                }
+                _ => Ok(()),
+            })
+            .collect();
+
+        for result in results {
+            result?;
+        }
+
+        Ok(())
+    }
+
+    fn migrate_tx_hash_numbers<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+        &self,
+        provider_factory: &ProviderFactory<
+            reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
+        >,
+        batch_size: u64,
     ) -> Result<()> {
         let provider = provider_factory.provider()?;
         let rocksdb = provider_factory.rocksdb_provider();
 
-        // Migrate TransactionHashNumbers
-        info!(target: "reth::cli", "Migrating transaction hash -> number index to RocksDB");
-        progress.set_phase("RocksDB: TxHashNumbers");
+        info!(target: "reth::cli", "Migrating TransactionHashNumbers to RocksDB");
 
         let tx = provider.tx_ref();
         let mut cursor = tx.cursor_read::<tables::TransactionHashNumbers>()?;
@@ -279,23 +325,32 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
 
             count += 1;
-            if count % 100_000 == 0 {
-                progress.log_progress();
-            }
         }
 
         if !batch.is_empty() {
             rocksdb.insert_tx_hash_numbers_batch(&batch)?;
         }
 
-        info!(target: "reth::cli", count, "Migrated transaction hash numbers");
+        info!(target: "reth::cli", count, "TransactionHashNumbers migration complete");
+        Ok(())
+    }
 
-        // Migrate AccountsHistory
-        info!(target: "reth::cli", "Migrating accounts history to RocksDB");
-        progress.set_phase("RocksDB: AccountsHistory");
+    fn migrate_accounts_history<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+        &self,
+        provider_factory: &ProviderFactory<
+            reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
+        >,
+        batch_size: u64,
+    ) -> Result<()> {
+        let provider = provider_factory.provider()?;
+        let rocksdb = provider_factory.rocksdb_provider();
 
+        info!(target: "reth::cli", "Migrating AccountsHistory to RocksDB");
+
+        let tx = provider.tx_ref();
         let mut cursor = tx.cursor_read::<tables::AccountsHistory>()?;
-        count = 0;
+
+        let mut count = 0u64;
 
         for result in cursor.walk(None)? {
             let (key, value) = result?;
@@ -305,20 +360,29 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             if count % batch_size == 0 {
                 rocksdb.flush()?;
             }
-            if count % 100_000 == 0 {
-                progress.log_progress();
-            }
         }
         rocksdb.flush()?;
 
-        info!(target: "reth::cli", count, "Migrated accounts history entries");
+        info!(target: "reth::cli", count, "AccountsHistory migration complete");
+        Ok(())
+    }
 
-        // Migrate StoragesHistory
-        info!(target: "reth::cli", "Migrating storages history to RocksDB");
-        progress.set_phase("RocksDB: StoragesHistory");
+    fn migrate_storages_history<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+        &self,
+        provider_factory: &ProviderFactory<
+            reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
+        >,
+        batch_size: u64,
+    ) -> Result<()> {
+        let provider = provider_factory.provider()?;
+        let rocksdb = provider_factory.rocksdb_provider();
 
+        info!(target: "reth::cli", "Migrating StoragesHistory to RocksDB");
+
+        let tx = provider.tx_ref();
         let mut cursor = tx.cursor_read::<tables::StoragesHistory>()?;
-        count = 0;
+
+        let mut count = 0u64;
 
         for result in cursor.walk(None)? {
             let (key, value) = result?;
@@ -328,14 +392,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             if count % batch_size == 0 {
                 rocksdb.flush()?;
             }
-            if count % 100_000 == 0 {
-                progress.log_progress();
-            }
         }
         rocksdb.flush()?;
 
-        info!(target: "reth::cli", count, "Migrated storages history entries");
-
+        info!(target: "reth::cli", count, "StoragesHistory migration complete");
         Ok(())
     }
 
@@ -344,37 +404,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         provider_factory: &ProviderFactory<
             reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
         >,
+        can_migrate_receipts: bool,
     ) -> Result<()> {
         let provider = provider_factory.provider()?;
-        let static_file_provider = provider_factory.static_file_provider();
-
-        // Verify static file segments against MDBX
-        for segment in [
-            StaticFileSegment::Headers,
-            StaticFileSegment::Transactions,
-            StaticFileSegment::Receipts,
-        ] {
-            info!(target: "reth::cli", ?segment, "Computing checksums");
-
-            let sf_checksum = self.compute_static_file_checksum(&static_file_provider, segment)?;
-            let mdbx_checksum = self.compute_mdbx_checksum_for_segment(&provider, segment)?;
-
-            if sf_checksum != mdbx_checksum {
-                return Err(eyre::eyre!(
-                    "Checksum mismatch for {:?}: static_file={:#x}, mdbx={:#x}",
-                    segment,
-                    sf_checksum,
-                    mdbx_checksum
-                ));
-            }
-
-            info!(target: "reth::cli", ?segment, checksum = %format!("{:#x}", sf_checksum), "Checksum verified");
-        }
-
-        // Verify RocksDB tables
         let rocksdb = provider_factory.rocksdb_provider();
         let tx = provider.tx_ref();
 
+        // Verify RocksDB tables
         info!(target: "reth::cli", "Verifying TransactionHashNumbers checksum");
         let mdbx_checksum = self.compute_table_checksum::<tables::TransactionHashNumbers>(tx)?;
         let rocksdb_checksum = rocksdb.checksum_tx_hash_numbers()?;
@@ -414,21 +450,67 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         }
         info!(target: "reth::cli", checksum = %format!("{:#x}", mdbx_checksum), "StoragesHistory verified");
 
+        // Verify static file segments
+        let static_file_provider = provider_factory.static_file_provider();
+
+        let mut segments_to_verify = vec![
+            (StaticFileSegment::TransactionSenders, tables::TransactionSenders::NAME),
+            (StaticFileSegment::AccountChangeSets, tables::AccountChangeSets::NAME),
+            (StaticFileSegment::StorageChangeSets, tables::StorageChangeSets::NAME),
+        ];
+
+        if can_migrate_receipts {
+            segments_to_verify.push((StaticFileSegment::Receipts, "Receipts"));
+        }
+
+        for (segment, name) in segments_to_verify {
+            info!(target: "reth::cli", segment = name, "Verifying static file checksum");
+
+            let sf_checksum = self.compute_static_file_checksum(&static_file_provider, segment)?;
+
+            let mdbx_checksum = match segment {
+                StaticFileSegment::TransactionSenders => {
+                    self.compute_table_checksum::<tables::TransactionSenders>(tx)?
+                }
+                StaticFileSegment::AccountChangeSets => {
+                    self.compute_dup_table_checksum::<tables::AccountChangeSets>(tx)?
+                }
+                StaticFileSegment::StorageChangeSets => {
+                    self.compute_dup_table_checksum::<tables::StorageChangeSets>(tx)?
+                }
+                StaticFileSegment::Receipts => {
+                    self.compute_table_checksum::<tables::Receipts<_>>(tx)?
+                }
+                _ => continue,
+            };
+
+            if sf_checksum != mdbx_checksum {
+                return Err(eyre::eyre!(
+                    "Checksum mismatch for {}: static_file={:#x}, mdbx={:#x}",
+                    name,
+                    sf_checksum,
+                    mdbx_checksum
+                ));
+            }
+            info!(target: "reth::cli", segment = name, checksum = %format!("{:#x}", sf_checksum), "Verified");
+        }
+
         info!(target: "reth::cli", "All checksums verified successfully");
         Ok(())
     }
 
-    fn compute_static_file_checksum<P: reth_provider::StaticFileProviderFactory>(
+    fn compute_static_file_checksum<N: reth_node_types::NodePrimitives>(
         &self,
-        provider: &P::StaticFileProvider,
+        provider: &reth_provider::providers::StaticFileProvider<N>,
         segment: StaticFileSegment,
     ) -> Result<u64> {
         use reth_db::static_file::iter_static_files;
 
         let static_files = iter_static_files(provider.directory())?;
-        let ranges = static_files
-            .get(segment)
-            .ok_or_else(|| eyre::eyre!("No static files found for segment: {}", segment))?;
+        let ranges = match static_files.get(segment) {
+            Some(r) => r,
+            None => return Ok(0), // No static files for this segment
+        };
 
         let mut hasher = checksum_hasher();
 
@@ -449,47 +531,24 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         Ok(hasher.finish())
     }
 
-    fn compute_mdbx_checksum_for_segment<TX: DbTx>(
-        &self,
-        provider: &impl DBProvider<Tx = TX>,
-        segment: StaticFileSegment,
-    ) -> Result<u64> {
-        let tx = provider.tx_ref();
+    fn compute_table_checksum<T: reth_db_api::table::Table>(&self, tx: &impl DbTx) -> Result<u64> {
+        let mut cursor = tx.cursor_read::<RawTable<T>>()?;
         let mut hasher = checksum_hasher();
 
-        match segment {
-            StaticFileSegment::Headers => {
-                let mut cursor = tx.cursor_read::<RawTable<tables::Headers>>()?;
-                for result in cursor.walk(None)? {
-                    let (k, v): (RawKey<_>, RawValue<_>) = result?;
-                    hasher.write(k.raw_key());
-                    hasher.write(v.raw_value());
-                }
-            }
-            StaticFileSegment::Transactions => {
-                let mut cursor = tx.cursor_read::<RawTable<tables::Transactions>>()?;
-                for result in cursor.walk(None)? {
-                    let (k, v): (RawKey<_>, RawValue<_>) = result?;
-                    hasher.write(k.raw_key());
-                    hasher.write(v.raw_value());
-                }
-            }
-            StaticFileSegment::Receipts => {
-                let mut cursor = tx.cursor_read::<RawTable<tables::Receipts>>()?;
-                for result in cursor.walk(None)? {
-                    let (k, v): (RawKey<_>, RawValue<_>) = result?;
-                    hasher.write(k.raw_key());
-                    hasher.write(v.raw_value());
-                }
-            }
-            _ => {}
+        for result in cursor.walk(None)? {
+            let (k, v): (RawKey<T::Key>, RawValue<T::Value>) = result?;
+            hasher.write(k.raw_key());
+            hasher.write(v.raw_value());
         }
 
         Ok(hasher.finish())
     }
 
-    fn compute_table_checksum<T: reth_db_api::table::Table>(&self, tx: &impl DbTx) -> Result<u64> {
-        let mut cursor = tx.cursor_read::<RawTable<T>>()?;
+    fn compute_dup_table_checksum<T: reth_db_api::table::DupSort>(
+        &self,
+        tx: &impl DbTx,
+    ) -> Result<u64> {
+        let mut cursor = tx.cursor_dup_read::<RawTable<T>>()?;
         let mut hasher = checksum_hasher();
 
         for result in cursor.walk(None)? {
@@ -506,13 +565,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         provider_factory: &ProviderFactory<
             reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
         >,
+        can_migrate_receipts: bool,
     ) -> Result<()> {
         use reth_provider::StorageSettings;
 
         let provider = provider_factory.provider_rw()?;
 
         let new_settings = StorageSettings::base()
-            .with_receipts_in_static_files(true)
+            .with_receipts_in_static_files(can_migrate_receipts)
             .with_account_changesets_in_static_files(true)
             .with_transaction_senders_in_static_files(true)
             .with_transaction_hash_numbers_in_rocksdb(true)
