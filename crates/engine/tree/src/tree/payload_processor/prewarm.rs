@@ -24,14 +24,13 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::BlockAccessList;
-use alloy_eips::Typed2718;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory,
     StateReader,
@@ -65,19 +64,6 @@ struct IndexedTransaction<Tx> {
     /// The wrapped transaction.
     tx: Tx,
 }
-
-/// Maximum standard Ethereum transaction type value.
-///
-/// Standard transaction types are:
-/// - Type 0: Legacy transactions (original Ethereum)
-/// - Type 1: EIP-2930 (access list transactions)
-/// - Type 2: EIP-1559 (dynamic fee transactions)
-/// - Type 3: EIP-4844 (blob transactions)
-/// - Type 4: EIP-7702 (set code authorization transactions)
-///
-/// Any transaction with a type > 4 is considered a non-standard/system transaction,
-/// typically used by L2s for special purposes (e.g., Optimism deposit transactions use type 126).
-const MAX_STANDARD_TX_TYPE: u8 = 4;
 
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
@@ -193,7 +179,7 @@ where
                 }
 
                 let indexed_tx = IndexedTransaction { index: tx_index, tx };
-                let is_system_tx = indexed_tx.tx.tx().ty() > MAX_STANDARD_TX_TYPE;
+                let is_system_tx = indexed_tx.tx.tx().is_system_tx();
 
                 // System transactions (type > 4) in the first position set critical metadata
                 // that affects all subsequent transactions (e.g., L1 block info on L2s).

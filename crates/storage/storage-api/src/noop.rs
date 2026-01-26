@@ -28,9 +28,7 @@ use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::{
-    Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader, StorageEntry,
-};
+use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
 #[cfg(feature = "db-api")]
 use reth_prune_types::PruneModes;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -415,7 +413,9 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
     fn storage_changeset(
         &self,
         _block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+    ) -> ProviderResult<
+        Vec<(reth_db_api::models::BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
+    > {
         Ok(Vec::default())
     }
 
@@ -424,14 +424,16 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
         _block_number: BlockNumber,
         _address: Address,
         _storage_key: B256,
-    ) -> ProviderResult<Option<StorageEntry>> {
+    ) -> ProviderResult<Option<reth_primitives_traits::StorageEntry>> {
         Ok(None)
     }
 
     fn storage_changesets_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+    ) -> ProviderResult<
+        Vec<(reth_db_api::models::BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
+    > {
         Ok(Vec::default())
     }
 
