@@ -363,10 +363,10 @@ where
     fn remove_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
         let block_hash = block.hash();
         for tx in block.body().transactions() {
-            if let Some((mapped_hash, _)) = self.tx_hash_index.get(tx.tx_hash()) {
-                if *mapped_hash == block_hash {
-                    self.tx_hash_index.remove(tx.tx_hash());
-                }
+            if let Some((mapped_hash, _)) = self.tx_hash_index.get(tx.tx_hash()) &&
+                *mapped_hash == block_hash
+            {
+                self.tx_hash_index.remove(tx.tx_hash());
             }
         }
     }
