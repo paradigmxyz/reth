@@ -38,6 +38,9 @@ pub struct ParallelismThresholds {
     /// for hash updates. When updating subtrie hashes with fewer changed keys than this threshold,
     /// the updates will be processed serially.
     pub min_updated_nodes: usize,
+    /// Minimum number of pruned roots before parallel processing is enabled for prune operations.
+    /// When `prune` has fewer pruned roots than this threshold, they will be processed serially.
+    pub min_pruned_roots: usize,
 }
 
 /// A revealed sparse trie with subtries that can be updated in parallel.
@@ -1016,10 +1019,24 @@ impl SparseTrie for ParallelSparseTrie {
         self.upper_subtrie.nodes.retain(|p, _| !is_strict_descendant(p));
         self.upper_subtrie.inner.values.retain(|p, _| !starts_with_pruned(p));
 
-        for subtrie in &mut self.lower_subtries {
-            if let Some(s) = subtrie.as_revealed_mut() {
-                s.nodes.retain(|p, _| !is_strict_descendant(p));
-                s.inner.values.retain(|p, _| !starts_with_pruned(p));
+        if !self.is_prune_parallelism_enabled(nodes_converted) {
+            for subtrie in &mut self.lower_subtries {
+                if let Some(s) = subtrie.as_revealed_mut() {
+                    s.nodes.retain(|p, _| !is_strict_descendant(p));
+                    s.inner.values.retain(|p, _| !starts_with_pruned(p));
+                }
+            }
+        } else {
+            #[cfg(feature = "std")]
+            {
+                use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+
+                self.lower_subtries.par_iter_mut().for_each(|subtrie| {
+                    if let Some(s) = subtrie.as_revealed_mut() {
+                        s.nodes.retain(|p, _| is_strict_descendant(p).not());
+                        s.inner.values.retain(|p, _| starts_with_pruned(p).not());
+                    }
+                });
             }
         }
 
@@ -1057,6 +1074,15 @@ impl ParallelSparseTrie {
         return false;
 
         num_changed_keys >= self.parallelism_thresholds.min_updated_nodes
+    }
+
+    /// Returns true if parallelism should be enabled for pruning with the given number
+    /// of pruned roots. Will always return false in nostd builds.
+    const fn is_prune_parallelism_enabled(&self, num_pruned_roots: usize) -> bool {
+        #[cfg(not(feature = "std"))]
+        return false;
+
+        num_pruned_roots >= self.parallelism_thresholds.min_pruned_roots
     }
 
     /// Creates a new revealed sparse trie from the given root node.
