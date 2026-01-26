@@ -857,12 +857,12 @@ mod tests {
     use super::*;
     use crate::{
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
-        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
+        CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool,
+        TransactionOrigin,
     };
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
-    use reth_evm_ethereum::EthEvmConfig;
     use reth_fs_util as fs;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
@@ -886,14 +886,14 @@ mod tests {
             "02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507"
         );
         let tx = PooledTransactionVariant::decode_2718(&mut &tx_bytes[..]).unwrap();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = MockEthProvider::default();
         let transaction = EthPooledTransaction::from_pooled(tx.try_into_recovered().unwrap());
-        let tx_to_cmp = transaction.clone();
+        let tx_hash = *transaction.hash();
         let sender = hex!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326").into();
         provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
-            .build(blob_store.clone());
+        let validator: EthTransactionValidator<_, _, reth_ethereum_primitives::Block> =
+            EthTransactionValidatorBuilder::new(provider).build(blob_store.clone());
 
         let txpool = Pool::new(
             validator,
@@ -902,7 +902,7 @@ mod tests {
             Default::default(),
         );
 
-        txpool.add_transaction(TransactionOrigin::Local, transaction.clone()).await.unwrap();
+        txpool.add_transaction(TransactionOrigin::Local, transaction).await.unwrap();
 
         let handle = tokio::runtime::Handle::current();
         let manager = TaskManager::new(handle);
@@ -914,7 +914,7 @@ mod tests {
         let mut txns = txpool.get_local_transactions();
         let tx_on_finish = txns.pop().expect("there should be 1 transaction");
 
-        assert_eq!(*tx_to_cmp.hash(), *tx_on_finish.hash());
+        assert_eq!(tx_hash, *tx_on_finish.hash());
 
         // shutdown the executor
         manager.graceful_shutdown();
