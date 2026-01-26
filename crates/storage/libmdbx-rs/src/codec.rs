@@ -2,29 +2,49 @@ use crate::{Error, TransactionKind};
 use derive_more::{Debug, Deref, DerefMut};
 use std::{borrow::Cow, slice};
 
-/// Implement this to be able to decode data values
-pub trait TableObject: Sized {
-    /// Decodes the object from the given bytes.
-    fn decode(data_val: &[u8]) -> Result<Self, Error>;
+/// A marker trait for types that can be deserialized from a database value
+/// without borrowing from the transaction.
+///
+/// Types implementing this trait can be used with iterators that need to
+/// return owned values. This is automatically implemented for any type that
+/// implements [`TableObject<'a>`] for all lifetimes `'a`.
+pub trait TableObjectOwned: for<'de> TableObject<'de> {
+    /// Decodes the object from the given bytes, without borrowing them.
+    fn decode(data_val: &[u8]) -> Result<Self, Error> {
+        <Self as TableObject<'_>>::decode_borrow(Cow::Borrowed(data_val))
+    }
+}
+
+impl<T> TableObjectOwned for T where T: for<'de> TableObject<'de> {}
+
+/// Decodes values read from the database into Rust types.
+///
+/// Implement this to be able to decode data values. The lifetime parameter `'a`
+/// allows types to borrow data from the transaction when appropriate (e.g.,
+/// `Cow<'a, [u8]>`).
+pub trait TableObject<'a>: Sized {
+    /// Creates the object from a `Cow` of bytes. This allows for efficient
+    /// handling of both owned and borrowed data.
+    fn decode_borrow(data: Cow<'a, [u8]>) -> Result<Self, Error>;
 
     /// Decodes the value directly from the given MDBX_val pointer.
     ///
     /// # Safety
     ///
-    /// This should only in the context of an MDBX transaction.
+    /// This should only be called in the context of an MDBX transaction.
     #[doc(hidden)]
     unsafe fn decode_val<K: TransactionKind>(
-        _: *const ffi::MDBX_txn,
+        tx: *const ffi::MDBX_txn,
         data_val: ffi::MDBX_val,
     ) -> Result<Self, Error> {
-        let s = unsafe { slice::from_raw_parts(data_val.iov_base as *const u8, data_val.iov_len) };
-        Self::decode(s)
+        let cow = unsafe { Cow::<'a, [u8]>::decode_val::<K>(tx, data_val)? };
+        Self::decode_borrow(cow)
     }
 }
 
-impl TableObject for Cow<'_, [u8]> {
-    fn decode(_: &[u8]) -> Result<Self, Error> {
-        unreachable!()
+impl<'a> TableObject<'a> for Cow<'a, [u8]> {
+    fn decode_borrow(data: Cow<'a, [u8]>) -> Result<Self, Error> {
+        Ok(data)
     }
 
     #[doc(hidden)]
@@ -51,14 +71,22 @@ impl TableObject for Cow<'_, [u8]> {
     }
 }
 
-impl TableObject for Vec<u8> {
-    fn decode(data_val: &[u8]) -> Result<Self, Error> {
-        Ok(data_val.to_vec())
+impl TableObject<'_> for Vec<u8> {
+    fn decode_borrow(data: Cow<'_, [u8]>) -> Result<Self, Error> {
+        Ok(data.into_owned())
+    }
+
+    unsafe fn decode_val<K: TransactionKind>(
+        _tx: *const ffi::MDBX_txn,
+        data_val: ffi::MDBX_val,
+    ) -> Result<Self, Error> {
+        let s = unsafe { slice::from_raw_parts(data_val.iov_base as *const u8, data_val.iov_len) };
+        Ok(s.to_vec())
     }
 }
 
-impl TableObject for () {
-    fn decode(_: &[u8]) -> Result<Self, Error> {
+impl TableObject<'_> for () {
+    fn decode_borrow(_: Cow<'_, [u8]>) -> Result<Self, Error> {
         Ok(())
     }
 
@@ -74,19 +102,26 @@ impl TableObject for () {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Deref, DerefMut)]
 pub struct ObjectLength(pub usize);
 
-impl TableObject for ObjectLength {
-    fn decode(data_val: &[u8]) -> Result<Self, Error> {
-        Ok(Self(data_val.len()))
+impl TableObject<'_> for ObjectLength {
+    fn decode_borrow(data: Cow<'_, [u8]>) -> Result<Self, Error> {
+        Ok(Self(data.len()))
+    }
+
+    unsafe fn decode_val<K: TransactionKind>(
+        _tx: *const ffi::MDBX_txn,
+        data_val: ffi::MDBX_val,
+    ) -> Result<Self, Error> {
+        Ok(Self(data_val.iov_len))
     }
 }
 
-impl<const LEN: usize> TableObject for [u8; LEN] {
-    fn decode(data_val: &[u8]) -> Result<Self, Error> {
-        if data_val.len() != LEN {
-            return Err(Error::DecodeErrorLenDiff)
+impl<const LEN: usize> TableObject<'_> for [u8; LEN] {
+    fn decode_borrow(data: Cow<'_, [u8]>) -> Result<Self, Error> {
+        if data.len() != LEN {
+            return Err(Error::DecodeErrorLenDiff);
         }
         let mut a = [0; LEN];
-        a[..].copy_from_slice(data_val);
+        a[..].copy_from_slice(&data);
         Ok(a)
     }
 }

@@ -5,7 +5,7 @@ use crate::{
     flags::{DatabaseFlags, WriteFlags},
     tx_access::TxPtrAccess,
     txn_manager::{TxnManagerMessage, TxnPtr},
-    Cursor, Error, Stat, TableObject,
+    Cursor, Error, Stat, TableObjectOwned,
 };
 use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
 use parking_lot::{Mutex, MutexGuard};
@@ -153,7 +153,7 @@ where
     /// [None] will be returned.
     pub fn get<Key>(&self, dbi: ffi::MDBX_dbi, key: &[u8]) -> Result<Option<Key>>
     where
-        Key: TableObject,
+        Key: TableObjectOwned,
     {
         let key_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };

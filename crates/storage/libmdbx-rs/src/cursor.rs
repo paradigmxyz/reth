@@ -3,7 +3,7 @@ use crate::{
     flags::*,
     mdbx_try_optional,
     transaction::{TransactionKind, RW},
-    TableObject, Transaction,
+    TableObjectOwned, Transaction,
 };
 use ffi::{
     MDBX_cursor_op, MDBX_FIRST, MDBX_FIRST_DUP, MDBX_GET_BOTH, MDBX_GET_BOTH_RANGE,
@@ -11,7 +11,7 @@ use ffi::{
     MDBX_NEXT_MULTIPLE, MDBX_NEXT_NODUP, MDBX_PREV, MDBX_PREV_DUP, MDBX_PREV_MULTIPLE,
     MDBX_PREV_NODUP, MDBX_SET, MDBX_SET_KEY, MDBX_SET_LOWERBOUND, MDBX_SET_RANGE,
 };
-use std::{borrow::Cow, ffi::c_void, fmt, marker::PhantomData, mem, ptr};
+use std::{ffi::c_void, fmt, marker::PhantomData, mem, ptr};
 
 /// A cursor for navigating the items within a database.
 pub struct Cursor<K>
@@ -58,8 +58,8 @@ where
         self.cursor
     }
 
-    /// Returns an iterator over the raw key value slices.
-    pub fn iter_slices<'a>(self) -> IntoIter<K, Cow<'a, [u8]>, Cow<'a, [u8]>> {
+    /// Returns an iterator over the raw key value bytes (as owned `Vec<u8>`).
+    pub fn iter_slices(self) -> IntoIter<K, Vec<u8>, Vec<u8>> {
         self.into_iter()
     }
 
@@ -67,8 +67,8 @@ where
     #[expect(clippy::should_implement_trait)]
     pub fn into_iter<Key, Value>(self) -> IntoIter<K, Key, Value>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         IntoIter::new(self, MDBX_NEXT, MDBX_NEXT)
     }
@@ -82,8 +82,8 @@ where
         op: MDBX_cursor_op,
     ) -> Result<(Option<Key>, Value, bool)>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         unsafe {
             let mut key_val = slice_to_val(key);
@@ -119,7 +119,7 @@ where
         op: MDBX_cursor_op,
     ) -> Result<Option<Value>>
     where
-        Value: TableObject,
+        Value: TableObjectOwned,
     {
         let (_, v, _) = mdbx_try_optional!(self.get::<(), Value>(key, data, op));
 
@@ -133,8 +133,8 @@ where
         op: MDBX_cursor_op,
     ) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         let (k, v, _) = mdbx_try_optional!(self.get(key, data, op));
 
@@ -144,8 +144,8 @@ where
     /// Position at first key/data item.
     pub fn first<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         self.get_full(None, None, MDBX_FIRST)
     }
@@ -153,7 +153,7 @@ where
     /// [`DatabaseFlags::DUP_SORT`]-only: Position at first data item of current key.
     pub fn first_dup<Value>(&mut self) -> Result<Option<Value>>
     where
-        Value: TableObject,
+        Value: TableObjectOwned,
     {
         self.get_value(None, None, MDBX_FIRST_DUP)
     }
@@ -161,7 +161,7 @@ where
     /// [`DatabaseFlags::DUP_SORT`]-only: Position at key/data pair.
     pub fn get_both<Value>(&mut self, k: &[u8], v: &[u8]) -> Result<Option<Value>>
     where
-        Value: TableObject,
+        Value: TableObjectOwned,
     {
         self.get_value(Some(k), Some(v), MDBX_GET_BOTH)
     }
@@ -170,7 +170,7 @@ where
     /// equal to specified data.
     pub fn get_both_range<Value>(&mut self, k: &[u8], v: &[u8]) -> Result<Option<Value>>
     where
-        Value: TableObject,
+        Value: TableObjectOwned,
     {
         self.get_value(Some(k), Some(v), MDBX_GET_BOTH_RANGE)
     }
@@ -178,8 +178,8 @@ where
     /// Return key/data at current cursor position.
     pub fn get_current<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         self.get_full(None, None, MDBX_GET_CURRENT)
     }
@@ -188,7 +188,7 @@ where
     /// Move cursor to prepare for [`Self::next_multiple()`].
     pub fn get_multiple<Value>(&mut self) -> Result<Option<Value>>
     where
-        Value: TableObject,
+        Value: TableObjectOwned,
     {
         self.get_value(None, None, MDBX_GET_MULTIPLE)
     }
@@ -196,8 +196,8 @@ where
     /// Position at last key/data item.
     pub fn last<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         self.get_full(None, None, MDBX_LAST)
     }
@@ -205,7 +205,7 @@ where
     /// DupSort-only: Position at last data item of current key.
     pub fn last_dup<Value>(&mut self) -> Result<Option<Value>>
     where
-        Value: TableObject,
+        Value: TableObjectOwned,
     {
         self.get_value(None, None, MDBX_LAST_DUP)
     }
@@ -214,8 +214,8 @@ where
     #[expect(clippy::should_implement_trait)]
     pub fn next<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         self.get_full(None, None, MDBX_NEXT)
     }
@@ -223,8 +223,8 @@ where
     /// [`DatabaseFlags::DUP_SORT`]-only: Position at next data item of current key.
     pub fn next_dup<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         self.get_full(None, None, MDBX_NEXT_DUP)
     }
@@ -233,8 +233,8 @@ where
     /// cursor position. Move cursor to prepare for `MDBX_NEXT_MULTIPLE`.
     pub fn next_multiple<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         self.get_full(None, None, MDBX_NEXT_MULTIPLE)
     }
@@ -242,8 +242,8 @@ where
     /// Position at first data item of next key.
     pub fn next_nodup<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         self.get_full(None, None, MDBX_NEXT_NODUP)
     }
@@ -251,8 +251,8 @@ where
     /// Position at previous data item.
     pub fn prev<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         self.get_full(None, None, MDBX_PREV)
     }
@@ -260,8 +260,8 @@ where
     /// [`DatabaseFlags::DUP_SORT`]-only: Position at previous data item of current key.
     pub fn prev_dup<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         self.get_full(None, None, MDBX_PREV_DUP)
     }
@@ -269,8 +269,8 @@ where
     /// Position at last data item of previous key.
     pub fn prev_nodup<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         self.get_full(None, None, MDBX_PREV_NODUP)
     }
@@ -278,7 +278,7 @@ where
     /// Position at specified key.
     pub fn set<Value>(&mut self, key: &[u8]) -> Result<Option<Value>>
     where
-        Value: TableObject,
+        Value: TableObjectOwned,
     {
         self.get_value(Some(key), None, MDBX_SET)
     }
@@ -286,8 +286,8 @@ where
     /// Position at specified key, return both key and data.
     pub fn set_key<Key, Value>(&mut self, key: &[u8]) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         self.get_full(Some(key), None, MDBX_SET_KEY)
     }
@@ -295,8 +295,8 @@ where
     /// Position at first key greater than or equal to specified key.
     pub fn set_range<Key, Value>(&mut self, key: &[u8]) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         self.get_full(Some(key), None, MDBX_SET_RANGE)
     }
@@ -305,8 +305,8 @@ where
     /// duplicate data items.
     pub fn prev_multiple<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         self.get_full(None, None, MDBX_PREV_MULTIPLE)
     }
@@ -322,8 +322,8 @@ where
     /// exactly and [true] if the next pair was returned.
     pub fn set_lowerbound<Key, Value>(&mut self, key: &[u8]) -> Result<Option<(bool, Key, Value)>>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         let (k, v, found) = mdbx_try_optional!(self.get(Some(key), None, MDBX_SET_LOWERBOUND));
 
@@ -340,8 +340,8 @@ where
     /// the next key.
     pub fn iter<Key, Value>(&mut self) -> Iter<'_, K, Key, Value>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         Iter::new(self, ffi::MDBX_NEXT, ffi::MDBX_NEXT)
     }
@@ -353,8 +353,8 @@ where
     /// the next key.
     pub fn iter_start<Key, Value>(&mut self) -> Iter<'_, K, Key, Value>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         Iter::new(self, ffi::MDBX_FIRST, ffi::MDBX_NEXT)
     }
@@ -366,8 +366,8 @@ where
     /// the next key.
     pub fn iter_from<Key, Value>(&mut self, key: &[u8]) -> Iter<'_, K, Key, Value>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         let res: Result<Option<((), ())>> = self.set_range(key);
         if let Err(error) = res {
@@ -381,8 +381,8 @@ where
     /// Each item will be returned as an iterator of its duplicates.
     pub fn iter_dup<Key, Value>(&mut self) -> IterDup<'_, K, Key, Value>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         IterDup::new(self, ffi::MDBX_NEXT)
     }
@@ -391,8 +391,8 @@ where
     /// database. Each item will be returned as an iterator of its duplicates.
     pub fn iter_dup_start<Key, Value>(&mut self) -> IterDup<'_, K, Key, Value>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         IterDup::new(self, ffi::MDBX_FIRST)
     }
@@ -401,8 +401,8 @@ where
     /// key. Each item will be returned as an iterator of its duplicates.
     pub fn iter_dup_from<Key, Value>(&mut self, key: &[u8]) -> IterDup<'_, K, Key, Value>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         let res: Result<Option<((), ())>> = self.set_range(key);
         if let Err(error) = res {
@@ -414,8 +414,8 @@ where
     /// Iterate over the duplicates of the item in the database with the given key.
     pub fn iter_dup_of<Key, Value>(&mut self, key: &[u8]) -> Iter<'_, K, Key, Value>
     where
-        Key: TableObject,
-        Value: TableObject,
+        Key: TableObjectOwned,
+        Value: TableObjectOwned,
     {
         let res: Result<Option<()>> = self.set(key);
         match res {
@@ -510,8 +510,8 @@ unsafe impl<K> Sync for Cursor<K> where K: TransactionKind {}
 pub enum IntoIter<K, Key, Value>
 where
     K: TransactionKind,
-    Key: TableObject,
-    Value: TableObject,
+    Key: TableObjectOwned,
+    Value: TableObjectOwned,
 {
     /// An iterator that returns an error on every call to [`Iter::next()`].
     /// Cursor.iter*() creates an Iter of this type when MDBX returns an error
@@ -541,8 +541,8 @@ where
 impl<K, Key, Value> IntoIter<K, Key, Value>
 where
     K: TransactionKind,
-    Key: TableObject,
-    Value: TableObject,
+    Key: TableObjectOwned,
+    Value: TableObjectOwned,
 {
     /// Creates a new iterator backed by the given cursor.
     fn new(cursor: Cursor<K>, op: ffi::MDBX_cursor_op, next_op: ffi::MDBX_cursor_op) -> Self {
@@ -553,8 +553,8 @@ where
 impl<K, Key, Value> Iterator for IntoIter<K, Key, Value>
 where
     K: TransactionKind,
-    Key: TableObject,
-    Value: TableObject,
+    Key: TableObjectOwned,
+    Value: TableObjectOwned,
 {
     type Item = Result<(Key, Value)>;
 
@@ -601,8 +601,8 @@ where
 pub enum Iter<'cur, K, Key, Value>
 where
     K: TransactionKind,
-    Key: TableObject,
-    Value: TableObject,
+    Key: TableObjectOwned,
+    Value: TableObjectOwned,
 {
     /// An iterator that returns an error on every call to [`Iter::next()`].
     /// Cursor.iter*() creates an Iter of this type when MDBX returns an error
@@ -632,8 +632,8 @@ where
 impl<'cur, K, Key, Value> Iter<'cur, K, Key, Value>
 where
     K: TransactionKind,
-    Key: TableObject,
-    Value: TableObject,
+    Key: TableObjectOwned,
+    Value: TableObjectOwned,
 {
     /// Creates a new iterator backed by the given cursor.
     fn new(
@@ -648,8 +648,8 @@ where
 impl<K, Key, Value> Iterator for Iter<'_, K, Key, Value>
 where
     K: TransactionKind,
-    Key: TableObject,
-    Value: TableObject,
+    Key: TableObjectOwned,
+    Value: TableObjectOwned,
 {
     type Item = Result<(Key, Value)>;
 
@@ -698,8 +698,8 @@ where
 pub enum IterDup<'cur, K, Key, Value>
 where
     K: TransactionKind,
-    Key: TableObject,
-    Value: TableObject,
+    Key: TableObjectOwned,
+    Value: TableObjectOwned,
 {
     /// An iterator that returns an error on every call to `Iter.next()`.
     /// Cursor.iter*() creates an Iter of this type when MDBX returns an error
@@ -726,8 +726,8 @@ where
 impl<'cur, K, Key, Value> IterDup<'cur, K, Key, Value>
 where
     K: TransactionKind,
-    Key: TableObject,
-    Value: TableObject,
+    Key: TableObjectOwned,
+    Value: TableObjectOwned,
 {
     /// Creates a new iterator backed by the given cursor.
     fn new(cursor: &'cur mut Cursor<K>, op: MDBX_cursor_op) -> Self {
@@ -738,8 +738,8 @@ where
 impl<K, Key, Value> fmt::Debug for IterDup<'_, K, Key, Value>
 where
     K: TransactionKind,
-    Key: TableObject,
-    Value: TableObject,
+    Key: TableObjectOwned,
+    Value: TableObjectOwned,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IterDup").finish()
@@ -749,8 +749,8 @@ where
 impl<K, Key, Value> Iterator for IterDup<'_, K, Key, Value>
 where
     K: TransactionKind,
-    Key: TableObject,
-    Value: TableObject,
+    Key: TableObjectOwned,
+    Value: TableObjectOwned,
 {
     type Item = IntoIter<K, Key, Value>;
 

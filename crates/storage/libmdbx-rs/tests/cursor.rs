@@ -1,6 +1,5 @@
 #![allow(missing_docs)]
 use reth_libmdbx::*;
-use std::borrow::Cow;
 use tempfile::tempdir;
 
 #[test]
@@ -324,22 +323,10 @@ fn test_put_del() {
     cursor.put(b"key2", b"val2", WriteFlags::empty()).unwrap();
     cursor.put(b"key3", b"val3", WriteFlags::empty()).unwrap();
 
-    assert_eq!(
-        cursor.set_key(b"key2").unwrap(),
-        Some((Cow::Borrowed(b"key2" as &[u8]), Cow::Borrowed(b"val2" as &[u8])))
-    );
-    assert_eq!(
-        cursor.get_current().unwrap(),
-        Some((Cow::Borrowed(b"key2" as &[u8]), Cow::Borrowed(b"val2" as &[u8])))
-    );
+    assert_eq!(cursor.set_key::<[u8; 4], [u8; 4]>(b"key2").unwrap(), Some((*b"key2", *b"val2")));
+    assert_eq!(cursor.get_current::<[u8; 4], [u8; 4]>().unwrap(), Some((*b"key2", *b"val2")));
 
     cursor.del(WriteFlags::empty()).unwrap();
-    assert_eq!(
-        cursor.get_current().unwrap(),
-        Some((Cow::Borrowed(b"key3" as &[u8]), Cow::Borrowed(b"val3" as &[u8])))
-    );
-    assert_eq!(
-        cursor.last().unwrap(),
-        Some((Cow::Borrowed(b"key3" as &[u8]), Cow::Borrowed(b"val3" as &[u8])))
-    );
+    assert_eq!(cursor.get_current::<[u8; 4], [u8; 4]>().unwrap(), Some((*b"key3", *b"val3")));
+    assert_eq!(cursor.last::<[u8; 4], [u8; 4]>().unwrap(), Some((*b"key3", *b"val3")));
 }

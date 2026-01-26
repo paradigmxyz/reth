@@ -1,7 +1,6 @@
 #![allow(missing_docs)]
 use reth_libmdbx::*;
 use std::{
-    borrow::Cow,
     io::Write,
     sync::{Arc, Barrier},
     thread::{self, JoinHandle},
@@ -274,8 +273,8 @@ fn test_concurrent_writers() {
 
     for i in 0..n {
         assert_eq!(
-            Cow::<Vec<u8>>::Owned(format!("{val}{i}").into_bytes()),
-            txn.get(db.dbi(), format!("{key}{i}").as_bytes()).unwrap().unwrap()
+            format!("{val}{i}").into_bytes(),
+            txn.get::<Vec<u8>>(db.dbi(), format!("{key}{i}").as_bytes()).unwrap().unwrap()
         );
     }
 }

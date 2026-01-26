@@ -12,7 +12,7 @@
 pub extern crate reth_mdbx_sys as ffi;
 
 pub use crate::{
-    codec::*,
+    codec::{ObjectLength, TableObject, TableObjectOwned},
     cursor::{Cursor, Iter, IterDup},
     database::Database,
     environment::{
