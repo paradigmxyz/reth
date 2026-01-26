@@ -16,6 +16,12 @@ PROFILE="${PROFILE:-maxperf}"
 FEATURES="${FEATURES:-jemalloc,asm-keccak,min-debug-logs}"
 TARGET="${TARGET:-$(rustc -Vv | grep host | cut -d' ' -f2)}"
 
+if [[ "$PROFILE" == dev ]]; then
+    PROFILE_DIR=debug
+else
+    PROFILE_DIR=$PROFILE
+fi
+
 # Manifest path for the binary
 case "$BINARY" in
     reth)
@@ -79,26 +85,26 @@ echo "=== PGO Phase ==="
 echo "Building PGO-instrumented binary..."
 cargo pgo build -- "${CARGO_ARGS[@]}"
 echo "Running instrumented binary to gather profiles..."
-run "target/$TARGET/$PROFILE/$BINARY"
+run "target/$TARGET/$PROFILE_DIR/$BINARY"
 
 # BOLT: build instrumented with PGO, run, optimize
 echo "=== BOLT Phase ==="
 echo "Building BOLT-instrumented binary with PGO..."
 cargo pgo bolt build --with-pgo -- "${CARGO_ARGS[@]}"
 echo "Running BOLT-instrumented binary..."
-run "target/$TARGET/$PROFILE/$BINARY-bolt-instrumented"
+run "target/$TARGET/$PROFILE_DIR/$BINARY-bolt-instrumented"
 echo "Optimizing with BOLT..."
 cargo pgo bolt optimize --with-pgo -- "${CARGO_ARGS[@]}"
 
 # Strip and copy optimized binary to expected locations
-OPTIMIZED_BIN="target/$TARGET/$PROFILE/$BINARY-bolt-optimized"
+OPTIMIZED_BIN="target/$TARGET/$PROFILE_DIR/$BINARY-bolt-optimized"
 echo "Stripping debug symbols..."
 strip "$OPTIMIZED_BIN"
 
-for out in "target/$TARGET/$PROFILE" "target/$PROFILE"; do
+for out in "target/$TARGET/$PROFILE_DIR" "target/$PROFILE_DIR"; do
     mkdir -p "$out"
     cp "$OPTIMIZED_BIN" "$out/$BINARY"
 done
 
 echo "=== Build Complete ==="
-ls -lh "target/$PROFILE/$BINARY"
+ls -lh "target/$PROFILE_DIR/$BINARY"
