@@ -65,6 +65,7 @@ use reth_trie_common::{
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
+    cell::RefCell,
     rc::Rc,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -1214,16 +1215,31 @@ where
         let mut account_nodes_processed = 0u64;
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
-        let mut v2_calculator = if self.v2_enabled {
-            let trie_cursor = provider_rc.account_trie_cursor()?;
-            let hashed_cursor = provider_rc.hashed_account_cursor()?;
-            Some(proof_v2::ProofCalculator::<
-                _,
-                _,
-                AsyncAccountValueEncoder<Factory::Provider, Factory::Provider>,
-            >::new(trie_cursor, hashed_cursor))
+        // Create both account and storage calculators for V2 proofs.
+        // The storage calculator is wrapped in Rc<RefCell<...>> for sharing with value encoders.
+        let (mut v2_account_calculator, v2_storage_calculator) = if self.v2_enabled {
+            let account_trie_cursor = provider_rc.account_trie_cursor()?;
+            let account_hashed_cursor = provider_rc.hashed_account_cursor()?;
+
+            let storage_trie_cursor = provider_rc.storage_trie_cursor(B256::ZERO)?;
+            let storage_hashed_cursor = provider_rc.hashed_storage_cursor(B256::ZERO)?;
+
+            (
+                Some(proof_v2::ProofCalculator::<
+                    _,
+                    _,
+                    AsyncAccountValueEncoder<
+                        <Factory::Provider as TrieCursorFactory>::StorageTrieCursor<'_>,
+                        <Factory::Provider as HashedCursorFactory>::StorageCursor<'_>,
+                    >,
+                >::new(account_trie_cursor, account_hashed_cursor)),
+                Some(Rc::new(RefCell::new(proof_v2::StorageProofCalculator::new_storage(
+                    storage_trie_cursor,
+                    storage_hashed_cursor,
+                )))),
+            )
         } else {
-            None
+            (None, None)
         };
 
         // Count this worker as available only after successful initialization.
@@ -1242,7 +1258,8 @@ where
                 AccountWorkerJob::AccountMultiproof { input } => {
                     let storage_wait_time = self.process_account_multiproof(
                         &provider_rc,
-                        v2_calculator.as_mut(),
+                        v2_account_calculator.as_mut(),
+                        v2_storage_calculator.clone(),
                         *input,
                         &mut account_proofs_processed,
                         &mut cursor_metrics_cache,
@@ -1352,18 +1369,28 @@ where
         Ok((ProofResult::Legacy(result, stats), storage_wait_time))
     }
 
-    fn compute_v2_account_multiproof<Provider>(
+    fn compute_v2_account_multiproof<'a, Provider>(
         &self,
-        v2_calculator: &mut proof_v2::ProofCalculator<
-            <Provider as TrieCursorFactory>::AccountTrieCursor<'_>,
-            <Provider as HashedCursorFactory>::AccountCursor<'_>,
-            AsyncAccountValueEncoder<Provider, Provider>,
+        v2_account_calculator: &mut proof_v2::ProofCalculator<
+            <Provider as TrieCursorFactory>::AccountTrieCursor<'a>,
+            <Provider as HashedCursorFactory>::AccountCursor<'a>,
+            AsyncAccountValueEncoder<
+                <Provider as TrieCursorFactory>::StorageTrieCursor<'a>,
+                <Provider as HashedCursorFactory>::StorageCursor<'a>,
+            >,
         >,
-        provider: &Rc<Provider>,
+        v2_storage_calculator: Rc<
+            RefCell<
+                proof_v2::StorageProofCalculator<
+                    <Provider as TrieCursorFactory>::StorageTrieCursor<'a>,
+                    <Provider as HashedCursorFactory>::StorageCursor<'a>,
+                >,
+            >,
+        >,
         targets: MultiProofTargetsV2,
     ) -> Result<(ProofResult, Duration), ParallelStateRootError>
     where
-        Provider: TrieCursorFactory + HashedCursorFactory,
+        Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
         let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
 
@@ -1384,11 +1411,11 @@ where
         let mut value_encoder = AsyncAccountValueEncoder::new(
             storage_proof_receivers,
             self.cached_storage_roots.clone(),
-            provider.clone(),
-            provider.clone(),
+            v2_storage_calculator,
         );
 
-        let account_proofs = v2_calculator.proof(&mut value_encoder, &mut account_targets)?;
+        let account_proofs =
+            v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?;
 
         let (storage_proofs, storage_wait_time) =
             value_encoder.into_storage_proofs_with_wait_time()?;
@@ -1401,14 +1428,27 @@ where
     /// Processes an account multiproof request.
     ///
     /// Returns the time spent waiting for storage proof results.
-    fn process_account_multiproof<Provider>(
+    fn process_account_multiproof<'a, Provider>(
         &self,
         provider_rc: &Rc<Provider>,
-        v2_calculator: Option<
+        v2_account_calculator: Option<
             &mut proof_v2::ProofCalculator<
-                <Provider as TrieCursorFactory>::AccountTrieCursor<'_>,
-                <Provider as HashedCursorFactory>::AccountCursor<'_>,
-                AsyncAccountValueEncoder<Provider, Provider>,
+                <Provider as TrieCursorFactory>::AccountTrieCursor<'a>,
+                <Provider as HashedCursorFactory>::AccountCursor<'a>,
+                AsyncAccountValueEncoder<
+                    <Provider as TrieCursorFactory>::StorageTrieCursor<'a>,
+                    <Provider as HashedCursorFactory>::StorageCursor<'a>,
+                >,
+            >,
+        >,
+        v2_storage_calculator: Option<
+            Rc<
+                RefCell<
+                    proof_v2::StorageProofCalculator<
+                        <Provider as TrieCursorFactory>::StorageTrieCursor<'a>,
+                        <Provider as HashedCursorFactory>::StorageCursor<'a>,
+                    >,
+                >,
             >,
         >,
         input: AccountMultiproofInput,
@@ -1416,7 +1456,7 @@ where
         cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
     ) -> Duration
     where
-        Provider: TrieCursorFactory + HashedCursorFactory,
+        Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
         let mut proof_cursor_metrics = ProofTaskCursorMetricsCache::default();
         let proof_start = Instant::now();
@@ -1445,8 +1485,8 @@ where
             AccountMultiproofInput::V2 { targets, proof_result_sender } => {
                 let (result, storage_wait_time) = match self
                     .compute_v2_account_multiproof::<Provider>(
-                        v2_calculator.expect("v2 calculator provided"),
-                        provider_rc,
+                        v2_account_calculator.expect("v2 account calculator provided"),
+                        v2_storage_calculator.expect("v2 storage calculator provided"),
                         targets,
                     ) {
                     Ok((proof, wait_time)) => (Ok(proof), wait_time),
@@ -2017,7 +2057,7 @@ mod tests {
             );
             let ctx = test_ctx(factory);
 
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, 1, false);
+            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, false);
 
             // Verify handle can be cloned
             let _cloned_handle = proof_handle.clone();

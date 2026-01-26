@@ -8,9 +8,9 @@ use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory,
-    proof_v2::{self, DeferredValueEncoder, LeafValueEncoder},
-    trie_cursor::TrieCursorFactory,
+    hashed_cursor::HashedStorageCursor,
+    proof_v2::{DeferredValueEncoder, LeafValueEncoder, StorageProofCalculator},
+    trie_cursor::TrieStorageCursor,
     ProofTrieNode,
 };
 use std::{
@@ -21,7 +21,7 @@ use std::{
 use tracing::debug_span;
 
 /// Returned from [`AsyncAccountValueEncoder`], used to track an async storage root calculation.
-pub(crate) enum AsyncAccountDeferredValueEncoder<T, H> {
+pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
     /// A storage proof job was dispatched to the worker pool.
     Dispatched {
         hashed_address: B256,
@@ -36,8 +36,8 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<T, H> {
     FromCache { account: Account, root: B256 },
     /// Synchronous storage root computation.
     Sync {
-        trie_cursor_factory: Rc<T>,
-        hashed_cursor_factory: Rc<H>,
+        /// Shared storage proof calculator for computing storage roots.
+        storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
         hashed_address: B256,
         account: Account,
         /// Cache to store computed storage roots for future reuse.
@@ -45,10 +45,10 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<T, H> {
     },
 }
 
-impl<T, H> DeferredValueEncoder for AsyncAccountDeferredValueEncoder<T, H>
+impl<TC, HC> DeferredValueEncoder for AsyncAccountDeferredValueEncoder<TC, HC>
 where
-    T: TrieCursorFactory,
-    H: HashedCursorFactory,
+    TC: TrieStorageCursor,
+    HC: HashedStorageCursor<Value = alloy_primitives::U256>,
 {
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
         let (account, root) = match self {
@@ -88,28 +88,17 @@ where
                 (account, root)
             }
             Self::FromCache { account, root } => (account, root),
-            Self::Sync {
-                trie_cursor_factory,
-                hashed_cursor_factory,
-                hashed_address,
-                account,
-                cached_storage_roots,
-            } => {
+            Self::Sync { storage_calculator, hashed_address, account, cached_storage_roots } => {
                 let _guard = debug_span!(
                     target: "trie::proof_task",
                     "Sync storage proof",
                     ?hashed_address,
                 )
                 .entered();
-                let trie_cursor = trie_cursor_factory.storage_trie_cursor(hashed_address)?;
-                let hashed_cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
 
-                let mut storage_proof_calculator =
-                    proof_v2::ProofCalculator::new_storage(trie_cursor, hashed_cursor);
-
-                let proof = storage_proof_calculator
-                    .storage_proof(hashed_address, &mut [B256::ZERO.into()])?;
-                let storage_root = storage_proof_calculator
+                let mut calculator = storage_calculator.borrow_mut();
+                let proof = calculator.storage_proof(hashed_address, &mut [B256::ZERO.into()])?;
+                let storage_root = calculator
                     .compute_root_hash(&proof)?
                     .expect("storage_proof with dummy target always returns root");
 
@@ -132,9 +121,10 @@ where
 /// storage proofs, for cases where it's possible to determine some necessary accounts ahead of
 /// time.
 ///
-/// When the worker pool is busy (channel is full), falls back to synchronous storage root
-/// computation using the provided cursor factories.
-pub(crate) struct AsyncAccountValueEncoder<T, H> {
+/// For accounts without pre-dispatched proofs or cached roots, uses a shared
+/// [`StorageProofCalculator`] to compute storage roots synchronously, reusing cursors across
+/// multiple accounts.
+pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     /// Storage proof jobs which were dispatched ahead of time.
     dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
     /// Storage roots which have already been computed. This can be used only if a storage proof
@@ -143,35 +133,31 @@ pub(crate) struct AsyncAccountValueEncoder<T, H> {
     /// Tracks storage proof results received from the storage workers. [`Rc`] + [`RefCell`] is
     /// required because [`DeferredValueEncoder`] cannot have a lifetime.
     storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNode>>>>,
-    /// Factory for creating trie cursors (for synchronous computation).
-    trie_cursor_factory: Rc<T>,
-    /// Factory for creating hashed cursors (for synchronous computation).
-    hashed_cursor_factory: Rc<H>,
+    /// Shared storage proof calculator for synchronous computation. Reuses cursors and internal
+    /// buffers across multiple storage root calculations.
+    storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     /// Accumulated time spent waiting for storage proof results.
     storage_wait_time: Rc<RefCell<Duration>>,
 }
 
-impl<T, H> AsyncAccountValueEncoder<T, H> {
-    /// Initializes a [`Self`] using cursor factories which will be used to calculate storage
-    /// roots synchronously.
+impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
+    /// Initializes a [`Self`] using a storage proof calculator which will be reused to calculate
+    /// storage roots synchronously.
     ///
     /// # Parameters
     /// - `dispatched`: Pre-dispatched storage proof receivers for target accounts
     /// - `cached_storage_roots`: Shared cache of already-computed storage roots
-    /// - `trie_cursor_factory`: Factory for creating trie cursors (for synchronous computation)
-    /// - `hashed_cursor_factory`: Factory for creating hashed cursors (for synchronous computation)
+    /// - `storage_calculator`: Shared storage proof calculator for synchronous computation
     pub(crate) fn new(
         dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
-        trie_cursor_factory: Rc<T>,
-        hashed_cursor_factory: Rc<H>,
+        storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     ) -> Self {
         Self {
             dispatched,
             cached_storage_roots,
             storage_proof_results: Default::default(),
-            trie_cursor_factory,
-            hashed_cursor_factory,
+            storage_calculator,
             storage_wait_time: Default::default(),
         }
     }
@@ -225,13 +211,13 @@ impl<T, H> AsyncAccountValueEncoder<T, H> {
     }
 }
 
-impl<T, H> LeafValueEncoder for AsyncAccountValueEncoder<T, H>
+impl<TC, HC> LeafValueEncoder for AsyncAccountValueEncoder<TC, HC>
 where
-    T: TrieCursorFactory,
-    H: HashedCursorFactory,
+    TC: TrieStorageCursor,
+    HC: HashedStorageCursor<Value = alloy_primitives::U256>,
 {
     type Value = Account;
-    type DeferredEncoder = AsyncAccountDeferredValueEncoder<T, H>;
+    type DeferredEncoder = AsyncAccountDeferredValueEncoder<TC, HC>;
 
     fn deferred_encoder(
         &mut self,
@@ -258,10 +244,9 @@ where
             return AsyncAccountDeferredValueEncoder::FromCache { account, root: *root }
         }
 
-        // Compute storage root synchronously
+        // Compute storage root synchronously using the shared calculator
         AsyncAccountDeferredValueEncoder::Sync {
-            trie_cursor_factory: self.trie_cursor_factory.clone(),
-            hashed_cursor_factory: self.hashed_cursor_factory.clone(),
+            storage_calculator: self.storage_calculator.clone(),
             hashed_address,
             account,
             cached_storage_roots: self.cached_storage_roots.clone(),
