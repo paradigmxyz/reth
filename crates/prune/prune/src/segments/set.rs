@@ -10,6 +10,7 @@ use reth_provider::{
     PruneCheckpointReader, PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune_types::PruneModes;
+use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
 
 /// Collection of [`Segment`]. Thread-safe, allocated on the heap.
 #[derive(Debug)]
@@ -52,7 +53,9 @@ where
         + PruneCheckpointReader
         + BlockReader<Transaction: Encodable2718>
         + ChainStateBlockReader
-        + StorageSettingsCache,
+        + StorageSettingsCache
+        + ChangeSetReader
+        + StorageChangeSetReader,
 {
     /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
     /// [`PruneModes`].
