@@ -634,7 +634,7 @@ where
             }
 
             // Convert the transaction to a [RecoveredTx]. This is
-            // purely for the purposes of utilizing the `evm_config.tx_env`` function.
+            // purely for the purposes of utilizing the `evm_config.tx_env` function.
             // Deposit transactions do not have signatures, so if the tx is a deposit, this
             // will just pull in its `from` address.
             let sequencer_tx = sequencer_tx.value().try_clone_into_recovered().map_err(|_| {
@@ -772,5 +772,91 @@ where
         }
 
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    mod data_availability_limits {
+        use crate::builder::ExecutionInfo;
+
+        #[test]
+        fn tx_da_size_over_tx_data_limit() {
+            let expected = true;
+            // DA values
+            let tx_da_size = 43;
+            let da_footprint_gas_scalar = Some(32);
+            // DA limits
+            let block_data_limit = Some(4200);
+            let tx_data_limit = Some(42);
+            // Gas limits
+            let block_gas_limit = 42;
+            let tx_gas_limit = 42;
+
+            let execution_info = ExecutionInfo::new();
+            assert_eq!(
+                expected,
+                execution_info.is_tx_over_limits(
+                    tx_da_size,
+                    block_gas_limit,
+                    tx_data_limit,
+                    block_data_limit,
+                    tx_gas_limit,
+                    da_footprint_gas_scalar,
+                )
+            )
+        }
+        #[test]
+        fn tx_da_size_over_block_data_limit() {
+            let expected = true;
+            // DA values
+            let tx_da_size = 43;
+            let da_footprint_gas_scalar = Some(32);
+            // DA limits
+            let block_data_limit = Some(42);
+            let tx_data_limit = Some(4300);
+            // Gas limits
+            let block_gas_limit = 42;
+            let tx_gas_limit = 42;
+
+            let execution_info = ExecutionInfo::new();
+            assert_eq!(
+                expected,
+                execution_info.is_tx_over_limits(
+                    tx_da_size,
+                    block_gas_limit,
+                    tx_data_limit,
+                    block_data_limit,
+                    tx_gas_limit,
+                    da_footprint_gas_scalar,
+                )
+            )
+        }
+        #[test]
+        fn tx_da_size_under_limits() {
+            let expected = false;
+            // DA values
+            let tx_da_size = 1;
+            let da_footprint_gas_scalar = Some(32);
+            // DA limits
+            let block_data_limit = Some(42);
+            let tx_data_limit = Some(42);
+            // Gas limits
+            let block_gas_limit = 42;
+            let tx_gas_limit = 42;
+
+            let execution_info = ExecutionInfo::new();
+            assert_eq!(
+                expected,
+                execution_info.is_tx_over_limits(
+                    tx_da_size,
+                    block_gas_limit,
+                    tx_data_limit,
+                    block_data_limit,
+                    tx_gas_limit,
+                    da_footprint_gas_scalar
+                )
+            )
+        }
     }
 }
