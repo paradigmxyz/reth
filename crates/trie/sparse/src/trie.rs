@@ -1128,7 +1128,7 @@ impl SparseTrieTrait for SerialSparseTrie {
 
         // Remove all descendants of pruned roots.
         // Sort for efficient binary search lookups.
-        effective_pruned_roots.sort();
+        effective_pruned_roots.sort_unstable();
 
         // Returns true if `p` is a strict descendant of any pruned root (same prefix, longer path).
         let is_strict_descendant = |p: &Nibbles| -> bool {

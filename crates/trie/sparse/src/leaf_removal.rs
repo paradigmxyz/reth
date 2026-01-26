@@ -4,7 +4,7 @@
 //! from a sparse trie. They are used by both `SerialSparseTrie` and `ParallelSparseTrie`.
 
 use crate::SparseNode;
-use reth_trie_common::{Nibbles, TrieMask};
+use reth_trie_common::Nibbles;
 
 /// Computes the replacement node for a branch when it has only one remaining child after
 /// a leaf removal.
@@ -56,10 +56,9 @@ pub fn branch_changes_on_leaf_removal(
         }
         // If the only child is a branch node, we downgrade the current branch
         // node into a one-nibble extension node.
-        SparseNode::Branch { .. } => (
-            SparseNode::new_ext(Nibbles::from_nibbles_unchecked([remaining_child_nibble])),
-            false,
-        ),
+        SparseNode::Branch { .. } => {
+            (SparseNode::new_ext(Nibbles::from_nibbles_unchecked([remaining_child_nibble])), false)
+        }
     }
 }
 
@@ -119,6 +118,7 @@ pub fn extension_changes_on_leaf_removal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_trie_common::TrieMask;
 
     #[test]
     fn test_branch_changes_leaf_child() {
