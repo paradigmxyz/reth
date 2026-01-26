@@ -93,6 +93,7 @@ jobs:
           VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
           VERGEN_GIT_DESCRIBE: ${{ steps.git.outputs.describe }}
           VERGEN_GIT_DIRTY: ${{ steps.git.outputs.dirty }}
+          DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
         with:
           project: ${{ vars.DEPOT_PROJECT_ID }}
           files: docker-bake.hcl

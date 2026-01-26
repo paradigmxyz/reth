@@ -1,4 +1,4 @@
-# syntax=docker.io/docker/dockerfile:1.7-labs
+# syntax=docker/dockerfile:1
 
 # Unified Dockerfile for reth and op-reth, optimized for Depot builds
 # Usage:
@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y libclang-dev pkg-config
 RUN cargo install sccache --locked
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_DIR=/sccache
+ENV SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev
 
 # Builds a cargo-chef plan
 FROM chef AS planner
@@ -52,17 +53,19 @@ ENV VERGEN_GIT_SHA=$VERGEN_GIT_SHA
 ENV VERGEN_GIT_DESCRIBE=$VERGEN_GIT_DESCRIBE
 ENV VERGEN_GIT_DIRTY=$VERGEN_GIT_DIRTY
 
-# Build dependencies with cache mounts
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+# Build dependencies
+RUN --mount=type=secret,id=DEPOT_TOKEN,env=SCCACHE_WEBDAV_TOKEN \
+    --mount=type=cache,target=/usr/local/cargo/registry,sharing=shared \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=shared \
+    --mount=type=cache,target=$SCCACHE_DIR,sharing=shared \
     cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --locked --recipe-path recipe.json --manifest-path $MANIFEST_PATH/Cargo.toml
 
-# Build application with cache mounts
+# Build application
 COPY --exclude=.git . .
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+RUN --mount=type=secret,id=DEPOT_TOKEN,env=SCCACHE_WEBDAV_TOKEN \
+    --mount=type=cache,target=/usr/local/cargo/registry,sharing=shared \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=shared \
+    --mount=type=cache,target=$SCCACHE_DIR,sharing=shared \
     cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $BINARY --manifest-path $MANIFEST_PATH/Cargo.toml
 
 # Copy binary to a known location (ARG not resolved in COPY)
