@@ -46,6 +46,11 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
+reth-db-api = { workspace = true }
+reth-primitives = { workspace = true }
+rand = { workspace = true }
+
 reth-primitives-traits = { workspace = true, features = ["serde"] }
 reth-codecs.workspace = true
 alloy-genesis.workspace = true
@@ -141,3 +146,7 @@ harness = false
 name = "hashed_state"
 harness = false
 required-features = ["rayon"]
+
+[[bench]]
+name = "smart_chunking"
+harness = false

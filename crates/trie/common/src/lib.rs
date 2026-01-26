@@ -52,7 +52,7 @@ pub use trie::{BranchNodeMasks, BranchNodeMasksMap, ProofTrieNode};
 /// The container indicates when the trie has been modified.
 pub mod prefix_set;
 
-mod proofs;
+pub mod proofs;
 #[cfg(any(test, feature = "test-utils"))]
 pub use proofs::triehash;
 pub use proofs::*;
