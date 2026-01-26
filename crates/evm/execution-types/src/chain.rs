@@ -2,9 +2,9 @@
 
 use crate::ExecutionOutcome;
 use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
-use alloy_consensus::{transaction::Recovered, BlockHeader};
+use alloy_consensus::{transaction::Recovered, BlockHeader, TxReceipt};
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Log, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_primitives_traits::{
     transaction::signed::SignedTransaction, Block, BlockBody, IndexedTx, NodePrimitives,
@@ -182,6 +182,19 @@ impl<N: NodePrimitives> Chain<N> {
     /// Returns an iterator over all the receipts of the blocks in the chain.
     pub fn block_receipts_iter(&self) -> impl Iterator<Item = &Vec<N::Receipt>> + '_ {
         self.execution_outcome.receipts().iter()
+    }
+
+    /// Returns an iterator over all receipts in the chain.
+    pub fn receipts_iter(&self) -> impl Iterator<Item = &N::Receipt> + '_ {
+        self.block_receipts_iter().flatten()
+    }
+
+    /// Returns an iterator over all logs in the chain.
+    pub fn logs_iter(&self) -> impl Iterator<Item = &Log> + '_
+    where
+        N::Receipt: TxReceipt<Log = Log>,
+    {
+        self.receipts_iter().flat_map(|receipt| receipt.logs())
     }
 
     /// Returns an iterator over all blocks in the chain with increasing block number.

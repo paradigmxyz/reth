@@ -44,7 +44,7 @@ pub trait LeafValueEncoder {
     ///
     /// The returned deferred encoder will be called as late as possible in the algorithm to
     /// maximize the time available for parallel computation (e.g., storage root calculation).
-    fn deferred_encoder(&self, key: B256, value: Self::Value) -> Self::DeferredEncoder;
+    fn deferred_encoder(&mut self, key: B256, value: Self::Value) -> Self::DeferredEncoder;
 }
 
 /// An encoder for storage slot values.
@@ -68,7 +68,7 @@ impl LeafValueEncoder for StorageValueEncoder {
     type Value = U256;
     type DeferredEncoder = StorageDeferredValueEncoder;
 
-    fn deferred_encoder(&self, _key: B256, value: Self::Value) -> Self::DeferredEncoder {
+    fn deferred_encoder(&mut self, _key: B256, value: Self::Value) -> Self::DeferredEncoder {
         StorageDeferredValueEncoder(value)
     }
 }
@@ -157,7 +157,7 @@ where
     type DeferredEncoder = SyncAccountDeferredValueEncoder<T, H>;
 
     fn deferred_encoder(
-        &self,
+        &mut self,
         hashed_address: B256,
         account: Self::Value,
     ) -> Self::DeferredEncoder {
