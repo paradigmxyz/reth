@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["fastapi", "uvicorn", "httpx"]
+# dependencies = ["fastapi", "uvicorn", "httpx", "cachetools"]
 # ///
 """
 Worker Concurrency Visualization Service
@@ -17,10 +17,12 @@ Grafana setup:
     3. Query /dashboard/{traceId} endpoint
 """
 
+import asyncio
 import os
 from collections import defaultdict
 
 import httpx
+from cachetools import TTLCache
 from fastapi import FastAPI, HTTPException
 
 app = FastAPI(title="Worker Concurrency Visualizer")
@@ -28,13 +30,40 @@ app = FastAPI(title="Worker Concurrency Visualizer")
 TEMPO_URL = os.environ.get("TEMPO_URL", "http://localhost:3200")
 HTTP_TIMEOUT = 30.0
 
+# Cache for traces: max 100 entries, TTL of 5 minutes
+_trace_cache: TTLCache[str, dict] = TTLCache(maxsize=100, ttl=300)
+# Lock to prevent concurrent fetches of the same trace (thundering herd)
+_trace_locks: dict[str, asyncio.Lock] = {}
+_locks_lock = asyncio.Lock()
+
+
+async def _get_trace_lock(trace_id: str) -> asyncio.Lock:
+    """Get or create a lock for a specific trace_id."""
+    async with _locks_lock:
+        if trace_id not in _trace_locks:
+            _trace_locks[trace_id] = asyncio.Lock()
+        return _trace_locks[trace_id]
+
 
 async def fetch_trace(trace_id: str) -> dict:
-    """Fetch trace from Tempo API."""
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        resp = await client.get(f"{TEMPO_URL}/api/traces/{trace_id}")
-        resp.raise_for_status()
-        return resp.json()
+    """Fetch trace from Tempo API with caching."""
+    # Check cache first (without lock for fast path)
+    if trace_id in _trace_cache:
+        return _trace_cache[trace_id]
+
+    # Use per-trace lock to prevent thundering herd
+    lock = await _get_trace_lock(trace_id)
+    async with lock:
+        # Double-check cache after acquiring lock
+        if trace_id in _trace_cache:
+            return _trace_cache[trace_id]
+
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            resp = await client.get(f"{TEMPO_URL}/api/traces/{trace_id}")
+            resp.raise_for_status()
+            trace = resp.json()
+            _trace_cache[trace_id] = trace
+            return trace
 
 
 def extract_worker_spans(trace: dict) -> dict[str, list[tuple[int, int]]]:
@@ -119,7 +148,7 @@ def extract_tx_execution_spans(trace: dict) -> tuple[list[tuple[int, int]], int,
     Returns tuple of (list of (start_ns, end_ns) tuples, total_gas_used, tx_details).
     """
     tx_spans = []
-    tx_details = []
+    raw_tx_data = []
     total_gas = 0
     
     def collect_spans(batches):
@@ -138,7 +167,6 @@ def extract_tx_execution_spans(trace: dict) -> tuple[list[tuple[int, int]], int,
                         # Extract tx details
                         tx_hash = None
                         gas_used = 0
-                        tx_index = None
                         for attr in span.get("attributes", []):
                             key = attr.get("key", "")
                             val = attr.get("value", {})
@@ -149,15 +177,11 @@ def extract_tx_execution_spans(trace: dict) -> tuple[list[tuple[int, int]], int,
                                     total_gas += gas_used
                             elif key == "tx_hash":
                                 tx_hash = val.get("stringValue")
-                            elif key == "tx_index":
-                                idx = val.get("intValue") or val.get("stringValue")
-                                if idx is not None:
-                                    tx_index = int(idx)
                         
                         if tx_hash:
                             duration_ms = (end_ns - start_ns) / 1_000_000
-                            tx_details.append({
-                                "tx_index": tx_index,
+                            raw_tx_data.append({
+                                "start_ns": start_ns,
                                 "tx_hash": tx_hash,
                                 "duration_ms": round(duration_ms, 3),
                                 "gas_used": gas_used,
@@ -168,6 +192,18 @@ def extract_tx_execution_spans(trace: dict) -> tuple[list[tuple[int, int]], int,
         collect_spans(trace["batches"])
     elif "resourceSpans" in trace:
         collect_spans(trace["resourceSpans"])
+    
+    # Sort by start time to infer tx_index from execution order
+    raw_tx_data.sort(key=lambda x: x["start_ns"])
+    tx_details = []
+    for i, tx in enumerate(raw_tx_data):
+        tx_details.append({
+            "tx_index": i,
+            "tx_hash": tx["tx_hash"],
+            "duration_ms": tx["duration_ms"],
+            "gas_used": tx["gas_used"],
+            "type": tx["type"]
+        })
     
     # Sort by end time to get completion order
     tx_spans.sort(key=lambda x: x[1])
@@ -327,6 +363,73 @@ async def health():
     return {"status": "ok"}
 
 
+@app.post("/cache/clear")
+async def clear_cache():
+    """Clear the trace cache."""
+    _trace_cache.clear()
+    return {"status": "ok", "message": "Cache cleared"}
+
+
+@app.get("/traces")
+async def list_traces(limit: int = 50):
+    """
+    List recent traces with on_new_payload spans from Tempo.
+    Returns trace metadata for use in a selection table.
+    """
+    import time
+
+    # Search for traces with on_new_payload span in last 24h
+    end = int(time.time())
+    start = end - 86400  # 24 hours ago
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            # Use TraceQL to find traces with on_new_payload spans
+            resp = await client.get(
+                f"{TEMPO_URL}/api/search",
+                params={
+                    "q": '{ name =~ ".*on_new_payload.*" }',
+                    "limit": limit,
+                    "start": start,
+                    "end": end,
+                },
+            )
+            resp.raise_for_status()
+            search_result = resp.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search traces: {e}")
+
+    traces = []
+    for trace_meta in search_result.get("traces", []):
+        trace_id = trace_meta.get("traceID", "")
+        root_name = trace_meta.get("rootServiceName", "")
+        root_trace = trace_meta.get("rootTraceName", "")
+        duration_ms = trace_meta.get("durationMs", 0)
+        start_time = trace_meta.get("startTimeUnixNano", 0)
+
+        # Try to fetch block number from the trace
+        block_number = None
+        try:
+            trace = await fetch_trace(trace_id)
+            block_number = extract_block_number(trace)
+        except Exception:
+            pass
+
+        traces.append({
+            "trace_id": trace_id,
+            "block_number": block_number,
+            "duration_ms": duration_ms,
+            "root_service": root_name,
+            "root_trace": root_trace,
+            "start_time_ns": start_time,
+        })
+
+    # Sort by block number descending (most recent first)
+    traces.sort(key=lambda x: x.get("block_number") or 0, reverse=True)
+
+    return traces
+
+
 @app.get("/dashboard/{trace_id}")
 async def dashboard_data(trace_id: str):
     """
@@ -412,6 +515,7 @@ async def dashboard_data(trace_id: str):
             tx_map[tx_hash]["prewarm_ms"] = prewarm["duration_ms"]
         else:
             tx_map[tx_hash] = {
+                "tx_index": None,
                 "tx_hash": tx_hash,
                 "duration_ms": 0,
                 "gas_used": 0,

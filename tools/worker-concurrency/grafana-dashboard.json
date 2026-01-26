@@ -1,25 +1,4 @@
 {
-  "annotations": {
-    "list": [
-      {
-        "builtIn": 1,
-        "datasource": {
-          "type": "grafana",
-          "uid": "-- Grafana --"
-        },
-        "enable": true,
-        "hide": true,
-        "iconColor": "rgba(0, 211, 255, 1)",
-        "name": "Annotations & Alerts",
-        "type": "dashboard"
-      }
-    ]
-  },
-  "editable": true,
-  "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
-  "id": 8,
-  "links": [],
   "panels": [
     {
       "collapsed": false,
@@ -29,877 +8,1203 @@
         "x": 0,
         "y": 0
       },
-      "id": 10,
+      "id": 50,
       "panels": [],
-      "title": "Reth block processing",
+      "title": "Trace List",
       "type": "row"
     },
     {
       "datasource": {
-        "type": "yesoreyeram-infinity-datasource",
-        "uid": "${infinity_ds}"
+        "type": "tempo",
+        "uid": "ffayr2gbgw8owa"
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "blue",
-                "value": 0
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 0,
-        "y": 1
-      },
-      "id": 13,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "columns": [],
-          "filters": [],
-          "format": "table",
-          "parser": "backend",
-          "refId": "A",
-          "root_selector": "$.block_number",
-          "source": "url",
-          "type": "json",
-          "url": "http://host.docker.internal:5050/dashboard/${traceId}",
-          "url_options": {
-            "method": "GET"
-          }
-        }
-      ],
-      "title": "Block Number",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "yesoreyeram-infinity-datasource",
-        "uid": "${infinity_ds}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 4,
-        "y": 1
-      },
-      "id": 1,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "columns": [],
-          "filters": [],
-          "format": "table",
-          "global_query_id": "",
-          "parser": "backend",
-          "refId": "A",
-          "root_selector": "$.duration_ms",
-          "source": "url",
-          "type": "json",
-          "url": "http://host.docker.internal:5050/dashboard/${traceId}",
-          "url_options": {
-            "method": "GET"
-          }
-        }
-      ],
-      "title": "Duration",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "yesoreyeram-infinity-datasource",
-        "uid": "${infinity_ds}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "yellow",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "suffix: MGas/s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 8,
-        "y": 1
-      },
-      "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "columns": [],
-          "filters": [],
-          "format": "table",
-          "parser": "backend",
-          "refId": "A",
-          "root_selector": "$.mgas_per_second",
-          "source": "url",
-          "type": "json",
-          "url": "http://host.docker.internal:5050/dashboard/${traceId}",
-          "url_options": {
-            "method": "GET"
-          }
-        }
-      ],
-      "title": "Throughput",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "yesoreyeram-infinity-datasource",
-        "uid": "${infinity_ds}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "orange",
-                "value": 0
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 12,
-        "y": 1
-      },
-      "id": 11,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "columns": [],
-          "filters": [],
-          "format": "table",
-          "parser": "backend",
-          "refId": "A",
-          "root_selector": "$.total_txs",
-          "source": "url",
-          "type": "json",
-          "url": "http://host.docker.internal:5050/dashboard/${traceId}",
-          "url_options": {
-            "method": "GET"
-          }
-        }
-      ],
-      "title": "Total Transactions",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "yesoreyeram-infinity-datasource",
-        "uid": "${infinity_ds}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
           "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "fillOpacity": 80,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineWidth": 1,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "ms"
+            "align": "auto",
+            "filterable": true
+          }
         },
         "overrides": [
           {
             "matcher": {
               "id": "byName",
-              "options": "spawn"
+              "options": "Block Dashboard"
             },
             "properties": [
               {
-                "id": "color",
-                "value": {
-                  "fixedColor": "yellow",
-                  "mode": "fixed"
-                }
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": false,
+                    "title": "View Details",
+                    "url": "/d/worker-concurrency/reth-block-processing?var-traceId=${__value.raw}"
+                  }
+                ]
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "execution"
+              "options": "Block Number"
             },
             "properties": [
               {
-                "id": "color",
-                "value": {
-                  "fixedColor": "green",
-                  "mode": "fixed"
-                }
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Open in Tempo",
+                    "url": "/explore?schemaVersion=1&panes={\"main\":{\"datasource\":\"tempo\",\"queries\":[{\"query\":\"{span.block_num=\\\"${__value.raw}\\\"}\",\"queryType\":\"traceql\"}]}}"
+                  }
+                ]
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "state_root"
+              "options": "Duration"
             },
             "properties": [
               {
-                "id": "color",
-                "value": {
-                  "fixedColor": "blue",
-                  "mode": "fixed"
-                }
+                "id": "unit",
+                "value": "ns"
               }
             ]
           }
         ]
       },
       "gridPos": {
-        "h": 4,
-        "w": 8,
-        "x": 16,
+        "h": 16,
+        "w": 24,
+        "x": 0,
         "y": 1
       },
-      "id": 15,
+      "id": 51,
       "options": {
-        "barRadius": 0,
-        "barWidth": 0.9,
-        "fullHighlight": false,
-        "groupWidth": 0.7,
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "right",
-          "showLegend": true
-        },
-        "orientation": "horizontal",
-        "showValue": "always",
-        "stacking": "normal",
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        },
-        "xTickLabelRotation": 0,
-        "xTickLabelSpacing": 0
+        "cellHeight": "sm",
+        "showHeader": true
       },
-      "pluginVersion": "12.3.0",
       "targets": [
         {
-          "columns": [
-            {
-              "selector": "category",
-              "text": "category",
-              "type": "string"
-            },
-            {
-              "selector": "spawn",
-              "text": "spawn",
-              "type": "number"
-            },
-            {
-              "selector": "execution",
-              "text": "execution",
-              "type": "number"
-            },
-            {
-              "selector": "state_root",
-              "text": "state_root",
-              "type": "number"
-            }
-          ],
-          "filters": [],
-          "format": "table",
-          "parser": "backend",
+          "datasource": {
+            "type": "tempo",
+            "uid": "ffayr2gbgw8owa"
+          },
+          "limit": 200,
+          "query": "{name =~ \".*on_new_payload.*\"} | select(span.block_num)",
+          "queryType": "traceql",
           "refId": "A",
-          "root_selector": "$.phases",
-          "source": "url",
-          "type": "json",
-          "url": "http://host.docker.internal:5050/dashboard/${traceId}",
-          "url_options": {
-            "method": "GET"
-          }
+          "tableType": "spans"
         }
       ],
-      "title": "Processing Phases",
+      "title": "Recent Traces (click to view details)",
       "transformations": [
         {
           "id": "organize",
           "options": {
+            "excludeByName": {
+              "nestedSetLeft": true,
+              "nestedSetParent": true,
+              "nestedSetRight": true,
+              "spanID": true,
+              "spanName": true,
+              "traceDuration": true,
+              "traceName": true,
+              "traceRootServiceName": true,
+              "traceRootSpanName": true,
+              "traceService": true,
+              "traceStatusCode": true,
+              "traceStatusMessage": true
+            },
             "indexByName": {
-              "category": 0,
-              "execution": 2,
-              "spawn": 1,
-              "state_root": 3
+              "duration": 1,
+              "span.block_num": 0,
+              "startTime": 2,
+              "traceIdHidden": 3
+            },
+            "renameByName": {
+              "duration": "Duration",
+              "span.block_num": "Block Number",
+              "startTime": "Time",
+              "traceIdHidden": "Block Dashboard"
             }
           }
         }
       ],
-      "type": "barchart"
+      "type": "table"
     },
     {
-      "datasource": {
-        "type": "yesoreyeram-infinity-datasource",
-        "uid": "${infinity_ds}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "fixedColor": "green",
-            "mode": "fixed"
-          },
-          "custom": {
-            "fillOpacity": 20,
-            "lineWidth": 2
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
+      "collapsed": false,
       "gridPos": {
-        "h": 10,
-        "w": 12,
+        "h": 1,
+        "w": 24,
         "x": 0,
-        "y": 5
+        "y": 6
       },
-      "id": 5,
-      "options": {
-        "legend": {
-          "calcs": [
-            "max",
-            "mean"
-          ],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        },
-        "xField": "time"
-      },
-      "targets": [
-        {
-          "columns": [
-            {
-              "selector": "time",
-              "text": "time",
-              "type": "number"
-            },
-            {
-              "selector": "active",
-              "text": "active",
-              "type": "number"
-            }
-          ],
-          "format": "table",
-          "parser": "backend",
-          "refId": "A",
-          "root_selector": "$.series.account_workers",
-          "source": "url",
-          "type": "json",
-          "url": "http://host.docker.internal:5050/dashboard/${traceId}",
-          "url_options": {
-            "method": "GET"
-          }
-        }
-      ],
-      "title": "Active account workers",
-      "type": "trend"
+      "id": 10,
+      "panels": [],
+      "title": "Reth block processing",
+      "type": "row"
     },
     {
-      "datasource": {
-        "type": "yesoreyeram-infinity-datasource",
-        "uid": "${infinity_ds}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "fixedColor": "blue",
-            "mode": "fixed"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 20,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "blue",
-                "value": 0
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
+      "collapsed": true,
       "gridPos": {
-        "h": 10,
-        "w": 12,
-        "x": 12,
-        "y": 5
-      },
-      "id": 6,
-      "options": {
-        "legend": {
-          "calcs": [
-            "max",
-            "mean"
-          ],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        },
-        "xField": "time"
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "columns": [
-            {
-              "selector": "time",
-              "text": "time",
-              "type": "number"
-            },
-            {
-              "selector": "active",
-              "text": "active",
-              "type": "number"
-            }
-          ],
-          "filters": [],
-          "format": "table",
-          "parser": "backend",
-          "refId": "A",
-          "root_selector": "$.series.storage_workers",
-          "source": "url",
-          "type": "json",
-          "url": "http://host.docker.internal:5050/dashboard/${traceId}",
-          "url_options": {
-            "method": "GET"
-          }
-        }
-      ],
-      "title": "Active storage workers",
-      "type": "trend"
-    },
-    {
-      "datasource": {
-        "type": "yesoreyeram-infinity-datasource",
-        "uid": "${infinity_ds}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "fixedColor": "purple",
-            "mode": "fixed"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 20,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "purple",
-                "value": 0
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 10,
-        "w": 12,
+        "h": 1,
+        "w": 24,
         "x": 0,
-        "y": 15
+        "y": 9
       },
-      "id": 14,
-      "options": {
-        "legend": {
-          "calcs": [
-            "max"
-          ],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        },
-        "xField": "time"
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
+      "id": 10,
+      "panels": [
         {
-          "columns": [
-            {
-              "selector": "time",
-              "text": "time",
-              "type": "number"
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": 0
+                  }
+                ]
+              }
             },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 0,
+            "y": 0
+          },
+          "id": 13,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showPercentChange": false,
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "targets": [
             {
-              "selector": "completed",
-              "text": "completed",
-              "type": "number"
+              "columns": [],
+              "filters": [],
+              "format": "table",
+              "parser": "backend",
+              "refId": "A",
+              "root_selector": "$.block_number",
+              "source": "url",
+              "type": "json",
+              "url": "http://host.docker.internal:5050/dashboard/${traceId}",
+              "url_options": {
+                "method": "GET"
+              }
             }
           ],
-          "filters": [],
-          "format": "table",
-          "parser": "backend",
-          "refId": "A",
-          "root_selector": "$.series.prewarm_progress",
-          "source": "url",
-          "type": "json",
-          "url": "http://host.docker.internal:5050/dashboard/${traceId}",
-          "url_options": {
-            "method": "GET"
-          }
-        }
-      ],
-      "title": "Prewarm progress",
-      "type": "trend"
-    },
-    {
-      "datasource": {
-        "type": "yesoreyeram-infinity-datasource",
-        "uid": "${infinity_ds}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "fixedColor": "orange",
-            "mode": "fixed"
+          "title": "Block Number",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
           },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 20,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  }
+                ]
+              },
+              "unit": "ms"
             },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 4,
+            "y": 0
+          },
+          "id": 1,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
             },
-            "showPoints": "auto",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
+            "showPercentChange": false,
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "columns": [],
+              "filters": [],
+              "format": "table",
+              "parser": "backend",
+              "refId": "A",
+              "root_selector": "$.duration_ms",
+              "source": "url",
+              "type": "json",
+              "url": "http://host.docker.internal:5050/dashboard/${traceId}",
+              "url_options": {
+                "method": "GET"
+              }
             }
+          ],
+          "title": "Duration",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
           },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "yellow",
+                    "value": 0
+                  }
+                ]
+              },
+              "unit": "suffix: MGas/s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 8,
+            "y": 0
+          },
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showPercentChange": false,
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "columns": [],
+              "filters": [],
+              "format": "table",
+              "parser": "backend",
+              "refId": "A",
+              "root_selector": "$.mgas_per_second",
+              "source": "url",
+              "type": "json",
+              "url": "http://host.docker.internal:5050/dashboard/${traceId}",
+              "url_options": {
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Throughput",
+          "type": "stat"
+        },
+        {
+          "gridPos": {
+            "h": 4,
+            "w": 2,
+            "x": 22,
+            "y": 0
+          },
+          "id": 100,
+          "options": {
+            "code": {
+              "language": "plaintext",
+              "showLineNumbers": false
+            },
+            "content": "<a href=\"/explore?schemaVersion=1&panes=%7B%22main%22%3A%7B%22datasource%22%3A%22tempo%22%2C%22queries%22%3A%5B%7B%22query%22%3A%22${traceId}%22%2C%22queryType%22%3A%22traceql%22%7D%5D%7D%7D\" target=\"_blank\" style=\"display:flex;align-items:center;justify-content:center;height:100%;font-size:14px;color:#6E9FFF;text-decoration:none;\">🔍 Tempo</a>",
+            "mode": "html"
+          },
+          "title": "",
+          "transparent": true,
+          "type": "text"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "purple",
+                    "value": 0
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 12,
+            "y": 0
+          },
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "showPercentChange": false,
+            "textMode": "auto",
+            "wideLayout": true
+          },
+          "targets": [
+            {
+              "columns": [],
+              "filters": [],
+              "format": "table",
+              "parser": "backend",
+              "refId": "A",
+              "root_selector": "$.total_txs",
+              "source": "url",
+              "type": "json",
+              "url": "http://host.docker.internal:5050/dashboard/${traceId}",
+              "url_options": {
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Total Txs",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "fillOpacity": 80,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineWidth": 1,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  }
+                ]
+              },
+              "unit": "ms"
+            },
+            "overrides": [
               {
-                "color": "orange",
-                "value": 0
+                "matcher": {
+                  "id": "byName",
+                  "options": "spawn"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "fixedColor": "yellow",
+                      "mode": "fixed"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "execution"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "fixedColor": "green",
+                      "mode": "fixed"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "state_root"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "fixedColor": "blue",
+                      "mode": "fixed"
+                    }
+                  }
+                ]
               }
             ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 10,
-        "w": 12,
-        "x": 12,
-        "y": 15
-      },
-      "id": 12,
-      "options": {
-        "legend": {
-          "calcs": [
-            "max"
-          ],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        },
-        "xField": "time"
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "columns": [
-            {
-              "selector": "time",
-              "text": "time",
-              "type": "number"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 16,
+            "y": 0
+          },
+          "id": 15,
+          "options": {
+            "barRadius": 0,
+            "barWidth": 0.9,
+            "fullHighlight": false,
+            "groupWidth": 0.7,
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "right",
+              "showLegend": true
             },
+            "orientation": "horizontal",
+            "showValue": "always",
+            "stacking": "normal",
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            },
+            "xTickLabelRotation": 0,
+            "xTickLabelSpacing": 0
+          },
+          "pluginVersion": "12.3.0",
+          "targets": [
             {
-              "selector": "completed",
-              "text": "completed",
-              "type": "number"
+              "columns": [
+                {
+                  "selector": "category",
+                  "text": "category",
+                  "type": "string"
+                },
+                {
+                  "selector": "spawn",
+                  "text": "spawn",
+                  "type": "number"
+                },
+                {
+                  "selector": "execution",
+                  "text": "execution",
+                  "type": "number"
+                },
+                {
+                  "selector": "state_root",
+                  "text": "state_root",
+                  "type": "number"
+                }
+              ],
+              "filters": [],
+              "format": "table",
+              "parser": "backend",
+              "refId": "A",
+              "root_selector": "$.phases",
+              "source": "url",
+              "type": "json",
+              "url": "http://host.docker.internal:5050/dashboard/${traceId}",
+              "url_options": {
+                "method": "GET"
+              }
             }
           ],
-          "filters": [],
-          "format": "table",
-          "parser": "backend",
-          "refId": "A",
-          "root_selector": "$.series.execution_progress",
-          "source": "url",
-          "type": "json",
-          "url": "http://host.docker.internal:5050/dashboard/${traceId}",
-          "url_options": {
-            "method": "GET"
-          }
+          "title": "Processing Phases",
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "indexByName": {
+                  "category": 0,
+                  "execution": 2,
+                  "spawn": 1,
+                  "state_root": 3
+                }
+              }
+            }
+          ],
+          "type": "barchart"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "fixedColor": "green",
+                "mode": "fixed"
+              },
+              "custom": {
+                "fillOpacity": 20,
+                "lineWidth": 2
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 4
+          },
+          "id": 5,
+          "options": {
+            "legend": {
+              "calcs": [
+                "max",
+                "mean"
+              ],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            },
+            "xField": "time"
+          },
+          "targets": [
+            {
+              "columns": [
+                {
+                  "selector": "time",
+                  "text": "time",
+                  "type": "number"
+                },
+                {
+                  "selector": "active",
+                  "text": "active",
+                  "type": "number"
+                }
+              ],
+              "format": "table",
+              "parser": "backend",
+              "refId": "A",
+              "root_selector": "$.series.account_workers",
+              "source": "url",
+              "type": "json",
+              "url": "http://host.docker.internal:5050/dashboard/${traceId}",
+              "url_options": {
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Active account workers",
+          "type": "trend"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "fixedColor": "blue",
+                "mode": "fixed"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "showValues": false,
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": 0
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 4
+          },
+          "id": 6,
+          "options": {
+            "legend": {
+              "calcs": [
+                "max",
+                "mean"
+              ],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            },
+            "xField": "time"
+          },
+          "pluginVersion": "12.3.0",
+          "targets": [
+            {
+              "columns": [
+                {
+                  "selector": "time",
+                  "text": "time",
+                  "type": "number"
+                },
+                {
+                  "selector": "active",
+                  "text": "active",
+                  "type": "number"
+                }
+              ],
+              "filters": [],
+              "format": "table",
+              "parser": "backend",
+              "refId": "A",
+              "root_selector": "$.series.storage_workers",
+              "source": "url",
+              "type": "json",
+              "url": "http://host.docker.internal:5050/dashboard/${traceId}",
+              "url_options": {
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Active storage workers",
+          "type": "trend"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "fixedColor": "purple",
+                "mode": "fixed"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "showValues": false,
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "purple",
+                    "value": 0
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 11
+          },
+          "id": 14,
+          "options": {
+            "legend": {
+              "calcs": [
+                "max"
+              ],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            },
+            "xField": "time"
+          },
+          "pluginVersion": "12.3.0",
+          "targets": [
+            {
+              "columns": [
+                {
+                  "selector": "time",
+                  "text": "time",
+                  "type": "number"
+                },
+                {
+                  "selector": "completed",
+                  "text": "completed",
+                  "type": "number"
+                }
+              ],
+              "filters": [],
+              "format": "table",
+              "parser": "backend",
+              "refId": "A",
+              "root_selector": "$.series.prewarm_progress",
+              "source": "url",
+              "type": "json",
+              "url": "http://host.docker.internal:5050/dashboard/${traceId}",
+              "url_options": {
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Prewarm progress",
+          "type": "trend"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "fixedColor": "orange",
+                "mode": "fixed"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "showValues": false,
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "orange",
+                    "value": 0
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 11
+          },
+          "id": 12,
+          "options": {
+            "legend": {
+              "calcs": [
+                "max"
+              ],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            },
+            "xField": "time"
+          },
+          "pluginVersion": "12.3.0",
+          "targets": [
+            {
+              "columns": [
+                {
+                  "selector": "time",
+                  "text": "time",
+                  "type": "number"
+                },
+                {
+                  "selector": "completed",
+                  "text": "completed",
+                  "type": "number"
+                }
+              ],
+              "filters": [],
+              "format": "table",
+              "parser": "backend",
+              "refId": "A",
+              "root_selector": "$.series.execution_progress",
+              "source": "url",
+              "type": "json",
+              "url": "http://host.docker.internal:5050/dashboard/${traceId}",
+              "url_options": {
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Execution progress",
+          "type": "trend"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "filterable": true
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "tx_index"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "#"
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 60
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "tx_hash"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Transaction"
+                  },
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "targetBlank": true,
+                        "title": "View on Etherscan",
+                        "url": "https://etherscan.io/tx/${__value.raw}"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "duration_ms"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Execution (ms)"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "ms"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "prewarm_ms"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Prewarm (ms)"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "ms"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "gas_used"
+                },
+                "properties": [
+                  {
+                    "id": "displayName",
+                    "value": "Gas Used"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 25
+          },
+          "id": 60,
+          "options": {
+            "cellHeight": "sm",
+            "showHeader": true
+          },
+          "targets": [
+            {
+              "columns": [
+                {
+                  "selector": "tx_index",
+                  "text": "tx_index",
+                  "type": "number"
+                },
+                {
+                  "selector": "tx_hash",
+                  "text": "tx_hash",
+                  "type": "string"
+                },
+                {
+                  "selector": "duration_ms",
+                  "text": "duration_ms",
+                  "type": "number"
+                },
+                {
+                  "selector": "prewarm_ms",
+                  "text": "prewarm_ms",
+                  "type": "number"
+                },
+                {
+                  "selector": "gas_used",
+                  "text": "gas_used",
+                  "type": "number"
+                }
+              ],
+              "filters": [],
+              "format": "table",
+              "parser": "backend",
+              "refId": "A",
+              "root_selector": "$.transactions",
+              "source": "url",
+              "type": "json",
+              "url": "http://host.docker.internal:5050/dashboard/${traceId}",
+              "url_options": {
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Transactions",
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "indexByName": {
+                  "duration_ms": 2,
+                  "gas_used": 4,
+                  "prewarm_ms": 3,
+                  "tx_hash": 1,
+                  "tx_index": 0
+                }
+              }
+            }
+          ],
+          "type": "table"
         }
       ],
-      "title": "Execution progress",
-      "type": "trend"
+      "title": "Block Details: ${traceId}",
+      "type": "row"
     }
   ],
-  "preload": false,
-  "refresh": "",
-  "schemaVersion": 42,
+  "refresh": "30s",
   "tags": [
     "reth",
     "trie",
@@ -909,48 +1214,22 @@
     "list": [
       {
         "current": {
-          "text": "4e8424f569aa4a4b94a7130a38f434f9",
-          "value": "4e8424f569aa4a4b94a7130a38f434f9"
+          "text": "",
+          "value": ""
         },
         "description": "Trace ID to analyze",
         "label": "Trace ID",
         "name": "traceId",
-        "options": [
-          {
-            "selected": true,
-            "text": "4e8424f569aa4a4b94a7130a38f434f9",
-            "value": "4e8424f569aa4a4b94a7130a38f434f9"
-          }
-        ],
-        "query": "4e8424f569aa4a4b94a7130a38f434f9",
-        "type": "textbox"
-      },
-      {
-        "current": {
-          "text": "Infinity",
-          "value": "infinity"
-        },
-        "description": "Infinity datasource",
-        "hide": 2,
-        "includeAll": false,
-        "label": "Infinity DS",
-        "name": "infinity_ds",
         "options": [],
-        "query": "yesoreyeram-infinity-datasource",
-        "refresh": 1,
-        "regex": "",
-        "type": "datasource"
+        "query": "",
+        "type": "textbox"
       }
     ]
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-1h",
     "to": "now"
   },
-  "timepicker": {},
-  "timezone": "",
-  "title": "Reth block processing",
-  "uid": "worker-concurrency",
-  "version": 39,
-  "weekStart": ""
+  "title": "Reth Block Processing",
+  "uid": "worker-concurrency"
 }
