@@ -1107,7 +1107,7 @@ impl SparseTrieTrait for SerialSparseTrie {
     /// Prunes the trie by converting nodes beyond `max_depth` into hash stubs,
     /// then removing all their descendants.
     fn prune(&mut self, max_depth: usize) -> usize {
-        // Phase 1: DFS traversal to find all nodes at exactly max_depth.
+        // DFS traversal to find all nodes at exactly max_depth.
         // These become the "prune roots" - nodes that will be converted to Hash stubs.
         let mut pruned_roots = Vec::<Nibbles>::new();
         let mut stack = vec![(Nibbles::default(), 0usize)];
@@ -1149,7 +1149,7 @@ impl SparseTrieTrait for SerialSparseTrie {
             return 0;
         }
 
-        // Phase 2: Convert eligible prune roots to Hash nodes.
+        // Convert eligible prune roots to Hash nodes.
         // Embedded nodes (RLP < 32 bytes) have no hash and must keep their children.
         let mut effective_pruned_roots = Vec::<Nibbles>::with_capacity(pruned_roots.len());
         for path in &pruned_roots {
@@ -1168,7 +1168,7 @@ impl SparseTrieTrait for SerialSparseTrie {
             return 0;
         }
 
-        // Phase 3: Clear update tracking state since we're modifying the structure.
+        // Clear update tracking state since we're modifying the structure.
         if let Some(updates) = self.updates.as_mut() {
             updates.updated_nodes.clear();
             updates.removed_nodes.clear();
@@ -1176,7 +1176,7 @@ impl SparseTrieTrait for SerialSparseTrie {
         }
         self.prefix_set.clear();
 
-        // Phase 4: Remove all descendants of pruned roots.
+        // Remove all descendants of pruned roots.
         // Sort for efficient binary search lookups.
         effective_pruned_roots.sort();
 
