@@ -22,6 +22,10 @@ pub use blocks::{
     StoredBlockWithdrawals,
 };
 
+/// Storage
+pub mod storage;
+pub use storage::StorageBeforeTx;
+
 /// Client Version
 pub mod client_version;
 pub use client_version::ClientVersion;
