@@ -509,50 +509,53 @@ where
         let trie_metrics = self.trie_metrics.clone();
         let span = Span::current();
 
-        self.executor.spawn_blocking(move || {
-            let _enter = span.entered();
+        std::thread::Builder::new()
+            .name("State Root Task".to_string())
+            .spawn(move || {
+                let _enter = span.entered();
 
-            // Reuse a stored SparseStateTrie, or create a new one using the desired configuration
-            // if there's none to reuse.
-            let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
-                let default_trie = RevealableSparseTrie::blind_from(
-                    ParallelSparseTrie::default()
-                        .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
-                );
-                ClearedSparseStateTrie::from_state_trie(
-                    SparseStateTrie::new()
-                        .with_accounts_trie(default_trie.clone())
-                        .with_default_storage_trie(default_trie)
-                        .with_updates(true),
-                )
-            });
+                // Reuse a stored SparseStateTrie, or create a new one using the desired
+                // configuration if there's none to reuse.
+                let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
+                    let default_trie = RevealableSparseTrie::blind_from(
+                        ParallelSparseTrie::default()
+                            .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
+                    );
+                    ClearedSparseStateTrie::from_state_trie(
+                        SparseStateTrie::new()
+                            .with_accounts_trie(default_trie.clone())
+                            .with_default_storage_trie(default_trie)
+                            .with_updates(true),
+                    )
+                });
 
-            let task =
-                SparseTrieTask::<_, ParallelSparseTrie, ParallelSparseTrie>::new_with_cleared_trie(
+                let task = SparseTrieTask::<_, ParallelSparseTrie, ParallelSparseTrie>::new_with_cleared_trie(
                     sparse_trie_rx,
                     proof_worker_handle,
                     trie_metrics,
                     sparse_state_trie,
                 );
 
-            let (result, trie) = task.run();
-            // Send state root computation result
-            let _ = state_root_tx.send(result);
+                let (result, trie) = task.run();
+                // Send state root computation result
+                let _ = state_root_tx.send(result);
 
-            // Clear the SparseStateTrie, shrink, and replace it back into the mutex _after_ sending
-            // results to the next step, so that time spent clearing doesn't block the step after
-            // this one.
-            let _enter = debug_span!(target: "engine::tree::payload_processor", "clear").entered();
-            let mut cleared_trie = ClearedSparseStateTrie::from_state_trie(trie);
+                // Clear the SparseStateTrie, shrink, and replace it back into the mutex _after_
+                // sending results to the next step, so that time spent clearing doesn't block the
+                // step after this one.
+                let _enter =
+                    debug_span!(target: "engine::tree::payload_processor", "clear").entered();
+                let mut cleared_trie = ClearedSparseStateTrie::from_state_trie(trie);
 
-            // Shrink the sparse trie so that we don't have ever increasing memory.
-            cleared_trie.shrink_to(
-                SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-            );
+                // Shrink the sparse trie so that we don't have ever increasing memory.
+                cleared_trie.shrink_to(
+                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                );
 
-            cleared_sparse_trie.lock().replace(cleared_trie);
-        });
+                cleared_sparse_trie.lock().replace(cleared_trie);
+            })
+            .expect("failed to spawn State Root Task thread");
     }
 
     /// Updates the execution cache with the post-execution state from an inserted block.
