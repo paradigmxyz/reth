@@ -52,6 +52,9 @@ pub struct NetworkMetrics {
     /// Number of Eth Requests dropped due to channel being at full capacity
     pub(crate) total_dropped_eth_requests_at_full_capacity: Counter,
 
+    /// Number of transaction events dropped due to the tx manager channel being at full capacity
+    pub(crate) total_dropped_tx_events_at_full_capacity: Counter,
+
     /* ================ POLL DURATION ================ */
 
     /* -- Total poll duration of `NetworksManager` future -- */

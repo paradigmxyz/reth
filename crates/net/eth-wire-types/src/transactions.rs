@@ -7,6 +7,7 @@ use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
+use reth_primitives_traits::InMemorySize;
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -24,6 +25,12 @@ where
 {
     fn from(hashes: Vec<T>) -> Self {
         Self(hashes.into_iter().map(|h| h.into()).collect())
+    }
+}
+
+impl InMemorySize for GetPooledTransactions {
+    fn size(&self) -> usize {
+        self.0.len() * core::mem::size_of::<B256>()
     }
 }
 

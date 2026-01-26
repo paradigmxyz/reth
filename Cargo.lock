@@ -3828,6 +3828,7 @@ dependencies = [
  "eyre",
  "futures",
  "reth-ethereum",
+ "reth-metrics",
  "reth-tracing",
  "tokio",
 ]
@@ -9071,6 +9072,7 @@ dependencies = [
  "futures",
  "metrics",
  "metrics-derive",
+ "reth-primitives-traits",
  "tokio",
  "tokio-util",
 ]

@@ -3,12 +3,15 @@ use alloy_primitives::U256;
 use criterion::*;
 use futures::StreamExt;
 use rand::SeedableRng;
-use reth_network::{test_utils::Testnet, NetworkEventListenerProvider};
+use reth_metrics::common::mpsc::memory_bounded_channel;
+use reth_network::{
+    test_utils::Testnet, transactions::NetworkTransactionEvent, NetworkEventListenerProvider,
+};
 use reth_network_api::Peers;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction};
 use std::sync::Arc;
-use tokio::{runtime::Runtime as TokioRuntime, sync::mpsc::unbounded_channel};
+use tokio::runtime::Runtime as TokioRuntime;
 
 criterion_group!(
     name = broadcast_benches;
@@ -32,7 +35,10 @@ pub fn broadcast_ingress_bench(c: &mut Criterion) {
                         let mut net = Testnet::create_with(2, provider.clone()).await;
 
                         let mut peer0 = net.remove_peer(0);
-                        let (tx, transactions_rx) = unbounded_channel();
+                        let (tx, transactions_rx) = memory_bounded_channel::<NetworkTransactionEvent>(
+                            1024 * 1024 * 1024,
+                            "bench_tx_events",
+                        );
                         peer0.network_mut().set_transactions(tx);
                         let mut events0 = peer0.handle().event_listener();
                         let net = net.with_eth_pool();

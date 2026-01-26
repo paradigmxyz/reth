@@ -25,6 +25,7 @@ use reth_ethereum::{
         NetworkHandle, NetworkInfo, NetworkManager, Peers,
     },
 };
+use reth_metrics::common::mpsc::memory_bounded_channel;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -37,7 +38,8 @@ async fn main() -> eyre::Result<()> {
     let config = NetworkConfig::builder(local_key).build_with_noop_provider(DEV.clone());
 
     let (requests_tx, mut requests_rx) = tokio::sync::mpsc::channel(1000);
-    let (transactions_tx, mut transactions_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (transactions_tx, mut transactions_rx) =
+        memory_bounded_channel::<NetworkTransactionEvent>(1024 * 1024 * 1024, "tx_events");
 
     // create the network instance
     let network = NetworkManager::eth(config)
@@ -86,8 +88,8 @@ async fn main() -> eyre::Result<()> {
                     }
              }
              transaction_message = transactions_rx.recv() => {
-                let Some(transaction_message) = transaction_message else {break};
-                match transaction_message {
+                let Some(budgeted) = transaction_message else {break};
+                match budgeted.msg {
                     NetworkTransactionEvent::IncomingTransactions { .. } => {}
                     NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
                         println!("Received incoming tx hashes broadcast: {peer_id:?}, {msg:?}");
