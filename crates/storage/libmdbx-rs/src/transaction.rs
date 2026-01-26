@@ -3,6 +3,7 @@ use crate::{
     environment::Environment,
     error::{mdbx_result, Result},
     flags::{DatabaseFlags, WriteFlags},
+    tx_access::TxPtrAccess,
     txn_manager::{TxnManagerMessage, TxnPtr},
     Cursor, Error, Stat, TableObject,
 };
@@ -537,8 +538,12 @@ impl Transaction<RW> {
 }
 
 /// A shareable pointer to an MDBX transaction.
+///
+/// This type provides synchronized access to the underlying MDBX transaction
+/// pointer via a mutex. It implements [`TxPtrAccess`] to enable abstraction
+/// over different access patterns.
 #[derive(Debug, Clone)]
-pub(crate) struct TransactionPtr {
+pub struct TransactionPtr {
     txn: *mut ffi::MDBX_txn,
     #[cfg(feature = "read-tx-timeouts")]
     timed_out: Arc<AtomicBool>,
@@ -715,6 +720,22 @@ unsafe impl Send for TransactionPtr {}
 
 // SAFETY: Access to the transaction is synchronized by the lock.
 unsafe impl Sync for TransactionPtr {}
+
+impl TxPtrAccess for TransactionPtr {
+    fn with_txn_ptr<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> R,
+    {
+        self.txn_execute_fail_on_timeout(f)
+    }
+
+    fn with_txn_ptr_for_cleanup<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> R,
+    {
+        self.txn_execute_renew_on_timeout(f)
+    }
+}
 
 #[cfg(test)]
 mod tests {
