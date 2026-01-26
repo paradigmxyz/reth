@@ -758,6 +758,31 @@ where
         debug_span!(target: "engine::tree", "merge transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
+        // Validate BAL hash if we executed with BAL tracking
+        if has_bal {
+            // Get the expected BAL from input and the built BAL from execution
+            let expected_bal =
+                input.block_access_list().transpose().map_err(BlockExecutionError::other)?;
+            let built_bal = db.take_built_alloy_bal();
+
+            // Compute hashes and compare
+            let expected_hash = expected_bal
+                .as_ref()
+                .map(|bal| alloy_eips::eip7928::compute_block_access_list_hash(bal));
+            let built_hash = built_bal
+                .as_ref()
+                .map(|bal| alloy_eips::eip7928::compute_block_access_list_hash(bal));
+
+            if expected_hash != built_hash {
+                return Err(InsertBlockErrorKind::Consensus(
+                    ConsensusError::BlockAccessListHashMismatch {
+                        got: built_hash,
+                        expected: expected_hash,
+                    },
+                ));
+            }
+        }
+
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();

@@ -317,6 +317,15 @@ pub enum ConsensusError {
     #[error("unexpected block access list hash")]
     BlockAccessListHashUnexpected,
 
+    /// Error when the block access list hash doesn't match the expected value.
+    #[error("block access list hash mismatch: got {got:?}, expected {expected:?}")]
+    BlockAccessListHashMismatch {
+        /// The computed block access list hash.
+        got: Option<B256>,
+        /// The expected block access list hash.
+        expected: Option<B256>,
+    },
+
     /// Error when the slot number is missing.
     #[error("missing slot number")]
     SlotNumberMissing,
