@@ -1256,6 +1256,7 @@ where
             target: "trie::proof_task",
             "Account multiproof calculation",
             targets = targets.len(),
+            num_slots = targets.values().map(|slots| slots.len()).sum::<usize>(),
             worker_id=self.worker_id,
         );
         let _span_guard = span.enter();
