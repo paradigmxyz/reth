@@ -3855,80 +3855,47 @@ Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
     }
 
     #[test]
-    fn test_prune_at_depth_0() {
-        let provider = DefaultTrieNodeProvider;
-        let mut sparse = SerialSparseTrie::default();
+    fn test_prune_at_various_depths() {
+        for max_depth in [0, 1, 2] {
+            let provider = DefaultTrieNodeProvider;
+            let mut sparse = SerialSparseTrie::default();
 
-        let value = large_account_value();
+            let value = large_account_value();
 
-        // Create a trie with many leaves to ensure branches have large RLP (>= 32 bytes)
-        // which will cause hashes to be stored
-        for i in 0..16u8 {
-            sparse
-                .update_leaf(
-                    Nibbles::from_nibbles([i, 0x2, 0x3, 0x4, 0x5, 0x6]),
-                    value.clone(),
-                    &provider,
-                )
-                .unwrap();
-        }
-
-        // Compute hashes
-        let root_before = sparse.root();
-        let nodes_before = sparse.revealed_node_count();
-
-        // Prune at depth 0: root's direct children should become Hash nodes
-        sparse.prune(0);
-
-        // Verify root hash unchanged
-        let root_after = sparse.root();
-        assert_eq!(root_before, root_after, "root hash should be preserved after prune");
-
-        // Verify nodes reduced
-        let nodes_after = sparse.revealed_node_count();
-        assert!(nodes_after < nodes_before, "node count should decrease after prune at depth 0");
-
-        // After pruning at depth 0, only the root branch should remain as non-Hash
-        assert_eq!(nodes_after, 1, "only root should be revealed after prune(0)");
-    }
-
-    #[test]
-    fn test_prune_at_depth_2() {
-        let provider = DefaultTrieNodeProvider;
-        let mut sparse = SerialSparseTrie::default();
-
-        let value = large_account_value();
-
-        // Build a deeper trie with multiple branches at each level
-        // to ensure hashes are stored (RLP >= 32 bytes)
-        for i in 0..4u8 {
-            for j in 0..4u8 {
-                for k in 0..4u8 {
-                    sparse
-                        .update_leaf(
-                            Nibbles::from_nibbles([i, j, k, 0x1, 0x2, 0x3]),
-                            value.clone(),
-                            &provider,
-                        )
-                        .unwrap();
+            // Build a deep trie with multiple branches at each level
+            // to ensure hashes are stored (RLP >= 32 bytes)
+            for i in 0..4u8 {
+                for j in 0..4u8 {
+                    for k in 0..4u8 {
+                        sparse
+                            .update_leaf(
+                                Nibbles::from_nibbles([i, j, k, 0x1, 0x2, 0x3]),
+                                value.clone(),
+                                &provider,
+                            )
+                            .unwrap();
+                    }
                 }
             }
+
+            let root_before = sparse.root();
+            let nodes_before = sparse.revealed_node_count();
+
+            sparse.prune(max_depth);
+
+            let root_after = sparse.root();
+            assert_eq!(root_before, root_after, "root hash should be preserved after prune");
+
+            let nodes_after = sparse.revealed_node_count();
+            assert!(
+                nodes_after < nodes_before,
+                "node count should decrease after prune at depth {max_depth}"
+            );
+
+            if max_depth == 0 {
+                assert_eq!(nodes_after, 1, "only root should be revealed after prune(0)");
+            }
         }
-
-        // Compute hashes
-        let root_before = sparse.root();
-        let nodes_before = sparse.revealed_node_count();
-
-        // Prune at depth 2: retain nodes at depth 0,1,2
-        sparse.prune(2);
-
-        // Verify root hash unchanged
-        let root_after = sparse.root();
-        assert_eq!(root_before, root_after, "root hash should be preserved after prune");
-
-        // Verify nodes reduced
-        let nodes_after = sparse.revealed_node_count();
-        assert!(nodes_after < nodes_before, "node count should decrease with deep trie");
     }
 
     #[test]
