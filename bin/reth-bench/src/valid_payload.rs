@@ -181,6 +181,20 @@ pub(crate) fn payload_to_new_payload(
     target_version: Option<EngineApiMessageVersion>,
 ) -> eyre::Result<(EngineApiMessageVersion, serde_json::Value)> {
     let (version, params) = match payload {
+        ExecutionPayload::V4(payload) => {
+            let cancun = sidecar.cancun().unwrap();
+            let prague = sidecar.prague().unwrap();
+            let requests = prague.requests.requests_hash();
+            (
+                EngineApiMessageVersion::V5,
+                serde_json::to_value((
+                    payload,
+                    cancun.versioned_hashes.clone(),
+                    cancun.parent_beacon_block_root,
+                    requests,
+                ))?,
+            )
+        }
         ExecutionPayload::V3(payload) => {
             let cancun = sidecar.cancun().unwrap();
 
@@ -283,9 +297,12 @@ pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
     forkchoice_state: ForkchoiceState,
     payload_attributes: Option<PayloadAttributes>,
 ) -> TransportResult<ForkchoiceUpdated> {
-    // FCU V3 is used for both Cancun and Prague (there is no FCU V4)
+    // FCU V3 is used for Cancun, Prague, and Amsterdam (there is no FCU V4-V6)
     match message_version {
-        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 |
+        EngineApiMessageVersion::V6 => {
             provider.fork_choice_updated_v3_wait(forkchoice_state, payload_attributes).await
         }
         EngineApiMessageVersion::V2 => {

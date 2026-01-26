@@ -369,7 +369,7 @@ impl<Txs> OpBuilder<'_, Txs> {
             }
         }
 
-        let BlockBuilderOutcome { execution_result, hashed_state, trie_updates, block } =
+        let BlockBuilderOutcome { execution_result, hashed_state, trie_updates, block, .. } =
             builder.finish(state_provider)?;
 
         let sealed_block = Arc::new(block.sealed_block().clone());

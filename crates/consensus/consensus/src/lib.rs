@@ -309,6 +309,26 @@ pub enum ConsensusError {
     #[error("unexpected parent beacon block root")]
     ParentBeaconBlockRootUnexpected,
 
+    /// Error when the block access list hash is missing.
+    #[error("missing block access list hash")]
+    BlockAccessListHashMissing,
+
+    /// Error when an unexpected block access list hash is encountered.
+    #[error("unexpected block access list hash")]
+    BlockAccessListHashUnexpected,
+
+    /// Error when the block access list hash doesn't match the expected value.
+    #[error("block access list hash mismatch: {0}")]
+    BlockAccessListHashMismatch(GotExpectedBoxed<B256>),
+
+    /// Error when the slot number is missing.
+    #[error("missing slot number")]
+    SlotNumberMissing,
+
+    /// Error when an unexpected slot number is encountered.
+    #[error("unexpected slot number")]
+    SlotNumberUnexpected,
+
     /// Error when blob gas used exceeds the maximum allowed.
     #[error("blob gas used {blob_gas_used} exceeds maximum allowance {max_blob_gas_per_block}")]
     BlobGasUsedExceedsMaxBlobGasPerBlock {
