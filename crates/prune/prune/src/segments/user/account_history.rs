@@ -138,6 +138,7 @@ impl AccountHistory {
             limiter.increment_deleted_entries_count();
         }
 
+        // Delete static file jars below the pruned block
         if done && let Some(last_block) = last_changeset_pruned_block {
             provider
                 .static_file_provider()
