@@ -15,6 +15,7 @@ use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
+use alloy_rlp::Decodable;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use rayon::prelude::*;
@@ -678,16 +679,22 @@ where
         S: StateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
-        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+        T: PayloadTypes<
+            BuiltPayload: BuiltPayload<Primitives = N>,
+            ExecutionData: ExecutionPayload,
+        >,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        let mut db = State::builder()
+        // Enable BAL builder if block access list is present in the payload
+        let has_bal = input.block_access_list().is_some();
+        let state_builder = State::builder()
             .with_database(StateProviderDatabase::new(state_provider))
             .with_bundle_update()
-            .without_state_clear()
-            .build();
+            .without_state_clear();
+        let mut db =
+            if has_bal { state_builder.with_bal_builder().build() } else { state_builder.build() };
 
         let spec_id = *env.evm_env.spec_id();
         let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
@@ -736,6 +743,7 @@ where
             transaction_count,
             handle.iter_transactions(),
             &receipt_tx,
+            has_bal,
         )?;
         drop(receipt_tx);
 
@@ -766,17 +774,20 @@ where
     /// - Executing each transaction with timing metrics
     /// - Streaming receipts to the receipt root computation task
     /// - Collecting transaction senders for later use
+    /// - Bumping BAL index after each transaction when BAL tracking is enabled
     ///
     /// Returns the executor (for finalization) and the collected senders.
-    fn execute_transactions<E, Tx, InnerTx, Err>(
+    fn execute_transactions<'a, E, Tx, InnerTx, Err, DB>(
         &self,
         mut executor: E,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
-        E: BlockExecutor<Receipt = N::Receipt>,
+        E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
+        DB: revm::Database + 'a,
         Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
         InnerTx: TxHashRef,
         Err: core::error::Error + Send + Sync + 'static,
@@ -788,6 +799,11 @@ where
         debug_span!(target: "engine::tree", "pre execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
+
+        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
+        if has_bal {
+            executor.evm_mut().db_mut().bump_bal_index();
+        }
 
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
@@ -822,6 +838,11 @@ where
             if let Some(receipt) = executor.receipts().last() {
                 let tx_index = executor.receipts().len() - 1;
                 let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+            }
+
+            // Bump BAL index after each transaction (EIP-7928)
+            if has_bal {
+                executor.evm_mut().db_mut().bump_bal_index();
             }
 
             enter.record("gas_used", gas_used);
@@ -1451,9 +1472,16 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     }
 
     /// Returns the block access list if available.
-    pub const fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
-        // TODO decode and return `BlockAccessList`
-        None
+    pub fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>>
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload
+                .block_access_list()
+                .map(|bytes| BlockAccessList::decode(&mut bytes.as_ref())),
+            Self::Block(_) => None,
+        }
     }
 
     /// Returns the number of transactions in the payload or block.
