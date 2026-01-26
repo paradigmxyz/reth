@@ -94,6 +94,13 @@ impl MultiProofTargets {
         ChunkedMultiProofTargets::new(self, size)
     }
 
+    /// Returns an iterator that yields chunks respecting account boundaries.
+    ///
+    /// See [`SmartChunkedMultiProofTargets`] for more information.
+    pub fn smart_chunks(self, size: usize) -> SmartChunkedMultiProofTargets {
+        SmartChunkedMultiProofTargets::new(self, size)
+    }
+
     /// Returns the number of items that will be considered during chunking in `[Self::chunks]`.
     pub fn chunking_length(&self) -> usize {
         self.values().map(|slots| 1 + slots.len().saturating_sub(1)).sum::<usize>()

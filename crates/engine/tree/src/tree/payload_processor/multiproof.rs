@@ -362,11 +362,12 @@ impl VersionedMultiProofTargets {
     }
 
     /// Chunks this `VersionedMultiProofTargets` into smaller chunks of the given size.
+    ///
+    /// Uses smart chunking for legacy targets to respect account boundaries and prevent
+    /// double-seeking when processing proofs.
     fn chunks(self, chunk_size: usize) -> Box<dyn Iterator<Item = Self>> {
         match self {
-            Self::Legacy(targets) => {
-                Box::new(MultiProofTargets::chunks(targets, chunk_size).map(Self::Legacy))
-            }
+            Self::Legacy(targets) => Box::new(targets.smart_chunks(chunk_size).map(Self::Legacy)),
             Self::V2(targets) => {
                 Box::new(ChunkedMultiProofTargetsV2::new(targets, chunk_size).map(Self::V2))
             }
