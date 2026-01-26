@@ -22,7 +22,7 @@ fn test_chain_spec() -> Arc<ChainSpec> {
             .chain(MAINNET.chain)
             .genesis(
                 serde_json::from_str(include_str!("../../src/testsuite/assets/genesis.json"))
-                    .unwrap(),
+                    .expect("failed to parse genesis.json"),
             )
             .cancun_activated()
             .build(),
@@ -160,10 +160,14 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
     }
 
     // Negative test: querying a non-existent tx hash returns None
-    let random_hash = B256::random();
+    let missing_hash = B256::from([0xde; 32]);
     let missing_tx: Option<Transaction> =
-        client.request("eth_getTransactionByHash", [random_hash]).await?;
-    assert!(missing_tx.is_none(), "Random tx hash should not exist");
+        client.request("eth_getTransactionByHash", [missing_hash]).await?;
+    assert!(missing_tx.is_none(), "expected no transaction for missing hash");
+
+    let missing_receipt: Option<TransactionReceipt> =
+        client.request("eth_getTransactionReceipt", [missing_hash]).await?;
+    assert!(missing_receipt.is_none(), "expected no receipt for missing hash");
 
     Ok(())
 }
