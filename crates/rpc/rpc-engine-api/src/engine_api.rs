@@ -257,7 +257,11 @@ where
         self.inner.accept_execution_requests_hash
     }
 
-    /// New payload version 5
+    /// Handler for `engine_newPayloadV5`
+    ///
+    /// Post-Amsterdam payload handler.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
     pub async fn new_payload_v5(
         &self,
         payload: PayloadT::ExecutionData,
@@ -551,7 +555,9 @@ where
 
     /// Handler for `engine_getPayloadV6`
     ///
-    /// For BAL
+    /// Post-Amsterdam payload handler that includes Block Access Lists (BAL).
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6>
     pub async fn get_payload_v6(
         &self,
         payload_id: PayloadId,
@@ -1018,6 +1024,10 @@ where
     }
 
     /// Handler for `engine_newPayloadV5`
+    ///
+    /// Post-Amsterdam payload handler.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
     async fn new_payload_v5(
         &self,
         payload: ExecutionPayloadV4,
@@ -1167,6 +1177,10 @@ where
     }
 
     /// Handler for `engine_getPayloadV6`
+    ///
+    /// Post-Amsterdam payload handler.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6>
     async fn get_payload_v6(
         &self,
         payload_id: PayloadId,
