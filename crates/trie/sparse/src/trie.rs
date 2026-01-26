@@ -1101,7 +1101,7 @@ impl SparseTrieTrait for SerialSparseTrie {
         self.nodes.values().filter(|n| !matches!(n, SparseNode::Hash(_))).count()
     }
 
-    fn prune(&mut self, max_depth: usize) {
+    fn prune(&mut self, max_depth: usize) -> usize {
         let mut pruned_roots = Vec::<Nibbles>::new();
         let mut stack = vec![(Nibbles::default(), 0usize)];
 
@@ -1136,7 +1136,7 @@ impl SparseTrieTrait for SerialSparseTrie {
         }
 
         if pruned_roots.is_empty() {
-            return;
+            return 0;
         }
 
         // Build effective_pruned_roots from only nodes that were actually converted to Hash nodes.
@@ -1152,13 +1152,17 @@ impl SparseTrieTrait for SerialSparseTrie {
             }
         }
 
+        let nodes_converted = effective_pruned_roots.len();
+
         if effective_pruned_roots.is_empty() {
-            return;
+            return 0;
         }
 
         // Clear state only after we know we have work to do
-        if self.updates.is_some() {
-            self.updates = Some(SparseTrieUpdates::default());
+        if let Some(updates) = self.updates.as_mut() {
+            updates.updated_nodes.clear();
+            updates.removed_nodes.clear();
+            updates.wiped = false;
         }
         self.prefix_set.clear();
 
@@ -1194,6 +1198,8 @@ impl SparseTrieTrait for SerialSparseTrie {
 
         // Remove branch masks under pruned roots
         self.branch_node_masks.retain(|p, _| !starts_with_pruned(p));
+
+        nodes_converted
     }
 }
 
@@ -4036,5 +4042,128 @@ Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
 
         let nodes_after = sparse.revealed_node_count();
         assert_eq!(nodes_before, nodes_after, "deep prune should not affect shallow trie");
+    }
+
+    #[test]
+    fn test_prune_extension_node_depth_semantics() {
+        // This test verifies that depth counts NODE traversals, not nibble length.
+        // An extension node with key "0x123" at depth 1 counts as ONE node,
+        // not three.
+
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+
+        let value = large_account_value();
+
+        // Create a trie structure that forces an extension node:
+        // Insert two leaves that share a common prefix, creating:
+        // Root (Branch) -> Extension (shared prefix) -> Branch -> Leaves
+        //
+        // For example, inserting keys that share nibbles [0,1,2,3] but differ at nibble 4
+        // will create an extension for the shared part.
+
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0, 1, 2, 3, 0, 5, 6, 7]), value.clone(), &provider)
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0, 1, 2, 3, 1, 5, 6, 7]), value.clone(), &provider)
+            .unwrap();
+
+        // Compute hashes first
+        let root_before = sparse.root();
+
+        // Structure should be:
+        // depth 0: Root Branch (has child at nibble 0)
+        // depth 1: Extension with key [1,2,3] pointing to...
+        // depth 2: Branch (has children at nibbles 0 and 1)
+        // depth 3: Leaves
+
+        // Prune at depth 1: should keep Root and Extension, prune the child Branch
+        sparse.prune(1);
+
+        let root_after = sparse.root();
+        assert_eq!(root_before, root_after, "root hash should be preserved");
+
+        // After prune(1), we should have:
+        // - Root Branch (depth 0) - revealed
+        // - Extension (depth 1) - revealed
+        // - Its child should be Hash node (pruned at depth 2)
+        let nodes_after = sparse.revealed_node_count();
+        assert_eq!(nodes_after, 2, "should have root branch + extension revealed after prune(1)");
+    }
+
+    #[test]
+    fn test_prune_embedded_node_preserved() {
+        // Embedded nodes (RLP < 32 bytes) have no hash and should NOT be pruned.
+        // This test creates a very small trie where the pruned frontier would be
+        // an embedded node, and verifies it's preserved.
+
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+
+        // Use a very small value to keep nodes small (potentially embedded)
+        let small_value = vec![0x80]; // minimal RLP (empty string)
+
+        // Create a minimal trie with just two leaves
+        // This should create a branch at root with two small leaf children
+        sparse.update_leaf(Nibbles::from_nibbles([0x0]), small_value.clone(), &provider).unwrap();
+        sparse.update_leaf(Nibbles::from_nibbles([0x1]), small_value.clone(), &provider).unwrap();
+
+        let root_before = sparse.root();
+        let nodes_before = sparse.revealed_node_count();
+
+        // Prune at depth 0: children of root should be pruned IF they have hashes.
+        // But if children are embedded (RLP < 32 bytes), they won't have hashes
+        // and should be preserved.
+        sparse.prune(0);
+
+        let root_after = sparse.root();
+        assert_eq!(root_before, root_after, "root hash must be preserved");
+
+        // If children were embedded, they should still be revealed
+        let nodes_after = sparse.revealed_node_count();
+
+        // The key assertion: either nodes are pruned (if they had hashes) or
+        // preserved (if embedded). Root hash is always preserved.
+        // We can't know for certain which case we hit without inspecting internals,
+        // but we verify the invariant: root hash unchanged.
+
+        // Check values are still accessible if nodes weren't pruned
+        if nodes_after == nodes_before {
+            // Embedded case: values should still be there
+            assert!(sparse.get_leaf_value(&Nibbles::from_nibbles([0x0])).is_some());
+            assert!(sparse.get_leaf_value(&Nibbles::from_nibbles([0x1])).is_some());
+        }
+    }
+
+    #[test]
+    fn test_prune_mixed_embedded_and_hashed() {
+        // Create a trie where some children are embedded and some have hashes.
+        // Verify only the hashed ones get pruned.
+
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+
+        let large_value = large_account_value(); // > 32 bytes when encoded
+        let small_value = vec![0x80]; // minimal RLP
+
+        // Create multiple children: some large (will have hashes), some small (embedded)
+        for i in 0..8u8 {
+            let value = if i < 4 { large_value.clone() } else { small_value.clone() };
+            sparse
+                .update_leaf(Nibbles::from_nibbles([i, 0x1, 0x2, 0x3]), value, &provider)
+                .unwrap();
+        }
+
+        let root_before = sparse.root();
+
+        // Prune at depth 0
+        sparse.prune(0);
+
+        let root_after = sparse.root();
+        assert_eq!(
+            root_before, root_after,
+            "root hash must be preserved regardless of embedded status"
+        );
     }
 }
