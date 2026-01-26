@@ -26,6 +26,7 @@ reth-node-core = { workspace = true, optional = true }
 reth-consensus = { workspace = true, optional = true }
 reth-consensus-common = { workspace = true, optional = true }
 reth-evm = { workspace = true, optional = true }
+reth-evm-ethereum = { workspace = true, optional = true }
 reth-revm = { workspace = true, optional = true }
 reth-rpc = { workspace = true, optional = true }
 reth-rpc-api = { workspace = true, optional = true }

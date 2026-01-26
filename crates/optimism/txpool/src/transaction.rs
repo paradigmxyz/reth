@@ -66,6 +66,7 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
             interop: Arc::new(AtomicU64::new(NO_INTEROP_TX)),
             _pd: core::marker::PhantomData,
             encoded_2718: Default::default(),
+            // time
         }
     }
 
@@ -115,6 +116,7 @@ impl<Cons, Pooled> MaybeInteropTransaction for OpPooledTransaction<Cons, Pooled>
     }
 }
 
+// here
 impl<Cons: SignedTransaction, Pooled> DataAvailabilitySized for OpPooledTransaction<Cons, Pooled> {
     fn estimated_da_size(&self) -> u64 {
         self.estimated_compressed_size()
@@ -290,6 +292,7 @@ where
 
 /// Helper trait to provide payload builder with access to conditionals and encoded bytes of
 /// transaction.
+/// here
 pub trait OpPooledTx:
     MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction + DataAvailabilitySized
 {

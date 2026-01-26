@@ -6,7 +6,7 @@ use reth_metrics::{
 };
 
 /// Transaction pool metrics
-#[derive(Metrics)]
+#[derive(Metrics, Clone)]
 #[metrics(scope = "transaction_pool")]
 pub struct TxPoolMetrics {
     /// Number of transactions inserted in the pool
@@ -122,7 +122,7 @@ impl MaintainPoolMetrics {
 }
 
 /// All Transactions metrics
-#[derive(Metrics)]
+#[derive(Metrics, Clone)]
 #[metrics(scope = "transaction_pool")]
 pub struct AllTransactionsMetrics {
     /// Number of all transactions by hash in the pool

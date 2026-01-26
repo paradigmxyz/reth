@@ -84,6 +84,7 @@ use tracing::{trace, warn};
 ///   B3 --> |promote| B2
 ///   new --> |apply state changes| pool
 /// ```
+#[derive(Clone)]
 pub struct TxPool<T: TransactionOrdering> {
     /// pending subpool
     ///
@@ -1314,6 +1315,7 @@ impl<T: TransactionOrdering> fmt::Debug for TxPool<T> {
 ///
 /// This is the sole entrypoint that's guarding all sub-pools, all sub-pool actions are always
 /// derived from this set. Updates returned from this type must be applied to the sub-pools.
+#[derive(Clone)]
 pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Minimum base fee required by the protocol.
     ///
@@ -2214,7 +2216,7 @@ pub(crate) struct InsertOk<T: PoolTransaction> {
 
 /// The internal transaction typed used by `AllTransactions` which also additional info used for
 /// determining the current state of the transaction.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
     /// The actual transaction object.
     pub(crate) transaction: Arc<ValidPoolTransaction<T>>,

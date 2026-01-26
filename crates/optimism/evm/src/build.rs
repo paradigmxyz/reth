@@ -56,6 +56,7 @@ impl<ChainSpec: OpHardforks> OpBlockAssembler<ChainSpec> {
 
         let timestamp = evm_env.block_env.timestamp().saturating_to();
 
+        // here.
         let transactions_root = proofs::calculate_transaction_root(&transactions);
         let receipts_root =
             calculate_receipt_root_no_memo_optimism(receipts, &self.chain_spec, timestamp);

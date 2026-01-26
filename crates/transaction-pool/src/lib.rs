@@ -534,6 +534,7 @@ where
         self.pool.add_all_transactions_event_listener()
     }
 
+    // here
     fn pending_transactions_listener_for(&self, kind: TransactionListenerKind) -> Receiver<TxHash> {
         self.pool.add_pending_listener(kind)
     }
@@ -606,6 +607,7 @@ where
         self.pool.best_transactions_with_attributes(best_transactions_attributes)
     }
 
+    // here
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.pending_transactions()
     }

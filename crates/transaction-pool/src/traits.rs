@@ -72,6 +72,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
+use mockall::automock;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_execution_types::ChangedAccount;

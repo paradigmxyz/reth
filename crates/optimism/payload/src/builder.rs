@@ -358,6 +358,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         // 3. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool() {
             let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
+            //here
             if ctx.execute_best_transactions(&mut info, &mut builder, best_txs)?.is_some() {
                 return Ok(BuildOutcomeKind::Cancelled)
             }
@@ -503,6 +504,7 @@ impl ExecutionInfo {
     ///   per tx.
     /// - block DA limit: if configured, ensures the transaction's DA size does not exceed the
     ///   maximum allowed DA limit per block.
+    /// here
     pub fn is_tx_over_limits(
         &self,
         tx_da_size: u64,
@@ -688,6 +690,7 @@ where
         let tx_da_limit = self.builder_config.da_config.max_da_tx_size();
         let base_fee = builder.evm_mut().block().basefee();
 
+        // here
         while let Some(tx) = best_txs.next(()) {
             let interop = tx.interop_deadline();
             let tx_da_size = tx.estimated_da_size();
@@ -702,6 +705,7 @@ where
                     ),
                 );
 
+            // here
             if info.is_tx_over_limits(
                 tx_da_size,
                 block_gas_limit,
@@ -781,32 +785,39 @@ mod tests {
         use reth_evm::{ConfigureEvm, Evm};
         use reth_optimism_chainspec::OP_MAINNET;
         use reth_optimism_evm::OpEvmConfig;
+        use reth_optimism_node::OpBuilder;
         use reth_primitives_traits::TxTy;
-        use reth_transaction_pool::test_utils::{mock_tx_pool, MockTxPool};
+        use reth_transaction_pool::{
+            pool::txpool::TxPool,
+            test_utils::{mock_tx_pool, MockTransaction, MockTxPool},
+            CoinbaseTipOrdering,
+        };
 
-        use crate::{OpPayloadBuilder, OpPayloadBuilderAttributes};
+        use crate::OpPayloadBuilderAttributes;
 
         #[test]
         fn mock() {
-            let pool = mock_tx_pool();
-            // FullNodeProvider
-            let client = ();
-            let evm_config = OpEvmConfig::optimism(OP_MAINNET.clone());
+            // let pool = mock_tx_pool();
+            // // FullNodeProvider
+            // let client = ();
+            // let evm_config = OpEvmConfig::optimism(OP_MAINNET.clone());
 
-            type MockOpPayloadBuilder = OpPayloadBuilder<
-                reth_transaction_pool::pool::txpool::TxPool<
-                    reth_transaction_pool::CoinbaseTipOrdering<
-                        reth_transaction_pool::test_utils::MockTransaction,
-                    >,
-                >,
-                (),
-                OpEvmConfig,
-                (),
-                (),
-            >;
+            // type MockOpPayloadBuilder = OpPayloadBuilder<
+            //     TxPool<CoinbaseTipOrdering<MockTransaction>>,
+            //     (),
+            //     OpEvmConfig,
+            //     (),
+            //     (),
+            // >;
 
-            let mockpayloadbuilder: MockOpPayloadBuilder =
-                OpPayloadBuilder::new(pool, client, evm_config);
+            // // let mockpayloadbuilder: MockOpPayloadBuilder =
+            // //     OpPayloadBuilder::new(pool, client, evm_config)
+            // //         .with_transactions(())
+            // //         .build_payload();
+
+            // mockpayloadbuilder.best_transactions
+
+            let pb = OpPayloadBuilder::new(true);
         }
     }
 

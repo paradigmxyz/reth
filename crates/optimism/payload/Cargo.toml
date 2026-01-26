@@ -32,6 +32,7 @@ reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-txpool.workspace = true
+reth-optimism-chainspec.workspace = true
 
 # ethereum
 revm.workspace = true
@@ -52,3 +53,4 @@ thiserror.workspace = true
 sha2.workspace = true
 serde.workspace = true
 either.workspace = true
+mockall = "0.14.0"
