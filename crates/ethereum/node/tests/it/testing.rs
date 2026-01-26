@@ -28,6 +28,8 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
         datadir: MaybePlatformPath::<DataDirPath>::from_str(tempdir.path().to_str().unwrap())
             .expect("valid datadir"),
         static_files_path: Some(tempdir.path().join("static")),
+        rocksdb_path: Some(tempdir.path().join("rocksdb")),
+        pprof_dumps_path: Some(tempdir.path().join("pprof")),
     };
     let config = NodeConfig::test().with_datadir_args(datadir_args).with_rpc(rpc_args);
     let db = create_test_rw_db();

@@ -2,10 +2,15 @@
 
 use crate::{is_database_empty, TableSet, Tables};
 use eyre::Context;
+use reth_tracing::tracing::info;
 use std::path::Path;
 
 pub use crate::implementation::mdbx::*;
 pub use reth_libmdbx::*;
+
+/// Tables that have been removed from the schema but may still exist on disk from previous
+/// versions. These will be dropped during database initialization.
+const ORPHAN_TABLES: &[&str] = &["AccountsTrieChangeSets", "StoragesTrieChangeSets"];
 
 /// Creates a new database at the specified path if it doesn't exist. Does NOT create tables. Check
 /// [`init_db`].
@@ -44,7 +49,28 @@ pub fn init_db_for<P: AsRef<Path>, TS: TableSet>(
     let mut db = create_db(path, args)?;
     db.create_and_track_tables_for::<TS>()?;
     db.record_client_version(client_version)?;
+    drop_orphan_tables(&db);
     Ok(db)
+}
+
+/// Drops orphaned tables that are no longer part of the schema.
+fn drop_orphan_tables(db: &DatabaseEnv) {
+    for table_name in ORPHAN_TABLES {
+        match db.drop_orphan_table(table_name) {
+            Ok(true) => {
+                info!(target: "reth::db", table = %table_name, "Dropped orphaned database table");
+            }
+            Ok(false) => {}
+            Err(e) => {
+                reth_tracing::tracing::warn!(
+                    target: "reth::db",
+                    table = %table_name,
+                    %e,
+                    "Failed to drop orphaned database table"
+                );
+            }
+        }
+    }
 }
 
 /// Opens up an existing database. Read only mode. It doesn't create it or create tables if missing.

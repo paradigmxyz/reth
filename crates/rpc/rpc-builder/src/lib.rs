@@ -31,14 +31,14 @@ use jsonrpsee::{
     Methods, RpcModule,
 };
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
-    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
+    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -103,7 +103,7 @@ pub use eth::EthHandlers;
 mod metrics;
 use crate::middleware::RethRpcMiddleware;
 pub use metrics::{MeteredBatchRequestsFuture, MeteredRequestFuture, RpcRequestMetricsService};
-use reth_chain_state::CanonStateSubscriptions;
+use reth_chain_state::{CanonStateSubscriptions, PersistedBlockSubscriptions};
 use reth_rpc::eth::sim_bundle::EthSimBundle;
 
 // Rpc rate limiter
@@ -311,12 +311,13 @@ where
     N: NodePrimitives,
     Provider: FullRpcProvider<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
         + CanonStateSubscriptions<Primitives = N>
+        + PersistedBlockSubscriptions
         + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
-    Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
+    Consensus: FullConsensus<N> + Clone + 'static,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
     /// be used to start the transport server(s).
@@ -413,8 +414,6 @@ impl<N: NodePrimitives> Default for RpcModuleBuilder<N, (), (), (), (), ()> {
 pub struct RpcModuleConfig {
     /// `eth` namespace settings
     eth: EthConfig,
-    /// `flashbots` namespace settings
-    flashbots: ValidationApiConfig,
 }
 
 // === impl RpcModuleConfig ===
@@ -426,8 +425,8 @@ impl RpcModuleConfig {
     }
 
     /// Returns a new RPC module config given the eth namespace config
-    pub const fn new(eth: EthConfig, flashbots: ValidationApiConfig) -> Self {
-        Self { eth, flashbots }
+    pub const fn new(eth: EthConfig) -> Self {
+        Self { eth }
     }
 
     /// Get a reference to the eth namespace config
@@ -445,7 +444,6 @@ impl RpcModuleConfig {
 #[derive(Clone, Debug, Default)]
 pub struct RpcModuleConfigBuilder {
     eth: Option<EthConfig>,
-    flashbots: Option<ValidationApiConfig>,
 }
 
 // === impl RpcModuleConfigBuilder ===
@@ -457,16 +455,10 @@ impl RpcModuleConfigBuilder {
         self
     }
 
-    /// Configures a custom flashbots namespace config
-    pub fn flashbots(mut self, flashbots: ValidationApiConfig) -> Self {
-        self.flashbots = Some(flashbots);
-        self
-    }
-
     /// Consumes the type and creates the [`RpcModuleConfig`]
     pub fn build(self) -> RpcModuleConfig {
-        let Self { eth, flashbots } = self;
-        RpcModuleConfig { eth: eth.unwrap_or_default(), flashbots: flashbots.unwrap_or_default() }
+        let Self { eth } = self;
+        RpcModuleConfig { eth: eth.unwrap_or_default() }
     }
 
     /// Get a reference to the eth namespace config, if any
@@ -664,7 +656,8 @@ where
             Transaction = N::SignedTx,
         > + AccountReader
         + ChangeSetReader
-        + CanonStateSubscriptions,
+        + CanonStateSubscriptions
+        + PersistedBlockSubscriptions,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: EthApiServer<
             RpcTxReq<EthApi::NetworkTypes>,
@@ -852,13 +845,14 @@ where
     N: NodePrimitives,
     Provider: FullRpcProvider<Block = N::Block>
         + CanonStateSubscriptions<Primitives = N>
+        + PersistedBlockSubscriptions
         + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: FullEthApiServer,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
-    Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
+    Consensus: FullConsensus<N> + Clone + 'static,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace
@@ -1531,7 +1525,7 @@ impl TransportRpcModuleConfig {
         self
     }
 
-    /// Sets the [`RpcModuleSelection`] for the http transport.
+    /// Sets the [`RpcModuleSelection`] for the ipc transport.
     pub fn with_ipc(mut self, ipc: impl Into<RpcModuleSelection>) -> Self {
         self.ipc = Some(ipc.into());
         self
@@ -1543,22 +1537,22 @@ impl TransportRpcModuleConfig {
         self
     }
 
-    /// Get a mutable reference to the
+    /// Get a mutable reference to the http module configuration.
     pub const fn http_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.http
     }
 
-    /// Get a mutable reference to the
+    /// Get a mutable reference to the ws module configuration.
     pub const fn ws_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.ws
     }
 
-    /// Get a mutable reference to the
+    /// Get a mutable reference to the ipc module configuration.
     pub const fn ipc_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.ipc
     }
 
-    /// Get a mutable reference to the
+    /// Get a mutable reference to the rpc module configuration.
     pub const fn config_mut(&mut self) -> &mut Option<RpcModuleConfig> {
         &mut self.config
     }
@@ -1669,7 +1663,7 @@ impl TransportRpcModules {
         self
     }
 
-    /// Sets the [`RpcModule`] for the http transport.
+    /// Sets the [`RpcModule`] for the ipc transport.
     /// This will overwrite current module, if any.
     pub fn with_ipc(mut self, ipc: RpcModule<()>) -> Self {
         self.ipc = Some(ipc);
@@ -2351,7 +2345,7 @@ mod tests {
                 $(
                     let val: RethRpcModule  = $s.parse().unwrap();
                     assert_eq!(val, $v);
-                    assert_eq!(val.to_string().as_str(), $s);
+                    assert_eq!(val.to_string(), $s);
                 )*
             };
         }

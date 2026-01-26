@@ -281,3 +281,66 @@ impl PingMsg {
         .to_string()
     }
 }
+
+/// Information reported about a new payload processing event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PayloadStats {
+    /// Block number of the payload
+    pub number: U256,
+
+    /// Hash of the payload block
+    pub hash: B256,
+
+    /// Time taken to validate the payload in milliseconds
+    #[serde(rename = "processingTime")]
+    pub processing_time: u64,
+}
+
+/// Message containing new payload information to be reported to the ethstats monitoring server.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PayloadMsg {
+    /// The node's unique identifier
+    pub id: String,
+
+    /// The payload information to report
+    pub payload: PayloadStats,
+}
+
+impl PayloadMsg {
+    /// Generate a new payload message for the ethstats monitoring server.
+    pub fn generate_new_payload_message(&self) -> String {
+        serde_json::json!({
+            "emit": ["new-payload", self]
+        })
+        .to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{B256, U256};
+
+    #[test]
+    fn test_payload_msg_generation() {
+        let payload_stats = PayloadStats {
+            number: U256::from(12345),
+            hash: B256::from_slice(&[1u8; 32]),
+            processing_time: 150,
+        };
+
+        let payload_msg = PayloadMsg { id: "test-node".to_string(), payload: payload_stats };
+
+        let message = payload_msg.generate_new_payload_message();
+        let parsed: serde_json::Value = serde_json::from_str(&message).expect("Valid JSON");
+
+        assert_eq!(parsed["emit"][0], "new-payload");
+        assert_eq!(parsed["emit"][1]["id"], "test-node");
+        assert_eq!(parsed["emit"][1]["payload"]["number"], "0x3039"); // 12345 in hex
+        assert_eq!(parsed["emit"][1]["payload"]["processingTime"], 150);
+
+        // Verify the structure contains all expected fields
+        assert!(parsed["emit"][1]["payload"]["hash"].is_string());
+        assert!(parsed["emit"][1]["payload"]["processingTime"].is_number());
+    }
+}

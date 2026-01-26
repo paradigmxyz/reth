@@ -1,6 +1,7 @@
 use crate::StreamBackfillJob;
 use reth_evm::ConfigureEvm;
 use std::{
+    collections::BTreeMap,
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
@@ -118,8 +119,6 @@ where
             results.push(executor.execute_one(&block)?);
             execution_duration += execute_start.elapsed();
 
-            // TODO(alexey): report gas metrics using `block.header.gas_used`
-
             // Seal the block back and save it
             blocks.push(block);
             // Check if we should commit now
@@ -150,7 +149,7 @@ where
             executor.into_state().take_bundle(),
             results,
         );
-        let chain = Chain::new(blocks, outcome, None);
+        let chain = Chain::new(blocks, outcome, BTreeMap::new());
         Ok(chain)
     }
 }

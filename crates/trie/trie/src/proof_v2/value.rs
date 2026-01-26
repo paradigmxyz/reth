@@ -7,7 +7,6 @@ use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::Account;
-use reth_trie_common::Nibbles;
 use std::rc::Rc;
 
 /// A trait for deferred RLP-encoding of leaf values.
@@ -45,7 +44,7 @@ pub trait LeafValueEncoder {
     ///
     /// The returned deferred encoder will be called as late as possible in the algorithm to
     /// maximize the time available for parallel computation (e.g., storage root calculation).
-    fn deferred_encoder(&self, key: B256, value: Self::Value) -> Self::DeferredEncoder;
+    fn deferred_encoder(&mut self, key: B256, value: Self::Value) -> Self::DeferredEncoder;
 }
 
 /// An encoder for storage slot values.
@@ -69,7 +68,7 @@ impl LeafValueEncoder for StorageValueEncoder {
     type Value = U256;
     type DeferredEncoder = StorageDeferredValueEncoder;
 
-    fn deferred_encoder(&self, _key: B256, value: Self::Value) -> Self::DeferredEncoder {
+    fn deferred_encoder(&mut self, _key: B256, value: Self::Value) -> Self::DeferredEncoder {
         StorageDeferredValueEncoder(value)
     }
 }
@@ -124,7 +123,7 @@ where
         // Compute storage root by calling storage_proof with the root path as a target.
         // This returns just the root node of the storage trie.
         let storage_root = storage_proof_calculator
-            .storage_proof(self.hashed_address, [Nibbles::new()])
+            .storage_proof(self.hashed_address, &mut [B256::ZERO.into()])
             .map(|nodes| {
                 // Encode the root node to RLP and hash it
                 let root_node =
@@ -158,7 +157,7 @@ where
     type DeferredEncoder = SyncAccountDeferredValueEncoder<T, H>;
 
     fn deferred_encoder(
-        &self,
+        &mut self,
         hashed_address: B256,
         account: Self::Value,
     ) -> Self::DeferredEncoder {

@@ -9,6 +9,16 @@ use std::{fmt::Debug, ops::RangeBounds};
 use tracing::debug;
 
 pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
+    /// Clear the entire table in a single operation.
+    ///
+    /// This is much faster than iterating entry-by-entry for `PruneMode::Full`.
+    /// Returns the number of entries that were in the table.
+    fn clear_table<T: Table>(&self) -> Result<usize, DatabaseError> {
+        let count = self.entries::<T>()?;
+        <Self as DbTxMut>::clear::<T>(self)?;
+        Ok(count)
+    }
+
     /// Prune the table for the specified pre-sorted key iterator.
     ///
     /// Returns number of rows pruned.
@@ -127,6 +137,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
     /// Prune a DUPSORT table for the specified key range.
     ///
     /// Returns number of rows pruned.
+    #[expect(unused)]
     fn prune_dupsort_table_with_range<T: DupSort>(
         &self,
         keys: impl RangeBounds<T::Key> + Clone + Debug,

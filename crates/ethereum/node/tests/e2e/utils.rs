@@ -29,6 +29,19 @@ pub(crate) fn eth_payload_attributes(timestamp: u64) -> EthPayloadBuilderAttribu
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
 
+/// Helper function to create pre-Cancun (Shanghai) payload attributes.
+/// No `parent_beacon_block_root` field.
+pub(crate) fn eth_payload_attributes_shanghai(timestamp: u64) -> EthPayloadBuilderAttributes {
+    let attributes = PayloadAttributes {
+        timestamp,
+        prev_randao: B256::ZERO,
+        suggested_fee_recipient: Address::ZERO,
+        withdrawals: Some(vec![]),
+        parent_beacon_block_root: None,
+    };
+    EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
+}
+
 /// Advances node by producing blocks with random transactions.
 pub(crate) async fn advance_with_random_transactions<Provider>(
     node: &mut NodeHelperType<EthereumNode, Provider>,

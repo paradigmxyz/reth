@@ -17,8 +17,8 @@ pub use set::SegmentSet;
 use std::{fmt::Debug, ops::RangeInclusive};
 use tracing::error;
 pub use user::{
-    AccountHistory, Bodies, MerkleChangeSets, Receipts as UserReceipts, ReceiptsByLogs,
-    SenderRecovery, StorageHistory, TransactionLookup,
+    AccountHistory, Bodies, Receipts as UserReceipts, ReceiptsByLogs, SenderRecovery,
+    StorageHistory, TransactionLookup,
 };
 
 /// Prunes data from static files for a given segment.
@@ -235,7 +235,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    &block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -273,7 +273,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    &block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -319,7 +319,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    &block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -355,7 +355,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    &block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }

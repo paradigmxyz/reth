@@ -24,7 +24,7 @@ pub struct Discv4Config {
     /// The number of allowed consecutive failures for `FindNode` requests. Default: 5.
     pub max_find_node_failures: u8,
     /// The interval to use when checking for expired nodes that need to be re-pinged. Default:
-    /// 10min.
+    /// 10 seconds.
     pub ping_interval: Duration,
     /// The duration of we consider a ping timed out.
     pub ping_expiration: Duration,
@@ -93,7 +93,7 @@ impl Discv4Config {
     /// Returns the corresponding [`ResolveNatInterval`], if a [`NatResolver`] and an interval was
     /// configured
     pub fn resolve_external_ip_interval(&self) -> Option<ResolveNatInterval> {
-        let resolver = self.external_ip_resolver?;
+        let resolver = self.external_ip_resolver.clone()?;
         let interval = self.resolve_external_ip_interval?;
         Some(ResolveNatInterval::interval_at(resolver, tokio::time::Instant::now(), interval))
     }
@@ -212,13 +212,13 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// Whether to enforce expiration timestamps in messages.
+    /// Whether to enable EIP-868
     pub const fn enable_eip868(&mut self, enable_eip868: bool) -> &mut Self {
         self.config.enable_eip868 = enable_eip868;
         self
     }
 
-    /// Whether to enable EIP-868
+    /// Whether to enforce expiration timestamps in messages.
     pub const fn enforce_expiration_timestamps(
         &mut self,
         enforce_expiration_timestamps: bool,
@@ -275,10 +275,7 @@ impl Discv4ConfigBuilder {
     }
 
     /// Configures if and how the external IP of the node should be resolved.
-    pub const fn external_ip_resolver(
-        &mut self,
-        external_ip_resolver: Option<NatResolver>,
-    ) -> &mut Self {
+    pub fn external_ip_resolver(&mut self, external_ip_resolver: Option<NatResolver>) -> &mut Self {
         self.config.external_ip_resolver = external_ip_resolver;
         self
     }

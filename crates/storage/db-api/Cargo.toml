@@ -40,6 +40,7 @@ serde = { workspace = true, default-features = false }
 metrics.workspace = true
 
 # misc
+arrayvec.workspace = true
 derive_more.workspace = true
 bytes.workspace = true
 
@@ -93,3 +94,4 @@ op = [
     "reth-primitives-traits/op",
 ]
 bench = []
+edge = []

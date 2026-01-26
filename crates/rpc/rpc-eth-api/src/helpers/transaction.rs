@@ -18,10 +18,12 @@ use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInfo};
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
-use reth_node_api::BlockBody;
-use reth_primitives_traits::{Recovered, RecoveredBlock, SignedTransaction, TxTy, WithEncoded};
+use reth_primitives_traits::{
+    BlockBody, Recovered, RecoveredBlock, SignedTransaction, TxTy, WithEncoded,
+};
 use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq, TransactionConversionError};
 use reth_rpc_eth_types::{
+    block::convert_transaction_receipt,
     utils::{binary_search, recover_raw_transaction},
     EthApiError::{self, TransactionConfirmationTimeout},
     FillTransaction, SignError, TransactionSource,
@@ -108,12 +110,19 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             tokio::time::timeout(timeout_duration, async {
                 while let Some(notification) = stream.next().await {
                     let chain = notification.committed();
-                    for block in chain.blocks_iter() {
-                        if block.body().contains_transaction(&hash) &&
-                            let Some(receipt) = this.transaction_receipt(hash).await?
-                        {
-                            return Ok(receipt);
-                        }
+                    if let Some((block, tx, receipt, all_receipts)) =
+                        chain.find_transaction_and_receipt_by_hash(hash) &&
+                        let Some(receipt) = convert_transaction_receipt(
+                            block,
+                            all_receipts,
+                            tx,
+                            receipt,
+                            this.converter(),
+                        )
+                        .transpose()
+                        .map_err(Self::Error::from)?
+                    {
+                        return Ok(receipt);
                     }
                 }
                 Err(Self::Error::from_eth_err(TransactionConfirmationTimeout {
@@ -610,7 +619,20 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         Output = Result<Option<TransactionSource<ProviderTx<Self::Provider>>>, Self::Error>,
     > + Send {
         async move {
-            // Try to find the transaction on disk
+            // First, try the RPC cache
+            if let Some(cached) = self.cache().get_transaction_by_hash(hash).await &&
+                let Some(tx) = cached.recovered_transaction()
+            {
+                return Ok(Some(TransactionSource::Block {
+                    transaction: tx.cloned(),
+                    index: cached.tx_index as u64,
+                    block_hash: cached.block.hash(),
+                    block_number: cached.block.number(),
+                    base_fee: cached.block.base_fee_per_gas(),
+                }));
+            }
+
+            // Cache miss - try to find the transaction on disk
             if let Some((tx, meta)) = self
                 .spawn_blocking_io(move |this| {
                     this.provider()

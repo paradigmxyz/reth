@@ -346,6 +346,21 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         limit: GetPooledTransactionLimit,
     ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled>;
 
+    /// Extends the given vector with pooled transactions for the given hashes that are allowed to
+    /// be propagated.
+    ///
+    /// This adheres to the expected behavior of [`Self::get_pooled_transaction_elements`].
+    ///
+    /// Consumer: P2P
+    fn append_pooled_transaction_elements(
+        &self,
+        tx_hashes: &[TxHash],
+        limit: GetPooledTransactionLimit,
+        out: &mut Vec<<Self::Transaction as PoolTransaction>::Pooled>,
+    ) {
+        out.extend(self.get_pooled_transaction_elements(tx_hashes.to_vec(), limit));
+    }
+
     /// Returns the pooled transaction variant for the given transaction hash.
     ///
     /// This adheres to the expected behavior of
@@ -638,11 +653,23 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError>;
+
+    /// Return the [`BlobAndProofV2`]s for a list of blob versioned hashes.
+    ///
+    /// The response is always the same length as the request. Missing or older-version blobs are
+    /// returned as `None` elements.
+    fn get_blobs_for_versioned_hashes_v3(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError>;
 }
 
 /// Extension for [`TransactionPool`] trait that allows to set the current block info.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPoolExt: TransactionPool {
+    /// The block type used for chain tip updates.
+    type Block: Block;
+
     /// Sets the current block info for the pool.
     fn set_block_info(&self, info: BlockInfo);
 
@@ -661,9 +688,7 @@ pub trait TransactionPoolExt: TransactionPool {
     /// sidecar must not be removed from the blob store. Only after a blob transaction is
     /// finalized, its sidecar is removed from the blob store. This ensures that in case of a reorg,
     /// the sidecar is still available.
-    fn on_canonical_state_change<B>(&self, update: CanonicalStateUpdate<'_, B>)
-    where
-        B: Block;
+    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_, Self::Block>);
 
     /// Updates the accounts in the pool
     fn update_accounts(&self, accounts: Vec<ChangedAccount>);
@@ -699,12 +724,12 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
 
     /// Returns an iterator over all pending [`Recovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.pending.iter().map(|tx| tx.transaction.clone_into_consensus())
     }
 
     /// Returns an iterator over all queued [`Recovered`] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.queued.iter().map(|tx| tx.transaction.clone_into_consensus())
     }
 
     /// Returns an iterator over all transactions, both pending and queued.
@@ -712,13 +737,25 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
         self.pending
             .iter()
             .chain(self.queued.iter())
-            .map(|tx| tx.transaction.clone().into_consensus())
+            .map(|tx| tx.transaction.clone_into_consensus())
     }
 }
 
 impl<T: PoolTransaction> Default for AllPoolTransactions<T> {
     fn default() -> Self {
         Self { pending: Default::default(), queued: Default::default() }
+    }
+}
+
+impl<T: PoolTransaction> IntoIterator for AllPoolTransactions<T> {
+    type Item = Arc<ValidPoolTransaction<T>>;
+    type IntoIter = std::iter::Chain<
+        std::vec::IntoIter<Arc<ValidPoolTransaction<T>>>,
+        std::vec::IntoIter<Arc<ValidPoolTransaction<T>>>,
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.pending.into_iter().chain(self.queued)
     }
 }
 

@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 /// * [`BlockBuffer::remove_old_blocks`] to remove old blocks that precede the finalized number.
 ///
 /// Note: Buffer is limited by number of blocks that it can contain and eviction of the block
-/// is done by last recently used block.
+/// is done in FIFO order (oldest inserted block is evicted first).
 #[derive(Debug)]
 pub struct BlockBuffer<B: Block> {
     /// All blocks in the buffer stored by their block hash.
@@ -66,9 +66,14 @@ impl<B: Block> BlockBuffer<B> {
     pub fn insert_block(&mut self, block: SealedBlock<B>) {
         let hash = block.hash();
 
-        self.parent_to_child.entry(block.parent_hash()).or_default().insert(hash);
-        self.earliest_blocks.entry(block.number()).or_default().insert(hash);
-        self.blocks.insert(hash, block);
+        match self.blocks.entry(hash) {
+            std::collections::hash_map::Entry::Occupied(_) => return,
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                self.parent_to_child.entry(block.parent_hash()).or_default().insert(hash);
+                self.earliest_blocks.entry(block.number()).or_default().insert(hash);
+                entry.insert(block);
+            }
+        };
 
         // Add block to FIFO queue and handle eviction if needed
         if self.block_queue.len() >= self.max_blocks {

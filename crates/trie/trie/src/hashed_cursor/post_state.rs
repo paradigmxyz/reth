@@ -420,7 +420,7 @@ mod tests {
                     .into_iter()
                     .map(|(byte, value)| (B256::repeat_byte(byte), value))
                     .collect();
-                result.sort_by(|a, b| a.0.cmp(&b.0));
+                result.sort_by_key(|a| a.0);
                 result.dedup_by(|a, b| a.0 == b.0);
                 result
             })
@@ -428,15 +428,21 @@ mod tests {
 
         /// Generate a sorted vector of (B256, U256) entries (including deletions as ZERO)
         fn sorted_post_state_nodes_strategy() -> impl Strategy<Value = Vec<(B256, U256)>> {
-            prop::collection::vec((any::<u8>(), u256_strategy()), 0..20).prop_map(|entries| {
-                let mut result: Vec<(B256, U256)> = entries
-                    .into_iter()
-                    .map(|(byte, value)| (B256::repeat_byte(byte), value))
-                    .collect();
-                result.sort_by(|a, b| a.0.cmp(&b.0));
-                result.dedup_by(|a, b| a.0 == b.0);
-                result
-            })
+            // Explicitly inject ZERO values to model post-state deletions.
+            prop::collection::vec((any::<u8>(), u256_strategy(), any::<bool>()), 0..20).prop_map(
+                |entries| {
+                    let mut result: Vec<(B256, U256)> = entries
+                        .into_iter()
+                        .map(|(byte, value, is_deletion)| {
+                            let effective_value = if is_deletion { U256::ZERO } else { value };
+                            (B256::repeat_byte(byte), effective_value)
+                        })
+                        .collect();
+                    result.sort_by_key(|a| a.0);
+                    result.dedup_by(|a, b| a.0 == b.0);
+                    result
+                },
+            )
         }
 
         proptest! {

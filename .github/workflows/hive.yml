@@ -15,16 +15,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare-reth:
+  prepare-reth-stable:
     uses: ./.github/workflows/prepare-reth.yml
     with:
       image_tag: ghcr.io/paradigmxyz/reth:latest
       binary_name: reth
+      cargo_features: "asm-keccak"
+      artifact_name: "reth-stable"
+
+  prepare-reth-edge:
+    uses: ./.github/workflows/prepare-reth.yml
+    with:
+      image_tag: ghcr.io/paradigmxyz/reth:latest
+      binary_name: reth
+      cargo_features: "asm-keccak edge"
+      artifact_name: "reth-edge"
 
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
-    runs-on: depot-ubuntu-latest-16
+    runs-on:
+      group: Reth
     steps:
       - uses: actions/checkout@v6
       - name: Checkout hive tests
@@ -67,7 +78,7 @@ jobs:
           chmod +x hive
 
       - name: Upload hive assets
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: hive_assets
           path: ./hive_assets
@@ -76,6 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        storage: [stable, edge]
         # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
         scenario:
@@ -85,7 +97,7 @@ jobs:
           - sim: devp2p
             limit: discv4
           # started failing after https://github.com/ethereum/go-ethereum/pull/31843, no
-          # action on our side, remove from here when we get unxpected passes on these tests
+          # action on our side, remove from here when we get unexpected passes on these tests
           # - sim: devp2p
           #  limit: eth
           #  include:
@@ -175,10 +187,12 @@ jobs:
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/paris.*
     needs:
-      - prepare-reth
+      - prepare-reth-stable
+      - prepare-reth-edge
       - prepare-hive
-    name: run ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
-    runs-on: depot-ubuntu-latest-16
+    name: ${{ matrix.storage }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
+    runs-on:
+      group: Reth
     permissions:
       issues: write
     steps:
@@ -187,15 +201,15 @@ jobs:
           fetch-depth: 0
 
       - name: Download hive assets
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: hive_assets
           path: /tmp
 
       - name: Download reth image
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
-          name: artifacts
+          name: reth-${{ matrix.storage }}
           path: /tmp
 
       - name: Load Docker images

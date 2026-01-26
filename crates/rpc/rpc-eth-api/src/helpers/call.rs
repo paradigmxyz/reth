@@ -20,12 +20,16 @@ use alloy_rpc_types_eth::{
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
-    env::BlockEnvironment, ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor, InspectorFor,
-    TransactionEnv, TxEnvFor,
+    env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor,
+    InspectorFor, TransactionEnv, TxEnvFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
-use reth_revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, db::State};
+use reth_revm::{
+    cancelled::CancelOnDrop,
+    database::StateProviderDatabase,
+    db::{bal::EvmDatabaseError, State},
+};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper,
@@ -33,7 +37,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
+use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Transaction},
@@ -92,7 +96,37 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             self.spawn_with_state_at_block(block, move |this, mut db| {
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
+
+                // Track previous block number and timestamp for validation
+                let mut prev_block_number = parent.number();
+                let mut prev_timestamp = parent.timestamp();
+
                 for block in block_state_calls {
+                    // Validate block number ordering if overridden
+                    if let Some(number) = block.block_overrides.as_ref().and_then(|o| o.number) {
+                        let number: u64 = number.try_into().unwrap_or(u64::MAX);
+                        if number <= prev_block_number {
+                            return Err(EthApiError::other(EthSimulateError::BlockNumberInvalid {
+                                got: number,
+                                parent: prev_block_number,
+                            })
+                            .into());
+                        }
+                    }
+                    // Validate timestamp ordering if overridden
+                    if let Some(time) = block
+                        .block_overrides
+                        .as_ref()
+                        .and_then(|o| o.time)
+                        .filter(|&t| t <= prev_timestamp)
+                    {
+                        return Err(EthApiError::other(EthSimulateError::BlockTimestampInvalid {
+                            got: time,
+                            parent: prev_timestamp,
+                        })
+                        .into());
+                    }
+
                     let mut evm_env = this
                         .evm_config()
                         .next_evm_env(&parent, &this.next_env_attributes(&parent)?)
@@ -112,6 +146,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     let SimBlock { block_overrides, state_overrides, calls } = block;
 
+                    // Set prevrandao to zero for simulated blocks by default,
+                    // matching spec behavior where MixDigest is zero-initialized.
+                    // If user provides an override, it will be applied by apply_block_overrides.
+                    evm_env.block_env.inner_mut().prevrandao = Some(B256::ZERO);
+
                     if let Some(block_overrides) = block_overrides {
                         // ensure we don't allow uncapped gas limit per block
                         if let Some(gas_limit_override) = block_overrides.gas_limit &&
@@ -126,8 +165,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             evm_env.block_env.inner_mut(),
                         );
                     }
-                    if let Some(state_overrides) = state_overrides {
-                        apply_state_overrides(state_overrides, &mut db)
+                    if let Some(ref state_overrides) = state_overrides {
+                        apply_state_overrides(state_overrides.clone(), &mut db)
                             .map_err(Self::Error::from_eth_err)?;
                     }
 
@@ -148,7 +187,17 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         }
 
                         if txs_without_gas_limit > 0 {
-                            (block_gas_limit - total_specified_gas) / txs_without_gas_limit as u64
+                            // Per spec: "gasLimit: blockGasLimit - soFarUsedGasInBlock"
+                            // Divide remaining gas equally among transactions without gas
+                            let gas_per_tx = (block_gas_limit - total_specified_gas) /
+                                txs_without_gas_limit as u64;
+                            // Cap to RPC gas limit, matching spec behavior
+                            let call_gas_limit = this.call_gas_limit();
+                            if call_gas_limit > 0 {
+                                gas_per_tx.min(call_gas_limit)
+                            } else {
+                                gas_per_tx
+                            }
                         } else {
                             0
                         }
@@ -173,7 +222,16 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         let evm = this
                             .evm_config()
                             .evm_with_env_and_inspector(&mut db, evm_env, inspector);
-                        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+                        let mut builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+
+                        if let Some(ref state_overrides) = state_overrides {
+                            simulate::apply_precompile_overrides(
+                                state_overrides,
+                                builder.evm_mut().precompiles_mut(),
+                            )
+                            .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
+                        }
+
                         simulate::execute_transactions(
                             builder,
                             calls,
@@ -184,7 +242,16 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .map_err(map_err)?
                     } else {
                         let evm = this.evm_config().evm_with_env(&mut db, evm_env);
-                        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+                        let mut builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+
+                        if let Some(ref state_overrides) = state_overrides {
+                            simulate::apply_precompile_overrides(
+                                state_overrides,
+                                builder.evm_mut().precompiles_mut(),
+                            )
+                            .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
+                        }
+
                         simulate::execute_transactions(
                             builder,
                             calls,
@@ -196,6 +263,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     };
 
                     parent = result.block.clone_sealed_header();
+
+                    // Update tracking for next iteration's validation
+                    prev_block_number = parent.number();
+                    prev_timestamp = parent.timestamp();
 
                     let block = simulate::build_simulated_block::<Self::Error, _>(
                         result.block,
@@ -491,11 +562,11 @@ pub trait Call:
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
         R: Send + 'static,
-        F: FnOnce(Self, &dyn StateProvider) -> Result<R, Self::Error> + Send + 'static,
+        F: FnOnce(Self, StateProviderBox) -> Result<R, Self::Error> + Send + 'static,
     {
         self.spawn_blocking_io_fut(move |this| async move {
             let state = this.state_at_block_id(at).await?;
-            f(this, &state)
+            f(this, state)
         })
     }
 
@@ -508,7 +579,7 @@ pub trait Call:
         tx_env: TxEnvFor<Self::Evm>,
     ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
-        DB: Database<Error = ProviderError> + fmt::Debug,
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + fmt::Debug,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);
         let res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
@@ -526,7 +597,7 @@ pub trait Call:
         inspector: I,
     ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
-        DB: Database<Error = ProviderError> + fmt::Debug,
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + fmt::Debug,
         I: InspectorFor<Self::Evm, DB>,
     {
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
@@ -666,7 +737,7 @@ pub trait Call:
             };
             let (tx, tx_info) = transaction.split();
 
-            let (evm_env, _) = self.evm_env_at(block.hash().into()).await?;
+            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
@@ -703,7 +774,7 @@ pub trait Call:
         target_tx_hash: B256,
     ) -> Result<usize, Self::Error>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit + core::fmt::Debug,
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + DatabaseCommit + core::fmt::Debug,
         I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);
