@@ -20,11 +20,11 @@ pub struct ProofTaskTrieMetrics {
     /// Histogram for account worker idle time in seconds (waiting for proof jobs + storage
     /// results).
     account_worker_idle_time_seconds: Histogram,
-    /// Histogram for dispatched deferred encoder variant count.
+    /// Histogram for `Dispatched` deferred encoder variant count.
     deferred_encoder_dispatched: Histogram,
-    /// Histogram for from_cache deferred encoder variant count.
+    /// Histogram for `FromCache` deferred encoder variant count.
     deferred_encoder_from_cache: Histogram,
-    /// Histogram for sync deferred encoder variant count.
+    /// Histogram for `Sync` deferred encoder variant count.
     deferred_encoder_sync: Histogram,
 }
 
