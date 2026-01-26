@@ -111,14 +111,17 @@ where
                     block_number.min(last_changeset_pruned_block),
                 )
             });
-        let outcomes = prune_history_indices::<Provider, tables::StoragesHistory, _>(
+        let (outcomes, indices_done) = prune_history_indices::<Provider, tables::StoragesHistory, _>(
             provider,
             highest_sharded_keys,
+            &limiter,
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
         )?;
-        trace!(target: "pruner", ?outcomes, %done, "Pruned storage history (indices)");
+        trace!(target: "pruner", ?outcomes, %done, %indices_done, "Pruned storage history (indices)");
 
-        let progress = limiter.progress(done);
+        // Both changesets pruning and indices pruning must be done for overall completion
+        let overall_done = done && indices_done;
+        let progress = limiter.progress(overall_done);
 
         Ok(SegmentOutput {
             progress,
