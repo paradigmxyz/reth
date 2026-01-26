@@ -104,10 +104,6 @@ impl EthChainSpec for CustomChainSpec {
         self.inner.base_fee_params_at_timestamp(timestamp)
     }
 
-    fn evm_limit_params_at_timestamp(&self, timestamp: u64) -> EvmLimitParams {
-        self.inner.evm_limit_params_at_timestamp(timestamp)
-    }
-
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
         self.inner.blob_params_at_timestamp(timestamp)
     }

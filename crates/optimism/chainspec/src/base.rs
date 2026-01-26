@@ -33,7 +33,6 @@ pub static BASE_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
                 ]
                 .into(),
             ),
-            evm_limit_params: EvmLimitParamsKind::default(),
             ..Default::default()
         },
     }

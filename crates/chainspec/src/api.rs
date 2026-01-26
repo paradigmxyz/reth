@@ -29,9 +29,6 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// Get the [`BlobParams`] for the given timestamp
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams>;
 
-    /// Get the [`EvmLimitParams`] for the chain at the given timestamp.
-    fn evm_limit_params_at_timestamp(&self, timestamp: u64) -> EvmLimitParams;
-
     /// Returns the deposit contract data for the chain, if it's present
     fn deposit_contract(&self) -> Option<&DepositContract>;
 
@@ -86,10 +83,6 @@ impl<H: BlockHeader> EthChainSpec for ChainSpec<H> {
 
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         self.base_fee_params_at_timestamp(timestamp)
-    }
-
-    fn evm_limit_params_at_timestamp(&self, timestamp: u64) -> EvmLimitParams {
-        self.evm_limit_params_at_timestamp(timestamp)
     }
 
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {

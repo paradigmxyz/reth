@@ -34,7 +34,6 @@ pub static OP_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
                 .into(),
             ),
             prune_delete_limit: 10000,
-            evm_limit_params: EvmLimitParamsKind::default(),
             ..Default::default()
         },
     }

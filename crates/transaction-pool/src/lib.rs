@@ -195,18 +195,24 @@
 //!
 //! Listen for new transactions and print them:
 //!
-//! ```ignore
+//! ```
 //! use reth_chainspec::MAINNET;
-//! use reth_storage_api::StateProviderFactory;
+//! use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_chainspec::ChainSpecProvider;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
 //! use reth_chainspec::EthereumHardforks;
-//! async fn t<C>(client: C)  where C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static{
+//! use reth_evm::ConfigureEvm;
+//! use alloy_consensus::Header;
+//! async fn t<C, Evm>(client: C, evm_config: Evm)
+//! where
+//!     C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + BlockReaderIdExt<Header = Header> + Clone + 'static,
+//!     Evm: ConfigureEvm<Primitives: reth_primitives_traits::NodePrimitives<BlockHeader = Header>> + 'static,
+//! {
 //!     let blob_store = InMemoryBlobStore::default();
 //!     let pool = Pool::eth_pool(
-//!         TransactionValidationTaskExecutor::eth(client, blob_store.clone(), TokioTaskExecutor::default()),
+//!         TransactionValidationTaskExecutor::eth(client, evm_config, blob_store.clone(), TokioTaskExecutor::default()),
 //!         blob_store,
 //!         Default::default(),
 //!     );
@@ -224,7 +230,7 @@
 //!
 //! Spawn maintenance task to keep the pool updated
 //!
-//! ```ignore
+//! ```
 //! use futures_util::Stream;
 //! use reth_chain_state::CanonStateNotification;
 //! use reth_chainspec::{MAINNET, ChainSpecProvider, ChainSpec};
@@ -235,18 +241,21 @@
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
 //! use reth_transaction_pool::maintain::{maintain_transaction_pool_future};
+//! use reth_evm::ConfigureEvm;
+//! use reth_ethereum_primitives::EthPrimitives;
 //! use alloy_consensus::Header;
 //!
-//!  async fn t<C, St>(client: C, stream: St)
+//!  async fn t<C, St, Evm>(client: C, stream: St, evm_config: Evm)
 //!    where C: StateProviderFactory + BlockReaderIdExt<Header = Header> + ChainSpecProvider<ChainSpec = ChainSpec> + Clone + 'static,
-//!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+//!     St: Stream<Item = CanonStateNotification<EthPrimitives>> + Send + Unpin + 'static,
+//!     Evm: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 //!     {
 //!     let blob_store = InMemoryBlobStore::default();
 //!     let rt = tokio::runtime::Runtime::new().unwrap();
 //!     let manager = TaskManager::new(rt.handle().clone());
 //!     let executor = manager.executor();
 //!     let pool = Pool::eth_pool(
-//!         TransactionValidationTaskExecutor::eth(client.clone(), blob_store.clone(), executor.clone()),
+//!         TransactionValidationTaskExecutor::eth(client.clone(), evm_config, blob_store.clone(), executor.clone()),
 //!         blob_store,
 //!         Default::default(),
 //!     );
@@ -427,20 +436,27 @@ where
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
     /// use reth_chainspec::MAINNET;
-    /// use reth_storage_api::StateProviderFactory;
+    /// use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_chainspec::ChainSpecProvider;
     /// use reth_transaction_pool::{
     ///     blobstore::InMemoryBlobStore, Pool, TransactionValidationTaskExecutor,
     /// };
     /// use reth_chainspec::EthereumHardforks;
-    /// # fn t<C>(client: C)  where C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static {
+    /// use reth_evm::ConfigureEvm;
+    /// use alloy_consensus::Header;
+    /// # fn t<C, Evm>(client: C, evm_config: Evm)
+    /// # where
+    /// #     C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + BlockReaderIdExt<Header = Header> + Clone + 'static,
+    /// #     Evm: ConfigureEvm<Primitives: reth_primitives_traits::NodePrimitives<BlockHeader = Header>> + 'static,
+    /// # {
     /// let blob_store = InMemoryBlobStore::default();
     /// let pool = Pool::eth_pool(
     ///     TransactionValidationTaskExecutor::eth(
     ///         client,
+    ///         evm_config,
     ///         blob_store.clone(),
     ///         TokioTaskExecutor::default(),
     ///     ),

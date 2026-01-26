@@ -127,7 +127,6 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (mainnet::MAINNET_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (mainnet::MAINNET_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
-        evm_limit_params: EvmLimitParamsKind::ethereum(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -163,7 +162,6 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (sepolia::SEPOLIA_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (sepolia::SEPOLIA_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
-        evm_limit_params: EvmLimitParamsKind::ethereum(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -194,7 +192,6 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (holesky::HOLESKY_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (holesky::HOLESKY_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
-        evm_limit_params: EvmLimitParamsKind::ethereum(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -227,7 +224,6 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (hoodi::HOODI_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (hoodi::HOODI_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
-        evm_limit_params: EvmLimitParamsKind::ethereum(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -481,9 +477,6 @@ pub struct ChainSpec<H: BlockHeader = Header> {
 
     /// The settings passed for blob configurations for specific hardforks.
     pub blob_params: BlobScheduleBlobParams,
-
-    /// EVM execution limits (max code size, max initcode size, tx gas limit cap).
-    pub evm_limit_params: EvmLimitParamsKind,
 }
 
 impl<H: BlockHeader> Default for ChainSpec<H> {
@@ -498,7 +491,6 @@ impl<H: BlockHeader> Default for ChainSpec<H> {
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
             blob_params: Default::default(),
-            evm_limit_params: EvmLimitParamsKind::ethereum(),
         }
     }
 }
@@ -594,21 +586,6 @@ impl<H: BlockHeader> ChainSpec<H> {
 
                 bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
             }
-        }
-    }
-
-    /// Get the [`EvmLimitParams`] for the chain at the given timestamp.
-    pub fn evm_limit_params_at_timestamp(&self, timestamp: u64) -> EvmLimitParams {
-        match &self.evm_limit_params {
-            EvmLimitParamsKind::Constant(params) => *params,
-            EvmLimitParamsKind::Variable(ForkEvmLimitParams(fork_params)) => fork_params
-                .iter()
-                .rev()
-                .find(|(fork, _)| {
-                    self.hardforks.is_fork_active_at_timestamp(fork.clone(), timestamp)
-                })
-                .map(|(_, params)| *params)
-                .unwrap_or_default(),
         }
     }
 
@@ -871,7 +848,6 @@ impl<H: BlockHeader> ChainSpec<H> {
             base_fee_params,
             prune_delete_limit,
             blob_params,
-            evm_limit_params,
         } = self;
         ChainSpec {
             chain,
@@ -883,7 +859,6 @@ impl<H: BlockHeader> ChainSpec<H> {
             base_fee_params,
             prune_delete_limit,
             blob_params,
-            evm_limit_params,
         }
     }
 }
@@ -3028,23 +3003,5 @@ Post-merge hard forks (timestamp based):
                 fork_block: None,
             }
         )
-    }
-
-    #[test]
-    fn test_evm_limit_params_osaka_resolution() {
-        let spec = ChainSpec::builder()
-            .chain(Chain::mainnet())
-            .genesis(Genesis::default())
-            .london_activated()
-            .with_fork(EthereumHardfork::Osaka, ForkCondition::Timestamp(1000))
-            .build();
-
-        // pre-Osaka
-        let params = spec.evm_limit_params_at_timestamp(999);
-        assert_eq!(params.tx_gas_limit_cap, None);
-
-        // post-Osaka
-        let params = spec.evm_limit_params_at_timestamp(1000);
-        assert_eq!(params.tx_gas_limit_cap, Some(MAX_TX_GAS_LIMIT_OSAKA));
     }
 }

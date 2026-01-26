@@ -152,20 +152,6 @@ where
     if let Err(error) = block.ensure_transaction_root_valid() {
         return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
     }
-    // EIP-7825 transaction gas limit validation
-    let evm_limits = chain_spec.evm_limit_params_at_timestamp(block.timestamp());
-    if let Some(tx_gas_cap) = evm_limits.tx_gas_limit_cap {
-        for tx in block.body().transactions() {
-            if tx.gas_limit() > tx_gas_cap {
-                return Err(TxGasLimitTooHighErr {
-                    tx_hash: *tx.tx_hash(),
-                    gas_limit: tx.gas_limit(),
-                    max_allowed: tx_gas_cap,
-                }
-                .into());
-            }
-        }
-    }
 
     Ok(())
 }
