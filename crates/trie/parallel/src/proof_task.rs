@@ -33,7 +33,7 @@ use crate::{
     root::ParallelStateRootError,
     stats::{ParallelTrieStats, ParallelTrieTracker},
     targets_v2::MultiProofTargetsV2,
-    value_encoder::AsyncAccountValueEncoder,
+    value_encoder::{AsyncAccountValueEncoder, ValueEncoderMetrics},
     StorageRootTargets,
 };
 use alloy_primitives::{
@@ -1247,6 +1247,7 @@ where
 
         let mut total_idle_time = Duration::ZERO;
         let mut idle_start = Instant::now();
+        let mut proof_calculator_metrics_cache = ValueEncoderMetrics::default();
 
         while let Ok(job) = self.work_rx.recv() {
             total_idle_time += idle_start.elapsed();
@@ -1256,7 +1257,7 @@ where
 
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
-                    let storage_wait_time = self.process_account_multiproof(
+                    let proof_calculator_metrics = self.process_account_multiproof(
                         &provider_rc,
                         v2_account_calculator.as_mut(),
                         v2_storage_calculator.clone(),
@@ -1264,7 +1265,8 @@ where
                         &mut account_proofs_processed,
                         &mut cursor_metrics_cache,
                     );
-                    total_idle_time += storage_wait_time;
+                    total_idle_time += proof_calculator_metrics.storage_wait_time;
+                    proof_calculator_metrics_cache.extend(&proof_calculator_metrics);
                 }
 
                 AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
@@ -1298,6 +1300,7 @@ where
             self.metrics.record_account_nodes(account_nodes_processed as usize);
             self.metrics.record_account_worker_idle_time(total_idle_time);
             self.cursor_metrics.record(&mut cursor_metrics_cache);
+            proof_calculator_metrics_cache.record();
         }
 
         Ok(())
@@ -1388,7 +1391,7 @@ where
             >,
         >,
         targets: MultiProofTargetsV2,
-    ) -> Result<(ProofResult, Duration), ParallelStateRootError>
+    ) -> Result<(ProofResult, ValueEncoderMetrics), ParallelStateRootError>
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
@@ -1417,17 +1420,16 @@ where
         let account_proofs =
             v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?;
 
-        let (storage_proofs, storage_wait_time) =
-            value_encoder.into_storage_proofs_with_wait_time()?;
+        let (storage_proofs, proof_calculator_metrics) = value_encoder.finalize()?;
 
         let proof = DecodedMultiProofV2 { account_proofs, storage_proofs };
 
-        Ok((ProofResult::V2(proof), storage_wait_time))
+        Ok((ProofResult::V2(proof), proof_calculator_metrics))
     }
 
     /// Processes an account multiproof request.
     ///
-    /// Returns the time spent waiting for storage proof results.
+    /// Returns metrics from the value encoder used during proof computation.
     fn process_account_multiproof<'a, Provider>(
         &self,
         provider_rc: &Rc<Provider>,
@@ -1454,14 +1456,14 @@ where
         input: AccountMultiproofInput,
         account_proofs_processed: &mut u64,
         cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
-    ) -> Duration
+    ) -> ValueEncoderMetrics
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
         let mut proof_cursor_metrics = ProofTaskCursorMetricsCache::default();
         let proof_start = Instant::now();
 
-        let (proof_result_sender, result, storage_wait_time) = match input {
+        let (proof_result_sender, result, proof_calculator_metrics) = match input {
             AccountMultiproofInput::Legacy {
                 targets,
                 prefix_sets,
@@ -1469,30 +1471,34 @@ where
                 multi_added_removed_keys,
                 proof_result_sender,
             } => {
-                let (result, storage_wait_time) = match self.compute_legacy_account_multiproof(
-                    provider_rc.as_ref(),
-                    targets,
-                    prefix_sets,
-                    collect_branch_node_masks,
-                    multi_added_removed_keys,
-                    &mut proof_cursor_metrics,
-                ) {
-                    Ok((proof, wait_time)) => (Ok(proof), wait_time),
-                    Err(e) => (Err(e), Duration::ZERO),
+                let (result, proof_calculator_metrics) = match self
+                    .compute_legacy_account_multiproof(
+                        provider_rc.as_ref(),
+                        targets,
+                        prefix_sets,
+                        collect_branch_node_masks,
+                        multi_added_removed_keys,
+                        &mut proof_cursor_metrics,
+                    ) {
+                    Ok((proof, wait_time)) => (
+                        Ok(proof),
+                        ValueEncoderMetrics { storage_wait_time: wait_time, ..Default::default() },
+                    ),
+                    Err(e) => (Err(e), ValueEncoderMetrics::default()),
                 };
-                (proof_result_sender, result, storage_wait_time)
+                (proof_result_sender, result, proof_calculator_metrics)
             }
             AccountMultiproofInput::V2 { targets, proof_result_sender } => {
-                let (result, storage_wait_time) = match self
+                let (result, proof_calculator_metrics) = match self
                     .compute_v2_account_multiproof::<Provider>(
                         v2_account_calculator.expect("v2 account calculator provided"),
                         v2_storage_calculator.expect("v2 storage calculator provided"),
                         targets,
                     ) {
-                    Ok((proof, wait_time)) => (Ok(proof), wait_time),
-                    Err(e) => (Err(e), Duration::ZERO),
+                    Ok((proof, metrics)) => (Ok(proof), metrics),
+                    Err(e) => (Err(e), ValueEncoderMetrics::default()),
                 };
-                (proof_result_sender, result, storage_wait_time)
+                (proof_result_sender, result, proof_calculator_metrics)
             }
         };
 
@@ -1547,7 +1553,7 @@ where
         // Accumulate per-proof metrics into the worker's cache
         cursor_metrics_cache.extend(&proof_cursor_metrics);
 
-        storage_wait_time
+        proof_calculator_metrics
     }
 
     /// Processes a blinded account node lookup request.

@@ -20,6 +20,45 @@ use std::{
 };
 use tracing::debug_span;
 
+#[cfg(feature = "metrics")]
+use reth_metrics::metrics::counter;
+
+/// Metrics collected by [`AsyncAccountValueEncoder`] during proof computation.
+///
+/// Tracks time spent waiting for storage proofs and counts of each deferred encoder variant used.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct ValueEncoderMetrics {
+    /// Accumulated time spent waiting for storage proof results from dispatched workers.
+    pub(crate) storage_wait_time: Duration,
+    /// Number of times the `Dispatched` variant was used (proof pre-dispatched to workers).
+    pub(crate) dispatched_count: u64,
+    /// Number of times the `FromCache` variant was used (storage root already cached).
+    pub(crate) from_cache_count: u64,
+    /// Number of times the `Sync` variant was used (synchronous computation).
+    pub(crate) sync_count: u64,
+}
+
+impl ValueEncoderMetrics {
+    /// Extends this metrics by adding the values from another.
+    pub(crate) fn extend(&mut self, other: &Self) {
+        self.storage_wait_time += other.storage_wait_time;
+        self.dispatched_count += other.dispatched_count;
+        self.from_cache_count += other.from_cache_count;
+        self.sync_count += other.sync_count;
+    }
+
+    /// Records these metrics to the global metrics registry.
+    #[cfg(feature = "metrics")]
+    pub(crate) fn record(&self) {
+        counter!("trie.proof_task.deferred_encoder_variant", "variant" => "dispatched")
+            .increment(self.dispatched_count);
+        counter!("trie.proof_task.deferred_encoder_variant", "variant" => "from_cache")
+            .increment(self.from_cache_count);
+        counter!("trie.proof_task.deferred_encoder_variant", "variant" => "sync")
+            .increment(self.sync_count);
+    }
+}
+
 /// Returned from [`AsyncAccountValueEncoder`], used to track an async storage root calculation.
 pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
     /// A storage proof job was dispatched to the worker pool.
@@ -89,13 +128,6 @@ where
             }
             Self::FromCache { account, root } => (account, root),
             Self::Sync { storage_calculator, hashed_address, account, cached_storage_roots } => {
-                let _guard = debug_span!(
-                    target: "trie::proof_task",
-                    "Sync storage proof",
-                    ?hashed_address,
-                )
-                .entered();
-
                 let mut calculator = storage_calculator.borrow_mut();
                 let proof = calculator.storage_proof(hashed_address, &mut [B256::ZERO.into()])?;
                 let storage_root = calculator
@@ -103,9 +135,6 @@ where
                     .expect("storage_proof with dummy target always returns root");
 
                 cached_storage_roots.insert(hashed_address, storage_root);
-
-                drop(_guard);
-
                 (account, storage_root)
             }
         };
@@ -138,6 +167,12 @@ pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     /// Accumulated time spent waiting for storage proof results.
     storage_wait_time: Rc<RefCell<Duration>>,
+    /// Number of times the `Dispatched` variant was used.
+    dispatched_count: u64,
+    /// Number of times the `FromCache` variant was used.
+    from_cache_count: u64,
+    /// Number of times the `Sync` variant was used.
+    sync_count: u64,
 }
 
 impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
@@ -159,19 +194,24 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
             storage_proof_results: Default::default(),
             storage_calculator,
             storage_wait_time: Default::default(),
+            dispatched_count: 0,
+            from_cache_count: 0,
+            sync_count: 0,
         }
     }
 
-    /// Consume [`Self`] and return all collected storage proofs which had been dispatched,
-    /// along with the total time spent waiting for storage proofs.
+    /// Consume [`Self`] and return all collected storage proofs along with accumulated metrics.
+    ///
+    /// This method collects any remaining dispatched proofs that weren't consumed during proof
+    /// calculation and includes their wait time in the returned metrics.
     ///
     /// # Panics
     ///
     /// This method panics if any deferred encoders produced by [`Self::deferred_encoder`] have not
     /// been dropped.
-    pub(crate) fn into_storage_proofs_with_wait_time(
+    pub(crate) fn finalize(
         self,
-    ) -> Result<(B256Map<Vec<ProofTrieNode>>, Duration), StateProofError> {
+    ) -> Result<(B256Map<Vec<ProofTrieNode>>, ValueEncoderMetrics), StateProofError> {
         let mut storage_proof_results = Rc::into_inner(self.storage_proof_results)
             .expect("no deferred encoders are still allocated")
             .into_inner();
@@ -180,7 +220,8 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
             .expect("no deferred encoders are still allocated")
             .into_inner();
 
-        // Any remaining dispatched proofs need to have their results collected
+        // Any remaining dispatched proofs need to have their results collected.
+        // These are proofs that were pre-dispatched but not consumed during proof calculation.
         for (hashed_address, rx) in &self.dispatched {
             let _guard = debug_span!(
                 target: "trie::proof_task",
@@ -207,7 +248,14 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
             storage_proof_results.insert(*hashed_address, proof);
         }
 
-        Ok((storage_proof_results, storage_wait_time))
+        let metrics = ValueEncoderMetrics {
+            storage_wait_time,
+            dispatched_count: self.dispatched_count,
+            from_cache_count: self.from_cache_count,
+            sync_count: self.sync_count,
+        };
+
+        Ok((storage_proof_results, metrics))
     }
 }
 
@@ -227,6 +275,7 @@ where
         // If the proof job has already been dispatched for this account then it's not necessary to
         // dispatch another.
         if let Some(rx) = self.dispatched.remove(&hashed_address) {
+            self.dispatched_count += 1;
             return AsyncAccountDeferredValueEncoder::Dispatched {
                 hashed_address,
                 account,
@@ -241,10 +290,12 @@ where
 
         // If the root is already calculated then just use it directly
         if let Some(root) = self.cached_storage_roots.get(&hashed_address) {
+            self.from_cache_count += 1;
             return AsyncAccountDeferredValueEncoder::FromCache { account, root: *root }
         }
 
         // Compute storage root synchronously using the shared calculator
+        self.sync_count += 1;
         AsyncAccountDeferredValueEncoder::Sync {
             storage_calculator: self.storage_calculator.clone(),
             hashed_address,
