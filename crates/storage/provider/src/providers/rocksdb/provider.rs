@@ -3158,8 +3158,7 @@ mod tests {
 
     #[test]
     fn test_prune_account_history_mid_shard_preserves_key() {
-        // Regression test: when truncating a non-sentinel shard, the key (highest_block_number)
-        // must be preserved even though some blocks are removed from the value.
+        // Truncating a non-sentinel shard must preserve the key (highest_block_number).
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3334,8 +3333,7 @@ mod tests {
 
     #[test]
     fn test_prune_storage_history_mid_shard_preserves_key() {
-        // Regression test: when truncating a non-sentinel shard, the key (highest_block_number)
-        // must be preserved even though some blocks are removed from the value.
+        // Truncating a non-sentinel shard must preserve the key (highest_block_number).
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3374,14 +3372,11 @@ mod tests {
         assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), vec![60, 70]);
     }
 
-    // These tests verify that RocksDB prune_*_history_to produces logically
-    // equivalent results to MDBX prune_shard for the same inputs.
+    // MDBX equivalence tests: verify RocksDB produces same results as MDBX prune_shard.
 
     #[test]
     fn test_prune_equivalence_delete_early_shards_keep_sentinel() {
-        // Scenario: 3 shards, prune deletes first two, sentinel unchanged
-        // [(20, [10,15,20]), (50, [30,40,50]), (MAX, [60,70])], to_block=55
-        // Expected: [(MAX, [60,70])]
+        // [(20, [10,15,20]), (50, [30,40,50]), (MAX, [60,70])], to_block=55 → [(MAX, [60,70])]
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3422,9 +3417,7 @@ mod tests {
 
     #[test]
     fn test_prune_equivalence_sentinel_becomes_empty_with_prev() {
-        // Scenario: Sentinel becomes empty, prev shard promoted to sentinel
-        // [(50, [30,40,50]), (MAX, [35])], to_block=40
-        // Expected: [(MAX, [50])] - prev shard promoted
+        // [(50, [30,40,50]), (MAX, [35])], to_block=40 → [(MAX, [50])]
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3449,7 +3442,6 @@ mod tests {
         let outcome = batch.prune_account_history_to(address, 40).unwrap();
         batch.commit().unwrap();
 
-        // Deleted takes precedence (sentinel was deleted, prev promoted)
         assert_eq!(outcome, PruneShardOutcome::Deleted);
 
         let shards = provider.account_history_shards(address).unwrap();
@@ -3460,9 +3452,7 @@ mod tests {
 
     #[test]
     fn test_prune_equivalence_all_shards_become_empty() {
-        // Scenario: All shards become empty after pruning
-        // [(50, [30,40,50]), (MAX, [51])], to_block=51
-        // Expected: [] (no shards remain)
+        // [(50, [30,40,50]), (MAX, [51])], to_block=51 → []
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3495,9 +3485,7 @@ mod tests {
 
     #[test]
     fn test_prune_equivalence_non_sentinel_last_shard_promoted() {
-        // Scenario: Only non-sentinel shard remains after filtering, must be promoted
-        // [(100, [50, 75, 100])], to_block=60
-        // Expected: [(MAX, [75, 100])] - promoted to sentinel
+        // [(100, [50, 75, 100])], to_block=60 → [(MAX, [75, 100])]
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3520,16 +3508,13 @@ mod tests {
 
         let shards = provider.account_history_shards(address).unwrap();
         assert_eq!(shards.len(), 1);
-        // Must be promoted to sentinel
         assert_eq!(shards[0].0.highest_block_number, u64::MAX);
         assert_eq!(shards[0].1.iter().collect::<Vec<_>>(), vec![75, 100]);
     }
 
     #[test]
     fn test_prune_equivalence_filter_within_shard() {
-        // Scenario: Filter within a shard, key unchanged since already sentinel
-        // [(MAX, [10, 20, 30, 40])], to_block=25
-        // Expected: [(MAX, [30, 40])]
+        // [(MAX, [10, 20, 30, 40])], to_block=25 → [(MAX, [30, 40])]
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3558,9 +3543,8 @@ mod tests {
 
     #[test]
     fn test_prune_equivalence_multi_shard_partial_delete() {
-        // Scenario: First shard fully deleted, second shard partially pruned, third unchanged
-        // [(20, [10,20]), (50, [30,40,50]), (MAX, [60,70])], to_block=35
-        // Expected: [(50, [40,50]), (MAX, [60,70])]
+        // [(20, [10,20]), (50, [30,40,50]), (MAX, [60,70])], to_block=35 → [(50, [40,50]), (MAX,
+        // [60,70])]
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3591,7 +3575,6 @@ mod tests {
         let outcome = batch.prune_account_history_to(address, 35).unwrap();
         batch.commit().unwrap();
 
-        // Deleted takes precedence
         assert_eq!(outcome, PruneShardOutcome::Deleted);
 
         let shards = provider.account_history_shards(address).unwrap();
@@ -3604,9 +3587,7 @@ mod tests {
 
     #[test]
     fn test_prune_storage_equivalence_sentinel_promotion() {
-        // Same test but for storage history
-        // [(100, [50, 75, 100])], to_block=60
-        // Expected: [(MAX, [75, 100])]
+        // [(100, [50, 75, 100])], to_block=60 → [(MAX, [75, 100])]
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3636,14 +3617,11 @@ mod tests {
 
     #[test]
     fn test_prune_invariant_no_empty_shards() {
-        // Verify the invariant that no empty shards are left after pruning
-        // Tests multiple scenarios that could leave empty shards
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         let address = Address::from([0x42; 20]);
 
-        // Create shards where filtering removes all blocks from middle shard
         let mut batch = provider.batch();
         batch
             .put::<tables::AccountsHistory>(
@@ -3665,31 +3643,25 @@ mod tests {
             .unwrap();
         batch.commit().unwrap();
 
-        // Prune such that middle shard becomes empty
         let mut batch = provider.batch();
         batch.prune_account_history_to(address, 20).unwrap();
         batch.commit().unwrap();
 
-        // Verify no empty shards and all remaining shards have blocks
         let shards = provider.account_history_shards(address).unwrap();
         for (key, blocks) in &shards {
             assert!(!blocks.is_empty(), "Found empty shard at key {:?}", key.highest_block_number);
         }
-
-        // Should only have sentinel remaining
         assert_eq!(shards.len(), 1);
         assert_eq!(shards[0].0.highest_block_number, u64::MAX);
     }
 
     #[test]
     fn test_prune_invariant_sentinel_is_last() {
-        // Verify that after pruning, if any shards remain, the last one is sentinel
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         let address = Address::from([0x42; 20]);
 
-        // Non-sentinel shard only
         let mut batch = provider.batch();
         batch
             .put::<tables::AccountsHistory>(
@@ -3699,7 +3671,6 @@ mod tests {
             .unwrap();
         batch.commit().unwrap();
 
-        // Prune partially
         let mut batch = provider.batch();
         batch.prune_account_history_to(address, 60).unwrap();
         batch.commit().unwrap();
@@ -3713,7 +3684,6 @@ mod tests {
 
     #[test]
     fn test_prune_storage_equivalence_delete_early_shards_keep_sentinel() {
-        // 3 shards, first two deleted, sentinel unchanged
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3755,7 +3725,6 @@ mod tests {
 
     #[test]
     fn test_prune_storage_equivalence_sentinel_becomes_empty_with_prev() {
-        // Sentinel becomes empty, prev shard promoted
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3781,7 +3750,6 @@ mod tests {
         let outcome = batch.prune_storage_history_to(address, storage_key, 40).unwrap();
         batch.commit().unwrap();
 
-        // Deleted because the sentinel shard was removed (its content pruned) and prev promoted
         assert_eq!(outcome, PruneShardOutcome::Deleted);
 
         let shards = provider.storage_history_shards(address, storage_key).unwrap();
@@ -3792,7 +3760,6 @@ mod tests {
 
     #[test]
     fn test_prune_storage_equivalence_all_shards_become_empty() {
-        // All shards empty after pruning
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3826,7 +3793,6 @@ mod tests {
 
     #[test]
     fn test_prune_storage_equivalence_filter_within_shard() {
-        // Filter blocks within existing sentinel
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3856,7 +3822,6 @@ mod tests {
 
     #[test]
     fn test_prune_storage_equivalence_multi_shard_partial_delete() {
-        // First shard fully deleted, second partially pruned, third unchanged
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3900,7 +3865,6 @@ mod tests {
 
     #[test]
     fn test_prune_storage_invariant_no_empty_shards() {
-        // Verify no empty shards remain after pruning
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
@@ -3947,14 +3911,12 @@ mod tests {
 
     #[test]
     fn test_prune_storage_invariant_sentinel_is_last() {
-        // Verify last shard is always sentinel after pruning
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         let address = Address::from([0x42; 20]);
         let storage_key = B256::from([0x01; 32]);
 
-        // Non-sentinel shard only
         let mut batch = provider.batch();
         batch
             .put::<tables::StoragesHistory>(
@@ -3986,13 +3948,11 @@ mod tests {
 
         let address = Address::from([0x42; 20]);
 
-        // Shard with blocks including block 0
         let mut batch = provider.batch();
         let shard = BlockNumberList::new_pre_sorted([0u64, 1, 2, 10, 20]);
         batch.put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &shard).unwrap();
         batch.commit().unwrap();
 
-        // Prune to block 0 (removes only block 0)
         let mut batch = provider.batch();
         let outcome = batch.prune_account_history_to(address, 0).unwrap();
         batch.commit().unwrap();
@@ -4013,7 +3973,6 @@ mod tests {
         let address = Address::from([0x42; 20]);
         let storage_key = B256::from([0x01; 32]);
 
-        // Shard with blocks including block 0
         let mut batch = provider.batch();
         let shard = BlockNumberList::new_pre_sorted([0u64, 5, 10]);
         batch
@@ -4021,7 +3980,6 @@ mod tests {
             .unwrap();
         batch.commit().unwrap();
 
-        // Prune to block 0 (removes only block 0)
         let mut batch = provider.batch();
         let outcome = batch.prune_storage_history_to(address, storage_key, 0).unwrap();
         batch.commit().unwrap();

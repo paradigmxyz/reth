@@ -662,8 +662,7 @@ mod tests {
         test_prune(1200, 3, (PruneProgress::Finished, 202));
     }
 
-    /// Tests that when a limiter stops mid-block (with multiple storage changes for the same
-    /// block), the checkpoint is set to `block_number - 1` to avoid dangling index entries.
+    /// Checkpoint is set to `block_number - 1` when limiter stops mid-block.
     #[test]
     fn prune_partial_progress_mid_block() {
         use alloy_primitives::{Address, U256};
@@ -673,7 +672,6 @@ mod tests {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
-        // Create blocks 0..=10
         let blocks = random_block_range(
             &mut rng,
             0..=10,
@@ -681,50 +679,41 @@ mod tests {
         );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
-        // Create specific changesets where block 5 has 4 storage changes
         let addr1 = Address::with_last_byte(1);
         let addr2 = Address::with_last_byte(2);
 
         let account = Account { nonce: 1, balance: U256::from(100), bytecode_hash: None };
 
-        // Create storage entries
         let storage_entry = |key: u8| reth_primitives_traits::StorageEntry {
             key: B256::with_last_byte(key),
             value: U256::from(100),
         };
 
-        // Build changesets: blocks 0-4 have 1 storage change each, block 5 has 4 changes, block 6
-        // has 1. Entries within each account must be sorted by key.
+        // Blocks 0-4: 1 storage change each; block 5: 4 changes; block 6: 1 change
         let changesets: Vec<ChangeSet> = vec![
-            vec![(addr1, account, vec![storage_entry(1)])], // block 0
-            vec![(addr1, account, vec![storage_entry(1)])], // block 1
-            vec![(addr1, account, vec![storage_entry(1)])], // block 2
-            vec![(addr1, account, vec![storage_entry(1)])], // block 3
-            vec![(addr1, account, vec![storage_entry(1)])], // block 4
-            // block 5: 4 different storage changes (2 addresses, each with 2 storage slots)
-            // Sorted by address, then by storage key within each address
+            vec![(addr1, account, vec![storage_entry(1)])],
+            vec![(addr1, account, vec![storage_entry(1)])],
+            vec![(addr1, account, vec![storage_entry(1)])],
+            vec![(addr1, account, vec![storage_entry(1)])],
+            vec![(addr1, account, vec![storage_entry(1)])],
             vec![
                 (addr1, account, vec![storage_entry(1), storage_entry(2)]),
                 (addr2, account, vec![storage_entry(1), storage_entry(2)]),
             ],
-            vec![(addr1, account, vec![storage_entry(3)])], // block 6
+            vec![(addr1, account, vec![storage_entry(3)])],
         ];
 
         db.insert_changesets(changesets.clone(), None).expect("insert changesets");
         db.insert_history(changesets.clone(), None).expect("insert history");
 
-        // Total storage changesets
         let total_storage_entries: usize =
             changesets.iter().flat_map(|c| c.iter()).map(|(_, _, entries)| entries.len()).sum();
         assert_eq!(db.table::<tables::StorageChangeSets>().unwrap().len(), total_storage_entries);
 
         let prune_mode = PruneMode::Before(10);
 
-        // Set limiter to stop mid-block 5
-        // With STORAGE_HISTORY_TABLES_TO_PRUNE=2, limit=14 gives us 7 storage entries before limit
-        // Blocks 0-4 use 5 slots, leaving 2 for block 5 (which has 4), so we stop mid-block 5
-        let deleted_entries_limit = 14; // 14/2 = 7 storage entries before limit
-        let limiter = PruneLimiter::default().set_deleted_entries_limit(deleted_entries_limit);
+        // Limit=14 / 2 tables = 7 entries. Blocks 0-4 (5 entries) + 2 of block 5's 4 = mid-block.
+        let limiter = PruneLimiter::default().set_deleted_entries_limit(14);
 
         let input = PruneInput { previous_checkpoint: None, to_block: 10, limiter };
         let segment = StorageHistory::new(prune_mode);
@@ -735,16 +724,13 @@ mod tests {
         );
         let result = segment.prune(&provider, input).unwrap();
 
-        // Should report that there's more data
-        assert!(!result.progress.is_finished(), "Expected HasMoreData since we stopped mid-block");
+        assert!(!result.progress.is_finished());
 
-        // Save checkpoint and commit
         segment
             .save_checkpoint(&provider, result.checkpoint.unwrap().as_prune_checkpoint(prune_mode))
             .unwrap();
         provider.commit().expect("commit");
 
-        // Verify checkpoint is set to block 4 (not 5), since block 5 is incomplete
         let checkpoint = db
             .factory
             .provider()
@@ -753,20 +739,11 @@ mod tests {
             .unwrap()
             .expect("checkpoint should exist");
 
-        assert_eq!(
-            checkpoint.block_number,
-            Some(4),
-            "Checkpoint should be block 4 (block before incomplete block 5)"
-        );
+        assert_eq!(checkpoint.block_number, Some(4));
 
-        // Verify remaining changesets
         let remaining_changesets = db.table::<tables::StorageChangeSets>().unwrap();
-        assert!(
-            !remaining_changesets.is_empty(),
-            "Should have remaining changesets for blocks 5-6"
-        );
+        assert!(!remaining_changesets.is_empty());
 
-        // Verify no dangling history indices for blocks that weren't fully pruned
         let history = db.table::<tables::StoragesHistory>().unwrap();
         for (key, _blocks) in &history {
             assert!(
@@ -776,11 +753,10 @@ mod tests {
             );
         }
 
-        // Run prune again to complete - should finish processing block 5 and 6
         let input2 = PruneInput {
             previous_checkpoint: Some(checkpoint),
             to_block: 10,
-            limiter: PruneLimiter::default().set_deleted_entries_limit(100), // high limit
+            limiter: PruneLimiter::default().set_deleted_entries_limit(100),
         };
 
         let provider2 = db.factory.database_provider_rw().unwrap();
@@ -789,7 +765,7 @@ mod tests {
         );
         let result2 = segment.prune(&provider2, input2).unwrap();
 
-        assert!(result2.progress.is_finished(), "Second run should complete");
+        assert!(result2.progress.is_finished());
 
         segment
             .save_checkpoint(
@@ -799,7 +775,6 @@ mod tests {
             .unwrap();
         provider2.commit().expect("commit");
 
-        // Verify final checkpoint
         let final_checkpoint = db
             .factory
             .provider()
@@ -808,12 +783,10 @@ mod tests {
             .unwrap()
             .expect("checkpoint should exist");
 
-        // Should now be at block 6 (the last block with changesets)
-        assert_eq!(final_checkpoint.block_number, Some(6), "Final checkpoint should be at block 6");
+        assert_eq!(final_checkpoint.block_number, Some(6));
 
-        // All changesets should be pruned
         let final_changesets = db.table::<tables::StorageChangeSets>().unwrap();
-        assert!(final_changesets.is_empty(), "All changesets up to block 10 should be pruned");
+        assert!(final_changesets.is_empty());
     }
 
     #[cfg(all(unix, feature = "rocksdb"))]

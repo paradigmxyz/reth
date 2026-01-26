@@ -757,8 +757,7 @@ mod tests {
         }
     }
 
-    /// Tests that when a limiter stops mid-block (with multiple changes for the same block),
-    /// the checkpoint is set to `block_number - 1` to avoid dangling index entries.
+    /// Checkpoint is set to `block_number - 1` when limiter stops mid-block.
     #[test]
     fn prune_partial_progress_mid_block() {
         use alloy_primitives::{Address, U256};
@@ -776,7 +775,6 @@ mod tests {
         );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
-        // Create specific changesets where block 5 has 4 account changes
         let addr1 = Address::with_last_byte(1);
         let addr2 = Address::with_last_byte(2);
         let addr3 = Address::with_last_byte(3);
@@ -785,27 +783,25 @@ mod tests {
 
         let account = Account { nonce: 1, balance: U256::from(100), bytecode_hash: None };
 
-        // Build changesets: blocks 0-4 have 1 change each, block 5 has 4 changes, block 6 has 1
+        // Blocks 0-4: 1 change each; block 5: 4 changes; block 6: 1 change
         let changesets: Vec<ChangeSet> = vec![
-            vec![(addr1, account, vec![])], // block 0
-            vec![(addr1, account, vec![])], // block 1
-            vec![(addr1, account, vec![])], // block 2
-            vec![(addr1, account, vec![])], // block 3
-            vec![(addr1, account, vec![])], // block 4
-            // block 5: 4 different account changes (sorted by address for consistency)
+            vec![(addr1, account, vec![])],
+            vec![(addr1, account, vec![])],
+            vec![(addr1, account, vec![])],
+            vec![(addr1, account, vec![])],
+            vec![(addr1, account, vec![])],
             vec![
                 (addr1, account, vec![]),
                 (addr2, account, vec![]),
                 (addr3, account, vec![]),
                 (addr4, account, vec![]),
             ],
-            vec![(addr5, account, vec![])], // block 6
+            vec![(addr5, account, vec![])],
         ];
 
         db.insert_changesets(changesets.clone(), None).expect("insert changesets");
         db.insert_history(changesets.clone(), None).expect("insert history");
 
-        // Total changesets: 5 (blocks 0-4) + 4 (block 5) + 1 (block 6) = 10
         assert_eq!(
             db.table::<tables::AccountChangeSets>().unwrap().len(),
             changesets.iter().flatten().count()
@@ -813,14 +809,8 @@ mod tests {
 
         let prune_mode = PruneMode::Before(10);
 
-        // Set limiter to stop after 7 entries (mid-block 5: 5 from blocks 0-4, then 2 of 4 from
-        // block 5). Due to ACCOUNT_HISTORY_TABLES_TO_PRUNE=2, actual limit is 7/2=3
-        // changesets. So we'll process blocks 0, 1, 2 (3 changesets), stopping before block
-        // 3. Actually, let's use a higher limit to reach block 5. With limit=14, we get 7
-        // changeset slots. Blocks 0-4 use 5 slots, leaving 2 for block 5 (which has 4), so
-        // we stop mid-block 5.
-        let deleted_entries_limit = 14; // 14/2 = 7 changeset entries before limit
-        let limiter = PruneLimiter::default().set_deleted_entries_limit(deleted_entries_limit);
+        // Limit=14 / 2 tables = 7 entries. Blocks 0-4 (5 entries) + 2 of block 5's 4 = mid-block.
+        let limiter = PruneLimiter::default().set_deleted_entries_limit(14);
 
         let input = PruneInput { previous_checkpoint: None, to_block: 10, limiter };
         let segment = AccountHistory::new(prune_mode);
@@ -831,16 +821,13 @@ mod tests {
         );
         let result = segment.prune(&provider, input).unwrap();
 
-        // Should report that there's more data
-        assert!(!result.progress.is_finished(), "Expected HasMoreData since we stopped mid-block");
+        assert!(!result.progress.is_finished());
 
-        // Save checkpoint and commit
         segment
             .save_checkpoint(&provider, result.checkpoint.unwrap().as_prune_checkpoint(prune_mode))
             .unwrap();
         provider.commit().expect("commit");
 
-        // Verify checkpoint is set to block 4 (not 5), since block 5 is incomplete
         let checkpoint = db
             .factory
             .provider()
@@ -849,28 +836,13 @@ mod tests {
             .unwrap()
             .expect("checkpoint should exist");
 
-        assert_eq!(
-            checkpoint.block_number,
-            Some(4),
-            "Checkpoint should be block 4 (block before incomplete block 5)"
-        );
+        assert_eq!(checkpoint.block_number, Some(4));
 
-        // Verify remaining changesets (block 5 and 6 should still have entries)
         let remaining_changesets = db.table::<tables::AccountChangeSets>().unwrap();
-        // After pruning blocks 0-4, remaining should be block 5 (4 entries) + block 6 (1 entry) = 5
-        // But since we stopped mid-block 5, some of block 5 might be pruned
-        // However, checkpoint is 4, so on re-run we should re-process from block 5
-        assert!(
-            !remaining_changesets.is_empty(),
-            "Should have remaining changesets for blocks 5-6"
-        );
+        assert!(!remaining_changesets.is_empty());
 
-        // Verify no dangling history indices for blocks that weren't fully pruned
-        // The indices for block 5 should still reference blocks <= 5 appropriately
         let history = db.table::<tables::AccountsHistory>().unwrap();
         for (key, _blocks) in &history {
-            // All blocks in the history should be > checkpoint block number
-            // OR the shard's highest_block_number should be > checkpoint
             assert!(
                 key.highest_block_number > 4,
                 "Found stale history shard with highest_block_number {} <= checkpoint 4",
@@ -878,11 +850,10 @@ mod tests {
             );
         }
 
-        // Run prune again to complete - should finish processing block 5 and 6
         let input2 = PruneInput {
             previous_checkpoint: Some(checkpoint),
             to_block: 10,
-            limiter: PruneLimiter::default().set_deleted_entries_limit(100), // high limit
+            limiter: PruneLimiter::default().set_deleted_entries_limit(100),
         };
 
         let provider2 = db.factory.database_provider_rw().unwrap();
@@ -891,7 +862,7 @@ mod tests {
         );
         let result2 = segment.prune(&provider2, input2).unwrap();
 
-        assert!(result2.progress.is_finished(), "Second run should complete");
+        assert!(result2.progress.is_finished());
 
         segment
             .save_checkpoint(
@@ -901,7 +872,6 @@ mod tests {
             .unwrap();
         provider2.commit().expect("commit");
 
-        // Verify final checkpoint
         let final_checkpoint = db
             .factory
             .provider()
@@ -910,11 +880,9 @@ mod tests {
             .unwrap()
             .expect("checkpoint should exist");
 
-        // Should now be at block 6 (the last block with changesets)
-        assert_eq!(final_checkpoint.block_number, Some(6), "Final checkpoint should be at block 6");
+        assert_eq!(final_checkpoint.block_number, Some(6));
 
-        // All changesets should be pruned
         let final_changesets = db.table::<tables::AccountChangeSets>().unwrap();
-        assert!(final_changesets.is_empty(), "All changesets up to block 10 should be pruned");
+        assert!(final_changesets.is_empty());
     }
 }
