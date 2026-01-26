@@ -143,10 +143,10 @@ where
     }
 }
 
-/// Implements the [`LeafValueEncoder`] trait for accounts using a [`CrossbeamSender`] to dispatch
-/// and compute storage roots asynchronously. Can also accept a set of already dispatched account
-/// storage proofs, for cases where it's possible to determine some necessary accounts ahead of
-/// time.
+/// Implements the [`LeafValueEncoder`] trait for accounts.
+///
+/// Accepts a set of pre-dispatched storage proof receivers for accounts whose storage roots are
+/// being computed asynchronously by worker threads.
 ///
 /// For accounts without pre-dispatched proofs or cached roots, uses a shared
 /// [`StorageProofCalculator`] to compute storage roots synchronously, reusing cursors across
