@@ -906,6 +906,110 @@ impl SparseTrie for ParallelSparseTrie {
             subtrie.shrink_values_to(size_per_subtrie);
         }
     }
+
+    fn revealed_node_count(&self) -> usize {
+        let upper_count =
+            self.upper_subtrie.nodes.values().filter(|n| !matches!(n, SparseNode::Hash(_))).count();
+
+        let lower_count: usize = self
+            .lower_subtries
+            .iter()
+            .filter_map(|s| s.as_revealed_ref())
+            .map(|s| s.nodes.values().filter(|n| !matches!(n, SparseNode::Hash(_))).count())
+            .sum();
+
+        upper_count + lower_count
+    }
+
+    fn prune(&mut self, max_depth: usize) {
+        let mut pruned_roots = Vec::<Nibbles>::new();
+        let mut stack = vec![(Nibbles::default(), 0usize)];
+
+        while let Some((path, depth)) = stack.pop() {
+            let Some(subtrie) = self.subtrie_for_path(&path) else { continue };
+            let Some(node) = subtrie.nodes.get(&path) else { continue };
+
+            match node {
+                SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {}
+                SparseNode::Extension { key, .. } => {
+                    let mut child = path;
+                    child.extend(key);
+                    if depth == max_depth {
+                        pruned_roots.push(child);
+                    } else {
+                        stack.push((child, depth + 1));
+                    }
+                }
+                SparseNode::Branch { state_mask, .. } => {
+                    let state_mask = *state_mask;
+                    for nibble in CHILD_INDEX_RANGE {
+                        if state_mask.is_bit_set(nibble) {
+                            let mut child = path;
+                            child.push_unchecked(nibble);
+                            if depth == max_depth {
+                                pruned_roots.push(child);
+                            } else {
+                                stack.push((child, depth + 1));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if pruned_roots.is_empty() {
+            return;
+        }
+
+        let mut effective_pruned_roots = Vec::<Nibbles>::with_capacity(pruned_roots.len());
+        for path in &pruned_roots {
+            let hash = self
+                .subtrie_for_path(path)
+                .and_then(|s| s.nodes.get(path))
+                .filter(|n| !matches!(n, SparseNode::Hash(_)))
+                .and_then(|n| n.hash());
+
+            if let Some(hash) = hash {
+                let subtrie = self.subtrie_for_path_mut(path);
+                subtrie.nodes.insert(*path, SparseNode::Hash(hash));
+                effective_pruned_roots.push(*path);
+            }
+        }
+
+        if effective_pruned_roots.is_empty() {
+            return;
+        }
+
+        if self.updates.is_some() {
+            self.updates = Some(SparseTrieUpdates::default());
+        }
+        self.prefix_set.clear();
+
+        effective_pruned_roots.sort();
+
+        let is_strict_descendant = |p: &Nibbles| -> bool {
+            let idx = effective_pruned_roots.partition_point(|root| root <= p);
+            if idx > 0 {
+                let candidate = &effective_pruned_roots[idx - 1];
+                if p.starts_with(candidate) && p.len() > candidate.len() {
+                    return true;
+                }
+            }
+            false
+        };
+
+        self.upper_subtrie.nodes.retain(|p, _| !is_strict_descendant(p));
+        self.upper_subtrie.inner.values.retain(|p, _| !is_strict_descendant(p));
+
+        for subtrie in &mut self.lower_subtries {
+            if let Some(s) = subtrie.as_revealed_mut() {
+                s.nodes.retain(|p, _| !is_strict_descendant(p));
+                s.inner.values.retain(|p, _| !is_strict_descendant(p));
+            }
+        }
+
+        self.branch_node_masks.retain(|p, _| !is_strict_descendant(p));
+    }
 }
 
 impl SparseTrieExt for ParallelSparseTrie {

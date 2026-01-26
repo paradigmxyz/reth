@@ -1096,6 +1096,105 @@ impl SparseTrieTrait for SerialSparseTrie {
     fn shrink_values_to(&mut self, size: usize) {
         self.values.shrink_to(size);
     }
+
+    fn revealed_node_count(&self) -> usize {
+        self.nodes.values().filter(|n| !matches!(n, SparseNode::Hash(_))).count()
+    }
+
+    fn prune(&mut self, max_depth: usize) {
+        let mut pruned_roots = Vec::<Nibbles>::new();
+        let mut stack = vec![(Nibbles::default(), 0usize)];
+
+        while let Some((path, depth)) = stack.pop() {
+            let Some(node) = self.nodes.get(&path) else { continue };
+
+            match node {
+                SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {}
+                SparseNode::Extension { key, .. } => {
+                    let mut child = path;
+                    child.extend(key);
+                    if depth == max_depth {
+                        pruned_roots.push(child);
+                    } else {
+                        stack.push((child, depth + 1));
+                    }
+                }
+                SparseNode::Branch { state_mask, .. } => {
+                    for nibble in CHILD_INDEX_RANGE {
+                        if state_mask.is_bit_set(nibble) {
+                            let mut child = path;
+                            child.push_unchecked(nibble);
+                            if depth == max_depth {
+                                pruned_roots.push(child);
+                            } else {
+                                stack.push((child, depth + 1));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if pruned_roots.is_empty() {
+            return;
+        }
+
+        // Build effective_pruned_roots from only nodes that were actually converted to Hash nodes.
+        // Embedded nodes (RLP < 32 bytes) have no hash and must keep their children.
+        let mut effective_pruned_roots = Vec::<Nibbles>::with_capacity(pruned_roots.len());
+        for path in &pruned_roots {
+            if let Some(node) = self.nodes.get(path) &&
+                !matches!(node, SparseNode::Hash(_)) &&
+                let Some(hash) = node.hash()
+            {
+                self.nodes.insert(*path, SparseNode::Hash(hash));
+                effective_pruned_roots.push(*path);
+            }
+        }
+
+        if effective_pruned_roots.is_empty() {
+            return;
+        }
+
+        // Clear state only after we know we have work to do
+        if self.updates.is_some() {
+            self.updates = Some(SparseTrieUpdates::default());
+        }
+        self.prefix_set.clear();
+
+        // Sort for binary search
+        effective_pruned_roots.sort();
+
+        let is_strict_descendant = |p: &Nibbles| -> bool {
+            let idx = effective_pruned_roots.partition_point(|root| root <= p);
+            if idx > 0 {
+                let candidate = &effective_pruned_roots[idx - 1];
+                if p.starts_with(candidate) && p.len() > candidate.len() {
+                    return true;
+                }
+            }
+            false
+        };
+
+        let starts_with_pruned = |p: &Nibbles| -> bool {
+            let idx = effective_pruned_roots.partition_point(|root| root <= p);
+            if idx > 0 {
+                let candidate = &effective_pruned_roots[idx - 1];
+                if p.starts_with(candidate) {
+                    return true;
+                }
+            }
+            false
+        };
+
+        self.nodes.retain(|p, _| !is_strict_descendant(p));
+
+        // Remove values under pruned roots (full leaf paths)
+        self.values.retain(|p, _| !starts_with_pruned(p));
+
+        // Remove branch masks under pruned roots
+        self.branch_node_masks.retain(|p, _| !starts_with_pruned(p));
+    }
 }
 
 impl SerialSparseTrie {
@@ -3722,5 +3821,220 @@ Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
 ";
 
         assert_eq!(alternate_printed, expected);
+    }
+
+    fn large_account_value() -> Vec<u8> {
+        let account = Account {
+            nonce: 0x123456789abcdef,
+            balance: alloy_primitives::U256::from(0x123456789abcdef0123456789abcdef_u128),
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        account.into_trie_account(EMPTY_ROOT_HASH).encode(&mut buf);
+        buf
+    }
+
+    #[test]
+    fn test_prune_at_depth_0() {
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+
+        let value = large_account_value();
+
+        // Create a trie with many leaves to ensure branches have large RLP (>= 32 bytes)
+        // which will cause hashes to be stored
+        for i in 0..16u8 {
+            sparse
+                .update_leaf(
+                    Nibbles::from_nibbles([i, 0x2, 0x3, 0x4, 0x5, 0x6]),
+                    value.clone(),
+                    &provider,
+                )
+                .unwrap();
+        }
+
+        // Compute hashes
+        let root_before = sparse.root();
+        let nodes_before = sparse.revealed_node_count();
+
+        // Prune at depth 0: root's direct children should become Hash nodes
+        sparse.prune(0);
+
+        // Verify root hash unchanged
+        let root_after = sparse.root();
+        assert_eq!(root_before, root_after, "root hash should be preserved after prune");
+
+        // Verify nodes reduced
+        let nodes_after = sparse.revealed_node_count();
+        assert!(nodes_after < nodes_before, "node count should decrease after prune at depth 0");
+
+        // After pruning at depth 0, only the root branch should remain as non-Hash
+        assert_eq!(nodes_after, 1, "only root should be revealed after prune(0)");
+    }
+
+    #[test]
+    fn test_prune_at_depth_2() {
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+
+        let value = large_account_value();
+
+        // Build a deeper trie with multiple branches at each level
+        // to ensure hashes are stored (RLP >= 32 bytes)
+        for i in 0..4u8 {
+            for j in 0..4u8 {
+                for k in 0..4u8 {
+                    sparse
+                        .update_leaf(
+                            Nibbles::from_nibbles([i, j, k, 0x1, 0x2, 0x3]),
+                            value.clone(),
+                            &provider,
+                        )
+                        .unwrap();
+                }
+            }
+        }
+
+        // Compute hashes
+        let root_before = sparse.root();
+        let nodes_before = sparse.revealed_node_count();
+
+        // Prune at depth 2: retain nodes at depth 0,1,2
+        sparse.prune(2);
+
+        // Verify root hash unchanged
+        let root_after = sparse.root();
+        assert_eq!(root_before, root_after, "root hash should be preserved after prune");
+
+        // Verify nodes reduced
+        let nodes_after = sparse.revealed_node_count();
+        assert!(nodes_after < nodes_before, "node count should decrease with deep trie");
+    }
+
+    #[test]
+    fn test_prune_empty_trie() {
+        let mut sparse = SerialSparseTrie::default();
+
+        // Should not panic on empty trie
+        sparse.prune(2);
+
+        // Verify trie is still valid
+        let root = sparse.root();
+        assert_eq!(root, EMPTY_ROOT_HASH, "empty trie should have empty root hash");
+    }
+
+    #[test]
+    fn test_prune_preserves_root_hash() {
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+
+        let value = large_account_value();
+
+        // Create trie with many leaves to ensure hashes are stored
+        for i in 0..8u8 {
+            for j in 0..4u8 {
+                sparse
+                    .update_leaf(
+                        Nibbles::from_nibbles([i, j, 0x3, 0x4, 0x5, 0x6]),
+                        value.clone(),
+                        &provider,
+                    )
+                    .unwrap();
+            }
+        }
+
+        // Compute initial root hash
+        let root_before = sparse.root();
+
+        // Prune at depth 1
+        sparse.prune(1);
+
+        // Recompute root hash - should be unchanged
+        let root_after = sparse.root();
+        assert_eq!(root_before, root_after, "root hash must be preserved after prune");
+    }
+
+    #[test]
+    fn test_revealed_node_count() {
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+
+        let value = large_account_value();
+
+        // Empty trie has 1 revealed node (Empty root)
+        assert_eq!(sparse.revealed_node_count(), 1);
+
+        // Add many leaves to create a large trie with hashes
+        for i in 0..16u8 {
+            sparse
+                .update_leaf(
+                    Nibbles::from_nibbles([i, 0x2, 0x3, 0x4, 0x5, 0x6]),
+                    value.clone(),
+                    &provider,
+                )
+                .unwrap();
+        }
+
+        let nodes_before = sparse.revealed_node_count();
+        // Should have root branch + 16 leaves = 17 nodes minimum
+        assert!(nodes_before >= 17, "should have at least root + 16 leaves");
+
+        // Compute hashes before pruning
+        sparse.root();
+
+        // Prune
+        sparse.prune(0);
+
+        let nodes_after = sparse.revealed_node_count();
+        assert!(nodes_after < nodes_before, "prune should reduce node count");
+        // After prune(0), only root is revealed, children become Hash nodes
+        assert_eq!(nodes_after, 1, "only root should remain revealed after prune(0)");
+    }
+
+    #[test]
+    fn test_prune_single_leaf_trie() {
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+
+        let value = large_account_value();
+
+        // Single leaf trie - note: root is just a leaf, no children to prune
+        sparse.update_leaf(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), value, &provider).unwrap();
+
+        let root_before = sparse.root();
+        let nodes_before = sparse.revealed_node_count();
+
+        // Prune at depth 0 - single leaf at root has no children, should not change
+        sparse.prune(0);
+
+        let root_after = sparse.root();
+        assert_eq!(root_before, root_after, "root hash should be preserved");
+
+        let nodes_after = sparse.revealed_node_count();
+        assert_eq!(nodes_after, nodes_before, "single leaf trie should not change");
+    }
+
+    #[test]
+    fn test_prune_deep_depth_no_effect() {
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+
+        let value = large_account_value();
+
+        // Create trie with multiple leaves
+        for i in 0..4u8 {
+            sparse
+                .update_leaf(Nibbles::from_nibbles([i, 0x2, 0x3, 0x4]), value.clone(), &provider)
+                .unwrap();
+        }
+
+        sparse.root();
+        let nodes_before = sparse.revealed_node_count();
+
+        // Prune at depth 100 - should have no effect as trie is shallow
+        sparse.prune(100);
+
+        let nodes_after = sparse.revealed_node_count();
+        assert_eq!(nodes_before, nodes_after, "deep prune should not affect shallow trie");
     }
 }
