@@ -893,7 +893,7 @@ mod tests {
         provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
         let blob_store = InMemoryBlobStore::default();
         let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
-            .build::<_, _>(blob_store.clone());
+            .build(blob_store.clone());
 
         let txpool = Pool::new(
             validator,

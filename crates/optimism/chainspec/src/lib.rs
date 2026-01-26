@@ -66,8 +66,7 @@ use alloy_primitives::{B256, U256};
 use derive_more::{Constructor, Deref, From, Into};
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
-    DisplayHardforks, EthChainSpec, EthereumHardforks, EvmLimitParams, EvmLimitParamsKind,
-    ForkFilter, ForkId, Hardforks, Head,
+    DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 use reth_network_peers::NodeRecord;
@@ -246,10 +245,6 @@ impl EthChainSpec for OpChainSpec {
 
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         self.inner.base_fee_params_at_timestamp(timestamp)
-    }
-
-    fn evm_limit_params_at_timestamp(&self, timestamp: u64) -> EvmLimitParams {
-        self.inner.evm_limit_params_at_timestamp(timestamp)
     }
 
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
@@ -437,7 +432,6 @@ impl From<Genesis> for OpChainSpec {
                 // zero
                 paris_block_and_final_difficulty: Some((0, U256::ZERO)),
                 base_fee_params: optimism_genesis_info.base_fee_params,
-                evm_limit_params: EvmLimitParamsKind::default(),
                 ..Default::default()
             },
         }
@@ -1350,41 +1344,5 @@ mod tests {
         for eth_hf in EthereumHardfork::VARIANTS {
             assert!(!content.contains(eth_hf.name()));
         }
-    }
-
-    #[test]
-    fn test_variable_evm_limits_with_custom_hardfork() {
-        use reth_chainspec::{
-            hardfork, EvmLimitParams, EvmLimitParamsKind, ForkEvmLimitParams, Hardfork,
-        };
-
-        hardfork!(CustomFork { ExpandedLimits });
-
-        let default_limits = EvmLimitParams::default();
-        let modified_limits = EvmLimitParams {
-            max_code_size: default_limits.max_code_size * 2,
-            max_initcode_size: default_limits.max_initcode_size * 2,
-            tx_gas_limit_cap: Some(30_000_000),
-        };
-
-        let mut op_spec = OpChainSpecBuilder::base_mainnet()
-            .with_fork(CustomFork::ExpandedLimits, ForkCondition::Timestamp(1000))
-            .build();
-        op_spec.inner.evm_limit_params = EvmLimitParamsKind::Variable(ForkEvmLimitParams(vec![
-            (OpHardfork::Bedrock.boxed(), default_limits),
-            (CustomFork::ExpandedLimits.boxed(), modified_limits),
-        ]));
-
-        // Before custom fork: default limits
-        let before = op_spec.evm_limit_params_at_timestamp(999);
-        assert_eq!(before.max_code_size, default_limits.max_code_size);
-        assert_eq!(before.max_initcode_size, default_limits.max_initcode_size);
-        assert_eq!(before.tx_gas_limit_cap, None);
-
-        // After custom fork: modified limits
-        let after = op_spec.evm_limit_params_at_timestamp(1000);
-        assert_eq!(after.max_code_size, modified_limits.max_code_size);
-        assert_eq!(after.max_initcode_size, modified_limits.max_initcode_size);
-        assert_eq!(after.tx_gas_limit_cap, modified_limits.tx_gas_limit_cap);
     }
 }

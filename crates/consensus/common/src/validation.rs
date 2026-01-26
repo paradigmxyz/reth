@@ -1,12 +1,11 @@
 //! Collection of methods for block validation.
 
-use alloy_consensus::{BlockHeader as _, Transaction, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
-use reth_consensus::{ConsensusError, TxGasLimitTooHighErr};
+use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
-    transaction::TxHashRef,
     Block, BlockBody, BlockHeader, GotExpected, SealedBlock, SealedHeader,
 };
 
@@ -151,20 +150,6 @@ where
     // Check transaction root
     if let Err(error) = block.ensure_transaction_root_valid() {
         return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
-    }
-    // EIP-7825 transaction gas limit validation
-    let evm_limits = chain_spec.evm_limit_params_at_timestamp(block.timestamp());
-    if let Some(tx_gas_cap) = evm_limits.tx_gas_limit_cap {
-        for tx in block.body().transactions() {
-            if tx.gas_limit() > tx_gas_cap {
-                return Err(TxGasLimitTooHighErr {
-                    tx_hash: *tx.tx_hash(),
-                    gas_limit: tx.gas_limit(),
-                    max_allowed: tx_gas_cap,
-                }
-                .into());
-            }
-        }
     }
 
     Ok(())

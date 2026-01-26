@@ -4,7 +4,7 @@ use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
 use alloc::{sync::Arc, vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_primitives::{b256, U256};
-use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec, EvmLimitParamsKind, Hardfork};
+use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
 use reth_ethereum_forks::EthereumHardfork;
 use reth_optimism_forks::{OpHardfork, OP_SEPOLIA_HARDFORKS};
 use reth_primitives_traits::SealedHeader;
@@ -32,7 +32,6 @@ pub static OP_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
                 .into(),
             ),
             prune_delete_limit: 10000,
-            evm_limit_params: EvmLimitParamsKind::default(),
             ..Default::default()
         },
     }

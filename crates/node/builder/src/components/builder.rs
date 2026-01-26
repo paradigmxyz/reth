@@ -62,12 +62,12 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
             pool_builder,
             payload_builder,
             network_builder,
-            executor_builder: evm_builder,
+            executor_builder,
             consensus_builder,
             _marker,
         } = self;
         ComponentsBuilder {
-            executor_builder: evm_builder,
+            executor_builder,
             pool_builder,
             payload_builder,
             network_builder,
@@ -154,7 +154,7 @@ where
             pool_builder: _,
             payload_builder,
             network_builder,
-            executor_builder: evm_builder,
+            executor_builder,
             consensus_builder,
             _marker,
         } = self;
@@ -162,7 +162,7 @@ where
             pool_builder,
             payload_builder,
             network_builder,
-            executor_builder: evm_builder,
+            executor_builder,
             consensus_builder,
             _marker,
         }
@@ -264,7 +264,7 @@ where
             pool_builder,
             payload_builder,
             network_builder: _,
-            executor_builder: evm_builder,
+            executor_builder,
             consensus_builder,
             _marker,
         } = self;
@@ -272,7 +272,7 @@ where
             pool_builder,
             payload_builder,
             network_builder,
-            executor_builder: evm_builder,
+            executor_builder,
             consensus_builder,
             _marker,
         }
@@ -293,7 +293,7 @@ where
             pool_builder,
             payload_builder: _,
             network_builder,
-            executor_builder: evm_builder,
+            executor_builder,
             consensus_builder,
             _marker,
         } = self;
@@ -301,7 +301,7 @@ where
             pool_builder,
             payload_builder,
             network_builder,
-            executor_builder: evm_builder,
+            executor_builder,
             consensus_builder,
             _marker,
         }
@@ -380,12 +380,12 @@ where
             pool_builder,
             payload_builder,
             network_builder,
-            executor_builder: evm_builder,
+            executor_builder,
             consensus_builder,
             _marker,
         } = self;
 
-        let evm_config = evm_builder.build_evm(context).await?;
+        let evm_config = executor_builder.build_evm(context).await?;
         let pool = pool_builder.build_pool(context, evm_config.clone()).await?;
         let network = network_builder.build_network(context, pool.clone()).await?;
         let payload_builder_handle = payload_builder
