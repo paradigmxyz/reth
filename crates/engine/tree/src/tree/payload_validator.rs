@@ -773,13 +773,12 @@ where
                 .as_ref()
                 .map(|bal| alloy_eips::eip7928::compute_block_access_list_hash(bal));
 
-            if expected_hash != built_hash {
-                return Err(InsertBlockErrorKind::Consensus(
-                    ConsensusError::BlockAccessListHashMismatch {
-                        got: built_hash,
-                        expected: expected_hash,
-                    },
-                ));
+            if let (Some(expected), Some(got)) = (expected_hash, built_hash) {
+                if expected != got {
+                    return Err(InsertBlockErrorKind::Consensus(
+                        ConsensusError::BlockAccessListHashMismatch((got, expected).into()),
+                    ));
+                }
             }
         }
 
