@@ -981,8 +981,23 @@ where
     /// Storage tries not in the top `max_storage_tries` by revealed node count are cleared
     /// entirely.
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
+        #[cfg(feature = "metrics")]
+        let account_nodes_converted: u64;
+
         if let SparseTrie::Revealed(trie) = &mut self.state {
-            trie.prune(max_depth);
+            #[cfg(feature = "metrics")]
+            {
+                account_nodes_converted = trie.prune(max_depth) as u64;
+            }
+            #[cfg(not(feature = "metrics"))]
+            {
+                trie.prune(max_depth);
+            }
+        } else {
+            #[cfg(feature = "metrics")]
+            {
+                account_nodes_converted = 0;
+            }
         }
         self.revealed_account_paths.clear();
 
@@ -1013,17 +1028,55 @@ where
             .copied()
             .collect();
 
+        #[cfg(feature = "metrics")]
+        let tries_cleared_count = tries_to_clear.len() as u64;
+
         for hash in tries_to_clear {
             if let Some(trie) = self.storage.tries.remove(&hash) {
                 self.storage.cleared_tries.push(trie.clear());
             }
-            self.storage.revealed_paths.remove(&hash);
+            if let Some(mut paths) = self.storage.revealed_paths.remove(&hash) {
+                paths.clear();
+                self.storage.cleared_revealed_paths.push(paths);
+            }
         }
+
+        #[cfg(feature = "metrics")]
+        let mut storage_nodes_converted = 0u64;
 
         for hash in &tries_to_keep {
             if let Some(SparseTrie::Revealed(trie)) = self.storage.tries.get_mut(hash) {
-                trie.prune(max_depth);
+                #[cfg(feature = "metrics")]
+                {
+                    storage_nodes_converted += trie.prune(max_depth) as u64;
+                }
+                #[cfg(not(feature = "metrics"))]
+                {
+                    trie.prune(max_depth);
+                }
             }
+            if let Some(mut paths) = self.storage.revealed_paths.remove(hash) {
+                paths.clear();
+                self.storage.cleared_revealed_paths.push(paths);
+            }
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.prune_account_nodes_converted = account_nodes_converted;
+            self.metrics.prune_storage_nodes_converted = storage_nodes_converted;
+            self.metrics.prune_storage_tries_cleared = tries_cleared_count;
+            self.metrics.prune_storage_tries_retained = tries_to_keep.len() as u64;
+            self.metrics.post_prune_account_nodes =
+                self.state.as_revealed_ref().map(|t| t.revealed_node_count()).unwrap_or(0) as u64;
+            self.metrics.post_prune_storage_nodes = self
+                .storage
+                .tries
+                .values()
+                .filter_map(|t| t.as_revealed_ref())
+                .map(|t| t.revealed_node_count() as u64)
+                .sum();
+            self.metrics.record_prune();
         }
     }
 }

@@ -256,10 +256,14 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// * `max_depth` - Maximum depth to retain. Nodes at depth > `max_depth` are pruned.
     ///
+    /// # Returns
+    ///
+    /// The number of nodes that were converted to hash stubs.
+    ///
     /// # Panics
     ///
     /// May panic if called before `root()` has been called (hashes not available).
-    fn prune(&mut self, max_depth: usize);
+    fn prune(&mut self, max_depth: usize) -> usize;
 }
 
 /// Extension trait for sparse tries that support pruning.
