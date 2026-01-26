@@ -7,7 +7,7 @@ use crate::{
 use alloy_rlp::EMPTY_STRING_CODE;
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie_common::HashedPostState;
-use reth_trie_sparse::SparseTrieInterface;
+use reth_trie_sparse::SparseTrie;
 
 use alloy_primitives::{
     keccak256,
