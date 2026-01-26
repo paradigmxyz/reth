@@ -159,10 +159,11 @@ where
     let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(attributes.timestamp());
 
     // Build state with BAL builder enabled when Amsterdam is active
-    let state_builder =
-        State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update();
-    let mut db =
-        if is_amsterdam { state_builder.with_bal_builder().build() } else { state_builder.build() };
+    let mut db = State::builder()
+        .with_database(cached_reads.as_db_mut(state))
+        .with_bundle_update()
+        .with_bal_builder_if(is_amsterdam)
+        .build();
 
     let mut builder = evm_config
         .builder_for_next_block(

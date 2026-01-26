@@ -689,12 +689,12 @@ where
 
         // Enable BAL builder if block access list is present in the payload
         let has_bal = input.block_access_list().is_some();
-        let state_builder = State::builder()
+        let mut db = State::builder()
             .with_database(StateProviderDatabase::new(state_provider))
             .with_bundle_update()
-            .without_state_clear();
-        let mut db =
-            if has_bal { state_builder.with_bal_builder().build() } else { state_builder.build() };
+            .without_state_clear()
+            .with_bal_builder_if(has_bal)
+            .build();
 
         let spec_id = *env.evm_env.spec_id();
         let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
