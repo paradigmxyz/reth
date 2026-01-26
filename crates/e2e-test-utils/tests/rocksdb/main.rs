@@ -1,7 +1,7 @@
-//! E2E tests for RocksDB provider functionality.
+//! E2E tests for `RocksDB` provider functionality.
 //!
-//! These tests verify that reth can start and operate correctly with RocksDB
-//! enabled for various tables instead of the default MDBX storage.
+//! These tests verify that reth can start and operate correctly with `RocksDB`
+//! enabled for various tables instead of the default `MDBX` storage.
 
 #![cfg(all(feature = "edge", unix))]
 
@@ -18,19 +18,19 @@ use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use std::sync::Arc;
 
-/// Helper function to enable RocksDB for all supported tables.
+/// Helper function to enable `RocksDB` for all supported tables.
 ///
 /// This modifies the node configuration to route tx-hash, storages-history,
-/// and account-history tables to RocksDB instead of MDBX.
+/// and account-history tables to `RocksDB` instead of `MDBX`.
 fn with_rocksdb_enabled<C>(mut config: NodeConfig<C>) -> NodeConfig<C> {
     config.rocksdb =
         RocksDbArgs { all: true, tx_hash: true, storages_history: true, account_history: true };
     config
 }
 
-/// Test that a node with RocksDB enabled can start up and shut down cleanly.
+/// Test that a node with `RocksDB` enabled can start up and shut down cleanly.
 ///
-/// This is a minimal smoke test to verify that the RocksDB provider integration
+/// This is a minimal smoke test to verify that the `RocksDB` provider integration
 /// works correctly at a basic level.
 #[tokio::test]
 async fn test_rocksdb_node_startup() -> Result<()> {
@@ -72,9 +72,9 @@ async fn test_rocksdb_node_startup() -> Result<()> {
     Ok(())
 }
 
-/// Test that a node with RocksDB enabled can mine blocks and advance the chain.
+/// Test that a node with `RocksDB` enabled can mine blocks and advance the chain.
 ///
-/// This verifies that block production works correctly when using RocksDB
+/// This verifies that block production works correctly when using `RocksDB`
 /// for storage, including proper state transitions and block persistence.
 #[tokio::test]
 async fn test_rocksdb_block_mining() -> Result<()> {
@@ -131,9 +131,9 @@ async fn test_rocksdb_block_mining() -> Result<()> {
     Ok(())
 }
 
-/// Test that a node with RocksDB enabled correctly stores and retrieves transactions.
+/// Test that a node with `RocksDB` enabled correctly stores and retrieves transactions.
 ///
-/// This verifies that the TransactionHashNumbers RocksDB table works correctly
+/// This verifies that the `TransactionHashNumbers` `RocksDB` table works correctly
 /// by injecting transactions, mining blocks, and then querying the transactions
 /// via RPC to ensure they can be looked up by hash.
 #[tokio::test]
