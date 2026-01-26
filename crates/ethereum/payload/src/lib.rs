@@ -161,11 +161,8 @@ where
     // Build state with BAL builder enabled when Amsterdam is active
     let state_builder =
         State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update();
-    let mut db = if is_amsterdam {
-        state_builder.with_bal_builder().build()
-    } else {
-        state_builder.build()
-    };
+    let mut db =
+        if is_amsterdam { state_builder.with_bal_builder().build() } else { state_builder.build() };
 
     let mut builder = evm_config
         .builder_for_next_block(
@@ -369,7 +366,7 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, .. } =
+    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } =
         builder.finish(state_provider.as_ref())?;
 
     let requests = chain_spec
@@ -386,9 +383,10 @@ where
         }));
     }
 
-    let payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests, None)
-        // add blob sidecars from the executed txs
-        .with_sidecars(blob_sidecars);
+    let payload =
+        EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests, block_access_list)
+            // add blob sidecars from the executed txs
+            .with_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }

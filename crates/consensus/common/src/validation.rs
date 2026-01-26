@@ -88,7 +88,7 @@ pub fn validate_cancun_gas<B: Block>(block: &SealedBlock<B>) -> Result<(), Conse
 
 /// Validate that Amsterdam header fields are present in the block.
 ///
-/// This checks that the block_access_list_hash and slot_number are set in the header,
+/// This checks that the `block_access_list_hash` and `slot_number` are set in the header,
 /// as required post-Amsterdam.
 ///
 /// See [EIP-7928]: Block-level Access Lists

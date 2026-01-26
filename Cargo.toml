@@ -818,9 +818,9 @@ revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "0dc217a9d2c
 op-revm = { git = "https://github.com/bluealloy/revm", rev = "0dc217a9d2c470c533ef8d7a51396e4fb2b02008" }
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "fccc4ac50775f5eac9a766725507dc3d6a47804b" }
 
-# alloy-evm bal-devnet2 patches (pinned to before block_access_list in BlockExecutionResult)
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "3df0a06" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "3df0a06" }
+# alloy-evm bal-devnet2 patches
+alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "bal-devnet2" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", branch = "bal-devnet2" }
 
 # alloy bal-devnet2 patches
 alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
