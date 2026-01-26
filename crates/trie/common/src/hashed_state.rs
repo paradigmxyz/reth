@@ -524,9 +524,13 @@ impl HashedStorage {
 
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
-        let mut storage_slots: Vec<_> = self.storage.into_iter().collect();
+        let mut has_non_zero = false;
+        let mut storage_slots: Vec<_> = self
+            .storage
+            .into_iter()
+            .inspect(|(_, v)| has_non_zero = has_non_zero || *v != U256::ZERO)
+            .collect();
         storage_slots.sort_unstable_by_key(|(key, _)| *key);
-        let has_non_zero = storage_slots.iter().any(|(_, v)| *v != U256::ZERO);
 
         HashedStorageSorted { storage_slots, wiped: self.wiped, has_non_zero }
     }
@@ -534,9 +538,14 @@ impl HashedStorage {
     /// Creates a sorted copy without consuming self.
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedStorageSorted {
-        let mut storage_slots: Vec<_> = self.storage.iter().map(|(&k, &v)| (k, v)).collect();
+        let mut has_non_zero = false;
+        let mut storage_slots: Vec<_> = self
+            .storage
+            .iter()
+            .inspect(|(_, v)| has_non_zero = has_non_zero || **v != U256::ZERO)
+            .map(|(&k, &v)| (k, v))
+            .collect();
         storage_slots.sort_unstable_by_key(|(key, _)| *key);
-        let has_non_zero = storage_slots.iter().any(|(_, v)| *v != U256::ZERO);
 
         HashedStorageSorted { storage_slots, wiped: self.wiped, has_non_zero }
     }
