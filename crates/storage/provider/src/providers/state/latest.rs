@@ -195,14 +195,3 @@ impl<Provider: DBProvider> LatestStateProvider<Provider> {
 
 // Delegates all provider impls to [LatestStateProviderRef]
 reth_storage_api::macros::delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvider + BlockHashReader ]);
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const fn assert_state_provider<T: StateProvider>() {}
-    #[expect(dead_code)]
-    const fn assert_latest_state_provider<T: DBProvider + BlockHashReader>() {
-        assert_state_provider::<LatestStateProvider<T>>();
-    }
-}
