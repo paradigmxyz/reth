@@ -17,11 +17,14 @@ reth-chain-state.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-chainspec.workspace = true
 reth-eth-wire-types.workspace = true
+reth-evm.workspace = true
+reth-evm-ethereum.workspace = true
 reth-primitives-traits.workspace = true
 reth-execution-types.workspace = true
 reth-fs-util.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
+revm.workspace = true
 revm-interpreter.workspace = true
 revm-primitives.workspace = true
 
@@ -92,6 +95,7 @@ serde = [
     "reth-ethereum-primitives/serde",
     "reth-chain-state/serde",
     "reth-storage-api/serde",
+    "revm/serde",
 ]
 test-utils = [
     "rand",
@@ -103,6 +107,8 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-ethereum-primitives/test-utils",
     "alloy-primitives/rand",
+    "reth-evm/test-utils",
+    "reth-evm-ethereum/test-utils",
 ]
 arbitrary = [
     "proptest",
@@ -118,6 +124,7 @@ arbitrary = [
     "revm-interpreter/arbitrary",
     "reth-ethereum-primitives/arbitrary",
     "revm-primitives/arbitrary",
+    "revm/arbitrary",
 ]
 
 [[bench]]
