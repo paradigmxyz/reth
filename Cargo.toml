@@ -487,7 +487,7 @@ revm-inspectors = "0.34.0"
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-dyn-abi = "1.5.2"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-eip7928 = { version = "0.3.0", default-features = false }
+alloy-eip7928 = { version = "0.3.0", default-features = false, features = ["rlp"] }
 alloy-evm = { version = "0.27.0", default-features = false }
 alloy-primitives = { version = "1.5.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
@@ -798,7 +798,11 @@ ipnet = "2.11"
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
 # alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
 
-# staging patches
+# =============================================================================
+# BAL devnet2 patches (EIP-7778, EIP-7928 block access lists)
+# =============================================================================
+
+# revm staging patches
 revm = { git = "https://github.com/bluealloy/revm", rev = "0dc217a9d2c470c533ef8d7a51396e4fb2b02008" }
 revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "0dc217a9d2c470c533ef8d7a51396e4fb2b02008" }
 revm-database = { git = "https://github.com/bluealloy/revm", rev = "0dc217a9d2c470c533ef8d7a51396e4fb2b02008" }
@@ -813,5 +817,26 @@ revm-handler = { git = "https://github.com/bluealloy/revm", rev = "0dc217a9d2c47
 revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "0dc217a9d2c470c533ef8d7a51396e4fb2b02008" }
 op-revm = { git = "https://github.com/bluealloy/revm", rev = "0dc217a9d2c470c533ef8d7a51396e4fb2b02008" }
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "fccc4ac50775f5eac9a766725507dc3d6a47804b" }
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "33e82b9777d99ad8ce1ccd8c59817999fa0dfdec" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "33e82b9777d99ad8ce1ccd8c59817999fa0dfdec" }
+
+# alloy-evm bal-devnet2 patches
+alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "bal-devnet2" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", branch = "bal-devnet2" }
+
+# alloy bal-devnet2 patches
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-serde = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", branch = "bal-devnet2" }
+
+# op-alloy bal-devnet2 patches
+op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", branch = "bal-devnet2" }
+op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", branch = "bal-devnet2" }
+op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", branch = "bal-devnet2" }
+op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", branch = "bal-devnet2" }

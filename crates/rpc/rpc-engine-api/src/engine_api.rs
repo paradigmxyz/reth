@@ -256,6 +256,39 @@ where
     pub fn accept_execution_requests_hash(&self) -> bool {
         self.inner.accept_execution_requests_hash
     }
+
+    /// New payload version 5
+    pub async fn new_payload_v5(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> EngineApiResult<PayloadStatus> {
+        let payload_or_attrs = PayloadOrAttributes::<
+            '_,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
+        >::from_execution_payload(&payload);
+        self.inner.validator.validate_version_specific_fields(
+            EngineApiMessageVersion::V6,
+            /* //todo */
+            payload_or_attrs,
+        )?;
+
+        Ok(self.inner.beacon_consensus.new_payload(payload).await?)
+    }
+
+    /// Metrics version of `new_payload_v5`
+    pub async fn new_payload_v5_metered(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> RpcResult<PayloadStatus> {
+        let start = Instant::now();
+
+        let res = Self::new_payload_v5(self, payload).await;
+
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v5.record(elapsed);
+        Ok(res?)
+    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
@@ -513,6 +546,27 @@ where
         let start = Instant::now();
         let res = Self::get_payload_v5(self, payload_id).await;
         self.inner.metrics.latency.get_payload_v5.record(start.elapsed());
+        res
+    }
+
+    /// Handler for `engine_getPayloadV6`
+    ///
+    /// For BAL
+    pub async fn get_payload_v6(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV6> {
+        self.get_payload_inner(payload_id, EngineApiMessageVersion::V6).await
+    }
+
+    /// Metrics version of `get_payload_v6`
+    pub async fn get_payload_v6_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV6> {
+        let start = Instant::now();
+        let res = Self::get_payload_v6(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v6.record(start.elapsed());
         res
     }
 
@@ -964,21 +1018,29 @@ where
     }
 
     /// Handler for `engine_newPayloadV5`
-    ///
-    /// Post Amsterdam payload handler. Currently returns unsupported fork error.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
     async fn new_payload_v5(
         &self,
-        _payload: ExecutionPayloadV4,
-        _versioned_hashes: Vec<B256>,
-        _parent_beacon_block_root: B256,
-        _execution_requests: RequestsOrHash,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV5");
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
+
+        // Accept requests as a hash only if it is explicitly allowed
+        if requests.is_hash() && !self.inner.accept_execution_requests_hash {
+            return Err(EngineApiError::UnexpectedRequestsHash.into());
+        }
+
+        let payload = ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+                PraguePayloadFields { requests },
+            ),
+        };
+
+        Ok(self.new_payload_v5_metered(payload).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
@@ -1105,18 +1167,12 @@ where
     }
 
     /// Handler for `engine_getPayloadV6`
-    ///
-    /// Post Amsterdam payload handler. Currently returns unsupported fork error.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6>
     async fn get_payload_v6(
         &self,
-        _payload_id: PayloadId,
+        payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV6> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV6");
-        Err(EngineApiError::EngineObjectValidationError(
-            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
+        Ok(self.get_payload_v6_metered(payload_id).await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`
