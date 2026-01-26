@@ -66,13 +66,17 @@ use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 #[non_exhaustive]
 pub struct TestPoolBuilder;
 
-impl<Node> PoolBuilder<Node> for TestPoolBuilder
+impl<Node, Evm: Send> PoolBuilder<Node, Evm> for TestPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<Primitives: NodePrimitives<SignedTx = TransactionSigned>>>,
 {
     type Pool = TestPool;
 
-    async fn build_pool(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
+    async fn build_pool(
+        self,
+        _ctx: &BuilderContext<Node>,
+        _evm_config: Evm,
+    ) -> eyre::Result<Self::Pool> {
         Ok(testing_pool())
     }
 }
