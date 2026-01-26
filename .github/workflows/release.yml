@@ -121,7 +121,23 @@ jobs:
           echo "SDKROOT=$(xcrun -sdk macosx --show-sdk-path)" >> $GITHUB_ENV
           echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)" >> $GITHUB_ENV
 
-      - name: Build Reth
+      - name: Install PGO+BOLT dependencies
+        if: matrix.configs.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lsb-release wget
+
+      - name: Build with PGO+BOLT (Linux x86_64)
+        if: matrix.configs.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          BINARY=${{ matrix.build.binary }} \
+          PROFILE=${{ matrix.configs.profile }} \
+          FEATURES="jemalloc,asm-keccak,min-debug-logs" \
+          TARGET=${{ matrix.configs.target }} \
+            .github/scripts/build_pgo_bolt.sh
+
+      - name: Build Reth (non-PGO+BOLT)
+        if: matrix.configs.target != 'x86_64-unknown-linux-gnu'
         run: make PROFILE=${{ matrix.configs.profile }} ${{ matrix.build.command }}-${{ matrix.configs.target }}
       - name: Move binary
         run: |
