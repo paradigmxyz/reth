@@ -35,23 +35,16 @@ mod tests {
         let evm_config = OpEvmConfig::optimism(OP_MAINNET.clone());
 
         let executor = TaskExecutor::current();
-        // let executor = MockExecutor { result: todo!(), evm: todo!(), hook: todo!(), receipts:
-        // todo!() }
         let cfg_container =
             WithConfigs { config: NodeConfig::test(), toml_config: reth_config::Config::default() };
 
         let factory = OpNode::provider_factory_builder()
             .open_read_only(OP_MAINNET.clone(), "datadir")
             .unwrap();
-        // let factory2 = OpNode::provider_factory_builder()
-        //     .chainspec(OpChainSpecBuilder::optimism_mainnet().build().into())
-        //     .build_provider_factory()
-        //     .unwrap();
 
         let provider = factory.provider().unwrap();
 
-        let ctx: BuilderContext<_> =
-            BuilderContext::<_>::new(Head::default(), provider, executor, cfg_container);
+        let ctx = BuilderContext::new(Head::default(), provider, executor, cfg_container);
 
         let pool = OpPoolBuilder::default().build_pool(&ctx, evm_config).await?;
 
