@@ -8,11 +8,13 @@ use alloy_rpc_types_eth::{Transaction, TransactionReceipt};
 use eyre::Result;
 use jsonrpsee::core::client::ClientT;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
+use reth_db::tables;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, E2ETestSetupBuilder};
 use reth_node_builder::NodeConfig;
 use reth_node_core::args::RocksDbArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::EthPayloadBuilderAttributes;
+use reth_provider::RocksDBProviderFactory;
 use std::sync::Arc;
 
 /// Returns the test chain spec for `RocksDB` tests.
@@ -159,8 +161,20 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
         assert!(receipt.status());
     }
 
-    // Negative test: querying a non-existent tx hash returns None
     let missing_hash = B256::from([0xde; 32]);
+
+    // Direct RocksDB assertions
+    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
+    for (i, tx_hash) in tx_hashes.iter().enumerate() {
+        let tx_number: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(*tx_hash)?;
+        assert!(tx_number.is_some(), "TransactionHashNumbers should contain tx_hash={tx_hash:?}");
+        assert_eq!(tx_number, Some(i as u64), "tx {tx_hash} should have TxNumber {i}");
+    }
+
+    let missing_tx_number: Option<u64> =
+        rocksdb.get::<tables::TransactionHashNumbers>(missing_hash)?;
+    assert!(missing_tx_number.is_none());
+
     let missing_tx: Option<Transaction> =
         client.request("eth_getTransactionByHash", [missing_hash]).await?;
     assert!(missing_tx.is_none(), "expected no transaction for missing hash");
