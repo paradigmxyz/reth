@@ -7800,6 +7800,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "ratatui",
+ "rayon",
  "reqwest",
  "reth-chainspec",
  "reth-cli",

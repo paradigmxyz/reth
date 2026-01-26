@@ -67,6 +67,7 @@ alloy-chains.workspace = true
 
 itertools.workspace = true
 futures.workspace = true
+rayon.workspace = true
 tokio.workspace = true
 
 # misc

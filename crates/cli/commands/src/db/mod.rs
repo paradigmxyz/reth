@@ -15,6 +15,7 @@ mod clear;
 mod diff;
 mod get;
 mod list;
+mod migrate_legacy;
 mod repair_trie;
 mod settings;
 mod static_file_header;
@@ -29,12 +30,12 @@ pub struct Command<C: ChainSpecParser> {
     env: EnvironmentArgs<C>,
 
     #[command(subcommand)]
-    command: Subcommands<C>,
+    command: Subcommands,
 }
 
-#[derive(Subcommand, Debug)]
 /// `reth db` subcommands
-pub enum Subcommands<C: ChainSpecParser> {
+#[derive(Subcommand, Debug)]
+pub enum Subcommands {
     /// Lists all the tables, their entry count and their size
     Stats(stats::Command),
     /// Lists the contents of a table
@@ -66,7 +67,7 @@ pub enum Subcommands<C: ChainSpecParser> {
     /// Gets storage size information for an account
     AccountStorage(account_storage::Command),
     /// Migrate storage from legacy MDBX to new RocksDB + static files.
-    MigrateLegacyStorage(crate::migrate::Command<C>),
+    MigrateLegacyStorage(migrate_legacy::Command),
 }
 
 /// Initializes a provider factory with specified access rights, and then execute with the provided
@@ -201,7 +202,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 });
             }
             Subcommands::MigrateLegacyStorage(command) => {
-                command.execute::<N>(ctx).await?;
+                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+                command.execute::<N>(provider_factory)?;
             }
         }
 

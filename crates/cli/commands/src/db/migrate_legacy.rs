@@ -4,34 +4,26 @@
 
 use std::{sync::Arc, time::Instant};
 
+use alloy_primitives::{Address, BlockNumber};
 use clap::Parser;
 use eyre::Result;
 use rayon::prelude::*;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_runner::CliContext;
-use reth_db::{
-    cursor::{DbCursorRO, DbDupCursorRO},
-    tables,
-    transaction::DbTx,
-    DatabaseEnv,
-};
-use reth_primitives_traits::BlockNumber;
+use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx, DatabaseEnv};
+use reth_db_api::models::{AccountBeforeTx, StorageBeforeTx};
+#[cfg(feature = "edge")]
+use reth_provider::RocksDBProviderFactory;
 use reth_provider::{
-    BlockNumReader, BlockReader, DBProvider, ProviderFactory, StaticFileProviderFactory,
-    StaticFileWriter, TransactionsProvider,
+    BlockBodyIndicesProvider, BlockNumReader, MetadataWriter, ProviderFactory,
+    StaticFileProviderFactory, StaticFileWriter, TransactionsProvider,
 };
 use reth_static_file_types::StaticFileSegment;
 use tracing::{error, info, warn};
 
-use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
+use crate::common::CliNodeTypes;
 
 /// Migrate from legacy MDBX storage to new RocksDB + static files.
 #[derive(Debug, Parser)]
-pub struct Command<C: ChainSpecParser> {
-    #[command(flatten)]
-    env: EnvironmentArgs<C>,
-
+pub struct Command {
     /// Block batch size for processing.
     #[arg(long, default_value = "10000")]
     batch_size: u64,
@@ -53,14 +45,14 @@ pub struct Command<C: ChainSpecParser> {
     skip_rocksdb: bool,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
+impl Command {
     /// Execute the migration command.
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    pub fn execute<N: CliNodeTypes>(
         self,
-        _ctx: CliContext,
+        provider_factory: ProviderFactory<
+            reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
+        >,
     ) -> Result<()> {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
-
         info!(target: "reth::cli", "Starting storage migration from legacy MDBX to new storage");
 
         let provider = provider_factory.provider()?;
@@ -93,10 +85,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         let start_time = Instant::now();
 
-        // Phase 1: Migrate to static files (parallel)
+        // Phase 1: Migrate to static files
         if !self.skip_static_files {
             info!(target: "reth::cli", "Phase 1: Migrating to static files");
-            self.migrate_to_static_files_parallel::<N>(
+            self.migrate_to_static_files::<N>(
                 &provider_factory,
                 self.from_block,
                 to_block,
@@ -104,10 +96,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             )?;
         }
 
-        // Phase 2: Migrate indexes to RocksDB (parallel)
+        // Phase 2: Migrate indexes to RocksDB
         if !self.skip_rocksdb {
-            info!(target: "reth::cli", "Phase 2: Migrating to RocksDB");
-            self.migrate_to_rocksdb_parallel::<N>(&provider_factory, self.batch_size)?;
+            #[cfg(feature = "edge")]
+            {
+                info!(target: "reth::cli", "Phase 2: Migrating to RocksDB");
+                self.migrate_to_rocksdb::<N>(&provider_factory, self.batch_size)?;
+            }
+            #[cfg(not(feature = "edge"))]
+            {
+                warn!(target: "reth::cli", "Phase 2: Skipping RocksDB migration (requires 'edge' feature)");
+            }
         }
 
         // Phase 3: Update storage settings
@@ -124,7 +123,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         Ok(())
     }
 
-    fn migrate_to_static_files_parallel<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    fn migrate_to_static_files<N: CliNodeTypes>(
         &self,
         provider_factory: &ProviderFactory<
             reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
@@ -149,7 +148,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         Ok(())
     }
 
-    fn migrate_segment<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    fn migrate_segment<N: CliNodeTypes>(
         &self,
         provider_factory: &ProviderFactory<
             reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
@@ -180,7 +179,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                             body.first_tx_num..body.first_tx_num + body.tx_count as u64,
                         )?;
                         for (i, sender) in senders.into_iter().enumerate() {
-                            writer.append_sender(body.first_tx_num + i as u64, sender)?;
+                            writer
+                                .append_transaction_sender(body.first_tx_num + i as u64, &sender)?;
                         }
                     }
                 }
@@ -188,9 +188,27 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             StaticFileSegment::AccountChangeSets => {
                 let tx = provider.tx_ref();
                 let mut cursor = tx.cursor_dup_read::<tables::AccountChangeSets>()?;
+
+                let mut current_block = start;
+                let mut block_changesets: Vec<AccountBeforeTx> = Vec::new();
+
                 for result in cursor.walk_range(start..=to_block)? {
                     let (block, changeset) = result?;
-                    writer.append_account_changeset(block, changeset)?;
+
+                    if block != current_block {
+                        if !block_changesets.is_empty() {
+                            writer.append_account_changeset(
+                                std::mem::take(&mut block_changesets),
+                                current_block,
+                            )?;
+                        }
+                        current_block = block;
+                    }
+                    block_changesets.push(changeset);
+                }
+
+                if !block_changesets.is_empty() {
+                    writer.append_account_changeset(block_changesets, current_block)?;
                 }
             }
             StaticFileSegment::StorageChangeSets => {
@@ -198,17 +216,34 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 let mut cursor = tx.cursor_dup_read::<tables::StorageChangeSets>()?;
                 let start_key =
                     reth_db_api::models::BlockNumberAddress((start, Default::default()));
-                let end_key = reth_db_api::models::BlockNumberAddress((
-                    to_block,
-                    alloy_primitives::Address::MAX,
-                ));
+                let end_key =
+                    reth_db_api::models::BlockNumberAddress((to_block, Address::new([0xff; 20])));
+
+                let mut current_block = start;
+                let mut block_changesets: Vec<StorageBeforeTx> = Vec::new();
+
                 for result in cursor.walk_range(start_key..=end_key)? {
-                    let (key, changeset) = result?;
-                    writer.append_storage_changeset(
-                        key.block_number(),
-                        key.address(),
-                        changeset,
-                    )?;
+                    let (key, entry) = result?;
+                    let block = key.block_number();
+
+                    if block != current_block {
+                        if !block_changesets.is_empty() {
+                            writer.append_storage_changeset(
+                                std::mem::take(&mut block_changesets),
+                                current_block,
+                            )?;
+                        }
+                        current_block = block;
+                    }
+                    block_changesets.push(StorageBeforeTx {
+                        address: key.address(),
+                        key: entry.key,
+                        value: entry.value,
+                    });
+                }
+
+                if !block_changesets.is_empty() {
+                    writer.append_storage_changeset(block_changesets, current_block)?;
                 }
             }
             StaticFileSegment::Receipts => {
@@ -232,127 +267,95 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         Ok(())
     }
 
-    fn migrate_to_rocksdb_parallel<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    #[cfg(feature = "edge")]
+    fn migrate_to_rocksdb<N: CliNodeTypes>(
         &self,
         provider_factory: &ProviderFactory<
             reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
         >,
         batch_size: u64,
     ) -> Result<()> {
-        ["tx_hash_numbers", "accounts_history", "storages_history"].into_par_iter().try_for_each(
-            |table| match table {
-                "tx_hash_numbers" => {
-                    self.migrate_tx_hash_numbers::<N>(provider_factory, batch_size)
-                }
-                "accounts_history" => {
-                    self.migrate_accounts_history::<N>(provider_factory, batch_size)
-                }
-                "storages_history" => {
-                    self.migrate_storages_history::<N>(provider_factory, batch_size)
-                }
-                _ => Ok(()),
-            },
-        )?;
+        [RocksDBTable::TxHashNumbers, RocksDBTable::AccountsHistory, RocksDBTable::StoragesHistory]
+            .into_par_iter()
+            .try_for_each(|table| {
+                self.migrate_rocksdb_table::<N>(provider_factory, table, batch_size)
+            })?;
         Ok(())
     }
 
-    fn migrate_tx_hash_numbers<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    #[cfg(feature = "edge")]
+    fn migrate_rocksdb_table<N: CliNodeTypes>(
         &self,
         provider_factory: &ProviderFactory<
             reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
         >,
+        table: RocksDBTable,
         batch_size: u64,
     ) -> Result<()> {
         let provider = provider_factory.provider()?;
         let rocksdb = provider_factory.rocksdb_provider();
-
-        info!(target: "reth::cli", "Migrating TransactionHashNumbers");
-
         let tx = provider.tx_ref();
-        let mut cursor = tx.cursor_read::<tables::TransactionHashNumbers>()?;
-        let mut batch = Vec::new();
-        let mut count = 0u64;
 
-        for result in cursor.walk(None)? {
-            let (hash, tx_num) = result?;
-            batch.push((hash, tx_num));
+        info!(target: "reth::cli", ?table, "Migrating");
 
-            if batch.len() >= batch_size as usize {
-                rocksdb.insert_tx_hash_numbers_batch(&batch)?;
-                batch.clear();
+        let count = match table {
+            RocksDBTable::TxHashNumbers => {
+                let mut cursor = tx.cursor_read::<tables::TransactionHashNumbers>()?;
+                let mut batch = rocksdb.batch_with_auto_commit();
+                let mut count = 0u64;
+
+                for result in cursor.walk(None)? {
+                    let (hash, tx_num) = result?;
+                    batch.put::<tables::TransactionHashNumbers>(hash, &tx_num)?;
+                    count += 1;
+                }
+
+                batch.commit()?;
+                count
             }
-            count += 1;
-        }
+            RocksDBTable::AccountsHistory => {
+                let mut cursor = tx.cursor_read::<tables::AccountsHistory>()?;
+                let mut batch = rocksdb.batch_with_auto_commit();
+                let mut count = 0u64;
 
-        if !batch.is_empty() {
-            rocksdb.insert_tx_hash_numbers_batch(&batch)?;
-        }
+                for result in cursor.walk(None)? {
+                    let (key, value) = result?;
+                    batch.put::<tables::AccountsHistory>(key, &value)?;
+                    count += 1;
+                    if count % batch_size == 0 {
+                        batch.commit()?;
+                        batch = rocksdb.batch_with_auto_commit();
+                    }
+                }
 
-        info!(target: "reth::cli", count, "TransactionHashNumbers done");
+                batch.commit()?;
+                count
+            }
+            RocksDBTable::StoragesHistory => {
+                let mut cursor = tx.cursor_read::<tables::StoragesHistory>()?;
+                let mut batch = rocksdb.batch_with_auto_commit();
+                let mut count = 0u64;
+
+                for result in cursor.walk(None)? {
+                    let (key, value) = result?;
+                    batch.put::<tables::StoragesHistory>(key, &value)?;
+                    count += 1;
+                    if count % batch_size == 0 {
+                        batch.commit()?;
+                        batch = rocksdb.batch_with_auto_commit();
+                    }
+                }
+
+                batch.commit()?;
+                count
+            }
+        };
+
+        info!(target: "reth::cli", ?table, count, "Done");
         Ok(())
     }
 
-    fn migrate_accounts_history<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
-        &self,
-        provider_factory: &ProviderFactory<
-            reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
-        >,
-        batch_size: u64,
-    ) -> Result<()> {
-        let provider = provider_factory.provider()?;
-        let rocksdb = provider_factory.rocksdb_provider();
-
-        info!(target: "reth::cli", "Migrating AccountsHistory");
-
-        let tx = provider.tx_ref();
-        let mut cursor = tx.cursor_read::<tables::AccountsHistory>()?;
-        let mut count = 0u64;
-
-        for result in cursor.walk(None)? {
-            let (key, value) = result?;
-            rocksdb.insert_account_history(key, value)?;
-            count += 1;
-            if count % batch_size == 0 {
-                rocksdb.flush()?;
-            }
-        }
-        rocksdb.flush()?;
-
-        info!(target: "reth::cli", count, "AccountsHistory done");
-        Ok(())
-    }
-
-    fn migrate_storages_history<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
-        &self,
-        provider_factory: &ProviderFactory<
-            reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
-        >,
-        batch_size: u64,
-    ) -> Result<()> {
-        let provider = provider_factory.provider()?;
-        let rocksdb = provider_factory.rocksdb_provider();
-
-        info!(target: "reth::cli", "Migrating StoragesHistory");
-
-        let tx = provider.tx_ref();
-        let mut cursor = tx.cursor_read::<tables::StoragesHistory>()?;
-        let mut count = 0u64;
-
-        for result in cursor.walk(None)? {
-            let (key, value) = result?;
-            rocksdb.insert_storage_history(key, value)?;
-            count += 1;
-            if count % batch_size == 0 {
-                rocksdb.flush()?;
-            }
-        }
-        rocksdb.flush()?;
-
-        info!(target: "reth::cli", count, "StoragesHistory done");
-        Ok(())
-    }
-
-    fn update_storage_settings<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    fn update_storage_settings<N: CliNodeTypes>(
         &self,
         provider_factory: &ProviderFactory<
             reth_node_builder::NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>,
@@ -363,6 +366,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         let provider = provider_factory.provider_rw()?;
 
+        #[cfg(feature = "edge")]
         let new_settings = StorageSettings::base()
             .with_receipts_in_static_files(can_migrate_receipts)
             .with_account_changesets_in_static_files(true)
@@ -371,10 +375,25 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             .with_account_history_in_rocksdb(true)
             .with_storages_history_in_rocksdb(true);
 
+        #[cfg(not(feature = "edge"))]
+        let new_settings = StorageSettings::base()
+            .with_receipts_in_static_files(can_migrate_receipts)
+            .with_account_changesets_in_static_files(true)
+            .with_transaction_senders_in_static_files(true);
+
         info!(target: "reth::cli", ?new_settings, "Writing storage settings");
         provider.write_storage_settings(new_settings)?;
         provider.commit()?;
 
         Ok(())
     }
+}
+
+/// RocksDB tables to migrate.
+#[cfg(feature = "edge")]
+#[derive(Debug, Clone, Copy)]
+enum RocksDBTable {
+    TxHashNumbers,
+    AccountsHistory,
+    StoragesHistory,
 }
