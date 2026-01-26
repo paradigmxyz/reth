@@ -237,8 +237,10 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
     ///
     /// Depth counts nodes traversed (not nibbles). Must be called after `root()`.
+    /// Embedded nodes (RLP < 32 bytes) are preserved since they have no hash.
     ///
     /// Returns the number of nodes converted to hash stubs.
+    /// Returns 0 if `max_depth` exceeds trie depth or trie is empty.
     fn prune(&mut self, max_depth: usize) -> usize;
 }
 

@@ -990,7 +990,7 @@ impl SparseTrie for ParallelSparseTrie {
         }
         self.prefix_set.clear();
 
-        effective_pruned_roots.sort();
+        effective_pruned_roots.sort_unstable();
 
         let is_strict_descendant = |p: &Nibbles| -> bool {
             let idx = effective_pruned_roots.partition_point(|root| root <= p);
@@ -1037,7 +1037,7 @@ impl SparseTrie for ParallelSparseTrie {
             }
         }
 
-        self.branch_node_masks.retain(|p, _| !is_strict_descendant(p));
+        self.branch_node_masks.retain(|p, _| !starts_with_pruned(p));
 
         nodes_converted
     }

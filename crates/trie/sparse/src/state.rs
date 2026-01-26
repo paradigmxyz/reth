@@ -1055,10 +1055,6 @@ where
                     trie.prune(max_depth);
                 }
             }
-            if let Some(mut paths) = self.storage.revealed_paths.remove(hash) {
-                paths.clear();
-                self.storage.cleared_revealed_paths.push(paths);
-            }
         }
 
         #[cfg(feature = "metrics")]
