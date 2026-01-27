@@ -1834,6 +1834,9 @@ pub enum SparseNode {
         /// Pre-computed hash of the sparse node.
         /// Can be reused unless this trie path has been updated.
         hash: Option<B256>,
+        /// Cached RLP encoding from the original proof.
+        /// Can be reused for hashing if the node hasn't been modified.
+        cached_rlp: Option<Vec<u8>>,
     },
     /// Sparse extension node with key.
     Extension {
@@ -1849,6 +1852,9 @@ pub enum SparseNode {
         ///
         /// If [`None`], then the value is not known and should be calculated from scratch.
         store_in_db_trie: Option<bool>,
+        /// Cached RLP encoding from the original proof.
+        /// Can be reused for hashing if the node hasn't been modified.
+        cached_rlp: Option<Vec<u8>>,
     },
     /// Sparse branch node with state mask.
     Branch {
@@ -1864,6 +1870,9 @@ pub enum SparseNode {
         ///
         /// If [`None`], then the value is not known and should be calculated from scratch.
         store_in_db_trie: Option<bool>,
+        /// Cached RLP encoding from the original proof.
+        /// Can be reused for hashing if the node hasn't been modified.
+        cached_rlp: Option<Vec<u8>>,
     },
 }
 

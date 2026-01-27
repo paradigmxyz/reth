@@ -18,7 +18,7 @@ use reth_trie::{
 };
 use std::{
     collections::HashMap,
-    sync::{mpsc, OnceLock},
+    sync::{mpsc, Arc, OnceLock},
     time::Duration,
 };
 use thiserror::Error;
@@ -37,8 +37,8 @@ use tracing::*;
 /// the entire trie, only operating on the modified parts.
 #[derive(Debug)]
 pub struct ParallelStateRoot<Factory> {
-    /// Factory for creating state providers.
-    factory: Factory,
+    /// Factory for creating state providers (Arc-wrapped to avoid clone overhead).
+    factory: Arc<Factory>,
     // Prefix sets indicating which portions of the trie need to be recomputed.
     prefix_sets: TriePrefixSets,
     /// Parallel state root metrics.
@@ -50,7 +50,7 @@ impl<Factory> ParallelStateRoot<Factory> {
     /// Create new parallel state root calculator.
     pub fn new(factory: Factory, prefix_sets: TriePrefixSets) -> Self {
         Self {
-            factory,
+            factory: Arc::new(factory),
             prefix_sets,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
@@ -61,8 +61,8 @@ impl<Factory> ParallelStateRoot<Factory> {
 impl<Factory> ParallelStateRoot<Factory>
 where
     Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-        + Clone
         + Send
+        + Sync
         + 'static,
 {
     /// Calculate incremental state root in parallel.
@@ -103,7 +103,7 @@ where
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
-            let factory = self.factory.clone();
+            let factory = Arc::clone(&self.factory);
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
