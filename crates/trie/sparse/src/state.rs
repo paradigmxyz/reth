@@ -694,7 +694,13 @@ where
     ) -> SparseStateTrieResult<bool> {
         let storage_root = if let Some(storage_trie) = self.storage.tries.get_mut(&address) {
             trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
-            storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
+            match storage_trie.root() {
+                Some(root) => root,
+                None => {
+                    tracing::info!(target: "trie::sparse", ?address, "Blind error: storage trie exists but has no root");
+                    return Err(SparseTrieErrorKind::Blind.into())
+                }
+            }
         } else if self.is_account_revealed(address) {
             trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
             // The account was revealed, either...
@@ -706,6 +712,7 @@ where
                 EMPTY_ROOT_HASH
             }
         } else {
+            tracing::info!(target: "trie::sparse", ?address, "Blind error: account not revealed and no storage trie");
             return Err(SparseTrieErrorKind::Blind.into())
         };
 
@@ -735,6 +742,7 @@ where
         provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<bool> {
         if !self.is_account_revealed(address) {
+            tracing::info!(target: "trie::sparse", ?address, "Blind error in update_account_storage_root: account not revealed");
             return Err(SparseTrieErrorKind::Blind.into())
         }
 
@@ -752,7 +760,13 @@ where
         // be empty.
         let storage_root = if let Some(storage_trie) = self.storage.tries.get_mut(&address) {
             trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
-            storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
+            match storage_trie.root() {
+                Some(root) => root,
+                None => {
+                    tracing::info!(target: "trie::sparse", ?address, "Blind error in update_account_storage_root: storage trie has no root");
+                    return Err(SparseTrieErrorKind::Blind.into())
+                }
+            }
         } else {
             EMPTY_ROOT_HASH
         };
