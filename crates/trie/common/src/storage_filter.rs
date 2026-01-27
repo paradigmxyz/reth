@@ -3,9 +3,9 @@
 //! This filter is used to skip storage proof calculations for accounts that
 //! definitely have no storage, providing a significant performance optimization.
 
-use alloy_primitives::{map::FbHasher, B256};
+use alloy_primitives::B256;
 use cuckoofilter::{CuckooError, CuckooFilter};
-use std::fmt;
+use std::{collections::hash_map::DefaultHasher, fmt};
 
 /// A cuckoo filter for tracking which accounts have storage.
 ///
@@ -17,7 +17,7 @@ use std::fmt;
 /// False negatives are impossible - if an account has storage, the filter will
 /// always report it as potentially having storage.
 pub struct StorageAccountFilter {
-    filter: CuckooFilter<FbHasher<20>>,
+    filter: CuckooFilter<DefaultHasher>,
 }
 
 impl fmt::Debug for StorageAccountFilter {
