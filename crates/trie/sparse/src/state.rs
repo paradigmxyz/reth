@@ -983,9 +983,13 @@ where
     ///
     /// # Preconditions
     ///
-    /// Node hashes must be computed (via `root()` or `update_subtrie_hashes()`) before calling
-    /// this method. Otherwise, nodes cannot be converted to hash stubs and pruning will have
-    /// no effect.
+    /// Node hashes must be computed via `root()` before calling this method. Otherwise, nodes
+    /// cannot be converted to hash stubs and pruning will have no effect.
+    ///
+    /// # Effects
+    ///
+    /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
+    /// - Clears update tracking state (prefix sets, updated/removed nodes)
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
         #[cfg(feature = "metrics")]
         let account_nodes_converted: u64;
@@ -1060,6 +1064,9 @@ where
                 {
                     trie.prune(max_depth);
                 }
+            }
+            if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
+                paths.clear();
             }
         }
 
