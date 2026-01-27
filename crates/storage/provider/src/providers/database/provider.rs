@@ -627,6 +627,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                         StateWriteConfig {
                             write_receipts: !sf_ctx.write_receipts,
                             write_account_changesets: !sf_ctx.write_account_changesets,
+                            write_storage_changesets: !sf_ctx.write_storage_changesets,
                         },
                     )?;
                     timings.write_state += start.elapsed();
@@ -2304,52 +2305,55 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         config: StateWriteConfig,
     ) -> ProviderResult<()> {
         // Write storage changes
-        tracing::trace!("Writing storage changes");
-        let mut storages_cursor = self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
-        for (block_index, mut storage_changes) in reverts.storage.into_iter().enumerate() {
-            let block_number = first_block + block_index as BlockNumber;
+        if config.write_storage_changesets {
+            tracing::trace!("Writing storage changes");
+            let mut storages_cursor =
+                self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
+            for (block_index, mut storage_changes) in reverts.storage.into_iter().enumerate() {
+                let block_number = first_block + block_index as BlockNumber;
 
-            tracing::trace!(block_number, "Writing block change");
-            // sort changes by address.
-            storage_changes.par_sort_unstable_by_key(|a| a.address);
-            let total_changes =
-                storage_changes.iter().map(|change| change.storage_revert.len()).sum();
-            let mut changeset = Vec::with_capacity(total_changes);
-            for PlainStorageRevert { address, wiped, storage_revert } in storage_changes {
-                let mut storage = storage_revert
-                    .into_iter()
-                    .map(|(k, v)| (B256::new(k.to_be_bytes()), v))
-                    .collect::<Vec<_>>();
-                // sort storage slots by key.
-                storage.par_sort_unstable_by_key(|a| a.0);
+                tracing::trace!(block_number, "Writing block change");
+                // sort changes by address.
+                storage_changes.par_sort_unstable_by_key(|a| a.address);
+                let total_changes =
+                    storage_changes.iter().map(|change| change.storage_revert.len()).sum();
+                let mut changeset = Vec::with_capacity(total_changes);
+                for PlainStorageRevert { address, wiped, storage_revert } in storage_changes {
+                    let mut storage = storage_revert
+                        .into_iter()
+                        .map(|(k, v)| (B256::new(k.to_be_bytes()), v))
+                        .collect::<Vec<_>>();
+                    // sort storage slots by key.
+                    storage.par_sort_unstable_by_key(|a| a.0);
 
-                // If we are writing the primary storage wipe transition, the pre-existing plain
-                // storage state has to be taken from the database and written to storage history.
-                // See [StorageWipe::Primary] for more details.
-                //
-                // TODO(mediocregopher): This could be rewritten in a way which doesn't require
-                // collecting wiped entries into a Vec like this, see
-                // `write_storage_trie_changesets`.
-                let mut wiped_storage = Vec::new();
-                if wiped {
-                    tracing::trace!(?address, "Wiping storage");
-                    if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
-                        wiped_storage.push((entry.key, entry.value));
-                        while let Some(entry) = storages_cursor.next_dup_val()? {
-                            wiped_storage.push((entry.key, entry.value))
+                    // If we are writing the primary storage wipe transition, the pre-existing plain
+                    // storage state has to be taken from the database and written to storage
+                    // history. See [StorageWipe::Primary] for more details.
+                    //
+                    // TODO(mediocregopher): This could be rewritten in a way which doesn't require
+                    // collecting wiped entries into a Vec like this, see
+                    // `write_storage_trie_changesets`.
+                    let mut wiped_storage = Vec::new();
+                    if wiped {
+                        tracing::trace!(?address, "Wiping storage");
+                        if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
+                            wiped_storage.push((entry.key, entry.value));
+                            while let Some(entry) = storages_cursor.next_dup_val()? {
+                                wiped_storage.push((entry.key, entry.value))
+                            }
                         }
+                    }
+
+                    tracing::trace!(?address, ?storage, "Writing storage reverts");
+                    for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
+                        changeset.push(StorageBeforeTx { address, key, value });
                     }
                 }
 
-                tracing::trace!(?address, ?storage, "Writing storage reverts");
-                for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
-                    changeset.push(StorageBeforeTx { address, key, value });
-                }
+                let mut storage_changesets_writer =
+                    EitherWriter::new_storage_changesets(self, block_number)?;
+                storage_changesets_writer.append_storage_changeset(block_number, changeset)?;
             }
-
-            let mut storage_changesets_writer =
-                EitherWriter::new_storage_changesets(self, block_number)?;
-            storage_changesets_writer.append_storage_changeset(block_number, changeset)?;
         }
 
         if !config.write_account_changesets {
