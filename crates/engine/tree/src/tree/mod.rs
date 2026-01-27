@@ -282,6 +282,9 @@ where
     evm_config: C,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
+    /// Cuckoo filter for tracking accounts with storage.
+    /// Used to skip storage proof calculations for accounts without storage.
+    storage_filter: std::sync::Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -291,8 +294,8 @@ where
     C: Debug + ConfigureEvm<Primitives = N>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EngineApiTreeHandler")
-            .field("provider", &self.provider)
+        let mut s = f.debug_struct("EngineApiTreeHandler");
+        s.field("provider", &self.provider)
             .field("consensus", &self.consensus)
             .field("payload_validator", &self.payload_validator)
             .field("state", &self.state)
@@ -307,6 +310,7 @@ where
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
+            .field("storage_filter", &self.storage_filter)
             .finish()
     }
 }
@@ -346,6 +350,7 @@ where
         engine_kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
+        storage_filter: std::sync::Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -367,6 +372,7 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
+            storage_filter,
         }
     }
 
@@ -405,6 +411,17 @@ where
             kind,
         );
 
+        // Build the storage filter from the database
+        let storage_filter = {
+            use reth_trie_db::StorageFilterBuilder;
+
+            let db_provider = provider.database_provider_ro().expect("failed to get db provider");
+            let filter = db_provider
+                .build_storage_filter()
+                .expect("failed to build storage filter");
+            std::sync::Arc::new(parking_lot::RwLock::new(filter))
+        };
+
         let task = Self::new(
             provider,
             consensus,
@@ -419,6 +436,7 @@ where
             kind,
             evm_config,
             changeset_cache,
+            storage_filter,
         );
         let incoming = task.incoming_tx.clone();
         std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();
