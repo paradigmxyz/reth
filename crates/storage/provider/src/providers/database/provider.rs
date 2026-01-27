@@ -3383,22 +3383,33 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
 
         // Use pre-computed transitions for history indices since static file
         // writes aren't visible until commit.
-        self.with_rocksdb_batch(|batch| {
-            let mut writer = EitherWriter::new_accounts_history(self, batch)?;
-            for (address, blocks) in account_transitions {
-                let list = BlockNumberList::new(blocks).map_err(ProviderError::other)?;
-                writer.upsert_account_history(ShardedKey::last(address), &list)?;
-            }
-            Ok(((), writer.into_raw_rocksdb_batch()))
-        })?;
-        self.with_rocksdb_batch(|batch| {
-            let mut writer = EitherWriter::new_storages_history(self, batch)?;
-            for ((address, key), blocks) in storage_transitions {
-                let list = BlockNumberList::new(blocks).map_err(ProviderError::other)?;
-                writer.upsert_storage_history(StorageShardedKey::last(address, key), &list)?;
-            }
-            Ok(((), writer.into_raw_rocksdb_batch()))
-        })?;
+        // Note: For MDBX we must use insert_*_history_index which properly merges with
+        // existing shards. For RocksDB we use EitherWriter directly.
+        let storage_settings = self.cached_storage_settings();
+        if storage_settings.account_history_in_rocksdb {
+            self.with_rocksdb_batch(|batch| {
+                let mut writer = EitherWriter::new_accounts_history(self, batch)?;
+                for (address, blocks) in account_transitions {
+                    let list = BlockNumberList::new(blocks).map_err(ProviderError::other)?;
+                    writer.upsert_account_history(ShardedKey::last(address), &list)?;
+                }
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
+        } else {
+            self.insert_account_history_index(account_transitions)?;
+        }
+        if storage_settings.storages_history_in_rocksdb {
+            self.with_rocksdb_batch(|batch| {
+                let mut writer = EitherWriter::new_storages_history(self, batch)?;
+                for ((address, key), blocks) in storage_transitions {
+                    let list = BlockNumberList::new(blocks).map_err(ProviderError::other)?;
+                    writer.upsert_storage_history(StorageShardedKey::last(address, key), &list)?;
+                }
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
+        } else {
+            self.insert_storage_history_index(storage_transitions)?;
+        }
         durations_recorder.record_relative(metrics::Action::InsertHistoryIndices);
 
         // Update pipeline progress
