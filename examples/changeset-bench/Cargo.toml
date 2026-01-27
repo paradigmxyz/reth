@@ -1,0 +1,16 @@
+[package]
+name = "example-changeset-bench"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["node"] }
+reth-db-api.workspace = true
+alloy-primitives.workspace = true
+rand = "0.8"
+clap = { workspace = true, features = ["derive"] }
+eyre.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true

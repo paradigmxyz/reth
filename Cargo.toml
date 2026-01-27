@@ -155,6 +155,7 @@ members = [
     "examples/custom-rlpx-subprotocol",
     "examples/custom-rpc-middleware",
     "examples/custom-node",
+    "examples/changeset-bench",
     "examples/db-access",
     "examples/engine-api-access",
     "examples/exex-hello-world",
