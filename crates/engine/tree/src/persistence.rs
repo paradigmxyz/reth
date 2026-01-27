@@ -169,22 +169,22 @@ where
             Vec::new()
         };
 
-        // We calculate an estimated commit duration per block by diving the total commit duration
-        // for a batch by the number of blocks in the batch
-        let commit_duration = {
+        let total_commit_duration = {
             let start = Instant::now();
             let provider_rw = self.provider.database_provider_rw()?;
 
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
             provider_rw.commit()?;
             start.elapsed()
-        }
-        .div_f64(timing_stats.len() as f64);
+        };
+        // We calculate an estimated commit duration per block by diving the total commit duration
+        // for a batch by the number of blocks in the batch
+        let commit_duration = total_commit_duration.div_f64(timing_stats.len() as f64);
 
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         self.metrics.save_blocks_block_count.record(block_count as f64);
-        self.metrics.save_blocks_duration_seconds.record(commit_duration);
+        self.metrics.save_blocks_duration_seconds.record(total_commit_duration);
 
         // Emit unified slow block logs after commit completes
         for stats in timing_stats {
