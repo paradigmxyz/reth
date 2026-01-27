@@ -458,7 +458,9 @@ where
 
             // check the starting hash
             if headers_falling[0].hash() == self.start_hash {
-                let headers_rising = headers_falling.iter().rev().cloned().collect::<Vec<_>>();
+                let mut headers_rising = headers_falling.clone();
+                headers_rising.reverse();
+
                 // check if the downloaded headers are valid
                 if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
                     debug!(target: "downloaders", %err, ?self.start_hash, "Received bad header response");
@@ -469,7 +471,8 @@ where
                 let hashes = headers_falling.iter().map(|h| h.hash()).collect::<Vec<_>>();
 
                 // populate the pending headers
-                self.pending_headers = headers_falling.clone().into();
+                headers_rising.reverse();
+                self.pending_headers = headers_rising.into();
 
                 // set the actual request if it hasn't been started yet
                 if !self.has_bodies_request_started() {
