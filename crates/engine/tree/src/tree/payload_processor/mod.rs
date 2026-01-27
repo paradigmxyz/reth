@@ -294,9 +294,7 @@ where
         let multi_proof_task = MultiProofTask::new(
             proof_handle.clone(),
             to_sparse_trie,
-            config
-                .multiproof_chunking_enabled()
-                .then_some(config.effective_multiproof_chunk_size()),
+            config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
             to_multi_proof.clone(),
             from_multi_proof,
         )
