@@ -12,7 +12,7 @@ use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
 use reth_trie::{
     added_removed_keys::MultiAddedRemovedKeys, proof_v2, HashedPostState, HashedStorage,
-    MultiProofTargets,
+    MultiProofTargets, MAX_ACCOUNT_TARGETS_PER_CHUNK,
 };
 #[cfg(test)]
 use reth_trie_parallel::stats::ParallelTrieTracker;
@@ -1489,9 +1489,6 @@ fn get_proof_targets(
     }
 }
 
-/// Maximum number of account targets per multiproof job.
-const MAX_ACCOUNT_TARGETS_PER_JOB: usize = 5;
-
 /// Dispatches work items as a single unit or in chunks based on target size and worker
 /// availability.
 #[allow(clippy::too_many_arguments)]
@@ -1512,7 +1509,7 @@ where
 
     if should_chunk &&
         let Some(chunk_size) = chunk_size &&
-        (chunking_len > chunk_size || chunking_len > MAX_ACCOUNT_TARGETS_PER_JOB)
+        (chunking_len > chunk_size || chunking_len > MAX_ACCOUNT_TARGETS_PER_CHUNK)
     {
         let mut num_chunks = 0usize;
         for chunk in chunker(items, chunk_size) {

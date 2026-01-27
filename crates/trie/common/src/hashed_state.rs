@@ -832,8 +832,7 @@ pub struct ChunkedHashedPostState {
     size: usize,
 }
 
-/// Maximum number of account targets per chunk.
-const MAX_ACCOUNT_TARGETS_PER_CHUNK: usize = 5;
+use crate::MAX_ACCOUNT_TARGETS_PER_CHUNK;
 
 /// Order discriminant for sorting flattened state items.
 /// Ordering: `StorageWipe` < `StorageUpdate` (by slot) < `Account`

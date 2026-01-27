@@ -96,8 +96,7 @@ impl MultiProofTargets {
     }
 }
 
-/// Maximum number of account targets per chunk.
-const MAX_ACCOUNT_TARGETS_PER_CHUNK: usize = 5;
+use crate::MAX_ACCOUNT_TARGETS_PER_CHUNK;
 
 /// An iterator that yields chunks of the proof targets of at most `size` account and storage
 /// targets.

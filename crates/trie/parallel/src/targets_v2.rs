@@ -1,7 +1,7 @@
 //! V2 multiproof targets and chunking.
 
 use alloy_primitives::{map::B256Map, B256};
-use reth_trie::proof_v2;
+use reth_trie::{proof_v2, MAX_ACCOUNT_TARGETS_PER_CHUNK};
 
 /// A set of account and storage V2 proof targets. The account and storage targets do not need to
 /// necessarily overlap.
@@ -73,7 +73,9 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         }
 
         // Process account targets and their storage
-        while count < self.size {
+        while count < self.size &&
+            chunk.account_targets.len() < MAX_ACCOUNT_TARGETS_PER_CHUNK
+        {
             let Some(account_target) = self.account_targets.next() else {
                 break;
             };
