@@ -100,9 +100,9 @@ async fn test_rocksdb_block_mining() -> Result<()> {
     let genesis_hash = nodes[0].block_hash(0);
     assert_ne!(genesis_hash, B256::ZERO);
 
-    // Mine 3 blocks
+    // Mine 3 empty blocks
     for i in 1..=3 {
-        let payload = nodes[0].advance_block().await?;
+        let payload = nodes[0].advance_empty_block().await?;
         let block = payload.block();
         assert_eq!(block.number(), i);
         assert_ne!(block.hash(), B256::ZERO);
@@ -144,7 +144,7 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
     let raw_tx = TransactionTestContext::transfer_tx_bytes(chain_id, signer).await;
     let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
 
-    let payload = nodes[0].advance_block_with_tx().await?;
+    let payload = nodes[0].advance_block().await?;
     assert_eq!(payload.block().number(), 1);
 
     let client = nodes[0].rpc_client().expect("RPC client should be available");
@@ -225,7 +225,7 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
     }
 
     // Mine one block containing all 3 txs
-    let payload = nodes[0].advance_block_with_tx().await?;
+    let payload = nodes[0].advance_block().await?;
     assert_eq!(payload.block().number(), 1);
 
     let client = nodes[0].rpc_client().expect("RPC client");
@@ -308,7 +308,7 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
         )
         .await?;
 
-    let payload1 = nodes[0].advance_block_with_tx().await?;
+    let payload1 = nodes[0].advance_block().await?;
     assert_eq!(payload1.block().number(), 1);
 
     // Block 2: 1 transaction
@@ -319,7 +319,7 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
         )
         .await?;
 
-    let payload2 = nodes[0].advance_block_with_tx().await?;
+    let payload2 = nodes[0].advance_block().await?;
     assert_eq!(payload2.block().number(), 2);
 
     // Verify block contents via RPC
@@ -418,7 +418,7 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     }
 
     // Now mine the block
-    let payload = nodes[0].advance_block_with_tx().await?;
+    let payload = nodes[0].advance_block().await?;
     assert_eq!(payload.block().number(), 1);
 
     // Poll until tx appears in RocksDB

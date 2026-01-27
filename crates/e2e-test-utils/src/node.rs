@@ -110,7 +110,7 @@ where
     /// expects a payload attribute event and waits until the payload is built.
     ///
     /// It triggers the resolve payload via engine api and expects the built payload event.
-    /// This accepts empty blocks; use [`Self::new_payload_non_empty`] if transactions are required.
+    /// Requires at least one transaction in the payload.
     pub async fn new_payload(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let eth_attr = self.payload.new_payload().await.unwrap();
         self.payload.expect_attr_event(eth_attr.clone()).await?;
@@ -118,13 +118,13 @@ where
         Ok(self.payload.expect_built_payload().await?)
     }
 
-    /// Creates a new payload that must contain at least one transaction.
+    /// Creates a new payload, accepting empty blocks without transactions.
     ///
-    /// Use this after injecting transactions to ensure they are included in the block.
-    pub async fn new_payload_non_empty(&mut self) -> eyre::Result<Payload::BuiltPayload> {
+    /// Use this for tests that intentionally mine empty blocks.
+    pub async fn new_payload_or_empty(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let eth_attr = self.payload.new_payload().await.unwrap();
         self.payload.expect_attr_event(eth_attr.clone()).await?;
-        self.payload.wait_for_non_empty_payload(eth_attr.payload_id()).await;
+        self.payload.wait_for_built_payload_or_empty(eth_attr.payload_id()).await;
         Ok(self.payload.expect_built_payload().await?)
     }
 
@@ -135,27 +135,27 @@ where
         Ok(payload)
     }
 
-    /// Triggers payload building job (requiring transactions) and submits it to the engine.
-    pub async fn build_and_submit_payload_non_empty(
+    /// Triggers payload building job (accepting empty blocks) and submits it to the engine.
+    pub async fn build_and_submit_payload_or_empty(
         &mut self,
     ) -> eyre::Result<Payload::BuiltPayload> {
-        let payload = self.new_payload_non_empty().await?;
+        let payload = self.new_payload_or_empty().await?;
         self.submit_payload(payload.clone()).await?;
         Ok(payload)
     }
 
-    /// Advances the node forward one block (accepts empty blocks).
+    /// Advances the node forward one block (requires at least one transaction).
     pub async fn advance_block(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let payload = self.build_and_submit_payload().await?;
         self.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
         Ok(payload)
     }
 
-    /// Advances the node forward one block, requiring at least one transaction.
+    /// Advances the node forward one block, accepting empty blocks.
     ///
-    /// Use this after injecting transactions to ensure they are included in the block.
-    pub async fn advance_block_with_tx(&mut self) -> eyre::Result<Payload::BuiltPayload> {
-        let payload = self.build_and_submit_payload_non_empty().await?;
+    /// Use this for tests that intentionally mine empty blocks without transactions.
+    pub async fn advance_empty_block(&mut self) -> eyre::Result<Payload::BuiltPayload> {
+        let payload = self.build_and_submit_payload_or_empty().await?;
         self.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
         Ok(payload)
     }

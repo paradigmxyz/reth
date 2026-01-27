@@ -54,15 +54,13 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
         Ok(())
     }
 
-    /// Wait until the best built payload is ready (including empty blocks).
-    ///
-    /// Use [`Self::wait_for_non_empty_payload`] if the payload must contain transactions.
+    /// Wait until the best built payload is ready (requires at least one transaction).
     pub async fn wait_for_built_payload(&self, payload_id: PayloadId) {
         let start = std::time::Instant::now();
         loop {
             let payload =
                 self.payload_builder.best_payload(payload_id).await.transpose().ok().flatten();
-            if payload.is_some() {
+            if payload.is_some_and(|p| !p.block().body().transactions().is_empty()) {
                 self.payload_builder
                     .resolve_kind(payload_id, PayloadKind::Earliest)
                     .await
@@ -78,15 +76,15 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
         }
     }
 
-    /// Wait until the best built payload contains at least one transaction.
+    /// Wait until any payload is ready, including empty blocks.
     ///
-    /// Use this when transactions have been injected and must be included in the block.
-    pub async fn wait_for_non_empty_payload(&self, payload_id: PayloadId) {
+    /// Use this for tests that intentionally mine empty blocks without transactions.
+    pub async fn wait_for_built_payload_or_empty(&self, payload_id: PayloadId) {
         let start = std::time::Instant::now();
         loop {
             let payload =
                 self.payload_builder.best_payload(payload_id).await.transpose().ok().flatten();
-            if payload.is_some_and(|p| !p.block().body().transactions().is_empty()) {
+            if payload.is_some() {
                 self.payload_builder
                     .resolve_kind(payload_id, PayloadKind::Earliest)
                     .await
@@ -96,7 +94,7 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
             }
             assert!(
                 start.elapsed() < std::time::Duration::from_secs(30),
-                "wait_for_non_empty_payload timed out after 30s"
+                "wait_for_built_payload_or_empty timed out after 30s"
             );
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
