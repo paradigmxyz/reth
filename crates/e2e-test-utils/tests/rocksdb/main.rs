@@ -10,7 +10,6 @@ use jsonrpsee::core::client::ClientT;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_db::tables;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet, E2ETestSetupBuilder};
-use reth_node_builder::NodeConfig;
 use reth_node_core::args::RocksDbArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::EthPayloadBuilderAttributes;
@@ -97,14 +96,13 @@ fn test_attributes_generator(timestamp: u64) -> EthPayloadBuilderAttributes {
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
 
-/// Enables `RocksDB` for `TransactionHashNumbers` table.
-/// Explicitly enables static file changesets to test the fix for double-write bug.
-const fn with_rocksdb_enabled<C>(mut config: NodeConfig<C>) -> NodeConfig<C> {
-    config.rocksdb =
-        RocksDbArgs { all: true, tx_hash: true, storages_history: true, account_history: true };
-    config.static_files.storage_changesets = true;
-    config.static_files.account_changesets = true;
-    config
+/// Verifies that RocksDB defaults are enabled when the `edge` feature is active.
+#[test]
+fn test_rocksdb_defaults_match_edge_feature() {
+    let args = RocksDbArgs::default();
+    assert!(args.tx_hash, "tx_hash should default to true with edge feature");
+    assert!(args.storages_history, "storages_history should default to true with edge feature");
+    assert!(args.account_history, "account_history should default to true with edge feature");
 }
 
 /// Smoke test: node boots with `RocksDB` routing enabled.
@@ -116,7 +114,6 @@ async fn test_rocksdb_node_startup() -> Result<()> {
 
     let (nodes, _tasks, _wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
-            .with_node_config_modifier(with_rocksdb_enabled)
             .build()
             .await?;
 
@@ -144,7 +141,6 @@ async fn test_rocksdb_block_mining() -> Result<()> {
 
     let (mut nodes, _tasks, _wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
-            .with_node_config_modifier(with_rocksdb_enabled)
             .build()
             .await?;
 
@@ -201,7 +197,6 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
-    .with_node_config_modifier(with_rocksdb_enabled)
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -268,7 +263,6 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
-    .with_node_config_modifier(with_rocksdb_enabled)
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -336,7 +330,6 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
-    .with_node_config_modifier(with_rocksdb_enabled)
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -421,7 +414,6 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
-    .with_node_config_modifier(with_rocksdb_enabled)
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
