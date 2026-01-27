@@ -702,14 +702,47 @@ where
         );
 
         // Collect children into RlpNode Vec. Children are in lexicographic order.
+        // We need to track the nibble for each child for AddedRemovedKeys tracking.
+        let mut state_mask_iter = branch.state_mask;
         for child in self.child_stack.drain(self.child_stack.len() - num_children..) {
+            // Get the nibble for this child from the state mask
+            let child_nibble = state_mask_iter.trailing_zeros() as u8;
+            state_mask_iter.unset_bit(child_nibble);
+
             let child_rlp_node = match child {
                 ProofTrieBranchChild::RlpNode(rlp_node) => rlp_node,
                 uncommitted_child => {
+                    // Capture child type before conversion for tracking
+                    let is_extension =
+                        matches!(uncommitted_child, ProofTrieBranchChild::Extension { .. });
+                    let is_branch =
+                        matches!(uncommitted_child, ProofTrieBranchChild::Branch { .. });
+
                     // Convert uncommitted child (not retained for proof) to RlpNode now.
                     self.rlp_encode_buf.clear();
                     let (rlp_node, freed_buf) =
                         uncommitted_child.into_rlp(&mut self.rlp_encode_buf)?;
+
+                    // Track this non-target child for potential later retention during branch
+                    // collapse
+                    if let Some(added_removed_keys) = &self.added_removed_keys {
+                        let removed_mask = added_removed_keys.get_removed_mask(&self.branch_path);
+                        if !removed_mask.is_bit_set(child_nibble) {
+                            let mut child_path = self.branch_path;
+                            child_path.push_unchecked(child_nibble);
+
+                            if is_branch {
+                                self.added_removed_tracking
+                                    .track_committed_branch(child_path, &self.rlp_encode_buf);
+                            }
+                            self.added_removed_tracking.track_nontarget(
+                                child_path,
+                                &self.rlp_encode_buf,
+                                is_extension,
+                            );
+                        }
+                    }
+
                     if let Some(buf) = freed_buf {
                         self.rlp_nodes_bufs.push(buf);
                     }
