@@ -410,7 +410,6 @@ where
     };
     use reth_provider::EitherWriter;
 
-    // Write account history using EitherWriter
     provider.with_rocksdb_batch(|batch| {
         let mut writer = EitherWriter::new_accounts_history(provider, batch)?;
         let list = BlockNumberList::new([block]).expect("single block always fits");
