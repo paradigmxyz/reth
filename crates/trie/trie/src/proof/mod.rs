@@ -5,7 +5,9 @@ use crate::{
     },
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieCursorMetricsCache},
+    trie_cursor::{
+        InstrumentedTrieCursor, TrieCursorFactory, TrieCursorMetricsCache, TrieStorageCursor,
+    },
     walker::TrieWalker,
     HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
@@ -343,44 +345,67 @@ where
 
     /// Generate storage proof.
     pub fn storage_multiproof(
-        self,
+        mut self,
         targets: B256Set,
     ) -> Result<StorageMultiProof, StateProofError> {
-        let mut discard_hashed_cursor_metrics = HashedCursorMetricsCache::default();
-        let hashed_cursor_metrics =
-            self.hashed_cursor_metrics.unwrap_or(&mut discard_hashed_cursor_metrics);
-
         let hashed_storage_cursor =
             self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
+        let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
 
-        let mut hashed_storage_cursor =
-            InstrumentedHashedCursor::new(hashed_storage_cursor, hashed_cursor_metrics);
+        let prefix_set = self.prefix_set;
+        let collect_branch_node_masks = self.collect_branch_node_masks;
+        let added_removed_keys = self.added_removed_keys;
 
+        if let Some(hashed_cursor_metrics) = self.hashed_cursor_metrics.as_mut() {
+            let trie_cursor_metrics = self.trie_cursor_metrics.as_mut().unwrap();
+            Self::storage_multiproof_inner(
+                targets,
+                InstrumentedHashedCursor::new(hashed_storage_cursor, hashed_cursor_metrics),
+                InstrumentedTrieCursor::new(trie_cursor, trie_cursor_metrics),
+                prefix_set,
+                collect_branch_node_masks,
+                added_removed_keys,
+            )
+        } else {
+            Self::storage_multiproof_inner(
+                targets,
+                hashed_storage_cursor,
+                trie_cursor,
+                prefix_set,
+                collect_branch_node_masks,
+                added_removed_keys,
+            )
+        }
+    }
+
+    fn storage_multiproof_inner<HC, TC>(
+        targets: B256Set,
+        mut hashed_storage_cursor: HC,
+        trie_cursor: TC,
+        mut prefix_set: PrefixSetMut,
+        collect_branch_node_masks: bool,
+        added_removed_keys: Option<K>,
+    ) -> Result<StorageMultiProof, StateProofError>
+    where
+        HC: HashedStorageCursor<Value = alloy_primitives::U256>,
+        TC: TrieStorageCursor,
+    {
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
             return Ok(StorageMultiProof::empty())
         }
 
-        let mut discard_trie_cursor_metrics = TrieCursorMetricsCache::default();
-        let trie_cursor_metrics =
-            self.trie_cursor_metrics.unwrap_or(&mut discard_trie_cursor_metrics);
-
         let target_nibbles = targets.into_iter().map(Nibbles::unpack).collect::<Vec<_>>();
-        let mut prefix_set = self.prefix_set;
         prefix_set.extend_keys(target_nibbles.clone());
 
-        let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
-
-        let trie_cursor = InstrumentedTrieCursor::new(trie_cursor, trie_cursor_metrics);
-
         let walker = TrieWalker::<_>::storage_trie(trie_cursor, prefix_set.freeze())
-            .with_added_removed_keys(self.added_removed_keys.as_ref());
+            .with_added_removed_keys(added_removed_keys.as_ref());
 
         let retainer = ProofRetainer::from_iter(target_nibbles)
-            .with_added_removed_keys(self.added_removed_keys.as_ref());
+            .with_added_removed_keys(added_removed_keys.as_ref());
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
-            .with_updates(self.collect_branch_node_masks);
+            .with_updates(collect_branch_node_masks);
         let mut storage_node_iter = TrieNodeIter::storage_trie(walker, hashed_storage_cursor);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
@@ -398,7 +423,7 @@ where
 
         let root = hash_builder.root();
         let subtree = hash_builder.take_proof_nodes();
-        let branch_node_masks = if self.collect_branch_node_masks {
+        let branch_node_masks = if collect_branch_node_masks {
             let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
             updated_branch_nodes
                 .into_iter()

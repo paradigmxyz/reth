@@ -147,6 +147,8 @@ pub struct TreeConfig {
     enable_proof_v2: bool,
     /// Whether to disable cache metrics recording (can be expensive with large cached state).
     disable_cache_metrics: bool,
+    /// Whether to enable trie cursor metrics (adds overhead from timing every cursor operation).
+    trie_metrics: bool,
 }
 
 impl Default for TreeConfig {
@@ -176,6 +178,7 @@ impl Default for TreeConfig {
             account_worker_count: default_account_worker_count(),
             enable_proof_v2: false,
             disable_cache_metrics: false,
+            trie_metrics: false,
         }
     }
 }
@@ -208,6 +211,7 @@ impl TreeConfig {
         account_worker_count: usize,
         enable_proof_v2: bool,
         disable_cache_metrics: bool,
+        trie_metrics: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -234,6 +238,7 @@ impl TreeConfig {
             account_worker_count,
             enable_proof_v2,
             disable_cache_metrics,
+            trie_metrics,
         }
     }
 
@@ -521,6 +526,17 @@ impl TreeConfig {
     /// Setter for whether to disable cache metrics recording.
     pub const fn without_cache_metrics(mut self, disable_cache_metrics: bool) -> Self {
         self.disable_cache_metrics = disable_cache_metrics;
+        self
+    }
+
+    /// Returns whether trie cursor metrics are enabled.
+    pub const fn trie_metrics(&self) -> bool {
+        self.trie_metrics
+    }
+
+    /// Setter for whether to enable trie cursor metrics.
+    pub const fn with_trie_metrics(mut self, trie_metrics: bool) -> Self {
+        self.trie_metrics = trie_metrics;
         self
     }
 }

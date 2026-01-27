@@ -123,6 +123,8 @@ pub struct ProofWorkerHandle {
     account_worker_count: usize,
     /// Whether V2 storage proofs are enabled
     v2_proofs_enabled: bool,
+    /// Whether trie cursor metrics are enabled
+    trie_metrics_enabled: bool,
 }
 
 impl ProofWorkerHandle {
@@ -137,12 +139,14 @@ impl ProofWorkerHandle {
     /// - `storage_worker_count`: Number of storage workers to spawn
     /// - `account_worker_count`: Number of account workers to spawn
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
+    /// - `trie_metrics_enabled`: Whether to enable trie cursor metrics
     pub fn new<Factory>(
         executor: Handle,
         task_ctx: ProofTaskCtx<Factory>,
         storage_worker_count: usize,
         account_worker_count: usize,
         v2_proofs_enabled: bool,
+        trie_metrics_enabled: bool,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -262,7 +266,13 @@ impl ProofWorkerHandle {
             storage_worker_count,
             account_worker_count,
             v2_proofs_enabled,
+            trie_metrics_enabled,
         }
+    }
+
+    /// Returns whether trie cursor metrics are enabled.
+    pub const fn trie_metrics_enabled(&self) -> bool {
+        self.trie_metrics_enabled
     }
 
     /// Returns whether V2 storage proofs are enabled for this worker pool.
@@ -2010,7 +2020,7 @@ mod tests {
             );
             let ctx = test_ctx(factory);
 
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, false);
+            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, false, false);
 
             // Verify handle can be cloned
             let _cloned_handle = proof_handle.clone();
