@@ -357,48 +357,45 @@ where
 
             // Check if this is a branch that will collapse after removals.
             // If so, we need to also retain the remaining sibling's proof.
-            if let Some(added_removed_keys) = &self.added_removed_keys {
-                if let ProofTrieBranchChild::Branch { node, .. } = &child {
-                    let state_mask = node.state_mask;
-                    let removed_mask = added_removed_keys.get_removed_mask(&child_path);
-                    let nonremoved_mask = TrieMask::new(!removed_mask.get() & state_mask.get());
+            if let Some(added_removed_keys) = &self.added_removed_keys
+                && let ProofTrieBranchChild::Branch { node, .. } = &child
+            {
+                let state_mask = node.state_mask;
+                let removed_mask = added_removed_keys.get_removed_mask(&child_path);
+                let nonremoved_mask = TrieMask::new(!removed_mask.get() & state_mask.get());
 
-                    // If exactly one child remains after removals, the branch will collapse
-                    if nonremoved_mask.count_ones() == 1 {
-                        let remaining_nibble = nonremoved_mask.trailing_zeros() as u8;
+                // If exactly one child remains after removals, the branch will collapse
+                if nonremoved_mask.count_ones() == 1 {
+                    let remaining_nibble = nonremoved_mask.trailing_zeros() as u8;
 
-                        // Check if the remaining child is the one we've been tracking as non-target
-                        if self
-                            .added_removed_tracking
-                            .branch_child_is_nontarget(&child_path, remaining_nibble)
+                    // Check if the remaining child is the one we've been tracking as non-target
+                    if self
+                        .added_removed_tracking
+                        .branch_child_is_nontarget(&child_path, remaining_nibble)
+                        && let Some(nontarget) = self.added_removed_tracking.last_nontarget.take()
+                    {
+                        trace!(
+                            target: TRACE_TARGET,
+                            ?child_path,
+                            ?remaining_nibble,
+                            nontarget_path = ?nontarget.path,
+                            "Branch will collapse, retaining sibling proof"
+                        );
+
+                        self.retained_proofs.push(nontarget);
+
+                        // If the sibling is an extension node, we also need to retain its
+                        // child. The sparse trie's reveal_remaining_child_on_leaf_removal
+                        // recurses into extensions to also reveal their grandchild.
+                        if let Some(ext_child) =
+                            self.added_removed_tracking.last_extension_child.take()
                         {
-                            if let Some(nontarget) =
-                                self.added_removed_tracking.last_nontarget.take()
-                            {
-                                trace!(
-                                    target: TRACE_TARGET,
-                                    ?child_path,
-                                    ?remaining_nibble,
-                                    nontarget_path = ?nontarget.path,
-                                    "Branch will collapse, retaining sibling proof"
-                                );
-
-                                self.retained_proofs.push(nontarget);
-
-                                // If the sibling is an extension node, we also need to retain its
-                                // child. The sparse trie's reveal_remaining_child_on_leaf_removal
-                                // recurses into extensions to also reveal their grandchild.
-                                if let Some(ext_child) =
-                                    self.added_removed_tracking.last_extension_child.take()
-                                {
-                                    trace!(
-                                        target: TRACE_TARGET,
-                                        ext_child_path = ?ext_child.path,
-                                        "Also retaining extension child proof"
-                                    );
-                                    self.retained_proofs.push(ext_child);
-                                }
-                            }
+                            trace!(
+                                target: TRACE_TARGET,
+                                ext_child_path = ?ext_child.path,
+                                "Also retaining extension child proof"
+                            );
+                            self.retained_proofs.push(ext_child);
                         }
                     }
                 }
@@ -427,13 +424,13 @@ where
         // Check if we need to track this node for AddedRemovedKeys collapse detection.
         // If so, we need to convert to ProofTrieNode first (to store for later), then to RlpNode.
         let should_track = if let Some(added_removed_keys) = &self.added_removed_keys {
-            if !child_path.is_empty() {
+            if child_path.is_empty() {
+                false
+            } else {
                 let parent_path = child_path.slice_unchecked(0, child_path.len() - 1);
                 let child_nibble = child_path.last().expect("path not empty");
                 let removed_mask = added_removed_keys.get_removed_mask(&parent_path);
                 !removed_mask.is_bit_set(child_nibble)
-            } else {
-                false
             }
         } else {
             false
@@ -1265,37 +1262,69 @@ where
                 self.commit_last_child(targets)?;
 
                 if !self.should_retain(targets, &child_path, false) {
-                    // Pull this child's hash out of the cached branch node. To get the hash's index
-                    // we first need to calculate the mask of which cached hashes have already been
-                    // used by this branch (if any). The number of set bits in that mask will be the
-                    // index of the next hash in the array to use.
-                    let curr_hashed_used_mask = cached_branch.hash_mask.get() & curr_state_mask;
-                    let hash_idx = curr_hashed_used_mask.count_ones() as usize;
-                    let hash = cached_branch.hashes[hash_idx];
+                    // Check if this child will be the remaining sibling after a branch collapse.
+                    // If so, we can't use the cached hash - we need to compute the full node
+                    // so it can be included in the proof.
+                    let needs_full_node_for_collapse =
+                        if let Some(added_removed_keys) = &self.added_removed_keys {
+                            let removed_mask = added_removed_keys.get_removed_mask(&cached_path);
+                            let nonremoved_mask =
+                                TrieMask::new(!removed_mask.get() & cached_branch.state_mask.get());
 
-                    trace!(
-                        target: TRACE_TARGET,
-                        ?child_path,
-                        ?hash_idx,
-                        ?hash,
-                        "Using cached hash for child",
-                    );
+                            // Branch will collapse if only 1 child remains
+                            if nonremoved_mask.count_ones() == 1 {
+                                let remaining_nibble = nonremoved_mask.trailing_zeros() as u8;
+                                // This child is the remaining one
+                                remaining_nibble == child_nibble
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
 
-                    self.child_stack.push(ProofTrieBranchChild::RlpNode(RlpNode::word_rlp(&hash)));
-                    self.branch_stack
-                        .last_mut()
-                        .expect("already asserted there is a last branch")
-                        .state_mask
-                        .set_bit(child_nibble);
+                    if needs_full_node_for_collapse {
+                        trace!(
+                            target: TRACE_TARGET,
+                            ?child_path,
+                            ?cached_path,
+                            "Child is remaining sibling after collapse, computing full node"
+                        );
+                        // Fall through to compute the full node instead of using cached hash
+                    } else {
+                        // Pull this child's hash out of the cached branch node. To get the hash's
+                        // index we first need to calculate the mask of which cached hashes have
+                        // already been used by this branch (if any). The number of set bits in that
+                        // mask will be the index of the next hash in the array to use.
+                        let curr_hashed_used_mask = cached_branch.hash_mask.get() & curr_state_mask;
+                        let hash_idx = curr_hashed_used_mask.count_ones() as usize;
+                        let hash = cached_branch.hashes[hash_idx];
 
-                    // Update the `uncalculated_lower_bound` to indicate that the child whose bit
-                    // was just set is completely processed.
-                    uncalculated_lower_bound = increment_and_strip_trailing_zeros(&child_path);
+                        trace!(
+                            target: TRACE_TARGET,
+                            ?child_path,
+                            ?hash_idx,
+                            ?hash,
+                            "Using cached hash for child",
+                        );
 
-                    // Push the current cached branch back onto the stack before looping.
-                    self.cached_branch_stack.push((cached_path, cached_branch));
+                        self.child_stack
+                            .push(ProofTrieBranchChild::RlpNode(RlpNode::word_rlp(&hash)));
+                        self.branch_stack
+                            .last_mut()
+                            .expect("already asserted there is a last branch")
+                            .state_mask
+                            .set_bit(child_nibble);
 
-                    continue
+                        // Update the `uncalculated_lower_bound` to indicate that the child whose
+                        // bit was just set is completely processed.
+                        uncalculated_lower_bound = increment_and_strip_trailing_zeros(&child_path);
+
+                        // Push the current cached branch back onto the stack before looping.
+                        self.cached_branch_stack.push((cached_path, cached_branch));
+
+                        continue
+                    }
                 }
             }
 
@@ -2577,6 +2606,130 @@ mod tests {
             "Expected sibling at path {:?} to be retained in proof for branch collapse. \
              Proof paths: {:?}",
             sibling_path, proof_paths
+        );
+    }
+
+    /// Integration test: Verify that extra retained nodes from AddedRemovedKeys
+    /// actually prevent sparse trie DB fallback during remove_leaf.
+    ///
+    /// This test:
+    /// 1. Creates a trie with a collapsing branch structure
+    /// 2. Generates proofs with AddedRemovedKeys to capture the remaining sibling
+    /// 3. Reveals those proofs in a sparse trie
+    /// 4. Removes leaves and verifies no BlindedNode error occurs
+    #[test]
+    fn test_added_removed_keys_prevents_sparse_trie_fallback() {
+        use alloy_primitives::hex;
+        use alloy_trie::proof::AddedRemovedKeys;
+        use reth_trie_common::ProofTrieNode;
+        use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
+
+        reth_tracing::init_test_tracing();
+
+        // Helper function to create B256 from hex string
+        let b256 = |s: &str| B256::from_slice(&hex::decode(s).unwrap());
+
+        // Create trie structure:
+        //
+        //                    Root (branch at [])
+        //                   /     |     \
+        //                 0x0   0x1     0x2
+        //                  |     |       |
+        //               Leaf  Branch   Leaf
+        //                    at [1]
+        //                    / | \
+        //                 0x10 0x11 0x12
+        //                   |    |    |
+        //                 Leaf Leaf  Leaf
+        //
+        // We'll target 0x10... and 0x12... (the ones being removed).
+        // The branch at [1] will collapse to just 0x11...
+        // The sibling at 0x11... should be retained so remove_leaf doesn't need DB.
+        let mut accounts = B256Map::default();
+
+        // Accounts to create the structure
+        let addr_0 = b256("0000000000000000000000000000000000000000000000000000000000000000");
+        let addr_10 = b256("1000000000000000000000000000000000000000000000000000000000000000");
+        let addr_11 = b256("1100000000000000000000000000000000000000000000000000000000000000");
+        let addr_12 = b256("1200000000000000000000000000000000000000000000000000000000000000");
+        let addr_2 = b256("2000000000000000000000000000000000000000000000000000000000000000");
+
+        accounts.insert(addr_0, Some(Account { nonce: 1, ..Default::default() }));
+        accounts.insert(addr_10, Some(Account { nonce: 2, ..Default::default() }));
+        accounts.insert(addr_11, Some(Account { nonce: 3, ..Default::default() }));
+        accounts.insert(addr_12, Some(Account { nonce: 4, ..Default::default() }));
+        accounts.insert(addr_2, Some(Account { nonce: 5, ..Default::default() }));
+
+        let post_state = HashedPostState { accounts, ..Default::default() };
+        let harness = ProofTestHarness::new(post_state);
+
+        // Set up AddedRemovedKeys: mark addr_10 and addr_12 as removed
+        let mut added_removed_keys = AddedRemovedKeys::default();
+        added_removed_keys.insert_removed(addr_10);
+        added_removed_keys.insert_removed(addr_12);
+
+        // Target the leaves being removed - we need proofs for these paths
+        let mut targets = vec![Target::new(addr_10), Target::new(addr_12)];
+
+        // Create proof calculator with AddedRemovedKeys
+        let trie_cursor = harness.trie_cursor_factory.account_trie_cursor().unwrap();
+        let hashed_cursor = harness.hashed_cursor_factory.hashed_account_cursor().unwrap();
+
+        let mut value_encoder = SyncAccountValueEncoder::new(
+            harness.trie_cursor_factory.clone(),
+            harness.hashed_cursor_factory.clone(),
+        );
+        let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor)
+            .with_added_removed_keys(Some(added_removed_keys));
+
+        let proof_result: Vec<ProofTrieNode> = proof_calculator
+            .proof(&mut value_encoder, &mut targets)
+            .expect("Proof generation failed");
+
+        // Verify sibling is in the proof
+        let addr_11_path = Nibbles::unpack(addr_11);
+        let sibling_path = addr_11_path.slice_unchecked(0, 2); // [1, 1]
+        let has_sibling = proof_result.iter().any(|n| n.path == sibling_path);
+        assert!(has_sibling, "Sibling path {:?} should be in proof", sibling_path);
+
+        // Now reveal proofs in a sparse trie
+        let mut sparse = SerialSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+
+        // Reveal the proof nodes (root first, then others in order)
+        let mut sorted_proofs = proof_result;
+        sorted_proofs.sort_by_key(|n| n.path);
+
+        // The first node should be the root
+        if let Some(root) = sorted_proofs.first() {
+            if root.path.is_empty() {
+                sparse = SerialSparseTrie::from_root(
+                    root.node.clone(),
+                    root.masks.clone(),
+                    true, // retain_updates
+                )
+                .expect("Failed to create sparse trie from root");
+            }
+        }
+
+        // Reveal remaining nodes
+        sparse.reveal_nodes(sorted_proofs).expect("Failed to reveal proof nodes");
+
+        // Now remove one of the leaves - this should NOT cause a BlindedNode error
+        // because the sibling was retained in the proof
+        let addr_10_path = Nibbles::unpack(addr_10);
+
+        // The key test: remove_leaf should succeed without hitting BlindedNode error
+        // In the broken case, this would fail with:
+        // SparseTrieErrorKind::BlindedNode { path: [1, 1], hash: ... }
+        let result = sparse.remove_leaf(&addr_10_path, &provider);
+
+        // Check that we didn't get a BlindedNode error
+        assert!(
+            result.is_ok(),
+            "remove_leaf should succeed because sibling was pre-revealed. \
+             Got error: {:?}",
+            result.err()
         );
     }
 }

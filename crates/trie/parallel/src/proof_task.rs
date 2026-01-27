@@ -1380,6 +1380,11 @@ where
 
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
+        // Set account-level added/removed keys for sibling retention on branch collapse
+        let account_added_removed_keys =
+            multi_added_removed_keys.map(|keys| keys.get_accounts().clone());
+        v2_account_calculator.set_added_removed_keys(account_added_removed_keys);
+
         let storage_proof_receivers = dispatch_v2_storage_proofs(
             &self.storage_work_tx,
             &account_targets,
