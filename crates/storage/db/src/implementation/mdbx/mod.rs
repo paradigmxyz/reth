@@ -241,6 +241,8 @@ pub struct DatabaseEnv {
 impl Database for DatabaseEnv {
     type TX = tx::Tx<RO>;
     type TXMut = tx::Tx<RW>;
+    type TXUnsync = tx::TxUnsync<RO>;
+    type TXMutUnsync = tx::TxUnsync<RW>;
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Tx::new(
@@ -258,6 +260,18 @@ impl Database for DatabaseEnv {
             self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
+    }
+
+    fn tx_unsync(&self) -> Result<Self::TXUnsync, DatabaseError> {
+        let inner =
+            self.inner.begin_ro_txn_unsync().map_err(|e| DatabaseError::InitTx(e.into()))?;
+        Ok(tx::TxUnsync::new(inner, self.dbis.clone()))
+    }
+
+    fn tx_mut_unsync(&self) -> Result<Self::TXMutUnsync, DatabaseError> {
+        let inner =
+            self.inner.begin_rw_txn_unsync().map_err(|e| DatabaseError::InitTx(e.into()))?;
+        Ok(tx::TxUnsync::new(inner, self.dbis.clone()))
     }
 }
 

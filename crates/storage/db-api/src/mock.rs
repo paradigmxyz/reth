@@ -34,6 +34,8 @@ pub struct DatabaseMock {
 impl Database for DatabaseMock {
     type TX = TxMock;
     type TXMut = TxMock;
+    type TXUnsync = TxMock;
+    type TXMutUnsync = TxMock;
 
     /// Creates a new read-only transaction.
     ///
@@ -48,6 +50,14 @@ impl Database for DatabaseMock {
     /// This always succeeds and returns a default [`TxMock`] instance.
     /// The mock transaction doesn't actually perform any database operations.
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
+        Ok(TxMock::default())
+    }
+
+    fn tx_unsync(&self) -> Result<Self::TXUnsync, DatabaseError> {
+        Ok(TxMock::default())
+    }
+
+    fn tx_mut_unsync(&self) -> Result<Self::TXMutUnsync, DatabaseError> {
         Ok(TxMock::default())
     }
 }

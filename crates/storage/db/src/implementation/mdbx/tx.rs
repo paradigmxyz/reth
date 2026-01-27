@@ -9,7 +9,9 @@ use reth_db_api::{
     table::{Compress, DupSort, Encode, IntoVec, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
 };
-use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
+use reth_libmdbx::{
+    ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, TransactionUnsync, WriteFlags, RW,
+};
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, trace, warn};
 use std::{
@@ -442,6 +444,201 @@ impl DbTxMut for Tx<RW> {
 
     fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError> {
         self.new_cursor()
+    }
+}
+
+/// Unsynchronized wrapper for the libmdbx transaction.
+///
+/// This is a faster variant of [`Tx`] that avoids `Arc` and `Mutex` overhead.
+/// It is **not** `Sync` and not `Clone`.
+#[derive(Debug)]
+pub struct TxUnsync<K: TransactionKind> {
+    /// Libmdbx-sys unsynchronized transaction.
+    inner: TransactionUnsync<K>,
+
+    /// Cached MDBX DBIs for reuse.
+    dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
+}
+
+impl<K: TransactionKind> TxUnsync<K> {
+    /// Creates new `TxUnsync` object with an unsynchronized `RO` or `RW` transaction.
+    #[inline]
+    #[track_caller]
+    pub(crate) const fn new(
+        inner: TransactionUnsync<K>,
+        dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
+    ) -> Self {
+        Self { inner, dbis }
+    }
+
+    /// Gets this transaction ID.
+    pub fn id(&self) -> u64 {
+        self.inner.id()
+    }
+
+    /// Gets a table database handle by name if it exists, otherwise, check the
+    /// database, opening the DB if it exists.
+    pub fn get_dbi<T: Table>(&self) -> Result<MDBX_dbi, DatabaseError> {
+        if let Some(dbi) = self.dbis.get(T::NAME) {
+            Ok(*dbi)
+        } else {
+            self.inner
+                .open_db(Some(T::NAME))
+                .map(|db| db.dbi())
+                .map_err(|e| DatabaseError::Open(e.into()))
+        }
+    }
+
+    /// Create db Cursor
+    pub fn new_cursor<T: Table>(
+        &self,
+    ) -> Result<super::cursor::CursorUnsync<'_, K, T>, DatabaseError> {
+        let inner = self
+            .inner
+            .cursor_with_dbi(self.get_dbi::<T>()?)
+            .map_err(|e| DatabaseError::InitCursor(e.into()))?;
+        Ok(super::cursor::CursorUnsync::new(inner))
+    }
+}
+
+impl TableImporter for TxUnsync<RW> {}
+
+impl<K: TransactionKind> DbTx for TxUnsync<K> {
+    type Cursor<T: Table> = super::cursor::CursorUnsync<'static, K, T>;
+    type DupCursor<T: DupSort> = super::cursor::CursorUnsync<'static, K, T>;
+
+    fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, DatabaseError> {
+        self.get_by_encoded_key::<T>(&key.encode())
+    }
+
+    fn get_by_encoded_key<T: Table>(
+        &self,
+        key: &<T::Key as Encode>::Encoded,
+    ) -> Result<Option<T::Value>, DatabaseError> {
+        self.inner
+            .get(self.get_dbi::<T>()?, key.as_ref())
+            .map_err(|e| DatabaseError::Read(e.into()))?
+            .map(decode_one::<T>)
+            .transpose()
+    }
+
+    fn commit(self) -> Result<(), DatabaseError> {
+        self.inner.commit().map_err(|e| DatabaseError::Commit(e.into()))?;
+        Ok(())
+    }
+
+    fn abort(self) {
+        drop(self.inner);
+    }
+
+    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<T>, DatabaseError> {
+        // We need to use unsafe here because the cursor lifetime is tied to the transaction,
+        // but the DbTx trait requires 'static. The caller must ensure the cursor doesn't
+        // outlive the transaction.
+        let cursor = self.new_cursor::<T>()?;
+        // SAFETY: The cursor's lifetime is actually tied to `self`, but we're transmuting it to
+        // 'static. The caller (and the trait design) must ensure this is used correctly.
+        Ok(unsafe {
+            std::mem::transmute::<
+                super::cursor::CursorUnsync<'_, K, T>,
+                super::cursor::CursorUnsync<'static, K, T>,
+            >(cursor)
+        })
+    }
+
+    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError> {
+        let cursor = self.new_cursor::<T>()?;
+        Ok(unsafe {
+            std::mem::transmute::<
+                super::cursor::CursorUnsync<'_, K, T>,
+                super::cursor::CursorUnsync<'static, K, T>,
+            >(cursor)
+        })
+    }
+
+    fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
+        Ok(self
+            .inner
+            .db_stat_with_dbi(self.get_dbi::<T>()?)
+            .map_err(|e| DatabaseError::Stats(e.into()))?
+            .entries())
+    }
+
+    fn disable_long_read_transaction_safety(&mut self) {
+        // Unsync transactions are not tracked by the timeout manager, so this is a no-op
+    }
+}
+
+impl TxUnsync<RW> {
+    fn put_inner<T: Table>(
+        &self,
+        kind: PutKind,
+        key: T::Key,
+        value: T::Value,
+    ) -> Result<(), DatabaseError> {
+        let key = key.encode();
+        let value = value.compress();
+        let (_, write_operation, flags) = kind.into_operation_and_flags();
+        self.inner.put(self.get_dbi::<T>()?, key.as_ref(), value, flags).map_err(|e| {
+            DatabaseWriteError {
+                info: e.into(),
+                operation: write_operation,
+                table_name: T::NAME,
+                key: key.into_vec(),
+            }
+            .into()
+        })
+    }
+}
+
+impl DbTxMut for TxUnsync<RW> {
+    type CursorMut<T: Table> = super::cursor::CursorUnsync<'static, RW, T>;
+    type DupCursorMut<T: DupSort> = super::cursor::CursorUnsync<'static, RW, T>;
+
+    fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        self.put_inner::<T>(PutKind::Upsert, key, value)
+    }
+
+    fn append<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        self.put_inner::<T>(PutKind::Append, key, value)
+    }
+
+    fn delete<T: Table>(
+        &self,
+        key: T::Key,
+        value: Option<T::Value>,
+    ) -> Result<bool, DatabaseError> {
+        let value = value.map(Compress::compress);
+        let data = value.as_ref().map(AsRef::as_ref);
+
+        self.inner
+            .del(self.get_dbi::<T>()?, key.encode(), data)
+            .map_err(|e| DatabaseError::Delete(e.into()))
+    }
+
+    fn clear<T: Table>(&self) -> Result<(), DatabaseError> {
+        self.inner.clear_db(self.get_dbi::<T>()?).map_err(|e| DatabaseError::Delete(e.into()))?;
+        Ok(())
+    }
+
+    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError> {
+        let cursor = self.new_cursor::<T>()?;
+        Ok(unsafe {
+            std::mem::transmute::<
+                super::cursor::CursorUnsync<'_, RW, T>,
+                super::cursor::CursorUnsync<'static, RW, T>,
+            >(cursor)
+        })
+    }
+
+    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError> {
+        let cursor = self.new_cursor::<T>()?;
+        Ok(unsafe {
+            std::mem::transmute::<
+                super::cursor::CursorUnsync<'_, RW, T>,
+                super::cursor::CursorUnsync<'static, RW, T>,
+            >(cursor)
+        })
     }
 }
 

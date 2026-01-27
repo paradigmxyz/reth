@@ -3,10 +3,15 @@ use crate::{
     environment::Environment,
     error::{mdbx_result, Result},
     flags::{DatabaseFlags, WriteFlags},
+    mdbx_try_optional,
     txn_manager::{TxnManagerMessage, TxnPtr},
     Cursor, Error, Stat, TableObject,
 };
-use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
+use ffi::{
+    MDBX_cursor_op, MDBX_txn_flags_t, MDBX_FIRST, MDBX_GET_BOTH_RANGE, MDBX_GET_CURRENT, MDBX_LAST,
+    MDBX_LAST_DUP, MDBX_NEXT, MDBX_NEXT_DUP, MDBX_NEXT_NODUP, MDBX_PREV, MDBX_PREV_DUP, MDBX_SET,
+    MDBX_SET_KEY, MDBX_SET_RANGE, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE,
+};
 use parking_lot::{Mutex, MutexGuard};
 use std::{
     ffi::{c_uint, c_void},
@@ -716,15 +721,483 @@ unsafe impl Send for TransactionPtr {}
 // SAFETY: Access to the transaction is synchronized by the lock.
 unsafe impl Sync for TransactionPtr {}
 
+/// Converts an optional byte slice to an MDBX value.
+const unsafe fn slice_to_val(slice: Option<&[u8]>) -> ffi::MDBX_val {
+    match slice {
+        Some(slice) => {
+            ffi::MDBX_val { iov_len: slice.len(), iov_base: slice.as_ptr() as *mut c_void }
+        }
+        None => ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() },
+    }
+}
+
+/// An unsynchronized MDBX transaction.
+///
+/// This is a faster variant of [`Transaction`] that avoids `Arc` and `Mutex` overhead.
+/// It is **not** `Sync` and requires `&mut self` for operations.
+/// Use this when you need single-threaded access without cloning the transaction.
+///
+/// Note: Unlike [`Transaction`], unsync transactions are not tracked by the read transaction
+/// timeout manager. This means they won't be automatically aborted after a timeout.
+pub struct TransactionUnsync<K>
+where
+    K: TransactionKind,
+{
+    /// The transaction pointer itself.
+    txn: *mut ffi::MDBX_txn,
+    /// Whether the transaction has committed.
+    committed: bool,
+    /// The environment.
+    env: Environment,
+    _marker: std::marker::PhantomData<fn(K)>,
+}
+
+impl<K> TransactionUnsync<K>
+where
+    K: TransactionKind,
+{
+    pub(crate) fn new(env: Environment) -> Result<Self> {
+        let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
+        unsafe {
+            mdbx_result(ffi::mdbx_txn_begin_ex(
+                env.env_ptr(),
+                ptr::null_mut(),
+                K::OPEN_FLAGS,
+                &mut txn,
+                ptr::null_mut(),
+            ))?;
+        }
+
+        Ok(Self { txn, committed: false, env, _marker: Default::default() })
+    }
+
+    /// Returns the transaction ID.
+    pub fn id(&self) -> u64 {
+        unsafe { ffi::mdbx_txn_id(self.txn) }
+    }
+
+    /// Returns the environment.
+    pub const fn env(&self) -> &Environment {
+        &self.env
+    }
+
+    /// Gets an item from a database.
+    pub fn get<Key>(&self, dbi: ffi::MDBX_dbi, key: &[u8]) -> Result<Option<Key>>
+    where
+        Key: TableObject,
+    {
+        let key_val = ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let mut data_val = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+
+        unsafe {
+            match ffi::mdbx_get(self.txn, dbi, &key_val, &mut data_val) {
+                ffi::MDBX_SUCCESS => Key::decode_val::<K>(self.txn, data_val).map(Some),
+                ffi::MDBX_NOTFOUND => Ok(None),
+                err_code => Err(Error::from_err_code(err_code)),
+            }
+        }
+    }
+
+    /// Commits the transaction.
+    pub fn commit(mut self) -> Result<CommitLatency> {
+        self.committed = true;
+
+        if K::IS_READ_ONLY {
+            let mut latency = CommitLatency::new();
+            mdbx_result(unsafe {
+                ffi::mdbx_txn_commit_ex(self.txn, latency.mdb_commit_latency())
+            })?;
+            Ok(latency)
+        } else {
+            let (sender, rx) = sync_channel(0);
+            self.env
+                .txn_manager()
+                .send_message(TxnManagerMessage::Commit { tx: TxnPtr(self.txn), sender });
+            match rx.recv().unwrap() {
+                Ok((false, lat)) => Ok(lat),
+                Ok((true, _)) => Err(Error::BotchedTransaction),
+                Err(e) => Err(e),
+            }
+        }
+    }
+
+    /// Opens a handle to an MDBX database.
+    pub fn open_db(&self, name: Option<&str>) -> Result<Database> {
+        Database::new_unsync(self, name, 0)
+    }
+
+    /// Retrieves database statistics by the given dbi.
+    pub fn db_stat_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Stat> {
+        unsafe {
+            let mut stat = Stat::new();
+            mdbx_result(ffi::mdbx_dbi_stat(self.txn, dbi, stat.mdb_stat(), size_of::<Stat>()))?;
+            Ok(stat)
+        }
+    }
+
+    /// Open a new cursor on the given dbi.
+    pub fn cursor_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<CursorUnsync<'_, K>> {
+        CursorUnsync::new(self, dbi)
+    }
+
+    /// Returns the raw transaction pointer. For internal use only.
+    pub(crate) const fn txn_ptr(&self) -> *mut ffi::MDBX_txn {
+        self.txn
+    }
+}
+
+impl TransactionUnsync<RW> {
+    fn open_db_with_flags(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
+        Database::new_unsync(self, name, flags.bits())
+    }
+
+    /// Opens a handle to an MDBX database, creating the database if necessary.
+    pub fn create_db(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
+        self.open_db_with_flags(name, flags | DatabaseFlags::CREATE)
+    }
+
+    /// Stores an item into a database.
+    pub fn put(
+        &self,
+        dbi: ffi::MDBX_dbi,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+        flags: WriteFlags,
+    ) -> Result<()> {
+        let key = key.as_ref();
+        let data = data.as_ref();
+        let key_val = ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let mut data_val =
+            ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
+        mdbx_result(unsafe {
+            ffi::mdbx_put(self.txn, dbi, &key_val, &mut data_val, flags.bits())
+        })?;
+        Ok(())
+    }
+
+    /// Delete items from a database.
+    pub fn del(
+        &self,
+        dbi: ffi::MDBX_dbi,
+        key: impl AsRef<[u8]>,
+        data: Option<&[u8]>,
+    ) -> Result<bool> {
+        let key = key.as_ref();
+        let key_val = ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let data_val: Option<ffi::MDBX_val> = data.map(|data| ffi::MDBX_val {
+            iov_len: data.len(),
+            iov_base: data.as_ptr() as *mut c_void,
+        });
+
+        let result = if let Some(d) = data_val {
+            unsafe { ffi::mdbx_del(self.txn, dbi, &key_val, &d) }
+        } else {
+            unsafe { ffi::mdbx_del(self.txn, dbi, &key_val, ptr::null()) }
+        };
+
+        mdbx_result(result).map(|_| true).or_else(|e| match e {
+            Error::NotFound => Ok(false),
+            other => Err(other),
+        })
+    }
+
+    /// Empties the given database.
+    pub fn clear_db(&self, dbi: ffi::MDBX_dbi) -> Result<()> {
+        mdbx_result(unsafe { ffi::mdbx_drop(self.txn, dbi, false) })?;
+        Ok(())
+    }
+}
+
+impl<K> fmt::Debug for TransactionUnsync<K>
+where
+    K: TransactionKind,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TransactionUnsync").finish_non_exhaustive()
+    }
+}
+
+impl<K> Drop for TransactionUnsync<K>
+where
+    K: TransactionKind,
+{
+    fn drop(&mut self) {
+        if !self.committed {
+            if K::IS_READ_ONLY {
+                unsafe {
+                    ffi::mdbx_txn_abort(self.txn);
+                }
+            } else {
+                let (sender, rx) = sync_channel(0);
+                self.env
+                    .txn_manager()
+                    .send_message(TxnManagerMessage::Abort { tx: TxnPtr(self.txn), sender });
+                let _ = rx.recv();
+            }
+        }
+    }
+}
+
+// SAFETY: The transaction pointer can be sent across threads.
+// The user is responsible for ensuring single-threaded access.
+unsafe impl<K: TransactionKind> Send for TransactionUnsync<K> {}
+
+/// An unsynchronized cursor for navigating database items.
+///
+/// This is a faster variant of [`Cursor`] that works with [`TransactionUnsync`].
+pub struct CursorUnsync<'tx, K>
+where
+    K: TransactionKind,
+{
+    txn: &'tx TransactionUnsync<K>,
+    cursor: *mut ffi::MDBX_cursor,
+}
+
+impl<'tx, K> CursorUnsync<'tx, K>
+where
+    K: TransactionKind,
+{
+    pub(crate) fn new(txn: &'tx TransactionUnsync<K>, dbi: ffi::MDBX_dbi) -> Result<Self> {
+        let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
+        unsafe {
+            mdbx_result(ffi::mdbx_cursor_open(txn.txn_ptr(), dbi, &mut cursor))?;
+        }
+        Ok(Self { txn, cursor })
+    }
+
+    /// Returns a raw pointer to the underlying MDBX cursor.
+    pub const fn cursor(&self) -> *mut ffi::MDBX_cursor {
+        self.cursor
+    }
+
+    fn get<Key, Value>(
+        &mut self,
+        key: Option<&[u8]>,
+        data: Option<&[u8]>,
+        op: MDBX_cursor_op,
+    ) -> Result<(Option<Key>, Value, bool)>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        unsafe {
+            let mut key_val = slice_to_val(key);
+            let mut data_val = slice_to_val(data);
+            let key_ptr = key_val.iov_base;
+            let data_ptr = data_val.iov_base;
+            let v =
+                mdbx_result(ffi::mdbx_cursor_get(self.cursor, &mut key_val, &mut data_val, op))?;
+            assert_ne!(data_ptr, data_val.iov_base);
+            let key_out = if ptr::eq(key_ptr, key_val.iov_base) {
+                None
+            } else {
+                Some(Key::decode_val::<K>(self.txn.txn_ptr(), key_val)?)
+            };
+            let data_out = Value::decode_val::<K>(self.txn.txn_ptr(), data_val)?;
+            Ok((key_out, data_out, v))
+        }
+    }
+
+    fn get_value<Value>(
+        &mut self,
+        key: Option<&[u8]>,
+        data: Option<&[u8]>,
+        op: MDBX_cursor_op,
+    ) -> Result<Option<Value>>
+    where
+        Value: TableObject,
+    {
+        let (_, v, _) = mdbx_try_optional!(self.get::<(), Value>(key, data, op));
+        Ok(Some(v))
+    }
+
+    fn get_full<Key, Value>(
+        &mut self,
+        key: Option<&[u8]>,
+        data: Option<&[u8]>,
+        op: MDBX_cursor_op,
+    ) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        let (k, v, _) = mdbx_try_optional!(self.get(key, data, op));
+        Ok(Some((k.unwrap(), v)))
+    }
+
+    /// Position at first key/data item.
+    pub fn first<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_FIRST)
+    }
+
+    /// Position at last key/data item.
+    pub fn last<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_LAST)
+    }
+
+    /// Position at next data item.
+    #[allow(clippy::should_implement_trait)]
+    pub fn next<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_NEXT)
+    }
+
+    /// Position at previous data item.
+    pub fn prev<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_PREV)
+    }
+
+    /// Return key/data at current cursor position.
+    pub fn get_current<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_GET_CURRENT)
+    }
+
+    /// Position at specified key.
+    pub fn set<Value>(&mut self, key: &[u8]) -> Result<Option<Value>>
+    where
+        Value: TableObject,
+    {
+        self.get_value(Some(key), None, MDBX_SET)
+    }
+
+    /// Position at specified key, return both key and data.
+    pub fn set_key<Key, Value>(&mut self, key: &[u8]) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(Some(key), None, MDBX_SET_KEY)
+    }
+
+    /// Position at first key greater than or equal to specified key.
+    pub fn set_range<Key, Value>(&mut self, key: &[u8]) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(Some(key), None, MDBX_SET_RANGE)
+    }
+
+    /// DupSort-only: Position at next data item of current key.
+    pub fn next_dup<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_NEXT_DUP)
+    }
+
+    /// Position at first data item of next key.
+    pub fn next_nodup<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_NEXT_NODUP)
+    }
+
+    /// DupSort-only: Position at previous data item of current key.
+    pub fn prev_dup<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
+    where
+        Key: TableObject,
+        Value: TableObject,
+    {
+        self.get_full(None, None, MDBX_PREV_DUP)
+    }
+
+    /// DupSort-only: Position at last data item of current key.
+    pub fn last_dup<Value>(&mut self) -> Result<Option<Value>>
+    where
+        Value: TableObject,
+    {
+        self.get_value(None, None, MDBX_LAST_DUP)
+    }
+
+    /// DupSort-only: Position at given key and at first data >= specified data.
+    pub fn get_both_range<Value>(&mut self, k: &[u8], v: &[u8]) -> Result<Option<Value>>
+    where
+        Value: TableObject,
+    {
+        self.get_value(Some(k), Some(v), MDBX_GET_BOTH_RANGE)
+    }
+}
+
+impl CursorUnsync<'_, RW> {
+    /// Store by cursor.
+    pub fn put(&mut self, key: &[u8], data: &[u8], flags: WriteFlags) -> Result<()> {
+        let key_val = ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let mut data_val =
+            ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
+        mdbx_result(unsafe {
+            ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits())
+        })?;
+        Ok(())
+    }
+
+    /// Delete current key/data pair.
+    pub fn del(&mut self, flags: WriteFlags) -> Result<()> {
+        mdbx_result(unsafe { ffi::mdbx_cursor_del(self.cursor, flags.bits()) })?;
+        Ok(())
+    }
+}
+
+impl<K> Drop for CursorUnsync<'_, K>
+where
+    K: TransactionKind,
+{
+    fn drop(&mut self) {
+        unsafe { ffi::mdbx_cursor_close(self.cursor) }
+    }
+}
+
+impl<K> fmt::Debug for CursorUnsync<'_, K>
+where
+    K: TransactionKind,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CursorUnsync").finish_non_exhaustive()
+    }
+}
+
+// SAFETY: The cursor pointer can be sent across threads.
+// The user is responsible for ensuring single-threaded access.
+unsafe impl<K: TransactionKind> Send for CursorUnsync<'_, K> {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const fn assert_send_sync<T: Send + Sync>() {}
+    const fn assert_send<T: Send>() {}
 
     #[expect(dead_code)]
     const fn test_txn_send_sync() {
         assert_send_sync::<Transaction<RO>>();
         assert_send_sync::<Transaction<RW>>();
+    }
+
+    #[expect(dead_code)]
+    const fn test_txn_unsync_send() {
+        assert_send::<TransactionUnsync<RO>>();
+        assert_send::<TransactionUnsync<RW>>();
     }
 }

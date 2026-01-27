@@ -1,6 +1,6 @@
 use crate::{
     error::{mdbx_result, Result},
-    transaction::TransactionKind,
+    transaction::{TransactionKind, TransactionUnsync},
     Environment, Transaction,
 };
 use ffi::MDBX_db_flags_t;
@@ -43,6 +43,24 @@ impl Database {
 
     pub(crate) const fn new_from_ptr(dbi: ffi::MDBX_dbi, env: Environment) -> Self {
         Self { dbi, _env: Some(env) }
+    }
+
+    /// Opens a new database handle using an unsynchronized transaction.
+    pub(crate) fn new_unsync<K: TransactionKind>(
+        txn: &TransactionUnsync<K>,
+        name: Option<&str>,
+        flags: MDBX_db_flags_t,
+    ) -> Result<Self> {
+        let mut c_name_buf = smallvec::SmallVec::<[u8; 32]>::new();
+        let c_name = name.map(|n| {
+            c_name_buf.extend_from_slice(n.as_bytes());
+            c_name_buf.push(0);
+            CStr::from_bytes_with_nul(&c_name_buf).unwrap()
+        });
+        let name_ptr = if let Some(c_name) = c_name { c_name.as_ptr() } else { ptr::null() };
+        let mut dbi: ffi::MDBX_dbi = 0;
+        mdbx_result(unsafe { ffi::mdbx_dbi_open(txn.txn_ptr(), name_ptr, flags, &mut dbi) })?;
+        Ok(Self::new_from_ptr(dbi, txn.env().clone()))
     }
 
     /// Opens the freelist database with DBI `0`.

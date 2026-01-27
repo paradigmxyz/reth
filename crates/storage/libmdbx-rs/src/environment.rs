@@ -2,7 +2,7 @@ use crate::{
     database::Database,
     error::{mdbx_result, Error, Result},
     flags::EnvironmentFlags,
-    transaction::{RO, RW},
+    transaction::{TransactionUnsync, RO, RW},
     txn_manager::{TxnManager, TxnManagerMessage, TxnPtr},
     Mode, SyncMode, Transaction, TransactionKind,
 };
@@ -124,6 +124,39 @@ impl Environment {
             break res
         }?;
         Ok(Transaction::new_from_ptr(self.clone(), txn.0))
+    }
+
+    /// Create an unsynchronized read-only transaction for use with the environment.
+    ///
+    /// This is a faster variant of [`begin_ro_txn`](Self::begin_ro_txn) that avoids
+    /// `Arc` and `Mutex` overhead. The returned transaction is not `Sync` and not `Clone`.
+    #[inline]
+    pub fn begin_ro_txn_unsync(&self) -> Result<TransactionUnsync<RO>> {
+        TransactionUnsync::new(self.clone())
+    }
+
+    /// Create an unsynchronized read-write transaction for use with the environment.
+    ///
+    /// This is a faster variant of [`begin_rw_txn`](Self::begin_rw_txn) that avoids
+    /// `Arc` and `Mutex` overhead. The returned transaction is not `Sync` and not `Clone`.
+    ///
+    /// This method will block while there are any other read-write transactions open on the
+    /// environment.
+    pub fn begin_rw_txn_unsync(&self) -> Result<TransactionUnsync<RW>> {
+        let mut warned = false;
+        loop {
+            match TransactionUnsync::new(self.clone()) {
+                Ok(txn) => return Ok(txn),
+                Err(Error::Busy) => {
+                    if !warned {
+                        warned = true;
+                        warn!(target: "libmdbx", "Process stalled, awaiting read-write transaction lock.");
+                    }
+                    sleep(Duration::from_millis(250));
+                }
+                Err(e) => return Err(e),
+            }
+        }
     }
 
     /// Returns a raw pointer to the underlying MDBX environment.
