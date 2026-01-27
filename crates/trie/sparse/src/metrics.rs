@@ -21,8 +21,6 @@ pub(crate) struct SparseStateTrieMetrics {
     pub(crate) prune_storage_nodes_converted: u64,
     /// Number of storage tries cleared (evicted) during pruning.
     pub(crate) prune_storage_tries_cleared: u64,
-    /// Number of storage tries retained during pruning.
-    pub(crate) prune_storage_tries_retained: u64,
     /// Total revealed nodes in account trie after pruning.
     pub(crate) post_prune_account_nodes: u64,
     /// Total revealed nodes across retained storage tries after pruning.
@@ -61,9 +59,6 @@ impl SparseStateTrieMetrics {
         self.histograms
             .prune_storage_tries_cleared
             .record(take(&mut self.prune_storage_tries_cleared) as f64);
-        self.histograms
-            .prune_storage_tries_retained
-            .record(take(&mut self.prune_storage_tries_retained) as f64);
         self.histograms
             .post_prune_account_nodes
             .record(take(&mut self.post_prune_account_nodes) as f64);
@@ -113,8 +108,6 @@ pub(crate) struct SparseStateTrieInnerMetrics {
     pub(crate) prune_storage_nodes_converted: Histogram,
     /// Histogram of storage tries cleared (evicted) during pruning.
     pub(crate) prune_storage_tries_cleared: Histogram,
-    /// Histogram of storage tries retained during pruning.
-    pub(crate) prune_storage_tries_retained: Histogram,
     /// Histogram of revealed nodes in account trie after pruning.
     pub(crate) post_prune_account_nodes: Histogram,
     /// Histogram of revealed nodes across retained storage tries after pruning.

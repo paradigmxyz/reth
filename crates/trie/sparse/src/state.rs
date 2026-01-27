@@ -1167,7 +1167,6 @@ where
             self.metrics.prune_account_nodes_converted = account_nodes_converted;
             self.metrics.prune_storage_nodes_converted = storage_nodes_converted;
             self.metrics.prune_storage_tries_cleared = tries_cleared_count;
-            self.metrics.prune_storage_tries_retained = tries_to_keep.len() as u64;
             self.metrics.post_prune_account_nodes =
                 self.state.as_revealed_ref().map(|t| t.revealed_node_count()).unwrap_or(0) as u64;
             self.metrics.post_prune_storage_nodes = self
