@@ -29,7 +29,7 @@ pub const UPPER_TRIE_MAX_DEPTH: usize = 2;
 pub const NUM_LOWER_SUBTRIES: usize = 16usize.pow(UPPER_TRIE_MAX_DEPTH as u32);
 
 /// Configuration for controlling when parallelism is enabled in [`ParallelSparseTrie`] operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ParallelismThresholds {
     /// Minimum number of nodes to reveal before parallel processing is enabled.
     /// When `reveal_nodes` has fewer nodes than this threshold, they will be processed serially.
@@ -38,16 +38,6 @@ pub struct ParallelismThresholds {
     /// for hash updates. When updating subtrie hashes with fewer changed keys than this threshold,
     /// the updates will be processed serially.
     pub min_updated_nodes: usize,
-    /// Minimum number of revealed lower subtries before parallel processing is enabled for prune.
-    /// When pruning with fewer revealed subtries than this threshold, they will be processed
-    /// serially.
-    pub min_prune_subtries: usize,
-}
-
-impl Default for ParallelismThresholds {
-    fn default() -> Self {
-        Self { min_revealed_nodes: 0, min_updated_nodes: 0, min_prune_subtries: 4 }
-    }
 }
 
 /// A revealed sparse trie with subtries that can be updated in parallel.
@@ -1119,70 +1109,9 @@ impl SparseTrieExt for ParallelSparseTrie {
             true
         });
 
-        #[cfg(feature = "std")]
-        {
-            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
-            // Collect indices of revealed subtries that need processing (not fully cleared)
-            let revealed_indices: Vec<usize> = (0..NUM_LOWER_SUBTRIES)
-                .filter(|&idx| {
-                    !fully_pruned_subtries[idx] &&
-                        self.lower_subtries[idx].as_revealed_ref().is_some()
-                })
-                .collect();
-
-            // Only use parallelism if there are enough subtries to process
-            if revealed_indices.len() >= self.parallelism_thresholds.min_prune_subtries {
-                // Take out the subtries we need to process
-                let mut subtries_to_process: Vec<_> = revealed_indices
-                    .iter()
-                    .map(|&idx| {
-                        let subtrie = core::mem::replace(
-                            &mut self.lower_subtries[idx],
-                            LowerSparseSubtrie::Blind(None),
-                        );
-                        (idx, subtrie)
-                    })
-                    .collect();
-
-                // Process in parallel
-                subtries_to_process.par_iter_mut().for_each(|(subtrie_idx, subtrie)| {
-                    if let Some(s) = subtrie.as_revealed_mut() {
-                        let bucket = &roots_by_lower[*subtrie_idx];
-                        s.nodes.retain(|p, _| {
-                            !is_strict_descendant_in(bucket, p) &&
-                                !is_strict_descendant_in(&roots_upper, p)
-                        });
-                        s.inner.values.retain(|p, _| {
-                            !starts_with_pruned_in(bucket, p) &&
-                                !starts_with_pruned_in(&roots_upper, p)
-                        });
-                    }
-                });
-
-                // Put subtries back
-                for (idx, subtrie) in subtries_to_process {
-                    self.lower_subtries[idx] = subtrie;
-                }
-            } else {
-                // Process serially for small number of revealed subtries
-                for idx in revealed_indices {
-                    if let Some(s) = self.lower_subtries[idx].as_revealed_mut() {
-                        let bucket = &roots_by_lower[idx];
-                        s.nodes.retain(|p, _| {
-                            !is_strict_descendant_in(bucket, p) &&
-                                !is_strict_descendant_in(&roots_upper, p)
-                        });
-                        s.inner.values.retain(|p, _| {
-                            !starts_with_pruned_in(bucket, p) &&
-                                !starts_with_pruned_in(&roots_upper, p)
-                        });
-                    }
-                }
-            }
-        }
-
-        #[cfg(not(feature = "std"))]
+        // Process lower subtries serially - benchmarking shows parallelism adds overhead
+        // without benefit due to the fast per-subtrie retain() operations (~0.3µs each)
+        // and rayon dispatch overhead (~80-100µs).
         for (subtrie_idx, subtrie) in self.lower_subtries.iter_mut().enumerate() {
             // Skip subtries that were fully cleared via the fast path
             if fully_pruned_subtries[subtrie_idx] {
