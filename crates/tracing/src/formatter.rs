@@ -2,7 +2,7 @@ use crate::layers::BoxedLayer;
 use clap::ValueEnum;
 use std::{fmt, fmt::Display};
 use tracing_appender::non_blocking::NonBlocking;
-use tracing_subscriber::{EnvFilter, Layer, Registry};
+use tracing_subscriber::{reload, EnvFilter, Layer, Registry};
 
 /// Represents the logging format.
 ///
@@ -76,6 +76,46 @@ impl LogFormat {
                 } else {
                     layer.with_filter(filter).boxed()
                 }
+            }
+        }
+    }
+
+    /// Applies the specified logging format with a reloadable filter.
+    ///
+    /// This method is similar to [`Self::apply`] but accepts a reload layer instead of an
+    /// `EnvFilter`, allowing the filter to be changed at runtime.
+    ///
+    /// # Arguments
+    /// * `filter` - A `reload::Layer` wrapping an `EnvFilter` for dynamic filter updates.
+    /// * `color` - An optional string that enables or disables ANSI color codes in the logs.
+    ///
+    /// # Returns
+    /// A `BoxedLayer<Registry>` that can be added to a tracing subscriber.
+    pub fn apply_reloadable(
+        &self,
+        filter: reload::Layer<EnvFilter, Registry>,
+        color: Option<String>,
+    ) -> BoxedLayer<Registry> {
+        let ansi = if let Some(color) = color {
+            std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(color != "never")
+        } else {
+            false
+        };
+
+        // For reloadable filters, we can't determine max level hint dynamically,
+        // so we default to showing target (consistent with debug/trace level behavior)
+        let target = std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or(true);
+
+        match self {
+            Self::Json => {
+                let layer =
+                    tracing_subscriber::fmt::layer().json().with_ansi(ansi).with_target(target);
+                layer.with_filter(filter).boxed()
+            }
+            Self::LogFmt => tracing_logfmt::layer().with_filter(filter).boxed(),
+            Self::Terminal => {
+                let layer = tracing_subscriber::fmt::layer().with_ansi(ansi).with_target(target);
+                layer.with_filter(filter).boxed()
             }
         }
     }
