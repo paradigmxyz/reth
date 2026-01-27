@@ -633,7 +633,11 @@ impl TrieUpdatesSorted {
     /// For large batches, uses k-way merge for O(n log k) complexity.
     pub fn merge_batch<T: AsRef<Self> + From<Self>>(iter: impl IntoIterator<Item = T>) -> T {
         let items: alloc::vec::Vec<_> = iter.into_iter().collect();
-        Self::merge_slice(&items).into()
+        match items.len() {
+            0 => Self::default().into(),
+            1 => items.into_iter().next().expect("len == 1"),
+            _ => Self::merge_slice(&items).into(),
+        }
     }
 
     /// Batch-merge sorted trie updates from a slice. Slice is **newest to oldest**.
