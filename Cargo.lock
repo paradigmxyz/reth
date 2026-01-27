@@ -3585,6 +3585,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-changeset-bench"
+version = "0.0.0"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "eyre",
+ "rand 0.8.5",
+ "reth-db-api",
+ "reth-ethereum",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "example-custom-beacon-withdrawals"
 version = "0.0.0"
 dependencies = [

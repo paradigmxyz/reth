@@ -205,55 +205,85 @@ fn sample_changesets(args: &Args) -> Result<SampledData> {
     let mut seen_addresses: HashSet<Address> = HashSet::new();
     let mut seen_storage: HashSet<(Address, B256)> = HashSet::new();
 
-    println!("Scanning AccountChangeSets...");
+    println!("Scanning AccountChangeSets across full range...");
     {
         let mut cursor = provider.tx_ref().cursor_read::<tables::AccountChangeSets>()?;
         let mut walker = cursor.walk_range(oldest_block..=latest_block)?;
 
+        let mut all_entries: Vec<(Address, BlockNumber)> = Vec::new();
         let mut count = 0;
         while let Some(Ok((block, entry))) = walker.next() {
-            if !seen_addresses.contains(&entry.address) && accounts.len() < args.samples {
+            if !seen_addresses.contains(&entry.address) {
                 seen_addresses.insert(entry.address);
-                accounts.push((entry.address, block));
+                all_entries.push((entry.address, block));
             }
             count += 1;
-            if count % 100000 == 0 {
-                print!("\r  Scanned {} entries, found {} unique addresses", count, accounts.len());
+            if count % 500000 == 0 {
+                print!(
+                    "\r  Scanned {} entries, found {} unique addresses",
+                    count,
+                    all_entries.len()
+                );
                 std::io::stdout().flush()?;
             }
-            if accounts.len() >= args.samples {
-                break;
+        }
+        println!(
+            "\r  Scanned {} entries, found {} unique addresses",
+            count,
+            all_entries.len()
+        );
+
+        // Sample evenly across the collected entries
+        if all_entries.len() <= args.samples {
+            accounts = all_entries;
+        } else {
+            let step = all_entries.len() / args.samples;
+            for i in 0..args.samples {
+                accounts.push(all_entries[i * step].clone());
             }
         }
-        println!("\r  Scanned {} entries, found {} unique addresses", count, accounts.len());
+        println!("  Sampled {} addresses across block range", accounts.len());
     }
 
-    println!("Scanning StorageChangeSets...");
+    println!("Scanning StorageChangeSets across full range...");
     {
-        let changesets = provider.storage_changeset(oldest_block)?;
-        for (bna, entry) in &changesets {
-            let key = (bna.address(), entry.key);
-            if !seen_storage.contains(&key) && storage.len() < args.samples {
-                seen_storage.insert(key);
-                storage.push((bna.address(), entry.key, bna.block_number()));
-            }
-        }
+        let mut all_storage: Vec<(Address, B256, BlockNumber)> = Vec::new();
 
-        for block in oldest_block..=latest_block.min(oldest_block + 1000) {
-            if storage.len() >= args.samples {
-                break;
-            }
+        for block in oldest_block..=latest_block {
             if let Ok(changesets) = provider.storage_changeset(block) {
                 for (bna, entry) in changesets {
                     let key = (bna.address(), entry.key);
-                    if !seen_storage.contains(&key) && storage.len() < args.samples {
+                    if !seen_storage.contains(&key) {
                         seen_storage.insert(key);
-                        storage.push((bna.address(), entry.key, bna.block_number()));
+                        all_storage.push((bna.address(), entry.key, bna.block_number()));
                     }
                 }
             }
+            if (block - oldest_block) % 1000 == 0 {
+                print!(
+                    "\r  Scanned {} blocks, found {} unique slots",
+                    block - oldest_block,
+                    all_storage.len()
+                );
+                std::io::stdout().flush()?;
+            }
         }
-        println!("  Found {} unique storage slots", storage.len());
+        println!(
+            "\r  Scanned {} blocks, found {} unique slots",
+            latest_block - oldest_block + 1,
+            all_storage.len()
+        );
+
+        // Sample evenly across the collected entries
+        if all_storage.len() <= args.samples {
+            storage = all_storage;
+        } else {
+            let step = all_storage.len() / args.samples;
+            for i in 0..args.samples {
+                storage.push(all_storage[i * step].clone());
+            }
+        }
+        println!("  Sampled {} storage slots across block range", storage.len());
     }
 
     drop(provider);
