@@ -211,12 +211,12 @@ where
 
     /// Updates the storage filter with accounts from the hashed post state in background.
     ///
-    /// This spawns a blocking task that inserts accounts with non-zero storage and removes
+    /// This spawns a background thread that inserts accounts with non-zero storage and removes
     /// destroyed accounts. Called immediately after state root computation completes successfully.
     fn update_storage_filter(&self, hashed_state: Arc<reth_trie::HashedPostState>) {
         let Some(filter) = self.storage_filter.clone() else { return };
 
-        tokio::task::spawn_blocking(move || {
+        self.payload_processor.executor().spawn_blocking(move || {
             let mut filter_guard = filter.write();
             let mut inserted = 0usize;
             let mut removed = 0usize;
@@ -231,10 +231,8 @@ where
 
             // Process accounts with non-zero storage
             for (addr, storage) in hashed_state.storages.iter() {
-                let has_non_zero = storage
-                    .storage
-                    .iter()
-                    .any(|(_, value)| *value != alloy_primitives::U256::ZERO);
+                let has_non_zero =
+                    storage.storage.iter().any(|(_, value)| *value != alloy_primitives::U256::ZERO);
 
                 if has_non_zero {
                     if filter_guard.insert(*addr).is_err() {
@@ -1563,12 +1561,8 @@ where
             overlay_blocks.iter().rev().map(|b| b.trie_data_handle()).collect();
 
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
-        let deferred_trie_data = DeferredTrieData::pending(
-            hashed_state,
-            Arc::new(trie_output),
-            anchor_hash,
-            ancestors,
-        );
+        let deferred_trie_data =
+            DeferredTrieData::pending(hashed_state, Arc::new(trie_output), anchor_hash, ancestors);
         let deferred_handle_task = deferred_trie_data.clone();
         let block_validation_metrics = self.metrics.block_validation.clone();
 
