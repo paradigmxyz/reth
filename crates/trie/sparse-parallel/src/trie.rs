@@ -7666,68 +7666,6 @@ mod tests {
         }
     }
 
-    /// Large-scale prune test for profiling with samply.
-    ///
-    /// Run with:
-    /// ```sh
-    /// cargo test -p reth-trie-sparse-parallel --release -- test_prune_profile --nocapture --ignored
-    /// samply record --save-only -o /tmp/prune.json -- ./target/release/deps/reth_trie_sparse_parallel-* test_prune_profile --nocapture --ignored
-    /// profslice hotspots /tmp/prune.json --top 30
-    /// ```
-    #[test]
-    #[ignore = "profiling test - run manually with samply"]
-    fn test_prune_profile() {
-        use std::time::Instant;
-
-        const ITERATIONS: usize = 100;
-
-        let provider = DefaultTrieNodeProvider;
-        let value = large_account_value();
-
-        let mut total_prune_time = std::time::Duration::ZERO;
-
-        for iter in 0..ITERATIONS {
-            let mut trie = ParallelSparseTrie::default();
-
-            // Build a large trie: 16^4 = 65536 leaves
-            for a in 0..16u8 {
-                for b in 0..16u8 {
-                    for c in 0..16u8 {
-                        for d in 0..16u8 {
-                            trie.update_leaf(
-                                Nibbles::from_nibbles([a, b, c, d, 0x5, 0x6, 0x7, 0x8]),
-                                value.clone(),
-                                &provider,
-                            )
-                            .unwrap();
-                        }
-                    }
-                }
-            }
-
-            // Compute root (required before prune)
-            let root_before = trie.root();
-
-            // Profile prune at depth 2
-            let start_prune = Instant::now();
-            let pruned = trie.prune(2);
-            total_prune_time += start_prune.elapsed();
-
-            // Verify root is preserved
-            let root_after = trie.root();
-            assert_eq!(root_before, root_after, "root hash should be preserved");
-
-            if iter == 0 {
-                println!("Node count before prune: {}", 69905);
-                println!("Nodes converted to stubs: {}", pruned);
-                println!("Node count after prune: {}", trie.revealed_node_count());
-            }
-        }
-
-        println!("Total prune time for {} iterations: {:?}", ITERATIONS, total_prune_time);
-        println!("Average prune time: {:?}", total_prune_time / ITERATIONS as u32);
-    }
-
     #[test]
     fn test_prune_max_depth_overflow() {
         // Verify that max_depth > 255 is not truncated (was u8, now usize)
