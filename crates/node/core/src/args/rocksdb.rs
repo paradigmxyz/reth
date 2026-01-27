@@ -48,12 +48,14 @@ pub struct RocksDbArgs {
     /// Route storages history tables to `RocksDB` instead of MDBX.
     ///
     /// This is a genesis-initialization-only flag: changing it after genesis requires a re-sync.
+    /// Defaults to `false`.
     #[arg(long = "rocksdb.storages-history", default_value_t = default_storages_history_in_rocksdb(), action = ArgAction::Set)]
     pub storages_history: bool,
 
     /// Route account history tables to `RocksDB` instead of MDBX.
     ///
     /// This is a genesis-initialization-only flag: changing it after genesis requires a re-sync.
+    /// Defaults to `false`.
     #[arg(long = "rocksdb.account-history", default_value_t = default_account_history_in_rocksdb(), action = ArgAction::Set)]
     pub account_history: bool,
 }
