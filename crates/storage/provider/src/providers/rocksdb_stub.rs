@@ -2,28 +2,69 @@
 //!
 //! This module provides placeholder types that allow the code to compile when `RocksDB` is not
 //! available (either on non-Unix platforms or when the `rocksdb` feature is not enabled).
-//! Operations will produce errors if actually attempted.
+//! All method calls are cfg-guarded in the calling code, so only type definitions are needed here.
 
-use reth_db_api::table::{Encode, Table};
-use reth_storage_errors::{
-    db::LogLevel,
-    provider::{ProviderError::UnsupportedProvider, ProviderResult},
-};
-use std::path::Path;
+use alloy_primitives::BlockNumber;
+use metrics::Label;
+use parking_lot::Mutex;
+use reth_db_api::{database_metrics::DatabaseMetrics, models::StorageSettings};
+use reth_prune_types::PruneMode;
+use reth_storage_errors::{db::LogLevel, provider::ProviderResult};
+use std::{path::Path, sync::Arc};
+
+/// Pending `RocksDB` batches type alias (stub - uses unit type).
+pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<()>>>;
+
+/// Statistics for a single `RocksDB` table (column family) - stub.
+#[derive(Debug, Clone)]
+pub struct RocksDBTableStats {
+    /// Size of SST files on disk in bytes.
+    pub sst_size_bytes: u64,
+    /// Size of memtables in memory in bytes.
+    pub memtable_size_bytes: u64,
+    /// Name of the table/column family.
+    pub name: String,
+    /// Estimated number of keys in the table.
+    pub estimated_num_keys: u64,
+    /// Estimated size of live data in bytes (SST files + memtables).
+    pub estimated_size_bytes: u64,
+    /// Estimated bytes pending compaction (reclaimable space).
+    pub pending_compaction_bytes: u64,
+}
+
+/// Database-level statistics for `RocksDB` - stub.
+#[derive(Debug, Clone)]
+pub struct RocksDBStats {
+    /// Statistics for each table (column family).
+    pub tables: Vec<RocksDBTableStats>,
+    /// Total size of WAL (Write-Ahead Log) files in bytes.
+    pub wal_size_bytes: u64,
+}
+
+/// Context for `RocksDB` block writes (stub).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct RocksDBWriteCtx {
+    /// The first block number being written.
+    pub first_block_number: BlockNumber,
+    /// The prune mode for transaction lookup, if any.
+    pub prune_tx_lookup: Option<PruneMode>,
+    /// Storage settings determining what goes to `RocksDB`.
+    pub storage_settings: StorageSettings,
+    /// Pending batches (stub - unused).
+    pub pending_batches: PendingRocksDBBatches,
+}
 
 /// A stub `RocksDB` provider.
 ///
 /// This type exists to allow code to compile when `RocksDB` is not available (either on non-Unix
-/// platforms or when the `rocksdb` feature is not enabled). When using this stub, the
-/// `transaction_hash_numbers_in_rocksdb` flag should be set to `false` to ensure all operations
-/// route to MDBX instead.
+/// platforms or when the `rocksdb` feature is not enabled). All method calls on `RocksDBProvider`
+/// are cfg-guarded in the calling code, so this stub only provides type definitions.
 #[derive(Debug, Clone)]
 pub struct RocksDBProvider;
 
 impl RocksDBProvider {
     /// Creates a new stub `RocksDB` provider.
-    ///
-    /// On non-Unix platforms, this returns an error indicating `RocksDB` is not supported.
     pub fn new(_path: impl AsRef<Path>) -> ProviderResult<Self> {
         Ok(Self)
     }
@@ -33,130 +74,64 @@ impl RocksDBProvider {
         RocksDBBuilder::new(path)
     }
 
-    /// Get a value from `RocksDB` (stub implementation).
-    pub fn get<T: Table>(&self, _key: T::Key) -> ProviderResult<Option<T::Value>> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Get a value from `RocksDB` using pre-encoded key (stub implementation).
-    pub const fn get_encoded<T: Table>(
-        &self,
-        _key: &<T::Key as Encode>::Encoded,
-    ) -> ProviderResult<Option<T::Value>> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Put a value into `RocksDB` (stub implementation).
-    pub fn put<T: Table>(&self, _key: T::Key, _value: &T::Value) -> ProviderResult<()> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Put a value into `RocksDB` using pre-encoded key (stub implementation).
-    pub const fn put_encoded<T: Table>(
-        &self,
-        _key: &<T::Key as Encode>::Encoded,
-        _value: &T::Value,
-    ) -> ProviderResult<()> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Delete a value from `RocksDB` (stub implementation).
-    pub fn delete<T: Table>(&self, _key: T::Key) -> ProviderResult<()> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Write a batch of operations (stub implementation).
-    pub fn write_batch<F>(&self, _f: F) -> ProviderResult<()>
-    where
-        F: FnOnce(&mut RocksDBBatch) -> ProviderResult<()>,
-    {
-        Err(UnsupportedProvider)
-    }
-
-    /// Creates a new transaction (stub implementation).
-    pub const fn tx(&self) -> RocksTx {
-        RocksTx
-    }
-
-    /// Creates a new batch for atomic writes (stub implementation).
-    pub const fn batch(&self) -> RocksDBBatch {
-        RocksDBBatch
-    }
-
-    /// Gets the first key-value pair from a table (stub implementation).
-    pub const fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
-        Ok(None)
-    }
-
-    /// Gets the last key-value pair from a table (stub implementation).
-    pub const fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
-        Ok(None)
-    }
-
-    /// Creates an iterator for the specified table (stub implementation).
-    ///
-    /// Returns an empty iterator. This is consistent with `first()` and `last()` returning
-    /// `Ok(None)` - the stub behaves as if the database is empty rather than unavailable.
-    pub const fn iter<T: Table>(&self) -> ProviderResult<RocksDBIter<'_, T>> {
-        Ok(RocksDBIter { _marker: std::marker::PhantomData })
-    }
-
     /// Check consistency of `RocksDB` tables (stub implementation).
     ///
     /// Returns `None` since there is no `RocksDB` data to check when the feature is disabled.
     pub const fn check_consistency<Provider>(
         &self,
         _provider: &Provider,
-    ) -> ProviderResult<Option<alloy_primitives::BlockNumber>> {
+    ) -> ProviderResult<Option<BlockNumber>> {
         Ok(None)
+    }
+
+    /// Returns statistics for all column families in the database (stub implementation).
+    ///
+    /// Returns an empty vector since there is no `RocksDB` when the feature is disabled.
+    pub const fn table_stats(&self) -> Vec<RocksDBTableStats> {
+        Vec::new()
+    }
+
+    /// Clears all entries from the specified table (stub implementation).
+    ///
+    /// This is a no-op since there is no `RocksDB` when the feature is disabled.
+    pub const fn clear<T>(&self) -> ProviderResult<()> {
+        Ok(())
+    }
+
+    /// Returns the total size of WAL (Write-Ahead Log) files in bytes (stub implementation).
+    ///
+    /// Returns 0 since there is no `RocksDB` when the feature is disabled.
+    pub const fn wal_size_bytes(&self) -> u64 {
+        0
+    }
+
+    /// Returns database-level statistics including per-table stats and WAL size (stub
+    /// implementation).
+    ///
+    /// Returns empty stats since there is no `RocksDB` when the feature is disabled.
+    pub const fn db_stats(&self) -> RocksDBStats {
+        RocksDBStats { tables: Vec::new(), wal_size_bytes: 0 }
+    }
+
+    /// Flushes all pending writes to disk (stub implementation).
+    ///
+    /// This is a no-op since there is no `RocksDB` when the feature is disabled.
+    pub const fn flush(&self, _tables: &[&'static str]) -> ProviderResult<()> {
+        Ok(())
     }
 }
 
-/// A stub batch writer for `RocksDB` on non-Unix platforms.
+impl DatabaseMetrics for RocksDBProvider {
+    fn gauge_metrics(&self) -> Vec<(&'static str, f64, Vec<Label>)> {
+        vec![]
+    }
+}
+
+/// A stub batch writer for `RocksDB`.
 #[derive(Debug)]
 pub struct RocksDBBatch;
 
-impl RocksDBBatch {
-    /// Puts a value into the batch (stub implementation).
-    pub fn put<T: Table>(&self, _key: T::Key, _value: &T::Value) -> ProviderResult<()> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Puts a value into the batch using pre-encoded key (stub implementation).
-    pub const fn put_encoded<T: Table>(
-        &self,
-        _key: &<T::Key as Encode>::Encoded,
-        _value: &T::Value,
-    ) -> ProviderResult<()> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Deletes a value from the batch (stub implementation).
-    pub fn delete<T: Table>(&self, _key: T::Key) -> ProviderResult<()> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Commits the batch (stub implementation).
-    pub const fn commit(self) -> ProviderResult<()> {
-        Err(UnsupportedProvider)
-    }
-}
-
-/// A stub iterator for `RocksDB` (non-transactional).
-#[derive(Debug)]
-pub struct RocksDBIter<'a, T> {
-    _marker: std::marker::PhantomData<(&'a (), T)>,
-}
-
-impl<T: Table> Iterator for RocksDBIter<'_, T> {
-    type Item = ProviderResult<(T::Key, T::Value)>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        None
-    }
-}
-
-/// A stub builder for `RocksDB` on non-Unix platforms.
+/// A stub builder for `RocksDB`.
 #[derive(Debug)]
 pub struct RocksDBBuilder;
 
@@ -167,7 +142,7 @@ impl RocksDBBuilder {
     }
 
     /// Adds a column family for a specific table type (stub implementation).
-    pub const fn with_table<T: Table>(self) -> Self {
+    pub const fn with_table<T>(self) -> Self {
         self
     }
 
@@ -196,6 +171,11 @@ impl RocksDBBuilder {
         self
     }
 
+    /// Sets read-only mode (stub implementation).
+    pub const fn with_read_only(self, _read_only: bool) -> Self {
+        self
+    }
+
     /// Build the `RocksDB` provider (stub implementation).
     pub const fn build(self) -> ProviderResult<RocksDBProvider> {
         Ok(RocksDBProvider)
@@ -206,70 +186,6 @@ impl RocksDBBuilder {
 #[derive(Debug)]
 pub struct RocksTx;
 
-impl RocksTx {
-    /// Gets a value from the specified table (stub implementation).
-    pub fn get<T: Table>(&self, _key: T::Key) -> ProviderResult<Option<T::Value>> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Gets a value using pre-encoded key (stub implementation).
-    pub const fn get_encoded<T: Table>(
-        &self,
-        _key: &<T::Key as Encode>::Encoded,
-    ) -> ProviderResult<Option<T::Value>> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Puts a value into the specified table (stub implementation).
-    pub fn put<T: Table>(&self, _key: T::Key, _value: &T::Value) -> ProviderResult<()> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Puts a value using pre-encoded key (stub implementation).
-    pub const fn put_encoded<T: Table>(
-        &self,
-        _key: &<T::Key as Encode>::Encoded,
-        _value: &T::Value,
-    ) -> ProviderResult<()> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Deletes a value from the specified table (stub implementation).
-    pub fn delete<T: Table>(&self, _key: T::Key) -> ProviderResult<()> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Creates an iterator for the specified table (stub implementation).
-    pub const fn iter<T: Table>(&self) -> ProviderResult<RocksTxIter<'_, T>> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Creates an iterator starting from the given key (stub implementation).
-    pub fn iter_from<T: Table>(&self, _key: T::Key) -> ProviderResult<RocksTxIter<'_, T>> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Commits the transaction (stub implementation).
-    pub const fn commit(self) -> ProviderResult<()> {
-        Err(UnsupportedProvider)
-    }
-
-    /// Rolls back the transaction (stub implementation).
-    pub const fn rollback(self) -> ProviderResult<()> {
-        Err(UnsupportedProvider)
-    }
-}
-
-/// A stub iterator for `RocksDB` transactions.
+/// A stub raw iterator for `RocksDB`.
 #[derive(Debug)]
-pub struct RocksTxIter<'a, T> {
-    _marker: std::marker::PhantomData<(&'a (), T)>,
-}
-
-impl<T: Table> Iterator for RocksTxIter<'_, T> {
-    type Item = ProviderResult<(T::Key, T::Value)>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        None
-    }
-}
+pub struct RocksDBRawIter;

@@ -11,9 +11,16 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, fmt::Debug, string::String, vec::Vec};
+use alloc::{boxed::Box, fmt::Debug, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
+use core::error::Error;
+
+/// Pre-computed receipt root and logs bloom.
+///
+/// When provided to [`FullConsensus::validate_block_post_execution`], this allows skipping
+/// the receipt root computation and using the pre-computed values instead.
+pub type ReceiptRootBloom = (B256, Bloom);
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
@@ -38,26 +45,27 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
     ///
     /// See the Yellow Paper sections 4.3.2 "Holistic Validity".
     ///
+    /// If `receipt_root_bloom` is provided, the implementation should use the pre-computed
+    /// receipt root and logs bloom instead of computing them from the receipts.
+    ///
     /// Note: validating blocks does not include other validations of the Consensus
     fn validate_block_post_execution(
         &self,
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
+        receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError>;
 }
 
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
-    /// The error type related to consensus.
-    type Error;
-
     /// Ensures that body field values match the header.
     fn validate_body_against_header(
         &self,
         body: &B::Body,
         header: &SealedHeader<B::Header>,
-    ) -> Result<(), Self::Error>;
+    ) -> Result<(), ConsensusError>;
 
     /// Validate a block disregarding world state, i.e. things that can be checked before sender
     /// recovery and execution.
@@ -69,7 +77,7 @@ pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
     /// **This should not be called for the genesis block**.
     ///
     /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), Self::Error>;
+    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError>;
 }
 
 /// `HeaderValidator` is a protocol that validates headers and their relationships.
@@ -125,7 +133,7 @@ pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
 }
 
 /// Consensus Errors
-#[derive(Debug, PartialEq, Eq, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ConsensusError {
     /// Error when the gas used in the header exceeds the gas limit.
     #[error("block used gas ({gas_used}) is greater than gas limit ({gas_limit})")]
@@ -410,6 +418,9 @@ pub enum ConsensusError {
     /// Other, likely an injected L2 error.
     #[error("{0}")]
     Other(String),
+    /// Other unspecified error.
+    #[error(transparent)]
+    Custom(#[from] Arc<dyn Error + Send + Sync>),
 }
 
 impl ConsensusError {
@@ -446,4 +457,35 @@ pub struct TxGasLimitTooHighErr {
     pub gas_limit: u64,
     /// The maximum allowed gas limit
     pub max_allowed: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(thiserror::Error, Debug)]
+    #[error("Custom L2 consensus error")]
+    struct CustomL2Error;
+
+    #[test]
+    fn test_custom_error_conversion() {
+        // Test conversion from custom error to ConsensusError
+        let custom_err = CustomL2Error;
+        let arc_err: Arc<dyn Error + Send + Sync> = Arc::new(custom_err);
+        let consensus_err: ConsensusError = arc_err.into();
+
+        // Verify it's the Custom variant
+        assert!(matches!(consensus_err, ConsensusError::Custom(_)));
+    }
+
+    #[test]
+    fn test_custom_error_display() {
+        let custom_err = CustomL2Error;
+        let arc_err: Arc<dyn Error + Send + Sync> = Arc::new(custom_err);
+        let consensus_err: ConsensusError = arc_err.into();
+
+        // Verify the error message is preserved through transparent attribute
+        let error_message = format!("{}", consensus_err);
+        assert_eq!(error_message, "Custom L2 consensus error");
+    }
 }

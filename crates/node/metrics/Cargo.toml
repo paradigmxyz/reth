@@ -29,8 +29,12 @@ tracing.workspace = true
 eyre.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats"] }
 jemalloc_pprof = { workspace = true, optional = true }
+mappings = { version = "0.7", optional = true }
+pprof_util = { version = "0.8", optional = true }
+reth-fs-util = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
+tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.17.0"
@@ -44,5 +48,5 @@ workspace = true
 
 [features]
 jemalloc = ["dep:tikv-jemalloc-ctl"]
-jemalloc-prof = ["jemalloc", "dep:jemalloc_pprof"]
+jemalloc-prof = ["jemalloc", "dep:jemalloc_pprof", "dep:mappings", "dep:pprof_util", "dep:reth-fs-util", "dep:tempfile"]
 jemalloc-symbols = ["jemalloc-prof", "jemalloc_pprof?/symbolize"]

@@ -21,9 +21,11 @@ pub mod providers;
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
-    StaticFileAccess, StaticFileProviderBuilder, StaticFileWriter,
+    SaveBlocksMode, StaticFileAccess, StaticFileProviderBuilder, StaticFileWriteCtx,
+    StaticFileWriter,
 };
 
+pub mod changeset_walker;
 pub mod changesets_utils;
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -43,14 +45,15 @@ pub use revm_database::states::OriginalValuesKnown;
 // reexport traits to avoid breaking changes
 pub use reth_static_file_types as static_file;
 pub use reth_storage_api::{
-    HistoryWriter, MetadataProvider, MetadataWriter, StatsReader, StorageSettings,
-    StorageSettingsCache,
+    HistoryWriter, MetadataProvider, MetadataWriter, StateWriteConfig, StatsReader,
+    StorageSettings, StorageSettingsCache,
 };
 /// Re-export provider error.
 pub use reth_storage_errors::provider::{ProviderError, ProviderResult};
 pub use static_file::StaticFileSegment;
 
-pub(crate) fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {
+/// Converts a [`RangeBounds`](std::ops::RangeBounds) into a concrete [`Range`](std::ops::Range)
+pub fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {
     let start = match bounds.start_bound() {
         std::ops::Bound::Included(&v) => v,
         std::ops::Bound::Excluded(&v) => v + 1,

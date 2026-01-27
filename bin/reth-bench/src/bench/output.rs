@@ -1,10 +1,13 @@
 //! Contains various benchmark output formats, either for logging or for
 //! serialization to / from files.
 
+use alloy_primitives::B256;
+use csv::Writer;
 use eyre::OptionExt;
 use reth_primitives_traits::constants::GIGAGAS;
-use serde::{ser::SerializeStruct, Serialize};
-use std::time::Duration;
+use serde::{ser::SerializeStruct, Deserialize, Serialize};
+use std::{path::Path, time::Duration};
+use tracing::info;
 
 /// This is the suffix for gas output csv files.
 pub(crate) const GAS_OUTPUT_SUFFIX: &str = "total_gas.csv";
@@ -14,6 +17,17 @@ pub(crate) const COMBINED_OUTPUT_SUFFIX: &str = "combined_latency.csv";
 
 /// This is the suffix for new payload output csv files.
 pub(crate) const NEW_PAYLOAD_OUTPUT_SUFFIX: &str = "new_payload_latency.csv";
+
+/// Serialized format for gas ramp payloads on disk.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct GasRampPayloadFile {
+    /// Engine API version (1-5).
+    pub(crate) version: u8,
+    /// The block hash for FCU.
+    pub(crate) block_hash: B256,
+    /// The params to pass to newPayload.
+    pub(crate) params: serde_json::Value,
+}
 
 /// This represents the results of a single `newPayload` call in the benchmark, containing the gas
 /// used and the `newPayload` latency.
@@ -67,6 +81,8 @@ impl Serialize for NewPayloadResult {
 pub(crate) struct CombinedResult {
     /// The block number of the block being processed.
     pub(crate) block_number: u64,
+    /// The gas limit of the block.
+    pub(crate) gas_limit: u64,
     /// The number of transactions in the block.
     pub(crate) transaction_count: u64,
     /// The `newPayload` result.
@@ -88,7 +104,7 @@ impl std::fmt::Display for CombinedResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Payload {} processed at {:.4} Ggas/s, used {} total gas. Combined gas per second: {:.4} Ggas/s. fcu latency: {:?}, newPayload latency: {:?}",
+            "Block {} processed at {:.4} Ggas/s, used {} total gas. Combined: {:.4} Ggas/s. fcu: {:?}, newPayload: {:?}",
             self.block_number,
             self.new_payload_result.gas_per_second() / GIGAGAS as f64,
             self.new_payload_result.gas_used,
@@ -110,10 +126,11 @@ impl Serialize for CombinedResult {
         let fcu_latency = self.fcu_latency.as_micros();
         let new_payload_latency = self.new_payload_result.latency.as_micros();
         let total_latency = self.total_latency.as_micros();
-        let mut state = serializer.serialize_struct("CombinedResult", 6)?;
+        let mut state = serializer.serialize_struct("CombinedResult", 7)?;
 
         // flatten the new payload result because this is meant for CSV writing
         state.serialize_field("block_number", &self.block_number)?;
+        state.serialize_field("gas_limit", &self.gas_limit)?;
         state.serialize_field("transaction_count", &self.transaction_count)?;
         state.serialize_field("gas_used", &self.new_payload_result.gas_used)?;
         state.serialize_field("new_payload_latency", &new_payload_latency)?;
@@ -165,6 +182,36 @@ impl TotalGasOutput {
     pub(crate) fn total_gigagas_per_second(&self) -> f64 {
         self.total_gas_per_second / GIGAGAS as f64
     }
+}
+
+/// Write benchmark results to CSV files.
+///
+/// Writes two files to the output directory:
+/// - `combined_latency.csv`: Per-block latency results
+/// - `total_gas.csv`: Per-block gas usage over time
+pub(crate) fn write_benchmark_results(
+    output_dir: &Path,
+    gas_results: &[TotalGasRow],
+    combined_results: Vec<CombinedResult>,
+) -> eyre::Result<()> {
+    let output_path = output_dir.join(COMBINED_OUTPUT_SUFFIX);
+    info!("Writing engine api call latency output to file: {:?}", output_path);
+    let mut writer = Writer::from_path(&output_path)?;
+    for result in combined_results {
+        writer.serialize(result)?;
+    }
+    writer.flush()?;
+
+    let output_path = output_dir.join(GAS_OUTPUT_SUFFIX);
+    info!("Writing total gas output to file: {:?}", output_path);
+    let mut writer = Writer::from_path(&output_path)?;
+    for row in gas_results {
+        writer.serialize(row)?;
+    }
+    writer.flush()?;
+
+    info!("Finished writing benchmark output files to {:?}.", output_dir);
+    Ok(())
 }
 
 /// This serializes the `time` field of the [`TotalGasRow`] to microseconds.

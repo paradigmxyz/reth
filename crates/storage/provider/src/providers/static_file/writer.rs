@@ -6,6 +6,7 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, TxNumber, U256};
 use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
+use reth_db::models::{AccountBeforeTx, StorageBeforeTx};
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_node_types::NodePrimitives;
@@ -21,6 +22,47 @@ use std::{
 };
 use tracing::debug;
 
+/// Represents different pruning strategies for various static file segments.
+#[derive(Debug, Clone, Copy)]
+enum PruneStrategy {
+    /// Prune headers by number of blocks to delete.
+    Headers {
+        /// Number of blocks to delete.
+        num_blocks: u64,
+    },
+    /// Prune transactions by number of rows and last block.
+    Transactions {
+        /// Number of transaction rows to delete.
+        num_rows: u64,
+        /// The last block number after pruning.
+        last_block: BlockNumber,
+    },
+    /// Prune receipts by number of rows and last block.
+    Receipts {
+        /// Number of receipt rows to delete.
+        num_rows: u64,
+        /// The last block number after pruning.
+        last_block: BlockNumber,
+    },
+    /// Prune transaction senders by number of rows and last block.
+    TransactionSenders {
+        /// Number of transaction sender rows to delete.
+        num_rows: u64,
+        /// The last block number after pruning.
+        last_block: BlockNumber,
+    },
+    /// Prune account changesets to a target block number.
+    AccountChangeSets {
+        /// The target block number to prune to.
+        last_block: BlockNumber,
+    },
+    /// Prune storage changesets to a target block number.
+    StorageChangeSets {
+        /// The target block number to prune to.
+        last_block: BlockNumber,
+    },
+}
+
 /// Static file writers for every known [`StaticFileSegment`].
 ///
 /// WARNING: Trying to use more than one writer for the same segment type **will result in a
@@ -31,6 +73,8 @@ pub(crate) struct StaticFileWriters<N> {
     transactions: RwLock<Option<StaticFileProviderRW<N>>>,
     receipts: RwLock<Option<StaticFileProviderRW<N>>>,
     transaction_senders: RwLock<Option<StaticFileProviderRW<N>>>,
+    account_change_sets: RwLock<Option<StaticFileProviderRW<N>>>,
+    storage_change_sets: RwLock<Option<StaticFileProviderRW<N>>>,
 }
 
 impl<N> Default for StaticFileWriters<N> {
@@ -40,6 +84,8 @@ impl<N> Default for StaticFileWriters<N> {
             transactions: Default::default(),
             receipts: Default::default(),
             transaction_senders: Default::default(),
+            account_change_sets: Default::default(),
+            storage_change_sets: Default::default(),
         }
     }
 }
@@ -55,6 +101,8 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             StaticFileSegment::Transactions => self.transactions.write(),
             StaticFileSegment::Receipts => self.receipts.write(),
             StaticFileSegment::TransactionSenders => self.transaction_senders.write(),
+            StaticFileSegment::AccountChangeSets => self.account_change_sets.write(),
+            StaticFileSegment::StorageChangeSets => self.storage_change_sets.write(),
         };
 
         if write_guard.is_none() {
@@ -67,9 +115,14 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     pub(crate) fn commit(&self) -> ProviderResult<()> {
         debug!(target: "provider::static_file", "Committing all static file segments");
 
-        for writer_lock in
-            [&self.headers, &self.transactions, &self.receipts, &self.transaction_senders]
-        {
+        for writer_lock in [
+            &self.headers,
+            &self.transactions,
+            &self.receipts,
+            &self.transaction_senders,
+            &self.account_change_sets,
+            &self.storage_change_sets,
+        ] {
             let mut writer = writer_lock.write();
             if let Some(writer) = writer.as_mut() {
                 writer.commit()?;
@@ -81,9 +134,14 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     }
 
     pub(crate) fn has_unwind_queued(&self) -> bool {
-        for writer_lock in
-            [&self.headers, &self.transactions, &self.receipts, &self.transaction_senders]
-        {
+        for writer_lock in [
+            &self.headers,
+            &self.transactions,
+            &self.receipts,
+            &self.transaction_senders,
+            &self.account_change_sets,
+            &self.storage_change_sets,
+        ] {
             let writer = writer_lock.read();
             if let Some(writer) = writer.as_ref() &&
                 writer.will_prune_on_commit()
@@ -92,6 +150,31 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             }
         }
         false
+    }
+
+    /// Finalizes all writers by committing their configuration to disk and updating indices.
+    ///
+    /// Must be called after `sync_all` was called on individual writers.
+    /// Returns an error if any writer has prune queued.
+    pub(crate) fn finalize(&self) -> ProviderResult<()> {
+        debug!(target: "provider::static_file", "Finalizing all static file segments into disk");
+
+        for writer_lock in [
+            &self.headers,
+            &self.transactions,
+            &self.receipts,
+            &self.transaction_senders,
+            &self.account_change_sets,
+            &self.storage_change_sets,
+        ] {
+            let mut writer = writer_lock.write();
+            if let Some(writer) = writer.as_mut() {
+                writer.finalize()?;
+            }
+        }
+
+        debug!(target: "provider::static_file", "Finalized all static file segments into disk");
+        Ok(())
     }
 }
 
@@ -132,9 +215,10 @@ pub struct StaticFileProviderRW<N> {
     buf: Vec<u8>,
     /// Metrics.
     metrics: Option<Arc<StaticFileProviderMetrics>>,
-    /// On commit, does the instructed pruning: number of lines, and if it applies, the last block
-    /// it ends at.
-    prune_on_commit: Option<(u64, Option<BlockNumber>)>,
+    /// On commit, contains the pruning strategy to apply for the segment.
+    prune_on_commit: Option<PruneStrategy>,
+    /// Whether `sync_all()` has been called. Used by `finalize()` to avoid redundant syncs.
+    synced: bool,
 }
 
 impl<N: NodePrimitives> StaticFileProviderRW<N> {
@@ -156,6 +240,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             reader,
             metrics,
             prune_on_commit: None,
+            synced: false,
         };
 
         writer.ensure_end_range_consistency()?;
@@ -251,29 +336,72 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.prune_on_commit.is_some()
     }
 
+    /// Syncs all data (rows and offsets) to disk.
+    ///
+    /// This does NOT commit the configuration. Call [`Self::finalize`] after to write the
+    /// configuration and mark the writer as clean.
+    ///
+    /// Returns an error if prune is queued (use [`Self::commit`] instead).
+    pub fn sync_all(&mut self) -> ProviderResult<()> {
+        if self.prune_on_commit.is_some() {
+            return Err(StaticFileWriterError::FinalizeWithPruneQueued.into());
+        }
+        if self.writer.is_dirty() {
+            self.writer.sync_all().map_err(ProviderError::other)?;
+        }
+        self.synced = true;
+        Ok(())
+    }
+
+    /// Commits configuration to disk and updates the reader index.
+    ///
+    /// If `sync_all()` was not called, this will call it first to ensure data is persisted.
+    ///
+    /// Returns an error if prune is queued (use [`Self::commit`] instead).
+    pub fn finalize(&mut self) -> ProviderResult<()> {
+        if self.prune_on_commit.is_some() {
+            return Err(StaticFileWriterError::FinalizeWithPruneQueued.into());
+        }
+        if self.writer.is_dirty() {
+            if !self.synced {
+                self.writer.sync_all().map_err(ProviderError::other)?;
+            }
+
+            self.writer.finalize().map_err(ProviderError::other)?;
+            self.update_index()?;
+        }
+        self.synced = false;
+        Ok(())
+    }
+
     /// Commits configuration changes to disk and updates the reader index with the new changes.
     pub fn commit(&mut self) -> ProviderResult<()> {
         let start = Instant::now();
 
         // Truncates the data file if instructed to.
-        if let Some((to_delete, last_block_number)) = self.prune_on_commit.take() {
+        if let Some(strategy) = self.prune_on_commit.take() {
             debug!(
                 target: "provider::static_file",
                 segment = ?self.writer.user_header().segment(),
-                to_delete,
                 "Pruning data on commit"
             );
-            match self.writer.user_header().segment() {
-                StaticFileSegment::Headers => self.prune_header_data(to_delete)?,
-                StaticFileSegment::Transactions => self
-                    .prune_transaction_data(to_delete, last_block_number.expect("should exist"))?,
-                StaticFileSegment::Receipts => {
-                    self.prune_receipt_data(to_delete, last_block_number.expect("should exist"))?
+            match strategy {
+                PruneStrategy::Headers { num_blocks } => self.prune_header_data(num_blocks)?,
+                PruneStrategy::Transactions { num_rows, last_block } => {
+                    self.prune_transaction_data(num_rows, last_block)?
                 }
-                StaticFileSegment::TransactionSenders => self.prune_transaction_sender_data(
-                    to_delete,
-                    last_block_number.expect("should exist"),
-                )?,
+                PruneStrategy::Receipts { num_rows, last_block } => {
+                    self.prune_receipt_data(num_rows, last_block)?
+                }
+                PruneStrategy::TransactionSenders { num_rows, last_block } => {
+                    self.prune_transaction_sender_data(num_rows, last_block)?
+                }
+                PruneStrategy::AccountChangeSets { last_block } => {
+                    self.prune_account_changeset_data(last_block)?
+                }
+                PruneStrategy::StorageChangeSets { last_block } => {
+                    self.prune_storage_changeset_data(last_block)?
+                }
             }
         }
 
@@ -475,6 +603,93 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
+    /// Truncates account changesets to the given block. It deletes and loads an older static file
+    /// if the block goes beyond the start of the current block range.
+    ///
+    /// # Note
+    /// Commits to the configuration file at the end
+    fn truncate_changesets(&mut self, last_block: u64) -> ProviderResult<()> {
+        let segment = self.writer.user_header().segment();
+        debug_assert!(segment.is_change_based());
+
+        // Get the current block range
+        let current_block_end = self
+            .writer
+            .user_header()
+            .block_end()
+            .ok_or(ProviderError::MissingStaticFileBlock(segment, 0))?;
+
+        // If we're already at or before the target block, nothing to do
+        if current_block_end <= last_block {
+            return Ok(())
+        }
+
+        // Navigate to the correct file if the target block is in a previous file
+        let mut expected_block_start = self.writer.user_header().expected_block_start();
+        while last_block < expected_block_start && expected_block_start > 0 {
+            self.delete_current_and_open_previous()?;
+            expected_block_start = self.writer.user_header().expected_block_start();
+        }
+
+        // Now we're in the correct file, we need to find how many rows to prune
+        // We need to iterate through the changesets to find the correct position
+        // Since changesets are stored per block, we need to find the offset for the block
+        let changeset_offsets = self.writer.user_header().changeset_offsets().ok_or_else(|| {
+            ProviderError::other(StaticFileWriterError::new("Missing changeset offsets"))
+        })?;
+
+        // Find the number of rows to keep (up to and including last_block)
+        let blocks_to_keep = if last_block >= expected_block_start {
+            last_block - expected_block_start + 1
+        } else {
+            0
+        };
+
+        let rows_to_keep = if blocks_to_keep == 0 {
+            0
+        } else if blocks_to_keep as usize > changeset_offsets.len() {
+            // Keep all rows in this file (shouldn't happen if data is consistent)
+            self.writer.rows() as u64
+        } else if blocks_to_keep as usize == changeset_offsets.len() {
+            // Keep all rows
+            self.writer.rows() as u64
+        } else {
+            // Find the offset for the block after last_block
+            // This gives us the number of rows to keep
+            changeset_offsets[blocks_to_keep as usize].offset()
+        };
+
+        let total_rows = self.writer.rows() as u64;
+        let rows_to_delete = total_rows.saturating_sub(rows_to_keep);
+
+        if rows_to_delete > 0 {
+            // Calculate the number of blocks to prune
+            let current_block_end = self
+                .writer
+                .user_header()
+                .block_end()
+                .ok_or(ProviderError::MissingStaticFileBlock(segment, 0))?;
+            let blocks_to_remove = current_block_end - last_block;
+
+            // Update segment header - for changesets, prune expects number of blocks, not rows
+            self.writer.user_header_mut().prune(blocks_to_remove);
+
+            // Prune the actual rows
+            self.writer.prune_rows(rows_to_delete as usize).map_err(ProviderError::other)?;
+        }
+
+        // Update the block range
+        self.writer.user_header_mut().set_block_range(expected_block_start, last_block);
+
+        // Sync changeset offsets to match the new block range
+        self.writer.user_header_mut().sync_changeset_offsets();
+
+        // Commits new changes to disk
+        self.commit()?;
+
+        Ok(())
+    }
+
     /// Truncates a number of rows from disk. It deletes and loads an older static file if block
     /// goes beyond the start of the current block range.
     ///
@@ -597,6 +812,16 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         self.append_column(value)?;
 
+        Ok(())
+    }
+
+    /// Appends change to changeset static file.
+    fn append_change<V: Compact>(&mut self, change: &V) -> ProviderResult<()> {
+        if self.writer.user_header().changeset_offsets().is_some() {
+            self.writer.user_header_mut().increment_block_changes();
+        }
+
+        self.append_column(change)?;
         Ok(())
     }
 
@@ -827,6 +1052,79 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
+    /// Appends a block changeset to the static file.
+    ///
+    /// It **CALLS** `increment_block()`.
+    ///
+    /// Returns the current number of changesets in the file, if any.
+    pub fn append_account_changeset(
+        &mut self,
+        mut changeset: Vec<AccountBeforeTx>,
+        block_number: u64,
+    ) -> ProviderResult<()> {
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::AccountChangeSets);
+        let start = Instant::now();
+
+        self.increment_block(block_number)?;
+        self.ensure_no_queued_prune()?;
+
+        // first sort the changeset by address
+        changeset.sort_by_key(|change| change.address);
+
+        let mut count: u64 = 0;
+
+        for change in changeset {
+            self.append_change(&change)?;
+            count += 1;
+        }
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operations(
+                StaticFileSegment::AccountChangeSets,
+                StaticFileProviderOperation::Append,
+                count,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Appends a block storage changeset to the static file.
+    ///
+    /// It **CALLS** `increment_block()`.
+    pub fn append_storage_changeset(
+        &mut self,
+        mut changeset: Vec<StorageBeforeTx>,
+        block_number: u64,
+    ) -> ProviderResult<()> {
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::StorageChangeSets);
+        let start = Instant::now();
+
+        self.increment_block(block_number)?;
+        self.ensure_no_queued_prune()?;
+
+        // sort by address + storage key
+        changeset.sort_by_key(|change| (change.address, change.key));
+
+        let mut count: u64 = 0;
+        for change in changeset {
+            self.append_change(&change)?;
+            count += 1;
+        }
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operations(
+                StaticFileSegment::StorageChangeSets,
+                StaticFileProviderOperation::Append,
+                count,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
+    }
+
     /// Adds an instruction to prune `to_delete` transactions during commit.
     ///
     /// Note: `last_block` refers to the block the unwinds ends at.
@@ -836,7 +1134,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         last_block: BlockNumber,
     ) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Transactions);
-        self.queue_prune(to_delete, Some(last_block))
+        self.queue_prune(PruneStrategy::Transactions { num_rows: to_delete, last_block })
     }
 
     /// Adds an instruction to prune `to_delete` receipts during commit.
@@ -848,7 +1146,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         last_block: BlockNumber,
     ) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Receipts);
-        self.queue_prune(to_delete, Some(last_block))
+        self.queue_prune(PruneStrategy::Receipts { num_rows: to_delete, last_block })
     }
 
     /// Adds an instruction to prune `to_delete` transaction senders during commit.
@@ -863,26 +1161,31 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             self.writer.user_header().segment(),
             StaticFileSegment::TransactionSenders
         );
-        self.queue_prune(to_delete, Some(last_block))
+        self.queue_prune(PruneStrategy::TransactionSenders { num_rows: to_delete, last_block })
     }
 
     /// Adds an instruction to prune `to_delete` headers during commit.
     pub fn prune_headers(&mut self, to_delete: u64) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Headers);
-        self.queue_prune(to_delete, None)
+        self.queue_prune(PruneStrategy::Headers { num_blocks: to_delete })
     }
 
-    /// Adds an instruction to prune `to_delete` elements during commit.
-    ///
-    /// Note: `last_block` refers to the block the unwinds ends at if dealing with transaction-based
-    /// data.
-    fn queue_prune(
-        &mut self,
-        to_delete: u64,
-        last_block: Option<BlockNumber>,
-    ) -> ProviderResult<()> {
+    /// Adds an instruction to prune changesets until the given block.
+    pub fn prune_account_changesets(&mut self, last_block: u64) -> ProviderResult<()> {
+        debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::AccountChangeSets);
+        self.queue_prune(PruneStrategy::AccountChangeSets { last_block })
+    }
+
+    /// Adds an instruction to prune storage changesets until the given block.
+    pub fn prune_storage_changesets(&mut self, last_block: u64) -> ProviderResult<()> {
+        debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::StorageChangeSets);
+        self.queue_prune(PruneStrategy::StorageChangeSets { last_block })
+    }
+
+    /// Adds an instruction to prune elements during commit using the specified strategy.
+    fn queue_prune(&mut self, strategy: PruneStrategy) -> ProviderResult<()> {
         self.ensure_no_queued_prune()?;
-        self.prune_on_commit = Some((to_delete, last_block));
+        self.prune_on_commit = Some(strategy);
         Ok(())
     }
 
@@ -911,6 +1214,44 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 StaticFileSegment::Transactions,
+                StaticFileProviderOperation::Prune,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Prunes the last `to_delete` account changesets from the data file.
+    fn prune_account_changeset_data(&mut self, last_block: BlockNumber) -> ProviderResult<()> {
+        let start = Instant::now();
+
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::AccountChangeSets);
+
+        self.truncate_changesets(last_block)?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                StaticFileSegment::AccountChangeSets,
+                StaticFileProviderOperation::Prune,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Prunes the last storage changesets from the data file.
+    fn prune_storage_changeset_data(&mut self, last_block: BlockNumber) -> ProviderResult<()> {
+        let start = Instant::now();
+
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::StorageChangeSets);
+
+        self.truncate_changesets(last_block)?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                StaticFileSegment::StorageChangeSets,
                 StaticFileProviderOperation::Prune,
                 Some(start.elapsed()),
             );

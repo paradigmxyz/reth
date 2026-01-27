@@ -1,6 +1,6 @@
 use crate::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, SparseTrieInterface, SparseTrieUpdates,
+    LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
 };
 use alloc::{
     borrow::Cow,
@@ -43,14 +43,15 @@ const SPARSE_TRIE_SUBTRIE_HASHES_LEVEL: usize = 2;
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum SparseTrie<T = SerialSparseTrie> {
+pub enum RevealableSparseTrie<T = SerialSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
     /// This is the default state. In this state, the trie cannot be directly queried or modified
     /// until nodes are revealed.
     ///
-    /// In this state the `SparseTrie` can optionally carry with it a cleared `SerialSparseTrie`.
-    /// This allows for reusing the trie's allocations between payload executions.
+    /// In this state the `RevealableSparseTrie` can optionally carry with it a cleared
+    /// `SerialSparseTrie`. This allows for reusing the trie's allocations between payload
+    /// executions.
     Blind(Option<Box<T>>),
     /// Some nodes in the Trie have been revealed.
     ///
@@ -60,21 +61,23 @@ pub enum SparseTrie<T = SerialSparseTrie> {
     Revealed(Box<T>),
 }
 
-impl<T: Default> Default for SparseTrie<T> {
+impl<T: Default> Default for RevealableSparseTrie<T> {
     fn default() -> Self {
         Self::Blind(None)
     }
 }
 
-impl<T: SparseTrieInterface + Default> SparseTrie<T> {
+impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     /// Creates a new revealed but empty sparse trie with `SparseNode::Empty` as root node.
     ///
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
+    /// use reth_trie_sparse::{
+    ///     provider::DefaultTrieNodeProvider, RevealableSparseTrie, SerialSparseTrie,
+    /// };
     ///
-    /// let trie = SparseTrie::<SerialSparseTrie>::revealed_empty();
+    /// let trie = RevealableSparseTrie::<SerialSparseTrie>::revealed_empty();
     /// assert!(!trie.is_blind());
     /// ```
     pub fn revealed_empty() -> Self {
@@ -91,7 +94,7 @@ impl<T: SparseTrieInterface + Default> SparseTrie<T> {
     ///
     /// # Returns
     ///
-    /// A mutable reference to the underlying [`SparseTrieInterface`].
+    /// A mutable reference to the underlying [`RevealableSparseTrie`](SparseTrieTrait).
     pub fn reveal_root(
         &mut self,
         root: TrieNode,
@@ -115,17 +118,19 @@ impl<T: SparseTrieInterface + Default> SparseTrie<T> {
     }
 }
 
-impl<T: SparseTrieInterface> SparseTrie<T> {
+impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// Creates a new blind sparse trie.
     ///
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
+    /// use reth_trie_sparse::{
+    ///     provider::DefaultTrieNodeProvider, RevealableSparseTrie, SerialSparseTrie,
+    /// };
     ///
-    /// let trie = SparseTrie::<SerialSparseTrie>::blind();
+    /// let trie = RevealableSparseTrie::<SerialSparseTrie>::blind();
     /// assert!(trie.is_blind());
-    /// let trie = SparseTrie::<SerialSparseTrie>::default();
+    /// let trie = RevealableSparseTrie::<SerialSparseTrie>::default();
     /// assert!(trie.is_blind());
     /// ```
     pub const fn blind() -> Self {
@@ -133,7 +138,7 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     }
 
     /// Creates a new blind sparse trie, clearing and later reusing the given
-    /// [`SparseTrieInterface`].
+    /// [`RevealableSparseTrie`](SparseTrieTrait).
     pub fn blind_from(mut trie: T) -> Self {
         trie.clear();
         Self::Blind(Some(Box::new(trie)))
@@ -212,9 +217,10 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
         Some((revealed.root(), revealed.take_updates()))
     }
 
-    /// Returns a [`SparseTrie::Blind`] based on this one. If this instance was revealed, or was
-    /// itself a `Blind` with a pre-allocated [`SparseTrieInterface`], this will return
-    /// a `Blind` carrying a cleared pre-allocated [`SparseTrieInterface`].
+    /// Returns a [`RevealableSparseTrie::Blind`] based on this one. If this instance was revealed,
+    /// or was itself a `Blind` with a pre-allocated [`RevealableSparseTrie`](SparseTrieTrait),
+    /// this will return a `Blind` carrying a cleared pre-allocated
+    /// [`RevealableSparseTrie`](SparseTrieTrait).
     pub fn clear(self) -> Self {
         match self {
             Self::Blind(_) => self,
@@ -415,7 +421,7 @@ impl Default for SerialSparseTrie {
     }
 }
 
-impl SparseTrieInterface for SerialSparseTrie {
+impl SparseTrieTrait for SerialSparseTrie {
     fn with_root(
         mut self,
         root: TrieNode,
@@ -546,40 +552,43 @@ impl SparseTrieInterface for SerialSparseTrie {
                     self.reveal_node_or_hash(child_path, &ext.child)?;
                 }
             },
-            TrieNode::Leaf(leaf) => match self.nodes.entry(path) {
-                Entry::Occupied(mut entry) => match entry.get() {
-                    // Replace a hash node with a revealed leaf node and store leaf node value.
-                    SparseNode::Hash(hash) => {
-                        let mut full = *entry.key();
-                        full.extend(&leaf.key);
-                        self.values.insert(full, leaf.value.clone());
-                        entry.insert(SparseNode::Leaf {
-                            key: leaf.key,
-                            // Memoize the hash of a previously blinded node in a new leaf
-                            // node.
-                            hash: Some(*hash),
-                        });
-                    }
-                    // Left node already exists.
-                    SparseNode::Leaf { .. } => {}
-                    // All other node types can't be handled.
-                    node @ (SparseNode::Empty |
-                    SparseNode::Extension { .. } |
-                    SparseNode::Branch { .. }) => {
-                        return Err(SparseTrieErrorKind::Reveal {
-                            path: *entry.key(),
-                            node: Box::new(node.clone()),
+            TrieNode::Leaf(leaf) => {
+                let (leaf_key, leaf_value) = (leaf.key, leaf.value);
+                match self.nodes.entry(path) {
+                    Entry::Occupied(mut entry) => match entry.get() {
+                        // Replace a hash node with a revealed leaf node and store leaf node value.
+                        SparseNode::Hash(hash) => {
+                            let mut full = *entry.key();
+                            full.extend(&leaf_key);
+                            self.values.insert(full, leaf_value);
+                            entry.insert(SparseNode::Leaf {
+                                key: leaf_key,
+                                // Memoize the hash of a previously blinded node in a new leaf
+                                // node.
+                                hash: Some(*hash),
+                            });
                         }
-                        .into())
+                        // Left node already exists.
+                        SparseNode::Leaf { .. } => {}
+                        // All other node types can't be handled.
+                        node @ (SparseNode::Empty |
+                        SparseNode::Extension { .. } |
+                        SparseNode::Branch { .. }) => {
+                            return Err(SparseTrieErrorKind::Reveal {
+                                path: *entry.key(),
+                                node: Box::new(node.clone()),
+                            }
+                            .into())
+                        }
+                    },
+                    Entry::Vacant(entry) => {
+                        let mut full = *entry.key();
+                        full.extend(&leaf_key);
+                        entry.insert(SparseNode::new_leaf(leaf_key));
+                        self.values.insert(full, leaf_value);
                     }
-                },
-                Entry::Vacant(entry) => {
-                    let mut full = *entry.key();
-                    full.extend(&leaf.key);
-                    entry.insert(SparseNode::new_leaf(leaf.key));
-                    self.values.insert(full, leaf.value.clone());
                 }
-            },
+            }
         }
 
         Ok(())
@@ -2483,8 +2492,8 @@ mod tests {
 
     #[test]
     fn sparse_trie_is_blind() {
-        assert!(SparseTrie::<SerialSparseTrie>::blind().is_blind());
-        assert!(!SparseTrie::<SerialSparseTrie>::revealed_empty().is_blind());
+        assert!(RevealableSparseTrie::<SerialSparseTrie>::blind().is_blind());
+        assert!(!RevealableSparseTrie::<SerialSparseTrie>::revealed_empty().is_blind());
     }
 
     #[test]

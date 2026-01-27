@@ -1,6 +1,6 @@
 use crate::segments::{
-    user::ReceiptsByLogs, AccountHistory, Bodies, MerkleChangeSets, Segment, SenderRecovery,
-    StorageHistory, TransactionLookup, UserReceipts,
+    user::ReceiptsByLogs, AccountHistory, Bodies, Segment, SenderRecovery, StorageHistory,
+    TransactionLookup, UserReceipts,
 };
 use alloy_eips::eip2718::Encodable2718;
 use reth_db_api::{table::Value, transaction::DbTxMut};
@@ -10,6 +10,7 @@ use reth_provider::{
     PruneCheckpointReader, PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune_types::PruneModes;
+use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
 
 /// Collection of [`Segment`]. Thread-safe, allocated on the heap.
 #[derive(Debug)]
@@ -52,7 +53,9 @@ where
         + PruneCheckpointReader
         + BlockReader<Transaction: Encodable2718>
         + ChainStateBlockReader
-        + StorageSettingsCache,
+        + StorageSettingsCache
+        + ChangeSetReader
+        + StorageChangeSetReader,
 {
     /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
     /// [`PruneModes`].
@@ -67,15 +70,12 @@ where
             account_history,
             storage_history,
             bodies_history,
-            merkle_changesets,
             receipts_log_filter,
         } = prune_modes;
 
         Self::default()
             // Bodies - run first since file deletion is fast
             .segment_opt(bodies_history.map(Bodies::new))
-            // Merkle changesets
-            .segment(MerkleChangeSets::new(merkle_changesets))
             // Account history
             .segment_opt(account_history.map(AccountHistory::new))
             // Storage history

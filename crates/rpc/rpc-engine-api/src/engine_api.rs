@@ -11,8 +11,8 @@ use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    PraguePayloadFields,
+    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId,
+    PayloadStatus, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -963,6 +963,24 @@ where
         Ok(self.new_payload_v4_metered(payload).await?)
     }
 
+    /// Handler for `engine_newPayloadV5`
+    ///
+    /// Post Amsterdam payload handler. Currently returns unsupported fork error.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
+    async fn new_payload_v5(
+        &self,
+        _payload: ExecutionPayloadV4,
+        _versioned_hashes: Vec<B256>,
+        _parent_beacon_block_root: B256,
+        _execution_requests: RequestsOrHash,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV5");
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))?
+    }
+
     /// Handler for `engine_forkchoiceUpdatedV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -1086,6 +1104,21 @@ where
         Ok(self.get_payload_v5_metered(payload_id).await?)
     }
 
+    /// Handler for `engine_getPayloadV6`
+    ///
+    /// Post Amsterdam payload handler. Currently returns unsupported fork error.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6>
+    async fn get_payload_v6(
+        &self,
+        _payload_id: PayloadId,
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV6> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV6");
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))?
+    }
+
     /// Handler for `engine_getPayloadBodiesByHashV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     async fn get_payload_bodies_by_hash_v1(
@@ -1134,8 +1167,13 @@ where
 
     /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
-    async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
-        Ok(self.capabilities().list())
+    async fn exchange_capabilities(&self, capabilities: Vec<String>) -> RpcResult<Vec<String>> {
+        trace!(target: "rpc::engine", "Serving engine_exchangeCapabilities");
+
+        let el_caps = self.capabilities();
+        el_caps.log_capability_mismatches(&capabilities);
+
+        Ok(el_caps.list())
     }
 
     async fn get_blobs_v1(
@@ -1160,6 +1198,33 @@ where
     ) -> RpcResult<Option<Vec<Option<BlobAndProofV2>>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV3");
         Ok(self.get_blobs_v3_metered(versioned_hashes)?)
+    }
+
+    /// Handler for `engine_getBALsByHashV1`
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    async fn get_bals_by_hash_v1(
+        &self,
+        _block_hashes: Vec<BlockHash>,
+    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
+        trace!(target: "rpc::engine", "Serving engine_getBALsByHashV1");
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))?
+    }
+
+    /// Handler for `engine_getBALsByRangeV1`
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    async fn get_bals_by_range_v1(
+        &self,
+        _start: U64,
+        _count: U64,
+    ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
+        trace!(target: "rpc::engine", "Serving engine_getBALsByRangeV1");
+        Err(EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ))?
     }
 }
 

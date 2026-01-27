@@ -12,7 +12,6 @@ The `stages` lib plays a central role in syncing the node, maintaining state, up
 - AccountHashingStage
 - StorageHashingStage
 - MerkleStage (execute)
-- MerkleChangeSets
 - TransactionLookupStage
 - IndexStorageHistoryStage
 - IndexAccountHistoryStage
@@ -111,12 +110,6 @@ The `AccountHashingStage` handles the computation of account state hashes. It pr
 ## StorageHashingStage
 
 The `StorageHashingStage` is responsible for computing hashes of contract storage. Similar to the `AccountHashingStage`, it processes storage slots of smart contracts and generates cryptographic hashes that are used in the state trie. This stage ensures that contract storage can be efficiently verified and proven.
-
-<br>
-
-## MerkleChangeSets
-
-The `MerkleChangeSets` stage consolidates and finalizes Merkle-related change sets after the `MerkleStage` execution mode has run, ensuring consistent trie updates and checkpoints.
 
 <br>
 

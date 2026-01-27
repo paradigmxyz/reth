@@ -22,9 +22,8 @@ pub struct DefaultEngineValues {
     legacy_state_root_task_enabled: bool,
     state_cache_disabled: bool,
     prewarming_disabled: bool,
-    parallel_sparse_trie_disabled: bool,
     state_provider_metrics: bool,
-    cross_block_cache_size: u64,
+    cross_block_cache_size: usize,
     state_root_task_compare_updates: bool,
     accept_execution_requests_hash: bool,
     multiproof_chunking_enabled: bool,
@@ -36,6 +35,8 @@ pub struct DefaultEngineValues {
     allow_unwind_canonical_header: bool,
     storage_worker_count: Option<usize>,
     account_worker_count: Option<usize>,
+    enable_proof_v2: bool,
+    cache_metrics_disabled: bool,
 }
 
 impl DefaultEngineValues {
@@ -79,12 +80,6 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set whether to disable parallel sparse trie by default
-    pub const fn with_parallel_sparse_trie_disabled(mut self, v: bool) -> Self {
-        self.parallel_sparse_trie_disabled = v;
-        self
-    }
-
     /// Set whether to enable state provider metrics by default
     pub const fn with_state_provider_metrics(mut self, v: bool) -> Self {
         self.state_provider_metrics = v;
@@ -92,7 +87,7 @@ impl DefaultEngineValues {
     }
 
     /// Set the default cross-block cache size in MB
-    pub const fn with_cross_block_cache_size(mut self, v: u64) -> Self {
+    pub const fn with_cross_block_cache_size(mut self, v: usize) -> Self {
         self.cross_block_cache_size = v;
         self
     }
@@ -165,6 +160,18 @@ impl DefaultEngineValues {
         self.account_worker_count = v;
         self
     }
+
+    /// Set whether to enable proof V2 by default
+    pub const fn with_enable_proof_v2(mut self, v: bool) -> Self {
+        self.enable_proof_v2 = v;
+        self
+    }
+
+    /// Set whether to disable cache metrics by default
+    pub const fn with_cache_metrics_disabled(mut self, v: bool) -> Self {
+        self.cache_metrics_disabled = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -175,7 +182,6 @@ impl Default for DefaultEngineValues {
             legacy_state_root_task_enabled: false,
             state_cache_disabled: false,
             prewarming_disabled: false,
-            parallel_sparse_trie_disabled: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             state_root_task_compare_updates: false,
@@ -189,6 +195,8 @@ impl Default for DefaultEngineValues {
             allow_unwind_canonical_header: false,
             storage_worker_count: None,
             account_worker_count: None,
+            enable_proof_v2: false,
+            cache_metrics_disabled: false,
         }
     }
 }
@@ -228,14 +236,14 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-prewarming", alias = "engine.disable-caching-and-prewarming", default_value_t = DefaultEngineValues::get_global().prewarming_disabled)]
     pub prewarming_disabled: bool,
 
-    /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-parallel-sparse-trie
-    /// if you want to disable usage of the `ParallelSparseTrie`.
+    /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
     #[deprecated]
     #[arg(long = "engine.parallel-sparse-trie", default_value = "true", hide = true)]
     pub parallel_sparse_trie_enabled: bool,
 
-    /// Disable the parallel sparse trie in the engine.
-    #[arg(long = "engine.disable-parallel-sparse-trie", default_value_t = DefaultEngineValues::get_global().parallel_sparse_trie_disabled)]
+    /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
+    #[deprecated]
+    #[arg(long = "engine.disable-parallel-sparse-trie", default_value = "false", hide = true)]
     pub parallel_sparse_trie_disabled: bool,
 
     /// Enable state provider latency metrics. This allows the engine to collect and report stats
@@ -246,7 +254,7 @@ pub struct EngineArgs {
 
     /// Configure the size of cross-block cache in megabytes
     #[arg(long = "engine.cross-block-cache-size", default_value_t = DefaultEngineValues::get_global().cross_block_cache_size)]
-    pub cross_block_cache_size: u64,
+    pub cross_block_cache_size: usize,
 
     /// Enable comparing trie updates from the state root task to the trie updates from the regular
     /// state root calculation.
@@ -308,6 +316,14 @@ pub struct EngineArgs {
     /// If not specified, defaults to the same count as storage workers.
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
+
+    /// Enable V2 storage proofs for state root calculations
+    #[arg(long = "engine.enable-proof-v2", default_value_t = DefaultEngineValues::get_global().enable_proof_v2)]
+    pub enable_proof_v2: bool,
+
+    /// Disable cache metrics recording, which can take up to 50ms with large cached state.
+    #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
+    pub cache_metrics_disabled: bool,
 }
 
 #[allow(deprecated)]
@@ -319,7 +335,6 @@ impl Default for EngineArgs {
             legacy_state_root_task_enabled,
             state_cache_disabled,
             prewarming_disabled,
-            parallel_sparse_trie_disabled,
             state_provider_metrics,
             cross_block_cache_size,
             state_root_task_compare_updates,
@@ -333,6 +348,8 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
+            enable_proof_v2,
+            cache_metrics_disabled,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -343,7 +360,7 @@ impl Default for EngineArgs {
             state_cache_disabled,
             prewarming_disabled,
             parallel_sparse_trie_enabled: true,
-            parallel_sparse_trie_disabled,
+            parallel_sparse_trie_disabled: false,
             state_provider_metrics,
             cross_block_cache_size,
             accept_execution_requests_hash,
@@ -357,6 +374,8 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
+            enable_proof_v2,
+            cache_metrics_disabled,
         }
     }
 }
@@ -370,7 +389,6 @@ impl EngineArgs {
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
-            .with_disable_parallel_sparse_trie(self.parallel_sparse_trie_disabled)
             .with_state_provider_metrics(self.state_provider_metrics)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
@@ -391,6 +409,9 @@ impl EngineArgs {
         if let Some(count) = self.account_worker_count {
             config = config.with_account_worker_count(count);
         }
+
+        config = config.with_enable_proof_v2(self.enable_proof_v2);
+        config = config.without_cache_metrics(self.cache_metrics_disabled);
 
         config
     }
@@ -426,7 +447,7 @@ mod tests {
             state_cache_disabled: true,
             prewarming_disabled: true,
             parallel_sparse_trie_enabled: true,
-            parallel_sparse_trie_disabled: true,
+            parallel_sparse_trie_disabled: false,
             state_provider_metrics: true,
             cross_block_cache_size: 256,
             state_root_task_compare_updates: true,
@@ -441,6 +462,8 @@ mod tests {
             allow_unwind_canonical_header: true,
             storage_worker_count: Some(16),
             account_worker_count: Some(8),
+            enable_proof_v2: false,
+            cache_metrics_disabled: true,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -452,7 +475,6 @@ mod tests {
             "--engine.legacy-state-root",
             "--engine.disable-state-cache",
             "--engine.disable-prewarming",
-            "--engine.disable-parallel-sparse-trie",
             "--engine.state-provider-metrics",
             "--engine.cross-block-cache-size",
             "256",
@@ -471,6 +493,7 @@ mod tests {
             "16",
             "--engine.account-worker-count",
             "8",
+            "--engine.disable-cache-metrics",
         ])
         .args;
 

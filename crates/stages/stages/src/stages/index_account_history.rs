@@ -1,8 +1,13 @@
-use super::{collect_history_indices, load_history_indices};
-use alloy_primitives::Address;
+use super::collect_account_history_indices;
+use crate::stages::utils::{collect_history_indices, load_account_history};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
-use reth_db_api::{models::ShardedKey, table::Decode, tables, transaction::DbTxMut};
-use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_db_api::Tables;
+use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
+use reth_provider::{
+    DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
+    RocksDBProviderFactory, StorageSettingsCache,
+};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
@@ -43,8 +48,14 @@ impl Default for IndexAccountHistoryStage {
 
 impl<Provider> Stage<Provider> for IndexAccountHistoryStage
 where
-    Provider:
-        DBProvider<Tx: DbTxMut> + HistoryWriter + PruneCheckpointReader + PruneCheckpointWriter,
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + PruneCheckpointReader
+        + PruneCheckpointWriter
+        + reth_storage_api::ChangeSetReader
+        + reth_provider::StaticFileProviderFactory
+        + StorageSettingsCache
+        + RocksDBProviderFactory,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -92,33 +103,52 @@ where
 
         let mut range = input.next_block_range();
         let first_sync = input.checkpoint().block_number == 0;
+        let use_rocksdb = provider.cached_storage_settings().account_history_in_rocksdb;
 
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
         if first_sync {
-            provider.tx_ref().clear::<tables::AccountsHistory>()?;
+            if use_rocksdb {
+                // Note: RocksDB clear() executes immediately (not deferred to commit like MDBX),
+                // but this is safe for first_sync because if we crash before commit, the
+                // checkpoint stays at 0 and we'll just clear and rebuild again on restart. The
+                // source data (changesets) is intact.
+                provider.rocksdb_provider().clear::<tables::AccountsHistory>()?;
+            } else {
+                provider.tx_ref().clear::<tables::AccountsHistory>()?;
+            }
             range = 0..=*input.next_block_range().end();
         }
 
-        info!(target: "sync::stages::index_account_history::exec", ?first_sync, "Collecting indices");
-        let collector =
+        info!(target: "sync::stages::index_account_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
+
+        let collector = if provider.cached_storage_settings().account_changesets_in_static_files {
+            // Use the provider-based collection that can read from static files.
+            collect_account_history_indices(provider, range.clone(), &self.etl_config)?
+        } else {
             collect_history_indices::<_, tables::AccountChangeSets, tables::AccountsHistory, _>(
                 provider,
                 range.clone(),
                 ShardedKey::new,
                 |(index, value)| (index, value.address),
                 &self.etl_config,
-            )?;
+            )?
+        };
 
         info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
-        load_history_indices::<_, tables::AccountsHistory, _>(
-            provider,
-            collector,
-            first_sync,
-            ShardedKey::new,
-            ShardedKey::<Address>::decode_owned,
-            |key| key.key,
-        )?;
+
+        provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
+            let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
+            load_account_history(collector, first_sync, &mut writer)
+                .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
+            Ok(((), writer.into_raw_rocksdb_batch()))
+        })?;
+
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if use_rocksdb {
+            provider.commit_pending_rocksdb_batches()?;
+            provider.rocksdb_provider().flush(&[Tables::AccountsHistory.name()])?;
+        }
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
@@ -146,7 +176,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{address, BlockNumber, B256};
+    use alloy_primitives::{address, Address, BlockNumber, B256};
     use itertools::Itertools;
     use reth_db_api::{
         cursor::DbCursorRO,
@@ -630,6 +660,171 @@ mod tests {
             let table = self.db.table::<tables::AccountsHistory>().unwrap();
             assert!(table.is_empty());
             Ok(())
+        }
+    }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    mod rocksdb_tests {
+        use super::*;
+        use reth_provider::RocksDBProviderFactory;
+        use reth_storage_api::StorageSettings;
+
+        /// Test that when `account_history_in_rocksdb` is enabled, the stage
+        /// writes account history indices to `RocksDB` instead of MDBX.
+        #[tokio::test]
+        async fn execute_writes_to_rocksdb_when_enabled() {
+            // init
+            let db = TestStageDB::default();
+
+            // Enable RocksDB for account history
+            db.factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_account_history_in_rocksdb(true),
+            );
+
+            db.commit(|tx| {
+                for block in 0..=10 {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                    tx.put::<tables::AccountChangeSets>(block, acc())?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+            let input = ExecInput { target: Some(10), ..Default::default() };
+            let mut stage = IndexAccountHistoryStage::default();
+            let provider = db.factory.database_provider_rw().unwrap();
+            let out = stage.execute(&provider, input).unwrap();
+            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(10), done: true });
+            provider.commit().unwrap();
+
+            // Verify MDBX table is empty (data should be in RocksDB)
+            let mdbx_table = db.table::<tables::AccountsHistory>().unwrap();
+            assert!(
+                mdbx_table.is_empty(),
+                "MDBX AccountsHistory should be empty when RocksDB is enabled"
+            );
+
+            // Verify RocksDB has the data
+            let rocksdb = db.factory.rocksdb_provider();
+            let result = rocksdb.get::<tables::AccountsHistory>(shard(u64::MAX)).unwrap();
+            assert!(result.is_some(), "RocksDB should contain account history");
+
+            let block_list = result.unwrap();
+            let blocks: Vec<u64> = block_list.iter().collect();
+            assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
+        }
+
+        /// Test that unwind works correctly when `account_history_in_rocksdb` is enabled.
+        #[tokio::test]
+        async fn unwind_works_when_rocksdb_enabled() {
+            let db = TestStageDB::default();
+
+            db.factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_account_history_in_rocksdb(true),
+            );
+
+            db.commit(|tx| {
+                for block in 0..=10 {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                    tx.put::<tables::AccountChangeSets>(block, acc())?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+            let input = ExecInput { target: Some(10), ..Default::default() };
+            let mut stage = IndexAccountHistoryStage::default();
+            let provider = db.factory.database_provider_rw().unwrap();
+            let out = stage.execute(&provider, input).unwrap();
+            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(10), done: true });
+            provider.commit().unwrap();
+
+            // Verify RocksDB has blocks 0-10 before unwind
+            let rocksdb = db.factory.rocksdb_provider();
+            let result = rocksdb.get::<tables::AccountsHistory>(shard(u64::MAX)).unwrap();
+            assert!(result.is_some(), "RocksDB should have data before unwind");
+            let blocks_before: Vec<u64> = result.unwrap().iter().collect();
+            assert_eq!(blocks_before, (0..=10).collect::<Vec<_>>());
+
+            // Unwind to block 5 (remove blocks 6-10)
+            let unwind_input =
+                UnwindInput { checkpoint: StageCheckpoint::new(10), unwind_to: 5, bad_block: None };
+            let provider = db.factory.database_provider_rw().unwrap();
+            let out = stage.unwind(&provider, unwind_input).unwrap();
+            assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(5) });
+            provider.commit().unwrap();
+
+            // Verify RocksDB now only has blocks 0-5 (blocks 6-10 removed)
+            let rocksdb = db.factory.rocksdb_provider();
+            let result = rocksdb.get::<tables::AccountsHistory>(shard(u64::MAX)).unwrap();
+            assert!(result.is_some(), "RocksDB should still have data after unwind");
+            let blocks_after: Vec<u64> = result.unwrap().iter().collect();
+            assert_eq!(blocks_after, (0..=5).collect::<Vec<_>>(), "Should only have blocks 0-5");
+        }
+
+        /// Test incremental sync merges new data with existing shards.
+        #[tokio::test]
+        async fn execute_incremental_sync() {
+            let db = TestStageDB::default();
+
+            db.factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_account_history_in_rocksdb(true),
+            );
+
+            db.commit(|tx| {
+                for block in 0..=5 {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                    tx.put::<tables::AccountChangeSets>(block, acc())?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+            let input = ExecInput { target: Some(5), ..Default::default() };
+            let mut stage = IndexAccountHistoryStage::default();
+            let provider = db.factory.database_provider_rw().unwrap();
+            let out = stage.execute(&provider, input).unwrap();
+            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
+            provider.commit().unwrap();
+
+            let rocksdb = db.factory.rocksdb_provider();
+            let result = rocksdb.get::<tables::AccountsHistory>(shard(u64::MAX)).unwrap();
+            assert!(result.is_some());
+            let blocks: Vec<u64> = result.unwrap().iter().collect();
+            assert_eq!(blocks, (0..=5).collect::<Vec<_>>());
+
+            db.commit(|tx| {
+                for block in 6..=10 {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                    tx.put::<tables::AccountChangeSets>(block, acc())?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+            let input = ExecInput { target: Some(10), checkpoint: Some(StageCheckpoint::new(5)) };
+            let provider = db.factory.database_provider_rw().unwrap();
+            let out = stage.execute(&provider, input).unwrap();
+            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(10), done: true });
+            provider.commit().unwrap();
+
+            let rocksdb = db.factory.rocksdb_provider();
+            let result = rocksdb.get::<tables::AccountsHistory>(shard(u64::MAX)).unwrap();
+            assert!(result.is_some(), "RocksDB should have merged data");
+            let blocks: Vec<u64> = result.unwrap().iter().collect();
+            assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
         }
     }
 }

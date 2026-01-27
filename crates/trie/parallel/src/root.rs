@@ -4,7 +4,7 @@ use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets
 use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
-use reth_execution_errors::StorageRootError;
+use reth_execution_errors::{StateProofError, StorageRootError};
 use reth_provider::{DatabaseProviderROFactory, ProviderError};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -255,6 +255,15 @@ impl From<alloy_rlp::Error> for ParallelStateRootError {
     }
 }
 
+impl From<StateProofError> for ParallelStateRootError {
+    fn from(error: StateProofError) -> Self {
+        match error {
+            StateProofError::Database(err) => Self::Provider(ProviderError::Database(err)),
+            StateProofError::Rlp(err) => Self::Provider(ProviderError::Rlp(err)),
+        }
+    }
+}
+
 /// Gets or creates a tokio runtime handle for spawning blocking tasks.
 /// This ensures we always have a runtime available for I/O operations.
 fn get_runtime_handle() -> Handle {
@@ -289,8 +298,11 @@ mod tests {
     #[tokio::test]
     async fn random_parallel_root() {
         let factory = create_test_provider_factory();
-        let mut overlay_factory =
-            reth_provider::providers::OverlayStateProviderFactory::new(factory.clone());
+        let changeset_cache = reth_trie_db::ChangesetCache::new();
+        let mut overlay_factory = reth_provider::providers::OverlayStateProviderFactory::new(
+            factory.clone(),
+            changeset_cache,
+        );
 
         let mut rng = rand::rng();
         let mut state = (0..100)

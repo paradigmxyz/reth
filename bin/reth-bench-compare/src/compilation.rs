@@ -121,8 +121,7 @@ impl CompilationManager {
         cmd.env("RUSTFLAGS", rustflags);
         info!("Using RUSTFLAGS: {rustflags}");
 
-        // Debug log the command
-        debug!("Executing cargo command: {:?}", cmd);
+        info!("Compiling {binary_name} with {cmd:?}");
 
         let output = cmd.output().wrap_err("Failed to execute cargo build command")?;
 
@@ -231,8 +230,7 @@ impl CompilationManager {
         let mut cmd = Command::new("cargo");
         cmd.args(["install", "--locked", "samply"]);
 
-        // Debug log the command
-        debug!("Executing cargo command: {:?}", cmd);
+        info!("Installing samply with {cmd:?}");
 
         let output = cmd.output().wrap_err("Failed to execute cargo install samply command")?;
 
@@ -307,8 +305,7 @@ impl CompilationManager {
         let mut cmd = Command::new("make");
         cmd.arg("install-reth-bench").current_dir(&self.repo_root);
 
-        // Debug log the command
-        debug!("Executing make command: {:?}", cmd);
+        info!("Compiling reth-bench with {cmd:?}");
 
         let output = cmd.output().wrap_err("Failed to execute make install-reth-bench command")?;
 

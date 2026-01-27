@@ -158,12 +158,12 @@ where
                 .ok_or_else(|| PayloadBuilderError::MissingParentHeader(attributes.parent()))?
         };
 
-        let config = PayloadConfig::new(Arc::new(parent_header.clone()), attributes);
+        let cached_reads = self.maybe_pre_cached(parent_header.hash());
+
+        let config = PayloadConfig::new(Arc::new(parent_header), attributes);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
-
-        let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
         let mut job = BasicPayloadJob {
             config,

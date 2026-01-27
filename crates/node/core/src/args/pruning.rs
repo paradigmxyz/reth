@@ -5,19 +5,106 @@ use alloy_primitives::{Address, BlockNumber};
 use clap::{builder::RangedU64ValueParser, Args};
 use reth_chainspec::EthereumHardforks;
 use reth_config::config::PruneConfig;
-use reth_prune_types::{
-    PruneMode, PruneModes, ReceiptsLogPruneConfig, MERKLE_CHANGESETS_RETENTION_BLOCKS,
-    MINIMUM_PRUNING_DISTANCE,
-};
-use std::{collections::BTreeMap, ops::Not};
+use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
+use std::{collections::BTreeMap, ops::Not, sync::OnceLock};
+
+/// Global static pruning defaults
+static PRUNING_DEFAULTS: OnceLock<DefaultPruningValues> = OnceLock::new();
+
+/// Default values for `--full` and `--minimal` pruning modes that can be customized.
+///
+/// Global defaults can be set via [`DefaultPruningValues::try_init`].
+#[derive(Debug, Clone)]
+pub struct DefaultPruningValues {
+    /// Prune modes for `--full` flag.
+    ///
+    /// Note: `bodies_history` is ignored when `full_bodies_history_use_pre_merge` is `true`.
+    pub full_prune_modes: PruneModes,
+    /// If `true`, `--full` will set `bodies_history` to prune everything before the merge block
+    /// (Paris hardfork). If `false`, uses `full_prune_modes.bodies_history` directly.
+    pub full_bodies_history_use_pre_merge: bool,
+    /// Prune modes for `--minimal` flag.
+    pub minimal_prune_modes: PruneModes,
+}
+
+impl DefaultPruningValues {
+    /// Initialize the global pruning defaults with this configuration.
+    ///
+    /// Returns `Err(self)` if already initialized.
+    pub fn try_init(self) -> Result<(), Self> {
+        PRUNING_DEFAULTS.set(self)
+    }
+
+    /// Get a reference to the global pruning defaults.
+    pub fn get_global() -> &'static Self {
+        PRUNING_DEFAULTS.get_or_init(Self::default)
+    }
+
+    /// Set the prune modes for `--full` flag.
+    pub fn with_full_prune_modes(mut self, modes: PruneModes) -> Self {
+        self.full_prune_modes = modes;
+        self
+    }
+
+    /// Set whether `--full` should use pre-merge pruning for bodies history.
+    ///
+    /// When `true` (default), bodies are pruned before the Paris hardfork block.
+    /// When `false`, uses `full_prune_modes.bodies_history` directly.
+    pub const fn with_full_bodies_history_use_pre_merge(mut self, use_pre_merge: bool) -> Self {
+        self.full_bodies_history_use_pre_merge = use_pre_merge;
+        self
+    }
+
+    /// Set the prune modes for `--minimal` flag.
+    pub fn with_minimal_prune_modes(mut self, modes: PruneModes) -> Self {
+        self.minimal_prune_modes = modes;
+        self
+    }
+}
+
+impl Default for DefaultPruningValues {
+    fn default() -> Self {
+        Self {
+            full_prune_modes: PruneModes {
+                sender_recovery: Some(PruneMode::Full),
+                transaction_lookup: None,
+                receipts: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                // This field is ignored when full_bodies_history_use_pre_merge is true
+                bodies_history: None,
+                receipts_log_filter: Default::default(),
+            },
+            full_bodies_history_use_pre_merge: true,
+            minimal_prune_modes: PruneModes {
+                sender_recovery: Some(PruneMode::Full),
+                transaction_lookup: Some(PruneMode::Full),
+                receipts: Some(PruneMode::Full),
+                account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                bodies_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                receipts_log_filter: Default::default(),
+            },
+        }
+    }
+}
 
 /// Parameters for pruning and full node
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
 #[command(next_help_heading = "Pruning")]
 pub struct PruningArgs {
     /// Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored.
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, conflicts_with = "minimal")]
     pub full: bool,
+
+    /// Run minimal storage mode with maximum pruning and smaller static files.
+    ///
+    /// This mode configures the node to use minimal disk space by:
+    /// - Fully pruning sender recovery, transaction lookup, receipts
+    /// - Leaving 10,064 blocks for account, storage history and block bodies
+    /// - Using 10,000 blocks per static file segment
+    #[arg(long, default_value_t = false, conflicts_with = "full")]
+    pub minimal: bool,
 
     /// Minimum pruning interval measured in blocks.
     #[arg(long = "prune.block-interval", alias = "block-interval", value_parser = RangedU64ValueParser::<u64>::new().range(1..))]
@@ -122,21 +209,22 @@ impl PruningArgs {
 
         // If --full is set, use full node defaults.
         if self.full {
+            let defaults = DefaultPruningValues::get_global();
+            let mut segments = defaults.full_prune_modes.clone();
+            if defaults.full_bodies_history_use_pre_merge {
+                segments.bodies_history = chain_spec
+                    .ethereum_fork_activation(EthereumHardfork::Paris)
+                    .block_number()
+                    .map(PruneMode::Before);
+            }
+            config = PruneConfig { block_interval: config.block_interval, segments }
+        }
+
+        // If --minimal is set, use minimal storage mode with aggressive pruning.
+        if self.minimal {
             config = PruneConfig {
                 block_interval: config.block_interval,
-                segments: PruneModes {
-                    sender_recovery: Some(PruneMode::Full),
-                    transaction_lookup: None,
-                    receipts: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                    account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                    storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                    bodies_history: chain_spec
-                        .ethereum_fork_activation(EthereumHardfork::Paris)
-                        .block_number()
-                        .map(PruneMode::Before),
-                    merkle_changesets: PruneMode::Distance(MERKLE_CHANGESETS_RETENTION_BLOCKS),
-                    receipts_log_filter: Default::default(),
-                },
+                segments: DefaultPruningValues::get_global().minimal_prune_modes.clone(),
             }
         }
 

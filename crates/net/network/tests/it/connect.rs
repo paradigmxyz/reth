@@ -20,6 +20,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::{mainnet_nodes, NodeRecord, TrustedPeer};
 use reth_network_types::peers::config::PeerBackoffDurations;
+use reth_provider::test_utils::MockEthProvider;
 use reth_storage_api::noop::NoopProvider;
 use reth_tracing::init_test_tracing;
 use reth_transaction_pool::test_utils::testing_pool;
@@ -655,7 +656,8 @@ async fn new_random_peer(
 async fn test_connect_many() {
     reth_tracing::init_test_tracing();
 
-    let net = Testnet::create_with(5, NoopProvider::default()).await;
+    let provider = MockEthProvider::default().with_genesis_block();
+    let net = Testnet::create_with(5, provider).await;
 
     // install request handlers
     let net = net.with_eth_pool();
