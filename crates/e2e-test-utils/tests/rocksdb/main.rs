@@ -158,7 +158,7 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
 
     let client = nodes[0].rpc_client().expect("RPC client should be available");
 
-    // Query transaction by hash
+    // Query each transaction by hash
     let tx: Option<Transaction> = client.request("eth_getTransactionByHash", [tx_hash]).await?;
     let tx = tx.expect("Transaction should be found");
     assert_eq!(tx.block_number, Some(1));
