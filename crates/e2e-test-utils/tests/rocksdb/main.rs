@@ -96,13 +96,26 @@ fn test_attributes_generator(timestamp: u64) -> EthPayloadBuilderAttributes {
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
 
-/// Verifies that RocksDB defaults are enabled when the `edge` feature is active.
+/// Verifies that RocksDB CLI defaults match `StorageSettings::base()`.
 #[test]
-fn test_rocksdb_defaults_match_edge_feature() {
+fn test_rocksdb_defaults_match_storage_settings() {
+    use reth_provider::StorageSettings;
+
     let args = RocksDbArgs::default();
-    assert!(args.tx_hash, "tx_hash should default to true with edge feature");
-    assert!(args.storages_history, "storages_history should default to true with edge feature");
-    assert!(args.account_history, "account_history should default to true with edge feature");
+    let settings = StorageSettings::base();
+
+    assert_eq!(
+        args.tx_hash, settings.transaction_hash_numbers_in_rocksdb,
+        "tx_hash default should match StorageSettings::base()"
+    );
+    assert_eq!(
+        args.storages_history, settings.storages_history_in_rocksdb,
+        "storages_history default should match StorageSettings::base()"
+    );
+    assert_eq!(
+        args.account_history, settings.account_history_in_rocksdb,
+        "account_history default should match StorageSettings::base()"
+    );
 }
 
 /// Smoke test: node boots with `RocksDB` routing enabled.

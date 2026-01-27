@@ -1,13 +1,27 @@
 //! clap [Args](clap::Args) for `RocksDB` table routing configuration
 
 use clap::{ArgAction, Args};
+use reth_storage_api::StorageSettings;
 
-/// Default value for `RocksDB` routing flags.
+/// Default value for `tx_hash` routing flag.
 ///
-/// When the `edge` feature is enabled, defaults to `true` to enable edge storage features.
-/// Otherwise defaults to `false` for legacy behavior.
-const fn default_rocksdb_flag() -> bool {
-    cfg!(feature = "edge")
+/// Derived from [`StorageSettings::base()`] to ensure CLI defaults match storage defaults.
+const fn default_tx_hash_in_rocksdb() -> bool {
+    StorageSettings::base().transaction_hash_numbers_in_rocksdb
+}
+
+/// Default value for `storages_history` routing flag.
+///
+/// Derived from [`StorageSettings::base()`] to ensure CLI defaults match storage defaults.
+const fn default_storages_history_in_rocksdb() -> bool {
+    StorageSettings::base().storages_history_in_rocksdb
+}
+
+/// Default value for `account_history` routing flag.
+///
+/// Derived from [`StorageSettings::base()`] to ensure CLI defaults match storage defaults.
+const fn default_account_history_in_rocksdb() -> bool {
+    StorageSettings::base().account_history_in_rocksdb
 }
 
 /// Parameters for `RocksDB` table routing configuration.
@@ -27,22 +41,22 @@ pub struct RocksDbArgs {
     /// Route tx hash -> number table to `RocksDB` instead of MDBX.
     ///
     /// This is a genesis-initialization-only flag: changing it after genesis requires a re-sync.
-    /// Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
-    #[arg(long = "rocksdb.tx-hash", default_value_t = default_rocksdb_flag(), action = ArgAction::Set)]
+    /// Defaults to match [`StorageSettings::base()`].
+    #[arg(long = "rocksdb.tx-hash", default_value_t = default_tx_hash_in_rocksdb(), action = ArgAction::Set)]
     pub tx_hash: bool,
 
     /// Route storages history tables to `RocksDB` instead of MDBX.
     ///
     /// This is a genesis-initialization-only flag: changing it after genesis requires a re-sync.
-    /// Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
-    #[arg(long = "rocksdb.storages-history", default_value_t = default_rocksdb_flag(), action = ArgAction::Set)]
+    /// Defaults to match [`StorageSettings::base()`].
+    #[arg(long = "rocksdb.storages-history", default_value_t = default_storages_history_in_rocksdb(), action = ArgAction::Set)]
     pub storages_history: bool,
 
     /// Route account history tables to `RocksDB` instead of MDBX.
     ///
     /// This is a genesis-initialization-only flag: changing it after genesis requires a re-sync.
-    /// Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
-    #[arg(long = "rocksdb.account-history", default_value_t = default_rocksdb_flag(), action = ArgAction::Set)]
+    /// Defaults to match [`StorageSettings::base()`].
+    #[arg(long = "rocksdb.account-history", default_value_t = default_account_history_in_rocksdb(), action = ArgAction::Set)]
     pub account_history: bool,
 }
 
@@ -50,9 +64,9 @@ impl Default for RocksDbArgs {
     fn default() -> Self {
         Self {
             all: false,
-            tx_hash: default_rocksdb_flag(),
-            storages_history: default_rocksdb_flag(),
-            account_history: default_rocksdb_flag(),
+            tx_hash: default_tx_hash_in_rocksdb(),
+            storages_history: default_storages_history_in_rocksdb(),
+            account_history: default_account_history_in_rocksdb(),
         }
     }
 }
@@ -106,7 +120,25 @@ mod tests {
     fn test_parse_all_flag() {
         let args = CommandParser::<RocksDbArgs>::parse_from(["reth", "--rocksdb.all"]).args;
         assert!(args.all);
-        assert_eq!(args.tx_hash, default_rocksdb_flag());
+        assert_eq!(args.tx_hash, default_tx_hash_in_rocksdb());
+    }
+
+    #[test]
+    fn test_defaults_match_storage_settings() {
+        let args = RocksDbArgs::default();
+        let settings = StorageSettings::base();
+        assert_eq!(
+            args.tx_hash, settings.transaction_hash_numbers_in_rocksdb,
+            "tx_hash default should match StorageSettings::base()"
+        );
+        assert_eq!(
+            args.storages_history, settings.storages_history_in_rocksdb,
+            "storages_history default should match StorageSettings::base()"
+        );
+        assert_eq!(
+            args.account_history, settings.account_history_in_rocksdb,
+            "account_history default should match StorageSettings::base()"
+        );
     }
 
     #[test]
