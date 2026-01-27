@@ -1144,7 +1144,7 @@ where
 {
     /// Creates a new account proof worker.
     #[allow(clippy::too_many_arguments)]
-    fn new(
+    const fn new(
         task_ctx: ProofTaskCtx<Factory>,
         work_rx: CrossbeamReceiver<AccountWorkerJob>,
         worker_id: usize,
