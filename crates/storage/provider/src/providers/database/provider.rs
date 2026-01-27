@@ -3323,10 +3323,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
     ///
     /// **Note:** This function is only used in tests.
     ///
-    /// When edge storage settings configure history to be read from RocksDB
-    /// (`account_history_in_rocksdb` or `storages_history_in_rocksdb`), this function
-    /// skips writing history indices to MDBX. In production, history data is populated
-    /// via healing/stages instead.
+    /// History indices are written to the appropriate backend based on storage settings:
+    /// MDBX when `*_history_in_rocksdb` is false, RocksDB when true.
     ///
     /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually
     fn append_blocks_with_state(
@@ -3386,10 +3384,28 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // Use pre-computed transitions for history indices since static file
         // writes aren't visible until commit.
         let storage_settings = self.cached_storage_settings();
-        if !storage_settings.account_history_in_rocksdb {
+        if storage_settings.account_history_in_rocksdb {
+            self.with_rocksdb_batch(|batch| {
+                let mut writer = EitherWriter::new_accounts_history(self, batch)?;
+                for (address, blocks) in account_transitions {
+                    let list = BlockNumberList::new(blocks).map_err(ProviderError::other)?;
+                    writer.upsert_account_history(ShardedKey::last(address), &list)?;
+                }
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
+        } else {
             self.insert_account_history_index(account_transitions)?;
         }
-        if !storage_settings.storages_history_in_rocksdb {
+        if storage_settings.storages_history_in_rocksdb {
+            self.with_rocksdb_batch(|batch| {
+                let mut writer = EitherWriter::new_storages_history(self, batch)?;
+                for ((address, key), blocks) in storage_transitions {
+                    let list = BlockNumberList::new(blocks).map_err(ProviderError::other)?;
+                    writer.upsert_storage_history(StorageShardedKey::last(address, key), &list)?;
+                }
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
+        } else {
             self.insert_storage_history_index(storage_transitions)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertHistoryIndices);
