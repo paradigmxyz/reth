@@ -186,7 +186,7 @@ where
                 crsr.append(k, &v).expect("submit");
             }
 
-            tx.inner().commit().unwrap()
+            tx.commit().unwrap()
         });
     }
     db
@@ -204,7 +204,7 @@ where
                 crsr.insert(k, &v).expect("submit");
             }
 
-            tx.inner().commit().unwrap()
+            tx.commit().unwrap()
         });
     }
     db
@@ -221,7 +221,7 @@ where
                 tx.put::<T>(k, v).expect("submit");
             }
 
-            tx.inner().commit().unwrap()
+            tx.commit().unwrap()
         });
     }
     db
