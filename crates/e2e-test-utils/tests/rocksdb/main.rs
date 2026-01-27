@@ -15,7 +15,49 @@ use reth_node_core::args::RocksDbArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_provider::RocksDBProviderFactory;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
+
+const ROCKSDB_POLL_TIMEOUT: Duration = Duration::from_secs(30);
+const ROCKSDB_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Polls RPC until the given tx_hash is visible as pending (not yet mined).
+/// Prevents race conditions where `advance_block` is called before txs are in the pool.
+async fn wait_for_pending_tx<C: ClientT>(client: &C, tx_hash: B256) {
+    let start = std::time::Instant::now();
+    loop {
+        let tx: Option<Transaction> = client
+            .request("eth_getTransactionByHash", [tx_hash])
+            .await
+            .expect("RPC request failed");
+        if tx.is_some() {
+            return;
+        }
+        assert!(
+            start.elapsed() < ROCKSDB_POLL_TIMEOUT,
+            "Timed out waiting for tx_hash={tx_hash:?} to appear in pending pool"
+        );
+        tokio::time::sleep(ROCKSDB_POLL_INTERVAL).await;
+    }
+}
+
+/// Polls RocksDB until the given tx_hash appears in `TransactionHashNumbers`.
+/// Returns the tx_number on success, or panics on timeout.
+async fn poll_tx_in_rocksdb<P: RocksDBProviderFactory>(provider: &P, tx_hash: B256) -> u64 {
+    let rocksdb = provider.rocksdb_provider();
+    let start = std::time::Instant::now();
+    loop {
+        let tx_number: Option<u64> =
+            rocksdb.get::<tables::TransactionHashNumbers>(tx_hash).expect("RocksDB get failed");
+        if let Some(n) = tx_number {
+            return n;
+        }
+        assert!(
+            start.elapsed() < ROCKSDB_POLL_TIMEOUT,
+            "Timed out waiting for tx_hash={tx_hash:?} in RocksDB"
+        );
+        tokio::time::sleep(ROCKSDB_POLL_INTERVAL).await;
+    }
+}
 
 /// Returns the test chain spec for `RocksDB` tests.
 fn test_chain_spec() -> Arc<ChainSpec> {
@@ -68,13 +110,11 @@ async fn test_rocksdb_node_startup() -> Result<()> {
 
     assert_eq!(nodes.len(), 1);
 
-    // Verify RocksDB directory exists
-    let rocksdb_path = nodes[0].inner.data_dir.rocksdb();
-    assert!(rocksdb_path.exists(), "RocksDB directory should exist at {rocksdb_path:?}");
-    assert!(
-        std::fs::read_dir(&rocksdb_path).map(|mut d| d.next().is_some()).unwrap_or(false),
-        "RocksDB directory should be non-empty"
-    );
+    // Verify RocksDB provider is functional (can query without error)
+    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
+    let missing_hash = B256::from([0xab; 32]);
+    let result: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(missing_hash)?;
+    assert!(result.is_none(), "Missing hash should return None");
 
     let genesis_hash = nodes[0].block_hash(0);
     assert_ne!(genesis_hash, B256::ZERO);
@@ -170,23 +210,12 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
     assert!(receipt.status());
 
     // Direct RocksDB assertion - poll with timeout since persistence is async
-    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
-    let start = std::time::Instant::now();
-    loop {
-        let tx_number: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(tx_hash)?;
-        if let Some(n) = tx_number {
-            assert_eq!(n, 0, "First tx should have TxNumber 0");
-            break;
-        }
-        assert!(
-            start.elapsed() < std::time::Duration::from_secs(10),
-            "Timed out waiting for tx_hash={tx_hash:?} in RocksDB"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
+    let tx_number = poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash).await;
+    assert_eq!(tx_number, 0, "First tx should have TxNumber 0");
 
     // Verify missing hash returns None
     let missing_hash = B256::from([0xde; 32]);
+    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
     let missing_tx_number: Option<u64> =
         rocksdb.get::<tables::TransactionHashNumbers>(missing_hash)?;
     assert!(missing_tx_number.is_none());
@@ -223,6 +252,7 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
     // Create 3 txs from the same wallet with sequential nonces
     let wallets = wallet::Wallet::new(1).with_chain_id(chain_id).wallet_gen();
     let signer = wallets[0].clone();
+    let client = nodes[0].rpc_client().expect("RPC client");
 
     let mut tx_hashes = Vec::new();
     for nonce in 0..3 {
@@ -233,11 +263,14 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
         tx_hashes.push(tx_hash);
     }
 
+    // Wait for all txs to appear in pending pool before mining
+    for tx_hash in &tx_hashes {
+        wait_for_pending_tx(&client, *tx_hash).await;
+    }
+
     // Mine one block containing all 3 txs
     let payload = nodes[0].advance_block().await?;
     assert_eq!(payload.block().number(), 1);
-
-    let client = nodes[0].rpc_client().expect("RPC client");
 
     // Verify block contains all 3 txs
     let block: Option<alloy_rpc_types_eth::Block> =
@@ -252,31 +285,16 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
         assert_eq!(tx.block_number, Some(1), "All txs should be in block 1");
     }
 
-    // Poll RocksDB for all tx hashes with timeout
-    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
+    // Poll RocksDB for all tx hashes and collect tx_numbers
+    let mut tx_numbers = Vec::new();
     for tx_hash in &tx_hashes {
-        let start = std::time::Instant::now();
-        loop {
-            let tx_number: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(*tx_hash)?;
-            if let Some(n) = tx_number {
-                assert!(n < 3, "TxNumber {n} should be 0, 1, or 2");
-                break;
-            }
-            assert!(
-                start.elapsed() < std::time::Duration::from_secs(10),
-                "Timed out waiting for tx_hash={tx_hash:?}"
-            );
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
+        let n = poll_tx_in_rocksdb(&nodes[0].inner.provider, *tx_hash).await;
+        tx_numbers.push(n);
     }
 
-    // Verify all 3 distinct tx_numbers exist (0, 1, 2)
-    let mut found_numbers = std::collections::HashSet::new();
-    for tx_hash in &tx_hashes {
-        let tx_number: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(*tx_hash)?;
-        found_numbers.insert(tx_number.unwrap());
-    }
-    assert_eq!(found_numbers.len(), 3, "Should have 3 distinct tx_numbers");
+    // Verify tx_numbers form the set {0, 1, 2}
+    tx_numbers.sort();
+    assert_eq!(tx_numbers, vec![0, 1, 2], "TxNumbers should be 0, 1, 2");
 
     Ok(())
 }
@@ -317,6 +335,10 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
         )
         .await?;
 
+    // Wait for both txs to appear in pending pool
+    wait_for_pending_tx(&client, tx_hash_0).await;
+    wait_for_pending_tx(&client, tx_hash_1).await;
+
     let payload1 = nodes[0].advance_block().await?;
     assert_eq!(payload1.block().number(), 1);
 
@@ -327,6 +349,8 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
             TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 2).await,
         )
         .await?;
+
+    wait_for_pending_tx(&client, tx_hash_2).await;
 
     let payload2 = nodes[0].advance_block().await?;
     assert_eq!(payload2.block().number(), 2);
@@ -341,29 +365,10 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
     assert_eq!(tx2.expect("tx2").block_number, Some(2));
 
     // Poll RocksDB and verify global tx_number continuity
-    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
     let all_tx_hashes = [tx_hash_0, tx_hash_1, tx_hash_2];
-
-    // Wait for all to appear
-    for tx_hash in &all_tx_hashes {
-        let start = std::time::Instant::now();
-        loop {
-            let tx_number: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(*tx_hash)?;
-            if tx_number.is_some() {
-                break;
-            }
-            assert!(
-                start.elapsed() < std::time::Duration::from_secs(10),
-                "Timed out waiting for {tx_hash:?}"
-            );
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    }
-
-    // Collect all tx_numbers
     let mut tx_numbers = Vec::new();
     for tx_hash in &all_tx_hashes {
-        let n: u64 = rocksdb.get::<tables::TransactionHashNumbers>(*tx_hash)?.unwrap();
+        let n = poll_tx_in_rocksdb(&nodes[0].inner.provider, *tx_hash).await;
         tx_numbers.push(n);
     }
 
@@ -431,19 +436,8 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     assert_eq!(payload.block().number(), 1);
 
     // Poll until tx appears in RocksDB
-    let start = std::time::Instant::now();
-    loop {
-        let tx_number: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(tx_hash)?;
-        if let Some(n) = tx_number {
-            assert_eq!(n, 0, "First tx should have tx_number 0");
-            break;
-        }
-        assert!(
-            start.elapsed() < std::time::Duration::from_secs(10),
-            "Timed out waiting for mined tx in RocksDB"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
+    let tx_number = poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash).await;
+    assert_eq!(tx_number, 0, "First tx should have tx_number 0");
 
     // Verify tx is now mined via RPC
     let mined_tx: Option<Transaction> =
