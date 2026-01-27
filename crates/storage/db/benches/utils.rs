@@ -68,7 +68,7 @@ where
         for (k, _, v, _) in pair.clone() {
             tx.put::<T>(k, v).expect("submit");
         }
-        tx.inner.commit().unwrap();
+        tx.inner().commit().unwrap();
     }
 
     db.into_inner_db()

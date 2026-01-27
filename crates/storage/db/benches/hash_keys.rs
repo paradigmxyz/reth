@@ -186,7 +186,7 @@ where
                 crsr.append(k, &v).expect("submit");
             }
 
-            tx.inner.commit().unwrap()
+            tx.inner().commit().unwrap()
         });
     }
     db
@@ -204,7 +204,7 @@ where
                 crsr.insert(k, &v).expect("submit");
             }
 
-            tx.inner.commit().unwrap()
+            tx.inner().commit().unwrap()
         });
     }
     db
@@ -221,7 +221,7 @@ where
                 tx.put::<T>(k, v).expect("submit");
             }
 
-            tx.inner.commit().unwrap()
+            tx.inner().commit().unwrap()
         });
     }
     db
@@ -243,11 +243,11 @@ where
     T: Table,
 {
     db.view(|tx| {
-        let table_db = tx.inner.open_db(Some(T::NAME)).map_err(|_| "Could not open db.").unwrap();
+        let table_db = tx.inner().open_db(Some(T::NAME)).map_err(|_| "Could not open db.").unwrap();
 
         println!(
             "{:?}\n",
-            tx.inner
+            tx.inner()
                 .db_stat(table_db.dbi())
                 .map_err(|_| format!("Could not find table: {}", T::NAME))
                 .map(|stats| {
