@@ -44,6 +44,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 # misc
 rayon = { workspace = true, optional = true }
+cuckoofilter = "0.5"
 
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["serde"] }
