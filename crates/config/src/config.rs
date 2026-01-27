@@ -443,6 +443,11 @@ pub struct BlocksPerFileConfig {
 }
 
 impl StaticFilesConfig {
+    /// Returns whether this configuration is the default one.
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+
     /// Validates the static files configuration.
     ///
     /// Returns an error if any blocks per file value is zero.

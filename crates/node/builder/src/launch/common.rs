@@ -164,15 +164,12 @@ impl LaunchContext {
             .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
         Self::save_pruning_config(&mut toml_config, config, &config_path)?;
+        Self::save_static_files_config(&mut toml_config, config, &config_path)?;
 
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
         // Update the config with the command line arguments
         toml_config.peers.trusted_nodes_only = config.network.trusted_only;
-
-        // Merge static file CLI arguments with config file, giving priority to CLI
-        toml_config.static_files =
-            config.static_files.merge_with_config(toml_config.static_files, config.pruning.minimal);
 
         Ok(toml_config)
     }
@@ -200,6 +197,36 @@ impl LaunchContext {
 
         if should_save {
             info!(target: "reth::cli", "Saving prune config to toml file");
+            reth_config.save(config_path.as_ref())?;
+        }
+
+        Ok(())
+    }
+
+    /// Save static files config to the toml file if node has custom static files CLI arguments
+    /// (--minimal or explicit blocks-per-file flags).
+    fn save_static_files_config<ChainSpec>(
+        reth_config: &mut reth_config::Config,
+        config: &NodeConfig<ChainSpec>,
+        config_path: impl AsRef<std::path::Path>,
+    ) -> eyre::Result<()>
+    where
+        ChainSpec: EthChainSpec + reth_chainspec::EthereumHardforks,
+    {
+        // Merge static file CLI arguments with config file, giving priority to CLI
+        let merged_config =
+            config.static_files.merge_with_config(reth_config.static_files, config.pruning.minimal);
+
+        let mut should_save = false;
+
+        // Save if the merged config differs from what's in the file and is not default
+        if reth_config.static_files != merged_config && !merged_config.is_default() {
+            reth_config.static_files = merged_config;
+            should_save = true;
+        }
+
+        if should_save {
+            info!(target: "reth::cli", "Saving static files config to toml file");
             reth_config.save(config_path.as_ref())?;
         }
 
