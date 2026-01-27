@@ -462,16 +462,14 @@ where
                 Box::new(CachedStateProvider::new(state_provider, caches, cache_metrics));
         };
 
-        // Create read and timing stats handles before wrapping state provider - allows accessing
-        // statistics after the provider is consumed by execute_block.
-        // Always wrap with InstrumentedStateProvider to ensure state_reads metrics are tracked
-        // accurately, regardless of whether slow block logging is enabled.
-        let instrumented_state_provider_handle = if self.config.slow_block_threshold().is_some() {
+        let instrumented_state_provider_handle = if self.config.slow_block_threshold().is_some() ||
+            self.config.state_provider_metrics()
+        {
             let instrumented_state_provider =
                 InstrumentedStateProvider::new(state_provider, "engine");
             let handle = instrumented_state_provider.handle();
             state_provider = Box::new(instrumented_state_provider);
-            Some(handle)
+            self.config.slow_block_threshold().is_some().then_some(handle)
         } else {
             None
         };

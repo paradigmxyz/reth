@@ -35,38 +35,6 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
-
-    // Unique access tracking
-    /// Number of unique accounts touched in the latest block.
-    pub unique_accounts: Gauge,
-    /// Number of unique storage slots accessed in the latest block.
-    pub unique_storage_slots: Gauge,
-    /// Number of unique contracts executed in the latest block.
-    pub unique_contracts_executed: Gauge,
-
-    // Code bytes tracking
-    /// Total bytes of code read in the latest block.
-    pub code_bytes_read: Gauge,
-
-    // Deletion tracking (cross-client metrics)
-    /// Number of accounts deleted (selfdestructed) in the latest block.
-    pub accounts_deleted: Gauge,
-    /// Number of storage slots deleted (set to zero) in the latest block.
-    pub storage_slots_deleted: Gauge,
-
-    // Cache statistics
-    /// Account cache hits.
-    pub account_cache_hits: Counter,
-    /// Account cache misses.
-    pub account_cache_misses: Counter,
-    /// Storage cache hits.
-    pub storage_cache_hits: Counter,
-    /// Storage cache misses.
-    pub storage_cache_misses: Counter,
-    /// Code cache hits.
-    pub code_cache_hits: Counter,
-    /// Code cache misses.
-    pub code_cache_misses: Counter,
 }
 
 impl ExecutorMetrics {
