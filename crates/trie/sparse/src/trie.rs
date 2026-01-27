@@ -499,6 +499,7 @@ impl SparseTrieTrait for SerialSparseTrie {
                                 store_in_db_trie: Some(masks.is_some_and(|m| {
                                     !m.hash_mask.is_empty() || !m.tree_mask.is_empty()
                                 })),
+                                cached_rlp: None,
                             });
                         }
                         // Branch node already exists, or an extension node was placed where a
@@ -530,6 +531,7 @@ impl SparseTrieTrait for SerialSparseTrie {
                             // node.
                             hash: Some(*hash),
                             store_in_db_trie: None,
+                            cached_rlp: None,
                         });
                         self.reveal_node_or_hash(child_path, &ext.child)?;
                     }
@@ -566,6 +568,7 @@ impl SparseTrieTrait for SerialSparseTrie {
                                 // Memoize the hash of a previously blinded node in a new leaf
                                 // node.
                                 hash: Some(*hash),
+                                cached_rlp: None,
                             });
                         }
                         // Left node already exists.
@@ -829,7 +832,7 @@ impl SparseTrieTrait for SerialSparseTrie {
                         SparseNode::Branch { .. } => removed_node.node,
                     }
                 }
-                &SparseNode::Branch { mut state_mask, hash: _, store_in_db_trie: _ } => {
+                &SparseNode::Branch { mut state_mask, hash: _, store_in_db_trie: _, .. } => {
                     // If the node is a branch node, we need to check the number of children left
                     // after deleting the child at the given nibble.
 
@@ -1417,14 +1420,14 @@ impl SerialSparseTrie {
         while let Some((mut path, level)) = paths.pop() {
             match self.nodes.get(&path).unwrap() {
                 SparseNode::Empty | SparseNode::Hash(_) => {}
-                SparseNode::Leaf { key: _, hash } => {
+                SparseNode::Leaf { key: _, hash, .. } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
 
                     targets.push((level, path));
                 }
-                SparseNode::Extension { key, hash, store_in_db_trie: _ } => {
+                SparseNode::Extension { key, hash, store_in_db_trie: _, .. } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
@@ -1438,7 +1441,7 @@ impl SerialSparseTrie {
                         paths.push((path, level + 1));
                     }
                 }
-                SparseNode::Branch { state_mask, hash, store_in_db_trie: _ } => {
+                SparseNode::Branch { state_mask, hash, store_in_db_trie: _, .. } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
@@ -1523,29 +1526,91 @@ impl SerialSparseTrie {
             let (rlp_node, node_type) = match node {
                 SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), SparseNodeType::Empty),
                 SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), SparseNodeType::Hash),
-                SparseNode::Leaf { key, hash } => {
+                SparseNode::Leaf { key, hash, cached_rlp } => {
                     let mut path = path;
                     path.extend(key);
-                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
-                        (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
+                    if !prefix_set_contains(&path) {
+                        if let Some(rlp_bytes) = cached_rlp.as_ref() {
+                            (RlpNode::from_raw_rlp(rlp_bytes).unwrap(), SparseNodeType::Leaf)
+                        } else if let Some(hash) = *hash {
+                            (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
+                        } else {
+                            let value = self.values.get(&path).unwrap();
+                            rlp_buf.clear();
+                            let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
+                            *hash = rlp_node.as_hash();
+                            *cached_rlp = Some(rlp_node.as_ref().to_vec().into());
+                            (rlp_node, SparseNodeType::Leaf)
+                        }
                     } else {
                         let value = self.values.get(&path).unwrap();
                         rlp_buf.clear();
                         let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
                         *hash = rlp_node.as_hash();
+                        *cached_rlp = Some(rlp_node.as_ref().to_vec().into());
                         (rlp_node, SparseNodeType::Leaf)
                     }
                 }
-                SparseNode::Extension { key, hash, store_in_db_trie } => {
+                SparseNode::Extension { key, hash, store_in_db_trie, cached_rlp } => {
                     let mut child_path = path;
                     child_path.extend(key);
-                    if let Some((hash, store_in_db_trie)) =
-                        hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
-                    {
-                        (
-                            RlpNode::word_rlp(&hash),
-                            SparseNodeType::Extension { store_in_db_trie: Some(store_in_db_trie) },
-                        )
+                    if !prefix_set_contains(&path) {
+                        if let Some(rlp_bytes) = cached_rlp.as_ref() {
+                            (
+                                RlpNode::from_raw_rlp(rlp_bytes).unwrap(),
+                                SparseNodeType::Extension { store_in_db_trie: *store_in_db_trie },
+                            )
+                        } else if let Some((hash, store_in_db_trie)) = hash.zip(*store_in_db_trie) {
+                            (
+                                RlpNode::word_rlp(&hash),
+                                SparseNodeType::Extension {
+                                    store_in_db_trie: Some(store_in_db_trie),
+                                },
+                            )
+                        } else if buffers
+                            .rlp_node_stack
+                            .last()
+                            .is_some_and(|e| e.path == child_path)
+                        {
+                            let RlpNodeStackItem {
+                                path: _,
+                                rlp_node: child,
+                                node_type: child_node_type,
+                            } = buffers.rlp_node_stack.pop().unwrap();
+                            rlp_buf.clear();
+                            let rlp_node = ExtensionNodeRef::new(key, &child).rlp(rlp_buf);
+                            *hash = rlp_node.as_hash();
+                            *cached_rlp = Some(rlp_node.as_ref().to_vec().into());
+
+                            let store_in_db_trie_value = child_node_type.store_in_db_trie();
+
+                            trace!(
+                                target: "trie::sparse",
+                                ?path,
+                                ?child_path,
+                                ?child_node_type,
+                                "Extension node"
+                            );
+
+                            *store_in_db_trie = store_in_db_trie_value;
+
+                            (
+                                rlp_node,
+                                SparseNodeType::Extension {
+                                    store_in_db_trie: store_in_db_trie_value,
+                                },
+                            )
+                        } else {
+                            buffers.path_stack.extend([
+                                RlpNodePathStackItem { level, path, is_in_prefix_set },
+                                RlpNodePathStackItem {
+                                    level: level + 1,
+                                    path: child_path,
+                                    is_in_prefix_set: None,
+                                },
+                            ]);
+                            continue
+                        }
                     } else if buffers.rlp_node_stack.last().is_some_and(|e| e.path == child_path) {
                         let RlpNodeStackItem {
                             path: _,
@@ -1555,6 +1620,7 @@ impl SerialSparseTrie {
                         rlp_buf.clear();
                         let rlp_node = ExtensionNodeRef::new(key, &child).rlp(rlp_buf);
                         *hash = rlp_node.as_hash();
+                        *cached_rlp = Some(rlp_node.as_ref().to_vec().into());
 
                         let store_in_db_trie_value = child_node_type.store_in_db_trie();
 
@@ -1570,14 +1636,9 @@ impl SerialSparseTrie {
 
                         (
                             rlp_node,
-                            SparseNodeType::Extension {
-                                // Inherit the `store_in_db_trie` flag from the child node, which is
-                                // always the branch node
-                                store_in_db_trie: store_in_db_trie_value,
-                            },
+                            SparseNodeType::Extension { store_in_db_trie: store_in_db_trie_value },
                         )
                     } else {
-                        // need to get rlp node for child first
                         buffers.path_stack.extend([
                             RlpNodePathStackItem { level, path, is_in_prefix_set },
                             RlpNodePathStackItem {
@@ -1589,18 +1650,27 @@ impl SerialSparseTrie {
                         continue
                     }
                 }
-                SparseNode::Branch { state_mask, hash, store_in_db_trie } => {
-                    if let Some((hash, store_in_db_trie)) =
-                        hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
-                    {
-                        buffers.rlp_node_stack.push(RlpNodeStackItem {
-                            path,
-                            rlp_node: RlpNode::word_rlp(&hash),
-                            node_type: SparseNodeType::Branch {
-                                store_in_db_trie: Some(store_in_db_trie),
-                            },
-                        });
-                        continue
+                SparseNode::Branch { state_mask, hash, store_in_db_trie, cached_rlp } => {
+                    if !prefix_set_contains(&path) {
+                        if let Some(rlp_bytes) = cached_rlp.as_ref() {
+                            buffers.rlp_node_stack.push(RlpNodeStackItem {
+                                path,
+                                rlp_node: RlpNode::from_raw_rlp(rlp_bytes).unwrap(),
+                                node_type: SparseNodeType::Branch {
+                                    store_in_db_trie: *store_in_db_trie,
+                                },
+                            });
+                            continue
+                        } else if let Some((hash, store_in_db_trie)) = hash.zip(*store_in_db_trie) {
+                            buffers.rlp_node_stack.push(RlpNodeStackItem {
+                                path,
+                                rlp_node: RlpNode::word_rlp(&hash),
+                                node_type: SparseNodeType::Branch {
+                                    store_in_db_trie: Some(store_in_db_trie),
+                                },
+                            });
+                            continue
+                        }
                     }
                     let retain_updates = self.updates.is_some() && prefix_set_contains(&path);
 
@@ -1714,6 +1784,7 @@ impl SerialSparseTrie {
                         BranchNodeRef::new(&buffers.branch_value_stack_buf, *state_mask);
                     let rlp_node = branch_node_ref.rlp(rlp_buf);
                     *hash = rlp_node.as_hash();
+                    *cached_rlp = Some(rlp_node.as_ref().to_vec().into());
 
                     // Save a branch node update only if it's not a root node, and we need to
                     // persist updates.
@@ -1834,6 +1905,9 @@ pub enum SparseNode {
         /// Pre-computed hash of the sparse node.
         /// Can be reused unless this trie path has been updated.
         hash: Option<B256>,
+        /// Cached RLP encoding of the node.
+        /// Can be reused when the node is not in the prefix set.
+        cached_rlp: Option<alloy_primitives::Bytes>,
     },
     /// Sparse extension node with key.
     Extension {
@@ -1849,6 +1923,9 @@ pub enum SparseNode {
         ///
         /// If [`None`], then the value is not known and should be calculated from scratch.
         store_in_db_trie: Option<bool>,
+        /// Cached RLP encoding of the node.
+        /// Can be reused when the node is not in the prefix set.
+        cached_rlp: Option<alloy_primitives::Bytes>,
     },
     /// Sparse branch node with state mask.
     Branch {
@@ -1864,6 +1941,9 @@ pub enum SparseNode {
         ///
         /// If [`None`], then the value is not known and should be calculated from scratch.
         store_in_db_trie: Option<bool>,
+        /// Cached RLP encoding of the node.
+        /// Can be reused when the node is not in the prefix set.
+        cached_rlp: Option<alloy_primitives::Bytes>,
     },
 }
 
@@ -1880,7 +1960,7 @@ impl SparseNode {
 
     /// Create new [`SparseNode::Branch`] from state mask.
     pub const fn new_branch(state_mask: TrieMask) -> Self {
-        Self::Branch { state_mask, hash: None, store_in_db_trie: None }
+        Self::Branch { state_mask, hash: None, store_in_db_trie: None, cached_rlp: None }
     }
 
     /// Create new [`SparseNode::Branch`] with two bits set.
@@ -1889,17 +1969,17 @@ impl SparseNode {
             // set bits for both children
             (1u16 << bit_a) | (1u16 << bit_b),
         );
-        Self::Branch { state_mask, hash: None, store_in_db_trie: None }
+        Self::Branch { state_mask, hash: None, store_in_db_trie: None, cached_rlp: None }
     }
 
     /// Create new [`SparseNode::Extension`] from the key slice.
     pub const fn new_ext(key: Nibbles) -> Self {
-        Self::Extension { key, hash: None, store_in_db_trie: None }
+        Self::Extension { key, hash: None, store_in_db_trie: None, cached_rlp: None }
     }
 
     /// Create new [`SparseNode::Leaf`] from leaf key and value.
     pub const fn new_leaf(key: Nibbles) -> Self {
-        Self::Leaf { key, hash: None }
+        Self::Leaf { key, hash: None, cached_rlp: None }
     }
 
     /// Returns `true` if the node is a hash node.
@@ -3414,7 +3494,7 @@ mod tests {
         // Check that the root extension node exists
         assert_matches!(
             sparse.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Extension { key, hash: None, store_in_db_trie: None }) if *key == Nibbles::from_nibbles([0x00])
+            Some(SparseNode::Extension { key, hash: None, store_in_db_trie: None, .. }) if *key == Nibbles::from_nibbles([0x00])
         );
 
         // Insert the leaf with a different prefix
@@ -3423,7 +3503,7 @@ mod tests {
         // Check that the extension node was turned into a branch node
         assert_matches!(
             sparse.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
+            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None, .. }) if *state_mask == TrieMask::new(0b11)
         );
 
         // Generate the proof for the first key and reveal it in the sparse trie
@@ -3444,7 +3524,7 @@ mod tests {
         // Check that the branch node wasn't overwritten by the extension node in the proof
         assert_matches!(
             sparse.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
+            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None, .. }) if *state_mask == TrieMask::new(0b11)
         );
     }
 
@@ -3690,35 +3770,35 @@ mod tests {
 
         let normal_printed = format!("{sparse}");
         let expected = "\
-Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
-5 -> Branch { state_mask: TrieMask(0000000000001101), hash: None, store_in_db_trie: None }
-50 -> Extension { key: Nibbles(0x23), hash: None, store_in_db_trie: None }
-5023 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
-50231 -> Leaf { key: Nibbles(0x), hash: None }
-50233 -> Leaf { key: Nibbles(0x), hash: None }
-52013 -> Leaf { key: Nibbles(0x013), hash: None }
-53 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
-53102 -> Leaf { key: Nibbles(0x02), hash: None }
-533 -> Branch { state_mask: TrieMask(0000000000000101), hash: None, store_in_db_trie: None }
-53302 -> Leaf { key: Nibbles(0x2), hash: None }
-53320 -> Leaf { key: Nibbles(0x0), hash: None }
+Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None, cached_rlp: None }
+5 -> Branch { state_mask: TrieMask(0000000000001101), hash: None, store_in_db_trie: None, cached_rlp: None }
+50 -> Extension { key: Nibbles(0x23), hash: None, store_in_db_trie: None, cached_rlp: None }
+5023 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None, cached_rlp: None }
+50231 -> Leaf { key: Nibbles(0x), hash: None, cached_rlp: None }
+50233 -> Leaf { key: Nibbles(0x), hash: None, cached_rlp: None }
+52013 -> Leaf { key: Nibbles(0x013), hash: None, cached_rlp: None }
+53 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None, cached_rlp: None }
+53102 -> Leaf { key: Nibbles(0x02), hash: None, cached_rlp: None }
+533 -> Branch { state_mask: TrieMask(0000000000000101), hash: None, store_in_db_trie: None, cached_rlp: None }
+53302 -> Leaf { key: Nibbles(0x2), hash: None, cached_rlp: None }
+53320 -> Leaf { key: Nibbles(0x0), hash: None, cached_rlp: None }
 ";
         assert_eq!(normal_printed, expected);
 
         let alternate_printed = format!("{sparse:#}");
         let expected = "\
-Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
-    5 -> Branch { state_mask: TrieMask(0000000000001101), hash: None, store_in_db_trie: None }
-        50 -> Extension { key: Nibbles(0x23), hash: None, store_in_db_trie: None }
-            5023 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
-                50231 -> Leaf { key: Nibbles(0x), hash: None }
-                50233 -> Leaf { key: Nibbles(0x), hash: None }
-        52013 -> Leaf { key: Nibbles(0x013), hash: None }
-        53 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
-            53102 -> Leaf { key: Nibbles(0x02), hash: None }
-            533 -> Branch { state_mask: TrieMask(0000000000000101), hash: None, store_in_db_trie: None }
-                53302 -> Leaf { key: Nibbles(0x2), hash: None }
-                53320 -> Leaf { key: Nibbles(0x0), hash: None }
+Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None, cached_rlp: None }
+    5 -> Branch { state_mask: TrieMask(0000000000001101), hash: None, store_in_db_trie: None, cached_rlp: None }
+        50 -> Extension { key: Nibbles(0x23), hash: None, store_in_db_trie: None, cached_rlp: None }
+            5023 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None, cached_rlp: None }
+                50231 -> Leaf { key: Nibbles(0x), hash: None, cached_rlp: None }
+                50233 -> Leaf { key: Nibbles(0x), hash: None, cached_rlp: None }
+        52013 -> Leaf { key: Nibbles(0x013), hash: None, cached_rlp: None }
+        53 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None, cached_rlp: None }
+            53102 -> Leaf { key: Nibbles(0x02), hash: None, cached_rlp: None }
+            533 -> Branch { state_mask: TrieMask(0000000000000101), hash: None, store_in_db_trie: None, cached_rlp: None }
+                53302 -> Leaf { key: Nibbles(0x2), hash: None, cached_rlp: None }
+                53320 -> Leaf { key: Nibbles(0x0), hash: None, cached_rlp: None }
 ";
 
         assert_eq!(alternate_printed, expected);
