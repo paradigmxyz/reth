@@ -3383,6 +3383,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         self.write_hashed_state(&hashed_state)?;
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 
+        // Use pre-computed transitions for history indices since static file
+        // writes aren't visible until commit.
         let storage_settings = self.cached_storage_settings();
         if !storage_settings.account_history_in_rocksdb {
             self.insert_account_history_index(account_transitions)?;
