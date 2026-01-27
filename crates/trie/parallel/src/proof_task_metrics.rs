@@ -1,4 +1,4 @@
-use crate::value_encoder::ValueEncoderMetrics;
+use crate::value_encoder::ValueEncoderStats;
 use reth_metrics::{metrics::Histogram, Metrics};
 use reth_trie::{
     hashed_cursor::{HashedCursorMetrics, HashedCursorMetricsCache},
@@ -49,11 +49,11 @@ impl ProofTaskTrieMetrics {
         self.account_worker_idle_time_seconds.record(duration.as_secs_f64());
     }
 
-    /// Record account proof calculator metrics (from value encoder).
-    pub(crate) fn record_account_proof_calculator_metrics(&self, metrics: &ValueEncoderMetrics) {
-        self.deferred_encoder_dispatched.record(metrics.dispatched_count as f64);
-        self.deferred_encoder_from_cache.record(metrics.from_cache_count as f64);
-        self.deferred_encoder_sync.record(metrics.sync_count as f64);
+    /// Record value encoder stats (deferred encoder variant counts).
+    pub(crate) fn record_value_encoder_stats(&self, stats: &ValueEncoderStats) {
+        self.deferred_encoder_dispatched.record(stats.dispatched_count as f64);
+        self.deferred_encoder_from_cache.record(stats.from_cache_count as f64);
+        self.deferred_encoder_sync.record(stats.sync_count as f64);
     }
 }
 
