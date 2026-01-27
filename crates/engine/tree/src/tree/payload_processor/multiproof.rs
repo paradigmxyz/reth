@@ -65,6 +65,13 @@ const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
 const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
+/// Default queue depth threshold for switching to batching mode.
+/// When pending tasks exceed this, incoming updates are batched instead of queued individually.
+const DEFAULT_BATCHING_QUEUE_THRESHOLD: usize = 4;
+
+/// Default maximum number of state updates to batch before forcing a dispatch.
+const DEFAULT_MAX_BATCH_SIZE: usize = 10;
+
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
 #[derive(Debug)]
@@ -718,6 +725,16 @@ pub(super) struct MultiProofTask {
     /// Whether or not V2 proof calculation is enabled. If enabled then [`MultiProofTargetsV2`]
     /// will be produced by state updates.
     v2_proofs_enabled: bool,
+    /// Batched state updates accumulated when workers are saturated.
+    pending_batch: HashedPostState,
+    /// Number of state updates accumulated in the pending batch.
+    pending_batch_count: usize,
+    /// Source of the last state update added to the pending batch.
+    pending_batch_source: Option<Source>,
+    /// Queue depth threshold for switching to batching mode.
+    batching_queue_threshold: usize,
+    /// Maximum number of state updates to batch before forcing a dispatch.
+    max_batch_size: usize,
 }
 
 impl MultiProofTask {
@@ -750,7 +767,26 @@ impl MultiProofTask {
             metrics,
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             v2_proofs_enabled: false,
+            pending_batch: HashedPostState::default(),
+            pending_batch_count: 0,
+            pending_batch_source: None,
+            batching_queue_threshold: DEFAULT_BATCHING_QUEUE_THRESHOLD,
+            max_batch_size: DEFAULT_MAX_BATCH_SIZE,
         }
+    }
+
+    /// Sets the queue depth threshold for switching to batching mode.
+    #[allow(dead_code)]
+    pub(super) const fn with_batching_queue_threshold(mut self, threshold: usize) -> Self {
+        self.batching_queue_threshold = threshold;
+        self
+    }
+
+    /// Sets the maximum batch size before forcing a dispatch.
+    #[allow(dead_code)]
+    pub(super) const fn with_max_batch_size(mut self, max_size: usize) -> Self {
+        self.max_batch_size = max_size;
+        self
     }
 
     /// Enables V2 proof target generation on state updates.
@@ -864,6 +900,11 @@ impl MultiProofTask {
 
     /// Processes a hashed state update and dispatches multiproofs as needed.
     ///
+    /// Uses a hybrid batching strategy:
+    /// - When workers are available (queue below threshold), dispatch immediately for overlap
+    /// - When workers are saturated (queue above threshold), batch updates together
+    /// - Batched updates are dispatched when batch is full or at end-of-block
+    ///
     /// Returns the number of state updates dispatched (both `EmptyProof` and regular multiproofs).
     fn on_hashed_state_update(
         &mut self,
@@ -887,6 +928,45 @@ impl MultiProofTask {
                 state: fetched_state_update,
             });
             state_updates += 1;
+        }
+
+        // Check if we should batch or dispatch immediately
+        let pending_tasks = self.multiproof_manager.proof_worker_handle.pending_account_tasks();
+        let should_batch = pending_tasks >= self.batching_queue_threshold;
+
+        if should_batch {
+            // Workers saturated - accumulate into pending batch
+            self.pending_batch.extend(not_fetched_state_update);
+            self.pending_batch_count += 1;
+            self.pending_batch_source = Some(source);
+
+            trace!(
+                target: "engine::tree::payload_processor::multiproof",
+                pending_tasks,
+                pending_batch_count = self.pending_batch_count,
+                pending_batch_accounts = self.pending_batch.accounts.len(),
+                "Batching state update due to saturated workers"
+            );
+
+            // Check if batch is full and should be dispatched
+            if self.pending_batch_count >= self.max_batch_size {
+                state_updates += self.flush_pending_batch();
+            }
+
+            return state_updates;
+        }
+
+        // Workers available - dispatch immediately for execution overlap
+        state_updates += self.dispatch_state_update(source, not_fetched_state_update);
+        state_updates
+    }
+
+    /// Dispatches a state update (or batch) to workers.
+    ///
+    /// This contains the core dispatch logic extracted from the original `on_hashed_state_update`.
+    fn dispatch_state_update(&mut self, source: Source, not_fetched_state_update: HashedPostState) -> u64 {
+        if not_fetched_state_update.is_empty() {
+            return 0;
         }
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
@@ -962,7 +1042,31 @@ impl MultiProofTask {
 
         self.fetched_proof_targets.extend(spawned_proof_targets);
 
-        state_updates + num_chunks as u64
+        num_chunks as u64
+    }
+
+    /// Flushes the pending batch, chunking it optimally across available workers.
+    fn flush_pending_batch(&mut self) -> u64 {
+        if self.pending_batch.is_empty() {
+            return 0;
+        }
+
+        let batch = std::mem::take(&mut self.pending_batch);
+        let batch_count = self.pending_batch_count;
+        let source = self.pending_batch_source.take().unwrap_or(Source::Evm(
+            alloy_evm::block::StateChangeSource::Transaction(0),
+        ));
+        self.pending_batch_count = 0;
+
+        trace!(
+            target: "engine::tree::payload_processor::multiproof",
+            batch_count,
+            batch_accounts = batch.accounts.len(),
+            batch_storages = batch.storages.len(),
+            "Flushing pending batch"
+        );
+
+        self.dispatch_state_update(source, batch)
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -1156,6 +1260,18 @@ impl MultiProofTask {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
 
                 ctx.updates_finished_time = Some(Instant::now());
+
+                // Flush any remaining batched state updates at end-of-block
+                if !self.pending_batch.is_empty() {
+                    debug!(
+                        target: "engine::tree::payload_processor::multiproof",
+                        pending_batch_count = self.pending_batch_count,
+                        pending_batch_accounts = self.pending_batch.accounts.len(),
+                        "Flushing remaining batch at end of block"
+                    );
+                    let dispatched = self.flush_pending_batch();
+                    batch_metrics.state_update_proofs_requested += dispatched;
+                }
 
                 if self.is_done(batch_metrics, ctx) {
                     debug!(
