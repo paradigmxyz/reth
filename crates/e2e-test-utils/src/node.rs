@@ -118,16 +118,6 @@ where
         Ok(self.payload.expect_built_payload().await?)
     }
 
-    /// Creates a new payload, accepting empty blocks without transactions.
-    ///
-    /// Use this for tests that intentionally mine empty blocks.
-    pub async fn new_payload_or_empty(&mut self) -> eyre::Result<Payload::BuiltPayload> {
-        let eth_attr = self.payload.new_payload().await.unwrap();
-        self.payload.expect_attr_event(eth_attr.clone()).await?;
-        self.payload.wait_for_built_payload_or_empty(eth_attr.payload_id()).await;
-        Ok(self.payload.expect_built_payload().await?)
-    }
-
     /// Triggers payload building job and submits it to the engine.
     pub async fn build_and_submit_payload(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let payload = self.new_payload().await?;
@@ -135,27 +125,9 @@ where
         Ok(payload)
     }
 
-    /// Triggers payload building job (accepting empty blocks) and submits it to the engine.
-    pub async fn build_and_submit_payload_or_empty(
-        &mut self,
-    ) -> eyre::Result<Payload::BuiltPayload> {
-        let payload = self.new_payload_or_empty().await?;
-        self.submit_payload(payload.clone()).await?;
-        Ok(payload)
-    }
-
     /// Advances the node forward one block (requires at least one transaction).
     pub async fn advance_block(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let payload = self.build_and_submit_payload().await?;
-        self.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
-        Ok(payload)
-    }
-
-    /// Advances the node forward one block, accepting empty blocks.
-    ///
-    /// Use this for tests that intentionally mine empty blocks without transactions.
-    pub async fn advance_empty_block(&mut self) -> eyre::Result<Payload::BuiltPayload> {
-        let payload = self.build_and_submit_payload_or_empty().await?;
         self.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
         Ok(payload)
     }

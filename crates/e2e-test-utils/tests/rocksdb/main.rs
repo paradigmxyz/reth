@@ -88,6 +88,7 @@ async fn test_rocksdb_block_mining() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let chain_spec = test_chain_spec();
+    let chain_id = chain_spec.chain().id();
 
     let (mut nodes, _tasks, _wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
@@ -100,9 +101,17 @@ async fn test_rocksdb_block_mining() -> Result<()> {
     let genesis_hash = nodes[0].block_hash(0);
     assert_ne!(genesis_hash, B256::ZERO);
 
-    // Mine 3 empty blocks
-    for i in 1..=3 {
-        let payload = nodes[0].advance_empty_block().await?;
+    // Mine 3 blocks with transactions
+    let wallets = wallet::Wallet::new(1).with_chain_id(chain_id).wallet_gen();
+    let signer = wallets[0].clone();
+
+    for i in 1..=3u64 {
+        let raw_tx =
+            TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), i - 1)
+                .await;
+        nodes[0].rpc.inject_tx(raw_tx).await?;
+
+        let payload = nodes[0].advance_block().await?;
         let block = payload.block();
         assert_eq!(block.number(), i);
         assert_ne!(block.hash(), B256::ZERO);
