@@ -1,6 +1,6 @@
 //! Traits and default implementations related to retrieval of blinded trie nodes.
 
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{map::HashMap, Bytes, B256};
 use reth_execution_errors::SparseTrieError;
 use reth_trie_common::{Nibbles, TrieMask};
 
@@ -35,6 +35,21 @@ pub struct RevealedNode {
 pub trait TrieNodeProvider {
     /// Retrieve trie node by path.
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError>;
+
+    /// Batch retrieve trie nodes by paths. Default: sequential fallback.
+    fn trie_nodes_batch(
+        &self,
+        paths: &[Nibbles],
+    ) -> Result<HashMap<Nibbles, RevealedNode>, SparseTrieError> {
+        let mut result = HashMap::default();
+        result.reserve(paths.len());
+        for path in paths {
+            if let Some(node) = self.trie_node(path)? {
+                result.insert(path.clone(), node);
+            }
+        }
+        Ok(result)
+    }
 }
 
 /// Default trie node provider factory that creates [`DefaultTrieNodeProviderFactory`].
