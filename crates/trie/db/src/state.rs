@@ -1,7 +1,7 @@
 use crate::{
     load_prefix_sets_with_provider, DatabaseHashedCursorFactory, DatabaseTrieCursorFactory,
 };
-use alloy_primitives::{map::B256Map, BlockNumber, B256};
+use alloy_primitives::{map::B256Map, BlockNumber, B256, U256};
 use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress},
     transaction::DbTx,
@@ -298,7 +298,8 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
             .into_iter()
             .map(|(address, mut slots)| {
                 slots.sort_unstable_by_key(|(slot, _)| *slot);
-                (address, HashedStorageSorted { storage_slots: slots, wiped: false })
+                let has_non_zero = slots.iter().any(|(_, v)| *v != U256::ZERO);
+                (address, HashedStorageSorted { storage_slots: slots, wiped: false, has_non_zero })
             })
             .collect();
 
