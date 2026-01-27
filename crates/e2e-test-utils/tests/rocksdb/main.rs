@@ -98,10 +98,12 @@ fn test_attributes_generator(timestamp: u64) -> EthPayloadBuilderAttributes {
 }
 
 /// Enables `RocksDB` for `TransactionHashNumbers` table.
-/// Disables changesets in static files to avoid conflicts with persistence threshold 0.
+///
+/// Note: Static file changesets are disabled because `persistence_threshold(0)` causes
+/// a race where the static file writer expects sequential block numbers but receives
+/// them out of order, resulting in `UnexpectedStaticFileBlockNumber` errors.
 fn with_rocksdb_enabled<C>(mut config: NodeConfig<C>) -> NodeConfig<C> {
     config.rocksdb = RocksDbArgs { tx_hash: true, ..Default::default() };
-    // Disable storage changesets in static files to avoid persistence conflicts
     config.static_files.storage_changesets = false;
     config.static_files.account_changesets = false;
     config
