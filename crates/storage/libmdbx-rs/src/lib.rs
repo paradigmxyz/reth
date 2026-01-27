@@ -22,7 +22,8 @@ pub use crate::{
     error::{Error, Result},
     flags::*,
     transaction::{CommitLatency, Transaction, TransactionKind, TransactionPtr, RO, RW},
-    tx_access::TxPtrAccess,
+    tx_access::{RoUnsync, RwUnsync, TxPtrAccess},
+    tx_unsync::TxUnsync,
 };
 
 #[cfg(feature = "read-tx-timeouts")]
@@ -36,6 +37,7 @@ mod error;
 mod flags;
 mod transaction;
 mod tx_access;
+mod tx_unsync;
 mod txn_manager;
 
 #[cfg(test)]

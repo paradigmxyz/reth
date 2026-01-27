@@ -3,6 +3,7 @@ use crate::{
     error::{mdbx_result, Error, Result},
     flags::EnvironmentFlags,
     transaction::{RO, RW},
+    tx_unsync::TxUnsync,
     txn_manager::{TxnManager, TxnManagerMessage, TxnPtr},
     Mode, SyncMode, Transaction, TransactionKind,
 };
@@ -124,6 +125,35 @@ impl Environment {
             break res
         }?;
         Ok(Transaction::new_from_ptr(self.clone(), txn.0))
+    }
+
+    /// Create an unsynchronized read-only transaction.
+    ///
+    /// This is faster than [`begin_ro_txn`](Self::begin_ro_txn) for single-threaded
+    /// workloads because it avoids mutex overhead on every operation.
+    ///
+    /// The returned transaction is `Send` but `!Sync` - it can be moved between
+    /// threads but not shared concurrently.
+    #[inline]
+    pub fn begin_ro_unsync(&self) -> Result<TxUnsync<RO>> {
+        TxUnsync::<RO>::new(self.clone())
+    }
+
+    /// Create an unsynchronized read-write transaction.
+    ///
+    /// This is significantly faster than [`begin_rw_txn`](Self::begin_rw_txn) for
+    /// single-threaded workloads (up to 3-4x for writes) because it avoids mutex
+    /// overhead on every operation.
+    ///
+    /// The returned transaction is `!Send` and `!Sync` - it must stay on the
+    /// creating thread.
+    ///
+    /// **Note**: Unlike `begin_rw_txn`, this does not go through the transaction
+    /// manager and will not block waiting for other RW transactions. The caller
+    /// must ensure only one RW transaction is active at a time.
+    #[inline]
+    pub fn begin_rw_unsync(&self) -> Result<TxUnsync<RW>> {
+        TxUnsync::<RW>::new(self.clone())
     }
 
     /// Returns a raw pointer to the underlying MDBX environment.

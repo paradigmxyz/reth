@@ -37,6 +37,10 @@ pub trait TransactionKind: private::Sealed + Send + Sync + Debug + 'static {
     /// Convenience flag for distinguishing between read-only and read-write transactions.
     #[doc(hidden)]
     const IS_READ_ONLY: bool;
+
+    /// The unsynchronized inner type for this transaction kind.
+    #[doc(hidden)]
+    type UnsyncInner: crate::tx_access::TxPtrAccess;
 }
 
 #[derive(Debug)]
@@ -50,10 +54,12 @@ pub struct RW;
 impl TransactionKind for RO {
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_RDONLY;
     const IS_READ_ONLY: bool = true;
+    type UnsyncInner = crate::tx_access::RoUnsync;
 }
 impl TransactionKind for RW {
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_READWRITE;
     const IS_READ_ONLY: bool = false;
+    type UnsyncInner = crate::tx_access::RwUnsync;
 }
 
 /// An MDBX transaction.
