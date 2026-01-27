@@ -11,7 +11,6 @@ use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_db::tables;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet, E2ETestSetupBuilder};
 use reth_node_builder::NodeConfig;
-use reth_node_core::args::RocksDbArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_provider::RocksDBProviderFactory;
@@ -97,13 +96,15 @@ fn test_attributes_generator(timestamp: u64) -> EthPayloadBuilderAttributes {
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
 
-/// Enables `RocksDB` for `TransactionHashNumbers` table.
+/// Disables static file changesets for test stability.
 ///
 /// Note: Static file changesets are disabled because `persistence_threshold(0)` causes
 /// a race where the static file writer expects sequential block numbers but receives
 /// them out of order, resulting in `UnexpectedStaticFileBlockNumber` errors.
-fn with_rocksdb_enabled<C>(mut config: NodeConfig<C>) -> NodeConfig<C> {
-    config.rocksdb = RocksDbArgs { tx_hash: true, ..Default::default() };
+///
+/// RocksDB routing is automatically enabled by default when the `edge` feature is set
+/// (see `default_rocksdb_flag()` in `reth-node-core`), so no explicit configuration is needed.
+fn without_static_file_changesets<C>(mut config: NodeConfig<C>) -> NodeConfig<C> {
     config.static_files.storage_changesets = false;
     config.static_files.account_changesets = false;
     config
@@ -118,7 +119,7 @@ async fn test_rocksdb_node_startup() -> Result<()> {
 
     let (nodes, _tasks, _wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
-            .with_node_config_modifier(with_rocksdb_enabled)
+            .with_node_config_modifier(without_static_file_changesets)
             .build()
             .await?;
 
@@ -146,7 +147,7 @@ async fn test_rocksdb_block_mining() -> Result<()> {
 
     let (mut nodes, _tasks, _wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
-            .with_node_config_modifier(with_rocksdb_enabled)
+            .with_node_config_modifier(without_static_file_changesets)
             .build()
             .await?;
 
@@ -203,7 +204,7 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
-    .with_node_config_modifier(with_rocksdb_enabled)
+    .with_node_config_modifier(without_static_file_changesets)
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -270,7 +271,7 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
-    .with_node_config_modifier(with_rocksdb_enabled)
+    .with_node_config_modifier(without_static_file_changesets)
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -338,7 +339,7 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
-    .with_node_config_modifier(with_rocksdb_enabled)
+    .with_node_config_modifier(without_static_file_changesets)
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -423,7 +424,7 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
-    .with_node_config_modifier(with_rocksdb_enabled)
+    .with_node_config_modifier(without_static_file_changesets)
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
