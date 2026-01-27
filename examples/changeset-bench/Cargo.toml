@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 reth-ethereum = { workspace = true, features = ["node"] }
 reth-db-api.workspace = true
+reth-provider.workspace = true
 alloy-primitives.workspace = true
 rand = "0.8"
 clap = { workspace = true, features = ["derive"] }

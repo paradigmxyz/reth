@@ -3594,6 +3594,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-db-api",
  "reth-ethereum",
+ "reth-provider",
  "serde",
  "serde_json",
 ]

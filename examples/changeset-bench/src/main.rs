@@ -3,8 +3,10 @@
 //! This tool:
 //! 1. Opens the first datadir to collect sample addresses/blocks with actual changesets
 //! 2. Closes the database
-//! 3. Clears OS page cache before each query (requires sudo)
-//! 4. Runs benchmarks against both datadirs measuring true cold read performance
+//! 3. Runs benchmarks against both datadirs
+//!
+//! By default (warm mode): clears OS cache once before each backend run
+//! With --cold flag: clears OS cache AND reopens database before EACH query
 
 use alloy_primitives::{Address, BlockNumber, B256};
 use clap::Parser;
@@ -19,9 +21,10 @@ use reth_ethereum::{
         StorageChangeSetReader,
     },
 };
+use reth_provider::providers::{HistoricalStateProviderRef, HistoryInfo};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     fs::File,
     io::{BufReader, BufWriter, Write},
     path::PathBuf,
@@ -42,20 +45,17 @@ struct Args {
     edge: PathBuf,
 
     /// Number of queries to run per method
-    #[arg(long, default_value = "200")]
+    #[arg(long, default_value = "2000")]
     queries: usize,
 
     /// Number of addresses/storage slots to sample
     #[arg(long, default_value = "50")]
     samples: usize,
 
-    /// Percentage of queries targeting oldest blocks (worst case)
-    #[arg(long, default_value = "70")]
-    oldest_pct: u8,
-
-    /// Skip cache clearing (for testing without sudo)
+    /// Cold cache mode: clear OS cache AND reopen database before EACH query
+    /// Without this flag (warm mode): clear OS cache once before each backend run
     #[arg(long)]
-    skip_cache_clear: bool,
+    cold: bool,
 
     /// Path to save/load sampled data (skip sampling if exists)
     #[arg(long)]
@@ -63,11 +63,26 @@ struct Args {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct AccountSample {
+    address: Address,
+    first_change: BlockNumber,
+    last_change: BlockNumber,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StorageSample {
+    address: Address,
+    key: B256,
+    first_change: BlockNumber,
+    last_change: BlockNumber,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SampledData {
-    /// Addresses with account changesets
-    accounts: Vec<(Address, BlockNumber)>,
-    /// (Address, StorageKey, BlockNumber) tuples with storage changesets
-    storage: Vec<(Address, B256, BlockNumber)>,
+    /// Addresses with account changesets (first and last change blocks)
+    accounts: Vec<AccountSample>,
+    /// Storage slots with changesets (first and last change blocks)
+    storage: Vec<StorageSample>,
     /// Block range
     oldest_block: BlockNumber,
     latest_block: BlockNumber,
@@ -91,6 +106,58 @@ enum QueryType {
 #[derive(Debug, Default)]
 struct BenchmarkResults {
     timings: Vec<Duration>,
+}
+
+#[derive(Debug, Default)]
+struct HistoryStats {
+    in_changeset: usize,
+    in_plain_state: usize,
+    not_yet_written: usize,
+    maybe_in_plain_state: usize,
+}
+
+impl HistoryStats {
+    fn record(&mut self, info: &HistoryInfo) {
+        match info {
+            HistoryInfo::InChangeset(_) => self.in_changeset += 1,
+            HistoryInfo::InPlainState => self.in_plain_state += 1,
+            HistoryInfo::NotYetWritten => self.not_yet_written += 1,
+            HistoryInfo::MaybeInPlainState => self.maybe_in_plain_state += 1,
+        }
+    }
+
+    fn total(&self) -> usize {
+        self.in_changeset + self.in_plain_state + self.not_yet_written + self.maybe_in_plain_state
+    }
+
+    fn print(&self, label: &str) {
+        let total = self.total();
+        if total == 0 {
+            println!("  {}: no queries", label);
+            return;
+        }
+        println!("  {} History Distribution ({} queries):", label, total);
+        println!(
+            "    InChangeset:       {:>5} ({:>5.1}%)",
+            self.in_changeset,
+            self.in_changeset as f64 / total as f64 * 100.0
+        );
+        println!(
+            "    InPlainState:      {:>5} ({:>5.1}%)",
+            self.in_plain_state,
+            self.in_plain_state as f64 / total as f64 * 100.0
+        );
+        println!(
+            "    NotYetWritten:     {:>5} ({:>5.1}%)",
+            self.not_yet_written,
+            self.not_yet_written as f64 / total as f64 * 100.0
+        );
+        println!(
+            "    MaybeInPlainState: {:>5} ({:>5.1}%)",
+            self.maybe_in_plain_state,
+            self.maybe_in_plain_state as f64 / total as f64 * 100.0
+        );
+    }
 }
 
 impl BenchmarkResults {
@@ -154,24 +221,23 @@ fn main() -> Result<()> {
 
     let queries = generate_queries(&args, &sampled);
     println!("\nGenerated {} queries per method", queries.balance.len());
-    println!("  ~{}% targeting oldest 10% of blocks (worst case)", args.oldest_pct);
+    println!("  Query strategy: ~33% before first change, ~33% mid-range, ~33% at last change");
 
     println!("\n=== Running Benchmarks ===");
-
-    if !args.skip_cache_clear {
-        clear_os_cache()?;
+    if args.cold {
+        println!("Mode: COLD (clearing OS cache + reopening DB before each query)");
+    } else {
+        println!("Mode: WARM (clearing OS cache once before each backend run)");
     }
 
-    let clear_per_query = !args.skip_cache_clear;
+    let (normal_balance, _) = run_benchmark(&args.normal, &queries.balance, "MDBX", args.cold)?;
+    let (edge_balance, _) = run_benchmark(&args.edge, &queries.balance, "RocksDB/SF", args.cold)?;
 
-    let normal_balance = run_benchmark(&args.normal, &queries.balance, "MDBX", clear_per_query)?;
-    let edge_balance = run_benchmark(&args.edge, &queries.balance, "RocksDB/SF", clear_per_query)?;
+    let (normal_nonce, _) = run_benchmark(&args.normal, &queries.nonce, "MDBX", args.cold)?;
+    let (edge_nonce, _) = run_benchmark(&args.edge, &queries.nonce, "RocksDB/SF", args.cold)?;
 
-    let normal_nonce = run_benchmark(&args.normal, &queries.nonce, "MDBX", clear_per_query)?;
-    let edge_nonce = run_benchmark(&args.edge, &queries.nonce, "RocksDB/SF", clear_per_query)?;
-
-    let normal_storage = run_benchmark(&args.normal, &queries.storage, "MDBX", clear_per_query)?;
-    let edge_storage = run_benchmark(&args.edge, &queries.storage, "RocksDB/SF", clear_per_query)?;
+    let (normal_storage, _) = run_benchmark(&args.normal, &queries.storage, "MDBX", args.cold)?;
+    let (edge_storage, _) = run_benchmark(&args.edge, &queries.storage, "RocksDB/SF", args.cold)?;
 
     println!("\n=== Results ===");
     print_comparison("eth_getBalance", &normal_balance, &edge_balance);
@@ -200,40 +266,46 @@ fn sample_changesets(args: &Args) -> Result<SampledData> {
         latest_block - oldest_block + 1
     );
 
-    let mut accounts: Vec<(Address, BlockNumber)> = Vec::new();
-    let mut storage: Vec<(Address, B256, BlockNumber)> = Vec::new();
-    let mut seen_addresses: HashSet<Address> = HashSet::new();
-    let mut seen_storage: HashSet<(Address, B256)> = HashSet::new();
+    let mut accounts: Vec<AccountSample> = Vec::new();
+    let mut storage: Vec<StorageSample> = Vec::new();
 
     println!("Scanning AccountChangeSets across full range...");
     {
         let mut cursor = provider.tx_ref().cursor_read::<tables::AccountChangeSets>()?;
         let mut walker = cursor.walk_range(oldest_block..=latest_block)?;
 
-        let mut all_entries: Vec<(Address, BlockNumber)> = Vec::new();
+        let mut account_ranges: HashMap<Address, (BlockNumber, BlockNumber)> = HashMap::new();
         let mut count = 0;
         while let Some(Ok((block, entry))) = walker.next() {
-            if !seen_addresses.contains(&entry.address) {
-                seen_addresses.insert(entry.address);
-                all_entries.push((entry.address, block));
-            }
+            account_ranges
+                .entry(entry.address)
+                .and_modify(|(first, last)| {
+                    *first = (*first).min(block);
+                    *last = (*last).max(block);
+                })
+                .or_insert((block, block));
             count += 1;
             if count % 500000 == 0 {
                 print!(
                     "\r  Scanned {} entries, found {} unique addresses",
                     count,
-                    all_entries.len()
+                    account_ranges.len()
                 );
                 std::io::stdout().flush()?;
             }
         }
-        println!(
-            "\r  Scanned {} entries, found {} unique addresses",
-            count,
-            all_entries.len()
-        );
+        println!("\r  Scanned {} entries, found {} unique addresses", count, account_ranges.len());
 
-        // Sample evenly across the collected entries
+        let mut all_entries: Vec<AccountSample> = account_ranges
+            .into_iter()
+            .map(|(address, (first_change, last_change))| AccountSample {
+                address,
+                first_change,
+                last_change,
+            })
+            .collect();
+        all_entries.sort_by_key(|s| s.first_change);
+
         if all_entries.len() <= args.samples {
             accounts = all_entries;
         } else {
@@ -247,23 +319,27 @@ fn sample_changesets(args: &Args) -> Result<SampledData> {
 
     println!("Scanning StorageChangeSets across full range...");
     {
-        let mut all_storage: Vec<(Address, B256, BlockNumber)> = Vec::new();
+        let mut storage_ranges: HashMap<(Address, B256), (BlockNumber, BlockNumber)> =
+            HashMap::new();
 
         for block in oldest_block..=latest_block {
             if let Ok(changesets) = provider.storage_changeset(block) {
                 for (bna, entry) in changesets {
                     let key = (bna.address(), entry.key);
-                    if !seen_storage.contains(&key) {
-                        seen_storage.insert(key);
-                        all_storage.push((bna.address(), entry.key, bna.block_number()));
-                    }
+                    storage_ranges
+                        .entry(key)
+                        .and_modify(|(first, last)| {
+                            *first = (*first).min(block);
+                            *last = (*last).max(block);
+                        })
+                        .or_insert((block, block));
                 }
             }
             if (block - oldest_block) % 1000 == 0 {
                 print!(
                     "\r  Scanned {} blocks, found {} unique slots",
                     block - oldest_block,
-                    all_storage.len()
+                    storage_ranges.len()
                 );
                 std::io::stdout().flush()?;
             }
@@ -271,10 +347,20 @@ fn sample_changesets(args: &Args) -> Result<SampledData> {
         println!(
             "\r  Scanned {} blocks, found {} unique slots",
             latest_block - oldest_block + 1,
-            all_storage.len()
+            storage_ranges.len()
         );
 
-        // Sample evenly across the collected entries
+        let mut all_storage: Vec<StorageSample> = storage_ranges
+            .into_iter()
+            .map(|((address, key), (first_change, last_change))| StorageSample {
+                address,
+                key,
+                first_change,
+                last_change,
+            })
+            .collect();
+        all_storage.sort_by_key(|s| s.first_change);
+
         if all_storage.len() <= args.samples {
             storage = all_storage;
         } else {
@@ -303,45 +389,58 @@ struct GeneratedQueries {
 fn generate_queries(args: &Args, sampled: &SampledData) -> GeneratedQueries {
     let mut rng = rand::thread_rng();
 
-    let history_depth = sampled.latest_block - sampled.oldest_block;
-    let oldest_10pct = sampled.oldest_block + history_depth / 10;
-
-    let gen_block = |rng: &mut rand::rngs::ThreadRng| -> BlockNumber {
-        if rng.gen_range(0..100) < args.oldest_pct {
-            rng.gen_range(sampled.oldest_block..=oldest_10pct)
-        } else {
-            rng.gen_range(sampled.oldest_block..=sampled.latest_block)
-        }
-    };
-
     let mut balance = Vec::with_capacity(args.queries);
     let mut nonce = Vec::with_capacity(args.queries);
     let mut storage = Vec::with_capacity(args.queries);
 
     for _ in 0..args.queries {
-        if let Some((address, _)) = sampled.accounts.choose(&mut rng) {
+        if let Some(sample) = sampled.accounts.choose(&mut rng) {
+            let query_variant = rng.gen_range(0..3);
+            let block = match query_variant {
+                0 => {
+                    if sample.first_change > sampled.oldest_block {
+                        sample.first_change - 1
+                    } else {
+                        sample.first_change
+                    }
+                }
+                1 => (sample.first_change + sample.last_change) / 2,
+                _ => sample.last_change,
+            };
             balance.push(BenchmarkQuery {
                 query_type: QueryType::Balance,
-                address: *address,
+                address: sample.address,
                 storage_key: None,
-                block: gen_block(&mut rng),
+                block,
             });
             nonce.push(BenchmarkQuery {
                 query_type: QueryType::Nonce,
-                address: *address,
+                address: sample.address,
                 storage_key: None,
-                block: gen_block(&mut rng),
+                block,
             });
         }
     }
 
     for _ in 0..args.queries {
-        if let Some((address, key, _)) = sampled.storage.choose(&mut rng) {
+        if let Some(sample) = sampled.storage.choose(&mut rng) {
+            let query_variant = rng.gen_range(0..3);
+            let block = match query_variant {
+                0 => {
+                    if sample.first_change > sampled.oldest_block {
+                        sample.first_change - 1
+                    } else {
+                        sample.first_change
+                    }
+                }
+                1 => (sample.first_change + sample.last_change) / 2,
+                _ => sample.last_change,
+            };
             storage.push(BenchmarkQuery {
                 query_type: QueryType::Storage,
-                address: *address,
-                storage_key: Some(*key),
-                block: gen_block(&mut rng),
+                address: sample.address,
+                storage_key: Some(sample.key),
+                block,
             });
         }
     }
@@ -374,8 +473,8 @@ fn run_benchmark(
     datadir: &PathBuf,
     queries: &[BenchmarkQuery],
     backend_name: &str,
-    clear_cache_per_query: bool,
-) -> Result<BenchmarkResults> {
+    cold_mode: bool,
+) -> Result<(BenchmarkResults, HistoryStats)> {
     let method_name = queries
         .first()
         .map(|q| match q.query_type {
@@ -386,48 +485,118 @@ fn run_benchmark(
         .unwrap_or("unknown");
 
     println!(
-        "\nRunning {} on {} ({} queries, cache_clear_per_query={})...",
+        "\nRunning {} on {} ({} queries, cold={})...",
         method_name,
         backend_name,
         queries.len(),
-        clear_cache_per_query
+        cold_mode
     );
 
     let spec = ChainSpecBuilder::mainnet().build();
-    let factory = EthereumNode::provider_factory_builder()
-        .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
+
+    if !cold_mode {
+        clear_os_cache()?;
+    }
 
     let mut results = BenchmarkResults::new();
+    let mut history_stats = HistoryStats::default();
+    let benchmark_start = Instant::now();
 
-    for (i, query) in queries.iter().enumerate() {
-        if clear_cache_per_query {
+    if cold_mode {
+        for (i, query) in queries.iter().enumerate() {
             clear_os_cache_silent()?;
-        }
 
-        let start = Instant::now();
+            let start = Instant::now();
 
-        let state = factory.history_by_block_number(query.block)?;
+            let factory = EthereumNode::provider_factory_builder()
+                .open_read_only(spec.clone().into(), ReadOnlyConfig::from_datadir(datadir))?;
 
-        match query.query_type {
-            QueryType::Balance | QueryType::Nonce => {
-                let _account = state.basic_account(&query.address)?;
+            let db_provider = factory.provider()?;
+            let historical_provider =
+                HistoricalStateProviderRef::new(&db_provider, query.block + 1);
+
+            match query.query_type {
+                QueryType::Balance | QueryType::Nonce => {
+                    let history_info = historical_provider.account_history_lookup(query.address)?;
+                    history_stats.record(&history_info);
+                    let _account = historical_provider.basic_account(&query.address)?;
+                }
+                QueryType::Storage => {
+                    let key = query.storage_key.unwrap_or(B256::ZERO);
+                    let history_info =
+                        historical_provider.storage_history_lookup(query.address, key)?;
+                    history_stats.record(&history_info);
+                    let _value = historical_provider.storage(query.address, key)?;
+                }
             }
-            QueryType::Storage => {
-                let key = query.storage_key.unwrap_or(B256::ZERO);
-                let _value = state.storage(query.address, key)?;
-            }
+
+            results.add(start.elapsed());
+            drop(db_provider);
+            drop(factory);
+
+            print_progress(i, queries.len(), &results, benchmark_start)?;
         }
+    } else {
+        let factory = EthereumNode::provider_factory_builder()
+            .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
 
-        results.add(start.elapsed());
+        for (i, query) in queries.iter().enumerate() {
+            let start = Instant::now();
 
-        if (i + 1) % 10 == 0 || i + 1 == queries.len() {
-            print!("\r  Progress: {}/{}", i + 1, queries.len());
-            std::io::stdout().flush()?;
+            let db_provider = factory.provider()?;
+            let historical_provider =
+                HistoricalStateProviderRef::new(&db_provider, query.block + 1);
+
+            match query.query_type {
+                QueryType::Balance | QueryType::Nonce => {
+                    let history_info = historical_provider.account_history_lookup(query.address)?;
+                    history_stats.record(&history_info);
+                    let _account = historical_provider.basic_account(&query.address)?;
+                }
+                QueryType::Storage => {
+                    let key = query.storage_key.unwrap_or(B256::ZERO);
+                    let history_info =
+                        historical_provider.storage_history_lookup(query.address, key)?;
+                    history_stats.record(&history_info);
+                    let _value = historical_provider.storage(query.address, key)?;
+                }
+            }
+
+            results.add(start.elapsed());
+
+            print_progress(i, queries.len(), &results, benchmark_start)?;
         }
     }
-    println!("\r  Completed {} queries", queries.len());
+    println!();
 
-    Ok(results)
+    history_stats.print(backend_name);
+
+    Ok((results, history_stats))
+}
+
+fn print_progress(
+    i: usize,
+    total: usize,
+    results: &BenchmarkResults,
+    benchmark_start: Instant,
+) -> Result<()> {
+    if (i + 1) % 10 == 0 || i + 1 == total {
+        let completed = i + 1;
+        let remaining = total - completed;
+        let elapsed = benchmark_start.elapsed();
+        let avg_per_query = elapsed / completed as u32;
+        let eta = avg_per_query * remaining as u32;
+
+        print!(
+            "\r  Progress: {}/{} | Avg: {:.1?} | ETA: {:.1?}    ",
+            completed,
+            total,
+            results.mean(),
+            eta
+        );
+        std::io::stdout().flush()?;
+    }
+    Ok(())
 }
 
 fn print_comparison(method: &str, mdbx: &BenchmarkResults, rocksdb: &BenchmarkResults) {
