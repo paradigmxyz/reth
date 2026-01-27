@@ -29,6 +29,16 @@ use revm::{
     Database,
 };
 
+/// Error code for execution reverted in `eth_simulateV1`.
+///
+/// <https://github.com/ethereum/execution-apis>
+pub const SIMULATE_REVERT_CODE: i32 = -32000;
+
+/// Error code for VM execution errors (e.g., out of gas) in `eth_simulateV1`.
+///
+/// <https://github.com/ethereum/execution-apis>
+pub const SIMULATE_VM_ERROR_CODE: i32 = -32015;
+
 /// Errors which may occur during `eth_simulateV1` execution.
 #[derive(Debug, thiserror::Error)]
 pub enum EthSimulateError {
@@ -46,9 +56,14 @@ pub enum EthSimulateError {
         /// The parent block number.
         parent: u64,
     },
-    /// Block timestamp in sequence did not increase or stay the same.
-    #[error("Block timestamp in sequence did not increase")]
-    BlockTimestampInvalid,
+    /// Block timestamp in sequence did not increase.
+    #[error("block timestamps must be in order: {got} <= {parent}")]
+    BlockTimestampInvalid {
+        /// The block timestamp that was provided.
+        got: u64,
+        /// The parent block timestamp.
+        parent: u64,
+    },
     /// Transaction nonce is too low.
     #[error("nonce too low: next nonce {state}, tx nonce {tx}")]
     NonceTooLow {
@@ -102,7 +117,7 @@ impl EthSimulateError {
             Self::InsufficientFunds { .. } => -38014,
             Self::BlockGasLimitExceeded => -38015,
             Self::BlockNumberInvalid { .. } => -38020,
-            Self::BlockTimestampInvalid => -38021,
+            Self::BlockTimestampInvalid { .. } => -38021,
             Self::PrecompileSelfReference => -38022,
             Self::PrecompileDuplicateAddress => -38023,
             Self::SenderNotEOA => -38024,
@@ -158,7 +173,7 @@ pub fn apply_precompile_overrides(
         return Ok(());
     }
 
-    for (source, _dest) in &moves {
+    for (source, _) in &moves {
         if precompiles.get(source).is_none() {
             return Err(EthSimulateError::NotAPrecompile(*source));
         }
@@ -182,7 +197,7 @@ pub fn apply_precompile_overrides(
         }
     }
 
-    for (_source, dest, precompile) in extracted {
+    for (_, dest, precompile) in extracted {
         precompiles.apply_precompile(&dest, |_| Some(precompile));
     }
 
@@ -344,7 +359,7 @@ where
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
                         message: error.to_string(),
-                        code: error.into().code(),
+                        code: SIMULATE_VM_ERROR_CODE,
                         ..SimulateError::invalid_params()
                     }),
                     gas_used,
@@ -359,7 +374,7 @@ where
                     return_data: output,
                     error: Some(SimulateError {
                         message: error.to_string(),
-                        code: error.into().code(),
+                        code: SIMULATE_REVERT_CODE,
                         ..SimulateError::invalid_params()
                     }),
                     gas_used,

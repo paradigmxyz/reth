@@ -110,8 +110,6 @@ pub struct TreeConfig {
     disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
     disable_prewarming: bool,
-    /// Whether to disable the parallel sparse trie state root algorithm.
-    disable_parallel_sparse_trie: bool,
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
@@ -168,7 +166,6 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
-            disable_parallel_sparse_trie: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
@@ -201,7 +198,6 @@ impl TreeConfig {
         always_compare_trie_updates: bool,
         disable_state_cache: bool,
         disable_prewarming: bool,
-        disable_parallel_sparse_trie: bool,
         state_provider_metrics: bool,
         cross_block_cache_size: usize,
         has_enough_parallelism: bool,
@@ -228,7 +224,6 @@ impl TreeConfig {
             always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
-            disable_parallel_sparse_trie,
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
@@ -307,11 +302,6 @@ impl TreeConfig {
     /// Returns whether or not state provider metrics are enabled.
     pub const fn state_provider_metrics(&self) -> bool {
         self.state_provider_metrics
-    }
-
-    /// Returns whether or not the parallel sparse trie is disabled.
-    pub const fn disable_parallel_sparse_trie(&self) -> bool {
-        self.disable_parallel_sparse_trie
     }
 
     /// Returns whether or not state cache is disabled.
@@ -448,15 +438,6 @@ impl TreeConfig {
     /// Setter for state provider metrics.
     pub const fn with_state_provider_metrics(mut self, state_provider_metrics: bool) -> Self {
         self.state_provider_metrics = state_provider_metrics;
-        self
-    }
-
-    /// Setter for whether to disable the parallel sparse trie
-    pub const fn with_disable_parallel_sparse_trie(
-        mut self,
-        disable_parallel_sparse_trie: bool,
-    ) -> Self {
-        self.disable_parallel_sparse_trie = disable_parallel_sparse_trie;
         self
     }
 

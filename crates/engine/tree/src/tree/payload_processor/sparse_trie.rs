@@ -8,7 +8,7 @@ use reth_trie_parallel::{proof_task::ProofResult, root::ParallelStateRootError};
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrieInterface,
+    ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrie,
 };
 use smallvec::SmallVec;
 use std::{
@@ -38,8 +38,8 @@ where
     BPF: TrieNodeProviderFactory + Send + Sync + Clone,
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-    A: SparseTrieInterface + Send + Sync + Default,
-    S: SparseTrieInterface + Send + Sync + Default + Clone,
+    A: SparseTrie + Send + Sync + Default,
+    S: SparseTrie + Send + Sync + Default + Clone,
 {
     /// Creates a new sparse trie, pre-populating with a [`ClearedSparseStateTrie`].
     pub(super) fn new_with_cleared_trie(
@@ -150,8 +150,8 @@ where
     BPF: TrieNodeProviderFactory + Send + Sync,
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-    A: SparseTrieInterface + Send + Sync + Default,
-    S: SparseTrieInterface + Send + Sync + Default + Clone,
+    A: SparseTrie + Send + Sync + Default,
+    S: SparseTrie + Send + Sync + Default + Clone,
 {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
