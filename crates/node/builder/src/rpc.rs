@@ -1352,6 +1352,7 @@ where
             invalid_block_hook,
             changeset_cache,
             ctx.node.task_executor().clone(),
+            None, // storage_filter - will be set by EngineApiTreeHandler
         ))
     }
 }

@@ -419,6 +419,10 @@ where
             std::sync::Arc::new(parking_lot::RwLock::new(filter))
         };
 
+        // Set the storage filter on the payload validator for use in proof calculation
+        let mut payload_validator = payload_validator;
+        payload_validator.set_storage_filter(storage_filter.clone());
+
         let task = Self::new(
             provider,
             consensus,

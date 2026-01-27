@@ -269,6 +269,7 @@ where
         multiproof_provider_factory: F,
         config: &TreeConfig,
         bal: Option<Arc<BlockAccessList>>,
+        storage_filter: Option<Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -299,7 +300,7 @@ where
         // Create and spawn the storage proof task.
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let halve_workers = transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
+        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers, storage_filter);
 
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
@@ -1380,6 +1381,7 @@ mod tests {
             OverlayStateProviderFactory::new(provider_factory, ChangesetCache::new()),
             &TreeConfig::default(),
             None, // No BAL for test
+            None,
         );
 
         let mut state_hook = handle.state_hook();

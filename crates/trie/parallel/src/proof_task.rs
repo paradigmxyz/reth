@@ -39,6 +39,7 @@ use alloy_primitives::{
     B256,
 };
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use parking_lot::RwLock;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofError};
 use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
@@ -48,8 +49,16 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     proof::{ProofBlindedAccountProvider, ProofBlindedStorageProvider},
     proof_v2,
-    trie_cursor::TrieCursorFactory,
-    DecodedMultiProofV2, HashedPostState, Nibbles, ProofTrieNodeV2,
+    trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieCursorMetricsCache},
+    walker::TrieWalker,
+    DecodedMultiProof, DecodedMultiProofV2, DecodedStorageMultiProof, HashBuilder, HashedPostState,
+    MultiProofTargets, Nibbles, ProofTrieNode, ProofTrieNodeV2, TRIE_ACCOUNT_RLP_MAX_SIZE,
+};
+use reth_trie_common::{
+    added_removed_keys::MultiAddedRemovedKeys,
+    prefix_set::{PrefixSet, PrefixSetMut},
+    proof::{DecodedProofNodes, ProofRetainer},
+    BranchNodeMasks, BranchNodeMasksMap, StorageAccountFilter,
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
@@ -120,6 +129,7 @@ impl ProofWorkerHandle {
     /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `halve_workers`: Whether to halve the worker pool size (for small blocks)
+    /// - `storage_filter`: Optional filter to skip storage proofs for accounts without storage
     #[instrument(
         name = "ProofWorkerHandle::new",
         level = "debug",
@@ -130,6 +140,7 @@ impl ProofWorkerHandle {
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         halve_workers: bool,
+        storage_filter: Option<Arc<RwLock<StorageAccountFilter>>>,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -205,6 +216,7 @@ impl ProofWorkerHandle {
         let account_tx = storage_work_tx.clone();
         let account_avail = account_available_workers.clone();
         let account_parent_span = tracing::Span::current();
+        let account_storage_filter = storage_filter;
         runtime.spawn_blocking(move || {
             let worker_id = AtomicUsize::new(0);
             account_rt.proof_account_worker_pool().broadcast(account_worker_count, |_| {
@@ -224,6 +236,7 @@ impl ProofWorkerHandle {
                     account_tx.clone(),
                     account_avail.clone(),
                     cached_storage_roots.clone(),
+                    account_storage_filter.clone(),
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
@@ -888,6 +901,8 @@ struct AccountProofWorker<Factory> {
     available_workers: Arc<AtomicUsize>,
     /// Cached storage roots
     cached_storage_roots: Arc<DashMap<B256, B256>>,
+    /// Optional storage filter for skipping storage proofs of accounts without storage
+    storage_filter: Option<Arc<RwLock<StorageAccountFilter>>>,
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
@@ -909,6 +924,7 @@ where
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         available_workers: Arc<AtomicUsize>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
+        storage_filter: Option<Arc<RwLock<StorageAccountFilter>>>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
         #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
@@ -919,6 +935,7 @@ where
             storage_work_tx,
             available_workers,
             cached_storage_roots,
+            storage_filter,
             #[cfg(feature = "metrics")]
             metrics,
             #[cfg(feature = "metrics")]
@@ -1039,6 +1056,74 @@ where
         }
 
         Ok(())
+    }
+
+    fn compute_legacy_account_multiproof<Provider>(
+        &self,
+        provider: &Provider,
+        targets: MultiProofTargets,
+        mut prefix_sets: TriePrefixSets,
+        collect_branch_node_masks: bool,
+        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+        proof_cursor_metrics: &mut ProofTaskCursorMetricsCache,
+    ) -> Result<(ProofResult, Duration), ParallelStateRootError>
+    where
+        Provider: TrieCursorFactory + HashedCursorFactory,
+    {
+        let span = debug_span!(
+            target: "trie::proof_task",
+            "Account multiproof calculation",
+            targets = targets.len(),
+            num_slots = targets.values().map(|slots| slots.len()).sum::<usize>(),
+            worker_id=self.worker_id,
+        );
+        let _span_guard = span.enter();
+
+        trace!(
+            target: "trie::proof_task",
+            "Processing account multiproof"
+        );
+
+        let mut tracker = ParallelTrieTracker::default();
+
+        let mut storage_prefix_sets = std::mem::take(&mut prefix_sets.storage_prefix_sets);
+
+        let storage_root_targets_len =
+            StorageRootTargets::count(&prefix_sets.account_prefix_set, &storage_prefix_sets);
+
+        tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
+
+        let storage_proof_receivers = dispatch_storage_proofs(
+            &self.storage_work_tx,
+            &targets,
+            &mut storage_prefix_sets,
+            collect_branch_node_masks,
+            multi_added_removed_keys.as_ref(),
+            self.storage_filter.as_ref(),
+        )?;
+
+        let account_prefix_set = std::mem::take(&mut prefix_sets.account_prefix_set);
+
+        let ctx = AccountMultiproofParams {
+            targets: &targets,
+            prefix_set: account_prefix_set,
+            collect_branch_node_masks,
+            multi_added_removed_keys: multi_added_removed_keys.as_ref(),
+            storage_proof_receivers,
+            cached_storage_roots: &self.cached_storage_roots,
+        };
+
+        let mut storage_wait_time = Duration::ZERO;
+        let result = build_account_multiproof_with_storage_roots(
+            provider,
+            ctx,
+            &mut tracker,
+            proof_cursor_metrics,
+            &mut storage_wait_time,
+        )?;
+
+        let stats = tracker.finish();
+        Ok((ProofResult::Legacy(result, stats), storage_wait_time))
     }
 
     fn compute_v2_account_multiproof<'a, Provider>(
@@ -1210,6 +1295,281 @@ where
     }
 }
 
+/// Builds an account multiproof by consuming storage proof receivers lazily during trie walk.
+///
+/// This is a helper function used by account workers to build the account subtree proof
+/// while storage proofs are still being computed. Receivers are consumed only when needed,
+/// enabling interleaved parallelism between account trie traversal and storage proof computation.
+///
+/// Returns a `DecodedMultiProof` containing the account subtree and storage proofs.
+/// Also accumulates the time spent waiting for storage proofs into `storage_wait_time`.
+fn build_account_multiproof_with_storage_roots<P>(
+    provider: &P,
+    ctx: AccountMultiproofParams<'_>,
+    tracker: &mut ParallelTrieTracker,
+    proof_cursor_metrics: &mut ProofTaskCursorMetricsCache,
+    storage_wait_time: &mut Duration,
+) -> Result<DecodedMultiProof, ParallelStateRootError>
+where
+    P: TrieCursorFactory + HashedCursorFactory,
+{
+    let accounts_added_removed_keys =
+        ctx.multi_added_removed_keys.as_ref().map(|keys| keys.get_accounts());
+
+    // Wrap account trie cursor with instrumented cursor
+    let account_trie_cursor = provider.account_trie_cursor().map_err(ProviderError::Database)?;
+    let account_trie_cursor = InstrumentedTrieCursor::new(
+        account_trie_cursor,
+        &mut proof_cursor_metrics.account_trie_cursor,
+    );
+
+    // Create the walker.
+    let walker = TrieWalker::<_>::state_trie(account_trie_cursor, ctx.prefix_set)
+        .with_added_removed_keys(accounts_added_removed_keys)
+        .with_deletions_retained(true);
+
+    // Create a hash builder to rebuild the root node since it is not available in the database.
+    let retainer = ctx
+        .targets
+        .keys()
+        .map(Nibbles::unpack)
+        .collect::<ProofRetainer>()
+        .with_added_removed_keys(accounts_added_removed_keys);
+    let mut hash_builder = HashBuilder::default()
+        .with_proof_retainer(retainer)
+        .with_updates(ctx.collect_branch_node_masks);
+
+    // Initialize storage multiproofs map with pre-allocated capacity.
+    // Proofs will be inserted as they're consumed from receivers during trie walk.
+    let mut collected_decoded_storages: B256Map<DecodedStorageMultiProof> =
+        B256Map::with_capacity_and_hasher(ctx.targets.len(), Default::default());
+    let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+
+    // Wrap account hashed cursor with instrumented cursor
+    let account_hashed_cursor =
+        provider.hashed_account_cursor().map_err(ProviderError::Database)?;
+    let account_hashed_cursor = InstrumentedHashedCursor::new(
+        account_hashed_cursor,
+        &mut proof_cursor_metrics.account_hashed_cursor,
+    );
+
+    let mut account_node_iter = TrieNodeIter::state_trie(walker, account_hashed_cursor);
+
+    let mut storage_proof_receivers = ctx.storage_proof_receivers;
+
+    while let Some(account_node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
+        match account_node {
+            TrieElement::Branch(node) => {
+                hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+            }
+            TrieElement::Leaf(hashed_address, account) => {
+                let root = match storage_proof_receivers.remove(&hashed_address) {
+                    Some(receiver) => {
+                        let _guard = debug_span!(
+                            target: "trie::proof_task",
+                            "Waiting for storage proof",
+                            ?hashed_address,
+                        );
+                        // Block on this specific storage proof receiver - enables interleaved
+                        // parallelism
+                        let wait_start = Instant::now();
+                        let proof_msg = receiver.recv().map_err(|_| {
+                            ParallelStateRootError::StorageRoot(
+                                reth_execution_errors::StorageRootError::Database(
+                                    DatabaseError::Other(format!(
+                                        "Storage proof channel closed for {hashed_address}"
+                                    )),
+                                ),
+                            )
+                        })?;
+                        *storage_wait_time += wait_start.elapsed();
+
+                        drop(_guard);
+
+                        // Extract storage proof from the result
+                        debug_assert_eq!(
+                            proof_msg.hashed_address, hashed_address,
+                            "storage worker must return same address"
+                        );
+                        let proof_result = proof_msg.result?;
+                        let Some(root) = proof_result.root() else {
+                            trace!(
+                                target: "trie::proof_task",
+                                ?proof_result,
+                                "Received proof_result without root",
+                            );
+                            panic!("Partial proofs are not yet supported");
+                        };
+                        let proof = Into::<Option<DecodedStorageMultiProof>>::into(proof_result)
+                            .expect("Partial proofs are not yet supported (into)");
+                        collected_decoded_storages.insert(hashed_address, proof);
+                        root
+                    }
+                    // Since we do not store all intermediate nodes in the database, there might
+                    // be a possibility of re-adding a non-modified leaf to the hash builder.
+                    None => {
+                        tracker.inc_missed_leaves();
+
+                        match ctx.cached_storage_roots.entry(hashed_address) {
+                            dashmap::Entry::Occupied(occ) => *occ.get(),
+                            dashmap::Entry::Vacant(vac) => {
+                                let root =
+                                    StorageProof::new_hashed(provider, provider, hashed_address)
+                                        .with_prefix_set_mut(Default::default())
+                                        .with_trie_cursor_metrics(
+                                            &mut proof_cursor_metrics.storage_trie_cursor,
+                                        )
+                                        .with_hashed_cursor_metrics(
+                                            &mut proof_cursor_metrics.storage_hashed_cursor,
+                                        )
+                                        .storage_multiproof(
+                                            ctx.targets
+                                                .get(&hashed_address)
+                                                .cloned()
+                                                .unwrap_or_default(),
+                                        )
+                                        .map_err(|e| {
+                                            ParallelStateRootError::StorageRoot(
+                                                reth_execution_errors::StorageRootError::Database(
+                                                    DatabaseError::Other(e.to_string()),
+                                                ),
+                                            )
+                                        })?
+                                        .root;
+
+                                vac.insert(root);
+                                root
+                            }
+                        }
+                    }
+                };
+
+                // Encode account
+                account_rlp.clear();
+                let account = account.into_trie_account(root);
+                account.encode(&mut account_rlp as &mut dyn BufMut);
+
+                hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
+            }
+        }
+    }
+
+    let _ = hash_builder.root();
+
+    let account_subtree_raw_nodes = hash_builder.take_proof_nodes();
+    let decoded_account_subtree = DecodedProofNodes::try_from(account_subtree_raw_nodes)?;
+
+    let branch_node_masks = if ctx.collect_branch_node_masks {
+        let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
+        updated_branch_nodes
+            .into_iter()
+            .map(|(path, node)| {
+                (path, BranchNodeMasks { hash_mask: node.hash_mask, tree_mask: node.tree_mask })
+            })
+            .collect()
+    } else {
+        BranchNodeMasksMap::default()
+    };
+
+    // Consume remaining storage proof receivers for accounts not encountered during trie walk.
+    // Done last to allow storage workers more time to complete while we finalized the account trie.
+    for (hashed_address, receiver) in storage_proof_receivers {
+        let wait_start = Instant::now();
+        if let Ok(proof_msg) = receiver.recv() {
+            *storage_wait_time += wait_start.elapsed();
+            let proof_result = proof_msg.result?;
+            let proof = Into::<Option<DecodedStorageMultiProof>>::into(proof_result)
+                .expect("Partial proofs are not yet supported");
+            collected_decoded_storages.insert(hashed_address, proof);
+        }
+    }
+
+    Ok(DecodedMultiProof {
+        account_subtree: decoded_account_subtree,
+        branch_node_masks,
+        storages: collected_decoded_storages,
+    })
+}
+/// Queues storage proofs for all accounts in the targets and returns receivers.
+///
+/// This function queues all storage proof tasks to the worker pool but returns immediately
+/// with receivers, allowing the account trie walk to proceed in parallel with storage proof
+/// computation. This enables interleaved parallelism for better performance.
+///
+/// If a storage filter is provided, accounts that are definitely known to have no storage
+/// (not in the filter) will be skipped and an empty storage proof will be returned directly.
+///
+/// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
+fn dispatch_storage_proofs(
+    storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
+    targets: &MultiProofTargets,
+    storage_prefix_sets: &mut B256Map<PrefixSet>,
+    with_branch_node_masks: bool,
+    multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
+    storage_filter: Option<&Arc<RwLock<StorageAccountFilter>>>,
+) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
+    use reth_trie_common::EMPTY_ROOT_HASH;
+
+    let mut storage_proof_receivers =
+        B256Map::with_capacity_and_hasher(targets.len(), Default::default());
+
+    let mut sorted_targets: Vec<_> = targets.iter().collect();
+    sorted_targets.sort_unstable_by_key(|(addr, _)| *addr);
+
+    // Dispatch all storage proofs to worker pool
+    for (hashed_address, target_slots) in sorted_targets {
+        // Create channel for receiving ProofResultMessage
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+
+        // Check if this account is known to have no storage
+        let skip_storage_proof = storage_filter
+            .as_ref()
+            .is_some_and(|filter| !filter.read().may_have_storage(*hashed_address));
+
+        if skip_storage_proof {
+            // Account is definitely not in the filter, so it has no storage.
+            // Send an empty storage proof result directly.
+            trace!(
+                target: "trie::proof_task",
+                ?hashed_address,
+                "Skipping storage proof for account not in filter"
+            );
+            let empty_proof = DecodedStorageMultiProof {
+                root: EMPTY_ROOT_HASH,
+                subtree: Default::default(),
+                branch_node_masks: Default::default(),
+            };
+            let _ = result_tx.send(StorageProofResultMessage {
+                hashed_address: *hashed_address,
+                result: Ok(StorageProofResult::Legacy { proof: empty_proof }),
+            });
+        } else {
+            // Create computation input and dispatch to worker
+            let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
+            let input = StorageProofInput::legacy(
+                *hashed_address,
+                prefix_set,
+                target_slots.clone(),
+                with_branch_node_masks,
+                multi_added_removed_keys.cloned(),
+            );
+
+            storage_work_tx
+                .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
+                .map_err(|_| {
+                    ParallelStateRootError::Other(format!(
+                        "Failed to queue storage proof for {}: storage worker pool unavailable",
+                        hashed_address
+                    ))
+                })?;
+        }
+
+        storage_proof_receivers.insert(*hashed_address, result_rx);
+    }
+
+    Ok(storage_proof_receivers)
+}
+
 /// Queues V2 storage proofs for all accounts in the targets and returns receivers.
 ///
 /// This function queues all storage proof tasks to the worker pool but returns immediately
@@ -1356,7 +1716,7 @@ mod tests {
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();
-        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false);
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false, None);
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();

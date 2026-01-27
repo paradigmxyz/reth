@@ -139,6 +139,8 @@ where
     changeset_cache: ChangesetCache,
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
+    /// Optional storage filter for skipping storage proofs of accounts without storage
+    storage_filter: Option<Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -173,6 +175,7 @@ where
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
+        storage_filter: Option<Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>>,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
@@ -194,7 +197,16 @@ where
             validator,
             changeset_cache,
             runtime,
+            storage_filter,
         }
+    }
+
+    /// Sets the storage filter for skipping storage proofs of accounts without storage.
+    pub fn set_storage_filter(
+        &mut self,
+        filter: Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
+    ) {
+        self.storage_filter = Some(filter);
     }
 
     /// Converts a [`BlockOrPayload`] to a recovered block.
@@ -1320,6 +1332,7 @@ where
                     overlay_factory,
                     &self.config,
                     block_access_list,
+                    self.storage_filter.clone(),
                 );
 
                 // record prewarming initialization duration
@@ -1669,6 +1682,16 @@ pub trait EngineValidator<
     /// This is invoked when blocks are inserted via `InsertExecutedBlock` (e.g., locally built
     /// blocks by sequencers) to allow implementations to update internal state such as caches.
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>);
+
+    /// Sets the storage filter for skipping storage proofs of accounts without storage.
+    ///
+    /// This is called after the filter is built from the database.
+    /// Default implementation does nothing.
+    fn set_storage_filter(
+        &mut self,
+        _filter: Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
+    ) {
+    }
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1731,6 +1754,13 @@ where
             block.recovered_block.block_with_parent(),
             &block.execution_output.state,
         );
+    }
+
+    fn set_storage_filter(
+        &mut self,
+        filter: Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
+    ) {
+        self.storage_filter = Some(filter);
     }
 }
 

@@ -10591,6 +10591,7 @@ dependencies = [
  "derive_more",
  "itertools 0.14.0",
  "metrics",
+ "parking_lot",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.2",

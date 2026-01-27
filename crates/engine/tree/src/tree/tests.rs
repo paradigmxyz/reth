@@ -204,8 +204,12 @@ impl TestHarness {
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache.clone(),
             reth_tasks::Runtime::test(),
+            None, // storage_filter
         );
 
+        let storage_filter = std::sync::Arc::new(parking_lot::RwLock::new(
+            reth_trie_common::StorageAccountFilter::default(),
+        ));
         let tree = EngineApiTreeHandler::new(
             provider.clone(),
             consensus,
@@ -222,6 +226,7 @@ impl TestHarness {
             evm_config,
             changeset_cache,
             provider.cached_storage_settings().use_hashed_state(),
+            storage_filter,
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
@@ -407,6 +412,7 @@ impl ValidatorTestHarness {
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache,
             reth_tasks::Runtime::test(),
+            None, // storage_filter
         );
 
         Self { harness, validator, metrics: TestMetrics::default() }
