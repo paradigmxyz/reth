@@ -1278,7 +1278,7 @@ impl RocksDBProvider {
     }
 }
 
-/// Outcome of pruning a history shard in RocksDB.
+/// Outcome of pruning a history shard in `RocksDB`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PruneShardOutcome {
     /// Shard was deleted entirely.

@@ -136,8 +136,8 @@ impl AccountHistory {
             limiter.increment_deleted_entries_count();
         }
 
-        // Delete static file jars below the pruned block
-        if let Some(last_block) = last_changeset_pruned_block {
+        // Delete static file jars only when fully processed
+        if done && let Some(last_block) = last_changeset_pruned_block {
             provider
                 .static_file_provider()
                 .delete_segment_below_block(StaticFileSegment::AccountChangeSets, last_block + 1)?;

@@ -136,12 +136,10 @@ impl StorageHistory {
             limiter.increment_deleted_entries_count();
         }
 
-        if done {
-            if let Some(last_block) = last_changeset_pruned_block {
-                provider
-                    .static_file_provider()
-                    .delete_segment_below_block(StaticFileSegment::StorageChangeSets, last_block + 1)?;
-            }
+        if done && let Some(last_block) = last_changeset_pruned_block {
+            provider
+                .static_file_provider()
+                .delete_segment_below_block(StaticFileSegment::StorageChangeSets, last_block + 1)?;
         }
         trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned storage history (changesets from static files)");
 
@@ -318,7 +316,7 @@ impl StorageHistory {
 
         Ok(SegmentOutput {
             progress,
-            pruned: changesets_processed + deleted_shards,
+            pruned: changesets_processed + deleted_shards + updated_shards,
             checkpoint: Some(SegmentOutputCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
                 tx_number: None,
