@@ -136,6 +136,7 @@ impl StorageHistory {
             limiter.increment_deleted_entries_count();
         }
 
+        // Delete static file jars below the pruned block
         if done && let Some(last_block) = last_changeset_pruned_block {
             provider
                 .static_file_provider()
@@ -257,6 +258,9 @@ impl StorageHistory {
         let mut changesets_processed = 0usize;
         let mut done = true;
 
+        // Walk storage changesets from static files using a streaming iterator.
+        // For each changeset, track the highest block number seen for each (address, storage_key)
+        // pair to determine which history shard entries need pruning.
         let walker = provider.static_file_provider().walk_storage_changeset_range(range);
         for result in walker {
             if limiter.is_limit_reached() {

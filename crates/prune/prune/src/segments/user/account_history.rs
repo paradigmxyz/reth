@@ -257,6 +257,9 @@ impl AccountHistory {
         let mut changesets_processed = 0usize;
         let mut done = true;
 
+        // Walk account changesets from static files using a streaming iterator.
+        // For each changeset, track the highest block number seen for each address
+        // to determine which history shard entries need pruning.
         let walker = StaticFileAccountChangesetWalker::new(provider, range);
         for result in walker {
             if limiter.is_limit_reached() {
