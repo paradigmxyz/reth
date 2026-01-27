@@ -14,6 +14,7 @@ use rayon::prelude::*;
 use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx, DatabaseEnv};
 use reth_db_api::models::{AccountBeforeTx, StorageBeforeTx};
 use reth_provider::{
+    DBProvider,
     BlockBodyIndicesProvider, BlockNumReader, MetadataWriter, ProviderFactory,
     StaticFileProviderFactory, StaticFileWriter, TransactionsProvider,
 };
@@ -55,7 +56,7 @@ impl Command {
     ) -> Result<()> {
         info!(target: "reth::cli", "Starting storage migration from legacy MDBX to new storage");
 
-        let provider = provider_factory.provider()?;
+        let provider = provider_factory.provider()?.disable_long_read_transaction_safety();
         let to_block = provider.best_block_number()?;
         let prune_modes = provider.prune_modes_ref().clone();
         drop(provider);
@@ -166,7 +167,7 @@ impl Command {
         to_block: BlockNumber,
     ) -> Result<()> {
         let static_file_provider = provider_factory.static_file_provider();
-        let provider = provider_factory.provider()?;
+        let provider = provider_factory.provider()?.disable_long_read_transaction_safety();
 
         let highest = static_file_provider.get_highest_static_file_block(segment).unwrap_or(0);
         if highest >= to_block {
@@ -227,6 +228,8 @@ impl Command {
                                 current_block,
                             )?;
                         }
+                        // Advance writer to handle gaps in changeset data
+                        writer.ensure_at_block(block.saturating_sub(1))?;
                         blocks_processed += block - current_block;
                         current_block = block;
 
@@ -271,6 +274,8 @@ impl Command {
                                 current_block,
                             )?;
                         }
+                        // Advance writer to handle gaps in changeset data
+                        writer.ensure_at_block(block.saturating_sub(1))?;
                         blocks_processed += block - current_block;
                         current_block = block;
 
@@ -378,7 +383,7 @@ impl Command {
         use reth_db_api::table::Table;
         use reth_provider::RocksDBProviderFactory;
 
-        let provider = provider_factory.provider()?;
+        let provider = provider_factory.provider()?.disable_long_read_transaction_safety();
         let rocksdb = provider_factory.rocksdb_provider();
         let tx = provider.tx_ref();
 
