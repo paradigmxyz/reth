@@ -230,29 +230,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Shrink the capacity of the sparse trie's value storage to the given size.
     /// This will reduce memory usage if the current capacity is higher than the given size.
     fn shrink_values_to(&mut self, size: usize);
-
-    /// Returns the number of revealed (non-Hash) nodes in the trie.
-    fn revealed_node_count(&self) -> usize;
-}
-
-/// Extension trait for sparse tries that support pruning.
-///
-/// This trait provides the `prune` method for sparse trie implementations that support
-/// converting nodes beyond a certain depth into hash stubs. This is useful for reducing
-/// memory usage when caching tries across payload validations.
-///
-/// Note: Only [`crate::ParallelSparseTrie`] is required to implement this trait.
-/// [`crate::SerialSparseTrie`] provides `prune` as an inherent method but does not
-/// implement this trait.
-pub trait SparseTrieExt: SparseTrie {
-    /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
-    ///
-    /// Depth counts nodes traversed (not nibbles). Must be called after `root()`.
-    /// Embedded nodes (RLP < 32 bytes) are preserved since they have no hash.
-    ///
-    /// Returns the number of nodes converted to hash stubs.
-    /// Returns 0 if `max_depth` exceeds trie depth or trie is empty.
-    fn prune(&mut self, max_depth: usize) -> usize;
 }
 
 /// Extension trait for sparse tries that support pruning.

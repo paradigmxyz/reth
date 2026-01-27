@@ -1046,13 +1046,6 @@ impl SparseTrieTrait for SerialSparseTrie {
     fn shrink_values_to(&mut self, size: usize) {
         self.values.shrink_to(size);
     }
-
-    /// Counts all revealed (non-Hash) nodes in the trie.
-    ///
-    /// Hash nodes represent unexpanded subtries and are excluded from this count.
-    fn revealed_node_count(&self) -> usize {
-        self.nodes.values().filter(|n| !matches!(n, SparseNode::Hash(_))).count()
-    }
 }
 
 impl SerialSparseTrie {
