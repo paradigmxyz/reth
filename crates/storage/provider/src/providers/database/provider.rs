@@ -39,8 +39,8 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     models::{
-        storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress, ShardedKey,
-        StorageBeforeTx, StorageSettings, StoredBlockBodyIndices,
+        sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
+        ShardedKey, StorageBeforeTx, StorageSettings, StoredBlockBodyIndices,
     },
     table::Table,
     tables,
@@ -1215,7 +1215,64 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     }
 }
 
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Insert history index to the database.
+    ///
+    /// For each updated partial key, this function retrieves the last shard from the database
+    /// (if any), appends the new indices to it, chunks the resulting list if needed, and upserts
+    /// the shards back into the database.
+    ///
+    /// This function is used by history indexing stages.
+    fn append_history_index<P, T>(
+        &self,
+        index_updates: impl IntoIterator<Item = (P, impl IntoIterator<Item = u64>)>,
+        mut sharded_key_factory: impl FnMut(P, BlockNumber) -> T::Key,
+    ) -> ProviderResult<()>
+    where
+        P: Copy,
+        T: Table<Value = BlockNumberList>,
+    {
+        // This function cannot be used with DUPSORT tables because `upsert` on DUPSORT tables
+        // will append duplicate entries instead of updating existing ones, causing data corruption.
+        assert!(!T::DUPSORT, "append_history_index cannot be used with DUPSORT tables");
 
+        let mut cursor = self.tx.cursor_write::<T>()?;
+
+        for (partial_key, indices) in index_updates {
+            let last_key = sharded_key_factory(partial_key, u64::MAX);
+            let mut last_shard = cursor
+                .seek_exact(last_key.clone())?
+                .map(|(_, list)| list)
+                .unwrap_or_else(BlockNumberList::empty);
+
+            last_shard.append(indices).map_err(ProviderError::other)?;
+
+            // fast path: all indices fit in one shard
+            if last_shard.len() <= sharded_key::NUM_OF_INDICES_IN_SHARD as u64 {
+                cursor.upsert(last_key, &last_shard)?;
+                continue;
+            }
+
+            // slow path: rechunk into multiple shards
+            let chunks = last_shard.iter().chunks(sharded_key::NUM_OF_INDICES_IN_SHARD);
+            let mut chunks_peekable = chunks.into_iter().peekable();
+
+            while let Some(chunk) = chunks_peekable.next() {
+                let shard = BlockNumberList::new_pre_sorted(chunk);
+                let highest_block_number = if chunks_peekable.peek().is_some() {
+                    shard.iter().next_back().expect("`chunks` does not return empty list")
+                } else {
+                    // Insert last list with `u64::MAX`.
+                    u64::MAX
+                };
+
+                cursor.upsert(sharded_key_factory(partial_key, highest_block_number), &shard)?;
+            }
+        }
+
+        Ok(())
+    }
+}
 
 impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
@@ -2952,13 +3009,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         &self,
         account_transitions: impl IntoIterator<Item = (Address, impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()> {
-        self.with_rocksdb_batch(|batch| {
-            let mut writer = EitherWriter::new_accounts_history(self, batch)?;
-            for (address, indices) in account_transitions {
-                writer.append_account_history_index(address, indices)?;
-            }
-            Ok(((), writer.into_raw_rocksdb_batch()))
-        })
+        self.append_history_index::<_, tables::AccountsHistory>(
+            account_transitions,
+            ShardedKey::new,
+        )
     }
 
     fn unwind_storage_history_indices(
@@ -3023,22 +3077,26 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         &self,
         storage_transitions: impl IntoIterator<Item = ((Address, B256), impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()> {
-        self.with_rocksdb_batch(|batch| {
-            let mut writer = EitherWriter::new_storages_history(self, batch)?;
-            for ((address, storage_key), indices) in storage_transitions {
-                writer.append_storage_history_index(address, storage_key, indices)?;
-            }
-            Ok(((), writer.into_raw_rocksdb_batch()))
-        })
+        self.append_history_index::<_, tables::StoragesHistory>(
+            storage_transitions,
+            |(address, storage_key), highest_block_number| {
+                StorageShardedKey::new(address, storage_key, highest_block_number)
+            },
+        )
     }
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
-        let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
-        self.insert_account_history_index(indices)?;
+        let storage_settings = self.cached_storage_settings();
+        if !storage_settings.account_history_in_rocksdb {
+            let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
+            self.insert_account_history_index(indices)?;
+        }
 
-        let indices = self.changed_storages_and_blocks_with_range(range)?;
-        self.insert_storage_history_index(indices)?;
+        if !storage_settings.storages_history_in_rocksdb {
+            let indices = self.changed_storages_and_blocks_with_range(range)?;
+            self.insert_storage_history_index(indices)?;
+        }
 
         Ok(())
     }
