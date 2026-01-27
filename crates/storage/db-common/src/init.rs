@@ -420,7 +420,6 @@ where
         Ok(((), writer.into_raw_rocksdb_batch()))
     })?;
 
-    // Write storage history using EitherWriter
     provider.with_rocksdb_batch(|batch| {
         let mut writer = EitherWriter::new_storages_history(provider, batch)?;
         let list = BlockNumberList::new([block]).expect("single block always fits");
