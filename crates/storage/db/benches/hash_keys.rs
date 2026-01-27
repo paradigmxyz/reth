@@ -19,7 +19,6 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_fs_util as fs;
-use std::hint::black_box;
 
 mod utils;
 use utils::*;
@@ -178,17 +177,13 @@ fn append<T>(db: DatabaseEnv, input: Vec<(<T as Table>::Key, <T as Table>::Value
 where
     T: Table,
 {
-    {
-        let tx = db.tx_mut().expect("tx");
-        let mut crsr = tx.cursor_write::<T>().expect("cursor");
-        black_box({
-            for (k, v) in input {
-                crsr.append(k, &v).expect("submit");
-            }
-        });
-        drop(crsr);
-        tx.commit().unwrap();
+    let tx = db.tx_mut().expect("tx");
+    let mut crsr = tx.cursor_write::<T>().expect("cursor");
+    for (k, v) in input {
+        crsr.append(k, &v).expect("submit");
     }
+    drop(crsr);
+    tx.commit().unwrap();
     db
 }
 
@@ -196,17 +191,13 @@ fn insert<T>(db: DatabaseEnv, input: Vec<(<T as Table>::Key, <T as Table>::Value
 where
     T: Table,
 {
-    {
-        let tx = db.tx_mut().expect("tx");
-        let mut crsr = tx.cursor_write::<T>().expect("cursor");
-        black_box({
-            for (k, v) in input {
-                crsr.insert(k, &v).expect("submit");
-            }
-        });
-        drop(crsr);
-        tx.commit().unwrap();
+    let tx = db.tx_mut().expect("tx");
+    let mut crsr = tx.cursor_write::<T>().expect("cursor");
+    for (k, v) in input {
+        crsr.insert(k, &v).expect("submit");
     }
+    drop(crsr);
+    tx.commit().unwrap();
     db
 }
 
@@ -214,15 +205,11 @@ fn put<T>(db: DatabaseEnv, input: Vec<(<T as Table>::Key, <T as Table>::Value)>)
 where
     T: Table,
 {
-    {
-        let tx = db.tx_mut().expect("tx");
-        black_box({
-            for (k, v) in input {
-                tx.put::<T>(k, v).expect("submit");
-            }
-        });
-        tx.commit().unwrap();
+    let tx = db.tx_mut().expect("tx");
+    for (k, v) in input {
+        tx.put::<T>(k, v).expect("submit");
     }
+    tx.commit().unwrap();
     db
 }
 
