@@ -232,11 +232,8 @@ where
             }
         }
 
-        let mgas_per_sec = if stats.execution_duration.is_zero() {
-            0.0
-        } else {
-            (stats.gas_used as f64 / MGAS_TO_GAS as f64) / stats.execution_duration.as_secs_f64()
-        };
+        let mgas_per_sec = (stats.gas_used as f64 / MGAS_TO_GAS as f64) /
+            (stats.execution_duration.as_secs_f64() + stats.state_hash_duration.as_secs_f64());
 
         // Calculate cache hit rates
         let account_hit_rate =

@@ -14,7 +14,7 @@ use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Set, B256};
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use rayon::prelude::*;
@@ -1469,7 +1469,7 @@ where
         // Sum bytecode sizes for UNIQUE newly deployed bytecodes only.
         // This counts actual bytes persisted to the DB's code table, not duplicates.
         // Example: Factory deploying 3 identical contracts = code_bytes of 1 unique bytecode.
-        let unique_new_code_hashes: std::collections::HashSet<_> = output
+        let unique_new_code_hashes: B256Set = output
             .state
             .state
             .values()
@@ -1552,8 +1552,6 @@ where
             .unwrap_or((0, 0, 0, 0, 0, 0));
 
         // Build execution timing stats for slow block logging
-        // Note: state_hash_ms will be updated after state root computation,
-        // commit_ms will be added by persistence service after database commit
         ExecutionTimingStats {
             block_number: block.number(),
             block_hash: block.hash(),
