@@ -10217,6 +10217,7 @@ dependencies = [
  "reth-stages",
  "reth-stages-types",
  "reth-static-file-types",
+ "reth-storage-api",
  "reth-testing-utils",
  "reth-tokio-util",
  "reth-tracing",
@@ -11407,9 +11408,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.34.0"
+version = "0.34.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a1ce3f52a052d78cc251714d57bf05dc8bc75e269677de11805d3153300a2cd"
+checksum = "a24ca988ae1f7a0bb5688630579c00e867cd9f1df0a2f040623887f63d3b414c"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",

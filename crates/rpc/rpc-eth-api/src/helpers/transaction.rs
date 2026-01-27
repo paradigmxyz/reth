@@ -290,12 +290,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 let block_number = block.number();
                 let base_fee_per_gas = block.base_fee_per_gas();
                 if let Some((signer, tx)) = block.transactions_with_sender().nth(index) {
+                    #[allow(clippy::needless_update)]
                     let tx_info = TransactionInfo {
                         hash: Some(*tx.tx_hash()),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
                         base_fee: base_fee_per_gas,
                         index: Some(index as u64),
+                        ..Default::default()
                     };
 
                     return Ok(Some(
@@ -366,12 +368,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         .enumerate()
                         .find(|(_, (signer, tx))| **signer == sender && (*tx).nonce() == nonce)
                         .map(|(index, (signer, tx))| {
+                            #[allow(clippy::needless_update)]
                             let tx_info = TransactionInfo {
                                 hash: Some(*tx.tx_hash()),
                                 block_hash: Some(block_hash),
                                 block_number: Some(block_number),
                                 base_fee: base_fee_per_gas,
                                 index: Some(index as u64),
+                                ..Default::default()
                             };
                             Ok(self.converter().fill(tx.clone().with_signer(*signer), tx_info)?)
                         })
