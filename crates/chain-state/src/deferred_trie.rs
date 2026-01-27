@@ -288,6 +288,7 @@ impl DeferredTrieData {
             .iter()
             .rev()
             .map(|a| {
+                // Note: we can assume that this trie data has already been computed
                 let data = a.wait_cloned();
                 (data.hashed_state, data.trie_updates)
             })
