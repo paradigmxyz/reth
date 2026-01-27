@@ -219,11 +219,17 @@ impl LaunchContext {
 
         let mut should_save = false;
 
-        // Save if the merged config differs from what's in the file and is not default
-        if reth_config.static_files != merged_config && !merged_config.is_default() {
-            reth_config.static_files = merged_config;
-            should_save = true;
+        if !config.static_files.is_empty() || config.pruning.minimal {
+            // Save if the merged config differs from what's in the file and is not default
+            if reth_config.static_files != merged_config && !merged_config.is_default() {
+                should_save = true;
+            }
+        } else if !reth_config.static_files.is_default() {
+            warn!(target: "reth::cli", "Static files configuration is present in the config file, but no CLI arguments are provided. Using config from file.");
         }
+
+        // Always apply the merged config
+        reth_config.static_files = merged_config;
 
         if should_save {
             info!(target: "reth::cli", "Saving static files config to toml file");

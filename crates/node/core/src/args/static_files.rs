@@ -86,6 +86,16 @@ pub struct StaticFilesArgs {
 }
 
 impl StaticFilesArgs {
+    /// Returns `true` if no blocks-per-file CLI arguments are set.
+    pub const fn is_empty(&self) -> bool {
+        self.blocks_per_file_headers.is_none() &&
+            self.blocks_per_file_transactions.is_none() &&
+            self.blocks_per_file_receipts.is_none() &&
+            self.blocks_per_file_transaction_senders.is_none() &&
+            self.blocks_per_file_account_change_sets.is_none() &&
+            self.blocks_per_file_storage_change_sets.is_none()
+    }
+
     /// Merges the CLI arguments with an existing [`StaticFilesConfig`], giving priority to CLI
     /// args.
     ///
