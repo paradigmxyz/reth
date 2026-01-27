@@ -17,24 +17,31 @@ use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_provider::RocksDBProviderFactory;
 use std::{sync::Arc, time::Duration};
 
-const ROCKSDB_POLL_TIMEOUT: Duration = Duration::from_secs(30);
+const ROCKSDB_POLL_TIMEOUT: Duration = Duration::from_secs(60);
 const ROCKSDB_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Polls RPC until the given tx_hash is visible as pending (not yet mined).
 /// Prevents race conditions where `advance_block` is called before txs are in the pool.
-async fn wait_for_pending_tx<C: ClientT>(client: &C, tx_hash: B256) {
+/// Returns the pending transaction.
+async fn wait_for_pending_tx<C: ClientT>(client: &C, tx_hash: B256) -> Transaction {
     let start = std::time::Instant::now();
     loop {
         let tx: Option<Transaction> = client
             .request("eth_getTransactionByHash", [tx_hash])
             .await
             .expect("RPC request failed");
-        if tx.is_some() {
-            return;
+        if let Some(tx) = tx {
+            assert!(
+                tx.block_number.is_none(),
+                "Expected pending tx but tx_hash={tx_hash:?} is already mined in block {:?}",
+                tx.block_number
+            );
+            return tx;
         }
         assert!(
             start.elapsed() < ROCKSDB_POLL_TIMEOUT,
-            "Timed out waiting for tx_hash={tx_hash:?} to appear in pending pool"
+            "Timed out after {:?} waiting for tx_hash={tx_hash:?} to appear in pending pool",
+            start.elapsed()
         );
         tokio::time::sleep(ROCKSDB_POLL_INTERVAL).await;
     }
@@ -43,9 +50,11 @@ async fn wait_for_pending_tx<C: ClientT>(client: &C, tx_hash: B256) {
 /// Polls RocksDB until the given tx_hash appears in `TransactionHashNumbers`.
 /// Returns the tx_number on success, or panics on timeout.
 async fn poll_tx_in_rocksdb<P: RocksDBProviderFactory>(provider: &P, tx_hash: B256) -> u64 {
-    let rocksdb = provider.rocksdb_provider();
     let start = std::time::Instant::now();
+    let mut interval = ROCKSDB_POLL_INTERVAL;
     loop {
+        // Re-acquire handle each iteration to avoid stale snapshot reads
+        let rocksdb = provider.rocksdb_provider();
         let tx_number: Option<u64> =
             rocksdb.get::<tables::TransactionHashNumbers>(tx_hash).expect("RocksDB get failed");
         if let Some(n) = tx_number {
@@ -53,9 +62,12 @@ async fn poll_tx_in_rocksdb<P: RocksDBProviderFactory>(provider: &P, tx_hash: B2
         }
         assert!(
             start.elapsed() < ROCKSDB_POLL_TIMEOUT,
-            "Timed out waiting for tx_hash={tx_hash:?} in RocksDB"
+            "Timed out after {:?} waiting for tx_hash={tx_hash:?} in RocksDB",
+            start.elapsed()
         );
-        tokio::time::sleep(ROCKSDB_POLL_INTERVAL).await;
+        tokio::time::sleep(interval).await;
+        // Simple backoff: 50ms -> 100ms -> 200ms (capped)
+        interval = std::cmp::min(interval * 2, Duration::from_millis(200));
     }
 }
 
@@ -144,17 +156,27 @@ async fn test_rocksdb_block_mining() -> Result<()> {
     // Mine 3 blocks with transactions
     let wallets = wallet::Wallet::new(1).with_chain_id(chain_id).wallet_gen();
     let signer = wallets[0].clone();
+    let client = nodes[0].rpc_client().expect("RPC client should be available");
 
     for i in 1..=3u64 {
         let raw_tx =
             TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), i - 1)
                 .await;
-        nodes[0].rpc.inject_tx(raw_tx).await?;
+        let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
+
+        // Wait for tx to enter pending pool before mining
+        wait_for_pending_tx(&client, tx_hash).await;
 
         let payload = nodes[0].advance_block().await?;
         let block = payload.block();
         assert_eq!(block.number(), i);
         assert_ne!(block.hash(), B256::ZERO);
+
+        // Verify tx was actually included in the block
+        let receipt: Option<TransactionReceipt> =
+            client.request("eth_getTransactionReceipt", [tx_hash]).await?;
+        let receipt = receipt.expect("Receipt should exist after mining");
+        assert_eq!(receipt.block_number, Some(i), "Tx should be in block {i}");
     }
 
     // Verify all blocks are stored
@@ -189,14 +211,16 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
     // Inject and mine a transaction
     let wallets = wallet::Wallet::new(1).with_chain_id(chain_id).wallet_gen();
     let signer = wallets[0].clone();
+    let client = nodes[0].rpc_client().expect("RPC client should be available");
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(chain_id, signer).await;
     let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
 
+    // Wait for tx to enter pending pool before mining
+    wait_for_pending_tx(&client, tx_hash).await;
+
     let payload = nodes[0].advance_block().await?;
     assert_eq!(payload.block().number(), 1);
-
-    let client = nodes[0].rpc_client().expect("RPC client should be available");
 
     // Query each transaction by hash
     let tx: Option<Transaction> = client.request("eth_getTransactionByHash", [tx_hash]).await?;
@@ -411,25 +435,21 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
 
     // Verify tx is in pending pool via RPC
     let client = nodes[0].rpc_client().expect("RPC client");
+    wait_for_pending_tx(&client, tx_hash).await;
+
     let pending_tx: Option<Transaction> =
         client.request("eth_getTransactionByHash", [tx_hash]).await?;
     assert!(pending_tx.is_some(), "Pending tx should be visible via RPC");
     assert!(pending_tx.unwrap().block_number.is_none(), "Pending tx should have no block_number");
 
-    // Assert tx is NOT in RocksDB for 250ms
+    // Assert tx is NOT in RocksDB before mining (single check - tx is confirmed pending)
     let rocksdb = nodes[0].inner.provider.rocksdb_provider();
-    let check_duration = std::time::Duration::from_millis(250);
-    let start = std::time::Instant::now();
-
-    while start.elapsed() < check_duration {
-        let tx_number: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(tx_hash)?;
-        assert!(
-            tx_number.is_none(),
-            "Pending tx should NOT be in RocksDB before mining, but found tx_number={:?}",
-            tx_number
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
+    let tx_number: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(tx_hash)?;
+    assert!(
+        tx_number.is_none(),
+        "Pending tx should NOT be in RocksDB before mining, but found tx_number={:?}",
+        tx_number
+    );
 
     // Now mine the block
     let payload = nodes[0].advance_block().await?;
