@@ -110,25 +110,33 @@ where
     /// expects a payload attribute event and waits until the payload is built.
     ///
     /// It triggers the resolve payload via engine api and expects the built payload event.
-    /// Requires at least one transaction in the payload.
     pub async fn new_payload(&mut self) -> eyre::Result<Payload::BuiltPayload> {
+        // trigger new payload building draining the pool
         let eth_attr = self.payload.new_payload().await.unwrap();
+        // first event is the payload attributes
         self.payload.expect_attr_event(eth_attr.clone()).await?;
+        // wait for the payload builder to have finished building
         self.payload.wait_for_built_payload(eth_attr.payload_id()).await;
+        // ensure we're also receiving the built payload as event
         Ok(self.payload.expect_built_payload().await?)
     }
 
     /// Triggers payload building job and submits it to the engine.
     pub async fn build_and_submit_payload(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let payload = self.new_payload().await?;
+
         self.submit_payload(payload.clone()).await?;
+
         Ok(payload)
     }
 
-    /// Advances the node forward one block (requires at least one transaction).
+    /// Advances the node forward one block
     pub async fn advance_block(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let payload = self.build_and_submit_payload().await?;
+
+        // trigger forkchoice update via engine api to commit the block to the blockchain
         self.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
+
         Ok(payload)
     }
 
