@@ -10,11 +10,10 @@ use jsonrpsee::core::client::ClientT;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_db::tables;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet, E2ETestSetupBuilder};
-use reth_node_builder::NodeConfig;
 use reth_node_core::args::RocksDbArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_provider::RocksDBProviderFactory;
+use reth_provider::{RocksDBProviderFactory, StorageSettings};
 use std::{sync::Arc, time::Duration};
 
 const ROCKSDB_POLL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -97,14 +96,24 @@ fn test_attributes_generator(timestamp: u64) -> EthPayloadBuilderAttributes {
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
 
-/// Enables `RocksDB` for `TransactionHashNumbers` table.
-/// Explicitly enables static file changesets to test the fix for double-write bug.
-const fn with_rocksdb_enabled<C>(mut config: NodeConfig<C>) -> NodeConfig<C> {
-    config.rocksdb =
-        RocksDbArgs { all: true, tx_hash: true, storages_history: true, account_history: true };
-    config.static_files.storage_changesets = true;
-    config.static_files.account_changesets = true;
-    config
+/// Verifies that `RocksDB` CLI defaults match `StorageSettings::base()`.
+#[test]
+fn test_rocksdb_defaults_match_storage_settings() {
+    let args = RocksDbArgs::default();
+    let settings = StorageSettings::base();
+
+    assert_eq!(
+        args.tx_hash, settings.transaction_hash_numbers_in_rocksdb,
+        "tx_hash default should match StorageSettings::base()"
+    );
+    assert_eq!(
+        args.storages_history, settings.storages_history_in_rocksdb,
+        "storages_history default should match StorageSettings::base()"
+    );
+    assert_eq!(
+        args.account_history, settings.account_history_in_rocksdb,
+        "account_history default should match StorageSettings::base()"
+    );
 }
 
 /// Smoke test: node boots with `RocksDB` routing enabled.
@@ -116,7 +125,6 @@ async fn test_rocksdb_node_startup() -> Result<()> {
 
     let (nodes, _tasks, _wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
-            .with_node_config_modifier(with_rocksdb_enabled)
             .build()
             .await?;
 
@@ -144,7 +152,6 @@ async fn test_rocksdb_block_mining() -> Result<()> {
 
     let (mut nodes, _tasks, _wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
-            .with_node_config_modifier(with_rocksdb_enabled)
             .build()
             .await?;
 
@@ -201,7 +208,6 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
-    .with_node_config_modifier(with_rocksdb_enabled)
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -268,7 +274,6 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
-    .with_node_config_modifier(with_rocksdb_enabled)
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -336,7 +341,6 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
-    .with_node_config_modifier(with_rocksdb_enabled)
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
@@ -421,7 +425,6 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
         chain_spec.clone(),
         test_attributes_generator,
     )
-    .with_node_config_modifier(with_rocksdb_enabled)
     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
     .build()
     .await?;
