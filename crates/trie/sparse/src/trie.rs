@@ -1053,10 +1053,18 @@ impl SparseTrieTrait for SerialSparseTrie {
     fn revealed_node_count(&self) -> usize {
         self.nodes.values().filter(|n| !matches!(n, SparseNode::Hash(_))).count()
     }
+}
 
+impl SerialSparseTrie {
     /// Prunes the trie by converting nodes beyond `max_depth` into hash stubs,
     /// then removing all their descendants.
-    fn prune(&mut self, max_depth: usize) -> usize {
+    ///
+    /// Depth counts nodes traversed (not nibbles). Must be called after `root()`.
+    /// Embedded nodes (RLP < 32 bytes) are preserved since they have no hash.
+    ///
+    /// Returns the number of nodes converted to hash stubs.
+    /// Returns 0 if `max_depth` exceeds trie depth or trie is empty.
+    pub fn prune(&mut self, max_depth: usize) -> usize {
         // DFS to collect children of nodes at max_depth. These children (at depth max_depth+1)
         // become "prune roots" - converted to Hash stubs with their descendants removed.
         let mut pruned_roots = Vec::<Nibbles>::new();
@@ -1169,9 +1177,7 @@ impl SparseTrieTrait for SerialSparseTrie {
 
         nodes_converted
     }
-}
 
-impl SerialSparseTrie {
     /// Creates a new revealed sparse trie from the given root node.
     ///
     /// This function initializes the internal structures and then reveals the root.

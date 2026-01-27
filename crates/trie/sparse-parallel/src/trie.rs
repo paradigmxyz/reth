@@ -921,7 +921,9 @@ impl SparseTrie for ParallelSparseTrie {
 
         upper_count + lower_count
     }
+}
 
+impl SparseTrieExt for ParallelSparseTrie {
     fn prune(&mut self, max_depth: usize) -> usize {
         let mut pruned_roots = Vec::<Nibbles>::new();
         let mut stack = vec![(Nibbles::default(), 0usize)];
