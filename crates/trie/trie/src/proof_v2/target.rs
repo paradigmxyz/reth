@@ -96,6 +96,47 @@ impl<'a> SubTrieTargets<'a> {
     }
 }
 
+/// Helper to group targets by common prefix for efficient traversal.
+#[derive(Debug)]
+pub struct PrefixBatch<'a> {
+    /// The common prefix shared by all targets in this batch
+    pub common_prefix: Nibbles,
+    /// The targets in this batch
+    pub targets: &'a [Nibbles],
+}
+
+impl<'a> PrefixBatch<'a> {
+    /// Group sorted targets by their longest common prefix.
+    pub fn from_sorted(targets: &'a [Nibbles]) -> Vec<PrefixBatch<'a>> {
+        if targets.is_empty() {
+            return Vec::new();
+        }
+        let mut result = Vec::new();
+        let mut start = 0;
+        while start < targets.len() {
+            let first = &targets[start];
+            let mut end = start + 1;
+            let mut prefix_len = first.len();
+
+            while end < targets.len() {
+                let common = first.common_prefix_length(&targets[end]);
+                if common == 0 {
+                    break;
+                }
+                prefix_len = prefix_len.min(common);
+                end += 1;
+            }
+
+            result.push(PrefixBatch {
+                common_prefix: first.slice(..prefix_len),
+                targets: &targets[start..end],
+            });
+            start = end;
+        }
+        result
+    }
+}
+
 /// Given a set of [`Target`]s, returns an iterator over those same [`Target`]s chunked by the
 /// sub-tries they apply to within the overall trie.
 pub(crate) fn iter_sub_trie_targets<'a>(

@@ -637,6 +637,73 @@ where
         }
     }
 
+    /// Like [`Self::push_leaf`], but won't pop branches at or above `min_keep_prefix`.
+    ///
+    /// This optimization reduces unnecessary branch pop/push operations when processing
+    /// keys with shared prefixes within sub-tries.
+    fn push_leaf_with_min_prefix<'a>(
+        &mut self,
+        targets: &mut TargetsCursor<'a>,
+        key: Nibbles,
+        val: VE::DeferredEncoder,
+        min_keep_prefix: usize,
+    ) -> Result<(), StateProofError> {
+        loop {
+            trace!(
+                target: TRACE_TARGET,
+                ?key,
+                ?min_keep_prefix,
+                branch_stack_len = ?self.branch_stack.len(),
+                branch_path = ?self.branch_path,
+                child_stack_len = ?self.child_stack.len(),
+                "push_leaf_with_min_prefix: loop",
+            );
+
+            let curr_branch_state_mask = match self.branch_stack.last() {
+                Some(curr_branch) => curr_branch.state_mask,
+                None if self.child_stack.is_empty() => {
+                    self.child_stack
+                        .push(ProofTrieBranchChild::Leaf { short_key: key, value: val });
+                    return Ok(())
+                }
+                None => {
+                    debug_assert_eq!(self.child_stack.len(), 1);
+                    debug_assert!(!self
+                        .child_stack
+                        .last()
+                        .expect("already checked for emptiness")
+                        .short_key()
+                        .is_empty());
+                    let (nibble, short_key) = self.push_new_branch(key);
+                    self.push_new_leaf(targets, nibble, short_key, val)?;
+                    return Ok(())
+                }
+            };
+
+            let common_prefix_len = self.branch_path.common_prefix_length(&key);
+
+            if common_prefix_len < self.branch_path.len() {
+                if common_prefix_len >= min_keep_prefix {
+                    self.pop_branch(targets)?;
+                    continue
+                }
+                self.pop_branch(targets)?;
+                continue
+            }
+
+            let nibble = key.get_unchecked(common_prefix_len);
+            if curr_branch_state_mask.is_bit_set(nibble) {
+                let (nibble, short_key) = self.push_new_branch(key);
+                self.push_new_leaf(targets, nibble, short_key, val)?;
+            } else {
+                let short_key = key.slice_unchecked(common_prefix_len + 1, key.len());
+                self.push_new_leaf(targets, nibble, short_key, val)?;
+            }
+
+            return Ok(())
+        }
+    }
+
     /// Given the lower and upper bounds (exclusive) of a range of keys, iterates over the
     /// `hashed_cursor` and calculates all trie nodes possible based on those keys. If the upper
     /// bound is None then it is considered unbounded.
