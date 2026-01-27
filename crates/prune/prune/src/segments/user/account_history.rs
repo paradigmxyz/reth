@@ -299,9 +299,11 @@ impl AccountHistory {
         })?;
         trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned account history (RocksDB indices)");
 
-        // Delete static file jars AFTER RocksDB batch is queued. This ensures that if we crash
-        // after jar deletion but before checkpoint commit, we can still recover because the
-        // RocksDB batch will be committed atomically with the checkpoint.
+        // Delete static file jars only when fully processed. During provider.commit(), RocksDB
+        // batch is committed before the MDBX checkpoint. If crash occurs after RocksDB commit
+        // but before MDBX commit, on restart the pruner checkpoint indicates data needs
+        // re-pruning, but the RocksDB shards are already pruned - this is safe because pruning
+        // is idempotent (re-pruning already-pruned shards is a no-op).
         if done {
             provider.static_file_provider().delete_segment_below_block(
                 StaticFileSegment::AccountChangeSets,
