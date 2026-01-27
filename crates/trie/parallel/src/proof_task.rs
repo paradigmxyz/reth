@@ -1521,18 +1521,21 @@ fn dispatch_storage_proofs(
         // Create channel for receiving ProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
-        // Check if this account is known to have no storage
-        let skip_storage_proof = storage_filter
-            .as_ref()
-            .is_some_and(|filter| !filter.read().may_have_storage(*hashed_address));
+        // Check if this account is known to have no storage AND has no slots to prove.
+        // We can only skip if both conditions are met - if there are slots to prove,
+        // we must compute the proof regardless of the filter.
+        let skip_storage_proof = target_slots.is_empty()
+            && storage_filter
+                .as_ref()
+                .is_some_and(|filter| !filter.read().may_have_storage(*hashed_address));
 
         if skip_storage_proof {
-            // Account is definitely not in the filter, so it has no storage.
+            // Account has no slots to prove AND is not in the filter, so it has no storage.
             // Send an empty storage proof result directly.
             trace!(
                 target: "trie::proof_task",
                 ?hashed_address,
-                "Skipping storage proof for account not in filter"
+                "Skipping storage proof for account with no slots and not in filter"
             );
             let empty_proof = DecodedStorageMultiProof {
                 root: EMPTY_ROOT_HASH,
