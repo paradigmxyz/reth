@@ -1417,7 +1417,7 @@ impl SerialSparseTrie {
         while let Some((mut path, level)) = paths.pop() {
             match self.nodes.get(&path).unwrap() {
                 SparseNode::Empty | SparseNode::Hash(_) => {}
-                SparseNode::Leaf { key: _, hash } => {
+                SparseNode::Leaf { key: _, hash, .. } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
@@ -1438,7 +1438,7 @@ impl SerialSparseTrie {
                         paths.push((path, level + 1));
                     }
                 }
-                SparseNode::Branch { state_mask, hash, store_in_db_trie: _ } => {
+                SparseNode::Branch { state_mask, hash, .. } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
