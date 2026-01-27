@@ -884,9 +884,12 @@ where
 
         trace!(target: "trie::sparse", ?address, "Updating account");
         let nibbles = Nibbles::unpack(address);
-        self.account_rlp_buf.clear();
-        account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+        let mut rlp_buf = core::mem::take(&mut self.account_rlp_buf);
+        rlp_buf.clear();
+        account.into_trie_account(storage_root).encode(&mut rlp_buf);
+        let result = self.update_account_leaf(nibbles, rlp_buf, provider_factory);
+        self.account_rlp_buf = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+        result?;
 
         Ok(true)
     }
@@ -937,9 +940,12 @@ where
         // Otherwise, update the account leaf.
         trace!(target: "trie::sparse", ?address, "Updating account with the new storage root");
         let nibbles = Nibbles::unpack(address);
-        self.account_rlp_buf.clear();
-        trie_account.encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+        let mut rlp_buf = core::mem::take(&mut self.account_rlp_buf);
+        rlp_buf.clear();
+        trie_account.encode(&mut rlp_buf);
+        let result = self.update_account_leaf(nibbles, rlp_buf, provider_factory);
+        self.account_rlp_buf = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+        result?;
 
         Ok(true)
     }
