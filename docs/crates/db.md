@@ -58,8 +58,6 @@ There are many tables within the node, all used to store different types of data
 - HashedStorages
 - AccountsTrie
 - StoragesTrie
-- AccountsTrieChangeSets
-- StoragesTrieChangeSets
 - TransactionSenders
 - StageCheckpoints
 - StageCheckpointProgresses
@@ -159,7 +157,7 @@ pub trait DbTx: Debug + Send + Sync {
     ) -> Result<Option<T::Value>, DatabaseError>;
     /// Commit for read only transaction will consume and free transaction and allows
     /// freeing of memory pages
-    fn commit(self) -> Result<bool, DatabaseError>;
+    fn commit(self) -> Result<(), DatabaseError>;
     /// Aborts transaction
     fn abort(self);
     /// Iterate over read only values in table.

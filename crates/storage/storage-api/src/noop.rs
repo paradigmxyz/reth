@@ -6,11 +6,11 @@ use crate::{
     HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider, TrieReader,
+    StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
-use crate::{DBProvider, DatabaseProviderFactory};
+use crate::{DBProvider, DatabaseProviderFactory, StorageChangeSetReader};
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -35,9 +35,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
-    updates::{TrieUpdates, TrieUpdatesSorted},
-    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
-    StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -409,6 +408,40 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
     }
 }
 
+#[cfg(feature = "db-api")]
+impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<C, N> {
+    fn storage_changeset(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<
+        Vec<(reth_db_api::models::BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
+    > {
+        Ok(Vec::default())
+    }
+
+    fn get_storage_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+        _storage_key: B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::StorageEntry>> {
+        Ok(None)
+    }
+
+    fn storage_changesets_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<
+        Vec<(reth_db_api::models::BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
+    > {
+        Ok(Vec::default())
+    }
+
+    fn storage_changeset_count(&self) -> ProviderResult<usize> {
+        Ok(0)
+    }
+}
+
 impl<C: Send + Sync, N: NodePrimitives> StateRootProvider for NoopProvider<C, N> {
     fn state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
         Ok(B256::default())
@@ -639,23 +672,10 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<Chai
         &self.prune_modes
     }
 
-    fn commit(self) -> ProviderResult<bool> {
+    fn commit(self) -> ProviderResult<()> {
         use reth_db_api::transaction::DbTx;
 
         Ok(self.tx.commit()?)
-    }
-}
-
-impl<C: Send + Sync, N: NodePrimitives> TrieReader for NoopProvider<C, N> {
-    fn trie_reverts(&self, _from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
-        Ok(TrieUpdatesSorted::default())
-    }
-
-    fn get_block_trie_updates(
-        &self,
-        _block_number: BlockNumber,
-    ) -> ProviderResult<TrieUpdatesSorted> {
-        Ok(TrieUpdatesSorted::default())
     }
 }
 

@@ -19,7 +19,6 @@ reth-cli-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-storage-errors.workspace = true
 reth-storage-api = { workspace = true, features = ["std", "db-api"] }
-reth-provider.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
 reth-rpc-eth-types.workspace = true
@@ -81,7 +80,8 @@ tokio.workspace = true
 jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 keccak-cache-global = ["alloy-primitives/keccak-cache-global"]
-otlp = ["reth-tracing/otlp"]
+otlp = ["reth-tracing/otlp", "reth-tracing-otlp/otlp"]
+otlp-logs = ["reth-tracing/otlp-logs", "reth-tracing-otlp/otlp-logs"]
 tracy = ["reth-tracing/tracy"]
 
 min-error-logs = ["tracing/release_max_level_error"]
@@ -91,7 +91,7 @@ min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
 # Marker feature for edge/unstable builds - captured by vergen in build.rs
-edge = []
+edge = ["reth-storage-api/edge"]
 
 [build-dependencies]
 vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }

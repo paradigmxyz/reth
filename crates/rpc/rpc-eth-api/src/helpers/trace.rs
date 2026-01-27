@@ -13,7 +13,10 @@ use reth_evm::{
     Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
-use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::{bal::EvmDatabaseError, State},
+};
 use reth_rpc_eth_types::{cache::db::StateCacheDb, EthApiError};
 use reth_storage_api::{ProviderBlock, ProviderTx};
 use revm::{context::Block, context_interface::result::ResultAndState, DatabaseCommit};
@@ -32,7 +35,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         inspector: I,
     ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error = EvmDatabaseError<ProviderError>>,
         I: InspectorFor<Self::Evm, DB>,
     {
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
@@ -307,12 +310,14 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     .evm_factory()
                     .create_tracer(&mut db, evm_env, inspector_setup())
                     .try_trace_many(block.transactions_recovered().take(max_transactions), |ctx| {
+                        #[allow(clippy::needless_update)]
                         let tx_info = TransactionInfo {
                             hash: Some(*ctx.tx.tx_hash()),
                             index: Some(idx),
                             block_hash: Some(block_hash),
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
+                            ..Default::default()
                         };
                         idx += 1;
 

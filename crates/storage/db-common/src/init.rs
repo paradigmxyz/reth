@@ -6,7 +6,12 @@ use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
-use reth_db_api::{tables, transaction::DbTxMut, DatabaseError};
+use reth_db_api::{
+    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    tables,
+    transaction::DbTxMut,
+    BlockNumberList, DatabaseError,
+};
 use reth_etl::Collector;
 use reth_execution_errors::StateRootError;
 use reth_primitives_traits::{
@@ -14,11 +19,11 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
-    BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
-    HashingWriter, HeaderProvider, HistoryWriter, MetadataWriter, NodePrimitivesProvider,
-    OriginalValuesKnown, ProviderError, RevertsInit, RocksDBProviderFactory, StageCheckpointReader,
-    StageCheckpointWriter, StateWriter, StaticFileProviderFactory, StorageSettings,
-    StorageSettingsCache, TrieWriter,
+    BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, EitherWriter,
+    ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter, MetadataProvider,
+    MetadataWriter, NodePrimitivesProvider, OriginalValuesKnown, ProviderError, RevertsInit,
+    RocksDBProviderFactory, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
+    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -29,7 +34,7 @@ use reth_trie::{
 use reth_trie_db::DatabaseStateRoot;
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 /// Default soft limit for number of bytes to read from state dump file, before inserting into
 /// database.
@@ -91,7 +96,8 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
         + ChainSpecProvider
         + StageCheckpointReader
-        + BlockHashReader
+        + BlockNumReader
+        + MetadataProvider
         + StorageSettingsCache,
     PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
         + StageCheckpointWriter
@@ -102,6 +108,9 @@ where
         + TrieWriter
         + MetadataWriter
         + ChainSpecProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -125,7 +134,8 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
         + ChainSpecProvider
         + StageCheckpointReader
-        + BlockHashReader
+        + BlockNumReader
+        + MetadataProvider
         + StorageSettingsCache,
     PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
         + StageCheckpointWriter
@@ -136,6 +146,9 @@ where
         + TrieWriter
         + MetadataWriter
         + ChainSpecProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -158,6 +171,16 @@ where
                 if factory.get_stage_checkpoint(StageId::Headers)?.is_none() {
                     error!(target: "reth::storage", "Genesis header found on static files, but database is uninitialized.");
                     return Err(InitStorageError::UninitializedDatabase)
+                }
+
+                let stored = factory.storage_settings()?.unwrap_or_else(StorageSettings::legacy);
+                if stored != genesis_storage_settings {
+                    warn!(
+                        target: "reth::storage",
+                        ?stored,
+                        requested = ?genesis_storage_settings,
+                        "Storage settings mismatch detected"
+                    );
                 }
 
                 debug!("Genesis already written, skipping.");
@@ -335,7 +358,11 @@ where
         Vec::new(),
     );
 
-    provider.write_state(&execution_outcome, OriginalValuesKnown::Yes)?;
+    provider.write_state(
+        &execution_outcome,
+        OriginalValuesKnown::Yes,
+        StateWriteConfig::default(),
+    )?;
 
     trace!(target: "reth::cli", "Inserted state");
 
@@ -382,7 +409,8 @@ where
         + HistoryWriter
         + ChainSpecProvider
         + StorageSettingsCache
-        + RocksDBProviderFactory,
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
 {
     let genesis_block_number = provider.chain_spec().genesis_header().number();
     insert_history(provider, alloc, genesis_block_number)
@@ -404,17 +432,11 @@ where
         + RocksDBProviderFactory
         + NodePrimitivesProvider,
 {
-    use reth_db_api::{
-        models::{storage_sharded_key::StorageShardedKey, ShardedKey},
-        BlockNumberList,
-    };
-    use reth_provider::EitherWriter;
-
     provider.with_rocksdb_batch(|batch| {
         let mut writer = EitherWriter::new_accounts_history(provider, batch)?;
         let list = BlockNumberList::new([block]).expect("single block always fits");
         for (addr, _) in alloc.clone() {
-            writer.put_account_history(ShardedKey::last(*addr), &list)?;
+            writer.upsert_account_history(ShardedKey::last(*addr), &list)?;
         }
         trace!(target: "reth::cli", "Inserted account history");
         Ok(((), writer.into_raw_rocksdb_batch()))
@@ -426,7 +448,7 @@ where
         for (addr, account) in alloc {
             if let Some(storage) = &account.storage {
                 for key in storage.keys() {
-                    writer.put_storage_history(StorageShardedKey::last(*addr, *key), &list)?;
+                    writer.upsert_storage_history(StorageShardedKey::last(*addr, *key), &list)?;
                 }
             }
         }
@@ -508,6 +530,9 @@ where
         + HashingWriter
         + TrieWriter
         + StateWriter
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider
         + AsRef<Provider>,
 {
     if etl_config.file_size == 0 {
@@ -644,6 +669,9 @@ where
         + HashingWriter
         + HistoryWriter
         + StateWriter
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider
         + AsRef<Provider>,
 {
     let accounts_len = collector.len();
@@ -925,5 +953,31 @@ mod tests {
                 IntegerList::new([0]).unwrap()
             )],
         );
+    }
+
+    #[test]
+    fn warn_storage_settings_mismatch() {
+        let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
+        init_genesis_with_settings(&factory, StorageSettings::legacy()).unwrap();
+
+        // Request different settings - should warn but succeed
+        let result = init_genesis_with_settings(
+            &factory,
+            StorageSettings::legacy().with_receipts_in_static_files(true),
+        );
+
+        // Should succeed (warning is logged, not an error)
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn allow_same_storage_settings() {
+        let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
+        let settings = StorageSettings::legacy().with_receipts_in_static_files(true);
+        init_genesis_with_settings(&factory, settings).unwrap();
+
+        let result = init_genesis_with_settings(&factory, settings);
+
+        assert!(result.is_ok());
     }
 }
