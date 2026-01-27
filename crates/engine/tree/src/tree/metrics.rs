@@ -1,5 +1,4 @@
 use crate::tree::{error::InsertBlockFatalError, TreeOutcome};
-use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
 use reth_engine_primitives::{ForkchoiceStatus, OnForkChoiceUpdated};
 use reth_errors::ProviderError;
