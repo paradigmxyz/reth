@@ -221,7 +221,9 @@ fn main() -> Result<()> {
 
     let queries = generate_queries(&args, &sampled);
     println!("\nGenerated {} queries per method", queries.balance.len());
-    println!("  Query strategy: ~33% before first change, ~33% mid-range, ~33% at last change");
+    println!(
+        "  Query strategy: all queries at blocks with a changeset AFTER (forcing InChangeset)"
+    );
 
     println!("\n=== Running Benchmarks ===");
     if args.cold {
@@ -393,20 +395,105 @@ fn generate_queries(args: &Args, sampled: &SampledData) -> GeneratedQueries {
     let mut nonce = Vec::with_capacity(args.queries);
     let mut storage = Vec::with_capacity(args.queries);
 
+    // Print debug info about sampled data distribution
+    println!("\n=== Sample Distribution Debug ===");
+    let single_change_accounts =
+        sampled.accounts.iter().filter(|s| s.first_change == s.last_change).count();
+    let multi_change_accounts = sampled.accounts.len() - single_change_accounts;
+    println!(
+        "Accounts: {} single-change, {} multi-change",
+        single_change_accounts, multi_change_accounts
+    );
+
+    let single_change_storage =
+        sampled.storage.iter().filter(|s| s.first_change == s.last_change).count();
+    let multi_change_storage = sampled.storage.len() - single_change_storage;
+    println!(
+        "Storage: {} single-change, {} multi-change",
+        single_change_storage, multi_change_storage
+    );
+
+    if !sampled.accounts.is_empty() {
+        let min_first = sampled.accounts.iter().map(|s| s.first_change).min().unwrap();
+        let max_first = sampled.accounts.iter().map(|s| s.first_change).max().unwrap();
+        let min_last = sampled.accounts.iter().map(|s| s.last_change).min().unwrap();
+        let max_last = sampled.accounts.iter().map(|s| s.last_change).max().unwrap();
+        println!(
+            "Account first_change range: {} - {} (span: {})",
+            min_first,
+            max_first,
+            max_first - min_first
+        );
+        println!(
+            "Account last_change range: {} - {} (span: {})",
+            min_last,
+            max_last,
+            max_last - min_last
+        );
+        println!(
+            "Window: oldest_block={}, latest_block={}",
+            sampled.oldest_block, sampled.latest_block
+        );
+    }
+
+    // To force InChangeset, we must query at a block where there's a changeset AFTER that block.
+    // HistoryInfo::InChangeset(block_number) means "look in changeset at block_number".
+    //
+    // Strategy: For each sample with changes at [first_change, last_change]:
+    // - Query at first_change - 1: Returns InChangeset(first_change) if first_change > oldest_block
+    // - Query at any block in [first_change, last_change - 1]: Returns InChangeset for the next
+    //   change
+    // - Query at last_change or after: Returns InPlainState (no more changesets after)
+    //
+    // To guarantee InChangeset:
+    // 1. Only use samples where first_change > oldest_block (so first_change - 1 is valid)
+    // 2. Query at first_change - 1 (guaranteed to have changeset at first_change after it)
+    // 3. For multi-change samples, can also query in the middle
+
+    // Filter to samples that guarantee InChangeset (first_change > oldest_block)
+    let valid_accounts: Vec<_> =
+        sampled.accounts.iter().filter(|s| s.first_change > sampled.oldest_block).collect();
+    let valid_storage: Vec<_> =
+        sampled.storage.iter().filter(|s| s.first_change > sampled.oldest_block).collect();
+
+    println!(
+        "Valid samples (first_change > oldest_block): {} accounts, {} storage",
+        valid_accounts.len(),
+        valid_storage.len()
+    );
+
+    if valid_accounts.is_empty() {
+        eprintln!("WARNING: No valid account samples! All first_change <= oldest_block.");
+        eprintln!(
+            "This means all accounts in the sample window existed before the window started."
+        );
+    }
+
     for _ in 0..args.queries {
-        if let Some(sample) = sampled.accounts.choose(&mut rng) {
-            let query_variant = rng.gen_range(0..3);
-            let block = match query_variant {
-                0 => {
-                    if sample.first_change > sampled.oldest_block {
-                        sample.first_change - 1
-                    } else {
-                        sample.first_change
-                    }
+        // Prefer valid samples, fall back to any sample if none valid
+        let sample = if !valid_accounts.is_empty() {
+            valid_accounts.choose(&mut rng).copied()
+        } else {
+            sampled.accounts.choose(&mut rng)
+        };
+
+        if let Some(sample) = sample {
+            // Query at first_change - 1 to guarantee InChangeset(first_change)
+            // For multi-change samples, sometimes query in the middle too
+            let block = if sample.first_change > sampled.oldest_block {
+                if sample.first_change < sample.last_change && rng.gen_bool(0.5) {
+                    // Multi-change: query somewhere in the middle
+                    // Any block in [first_change, last_change - 1] should hit InChangeset
+                    rng.gen_range(sample.first_change..sample.last_change)
+                } else {
+                    // Query just before first_change
+                    sample.first_change - 1
                 }
-                1 => (sample.first_change + sample.last_change) / 2,
-                _ => sample.last_change,
+            } else {
+                // Fallback: query at first_change (may hit InPlainState)
+                sample.first_change
             };
+
             balance.push(BenchmarkQuery {
                 query_type: QueryType::Balance,
                 address: sample.address,
@@ -423,19 +510,23 @@ fn generate_queries(args: &Args, sampled: &SampledData) -> GeneratedQueries {
     }
 
     for _ in 0..args.queries {
-        if let Some(sample) = sampled.storage.choose(&mut rng) {
-            let query_variant = rng.gen_range(0..3);
-            let block = match query_variant {
-                0 => {
-                    if sample.first_change > sampled.oldest_block {
-                        sample.first_change - 1
-                    } else {
-                        sample.first_change
-                    }
+        let sample = if !valid_storage.is_empty() {
+            valid_storage.choose(&mut rng).copied()
+        } else {
+            sampled.storage.choose(&mut rng)
+        };
+
+        if let Some(sample) = sample {
+            let block = if sample.first_change > sampled.oldest_block {
+                if sample.first_change < sample.last_change && rng.gen_bool(0.5) {
+                    rng.gen_range(sample.first_change..sample.last_change)
+                } else {
+                    sample.first_change - 1
                 }
-                1 => (sample.first_change + sample.last_change) / 2,
-                _ => sample.last_change,
+            } else {
+                sample.first_change
             };
+
             storage.push(BenchmarkQuery {
                 query_type: QueryType::Storage,
                 address: sample.address,
