@@ -1524,8 +1524,8 @@ fn dispatch_storage_proofs(
         // Check if this account is known to have no storage AND has no slots to prove.
         // We can only skip if both conditions are met - if there are slots to prove,
         // we must compute the proof regardless of the filter.
-        let skip_storage_proof = target_slots.is_empty()
-            && storage_filter
+        let skip_storage_proof = target_slots.is_empty() &&
+            storage_filter
                 .as_ref()
                 .is_some_and(|filter| !filter.read().may_have_storage(*hashed_address));
 
@@ -1537,11 +1537,7 @@ fn dispatch_storage_proofs(
                 ?hashed_address,
                 "Skipping storage proof for account with no slots and not in filter"
             );
-            let empty_proof = DecodedStorageMultiProof {
-                root: EMPTY_ROOT_HASH,
-                subtree: Default::default(),
-                branch_node_masks: Default::default(),
-            };
+            let empty_proof = DecodedStorageMultiProof::empty();
             let _ = result_tx.send(StorageProofResultMessage {
                 hashed_address: *hashed_address,
                 result: Ok(StorageProofResult::Legacy { proof: empty_proof }),
