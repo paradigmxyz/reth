@@ -16,7 +16,7 @@ use reth_db_api::{
     cursor::DbCursorRW,
     database::Database,
     table::{Table, TableRow},
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_fs_util as fs;
 use std::hint::black_box;
@@ -185,9 +185,9 @@ where
             for (k, v) in input {
                 crsr.append(k, &v).expect("submit");
             }
-
-            tx.commit().unwrap()
         });
+        drop(crsr);
+        tx.commit().unwrap();
     }
     db
 }
@@ -203,9 +203,9 @@ where
             for (k, v) in input {
                 crsr.insert(k, &v).expect("submit");
             }
-
-            tx.commit().unwrap()
         });
+        drop(crsr);
+        tx.commit().unwrap();
     }
     db
 }
@@ -220,9 +220,8 @@ where
             for (k, v) in input {
                 tx.put::<T>(k, v).expect("submit");
             }
-
-            tx.commit().unwrap()
         });
+        tx.commit().unwrap();
     }
     db
 }

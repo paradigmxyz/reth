@@ -137,6 +137,7 @@ where
                 for (k, _, v, _) in input {
                     crsr.append(k, &v).expect("submit");
                 }
+                drop(crsr);
                 tx.commit().unwrap()
             },
         )
@@ -157,7 +158,7 @@ where
                     let (k, _, v, _) = input.get(index).unwrap().clone();
                     crsr.insert(k, &v).expect("submit");
                 }
-
+                drop(crsr);
                 tx.commit().unwrap()
             },
         )
@@ -219,6 +220,7 @@ where
                 for (k, _, v, _) in input {
                     crsr.append_dup(k, v).expect("submit");
                 }
+                drop(crsr);
                 tx.commit().unwrap()
             },
         )
