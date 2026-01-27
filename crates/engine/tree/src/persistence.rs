@@ -162,12 +162,14 @@ where
         debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
 
         // Extract timing stats before consuming blocks (for slow block logging after commit)
-        let timing_stats_list: Vec<ExecutionTimingStats> = if self.slow_block_threshold.is_some() {
+        let timing_stats: Vec<ExecutionTimingStats> = if self.slow_block_threshold.is_some() {
             blocks.iter().filter_map(|b| b.timing_stats()).collect()
         } else {
             Vec::new()
         };
 
+        // We calculate an estimated commit duration per block by diving the total commit duration
+        // for a batch by the number of blocks in the batch
         let commit_duration = {
             let start = Instant::now();
             let provider_rw = self.provider.database_provider_rw()?;
@@ -190,7 +192,7 @@ where
             provider_rw.commit()?;
             start.elapsed()
         }
-        .div_f64(timing_stats_list.len() as f64);
+        .div_f64(timing_stats.len() as f64);
 
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
@@ -198,7 +200,7 @@ where
         self.metrics.save_blocks_duration_seconds.record(commit_duration);
 
         // Emit unified slow block logs after commit completes
-        for stats in timing_stats_list {
+        for stats in timing_stats {
             let total_duration = stats.execution_duration +
                 stats.state_read_duration +
                 stats.state_hash_duration +

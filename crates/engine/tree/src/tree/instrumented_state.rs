@@ -74,6 +74,7 @@ where
         Self { state_provider, handle: InstrumentedStateProviderHandle::new(source) }
     }
 
+    /// Returns a handle that can be used to fetch recorded metrics.
     pub fn handle(&self) -> InstrumentedStateProviderHandle {
         self.handle.clone()
     }
@@ -258,6 +259,7 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStatePr
     }
 }
 
+/// A handle to [`InstrumentedStateProvider`] that can be used to fetch recorded metrics.
 #[derive(Debug, Clone)]
 pub struct InstrumentedStateProviderHandle(Arc<InstrumentedStateProviderHandleInner>);
 
@@ -292,7 +294,7 @@ impl InstrumentedStateProviderHandle {
     }
 
     /// Records the total latencies into their respective gauges and histograms.
-    pub fn record_total_latency(&self) {
+    fn record_total_latency(&self) {
         let total_storage_fetch_latency = self.0.total_storage_fetch_latency.duration();
         self.0.metrics.total_storage_fetch_latency.record(total_storage_fetch_latency);
         self.0
@@ -312,30 +314,37 @@ impl InstrumentedStateProviderHandle {
             .set(total_account_fetch_latency.as_secs_f64());
     }
 
+    /// Returns total number of storage fetches.
     pub fn total_storage_fetches(&self) -> usize {
         self.0.total_storage_fetches.load(Ordering::Relaxed)
     }
 
+    /// Returns total time spent on storage fetches.
     pub fn total_storage_fetch_latency(&self) -> Duration {
         self.0.total_storage_fetch_latency.duration()
     }
 
+    /// Returns total number of code fetches.
     pub fn total_code_fetches(&self) -> usize {
         self.0.total_code_fetches.load(Ordering::Relaxed)
     }
 
+    /// Returns total time spent on code fetches.
     pub fn total_code_fetch_latency(&self) -> Duration {
         self.0.total_code_fetch_latency.duration()
     }
 
+    /// Returns total amount of codes fetched, in bytes.
     pub fn total_code_fetched_bytes(&self) -> usize {
         self.0.total_code_fetched_bytes.load(Ordering::Relaxed)
     }
 
+    /// Returns total number of account fetches.
     pub fn total_account_fetches(&self) -> usize {
         self.0.total_account_fetches.load(Ordering::Relaxed)
     }
 
+    /// Returns total time spent on account fetches.
     pub fn total_account_fetch_latency(&self) -> Duration {
         self.0.total_account_fetch_latency.duration()
     }
