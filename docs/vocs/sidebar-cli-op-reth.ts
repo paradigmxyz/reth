@@ -40,7 +40,14 @@ export const opRethCliSidebar: SidebarItem = {
                 },
                 {
                     text: "op-reth db list",
-                    link: "/cli/op-reth/db/list"
+                    link: "/cli/op-reth/db/list",
+                    collapsed: true,
+                    items: [
+                        {
+                            text: "op-reth db list mdbx",
+                            link: "/cli/op-reth/db/list/mdbx"
+                        }
+                    ]
                 },
                 {
                     text: "op-reth db checksum",

@@ -1,18 +1,48 @@
-# reth db list
+# reth db list mdbx
 
-Lists the contents of a table
+
 
 ```bash
-$ reth db list --help
+$ reth db list mdbx --help
 ```
 ```txt
-Usage: reth db list [OPTIONS] <COMMAND>
+Usage: reth db list mdbx [OPTIONS] <TABLE>
 
-Commands:
-  mdbx
-  help  Print this message or the help of the given subcommand(s)
+Arguments:
+  <TABLE>
+
 
 Options:
+  -s, --skip <SKIP>
+          [default: 0]
+
+  -r, --reverse
+
+
+  -l, --len <LEN>
+          [default: 5]
+
+      --search <SEARCH>
+
+
+      --min-row-size <MIN_ROW_SIZE>
+          [default: 0]
+
+      --min-key-size <MIN_KEY_SIZE>
+          [default: 0]
+
+      --min-value-size <MIN_VALUE_SIZE>
+          [default: 0]
+
+  -c, --count
+
+
+  -j, --json
+
+
+      --raw
+
+
   -h, --help
           Print help (see a summary with '-h')
 
