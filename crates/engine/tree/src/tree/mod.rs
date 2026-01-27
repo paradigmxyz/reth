@@ -39,8 +39,9 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::spawn_os_thread;
-use reth_trie_db::ChangesetCache;
+use reth_trie_db::{ChangesetCache, StorageFilterBuilder};
 use revm::interpreter::debug_unreachable;
+use revm::state::EvmState;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
@@ -410,14 +411,9 @@ where
         );
 
         // Build the storage filter from the database
-        let storage_filter = {
-            use reth_trie_db::StorageFilterBuilder;
-
-            let db_provider = provider.database_provider_ro().expect("failed to get db provider");
-            let filter =
-                db_provider.build_storage_filter().expect("failed to build storage filter");
-            std::sync::Arc::new(parking_lot::RwLock::new(filter))
-        };
+        let db_provider = provider.database_provider_ro().expect("failed to get db provider");
+        let filter = db_provider.build_storage_filter().expect("failed to build storage filter");
+        let storage_filter = std::sync::Arc::new(parking_lot::RwLock::new(filter));
 
         // Set the storage filter on the payload validator for use in proof calculation
         let mut payload_validator = payload_validator;
