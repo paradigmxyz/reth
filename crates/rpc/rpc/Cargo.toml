@@ -28,6 +28,7 @@ reth-network-api.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-revm = { workspace = true, features = ["witness"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
+reth-tracing.workspace = true
 reth-rpc-convert.workspace = true
 revm-inspectors.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }

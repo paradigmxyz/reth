@@ -87,4 +87,14 @@ impl<
             Self::ReExecute(cmd) => cmd.chain_spec(),
         }
     }
+
+    /// Returns `true` if this is a node command with debug RPC namespace enabled.
+    ///
+    /// This is used to determine whether to enable runtime log level changes.
+    pub fn debug_namespace_enabled(&self) -> bool {
+        match self {
+            Self::Node(cmd) => cmd.rpc.debug_namespace_enabled(),
+            _ => false,
+        }
+    }
 }
