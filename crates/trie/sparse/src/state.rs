@@ -1030,10 +1030,14 @@ where
             })
             .collect();
 
-        storage_trie_counts.sort_by(|a, b| b.1.cmp(&a.1));
-
-        let tries_to_keep: HashSet<B256> =
-            storage_trie_counts.iter().take(max_storage_tries).map(|(hash, _)| *hash).collect();
+        // Use O(n) selection instead of O(n log n) sort
+        let tries_to_keep: HashSet<B256> = if storage_trie_counts.len() <= max_storage_tries {
+            storage_trie_counts.iter().map(|(hash, _)| *hash).collect()
+        } else {
+            storage_trie_counts
+                .select_nth_unstable_by(max_storage_tries.saturating_sub(1), |a, b| b.1.cmp(&a.1));
+            storage_trie_counts[..max_storage_tries].iter().map(|(hash, _)| *hash).collect()
+        };
 
         // Collect keys to avoid borrow conflict
         let tries_to_clear: Vec<B256> = self
@@ -1058,21 +1062,103 @@ where
         }
 
         #[cfg(feature = "metrics")]
-        let mut storage_nodes_converted = 0u64;
+        let storage_nodes_converted: u64;
 
-        for hash in &tries_to_keep {
-            if let Some(RevealableSparseTrie::Revealed(trie)) = self.storage.tries.get_mut(hash) {
+        #[cfg(feature = "std")]
+        {
+            use rayon::prelude::*;
+            #[cfg(feature = "metrics")]
+            use std::sync::atomic::{AtomicU64, Ordering};
+
+            const PARALLEL_PRUNE_THRESHOLD: usize = 8;
+
+            if tries_to_keep.len() >= PARALLEL_PRUNE_THRESHOLD {
+                let mut retained_tries: Vec<(B256, RevealableSparseTrie<S>)> = tries_to_keep
+                    .iter()
+                    .filter_map(|hash| self.storage.tries.remove(hash).map(|t| (*hash, t)))
+                    .collect();
+
+                #[cfg(feature = "metrics")]
+                let nodes_converted = AtomicU64::new(0);
+
+                retained_tries.par_iter_mut().for_each(|(_, trie)| {
+                    if let RevealableSparseTrie::Revealed(t) = trie {
+                        #[cfg(feature = "metrics")]
+                        {
+                            nodes_converted.fetch_add(t.prune(max_depth) as u64, Ordering::Relaxed);
+                        }
+                        #[cfg(not(feature = "metrics"))]
+                        {
+                            t.prune(max_depth);
+                        }
+                    }
+                });
+
                 #[cfg(feature = "metrics")]
                 {
-                    storage_nodes_converted += trie.prune(max_depth) as u64;
+                    storage_nodes_converted = nodes_converted.into_inner();
                 }
-                #[cfg(not(feature = "metrics"))]
+
+                for (hash, trie) in retained_tries {
+                    self.storage.tries.insert(hash, trie);
+                    if let Some(paths) = self.storage.revealed_paths.get_mut(&hash) {
+                        paths.clear();
+                    }
+                }
+            } else {
+                #[cfg(feature = "metrics")]
+                let mut nodes_converted = 0u64;
+
+                for hash in &tries_to_keep {
+                    if let Some(RevealableSparseTrie::Revealed(trie)) =
+                        self.storage.tries.get_mut(hash)
+                    {
+                        #[cfg(feature = "metrics")]
+                        {
+                            nodes_converted += trie.prune(max_depth) as u64;
+                        }
+                        #[cfg(not(feature = "metrics"))]
+                        {
+                            trie.prune(max_depth);
+                        }
+                    }
+                    if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
+                        paths.clear();
+                    }
+                }
+
+                #[cfg(feature = "metrics")]
                 {
-                    trie.prune(max_depth);
+                    storage_nodes_converted = nodes_converted;
                 }
             }
-            if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
-                paths.clear();
+        }
+
+        #[cfg(not(feature = "std"))]
+        {
+            #[cfg(feature = "metrics")]
+            let mut nodes_converted = 0u64;
+
+            for hash in &tries_to_keep {
+                if let Some(RevealableSparseTrie::Revealed(trie)) = self.storage.tries.get_mut(hash)
+                {
+                    #[cfg(feature = "metrics")]
+                    {
+                        nodes_converted += trie.prune(max_depth) as u64;
+                    }
+                    #[cfg(not(feature = "metrics"))]
+                    {
+                        trie.prune(max_depth);
+                    }
+                }
+                if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
+                    paths.clear();
+                }
+            }
+
+            #[cfg(feature = "metrics")]
+            {
+                storage_nodes_converted = nodes_converted;
             }
         }
 
