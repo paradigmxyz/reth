@@ -74,11 +74,6 @@ impl<P: DBProvider> StorageFilterBuilder for P {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use alloy_primitives::U256;
-    use reth_db_api::{cursor::DbCursorRW, tables, transaction::DbTxMut};
-    use reth_trie_common::StorageTrieEntry;
-
     #[test]
     fn test_build_empty_filter() {
         // This test requires a mock database, which we skip for now
