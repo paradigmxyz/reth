@@ -28,51 +28,6 @@ pub const UPPER_TRIE_MAX_DEPTH: usize = 2;
 /// Number of lower subtries which are managed by the [`ParallelSparseTrie`].
 pub const NUM_LOWER_SUBTRIES: usize = 16usize.pow(UPPER_TRIE_MAX_DEPTH as u32);
 
-/// Default minimum capacity threshold for post-prune shrinking.
-/// Shrinking is skipped if total capacity is below this to avoid overhead on small tries.
-pub const DEFAULT_SHRINK_CAPACITY_THRESHOLD: usize = 1024;
-
-/// Default ratio of pruned nodes that triggers shrinking (75% = 0.75).
-/// If `pruned_count > initial_count * ratio`, shrinking may be triggered.
-pub const DEFAULT_SHRINK_PRUNE_RATIO: f64 = 0.75;
-
-/// Default headroom factor for shrinking (25% = 0.25).
-/// After shrinking, capacity is set to `len + len * headroom`.
-pub const DEFAULT_SHRINK_HEADROOM: f64 = 0.25;
-
-/// Configuration for post-prune shrinking behavior.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ShrinkConfig {
-    /// Whether post-prune shrinking is enabled.
-    pub enabled: bool,
-    /// Minimum total capacity before shrinking is considered.
-    /// Tries with capacity below this are not shrunk to avoid overhead.
-    pub capacity_threshold: usize,
-    /// Ratio of pruned nodes that triggers shrinking.
-    /// If `pruned_count > initial_count * ratio`, shrinking is triggered.
-    pub prune_ratio: f64,
-    /// Headroom factor when shrinking (e.g., 0.25 means 25% extra capacity).
-    pub headroom: f64,
-}
-
-impl Default for ShrinkConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            capacity_threshold: DEFAULT_SHRINK_CAPACITY_THRESHOLD,
-            prune_ratio: DEFAULT_SHRINK_PRUNE_RATIO,
-            headroom: DEFAULT_SHRINK_HEADROOM,
-        }
-    }
-}
-
-impl ShrinkConfig {
-    /// Creates a disabled shrink configuration.
-    pub const fn disabled() -> Self {
-        Self { enabled: false, capacity_threshold: 0, prune_ratio: 0.0, headroom: 0.0 }
-    }
-}
-
 /// Configuration for controlling when parallelism is enabled in [`ParallelSparseTrie`] operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ParallelismThresholds {
@@ -168,8 +123,6 @@ pub struct ParallelSparseTrie {
     update_actions_buffers: Vec<Vec<SparseTrieUpdatesAction>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ParallelismThresholds,
-    /// Configuration for post-prune shrinking behavior.
-    shrink_config: ShrinkConfig,
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ParallelSparseTrieMetrics,
@@ -188,7 +141,6 @@ impl Default for ParallelSparseTrie {
             branch_node_masks: BranchNodeMasksMap::default(),
             update_actions_buffers: Vec::default(),
             parallelism_thresholds: Default::default(),
-            shrink_config: Default::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -970,6 +922,15 @@ impl SparseTrieExt for ParallelSparseTrie {
     }
 
     fn prune(&mut self, max_depth: usize) -> usize {
+        // Always clear transient bookkeeping, even if nothing is pruned.
+        // This ensures the trie is in a "fresh" state for the next execution.
+        if let Some(updates) = self.updates.as_mut() {
+            updates.updated_nodes.clear();
+            updates.removed_nodes.clear();
+            updates.wiped = false;
+        }
+        self.prefix_set.clear();
+
         let estimated_capacity = core::cmp::min(self.revealed_node_count() / 4, 1024);
         let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::with_capacity(estimated_capacity);
         let mut stack: SmallVec<[(Nibbles, usize); 32]> =
@@ -1046,25 +1007,67 @@ impl SparseTrieExt for ParallelSparseTrie {
 
         let nodes_converted = effective_pruned_roots.len();
 
-        if let Some(updates) = self.updates.as_mut() {
-            updates.updated_nodes.clear();
-            updates.removed_nodes.clear();
-            updates.wiped = false;
-        }
-        self.prefix_set.clear();
+        // Partition roots by subtrie for efficient per-subtrie pruning.
+        // Upper subtrie roots (path.len() < UPPER_TRIE_MAX_DEPTH) go to roots_upper.
+        // Lower subtrie roots go to roots_by_lower indexed by their subtrie index.
+        let mut roots_upper = Vec::<(Nibbles, B256)>::new();
+        let mut roots_by_lower: [Vec<(Nibbles, B256)>; NUM_LOWER_SUBTRIES] =
+            core::array::from_fn(|_| Vec::new());
 
-        // Sort by path for binary search. Roots are prefix-free by construction (all at same
+        for (path, hash) in effective_pruned_roots {
+            if SparseSubtrieType::path_len_is_upper(path.len()) {
+                roots_upper.push((path, hash));
+            } else {
+                let idx = path_subtrie_index_unchecked(&path);
+                roots_by_lower[idx].push((path, hash));
+            }
+        }
+
+        // Sort each bucket for binary search. Roots are prefix-free by construction (all at same
         // node-depth), which is required for partition_point ancestor detection to work correctly.
-        effective_pruned_roots.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        roots_upper.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        for bucket in &mut roots_by_lower {
+            bucket.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        }
+
         debug_assert!(
-            effective_pruned_roots.windows(2).all(|w| !w[1].0.starts_with(&w[0].0)),
+            {
+                let all_roots_sorted: Vec<_> =
+                    roots_upper.iter().chain(roots_by_lower.iter().flatten()).collect();
+                all_roots_sorted.windows(2).all(|w| !w[1].0.starts_with(&w[0].0))
+            },
             "prune roots must be prefix-free"
         );
 
-        let is_strict_descendant = |p: &Nibbles| -> bool {
-            let idx = effective_pruned_roots.partition_point(|(root, _)| root <= p);
+        // Fast path: If a pruned root exactly matches a lower subtrie's root path, we can
+        // clear the entire subtrie in O(1) instead of scanning with retain().
+        // Track which lower subtries have been fully cleared to skip retain() for them.
+        let mut fully_pruned_subtries = [false; NUM_LOWER_SUBTRIES];
+
+        for (idx, bucket) in roots_by_lower.iter().enumerate() {
+            for (path, hash) in bucket {
+                // Only lower subtries can be fully cleared (upper subtrie root is always empty
+                // path)
+                if let Some(subtrie) = self.lower_subtries[idx].as_revealed_mut() &&
+                    &subtrie.path == path
+                {
+                    // Fast-clear: O(1) instead of O(n) retain()
+                    subtrie.nodes.clear();
+                    subtrie.inner.values.clear();
+                    subtrie.nodes.insert(*path, SparseNode::Hash(*hash));
+                    fully_pruned_subtries[idx] = true;
+                }
+            }
+        }
+
+        // Helper to check if path is a strict descendant of any root in a sorted bucket
+        let is_strict_descendant_in = |roots: &[(Nibbles, B256)], p: &Nibbles| -> bool {
+            if roots.is_empty() {
+                return false;
+            }
+            let idx = roots.partition_point(|(root, _)| root <= p);
             if idx > 0 {
-                let candidate = &effective_pruned_roots[idx - 1].0;
+                let candidate = &roots[idx - 1].0;
                 if p.starts_with(candidate) && p.len() > candidate.len() {
                     return true;
                 }
@@ -1072,10 +1075,14 @@ impl SparseTrieExt for ParallelSparseTrie {
             false
         };
 
-        let starts_with_pruned = |p: &Nibbles| -> bool {
-            let idx = effective_pruned_roots.partition_point(|(root, _)| root <= p);
+        // Helper to check if path starts with any pruned root in a sorted bucket
+        let starts_with_pruned_in = |roots: &[(Nibbles, B256)], p: &Nibbles| -> bool {
+            if roots.is_empty() {
+                return false;
+            }
+            let idx = roots.partition_point(|(root, _)| root <= p);
             if idx > 0 {
-                let candidate = &effective_pruned_roots[idx - 1].0;
+                let candidate = &roots[idx - 1].0;
                 if p.starts_with(candidate) {
                     return true;
                 }
@@ -1083,30 +1090,88 @@ impl SparseTrieExt for ParallelSparseTrie {
             false
         };
 
-        self.upper_subtrie.nodes.retain(|p, _| !is_strict_descendant(p));
-        self.upper_subtrie.inner.values.retain(|p, _| !starts_with_pruned(p));
+        // Upper subtrie nodes: paths are < UPPER_TRIE_MAX_DEPTH, only check upper roots
+        self.upper_subtrie.nodes.retain(|p, _| !is_strict_descendant_in(&roots_upper, p));
+        // Upper subtrie values can have full paths (values are always stored in upper subtrie).
+        // Check both upper roots (for any path) and the appropriate lower bucket.
+        self.upper_subtrie.inner.values.retain(|p, _| {
+            // Always check upper roots first - they can have descendants at any depth
+            if starts_with_pruned_in(&roots_upper, p) {
+                return false;
+            }
+            // For longer paths, also check the appropriate lower bucket
+            if !SparseSubtrieType::path_len_is_upper(p.len()) {
+                let idx = path_subtrie_index_unchecked(p);
+                if starts_with_pruned_in(&roots_by_lower[idx], p) {
+                    return false;
+                }
+            }
+            true
+        });
 
         #[cfg(feature = "std")]
         {
-            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+            use rayon::iter::{
+                IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+            };
 
-            self.lower_subtries.par_iter_mut().for_each(|subtrie| {
+            self.lower_subtries.par_iter_mut().enumerate().for_each(|(subtrie_idx, subtrie)| {
+                // Skip subtries that were fully cleared via the fast path
+                if fully_pruned_subtries[subtrie_idx] {
+                    return;
+                }
                 if let Some(s) = subtrie.as_revealed_mut() {
-                    s.nodes.retain(|p, _| !is_strict_descendant(p));
-                    s.inner.values.retain(|p, _| !starts_with_pruned(p));
+                    let bucket = &roots_by_lower[subtrie_idx];
+                    // Check both the subtrie's own bucket and upper roots (upper roots can have
+                    // descendants in lower subtries when pruned at shallow depths)
+                    s.nodes.retain(|p, _| {
+                        !is_strict_descendant_in(bucket, p) &&
+                            !is_strict_descendant_in(&roots_upper, p)
+                    });
+                    s.inner.values.retain(|p, _| {
+                        !starts_with_pruned_in(bucket, p) && !starts_with_pruned_in(&roots_upper, p)
+                    });
                 }
             });
         }
 
         #[cfg(not(feature = "std"))]
-        for subtrie in &mut self.lower_subtries {
+        for (subtrie_idx, subtrie) in self.lower_subtries.iter_mut().enumerate() {
+            // Skip subtries that were fully cleared via the fast path
+            if fully_pruned_subtries[subtrie_idx] {
+                continue;
+            }
             if let Some(s) = subtrie.as_revealed_mut() {
-                s.nodes.retain(|p, _| !is_strict_descendant(p));
-                s.inner.values.retain(|p, _| !starts_with_pruned(p));
+                let bucket = &roots_by_lower[subtrie_idx];
+                // Check both the subtrie's own bucket and upper roots (upper roots can have
+                // descendants in lower subtries when pruned at shallow depths)
+                s.nodes.retain(|p, _| {
+                    !is_strict_descendant_in(bucket, p) && !is_strict_descendant_in(&roots_upper, p)
+                });
+                s.inner.values.retain(|p, _| {
+                    !starts_with_pruned_in(bucket, p) && !starts_with_pruned_in(&roots_upper, p)
+                });
             }
         }
 
-        self.branch_node_masks.retain(|p, _| !starts_with_pruned(p));
+        // Branch node masks: Two-phase pruning with fast path for fully-pruned subtries.
+        // - Upper masks (path.len() < UPPER_TRIE_MAX_DEPTH): check only against roots_upper
+        // - Lower masks: O(1) check for fully-pruned subtries, then check bucket + upper roots
+        self.branch_node_masks.retain(|p, _| {
+            if SparseSubtrieType::path_len_is_upper(p.len()) {
+                // Upper masks only need to check upper roots
+                !starts_with_pruned_in(&roots_upper, p)
+            } else {
+                let idx = path_subtrie_index_unchecked(p);
+                // Fast O(1) check: if subtrie is fully pruned, remove all masks in it
+                if fully_pruned_subtries[idx] {
+                    return false;
+                }
+                // Otherwise, check the subtrie's bucket and upper roots
+                !starts_with_pruned_in(&roots_by_lower[idx], p) &&
+                    !starts_with_pruned_in(&roots_upper, p)
+            }
+        });
 
         nodes_converted
     }
@@ -7602,52 +7667,66 @@ mod tests {
         }
     }
 
+    /// Large-scale prune test for profiling with samply.
+    ///
+    /// Run with:
+    /// ```sh
+    /// cargo test -p reth-trie-sparse-parallel --release -- test_prune_profile --nocapture --ignored
+    /// samply record --save-only -o /tmp/prune.json -- ./target/release/deps/reth_trie_sparse_parallel-* test_prune_profile --nocapture --ignored
+    /// profslice hotspots /tmp/prune.json --top 30
+    /// ```
     #[test]
-    #[ignore = "profiling test - run manually"]
+    #[ignore = "profiling test - run manually with samply"]
     fn test_prune_profile() {
         use std::time::Instant;
 
-        let provider = DefaultTrieNodeProvider;
-        let large_value = large_account_value();
+        const ITERATIONS: usize = 100;
 
-        // Generate 65536 keys (16^4) for a large trie
-        let mut keys = Vec::with_capacity(65536);
-        for a in 0..16u8 {
-            for b in 0..16u8 {
-                for c in 0..16u8 {
-                    for d in 0..16u8 {
-                        keys.push(Nibbles::from_nibbles([a, b, c, d, 0x5, 0x6, 0x7, 0x8]));
+        let provider = DefaultTrieNodeProvider;
+        let value = large_account_value();
+
+        let mut total_prune_time = std::time::Duration::ZERO;
+
+        for iter in 0..ITERATIONS {
+            let mut trie = ParallelSparseTrie::default();
+
+            // Build a large trie: 16^4 = 65536 leaves
+            for a in 0..16u8 {
+                for b in 0..16u8 {
+                    for c in 0..16u8 {
+                        for d in 0..16u8 {
+                            trie.update_leaf(
+                                Nibbles::from_nibbles([a, b, c, d, 0x5, 0x6, 0x7, 0x8]),
+                                value.clone(),
+                                &provider,
+                            )
+                            .unwrap();
+                        }
                     }
                 }
             }
+
+            // Compute root (required before prune)
+            let root_before = trie.root();
+
+            // Profile prune at depth 2
+            let start_prune = Instant::now();
+            let pruned = trie.prune(2);
+            total_prune_time += start_prune.elapsed();
+
+            // Verify root is preserved
+            let root_after = trie.root();
+            assert_eq!(root_before, root_after, "root hash should be preserved");
+
+            if iter == 0 {
+                println!("Node count before prune: {}", 69905);
+                println!("Nodes converted to stubs: {}", pruned);
+                println!("Node count after prune: {}", trie.revealed_node_count());
+            }
         }
 
-        // Build base trie once
-        let mut base_trie = ParallelSparseTrie::default();
-        for key in &keys {
-            base_trie.update_leaf(*key, large_value.clone(), &provider).unwrap();
-        }
-        base_trie.root(); // ensure hashes computed
-
-        // Pre-clone tries to exclude clone time from profiling
-        let iterations = 100;
-        let mut tries: Vec<_> = (0..iterations).map(|_| base_trie.clone()).collect();
-
-        // Measure only prune()
-        let mut total_pruned = 0;
-        let start = Instant::now();
-        for trie in &mut tries {
-            total_pruned += trie.prune(2);
-        }
-        let elapsed = start.elapsed();
-
-        println!(
-            "Prune benchmark: {} iterations, total: {:?}, avg: {:?}, pruned/iter: {}",
-            iterations,
-            elapsed,
-            elapsed / iterations as u32,
-            total_pruned / iterations
-        );
+        println!("Total prune time for {} iterations: {:?}", ITERATIONS, total_prune_time);
+        println!("Average prune time: {:?}", total_prune_time / ITERATIONS as u32);
     }
 
     #[test]
