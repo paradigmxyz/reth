@@ -3319,6 +3319,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         Ok(())
     }
 
+    /// Appends blocks with their execution state to the database.
+    ///
+    /// **Note:** This function is only used in tests.
+    ///
+    /// When edge storage settings configure history to be read from RocksDB
+    /// (`account_history_in_rocksdb` or `storages_history_in_rocksdb`), this function
+    /// skips writing history indices to MDBX. In production, history data is populated
+    /// via healing/stages instead.
+    ///
     /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually
     fn append_blocks_with_state(
         &self,
