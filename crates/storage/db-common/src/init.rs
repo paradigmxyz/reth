@@ -398,7 +398,7 @@ where
 
 /// Inserts history indices for genesis accounts and storage.
 ///
-/// Writes to either MDBX or RocksDB based on storage settings configuration,
+/// Writes to either MDBX or `RocksDB` based on storage settings configuration,
 /// using [`EitherWriter`] to abstract over the storage backend.
 pub fn insert_genesis_history<'a, 'b, Provider>(
     provider: &Provider,
@@ -418,7 +418,7 @@ where
 
 /// Inserts history indices for genesis accounts and storage.
 ///
-/// Writes to either MDBX or RocksDB based on storage settings configuration,
+/// Writes to either MDBX or `RocksDB` based on storage settings configuration,
 /// using [`EitherWriter`] to abstract over the storage backend.
 pub fn insert_history<'a, 'b, Provider>(
     provider: &Provider,
