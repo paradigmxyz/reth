@@ -88,6 +88,10 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         .fork(EthereumHardfork::Amsterdam)
         .active_at_timestamp(genesis.timestamp)
         .then_some(EMPTY_BLOCK_ACCESS_LIST_HASH);
+    let slot_number = hardforks
+        .fork(EthereumHardfork::Amsterdam)
+        .active_at_timestamp(genesis.timestamp)
+        .then_some(0);
 
     Header {
         number: genesis.number.unwrap_or_default(),
@@ -107,7 +111,7 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         excess_blob_gas,
         requests_hash,
         block_access_list_hash,
-        slot_number: Some(0),
+        slot_number,
         ..Default::default()
     }
 }
