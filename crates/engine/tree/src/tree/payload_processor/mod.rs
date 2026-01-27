@@ -221,6 +221,7 @@ where
         multiproof_provider_factory: F,
         config: &TreeConfig,
         bal: Option<Arc<BlockAccessList>>,
+        storage_filter: Option<Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -281,6 +282,7 @@ where
             storage_worker_count,
             account_worker_count,
             v2_proofs_enabled,
+            storage_filter,
         );
 
         let multi_proof_task = MultiProofTask::new(
