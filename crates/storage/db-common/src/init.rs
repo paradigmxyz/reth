@@ -932,27 +932,52 @@ mod tests {
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
 
-        let provider = factory.provider().unwrap();
+        let settings = factory.cached_storage_settings();
 
-        let tx = provider.tx_ref();
+        let expected_accounts = vec![
+            (ShardedKey::new(address_with_balance, u64::MAX), IntegerList::new([0]).unwrap()),
+            (ShardedKey::new(address_with_storage, u64::MAX), IntegerList::new([0]).unwrap()),
+        ];
+        let expected_storages = vec![(
+            StorageShardedKey::new(address_with_storage, storage_key, u64::MAX),
+            IntegerList::new([0]).unwrap(),
+        )];
 
-        assert_eq!(
-            collect_table_entries::<Arc<DatabaseEnv>, tables::AccountsHistory>(tx)
-                .expect("failed to collect"),
-            vec![
-                (ShardedKey::new(address_with_balance, u64::MAX), IntegerList::new([0]).unwrap()),
-                (ShardedKey::new(address_with_storage, u64::MAX), IntegerList::new([0]).unwrap())
-            ],
-        );
+        if settings.account_history_in_rocksdb {
+            let rocksdb = factory.rocksdb_provider();
+            let accounts_history: Vec<_> = rocksdb
+                .iter::<tables::AccountsHistory>()
+                .expect("failed to iter")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("failed to collect");
+            assert_eq!(accounts_history, expected_accounts);
+        } else {
+            let provider = factory.provider().unwrap();
+            let tx = provider.tx_ref();
+            assert_eq!(
+                collect_table_entries::<Arc<DatabaseEnv>, tables::AccountsHistory>(tx)
+                    .expect("failed to collect"),
+                expected_accounts,
+            );
+        }
 
-        assert_eq!(
-            collect_table_entries::<Arc<DatabaseEnv>, tables::StoragesHistory>(tx)
-                .expect("failed to collect"),
-            vec![(
-                StorageShardedKey::new(address_with_storage, storage_key, u64::MAX),
-                IntegerList::new([0]).unwrap()
-            )],
-        );
+        if settings.storages_history_in_rocksdb {
+            let rocksdb = factory.rocksdb_provider();
+            let storages_history: Vec<_> = rocksdb
+                .iter::<tables::StoragesHistory>()
+                .expect("failed to iter")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("failed to collect");
+            assert_eq!(storages_history, expected_storages);
+        } else {
+            let provider = factory.provider().unwrap();
+            let tx = provider.tx_ref();
+            assert_eq!(
+                collect_table_entries::<Arc<DatabaseEnv>, tables::StoragesHistory>(tx)
+                    .expect("failed to collect"),
+                expected_storages,
+            );
+        }
     }
 
     #[test]
