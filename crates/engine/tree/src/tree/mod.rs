@@ -1477,15 +1477,36 @@ where
                                     self.on_forkchoice_updated(state, payload_attrs, version);
 
                                 if let Ok(res) = &mut output {
+                                    let forkchoice_status = res.outcome.forkchoice_status();
+
                                     // track last received forkchoice state
                                     self.state
                                         .forkchoice_state_tracker
-                                        .set_latest(state, res.outcome.forkchoice_status());
+                                        .set_latest(state, forkchoice_status);
+
+                                    // update forkchoice state tracker metrics with last valid state
+                                    if let Some(last_valid) =
+                                        self.state.forkchoice_state_tracker.last_valid_state()
+                                    {
+                                        let block_num = |hash| {
+                                            self.sealed_header_by_hash(hash)
+                                                .ok()
+                                                .flatten()
+                                                .map(|h| h.number())
+                                                .unwrap_or(0)
+                                        };
+
+                                        self.metrics.engine.forkchoice_updated.set_last_valid(
+                                            block_num(last_valid.head_block_hash),
+                                            block_num(last_valid.safe_block_hash),
+                                            block_num(last_valid.finalized_block_hash),
+                                        );
+                                    }
 
                                     // emit an event about the handled FCU
                                     self.emit_event(ConsensusEngineEvent::ForkchoiceUpdated(
                                         state,
-                                        res.outcome.forkchoice_status(),
+                                        forkchoice_status,
                                     ));
 
                                     // handle the event if any
