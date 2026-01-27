@@ -254,6 +254,7 @@ pub trait SparseTrieExt: SparseTrie {
     /// # Behavior
     ///
     /// - Embedded nodes (RLP < 32 bytes) are preserved since they have no hash
+    /// - Clears `prefix_set` and update tracking (this is cache eviction, not a state transition)
     /// - Returns 0 if `max_depth` exceeds trie depth or trie is empty
     ///
     /// # Returns

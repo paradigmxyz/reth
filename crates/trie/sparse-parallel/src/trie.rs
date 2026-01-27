@@ -1023,8 +1023,7 @@ impl SparseTrieExt for ParallelSparseTrie {
             }
         }
 
-        // Sort each bucket for binary search. Roots are prefix-free by construction (all at same
-        // node-depth), which is required for partition_point ancestor detection to work correctly.
+        // Sort for binary search (roots are prefix-free by node-depth).
         roots_upper.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         for bucket in &mut roots_by_lower {
             bucket.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
