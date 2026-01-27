@@ -1073,35 +1073,34 @@ where
             const PARALLEL_PRUNE_THRESHOLD: usize = 8;
 
             if tries_to_keep.len() >= PARALLEL_PRUNE_THRESHOLD {
-                let mut retained_tries: Vec<(B256, RevealableSparseTrie<S>)> = tries_to_keep
-                    .iter()
-                    .filter_map(|hash| self.storage.tries.remove(hash).map(|t| (*hash, t)))
-                    .collect();
-
                 #[cfg(feature = "metrics")]
                 let nodes_converted = AtomicU64::new(0);
 
-                retained_tries.par_iter_mut().for_each(|(_, trie)| {
-                    if let RevealableSparseTrie::Revealed(t) = trie {
-                        #[cfg(feature = "metrics")]
-                        {
-                            nodes_converted.fetch_add(t.prune(max_depth) as u64, Ordering::Relaxed);
+                self.storage
+                    .tries
+                    .par_iter_mut()
+                    .filter(|(hash, _)| tries_to_keep.contains(*hash))
+                    .for_each(|(_, trie)| {
+                        if let RevealableSparseTrie::Revealed(t) = trie {
+                            #[cfg(feature = "metrics")]
+                            {
+                                nodes_converted
+                                    .fetch_add(t.prune(max_depth) as u64, Ordering::Relaxed);
+                            }
+                            #[cfg(not(feature = "metrics"))]
+                            {
+                                t.prune(max_depth);
+                            }
                         }
-                        #[cfg(not(feature = "metrics"))]
-                        {
-                            t.prune(max_depth);
-                        }
-                    }
-                });
+                    });
 
                 #[cfg(feature = "metrics")]
                 {
                     storage_nodes_converted = nodes_converted.into_inner();
                 }
 
-                for (hash, trie) in retained_tries {
-                    self.storage.tries.insert(hash, trie);
-                    if let Some(paths) = self.storage.revealed_paths.get_mut(&hash) {
+                for hash in &tries_to_keep {
+                    if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
                         paths.clear();
                     }
                 }

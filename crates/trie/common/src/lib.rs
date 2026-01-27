@@ -70,9 +70,6 @@ pub mod added_removed_keys;
 /// Utilities used by other modules in this crate.
 mod utils;
 
-mod trie_mask_ext;
-pub use trie_mask_ext::{SetBitsIter, TrieMaskExt};
-
 /// Bincode-compatible serde implementations for trie types.
 ///
 /// `bincode` crate allows for more efficient serialization of trie types, because it allows
