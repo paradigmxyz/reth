@@ -107,6 +107,7 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         excess_blob_gas,
         requests_hash,
         block_access_list_hash,
+        slot_number: Some(0),
         ..Default::default()
     }
 }
