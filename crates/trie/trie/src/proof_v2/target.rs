@@ -2,6 +2,49 @@ use crate::proof_v2::increment_and_strip_trailing_zeros;
 use alloy_primitives::B256;
 use reth_trie_common::Nibbles;
 
+/// Groups sorted targets by common prefix for efficient batch traversal.
+#[derive(Debug)]
+pub struct PrefixBatch<'a> {
+    /// The common prefix shared by all targets in this batch.
+    pub common_prefix: Nibbles,
+    /// The targets belonging to this batch.
+    pub targets: &'a [Nibbles],
+}
+
+impl<'a> PrefixBatch<'a> {
+    /// Group sorted nibble paths by their longest common prefix.
+    pub fn from_sorted(targets: &'a [Nibbles]) -> Vec<PrefixBatch<'a>> {
+        if targets.is_empty() {
+            return Vec::new();
+        }
+
+        let mut result = Vec::new();
+        let mut start = 0;
+
+        while start < targets.len() {
+            let first = &targets[start];
+            let mut end = start + 1;
+            let mut prefix_len = first.len();
+
+            while end < targets.len() {
+                let common = first.common_prefix_length(&targets[end]);
+                if common == 0 {
+                    break;
+                }
+                prefix_len = prefix_len.min(common);
+                end += 1;
+            }
+
+            result.push(PrefixBatch {
+                common_prefix: first.slice(..prefix_len),
+                targets: &targets[start..end],
+            });
+            start = end;
+        }
+        result
+    }
+}
+
 /// Target describes a proof target. For every proof target given, the
 /// [`crate::proof_v2::ProofCalculator`] will calculate and return all nodes whose path is a prefix
 /// of the target's `key`.
