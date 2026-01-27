@@ -401,25 +401,38 @@ impl Command {
             let mut current_block = start_block;
 
             for payload_idx in 0..count {
-                match collector.collect(current_block).await {
-                    Ok((transactions, total_gas, next_block)) => {
-                        info!(
-                            payload = payload_idx + 1,
-                            tx_count = transactions.len(),
-                            total_gas,
-                            blocks = format!("{}..{}", current_block, next_block),
-                            "Fetched transactions"
-                        );
-                        current_block = next_block;
-
-                        if tx_sender.send(transactions).await.is_err() {
-                            break;
+                const MAX_RETRIES: u32 = 5;
+                let mut attempts = 0;
+                let result = loop {
+                    attempts += 1;
+                    match collector.collect(current_block).await {
+                        Ok(res) => break Some(res),
+                        Err(e) => {
+                            if attempts >= MAX_RETRIES {
+                                warn!(payload = payload_idx + 1, attempts, error = %e, "Failed to fetch transactions after max retries");
+                                break None;
+                            }
+                            warn!(payload = payload_idx + 1, attempts, error = %e, "Failed to fetch transactions, retrying...");
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                         }
                     }
-                    Err(e) => {
-                        warn!(payload = payload_idx + 1, error = %e, "Failed to fetch transactions");
-                        break;
-                    }
+                };
+
+                let Some((transactions, total_gas, next_block)) = result else {
+                    break;
+                };
+
+                info!(
+                    payload = payload_idx + 1,
+                    tx_count = transactions.len(),
+                    total_gas,
+                    blocks = format!("{}..{}", current_block, next_block),
+                    "Fetched transactions"
+                );
+                current_block = next_block;
+
+                if tx_sender.send(transactions).await.is_err() {
+                    break;
                 }
             }
         });
