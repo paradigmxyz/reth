@@ -3,14 +3,10 @@
 //! Run with: `cargo bench -p reth-trie-sparse-parallel --bench prune`
 
 use alloy_primitives::{B256, U256};
-use criterion::{
-    black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput,
-};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_trie_common::Nibbles;
-use reth_trie_sparse::{
-    provider::DefaultTrieNodeProvider, RevealableSparseTrie, SparseTrieExt,
-};
+use reth_trie_sparse::{provider::DefaultTrieNodeProvider, RevealableSparseTrie, SparseTrieExt};
 use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::collections::{HashMap, HashSet};
 
@@ -27,17 +23,14 @@ fn nibbles_as_bytes(n: &Nibbles) -> impl Iterator<Item = u8> + '_ {
 /// Generate random storage keys for benchmarking.
 fn generate_test_data(size: usize) -> Vec<(B256, U256)> {
     let mut runner = TestRunner::deterministic();
-    proptest::collection::vec(any::<(B256, U256)>(), size)
-        .new_tree(&mut runner)
-        .unwrap()
-        .current()
+    proptest::collection::vec(any::<(B256, U256)>(), size).new_tree(&mut runner).unwrap().current()
 }
 
 /// Build a revealed parallel sparse trie from test data.
 fn build_trie(data: &[(B256, U256)]) -> RevealableSparseTrie<ParallelSparseTrie> {
     let provider = DefaultTrieNodeProvider;
     let mut trie = RevealableSparseTrie::<ParallelSparseTrie>::revealed_empty();
-    
+
     for (key, value) in data {
         trie.update_leaf(
             Nibbles::unpack(key),
@@ -46,7 +39,7 @@ fn build_trie(data: &[(B256, U256)]) -> RevealableSparseTrie<ParallelSparseTrie>
         )
         .unwrap();
     }
-    
+
     // Must compute root before pruning (nodes need hashes)
     trie.root().unwrap();
     trie
@@ -57,13 +50,10 @@ fn build_trie(data: &[(B256, U256)]) -> RevealableSparseTrie<ParallelSparseTrie>
 // ============================================================================
 
 /// Current algorithm: sorted binary search + starts_with prefix check
-fn descendant_check_binary_search(
-    roots: &[Nibbles],
-    paths: &[Nibbles],
-) -> usize {
+fn descendant_check_binary_search(roots: &[Nibbles], paths: &[Nibbles]) -> usize {
     let mut sorted_roots = roots.to_vec();
     sorted_roots.sort_unstable();
-    
+
     let starts_with_pruned = |p: &Nibbles| -> bool {
         let idx = sorted_roots.partition_point(|root| root <= p);
         if idx > 0 {
@@ -74,25 +64,22 @@ fn descendant_check_binary_search(
         }
         false
     };
-    
+
     paths.iter().filter(|p| starts_with_pruned(p)).count()
 }
 
 /// Alternative 1: Bucketed HashSet by nibble length
-fn descendant_check_bucketed_hashset(
-    roots: &[Nibbles],
-    paths: &[Nibbles],
-) -> usize {
+fn descendant_check_bucketed_hashset(roots: &[Nibbles], paths: &[Nibbles]) -> usize {
     // Group roots by nibble length
     let mut buckets: HashMap<usize, HashSet<Nibbles>> = HashMap::new();
     for root in roots {
         buckets.entry(root.len()).or_default().insert(root.clone());
     }
-    
+
     // Sorted lengths for consistent iteration
     let mut lengths: Vec<usize> = buckets.keys().copied().collect();
     lengths.sort_unstable();
-    
+
     let starts_with_pruned = |p: &Nibbles| -> bool {
         for &len in &lengths {
             if p.len() >= len {
@@ -104,15 +91,12 @@ fn descendant_check_bucketed_hashset(
         }
         false
     };
-    
+
     paths.iter().filter(|p| starts_with_pruned(p)).count()
 }
 
 /// Alternative 2: Packed u64 bucketed (for tries where roots have similar nibble lengths)
-fn descendant_check_packed_u64(
-    roots: &[Nibbles],
-    paths: &[Nibbles],
-) -> usize {
+fn descendant_check_packed_u64(roots: &[Nibbles], paths: &[Nibbles]) -> usize {
     // Pack nibbles into u64 (up to 16 nibbles = 64 bits)
     fn pack_nibbles(n: &Nibbles, len: usize) -> u64 {
         let mut packed = 0u64;
@@ -121,17 +105,17 @@ fn descendant_check_packed_u64(
         }
         packed
     }
-    
+
     // Group by length, store packed values
     let mut buckets: HashMap<usize, HashSet<u64>> = HashMap::new();
     for root in roots {
         let packed = pack_nibbles(root, root.len());
         buckets.entry(root.len()).or_default().insert(packed);
     }
-    
+
     let mut lengths: Vec<usize> = buckets.keys().copied().collect();
     lengths.sort_unstable();
-    
+
     let starts_with_pruned = |p: &Nibbles| -> bool {
         for &len in &lengths {
             if p.len() >= len {
@@ -143,7 +127,7 @@ fn descendant_check_packed_u64(
         }
         false
     };
-    
+
     paths.iter().filter(|p| starts_with_pruned(p)).count()
 }
 
@@ -159,7 +143,7 @@ fn descendant_check_prefix_expansion(
         // Add the root itself and mark that anything starting with it matches
         prefix_set.insert(root.clone());
     }
-    
+
     // For exact prefix matching, we just check if any root is a prefix
     let starts_with_pruned = |p: &Nibbles| -> bool {
         // Check all possible prefix lengths
@@ -171,7 +155,7 @@ fn descendant_check_prefix_expansion(
         }
         false
     };
-    
+
     paths.iter().filter(|p| starts_with_pruned(p)).count()
 }
 
@@ -181,17 +165,15 @@ fn descendant_check_prefix_expansion(
 
 fn bench_descendant_check_algorithms(c: &mut Criterion) {
     let mut group = c.benchmark_group("descendant_check");
-    
+
     // Test different trie sizes
     for num_leaves in [1_000, 10_000, 50_000] {
         let data = generate_test_data(num_leaves);
         let trie = build_trie(&data);
-        
+
         // Collect all paths from the trie for benchmarking
-        let all_paths: Vec<Nibbles> = data.iter()
-            .map(|(k, _)| Nibbles::unpack(k))
-            .collect();
-        
+        let all_paths: Vec<Nibbles> = data.iter().map(|(k, _)| Nibbles::unpack(k)).collect();
+
         // Simulate prune roots at different depths
         for max_depth in [2, 3, 4] {
             // Generate synthetic prune roots (simulate what DFS would find)
@@ -203,16 +185,16 @@ fn bench_descendant_check_algorithms(c: &mut Criterion) {
                     // Create paths of varying lengths (simulating extension nodes)
                     let base_len = max_depth * 2; // approximate nibbles per depth
                     let extra = i % 3; // vary length slightly
-                    let path_data: Vec<u8> = (0..(base_len + extra))
-                        .map(|j| ((i + j) % 16) as u8)
-                        .collect();
+                    let path_data: Vec<u8> =
+                        (0..(base_len + extra)).map(|j| ((i + j) % 16) as u8).collect();
                     Nibbles::from_nibbles(&path_data)
                 })
                 .collect();
-            
-            let id = format!("leaves={}/depth={}/roots={}", num_leaves, max_depth, prune_roots.len());
+
+            let id =
+                format!("leaves={}/depth={}/roots={}", num_leaves, max_depth, prune_roots.len());
             group.throughput(Throughput::Elements(all_paths.len() as u64));
-            
+
             // Benchmark current algorithm
             group.bench_function(BenchmarkId::new("binary_search", &id), |b| {
                 b.iter(|| {
@@ -222,7 +204,7 @@ fn bench_descendant_check_algorithms(c: &mut Criterion) {
                     ))
                 })
             });
-            
+
             // Benchmark bucketed hashset
             group.bench_function(BenchmarkId::new("bucketed_hashset", &id), |b| {
                 b.iter(|| {
@@ -232,7 +214,7 @@ fn bench_descendant_check_algorithms(c: &mut Criterion) {
                     ))
                 })
             });
-            
+
             // Benchmark packed u64
             group.bench_function(BenchmarkId::new("packed_u64", &id), |b| {
                 b.iter(|| {
@@ -242,7 +224,7 @@ fn bench_descendant_check_algorithms(c: &mut Criterion) {
                     ))
                 })
             });
-            
+
             // Benchmark prefix expansion
             let max_path_len = all_paths.iter().map(|p| p.len()).max().unwrap_or(64);
             group.bench_function(BenchmarkId::new("prefix_expansion", &id), |b| {
@@ -256,20 +238,20 @@ fn bench_descendant_check_algorithms(c: &mut Criterion) {
             });
         }
     }
-    
+
     group.finish();
 }
 
 fn bench_full_prune(c: &mut Criterion) {
     let mut group = c.benchmark_group("full_prune");
     group.sample_size(10); // Fewer samples for expensive operations
-    
+
     for num_leaves in [1_000, 10_000, 50_000] {
         let data = generate_test_data(num_leaves);
-        
+
         for max_depth in [2, 3, 4] {
             let id = format!("leaves={}/depth={}", num_leaves, max_depth);
-            
+
             group.bench_function(BenchmarkId::new("current", &id), |b| {
                 b.iter_with_setup(
                     || build_trie(&data),
@@ -282,13 +264,9 @@ fn bench_full_prune(c: &mut Criterion) {
             });
         }
     }
-    
+
     group.finish();
 }
 
-criterion_group!(
-    prune_benches,
-    bench_descendant_check_algorithms,
-    bench_full_prune,
-);
+criterion_group!(prune_benches, bench_descendant_check_algorithms, bench_full_prune,);
 criterion_main!(prune_benches);
