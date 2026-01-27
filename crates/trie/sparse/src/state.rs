@@ -1,6 +1,6 @@
 use crate::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    traits::SparseTrie as SparseTrieTrait,
+    traits::{SparseTrie as SparseTrieTrait, SparseTrieExt},
     RevealableSparseTrie, SerialSparseTrie,
 };
 use alloc::{collections::VecDeque, vec::Vec};
@@ -970,7 +970,13 @@ where
         storage_trie.remove_leaf(slot, provider)?;
         Ok(())
     }
+}
 
+impl<A, S> SparseStateTrie<A, S>
+where
+    A: SparseTrieTrait + SparseTrieExt + Default,
+    S: SparseTrieTrait + SparseTrieExt + Default + Clone,
+{
     /// Prunes the account trie and selected storage tries to reduce memory usage.
     ///
     /// # Arguments

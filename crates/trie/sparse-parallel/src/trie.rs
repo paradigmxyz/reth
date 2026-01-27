@@ -16,7 +16,7 @@ use reth_trie_sparse::{
     leaf_removal::{branch_changes_on_leaf_removal, extension_changes_on_leaf_removal},
     provider::{RevealedNode, TrieNodeProvider},
     LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrie,
-    SparseTrieUpdates,
+    SparseTrieExt, SparseTrieUpdates,
 };
 use smallvec::SmallVec;
 use std::cmp::{Ord, Ordering, PartialOrd};
@@ -921,7 +921,9 @@ impl SparseTrie for ParallelSparseTrie {
 
         upper_count + lower_count
     }
+}
 
+impl SparseTrieExt for ParallelSparseTrie {
     fn prune(&mut self, max_depth: usize) -> usize {
         let mut pruned_roots = Vec::<Nibbles>::new();
         let mut stack = vec![(Nibbles::default(), 0usize)];
