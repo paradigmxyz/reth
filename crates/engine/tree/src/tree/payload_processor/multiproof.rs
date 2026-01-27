@@ -1325,12 +1325,16 @@ impl MultiProofTask {
             }
         }
 
+        let now = Instant::now();
+        let total_time = ctx.first_update_time.map(|t| now.duration_since(t));
+        let time_since_updates_finished = ctx.updates_finished_time.map(|t| now.duration_since(t));
+
         debug!(
             target: "engine::tree::payload_processor::multiproof",
             total_updates = batch_metrics.state_update_proofs_requested,
             total_proofs = batch_metrics.proofs_processed,
-            total_time = ?ctx.first_update_time.map(|t|t.elapsed()),
-            time_since_updates_finished = ?ctx.updates_finished_time.map(|t|t.elapsed()),
+            ?total_time,
+            ?time_since_updates_finished,
             "All proofs processed, ending calculation"
         );
 
@@ -1339,14 +1343,14 @@ impl MultiProofTask {
             .state_updates_received_histogram
             .record(batch_metrics.state_update_proofs_requested as f64);
         self.metrics.proofs_processed_histogram.record(batch_metrics.proofs_processed as f64);
-        if let Some(total_time) = ctx.first_update_time.map(|t| t.elapsed()) {
+        if let Some(total_time) = total_time {
             self.metrics.multiproof_task_total_duration_histogram.record(total_time);
         }
 
-        if let Some(updates_finished_time) = ctx.updates_finished_time {
+        if let Some(time_since_updates_finished) = time_since_updates_finished {
             self.metrics
                 .last_proof_wait_time_histogram
-                .record(updates_finished_time.elapsed().as_secs_f64());
+                .record(time_since_updates_finished.as_secs_f64());
         }
     }
 }
