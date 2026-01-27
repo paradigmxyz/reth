@@ -13,7 +13,7 @@ use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet, E2ETestSe
 use reth_node_core::args::RocksDbArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_provider::RocksDBProviderFactory;
+use reth_provider::{RocksDBProviderFactory, StorageSettings};
 use std::{sync::Arc, time::Duration};
 
 const ROCKSDB_POLL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -99,8 +99,6 @@ fn test_attributes_generator(timestamp: u64) -> EthPayloadBuilderAttributes {
 /// Verifies that `RocksDB` CLI defaults match `StorageSettings::base()`.
 #[test]
 fn test_rocksdb_defaults_match_storage_settings() {
-    use reth_provider::StorageSettings;
-
     let args = RocksDbArgs::default();
     let settings = StorageSettings::base();
 
