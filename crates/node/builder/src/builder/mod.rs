@@ -703,7 +703,6 @@ where
         let Self { builder, task_executor } = self;
 
         let engine_tree_config = builder.config.engine.tree_config();
-
         let launcher = DebugNodeLauncher::new(EngineNodeLauncher::new(
             task_executor,
             builder.config.datadir(),
