@@ -119,7 +119,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
 
     /// Create new `StateProvider` for historical block number and lowest block numbers at which
     /// account & storage histories are available.
-    pub fn new_with_lowest_available_blocks(
+    pub const fn new_with_lowest_available_blocks(
         provider: &'b Provider,
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
@@ -490,7 +490,7 @@ impl<Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumR
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
-    fn as_ref(&self) -> HistoricalStateProviderRef<'_, Provider> {
+    const fn as_ref(&self) -> HistoricalStateProviderRef<'_, Provider> {
         HistoricalStateProviderRef::new_with_lowest_available_blocks(
             &self.provider,
             self.block_number,
