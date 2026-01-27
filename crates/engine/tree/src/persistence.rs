@@ -190,9 +190,9 @@ where
             provider_rw.commit()?;
             start.elapsed()
         };
-        // We calculate an estimated commit duration per block by diving the total commit duration
+        // We calculate an estimated commit duration per block by dividing the total commit duration
         // for a batch by the number of blocks in the batch
-        let commit_duration = total_commit_duration.div_f64(timing_stats.len() as f64);
+        let commit_duration = total_commit_duration.div_f64(block_count as f64);
 
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
