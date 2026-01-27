@@ -88,6 +88,7 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         .fork(EthereumHardfork::Amsterdam)
         .active_at_timestamp(genesis.timestamp)
         .then_some(EMPTY_BLOCK_ACCESS_LIST_HASH);
+
     let slot_number = hardforks
         .fork(EthereumHardfork::Amsterdam)
         .active_at_timestamp(genesis.timestamp)
