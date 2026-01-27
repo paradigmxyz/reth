@@ -4,8 +4,8 @@
 //! definitely have no storage, providing a significant performance optimization.
 
 use alloy_primitives::{map::FbHasher, B256};
+use core::fmt;
 use cuckoofilter::{CuckooError, CuckooFilter};
-use std::fmt;
 
 /// A cuckoo filter for tracking which accounts have storage.
 ///
