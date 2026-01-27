@@ -1022,6 +1022,15 @@ Engine:
 
           [default: 100]
 
+      --engine.slow-block-threshold <DURATION>
+          Configure the slow block logging threshold in milliseconds.
+
+          When set, blocks that take longer than this threshold to execute will be logged with detailed metrics including timing, state operations, and cache statistics.
+
+          Set to 0 to log all blocks (useful for debugging/profiling).
+
+          When not set, slow block logging is disabled (default).
+
 ERA:
       --era.enable
           Enable import from ERA1 files
