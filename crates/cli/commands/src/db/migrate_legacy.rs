@@ -14,8 +14,7 @@ use rayon::prelude::*;
 use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx, DatabaseEnv};
 use reth_db_api::models::{AccountBeforeTx, StorageBeforeTx};
 use reth_provider::{
-    DBProvider,
-    BlockBodyIndicesProvider, BlockNumReader, MetadataWriter, ProviderFactory,
+    BlockBodyIndicesProvider, BlockNumReader, DBProvider, MetadataWriter, ProviderFactory,
     StaticFileProviderFactory, StaticFileWriter, TransactionsProvider,
 };
 use reth_static_file_types::StaticFileSegment;
