@@ -15,16 +15,6 @@ pub(crate) struct SparseStateTrieMetrics {
     pub(crate) multiproof_skipped_storage_nodes: u64,
     /// Number of total storage nodes, including those that were skipped.
     pub(crate) multiproof_total_storage_nodes: u64,
-    /// Number of nodes converted to hash stubs during account trie pruning.
-    pub(crate) prune_account_nodes_converted: u64,
-    /// Number of nodes converted to hash stubs during storage trie pruning.
-    pub(crate) prune_storage_nodes_converted: u64,
-    /// Number of storage tries cleared (evicted) during pruning.
-    pub(crate) prune_storage_tries_cleared: u64,
-    /// Total revealed nodes in account trie after pruning.
-    pub(crate) post_prune_account_nodes: u64,
-    /// Total revealed nodes across retained storage tries after pruning.
-    pub(crate) post_prune_storage_nodes: u64,
     /// The actual metrics we will record into the histogram
     pub(crate) histograms: SparseStateTrieInnerMetrics,
 }
@@ -45,26 +35,6 @@ impl SparseStateTrieMetrics {
         self.histograms
             .multiproof_total_storage_nodes
             .record(take(&mut self.multiproof_total_storage_nodes) as f64);
-    }
-
-    /// Record the prune metrics into the histograms
-    pub(crate) fn record_prune(&mut self) {
-        use core::mem::take;
-        self.histograms
-            .prune_account_nodes_converted
-            .record(take(&mut self.prune_account_nodes_converted) as f64);
-        self.histograms
-            .prune_storage_nodes_converted
-            .record(take(&mut self.prune_storage_nodes_converted) as f64);
-        self.histograms
-            .prune_storage_tries_cleared
-            .record(take(&mut self.prune_storage_tries_cleared) as f64);
-        self.histograms
-            .post_prune_account_nodes
-            .record(take(&mut self.post_prune_account_nodes) as f64);
-        self.histograms
-            .post_prune_storage_nodes
-            .record(take(&mut self.post_prune_storage_nodes) as f64);
     }
 
     /// Increment the skipped account nodes counter by the given count
@@ -102,14 +72,4 @@ pub(crate) struct SparseStateTrieInnerMetrics {
     pub(crate) multiproof_skipped_storage_nodes: Histogram,
     /// Histogram of total storage nodes, including those that were skipped.
     pub(crate) multiproof_total_storage_nodes: Histogram,
-    /// Histogram of nodes converted to hash stubs during account trie pruning.
-    pub(crate) prune_account_nodes_converted: Histogram,
-    /// Histogram of nodes converted to hash stubs during storage trie pruning.
-    pub(crate) prune_storage_nodes_converted: Histogram,
-    /// Histogram of storage tries cleared (evicted) during pruning.
-    pub(crate) prune_storage_tries_cleared: Histogram,
-    /// Histogram of revealed nodes in account trie after pruning.
-    pub(crate) post_prune_account_nodes: Histogram,
-    /// Histogram of revealed nodes across retained storage tries after pruning.
-    pub(crate) post_prune_storage_nodes: Histogram,
 }
