@@ -1100,7 +1100,8 @@ impl SparseTrieTrait for SerialSparseTrie {
 
 impl SparseTrieExt for SerialSparseTrie {
     fn prune(&mut self, max_depth: usize) -> usize {
-        // Clear transient bookkeeping
+        // Pruning is a cache eviction operation, not a state transition.
+        // Clear transient bookkeeping since the pruned trie represents a fresh cache state.
         if let Some(updates) = self.updates.as_mut() {
             updates.updated_nodes.clear();
             updates.removed_nodes.clear();
@@ -1108,7 +1109,9 @@ impl SparseTrieExt for SerialSparseTrie {
         }
         self.prefix_set.clear();
 
-        // Collect nodes to prune via DFS
+        // Phase 1: DFS traversal to find nodes at max_depth that can be pruned.
+        // We collect "effective pruned roots" - these are the children of nodes at max_depth
+        // that have computed hashes and can be replaced with hash stubs.
         let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::new();
         let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
         stack.push((Nibbles::default(), 0));
@@ -1117,11 +1120,19 @@ impl SparseTrieExt for SerialSparseTrie {
             let Some(node) = self.nodes.get(&path) else { continue };
 
             match node {
+                // Empty: no children to traverse or prune.
+                // Hash: already a stub, nothing to do.
+                // Leaf: terminal node with no children, cannot be pruned further.
                 SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {}
+
                 SparseNode::Extension { key, .. } => {
+                    // Extension nodes count as 1 depth regardless of key length.
+                    // The child is at path + key.
                     let mut child = path;
                     child.extend(key);
                     if depth == max_depth {
+                        // At max depth: if the child has a hash, mark it for pruning.
+                        // Skip nodes already hashed or embedded (no hash means RLP < 32 bytes).
                         if let Some(hash) = self
                             .nodes
                             .get(&child)
@@ -1135,6 +1146,7 @@ impl SparseTrieExt for SerialSparseTrie {
                     }
                 }
                 SparseNode::Branch { state_mask, .. } => {
+                    // Iterate over all set children in the branch.
                     let mut mask = state_mask.get();
                     while mask != 0 {
                         let nibble = mask.trailing_zeros() as u8;
@@ -1143,6 +1155,7 @@ impl SparseTrieExt for SerialSparseTrie {
                         let mut child = path;
                         child.push_unchecked(nibble);
                         if depth == max_depth {
+                            // At max depth: if the child has a hash, mark it for pruning.
                             if let Some(hash) = self
                                 .nodes
                                 .get(&child)
@@ -1163,20 +1176,28 @@ impl SparseTrieExt for SerialSparseTrie {
             return 0;
         }
 
-        // Convert pruned roots to hash nodes
+        // Phase 2: Convert pruned roots to hash stubs.
+        // This replaces revealed subtrees with their hash, allowing descendants to be removed.
         for (path, hash) in &effective_pruned_roots {
             self.nodes.insert(*path, SparseNode::Hash(*hash));
         }
 
         let nodes_converted = effective_pruned_roots.len();
 
-        // Sort for binary search
+        // Phase 3: Remove descendants of pruned roots.
+        // Sort roots for efficient binary search when checking descendant relationships.
         effective_pruned_roots.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
 
+        // Returns true if `p` is strictly below any pruned root (i.e., a descendant).
+        // Used for nodes: we keep the hash stub itself, only remove its descendants.
         let is_strict_descendant = |p: &Nibbles| -> bool {
+            // Binary search: partition_point returns the first index where root > p.
+            // So idx-1 is the largest root <= p, which is the only candidate that could be
+            // an ancestor of p (any root that is a prefix of p must be <= p lexicographically).
             let idx = effective_pruned_roots.partition_point(|(root, _)| root <= p);
             if idx > 0 {
                 let candidate = &effective_pruned_roots[idx - 1].0;
+                // Check if p is strictly below candidate (same prefix but longer path).
                 if p.starts_with(candidate) && p.len() > candidate.len() {
                     return true;
                 }
@@ -1184,10 +1205,15 @@ impl SparseTrieExt for SerialSparseTrie {
             false
         };
 
+        // Returns true if `p` starts with any pruned root (inclusive).
+        // Used for values/masks: remove all data at or below pruned roots.
         let starts_with_pruned = |p: &Nibbles| -> bool {
+            // Binary search: find the largest root <= p, which is the only candidate
+            // that could be a prefix of p.
             let idx = effective_pruned_roots.partition_point(|(root, _)| root <= p);
             if idx > 0 {
                 let candidate = &effective_pruned_roots[idx - 1].0;
+                // Check if p starts with candidate (includes p == candidate).
                 if p.starts_with(candidate) {
                     return true;
                 }
@@ -1195,7 +1221,7 @@ impl SparseTrieExt for SerialSparseTrie {
             false
         };
 
-        // Remove descendant nodes and values
+        // Remove descendant nodes (keeping the hash stubs), and all values/masks under pruned roots.
         self.nodes.retain(|p, _| !is_strict_descendant(p));
         self.values.retain(|p, _| !starts_with_pruned(p));
         self.branch_node_masks.retain(|p, _| !starts_with_pruned(p));
