@@ -1093,7 +1093,7 @@ where
 
         tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
-        let storage_proof_receivers = dispatch_storage_proofs(
+        let (storage_proof_receivers, skipped_storage_proofs) = dispatch_storage_proofs(
             &self.storage_work_tx,
             &targets,
             &mut storage_prefix_sets,
@@ -1101,6 +1101,11 @@ where
             multi_added_removed_keys.as_ref(),
             self.storage_filter.as_ref(),
         )?;
+
+        #[cfg(feature = "metrics")]
+        if skipped_storage_proofs > 0 {
+            self.metrics.increment_storage_proofs_skipped(skipped_storage_proofs);
+        }
 
         let account_prefix_set = std::mem::take(&mut prefix_sets.account_prefix_set);
 
@@ -1500,6 +1505,9 @@ where
 /// (not in the filter) will be skipped and an empty storage proof will be returned directly.
 ///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
+///
+/// Returns a tuple of (receivers, skipped_count) where skipped_count is the number of
+/// storage proofs that were skipped due to the storage filter optimization.
 fn dispatch_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     targets: &MultiProofTargets,
@@ -1507,9 +1515,10 @@ fn dispatch_storage_proofs(
     with_branch_node_masks: bool,
     multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
     storage_filter: Option<&Arc<RwLock<StorageAccountFilter>>>,
-) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
+) -> Result<(B256Map<CrossbeamReceiver<StorageProofResultMessage>>, u64), ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(targets.len(), Default::default());
+    let mut skipped_count = 0u64;
 
     let mut sorted_targets: Vec<_> = targets.iter().collect();
     sorted_targets.sort_unstable_by_key(|(addr, _)| *addr);
@@ -1528,6 +1537,7 @@ fn dispatch_storage_proofs(
                 .is_some_and(|filter| !filter.read().may_have_storage(*hashed_address));
 
         if skip_storage_proof {
+            skipped_count += 1;
             let empty_proof = DecodedStorageMultiProof::empty();
             let _ = result_tx.send(StorageProofResultMessage {
                 hashed_address: *hashed_address,
@@ -1557,7 +1567,7 @@ fn dispatch_storage_proofs(
         storage_proof_receivers.insert(*hashed_address, result_rx);
     }
 
-    Ok(storage_proof_receivers)
+    Ok((storage_proof_receivers, skipped_count))
 }
 
 /// Queues V2 storage proofs for all accounts in the targets and returns receivers.
