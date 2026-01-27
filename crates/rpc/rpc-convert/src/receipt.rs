@@ -29,7 +29,7 @@ impl TryFromReceiptResponse<alloy_network::Ethereum> for reth_ethereum_primitive
 }
 
 #[cfg(feature = "op")]
-impl TryFromReceiptResponse<op_alloy_network::Optimism> for reth_optimism_primitives::OpReceipt {
+impl TryFromReceiptResponse<op_alloy_network::Optimism> for op_alloy_consensus::OpReceipt {
     type Error = Infallible;
 
     fn from_receipt_response(
