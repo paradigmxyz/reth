@@ -29,7 +29,7 @@ pub const UPPER_TRIE_MAX_DEPTH: usize = 2;
 pub const NUM_LOWER_SUBTRIES: usize = 16usize.pow(UPPER_TRIE_MAX_DEPTH as u32);
 
 /// Configuration for controlling when parallelism is enabled in [`ParallelSparseTrie`] operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParallelismThresholds {
     /// Minimum number of nodes to reveal before parallel processing is enabled.
     /// When `reveal_nodes` has fewer nodes than this threshold, they will be processed serially.
@@ -38,6 +38,16 @@ pub struct ParallelismThresholds {
     /// for hash updates. When updating subtrie hashes with fewer changed keys than this threshold,
     /// the updates will be processed serially.
     pub min_updated_nodes: usize,
+    /// Minimum number of revealed lower subtries before parallel processing is enabled for prune.
+    /// When pruning with fewer revealed subtries than this threshold, they will be processed
+    /// serially.
+    pub min_prune_subtries: usize,
+}
+
+impl Default for ParallelismThresholds {
+    fn default() -> Self {
+        Self { min_revealed_nodes: 0, min_updated_nodes: 0, min_prune_subtries: 4 }
+    }
 }
 
 /// A revealed sparse trie with subtries that can be updated in parallel.
@@ -924,8 +934,8 @@ impl SparseTrieExt for ParallelSparseTrie {
     }
 
     fn prune(&mut self, max_depth: usize) -> usize {
-        // Always clear transient bookkeeping, even if nothing is pruned.
-        // This ensures the trie is in a "fresh" state for the next execution.
+        // Pruning is cache eviction, not a state transition.
+        // Clear update tracking and prefix set since the pruned trie is a fresh cache state.
         if let Some(updates) = self.updates.as_mut() {
             updates.updated_nodes.clear();
             updates.removed_nodes.clear();
@@ -933,6 +943,8 @@ impl SparseTrieExt for ParallelSparseTrie {
         }
         self.prefix_set.clear();
 
+        // DFS traversal to find nodes at max_depth that can be pruned.
+        // Collects "effective pruned roots" - children of nodes at max_depth with computed hashes.
         let estimated_capacity = self.upper_subtrie.nodes.len().min(256);
         let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::with_capacity(estimated_capacity);
         let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
@@ -949,7 +961,9 @@ impl SparseTrieExt for ParallelSparseTrie {
             let Some(node) = subtrie.nodes.get(&path) else { continue };
 
             match node {
+                // Terminal nodes: no children to traverse or prune
                 SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {}
+                // Extension: counts as 1 depth regardless of key length
                 SparseNode::Extension { key, .. } => {
                     let mut child = path;
                     child.extend(key);
@@ -970,8 +984,8 @@ impl SparseTrieExt for ParallelSparseTrie {
                         stack.push((child, depth + 1));
                     }
                 }
+                // Branch: iterate over all set children
                 SparseNode::Branch { state_mask, .. } => {
-                    // Iterate only over set bits in state_mask
                     let mut mask = state_mask.get();
                     while mask != 0 {
                         let nibble = mask.trailing_zeros() as u8;
@@ -1148,7 +1162,7 @@ impl SparseTrieExt for ParallelSparseTrie {
                 .collect();
 
             // Only use parallelism if there are enough subtries to process
-            if revealed_indices.len() >= 4 {
+            if revealed_indices.len() >= self.parallelism_thresholds.min_prune_subtries {
                 // Take out the subtries we need to process
                 let mut subtries_to_process: Vec<_> = revealed_indices
                     .iter()
