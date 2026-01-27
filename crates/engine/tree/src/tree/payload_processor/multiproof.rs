@@ -508,13 +508,11 @@ impl MultiproofManager {
                     proof_result_sender,
                 }
             }
-            VersionedMultiProofTargets::V2(proof_targets) => {
-                AccountMultiproofInput::V2 {
-                    targets: proof_targets,
-                    proof_result_sender,
-                    multi_added_removed_keys,
-                }
-            }
+            VersionedMultiProofTargets::V2(proof_targets) => AccountMultiproofInput::V2 {
+                targets: proof_targets,
+                proof_result_sender,
+                multi_added_removed_keys,
+            },
         };
 
         // Dispatch account multiproof to worker pool with result sender

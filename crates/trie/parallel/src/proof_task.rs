@@ -1445,7 +1445,11 @@ where
                 };
                 (proof_result_sender, result, value_encoder_stats)
             }
-            AccountMultiproofInput::V2 { targets, proof_result_sender, multi_added_removed_keys } => {
+            AccountMultiproofInput::V2 {
+                targets,
+                proof_result_sender,
+                multi_added_removed_keys,
+            } => {
                 let (result, value_encoder_stats) = match self
                     .compute_v2_account_multiproof::<Provider>(
                         v2_account_calculator.expect("v2 account calculator provided"),
@@ -1832,10 +1836,13 @@ fn dispatch_v2_storage_proofs(
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
         // Get the AddedRemovedKeys for this specific account's storage
-        let added_removed_keys = multi_added_removed_keys
-            .and_then(|keys| keys.get_storage(&hashed_address).cloned());
-        let input =
-            StorageProofInput::new_with_added_removed_keys(hashed_address, targets, added_removed_keys);
+        let added_removed_keys =
+            multi_added_removed_keys.and_then(|keys| keys.get_storage(&hashed_address).cloned());
+        let input = StorageProofInput::new_with_added_removed_keys(
+            hashed_address,
+            targets,
+            added_removed_keys,
+        );
 
         storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
@@ -1858,8 +1865,8 @@ fn dispatch_v2_storage_proofs(
 
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         // Get the AddedRemovedKeys for this specific account's storage
-        let added_removed_keys = multi_added_removed_keys
-            .and_then(|keys| keys.get_storage(&hashed_address).cloned());
+        let added_removed_keys =
+            multi_added_removed_keys.and_then(|keys| keys.get_storage(&hashed_address).cloned());
         let input = StorageProofInput::new_with_added_removed_keys(
             hashed_address,
             vec![proof_v2::Target::new(B256::ZERO)],

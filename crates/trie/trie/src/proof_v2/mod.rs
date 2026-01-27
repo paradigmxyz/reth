@@ -55,11 +55,50 @@ struct AddedRemovedKeysTracking {
     last_nontarget_path: Nibbles,
     /// The RLP-encoded proof of the last non-target node.
     last_nontarget_proof: Vec<u8>,
+    /// If the last non-target was an extension, this holds the extension's child (the branch)
+    /// path and proof. This is needed because when an extension is the remaining sibling after
+    /// branch collapse, the sparse trie also needs the extension's child to be revealed.
+    last_extension_child_path: Option<Nibbles>,
+    last_extension_child_proof: Vec<u8>,
+    /// Temporary storage for the last committed branch, used to preserve extension child info.
+    pending_branch_path: Option<Nibbles>,
+    pending_branch_proof: Vec<u8>,
 }
 
 impl AddedRemovedKeysTracking {
+    /// Track a branch that was just committed. If an extension is tracked next at a path
+    /// that would include this branch, we preserve this as the extension's child.
+    fn track_committed_branch(&mut self, path: Nibbles, proof: &[u8]) {
+        self.pending_branch_path = Some(path);
+        self.pending_branch_proof.clear();
+        self.pending_branch_proof.extend_from_slice(proof);
+    }
+
     /// Track a non-target node for potential later retention.
-    fn track_nontarget(&mut self, path: Nibbles, proof: &[u8]) {
+    fn track_nontarget(&mut self, path: Nibbles, proof: &[u8], is_extension: bool) {
+        // If this is an extension and we have a pending branch that is its child, preserve it
+        if is_extension {
+            if let Some(pending_path) = &self.pending_branch_path {
+                // Check if the pending branch is a child of this extension
+                // Extension path + short_key = branch path
+                if pending_path.starts_with(&path) && pending_path.len() > path.len() {
+                    self.last_extension_child_path = self.pending_branch_path.take();
+                    self.last_extension_child_proof =
+                        core::mem::take(&mut self.pending_branch_proof);
+                } else {
+                    self.last_extension_child_path = None;
+                    self.last_extension_child_proof.clear();
+                }
+            } else {
+                self.last_extension_child_path = None;
+                self.last_extension_child_proof.clear();
+            }
+        } else {
+            // Non-extension: clear extension child tracking
+            self.last_extension_child_path = None;
+            self.last_extension_child_proof.clear();
+        }
+
         self.last_nontarget_path = path;
         self.last_nontarget_proof.clear();
         self.last_nontarget_proof.extend_from_slice(proof);
@@ -68,15 +107,19 @@ impl AddedRemovedKeysTracking {
     /// Returns true if the branch's remaining child (at `child_nibble`) is the tracked non-target.
     fn branch_child_is_nontarget(&self, branch_path: &Nibbles, child_nibble: u8) -> bool {
         // The tracked non-target must be an immediate child of this branch
-        branch_path.len() + 1 == self.last_nontarget_path.len()
-            && self.last_nontarget_path.starts_with(branch_path)
-            && self.last_nontarget_path.last() == Some(child_nibble)
+        branch_path.len() + 1 == self.last_nontarget_path.len() &&
+            self.last_nontarget_path.starts_with(branch_path) &&
+            self.last_nontarget_path.last() == Some(child_nibble)
     }
 
     /// Clears the tracking state.
     fn clear(&mut self) {
         self.last_nontarget_path = Nibbles::new();
         self.last_nontarget_proof.clear();
+        self.last_extension_child_path = None;
+        self.last_extension_child_proof.clear();
+        self.pending_branch_path = None;
+        self.pending_branch_proof.clear();
     }
 }
 
@@ -358,6 +401,31 @@ where
                                     node,
                                     masks: None,
                                 });
+
+                                // If the sibling is an extension node, we also need to retain its
+                                // child. The sparse trie's reveal_remaining_child_on_leaf_removal
+                                // recurses into extensions to also reveal their grandchild.
+                                if let Some(ext_child_path) =
+                                    self.added_removed_tracking.last_extension_child_path
+                                {
+                                    if let Ok(ext_child_node) = TrieNode::decode(
+                                        &mut self
+                                            .added_removed_tracking
+                                            .last_extension_child_proof
+                                            .as_slice(),
+                                    ) {
+                                        trace!(
+                                            target: TRACE_TARGET,
+                                            ?ext_child_path,
+                                            "Also retaining extension child proof"
+                                        );
+                                        self.retained_proofs.push(ProofTrieNode {
+                                            path: ext_child_path,
+                                            node: ext_child_node,
+                                            masks: None,
+                                        });
+                                    }
+                                }
                             }
                         }
                     }
@@ -383,6 +451,11 @@ where
         // If the child path is not being retained then we convert directly to an `RlpNode`
         // using `into_rlp`. Since we are not retaining the node we can recover any `RlpNode`
         // buffers for the free-list here, hence why we do this as a separate logical branch.
+
+        // Capture the child type before conversion for tracking purposes
+        let is_extension = matches!(child, ProofTrieBranchChild::Extension { .. });
+        let is_branch = matches!(child, ProofTrieBranchChild::Branch { .. });
+
         self.rlp_encode_buf.clear();
         let (child_rlp_node, freed_rlp_nodes_buf) = child.into_rlp(&mut self.rlp_encode_buf)?;
 
@@ -397,8 +470,17 @@ where
 
                 // Only track if not being removed
                 if !removed_mask.is_bit_set(child_nibble) {
-                    // We need to encode the node to get its proof bytes
-                    self.added_removed_tracking.track_nontarget(child_path, &self.rlp_encode_buf);
+                    // Track branches separately so extensions can reference them as children
+                    if is_branch {
+                        self.added_removed_tracking
+                            .track_committed_branch(child_path, &self.rlp_encode_buf);
+                    }
+                    // Track this node as a potential sibling for branch collapse
+                    self.added_removed_tracking.track_nontarget(
+                        child_path,
+                        &self.rlp_encode_buf,
+                        is_extension,
+                    );
                 }
             }
         }
