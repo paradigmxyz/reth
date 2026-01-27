@@ -3595,6 +3595,7 @@ dependencies = [
  "reth-db-api",
  "reth-ethereum",
  "reth-provider",
+ "reth-stages",
  "serde",
  "serde_json",
 ]
