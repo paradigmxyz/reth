@@ -1047,7 +1047,7 @@ where
         {
             use rayon::prelude::*;
 
-            const PARALLEL_PRUNE_THRESHOLD: usize = 8;
+            const PARALLEL_PRUNE_THRESHOLD: usize = 16;
 
             if tries_to_keep.len() >= PARALLEL_PRUNE_THRESHOLD {
                 self.storage
