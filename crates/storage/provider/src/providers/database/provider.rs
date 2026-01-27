@@ -3376,8 +3376,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
 
         // Use pre-computed transitions for history indices since static file
         // writes aren't visible until commit.
-        self.insert_account_history_index(account_transitions)?;
-        self.insert_storage_history_index(storage_transitions)?;
+        // Skip MDBX history index writes when RocksDB is configured for history
+        // (history will be read from RocksDB via healing/stages instead).
+        let storage_settings = self.cached_storage_settings();
+        if !storage_settings.account_history_in_rocksdb {
+            self.insert_account_history_index(account_transitions)?;
+        }
+        if !storage_settings.storages_history_in_rocksdb {
+            self.insert_storage_history_index(storage_transitions)?;
+        }
         durations_recorder.record_relative(metrics::Action::InsertHistoryIndices);
 
         // Update pipeline progress
