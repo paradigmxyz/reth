@@ -224,6 +224,31 @@ where
         self.storage.tries.insert(address, storage_trie);
     }
 
+    /// Pre-reveal blinded nodes for account paths to reduce random I/O.
+    pub fn prefetch_blinded_for_paths<P: TrieNodeProvider>(
+        &mut self,
+        account_paths: impl Iterator<Item = Nibbles>,
+        provider: &P,
+    ) -> SparseStateTrieResult<()>
+    where
+        A: crate::BlindedPathCollector,
+    {
+        let mut blinded = Vec::new();
+        if let Some(trie) = self.state.as_revealed_ref() {
+            for path in account_paths {
+                trie.collect_blinded_on_path(&path, &mut blinded);
+            }
+        }
+        for path in blinded {
+            if let Some(node) = provider.trie_node(&path)? {
+                if let Some(trie) = self.state.as_revealed_mut() {
+                    trie.reveal_node(path, TrieNode::decode(&mut node.node.as_ref())?, None)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Reveal unknown trie paths from multiproof.
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_multiproof(&mut self, multiproof: MultiProof) -> SparseStateTrieResult<()> {

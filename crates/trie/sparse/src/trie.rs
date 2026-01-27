@@ -1,6 +1,7 @@
 use crate::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
+    BlindedPathCollector, LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait,
+    SparseTrieUpdates,
 };
 use alloc::{
     borrow::Cow,
@@ -418,6 +419,12 @@ impl Default for SerialSparseTrie {
             updates: None,
             rlp_buf: Vec::new(),
         }
+    }
+}
+
+impl BlindedPathCollector for SerialSparseTrie {
+    fn collect_blinded_on_path(&self, target_path: &Nibbles, out: &mut Vec<Nibbles>) {
+        self.collect_blinded_on_path(target_path, out)
     }
 }
 
@@ -1131,6 +1138,34 @@ impl SerialSparseTrie {
     /// Returns an immutable reference to all nodes in the sparse trie.
     pub const fn nodes_ref(&self) -> &HashMap<Nibbles, SparseNode> {
         &self.nodes
+    }
+
+    /// Collect paths of blinded (Hash) nodes along the path from root to target.
+    pub fn collect_blinded_on_path(&self, target_path: &Nibbles, out: &mut Vec<Nibbles>) {
+        let mut current = Nibbles::default();
+        while current.len() < target_path.len() {
+            if let Some(node) = self.nodes.get(&current) {
+                if matches!(node, SparseNode::Hash(_)) {
+                    out.push(current.clone());
+                }
+                match node {
+                    SparseNode::Branch { state_mask, .. } => {
+                        let nibble = target_path.get_unchecked(current.len());
+                        if state_mask.is_bit_set(nibble) {
+                            current.push_unchecked(nibble);
+                        } else {
+                            break;
+                        }
+                    }
+                    SparseNode::Extension { key, .. } => {
+                        current.extend(key);
+                    }
+                    _ => break,
+                }
+            } else {
+                break;
+            }
+        }
     }
 
     /// Reveals either a node or its hash placeholder based on the provided child data.

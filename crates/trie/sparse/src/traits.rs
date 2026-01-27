@@ -277,3 +277,9 @@ pub enum LeafLookup {
     /// Leaf does not exist (exclusion proof found).
     NonExistent,
 }
+
+/// Trait for collecting blinded node paths along a target path.
+pub trait BlindedPathCollector {
+    /// Collect paths of blinded (Hash) nodes along the path from root to target.
+    fn collect_blinded_on_path(&self, target_path: &Nibbles, out: &mut Vec<Nibbles>);
+}
