@@ -1541,12 +1541,12 @@ where
         ) = cache_metrics
             .map(|metrics| {
                 (
-                    metrics.account_hits(),
-                    metrics.account_misses(),
-                    metrics.storage_hits(),
-                    metrics.storage_misses(),
-                    metrics.code_hits(),
-                    metrics.code_misses(),
+                    metrics.stats.account_hits(),
+                    metrics.stats.account_misses(),
+                    metrics.stats.storage_hits(),
+                    metrics.stats.storage_misses(),
+                    metrics.stats.code_hits(),
+                    metrics.stats.code_misses(),
                 )
             })
             .unwrap_or((0, 0, 0, 0, 0, 0));
