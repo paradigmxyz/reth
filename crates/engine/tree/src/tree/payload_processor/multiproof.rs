@@ -964,7 +964,11 @@ impl MultiProofTask {
     /// Dispatches a state update (or batch) to workers.
     ///
     /// This contains the core dispatch logic extracted from the original `on_hashed_state_update`.
-    fn dispatch_state_update(&mut self, source: Source, not_fetched_state_update: HashedPostState) -> u64 {
+    fn dispatch_state_update(
+        &mut self,
+        source: Source,
+        not_fetched_state_update: HashedPostState,
+    ) -> u64 {
         if not_fetched_state_update.is_empty() {
             return 0;
         }
@@ -1053,9 +1057,10 @@ impl MultiProofTask {
 
         let batch = std::mem::take(&mut self.pending_batch);
         let batch_count = self.pending_batch_count;
-        let source = self.pending_batch_source.take().unwrap_or(Source::Evm(
-            alloy_evm::block::StateChangeSource::Transaction(0),
-        ));
+        let source = self
+            .pending_batch_source
+            .take()
+            .unwrap_or(Source::Evm(alloy_evm::block::StateChangeSource::Transaction(0)));
         self.pending_batch_count = 0;
 
         trace!(
