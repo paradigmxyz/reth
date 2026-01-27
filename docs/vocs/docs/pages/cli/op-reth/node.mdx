@@ -1007,6 +1007,9 @@ Engine:
       --engine.disable-cache-metrics
           Disable cache metrics recording, which can take up to 50ms with large cached state
 
+      --engine.trie-metrics
+          Enable trie cursor metrics recording. This adds overhead from timing every cursor operation in hot paths
+
 ERA:
       --era.enable
           Enable import from ERA1 files
