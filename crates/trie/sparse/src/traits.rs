@@ -240,16 +240,26 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 /// This trait provides the `prune` method for sparse trie implementations that support
 /// converting nodes beyond a certain depth into hash stubs. This is useful for reducing
 /// memory usage when caching tries across payload validations.
-///
-/// Note: Only [`crate::ParallelSparseTrie`] implements this trait.
 pub trait SparseTrieExt: SparseTrie {
     /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
     ///
-    /// Depth counts nodes traversed (not nibbles). Must be called after `root()`.
-    /// Embedded nodes (RLP < 32 bytes) are preserved since they have no hash.
+    /// Depth counts nodes traversed (not nibbles), so extension nodes count as 1 depth
+    /// regardless of key length. `max_depth == 0` prunes all children of the root node.
     ///
-    /// Returns the number of nodes converted to hash stubs.
-    /// Returns 0 if `max_depth` exceeds trie depth or trie is empty.
+    /// # Preconditions
+    ///
+    /// Must be called after `root()` to ensure all nodes have computed hashes.
+    /// Calling on a trie without computed hashes will result in no pruning.
+    ///
+    /// # Behavior
+    ///
+    /// - Embedded nodes (RLP < 32 bytes) are preserved since they have no hash
+    /// - Clears `prefix_set` and update tracking (this is cache eviction, not a state transition)
+    /// - Returns 0 if `max_depth` exceeds trie depth or trie is empty
+    ///
+    /// # Returns
+    ///
+    /// The number of nodes converted to hash stubs.
     fn prune(&mut self, max_depth: usize) -> usize;
 }
 
