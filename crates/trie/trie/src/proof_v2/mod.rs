@@ -12,8 +12,8 @@ use crate::{
     trie_cursor::{depth_first, TrieCursor, TrieStorageCursor},
 };
 use alloy_primitives::{keccak256, B256, U256};
-use alloy_rlp::Encodable;
-use alloy_trie::{BranchNodeCompact, TrieMask};
+use alloy_rlp::{Decodable, Encodable};
+use alloy_trie::{proof::AddedRemovedKeys, BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{BranchNode, BranchNodeMasks, Nibbles, ProofTrieNode, RlpNode, TrieNode};
 use std::cmp::Ordering;
@@ -44,6 +44,41 @@ static PATH_ALL_ZEROS: Nibbles = {
     }
     path
 };
+
+/// Tracking state for [`AddedRemovedKeys`] during proof calculation.
+///
+/// This tracks non-target nodes during traversal so they can be retroactively retained
+/// when a branch collapses (i.e., when all but one child is removed).
+#[derive(Debug, Default)]
+struct AddedRemovedKeysTracking {
+    /// Path of the last non-target, non-removed node seen.
+    last_nontarget_path: Nibbles,
+    /// The RLP-encoded proof of the last non-target node.
+    last_nontarget_proof: Vec<u8>,
+}
+
+impl AddedRemovedKeysTracking {
+    /// Track a non-target node for potential later retention.
+    fn track_nontarget(&mut self, path: Nibbles, proof: &[u8]) {
+        self.last_nontarget_path = path;
+        self.last_nontarget_proof.clear();
+        self.last_nontarget_proof.extend_from_slice(proof);
+    }
+
+    /// Returns true if the branch's remaining child (at `child_nibble`) is the tracked non-target.
+    fn branch_child_is_nontarget(&self, branch_path: &Nibbles, child_nibble: u8) -> bool {
+        // The tracked non-target must be an immediate child of this branch
+        branch_path.len() + 1 == self.last_nontarget_path.len()
+            && self.last_nontarget_path.starts_with(branch_path)
+            && self.last_nontarget_path.last() == Some(child_nibble)
+    }
+
+    /// Clears the tracking state.
+    fn clear(&mut self) {
+        self.last_nontarget_path = Nibbles::new();
+        self.last_nontarget_proof.clear();
+    }
+}
 
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
@@ -95,6 +130,13 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     rlp_nodes_bufs: Vec<Vec<RlpNode>>,
     /// Re-usable byte buffer, used for RLP encoding.
     rlp_encode_buf: Vec<u8>,
+    /// Optional configuration for tracking added/removed keys.
+    ///
+    /// When set, the calculator will retain extra proof nodes for siblings that would become
+    /// orphaned when a branch collapses due to leaf removal.
+    added_removed_keys: Option<AddedRemovedKeys>,
+    /// Tracking state for added/removed keys during proof calculation.
+    added_removed_tracking: AddedRemovedKeysTracking,
 }
 
 impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
@@ -110,7 +152,24 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
             retained_proofs: Vec::<_>::new(),
             rlp_nodes_bufs: Vec::<_>::new(),
             rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
+            added_removed_keys: None,
+            added_removed_tracking: AddedRemovedKeysTracking::default(),
         }
+    }
+
+    /// Sets the added/removed keys configuration.
+    ///
+    /// When set, the calculator will retain extra proof nodes for siblings that would become
+    /// orphaned when a branch collapses due to leaf removal. This prevents the sparse trie
+    /// from needing to fall back to database lookups during updates.
+    pub fn with_added_removed_keys(mut self, added_removed_keys: Option<AddedRemovedKeys>) -> Self {
+        self.added_removed_keys = added_removed_keys;
+        self
+    }
+
+    /// Sets the added/removed keys configuration by reference.
+    pub fn set_added_removed_keys(&mut self, added_removed_keys: Option<AddedRemovedKeys>) {
+        self.added_removed_keys = added_removed_keys;
     }
 }
 
@@ -265,6 +324,46 @@ where
         if self.should_retain(targets, &child_path, true) {
             trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
 
+            // Check if this is a branch that will collapse after removals.
+            // If so, we need to also retain the remaining sibling's proof.
+            if let Some(added_removed_keys) = &self.added_removed_keys {
+                if let ProofTrieBranchChild::Branch { node, .. } = &child {
+                    let state_mask = node.state_mask;
+                    let removed_mask = added_removed_keys.get_removed_mask(&child_path);
+                    let nonremoved_mask = TrieMask::new(!removed_mask.get() & state_mask.get());
+
+                    // If exactly one child remains after removals, the branch will collapse
+                    if nonremoved_mask.count_ones() == 1 {
+                        let remaining_nibble = nonremoved_mask.trailing_zeros() as u8;
+
+                        // Check if the remaining child is the one we've been tracking as non-target
+                        if self
+                            .added_removed_tracking
+                            .branch_child_is_nontarget(&child_path, remaining_nibble)
+                        {
+                            trace!(
+                                target: TRACE_TARGET,
+                                ?child_path,
+                                ?remaining_nibble,
+                                nontarget_path = ?self.added_removed_tracking.last_nontarget_path,
+                                "Branch will collapse, retaining sibling proof"
+                            );
+
+                            // Retain the sibling's proof - decode and add to retained_proofs
+                            if let Ok(node) = TrieNode::decode(
+                                &mut self.added_removed_tracking.last_nontarget_proof.as_slice(),
+                            ) {
+                                self.retained_proofs.push(ProofTrieNode {
+                                    path: self.added_removed_tracking.last_nontarget_path,
+                                    node,
+                                    masks: None,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
             // Convert to `ProofTrieNode`, which will be what is retained.
             //
             // If this node is a branch then its `rlp_nodes_buf` will be taken and not returned to
@@ -286,6 +385,23 @@ where
         // buffers for the free-list here, hence why we do this as a separate logical branch.
         self.rlp_encode_buf.clear();
         let (child_rlp_node, freed_rlp_nodes_buf) = child.into_rlp(&mut self.rlp_encode_buf)?;
+
+        // Track this non-target node for potential later retention during branch collapse.
+        // Only track if AddedRemovedKeys is configured and this node is not being removed.
+        if let Some(added_removed_keys) = &self.added_removed_keys {
+            if !child_path.is_empty() {
+                // Check if this child is in the removed set
+                let parent_path = child_path.slice_unchecked(0, child_path.len() - 1);
+                let child_nibble = child_path.last().expect("path not empty");
+                let removed_mask = added_removed_keys.get_removed_mask(&parent_path);
+
+                // Only track if not being removed
+                if !removed_mask.is_bit_set(child_nibble) {
+                    // We need to encode the node to get its proof bytes
+                    self.added_removed_tracking.track_nontarget(child_path, &self.rlp_encode_buf);
+                }
+            }
+        }
 
         // If there is an `RlpNode` buffer which can be re-used then push it onto the free-list.
         if let Some(buf) = freed_rlp_nodes_buf {
@@ -1257,6 +1373,9 @@ where
         value_encoder: &mut VE,
         targets: &mut [Target],
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
+        // Clear tracking state from any previous calculation
+        self.added_removed_tracking.clear();
+
         // If there are no targets then nothing could be returned, return early.
         if targets.is_empty() {
             trace!(target: TRACE_TARGET, "Empty targets, returning");

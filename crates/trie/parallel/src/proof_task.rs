@@ -60,7 +60,7 @@ use reth_trie::{
 use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSet, PrefixSetMut},
-    proof::{DecodedProofNodes, ProofRetainer},
+    proof::{AddedRemovedKeys, DecodedProofNodes, ProofRetainer},
     BranchNodeMasks, BranchNodeMasksMap,
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
@@ -513,7 +513,8 @@ where
             <Provider as HashedCursorFactory>::StorageCursor<'_>,
         >,
     ) -> Result<StorageProofResult, StateProofError> {
-        let StorageProofInput::V2 { hashed_address, mut targets } = input else {
+        let StorageProofInput::V2 { hashed_address, mut targets, added_removed_keys } = input
+        else {
             panic!("compute_v2_storage_proof only accepts StorageProofInput::V2")
         };
 
@@ -532,6 +533,9 @@ where
             worker_id = self.id,
         );
         let _span_guard = span.enter();
+
+        // Configure the calculator with added/removed keys for sibling retention
+        calculator.set_added_removed_keys(added_removed_keys);
 
         let proof_start = Instant::now();
         let proof = calculator.storage_proof(hashed_address, &mut targets)?;
@@ -994,7 +998,7 @@ where
                     &mut hashed_cursor_metrics,
                 )
             }
-            StorageProofInput::V2 { hashed_address, targets } => {
+            StorageProofInput::V2 { hashed_address, targets, .. } => {
                 trace!(
                     target: "trie::proof_task",
                     worker_id = self.worker_id,
@@ -1358,6 +1362,7 @@ where
         v2_account_calculator: &mut V2AccountProofCalculator<'a, Provider>,
         v2_storage_calculator: Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>,
         targets: MultiProofTargetsV2,
+        multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
     ) -> Result<(ProofResult, ValueEncoderStats), ParallelStateRootError>
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
@@ -1375,8 +1380,12 @@ where
 
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
-        let storage_proof_receivers =
-            dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
+        let storage_proof_receivers = dispatch_v2_storage_proofs(
+            &self.storage_work_tx,
+            &account_targets,
+            storage_targets,
+            multi_added_removed_keys,
+        )?;
 
         let mut value_encoder = AsyncAccountValueEncoder::new(
             storage_proof_receivers,
@@ -1436,12 +1445,13 @@ where
                 };
                 (proof_result_sender, result, value_encoder_stats)
             }
-            AccountMultiproofInput::V2 { targets, proof_result_sender } => {
+            AccountMultiproofInput::V2 { targets, proof_result_sender, multi_added_removed_keys } => {
                 let (result, value_encoder_stats) = match self
                     .compute_v2_account_multiproof::<Provider>(
                         v2_account_calculator.expect("v2 account calculator provided"),
                         v2_storage_calculator.expect("v2 storage calculator provided"),
                         targets,
+                        multi_added_removed_keys.as_ref(),
                     ) {
                     Ok((proof, stats)) => (Ok(proof), stats),
                     Err(e) => (Err(e), ValueEncoderStats::default()),
@@ -1811,6 +1821,7 @@ fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &Vec<proof_v2::Target>,
     storage_targets: B256Map<Vec<proof_v2::Target>>,
+    multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
@@ -1819,7 +1830,12 @@ fn dispatch_v2_storage_proofs(
     for (hashed_address, targets) in storage_targets {
         // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
-        let input = StorageProofInput::new(hashed_address, targets);
+
+        // Get the AddedRemovedKeys for this specific account's storage
+        let added_removed_keys = multi_added_removed_keys
+            .and_then(|keys| keys.get_storage(&hashed_address).cloned());
+        let input =
+            StorageProofInput::new_with_added_removed_keys(hashed_address, targets, added_removed_keys);
 
         storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
@@ -1841,7 +1857,14 @@ fn dispatch_v2_storage_proofs(
         }
 
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
-        let input = StorageProofInput::new(hashed_address, vec![proof_v2::Target::new(B256::ZERO)]);
+        // Get the AddedRemovedKeys for this specific account's storage
+        let added_removed_keys = multi_added_removed_keys
+            .and_then(|keys| keys.get_storage(&hashed_address).cloned());
+        let input = StorageProofInput::new_with_added_removed_keys(
+            hashed_address,
+            vec![proof_v2::Target::new(B256::ZERO)],
+            added_removed_keys,
+        );
 
         storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
@@ -1879,6 +1902,8 @@ pub enum StorageProofInput {
         hashed_address: B256,
         /// The set of proof targets
         targets: Vec<proof_v2::Target>,
+        /// Added/removed keys for sibling retention during branch collapses
+        added_removed_keys: Option<AddedRemovedKeys>,
     },
 }
 
@@ -1903,7 +1928,16 @@ impl StorageProofInput {
 
     /// Creates a new [`StorageProofInput`] with the given hashed address and target slots.
     pub const fn new(hashed_address: B256, targets: Vec<proof_v2::Target>) -> Self {
-        Self::V2 { hashed_address, targets }
+        Self::V2 { hashed_address, targets, added_removed_keys: None }
+    }
+
+    /// Creates a new V2 [`StorageProofInput`] with added/removed keys for sibling retention.
+    pub const fn new_with_added_removed_keys(
+        hashed_address: B256,
+        targets: Vec<proof_v2::Target>,
+        added_removed_keys: Option<AddedRemovedKeys>,
+    ) -> Self {
+        Self::V2 { hashed_address, targets, added_removed_keys }
     }
 
     /// Returns the targeted hashed address.
@@ -1938,6 +1972,8 @@ pub enum AccountMultiproofInput {
         targets: MultiProofTargetsV2,
         /// Context for sending the proof result.
         proof_result_sender: ProofResultContext,
+        /// Provided by the user to give the necessary context to retain extra proofs.
+        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     },
 }
 

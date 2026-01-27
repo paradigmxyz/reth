@@ -509,7 +509,11 @@ impl MultiproofManager {
                 }
             }
             VersionedMultiProofTargets::V2(proof_targets) => {
-                AccountMultiproofInput::V2 { targets: proof_targets, proof_result_sender }
+                AccountMultiproofInput::V2 {
+                    targets: proof_targets,
+                    proof_result_sender,
+                    multi_added_removed_keys,
+                }
             }
         };
 
@@ -773,15 +777,14 @@ impl MultiProofTask {
         targets.retain_difference(&self.fetched_proof_targets);
         extend_multiproof_targets(&mut self.fetched_proof_targets, &targets);
 
-        // For Legacy multiproofs, make sure all target accounts have an `AddedRemovedKeySet` in the
+        // Make sure all target accounts have an `AddedRemovedKeySet` in the
         // [`MultiAddedRemovedKeys`]. Even if there are not any known removed keys for the account,
         // we still want to optimistically fetch extension children for the leaf addition case.
-        // V2 multiproofs don't need this.
         //
         // Only clone the AddedRemovedKeys for accounts in the targets, not the entire accumulated
         // set, to avoid O(n) cloning with many buffered blocks.
-        let multi_added_removed_keys =
-            if let VersionedMultiProofTargets::Legacy(legacy_targets) = &targets {
+        let multi_added_removed_keys = match &targets {
+            VersionedMultiProofTargets::Legacy(legacy_targets) => {
                 self.multi_added_removed_keys.touch_accounts(legacy_targets.keys().copied());
                 Some(Arc::new(MultiAddedRemovedKeys {
                     account: self.multi_added_removed_keys.account.clone(),
@@ -792,9 +795,27 @@ impl MultiProofTask {
                         })
                         .collect(),
                 }))
-            } else {
-                None
-            };
+            }
+            VersionedMultiProofTargets::V2(v2_targets) => {
+                // Extract B256 keys from V2 targets
+                let account_keys: Vec<B256> =
+                    v2_targets.account_targets.iter().map(|t| t.key()).collect();
+                self.multi_added_removed_keys.touch_accounts(
+                    v2_targets.storage_targets.keys().chain(account_keys.iter()).copied(),
+                );
+                Some(Arc::new(MultiAddedRemovedKeys {
+                    account: self.multi_added_removed_keys.account.clone(),
+                    storages: v2_targets
+                        .storage_targets
+                        .keys()
+                        .chain(account_keys.iter())
+                        .filter_map(|k| {
+                            self.multi_added_removed_keys.storages.get(k).map(|v| (*k, v.clone()))
+                        })
+                        .collect(),
+                }))
+            }
+        };
 
         self.metrics.prefetch_proof_targets_accounts_histogram.record(targets.len() as f64);
         self.metrics
