@@ -931,10 +931,11 @@ impl SparseTrieExt for ParallelSparseTrie {
         }
         self.prefix_set.clear();
 
-        let estimated_capacity = core::cmp::min(self.revealed_node_count() / 4, 1024);
+        let estimated_capacity = self.upper_subtrie.nodes.len().min(256);
         let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::with_capacity(estimated_capacity);
-        let mut stack: SmallVec<[(Nibbles, usize); 32]> =
-            SmallVec::from_buf_and_len([(Nibbles::default(), 0usize); 32], 1);
+        let mut stack: SmallVec<[(Nibbles, u8); 32]> = SmallVec::new();
+        stack.push((Nibbles::default(), 0));
+        let max_depth = max_depth as u8;
 
         while let Some((path, depth)) = stack.pop() {
             let subtrie = if SparseSubtrieType::path_len_is_upper(path.len()) {
@@ -1621,37 +1622,47 @@ impl ParallelSparseTrie {
         }
     }
 
-    /// Computes an optional replacement for an extension node when its child has been
-    /// modified during leaf removal.
+    /// Given the path to a parent extension and its key, and a child node (not necessarily on this
+    /// subtrie), returns an optional replacement parent node. If a replacement is returned then the
+    /// child node should be deleted.
     ///
-    /// After collapsing a branch into a leaf or extension, the parent extension may need
-    /// to be merged with its new child:
-    /// - If the child is now a leaf: merge into a single leaf
-    /// - If the child is now an extension: merge into a single longer extension
-    /// - If the child is still a branch: no change needed
+    /// ## Panics
     ///
-    /// # Returns
-    ///
-    /// - `Some(node)` if the extension should be replaced (and the child deleted)
-    /// - `None` if no change is needed
+    /// - If either parent or child node is not already revealed.
+    /// - If parent's path is not a prefix of the child's path.
     fn extension_changes_on_leaf_removal(
+        parent_path: &Nibbles,
         parent_key: &Nibbles,
+        child_path: &Nibbles,
         child: &SparseNode,
     ) -> Option<SparseNode> {
+        debug_assert!(child_path.len() > parent_path.len());
+        debug_assert!(child_path.starts_with(parent_path));
+
+        // If the parent node is an extension node, we need to look at its child to see
+        // if we need to merge it.
         match child {
             SparseNode::Empty | SparseNode::Hash(_) => {
                 panic!("child must be revealed")
             }
+            // For a leaf node, we collapse the extension node into a leaf node,
+            // extending the key. While it's impossible to encounter an extension node
+            // followed by a leaf node in a complete trie, it's possible here because we
+            // could have downgraded the extension node's child into a leaf node from a
+            // branch in a previous call to `branch_changes_on_leaf_removal`.
             SparseNode::Leaf { key, .. } => {
                 let mut new_key = *parent_key;
                 new_key.extend(key);
                 Some(SparseNode::new_leaf(new_key))
             }
+            // Similar to the leaf node, for an extension node, we collapse them into one
+            // extension node, extending the key.
             SparseNode::Extension { key, .. } => {
                 let mut new_key = *parent_key;
                 new_key.extend(key);
                 Some(SparseNode::new_ext(new_key))
             }
+            // For a branch node, we just leave the extension node as-is.
             SparseNode::Branch { .. } => None,
         }
     }
