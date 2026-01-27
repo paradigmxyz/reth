@@ -487,12 +487,26 @@ impl Command {
 
         let provider = provider_factory.provider_rw()?;
 
-        // Update storage settings
+        // Check if TransactionSenders actually has data in static files
+        // If not, don't enable that setting to avoid consistency check failures
+        let static_file_provider = provider_factory.static_file_provider();
+        let senders_have_data = static_file_provider
+            .get_highest_static_file_tx(StaticFileSegment::TransactionSenders)
+            .is_some();
+
+        if !senders_have_data {
+            warn!(
+                target: "reth::cli",
+                "TransactionSenders has no data in static files, not enabling static file storage for senders"
+            );
+        }
+
+        // Update storage settings - only enable senders if we have data
         #[cfg(feature = "edge")]
         let new_settings = StorageSettings::base()
             .with_receipts_in_static_files(can_migrate_receipts)
             .with_account_changesets_in_static_files(true)
-            .with_transaction_senders_in_static_files(true)
+            .with_transaction_senders_in_static_files(senders_have_data)
             .with_transaction_hash_numbers_in_rocksdb(true)
             .with_account_history_in_rocksdb(true)
             .with_storages_history_in_rocksdb(true);
@@ -501,7 +515,7 @@ impl Command {
         let new_settings = StorageSettings::base()
             .with_receipts_in_static_files(can_migrate_receipts)
             .with_account_changesets_in_static_files(true)
-            .with_transaction_senders_in_static_files(true);
+            .with_transaction_senders_in_static_files(senders_have_data);
 
         info!(target: "reth::cli", ?new_settings, "Writing storage settings");
         provider.write_storage_settings(new_settings)?;
