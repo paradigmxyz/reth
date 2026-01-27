@@ -15,7 +15,7 @@ pub const MIN_WORKER_COUNT: usize = 32;
 fn default_storage_worker_count() -> usize {
     #[cfg(feature = "std")]
     {
-        std::thread::available_parallelism().map_or(8, |n| n.get() * 2).min(MIN_WORKER_COUNT)
+        std::thread::available_parallelism().map_or(8, |n| n.get() * 4)
     }
     #[cfg(not(feature = "std"))]
     {
@@ -26,13 +26,19 @@ fn default_storage_worker_count() -> usize {
 /// Returns the default number of account worker threads.
 ///
 /// Account workers coordinate storage proof collection and account trie traversal.
-/// They are set to the same count as storage workers for simplicity.
 fn default_account_worker_count() -> usize {
-    default_storage_worker_count()
+    #[cfg(feature = "std")]
+    {
+        std::thread::available_parallelism().map_or(8, |n| n.get() * 4)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        8
+    }
 }
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
-pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
+pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 1;
 
 /// Default number of reserved CPU cores for non-reth processes.
 ///

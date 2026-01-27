@@ -98,27 +98,17 @@ impl TrieNodeIterMetrics {
     }
 
     /// Increment `branch_nodes_returned_total`.
-    pub fn inc_branch_nodes_returned(&self) {
-        self.branch_nodes_returned_total.increment(1);
-    }
+    pub fn inc_branch_nodes_returned(&self) {}
 
     /// Increment `leaf_nodes_same_seeked_total`.
-    pub fn inc_leaf_nodes_same_seeked(&self) {
-        self.leaf_nodes_same_seeked_total.increment(1);
-    }
+    pub fn inc_leaf_nodes_same_seeked(&self) {}
 
     /// Increment `leaf_nodes_seeked_total`.
-    pub fn inc_leaf_nodes_seeked(&self) {
-        self.leaf_nodes_seeked_total.increment(1);
-    }
+    pub fn inc_leaf_nodes_seeked(&self) {}
 
     /// Increment `leaf_nodes_advanced_total`.
-    pub fn inc_leaf_nodes_advanced(&self) {
-        self.leaf_nodes_advanced_total.increment(1);
-    }
+    pub fn inc_leaf_nodes_advanced(&self) {}
 
     /// Increment `leaf_nodes_returned_total`.
-    pub fn inc_leaf_nodes_returned(&self) {
-        self.leaf_nodes_returned_total.increment(1);
-    }
+    pub fn inc_leaf_nodes_returned(&self) {}
 }
