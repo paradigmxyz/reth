@@ -592,6 +592,51 @@ where
             Self::RocksDB(batch) => batch.get::<tables::StoragesHistory>(key),
         }
     }
+
+    /// Appends storage history indices with proper shard management.
+    ///
+    /// For each (address, storage_key) pair, retrieves the last shard (if any), appends
+    /// the new indices, chunks the resulting list if needed, and upserts the shards back.
+    pub fn append_storage_history_index(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        use reth_db_api::models::sharded_key::NUM_OF_INDICES_IN_SHARD;
+
+        let mut last_shard = self
+            .get_last_storage_history_shard(address, storage_key)?
+            .unwrap_or_else(BlockNumberList::empty);
+
+        last_shard.append(indices).map_err(ProviderError::other)?;
+
+        // fast path: all indices fit in one shard
+        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            self.upsert_storage_history(StorageShardedKey::last(address, storage_key), &last_shard)?;
+            return Ok(());
+        }
+
+        // slow path: rechunk into multiple shards
+        use itertools::Itertools;
+        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+            self.upsert_storage_history(
+                StorageShardedKey::new(address, storage_key, highest_block_number),
+                &shard,
+            )?;
+        }
+
+        Ok(())
+    }
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
@@ -654,6 +699,47 @@ where
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.delete::<tables::AccountsHistory>(key),
         }
+    }
+
+    /// Appends account history indices with proper shard management.
+    ///
+    /// For each address, retrieves the last shard (if any), appends the new indices,
+    /// chunks the resulting list if needed, and upserts the shards back.
+    pub fn append_account_history_index(
+        &mut self,
+        address: Address,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        use reth_db_api::models::sharded_key::NUM_OF_INDICES_IN_SHARD;
+
+        let mut last_shard = self
+            .get_last_account_history_shard(address)?
+            .unwrap_or_else(BlockNumberList::empty);
+
+        last_shard.append(indices).map_err(ProviderError::other)?;
+
+        // fast path: all indices fit in one shard
+        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            self.upsert_account_history(ShardedKey::last(address), &last_shard)?;
+            return Ok(());
+        }
+
+        // slow path: rechunk into multiple shards
+        use itertools::Itertools;
+        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+            self.upsert_account_history(ShardedKey::new(address, highest_block_number), &shard)?;
+        }
+
+        Ok(())
     }
 }
 
