@@ -239,7 +239,7 @@ where
                     let (k, _, v, _) = input.get(index).unwrap().clone();
                     tx.put::<T>(k, v).unwrap();
                 }
-                tx.inner().commit().unwrap();
+                tx.commit().unwrap();
             },
         )
     });
