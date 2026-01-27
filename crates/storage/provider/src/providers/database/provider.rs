@@ -3324,7 +3324,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
     /// **Note:** This function is only used in tests.
     ///
     /// History indices are written to the appropriate backend based on storage settings:
-    /// MDBX when `*_history_in_rocksdb` is false, RocksDB when true.
+    /// MDBX when `*_history_in_rocksdb` is false, `RocksDB` when true.
     ///
     /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually
     fn append_blocks_with_state(
