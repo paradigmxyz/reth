@@ -222,7 +222,11 @@ impl CachedStateMetrics {
         self.account_cache_hits.set(0);
         self.account_cache_misses.set(0);
 
-        // readable stats
+        self.reset_stats();
+    }
+
+    /// Resets cache statistics, does not affect metrics.
+    pub(crate) fn reset_stats(&self) {
         self.stats.account_hits.store(0, Ordering::Relaxed);
         self.stats.account_misses.store(0, Ordering::Relaxed);
         self.stats.storage_hits.store(0, Ordering::Relaxed);

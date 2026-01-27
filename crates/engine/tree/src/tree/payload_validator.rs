@@ -480,6 +480,8 @@ where
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
         if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
+            // Reset cache stats for the new block
+            cache_metrics.reset_stats();
             state_provider =
                 Box::new(CachedStateProvider::new(state_provider, caches, cache_metrics));
         };
