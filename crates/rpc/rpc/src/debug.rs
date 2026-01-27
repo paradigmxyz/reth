@@ -29,7 +29,7 @@ use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
     FromEthApiError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{simulate::EthSimulateError, EthApiError};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
@@ -37,7 +37,7 @@ use reth_storage_api::{
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::DatabaseCommit;
+use revm::{context::Block, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
@@ -450,9 +450,38 @@ where
                 let mut bundles = bundles.into_iter().peekable();
                 let mut inspector = DebugInspector::new(tracing_options.clone())
                     .map_err(Eth::Error::from_eth_err)?;
+
+                // Track previous block number and timestamp for validation
+                let mut prev_block_number: u64 = evm_env.block_env.number().saturating_to();
+                let mut prev_timestamp: u64 = evm_env.block_env.timestamp().saturating_to();
+
                 while let Some(bundle) = bundles.next() {
                     let mut results = Vec::with_capacity(bundle.transactions.len());
                     let Bundle { transactions, block_override } = bundle;
+
+                    // Validate block number ordering if overridden
+                    if let Some(number) = block_override.as_ref().and_then(|o| o.number) {
+                        let number: u64 = number.try_into().unwrap_or(u64::MAX);
+                        if number <= prev_block_number {
+                            return Err(EthApiError::other(EthSimulateError::BlockNumberInvalid {
+                                got: number,
+                                parent: prev_block_number,
+                            })
+                            .into());
+                        }
+                    }
+                    // Validate timestamp ordering if overridden
+                    if let Some(time) = block_override
+                        .as_ref()
+                        .and_then(|o| o.time)
+                        .filter(|&t| t <= prev_timestamp)
+                    {
+                        return Err(EthApiError::other(EthSimulateError::BlockTimestampInvalid {
+                            got: time,
+                            parent: prev_timestamp,
+                        })
+                        .into());
+                    }
 
                     let block_overrides = block_override.map(Box::new);
 
@@ -486,6 +515,10 @@ where
                     // Increment block_env number and timestamp for the next bundle
                     evm_env.block_env.inner_mut().number += uint!(1_U256);
                     evm_env.block_env.inner_mut().timestamp += uint!(12_U256);
+
+                    // Update tracking for next iteration's validation
+                    prev_block_number = evm_env.block_env.number().saturating_to();
+                    prev_timestamp = evm_env.block_env.timestamp().saturating_to();
 
                     all_bundles.push(results);
                 }
