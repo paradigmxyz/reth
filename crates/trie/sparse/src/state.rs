@@ -1902,7 +1902,7 @@ mod tests {
                     Nibbles::from_nibbles([0x1]),
                     alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
                         Nibbles::from_nibbles([0x1, 0x2]),
-                        leaf_value.clone(),
+                        leaf_value,
                     )))
                     .into(),
                 ),
@@ -1923,7 +1923,7 @@ mod tests {
 
         let storage_proof = StorageMultiProof {
             root: EMPTY_ROOT_HASH,
-            subtree: ProofNodes::from_iter([(Nibbles::default(), storage_leaf.clone().into())]),
+            subtree: ProofNodes::from_iter([(Nibbles::default(), storage_leaf.into())]),
             branch_node_masks: BranchNodeMasksMap::default(),
         };
 
