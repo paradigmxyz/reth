@@ -17,8 +17,6 @@ pub use state::*;
 mod trie;
 pub use trie::*;
 
-pub mod leaf_removal;
-
 mod traits;
 pub use traits::*;
 

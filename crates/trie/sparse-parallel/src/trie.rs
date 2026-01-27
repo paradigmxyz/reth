@@ -10,10 +10,9 @@ use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
-    ProofTrieNode, RlpNode, TrieNode, CHILD_INDEX_RANGE,
+    ProofTrieNode, RlpNode, TrieMaskExt, TrieNode, CHILD_INDEX_RANGE,
 };
 use reth_trie_sparse::{
-    leaf_removal::{branch_changes_on_leaf_removal, extension_changes_on_leaf_removal},
     provider::{RevealedNode, TrieNodeProvider},
     LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrie,
     SparseTrieExt, SparseTrieUpdates,
@@ -636,7 +635,7 @@ impl SparseTrie for ParallelSparseTrie {
                     true, // recurse_into_extension
                 )?;
 
-                let (new_branch_node, remove_child) = branch_changes_on_leaf_removal(
+                let (new_branch_node, remove_child) = Self::branch_changes_on_leaf_removal(
                     branch_path,
                     &remaining_child_path,
                     &remaining_child_node,
@@ -677,10 +676,8 @@ impl SparseTrie for ParallelSparseTrie {
             let ext_subtrie = self.subtrie_for_path_mut(&ext_path);
             let branch_path = branch_parent_path.as_ref().unwrap();
 
-            if let Some(new_ext_node) = extension_changes_on_leaf_removal(
-                &ext_path,
+            if let Some(new_ext_node) = Self::extension_changes_on_leaf_removal(
                 shortkey,
-                branch_path,
                 branch_parent_node.as_ref().unwrap(),
             ) {
                 ext_subtrie.nodes.insert(ext_path, new_ext_node.clone());
@@ -925,7 +922,7 @@ impl SparseTrieExt for ParallelSparseTrie {
     }
 
     fn prune(&mut self, max_depth: usize) -> usize {
-        let mut pruned_roots = Vec::<Nibbles>::new();
+        let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::new();
         let mut stack = vec![(Nibbles::default(), 0usize)];
 
         while let Some((path, depth)) = stack.pop() {
@@ -938,52 +935,48 @@ impl SparseTrieExt for ParallelSparseTrie {
                     let mut child = path;
                     child.extend(key);
                     if depth == max_depth {
-                        pruned_roots.push(child);
+                        if let Some(hash) = self
+                            .subtrie_for_path(&child)
+                            .and_then(|s| s.nodes.get(&child))
+                            .filter(|n| !matches!(n, SparseNode::Hash(_)))
+                            .and_then(|n| n.hash())
+                        {
+                            effective_pruned_roots.push((child, hash));
+                        }
                     } else {
                         stack.push((child, depth + 1));
                     }
                 }
                 SparseNode::Branch { state_mask, .. } => {
-                    let state_mask = *state_mask;
-                    for nibble in CHILD_INDEX_RANGE {
-                        if state_mask.is_bit_set(nibble) {
-                            let mut child = path;
-                            child.push_unchecked(nibble);
-                            if depth == max_depth {
-                                pruned_roots.push(child);
-                            } else {
-                                stack.push((child, depth + 1));
+                    for nibble in state_mask.iter_set_bits() {
+                        let mut child = path;
+                        child.push_unchecked(nibble);
+                        if depth == max_depth {
+                            if let Some(hash) = self
+                                .subtrie_for_path(&child)
+                                .and_then(|s| s.nodes.get(&child))
+                                .filter(|n| !matches!(n, SparseNode::Hash(_)))
+                                .and_then(|n| n.hash())
+                            {
+                                effective_pruned_roots.push((child, hash));
                             }
+                        } else {
+                            stack.push((child, depth + 1));
                         }
                     }
                 }
             }
         }
 
-        if pruned_roots.is_empty() {
-            return 0;
-        }
-
-        let mut effective_pruned_roots = Vec::<Nibbles>::with_capacity(pruned_roots.len());
-        for path in &pruned_roots {
-            let hash = self
-                .subtrie_for_path(path)
-                .and_then(|s| s.nodes.get(path))
-                .filter(|n| !matches!(n, SparseNode::Hash(_)))
-                .and_then(|n| n.hash());
-
-            if let Some(hash) = hash {
-                let subtrie = self.subtrie_for_path_mut(path);
-                subtrie.nodes.insert(*path, SparseNode::Hash(hash));
-                effective_pruned_roots.push(*path);
-            }
-        }
-
-        let nodes_converted = effective_pruned_roots.len();
-
         if effective_pruned_roots.is_empty() {
             return 0;
         }
+
+        for (path, hash) in &effective_pruned_roots {
+            self.subtrie_for_path_mut(path).nodes.insert(*path, SparseNode::Hash(*hash));
+        }
+
+        let nodes_converted = effective_pruned_roots.len();
 
         if let Some(updates) = self.updates.as_mut() {
             updates.updated_nodes.clear();
@@ -992,18 +985,18 @@ impl SparseTrieExt for ParallelSparseTrie {
         }
         self.prefix_set.clear();
 
-        // Sort for binary search. Roots are prefix-free by construction (all at same node-depth),
-        // which is required for partition_point ancestor detection to work correctly.
-        effective_pruned_roots.sort_unstable();
+        // Sort by path for binary search. Roots are prefix-free by construction (all at same
+        // node-depth), which is required for partition_point ancestor detection to work correctly.
+        effective_pruned_roots.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         debug_assert!(
-            effective_pruned_roots.windows(2).all(|w| !w[1].starts_with(&w[0])),
+            effective_pruned_roots.windows(2).all(|w| !w[1].0.starts_with(&w[0].0)),
             "prune roots must be prefix-free"
         );
 
         let is_strict_descendant = |p: &Nibbles| -> bool {
-            let idx = effective_pruned_roots.partition_point(|root| root <= p);
+            let idx = effective_pruned_roots.partition_point(|(root, _)| root <= p);
             if idx > 0 {
-                let candidate = &effective_pruned_roots[idx - 1];
+                let candidate = &effective_pruned_roots[idx - 1].0;
                 if p.starts_with(candidate) && p.len() > candidate.len() {
                     return true;
                 }
@@ -1012,9 +1005,9 @@ impl SparseTrieExt for ParallelSparseTrie {
         };
 
         let starts_with_pruned = |p: &Nibbles| -> bool {
-            let idx = effective_pruned_roots.partition_point(|root| root <= p);
+            let idx = effective_pruned_roots.partition_point(|(root, _)| root <= p);
             if idx > 0 {
-                let candidate = &effective_pruned_roots[idx - 1];
+                let candidate = &effective_pruned_roots[idx - 1].0;
                 if p.starts_with(candidate) {
                     return true;
                 }
@@ -1380,6 +1373,86 @@ impl ParallelSparseTrie {
         }
 
         Ok(remaining_child_node)
+    }
+
+    /// Computes the replacement node for a branch when it has only one remaining child after
+    /// a leaf removal.
+    ///
+    /// Given a parent branch node's path and the remaining child's path and node, this function
+    /// determines what the branch should be replaced with:
+    /// - If the child is a leaf: collapse into a leaf with prepended nibble
+    /// - If the child is an extension: collapse into a longer extension
+    /// - If the child is a branch: downgrade to a one-nibble extension
+    ///
+    /// # Returns
+    ///
+    /// A tuple of:
+    /// - The replacement node for the branch
+    /// - `true` if the child node should be removed, `false` if it should be kept
+    fn branch_changes_on_leaf_removal(
+        parent_path: &Nibbles,
+        remaining_child_path: &Nibbles,
+        remaining_child_node: &SparseNode,
+    ) -> (SparseNode, bool) {
+        debug_assert!(remaining_child_path.len() > parent_path.len());
+        debug_assert!(remaining_child_path.starts_with(parent_path));
+
+        let remaining_child_nibble = remaining_child_path.get_unchecked(parent_path.len());
+
+        match remaining_child_node {
+            SparseNode::Empty | SparseNode::Hash(_) => {
+                panic!("remaining child must have been revealed already")
+            }
+            SparseNode::Leaf { key, .. } => {
+                let mut new_key = Nibbles::from_nibbles_unchecked([remaining_child_nibble]);
+                new_key.extend(key);
+                (SparseNode::new_leaf(new_key), true)
+            }
+            SparseNode::Extension { key, .. } => {
+                let mut new_key = Nibbles::from_nibbles_unchecked([remaining_child_nibble]);
+                new_key.extend(key);
+                (SparseNode::new_ext(new_key), true)
+            }
+            SparseNode::Branch { .. } => (
+                SparseNode::new_ext(Nibbles::from_nibbles_unchecked([remaining_child_nibble])),
+                false,
+            ),
+        }
+    }
+
+    /// Computes an optional replacement for an extension node when its child has been
+    /// modified during leaf removal.
+    ///
+    /// After collapsing a branch into a leaf or extension, the parent extension may need
+    /// to be merged with its new child:
+    /// - If the child is now a leaf: merge into a single leaf
+    /// - If the child is now an extension: merge into a single longer extension
+    /// - If the child is still a branch: no change needed
+    ///
+    /// # Returns
+    ///
+    /// - `Some(node)` if the extension should be replaced (and the child deleted)
+    /// - `None` if no change is needed
+    fn extension_changes_on_leaf_removal(
+        parent_key: &Nibbles,
+        child: &SparseNode,
+    ) -> Option<SparseNode> {
+        match child {
+            SparseNode::Empty | SparseNode::Hash(_) => {
+                panic!("child must be revealed")
+            }
+            SparseNode::Leaf { key, .. } => {
+                let mut new_key = *parent_key;
+                new_key.extend(key);
+                Some(SparseNode::new_leaf(new_key))
+            }
+            SparseNode::Extension { key, .. } => {
+                let mut new_key = *parent_key;
+                new_key.extend(key);
+                Some(SparseNode::new_ext(new_key))
+            }
+            SparseNode::Branch { .. } => None,
+        }
     }
 
     /// Drains any [`SparseTrieUpdatesAction`]s from the given subtrie, and applies each action to
