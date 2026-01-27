@@ -71,7 +71,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, error, info, instrument, trace};
+use tracing::{debug, debug_span, error, instrument, trace};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::{
@@ -1508,8 +1508,6 @@ fn dispatch_storage_proofs(
     multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
     storage_filter: Option<&Arc<RwLock<StorageAccountFilter>>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
-    use reth_trie_common::EMPTY_ROOT_HASH;
-
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(targets.len(), Default::default());
 
@@ -1530,13 +1528,6 @@ fn dispatch_storage_proofs(
                 .is_some_and(|filter| !filter.read().may_have_storage(*hashed_address));
 
         if skip_storage_proof {
-            // Account has no slots to prove AND is not in the filter, so it has no storage.
-            // Send an empty storage proof result directly.
-            info!(
-                target: "trie::proof_task",
-                ?hashed_address,
-                "Skipping storage proof for account with no slots and not in filter"
-            );
             let empty_proof = DecodedStorageMultiProof::empty();
             let _ = result_tx.send(StorageProofResultMessage {
                 hashed_address: *hashed_address,

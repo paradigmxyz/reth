@@ -621,16 +621,6 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
 impl<N: NodeTypesWithDB> HashedPostStateProvider for BlockchainProvider<N> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        // Log all changed accounts with their unhashed and hashed addresses
-        for (address, _account) in bundle_state.state() {
-            let hashed = alloy_primitives::keccak256(address);
-            tracing::info!(
-                target: "trie::hashed_state",
-                %address,
-                %hashed,
-                "Account in state update"
-            );
-        }
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
 }
