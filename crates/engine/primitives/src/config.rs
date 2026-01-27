@@ -631,7 +631,10 @@ impl TreeConfig {
     }
 
     /// Setter for slow block threshold.
-    pub const fn with_slow_block_threshold(mut self, slow_block_threshold: Option<Duration>) -> Self {
+    pub const fn with_slow_block_threshold(
+        mut self,
+        slow_block_threshold: Option<Duration>,
+    ) -> Self {
         self.slow_block_threshold = slow_block_threshold;
         self
     }
