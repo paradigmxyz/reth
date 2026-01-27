@@ -73,6 +73,11 @@ where
 
         let mut excess_blob_gas = None;
         let mut block_blob_gas_used = None;
+        let slot_number = if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
+            Some(0u64)
+        } else {
+            None
+        };
 
         // only determine cancun fields when active
         if self.chain_spec.is_cancun_active_at_timestamp(timestamp) {
@@ -126,7 +131,7 @@ where
             excess_blob_gas,
             requests_hash,
             block_access_list_hash,
-            slot_number: None,
+            slot_number,
         };
 
         Ok(Block {
