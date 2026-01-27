@@ -1382,7 +1382,7 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNode, BranchNodeMasks, LeafNode, StorageMultiProof, TrieMask,
+        BranchNode, BranchNodeMasks, BranchNodeMasksMap, LeafNode, StorageMultiProof, TrieMask,
     };
 
     #[test]
@@ -1862,5 +1862,165 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn test_sparse_state_trie_prune_max_zero() {
+        // Verify that max_storage_tries = 0 clears all storage tries
+        let provider_factory = DefaultTrieNodeProviderFactory;
+        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
+
+        // Create a simple account trie with a few leaves
+        let leaf_value = alloy_rlp::encode(TrieAccount::default());
+
+        let branch_rlp = alloy_rlp::encode(TrieNode::Branch(BranchNode {
+            stack: vec![
+                RlpNode::from_rlp(&alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+                    Nibbles::from_nibbles([0x1, 0x2]),
+                    leaf_value.clone(),
+                )))),
+                RlpNode::from_rlp(&alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+                    Nibbles::from_nibbles([0x1, 0x2]),
+                    leaf_value.clone(),
+                )))),
+            ],
+            state_mask: TrieMask::new(0b11),
+        }));
+
+        let multiproof = MultiProof {
+            account_subtree: ProofNodes::from_iter([
+                (Nibbles::default(), branch_rlp.into()),
+                (
+                    Nibbles::from_nibbles([0x0]),
+                    alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+                        Nibbles::from_nibbles([0x1, 0x2]),
+                        leaf_value.clone(),
+                    )))
+                    .into(),
+                ),
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+                        Nibbles::from_nibbles([0x1, 0x2]),
+                        leaf_value.clone(),
+                    )))
+                    .into(),
+                ),
+            ]),
+            ..Default::default()
+        };
+
+        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
+
+        // Add some storage tries
+        let storage_key_1 = B256::random();
+        let storage_key_2 = B256::random();
+
+        let storage_leaf = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+            Nibbles::from_nibbles([0x1, 0x2, 0x3]),
+            alloy_rlp::encode(U256::from(42)),
+        )));
+
+        let storage_proof = StorageMultiProof {
+            root: EMPTY_ROOT_HASH,
+            subtree: ProofNodes::from_iter([(Nibbles::default(), storage_leaf.clone().into())]),
+            branch_node_masks: BranchNodeMasksMap::default(),
+        };
+
+        sparse
+            .reveal_decoded_storage_multiproof(
+                storage_key_1,
+                storage_proof.clone().try_into().unwrap(),
+            )
+            .unwrap();
+        sparse
+            .reveal_decoded_storage_multiproof(storage_key_2, storage_proof.try_into().unwrap())
+            .unwrap();
+
+        assert_eq!(sparse.storage.tries.len(), 2);
+
+        // Compute root to get hashes
+        let _ = sparse.root(provider_factory);
+
+        // Prune with max_storage_tries = 0
+        sparse.prune(2, 0);
+
+        // All storage tries should be cleared
+        assert_eq!(sparse.storage.tries.len(), 0);
+    }
+
+    #[test]
+    fn test_sparse_state_trie_prune_keeps_top_k() {
+        // Verify that prune keeps the top K storage tries by revealed node count
+        let provider_factory = DefaultTrieNodeProviderFactory;
+        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
+
+        // Create a minimal account trie
+        let leaf_value = alloy_rlp::encode(TrieAccount::default());
+        let leaf_rlp = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+            Nibbles::from_nibbles([0x1, 0x2]),
+            leaf_value,
+        )));
+
+        let multiproof = MultiProof {
+            account_subtree: ProofNodes::from_iter([(Nibbles::default(), leaf_rlp.into())]),
+            ..Default::default()
+        };
+
+        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
+
+        // Create storage tries with different sizes (more nodes = larger)
+        let storage_keys: Vec<B256> = (0..5).map(|_| B256::random()).collect();
+
+        for (i, key) in storage_keys.iter().enumerate() {
+            // Create a storage trie with (i+1) leaves so they have different sizes
+            let mut proof_nodes = Vec::new();
+
+            if i == 0 {
+                // Single leaf at root
+                let leaf = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+                    Nibbles::from_nibbles([0x1, 0x2]),
+                    alloy_rlp::encode(U256::from(1)),
+                )));
+                proof_nodes.push((Nibbles::default(), leaf.into()));
+            } else {
+                // Branch with multiple leaves
+                let mut stack = Vec::new();
+                for j in 0..=i {
+                    let leaf = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+                        Nibbles::from_nibbles([0x1, 0x2]),
+                        alloy_rlp::encode(U256::from(j)),
+                    )));
+                    stack.push(RlpNode::from_rlp(&leaf));
+                    proof_nodes.push((Nibbles::from_nibbles([j as u8]), leaf.into()));
+                }
+                let branch = alloy_rlp::encode(TrieNode::Branch(BranchNode {
+                    stack,
+                    state_mask: TrieMask::new((1u16 << (i + 1)) - 1),
+                }));
+                proof_nodes.push((Nibbles::default(), branch.into()));
+            }
+
+            let storage_proof = StorageMultiProof {
+                root: EMPTY_ROOT_HASH,
+                subtree: ProofNodes::from_iter(proof_nodes),
+                branch_node_masks: BranchNodeMasksMap::default(),
+            };
+
+            sparse
+                .reveal_decoded_storage_multiproof(*key, storage_proof.try_into().unwrap())
+                .unwrap();
+        }
+
+        assert_eq!(sparse.storage.tries.len(), 5);
+
+        // Compute root
+        let _ = sparse.root(provider_factory);
+
+        // Prune keeping only top 2
+        sparse.prune(10, 2);
+
+        // Should have exactly 2 storage tries remaining
+        assert_eq!(sparse.storage.tries.len(), 2);
     }
 }

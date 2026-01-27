@@ -1,6 +1,6 @@
 use crate::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
+    LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait, SparseTrieExt, SparseTrieUpdates,
 };
 use alloc::{
     borrow::Cow,
@@ -1099,6 +1099,112 @@ impl SparseTrieTrait for SerialSparseTrie {
 
     fn revealed_node_count(&self) -> usize {
         self.nodes.values().filter(|n| !matches!(n, SparseNode::Hash(_))).count()
+    }
+}
+
+impl SparseTrieExt for SerialSparseTrie {
+    fn prune(&mut self, max_depth: usize) -> usize {
+        // Clear transient bookkeeping
+        if let Some(updates) = self.updates.as_mut() {
+            updates.updated_nodes.clear();
+            updates.removed_nodes.clear();
+            updates.wiped = false;
+        }
+        self.prefix_set.clear();
+
+        // Collect nodes to prune via DFS
+        let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::new();
+        let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
+        stack.push((Nibbles::default(), 0));
+
+        while let Some((path, depth)) = stack.pop() {
+            let Some(node) = self.nodes.get(&path) else { continue };
+
+            match node {
+                SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {}
+                SparseNode::Extension { key, .. } => {
+                    let mut child = path;
+                    child.extend(key);
+                    if depth == max_depth {
+                        if let Some(hash) = self
+                            .nodes
+                            .get(&child)
+                            .filter(|n| !matches!(n, SparseNode::Hash(_)))
+                            .and_then(|n| n.hash())
+                        {
+                            effective_pruned_roots.push((child, hash));
+                        }
+                    } else {
+                        stack.push((child, depth + 1));
+                    }
+                }
+                SparseNode::Branch { state_mask, .. } => {
+                    let mut mask = state_mask.get();
+                    while mask != 0 {
+                        let nibble = mask.trailing_zeros() as u8;
+                        mask &= mask - 1;
+
+                        let mut child = path;
+                        child.push_unchecked(nibble);
+                        if depth == max_depth {
+                            if let Some(hash) = self
+                                .nodes
+                                .get(&child)
+                                .filter(|n| !matches!(n, SparseNode::Hash(_)))
+                                .and_then(|n| n.hash())
+                            {
+                                effective_pruned_roots.push((child, hash));
+                            }
+                        } else {
+                            stack.push((child, depth + 1));
+                        }
+                    }
+                }
+            }
+        }
+
+        if effective_pruned_roots.is_empty() {
+            return 0;
+        }
+
+        // Convert pruned roots to hash nodes
+        for (path, hash) in &effective_pruned_roots {
+            self.nodes.insert(*path, SparseNode::Hash(*hash));
+        }
+
+        let nodes_converted = effective_pruned_roots.len();
+
+        // Sort for binary search
+        effective_pruned_roots.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+
+        let is_strict_descendant = |p: &Nibbles| -> bool {
+            let idx = effective_pruned_roots.partition_point(|(root, _)| root <= p);
+            if idx > 0 {
+                let candidate = &effective_pruned_roots[idx - 1].0;
+                if p.starts_with(candidate) && p.len() > candidate.len() {
+                    return true;
+                }
+            }
+            false
+        };
+
+        let starts_with_pruned = |p: &Nibbles| -> bool {
+            let idx = effective_pruned_roots.partition_point(|(root, _)| root <= p);
+            if idx > 0 {
+                let candidate = &effective_pruned_roots[idx - 1].0;
+                if p.starts_with(candidate) {
+                    return true;
+                }
+            }
+            false
+        };
+
+        // Remove descendant nodes and values
+        self.nodes.retain(|p, _| !is_strict_descendant(p));
+        self.values.retain(|p, _| !starts_with_pruned(p));
+        self.branch_node_masks.retain(|p, _| !starts_with_pruned(p));
+
+        nodes_converted
     }
 }
 
