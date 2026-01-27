@@ -241,10 +241,17 @@ where
         let conn_ref = self.conn.clone();
         tokio::spawn(async move {
             sleep(PING_TIMEOUT).await;
-            let mut active = active_ping.lock().await;
-            if active.is_some() {
+            let timed_out = {
+                let mut active = active_ping.lock().await;
+                let timed_out = active.is_some();
+                if timed_out {
+                    *active = None;
+                }
+                timed_out
+            };
+
+            if timed_out {
                 debug!(target: "ethstats", "Ping timeout");
-                *active = None;
                 // Clear connection to trigger reconnect
                 if let Some(conn) = conn_ref.write().await.take() {
                     let _ = conn.close().await;
@@ -260,11 +267,12 @@ where
     /// Calculates the round-trip time from the last ping and sends it to
     /// the server. This is called when a pong response is received.
     async fn report_latency(&self) -> Result<(), EthStatsError> {
-        let conn = self.conn.read().await;
-        let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
+        let start = {
+            let mut active = self.last_ping.lock().await;
+            active.take()
+        };
 
-        let mut active = self.last_ping.lock().await;
-        if let Some(start) = active.take() {
+        if let Some(start) = start {
             let latency = start.elapsed().as_millis() as u64 / 2;
 
             debug!(target: "ethstats", "Reporting latency: {}ms", latency);
@@ -272,7 +280,9 @@ where
             let latency_msg = LatencyMsg { id: self.credentials.node_id.clone(), latency };
 
             let message = latency_msg.generate_latency_message();
-            conn.write_json(&message).await?
+            let conn = self.conn.read().await;
+            let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
+            conn.write_json(&message).await?;
         }
 
         Ok(())
