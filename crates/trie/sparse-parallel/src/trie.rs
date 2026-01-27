@@ -1100,36 +1100,6 @@ impl SparseTrieExt for ParallelSparseTrie {
             }
         }
 
-        // Helper to check if path is a strict descendant of any root in a sorted bucket
-        let is_strict_descendant_in = |roots: &[(Nibbles, B256)], p: &Nibbles| -> bool {
-            if roots.is_empty() {
-                return false;
-            }
-            let idx = roots.partition_point(|(root, _)| root <= p);
-            if idx > 0 {
-                let candidate = &roots[idx - 1].0;
-                if p.starts_with(candidate) && p.len() > candidate.len() {
-                    return true;
-                }
-            }
-            false
-        };
-
-        // Helper to check if path starts with any pruned root in a sorted bucket
-        let starts_with_pruned_in = |roots: &[(Nibbles, B256)], p: &Nibbles| -> bool {
-            if roots.is_empty() {
-                return false;
-            }
-            let idx = roots.partition_point(|(root, _)| root <= p);
-            if idx > 0 {
-                let candidate = &roots[idx - 1].0;
-                if p.starts_with(candidate) {
-                    return true;
-                }
-            }
-            false
-        };
-
         // Upper subtrie nodes: paths are < UPPER_TRIE_MAX_DEPTH, only check upper roots
         self.upper_subtrie.nodes.retain(|p, _| !is_strict_descendant_in(&roots_upper, p));
         // Upper subtrie values can have full paths (values are always stored in upper subtrie).
