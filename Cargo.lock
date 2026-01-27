@@ -2764,6 +2764,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cuckoofilter"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b810a8449931679f64cd7eef1bbd0fa315801b6d5d9cdc1ace2804d6529eee18"
+dependencies = [
+ "byteorder",
+ "fnv",
+ "rand 0.7.3",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10520,6 +10531,7 @@ dependencies = [
  "bincode 1.3.3",
  "bytes",
  "codspeed-criterion-compat",
+ "cuckoofilter",
  "derive_more",
  "hash-db",
  "itertools 0.14.0",
