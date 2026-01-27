@@ -884,9 +884,13 @@ where
 
         trace!(target: "trie::sparse", ?address, "Updating account");
         let nibbles = Nibbles::unpack(address);
-        self.account_rlp_buf.clear();
-        account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+        // Use mem::take to avoid clone allocation - we own the buffer
+        let mut rlp_buf = core::mem::take(&mut self.account_rlp_buf);
+        rlp_buf.clear();
+        account.into_trie_account(storage_root).encode(&mut rlp_buf);
+        self.update_account_leaf(nibbles, rlp_buf, provider_factory)?;
+        // Restore buffer for reuse (update_account_leaf takes ownership but we want to keep capacity)
+        self.account_rlp_buf = Vec::with_capacity(128);
 
         Ok(true)
     }
