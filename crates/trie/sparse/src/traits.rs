@@ -241,9 +241,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 /// converting nodes beyond a certain depth into hash stubs. This is useful for reducing
 /// memory usage when caching tries across payload validations.
 ///
-/// Note: Only [`crate::ParallelSparseTrie`] is required to implement this trait.
-/// [`crate::SerialSparseTrie`] provides `prune` as an inherent method but does not
-/// implement this trait.
+/// Note: Only [`crate::ParallelSparseTrie`] implements this trait.
 pub trait SparseTrieExt: SparseTrie {
     /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
     ///

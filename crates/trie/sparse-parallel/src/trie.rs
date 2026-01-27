@@ -2753,7 +2753,8 @@ mod tests {
     use reth_trie_db::DatabaseTrieCursorFactory;
     use reth_trie_sparse::{
         provider::{DefaultTrieNodeProvider, RevealedNode, TrieNodeProvider},
-        LeafLookup, LeafLookupError, SerialSparseTrie, SparseNode, SparseTrie, SparseTrieUpdates,
+        LeafLookup, LeafLookupError, SerialSparseTrie, SparseNode, SparseTrie, SparseTrieExt,
+        SparseTrieUpdates,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -2796,6 +2797,17 @@ mod tests {
 
     fn create_account(nonce: u64) -> Account {
         Account { nonce, ..Default::default() }
+    }
+
+    fn large_account_value() -> Vec<u8> {
+        let account = Account {
+            nonce: 0x123456789abcdef,
+            balance: U256::from(0x123456789abcdef0123456789abcdef_u128),
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        account.into_trie_account(EMPTY_ROOT_HASH).encode(&mut buf);
+        buf
     }
 
     fn encode_account_value(nonce: u64) -> Vec<u8> {
@@ -7212,161 +7224,181 @@ mod tests {
     }
 
     #[test]
-    fn test_prune_parallel_matches_serial_values_removal() {
-        // Verify parallel removes same values as serial after prune
-        use reth_trie_sparse::provider::DefaultTrieNodeProvider;
+    fn test_prune_at_various_depths() {
+        for max_depth in [0, 1, 2] {
+            let provider = DefaultTrieNodeProvider;
+            let mut trie = ParallelSparseTrie::default();
 
-        let provider = DefaultTrieNodeProvider;
-        let mut serial = SerialSparseTrie::default();
-        let mut parallel = ParallelSparseTrie::default();
+            let value = large_account_value();
 
-        let value = vec![0x80, 0x81, 0x82]; // small value
-
-        // Same operations on both
-        for i in 0..4u8 {
-            serial
-                .update_leaf(Nibbles::from_nibbles([i, 0x1, 0x2]), value.clone(), &provider)
-                .unwrap();
-            parallel
-                .update_leaf(Nibbles::from_nibbles([i, 0x1, 0x2]), value.clone(), &provider)
-                .unwrap();
-        }
-
-        serial.root();
-        parallel.root();
-
-        serial.prune(0);
-        parallel.prune(0);
-
-        // Both should have same root
-        assert_eq!(serial.root(), parallel.root());
-
-        // Both should have same revealed node count
-        assert_eq!(serial.revealed_node_count(), parallel.revealed_node_count());
-    }
-
-    #[test]
-    fn test_prune_serial_parallel_parity() {
-        // Comprehensive parity test: serial and parallel should produce identical
-        // results for the same sequence of operations including prune.
-
-        let provider = DefaultTrieNodeProvider;
-        let mut serial = SerialSparseTrie::default();
-        let mut parallel = ParallelSparseTrie::default();
-
-        // Large value to ensure hashes are computed
-        let large_value = {
-            let account = Account {
-                nonce: 0x123456789abcdef,
-                balance: U256::from(0x123456789abcdef0123456789abcdef_u128),
-                ..Default::default()
-            };
-            let mut buf = Vec::new();
-            account.into_trie_account(EMPTY_ROOT_HASH).encode(&mut buf);
-            buf
-        };
-
-        // Test keys at different depths:
-        // - Upper-only paths (< 2 nibbles)
-        // - Boundary paths (= 2 nibbles)
-        // - Lower paths (> 2 nibbles)
-        let test_keys = [
-            Nibbles::from_nibbles([0x0]),                // 1 nibble (upper only)
-            Nibbles::from_nibbles([0x1, 0x2]),           // 2 nibbles (boundary)
-            Nibbles::from_nibbles([0x2, 0x3, 0x4]),      // 3 nibbles (lower)
-            Nibbles::from_nibbles([0x3, 0x4, 0x5, 0x6]), // 4 nibbles (lower)
-            Nibbles::from_nibbles([0x4, 0x5, 0x6, 0x7, 0x8]), // 5 nibbles (lower)
-            Nibbles::from_nibbles([0x5, 0x0, 0x1, 0x2, 0x3, 0x4]), // 6 nibbles (lower)
-        ];
-
-        // Insert all keys
-        for key in &test_keys {
-            serial.update_leaf(key.clone(), large_value.clone(), &provider).unwrap();
-            parallel.update_leaf(key.clone(), large_value.clone(), &provider).unwrap();
-        }
-
-        // Verify roots match after inserts
-        assert_eq!(serial.root(), parallel.root(), "roots should match after inserts");
-
-        // Prune at different depths and compare
-        for max_depth in [0, 1, 2, 3] {
-            let mut s = SerialSparseTrie::default();
-            let mut p = ParallelSparseTrie::default();
-
-            for key in &test_keys {
-                s.update_leaf(key.clone(), large_value.clone(), &provider).unwrap();
-                p.update_leaf(key.clone(), large_value.clone(), &provider).unwrap();
+            for i in 0..4u8 {
+                for j in 0..4u8 {
+                    for k in 0..4u8 {
+                        trie.update_leaf(
+                            Nibbles::from_nibbles([i, j, k, 0x1, 0x2, 0x3]),
+                            value.clone(),
+                            &provider,
+                        )
+                        .unwrap();
+                    }
+                }
             }
 
-            s.root();
-            p.root();
+            let root_before = trie.root();
+            let nodes_before = trie.revealed_node_count();
 
-            s.prune(max_depth);
-            p.prune(max_depth);
+            trie.prune(max_depth);
 
-            assert_eq!(s.root(), p.root(), "roots should match after prune({})", max_depth);
-            assert_eq!(
-                s.revealed_node_count(),
-                p.revealed_node_count(),
-                "revealed_node_count should match after prune({})",
-                max_depth
+            let root_after = trie.root();
+            assert_eq!(root_before, root_after, "root hash should be preserved after prune");
+
+            let nodes_after = trie.revealed_node_count();
+            assert!(
+                nodes_after < nodes_before,
+                "node count should decrease after prune at depth {max_depth}"
             );
+
+            if max_depth == 0 {
+                assert_eq!(nodes_after, 1, "only root should be revealed after prune(0)");
+            }
         }
     }
 
     #[test]
-    fn test_prune_parity_with_removes() {
-        // Parity test including remove operations
+    fn test_prune_empty_trie() {
+        let mut trie = ParallelSparseTrie::default();
+        trie.prune(2);
+        let root = trie.root();
+        assert_eq!(root, EMPTY_ROOT_HASH, "empty trie should have empty root hash");
+    }
 
+    #[test]
+    fn test_prune_preserves_root_hash() {
         let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
 
-        let value = vec![0x80, 0x81, 0x82, 0x83, 0x84];
+        let value = large_account_value();
 
-        let keys: Vec<Nibbles> =
-            (0..8u8).map(|i| Nibbles::from_nibbles([i, 0x1, 0x2, 0x3, 0x4, 0x5])).collect();
-
-        let mut serial = SerialSparseTrie::default();
-        let mut parallel = ParallelSparseTrie::default();
-
-        // Insert all
-        for key in &keys {
-            serial.update_leaf(key.clone(), value.clone(), &provider).unwrap();
-            parallel.update_leaf(key.clone(), value.clone(), &provider).unwrap();
+        for i in 0..8u8 {
+            for j in 0..4u8 {
+                trie.update_leaf(
+                    Nibbles::from_nibbles([i, j, 0x3, 0x4, 0x5, 0x6]),
+                    value.clone(),
+                    &provider,
+                )
+                .unwrap();
+            }
         }
 
-        // Remove some
-        for key in keys.iter().take(3) {
-            serial.remove_leaf(key, &provider).unwrap();
-            parallel.remove_leaf(key, &provider).unwrap();
+        let root_before = trie.root();
+        trie.prune(1);
+        let root_after = trie.root();
+        assert_eq!(root_before, root_after, "root hash must be preserved after prune");
+    }
+
+    #[test]
+    fn test_prune_single_leaf_trie() {
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        let value = large_account_value();
+        trie.update_leaf(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), value, &provider).unwrap();
+
+        let root_before = trie.root();
+        let nodes_before = trie.revealed_node_count();
+
+        trie.prune(0);
+
+        let root_after = trie.root();
+        assert_eq!(root_before, root_after, "root hash should be preserved");
+        assert_eq!(trie.revealed_node_count(), nodes_before, "single leaf trie should not change");
+    }
+
+    #[test]
+    fn test_prune_deep_depth_no_effect() {
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        let value = large_account_value();
+
+        for i in 0..4u8 {
+            trie.update_leaf(Nibbles::from_nibbles([i, 0x2, 0x3, 0x4]), value.clone(), &provider)
+                .unwrap();
         }
 
-        assert_eq!(serial.root(), parallel.root(), "roots should match after removes");
+        trie.root();
+        let nodes_before = trie.revealed_node_count();
 
-        // Prune
-        serial.prune(1);
-        parallel.prune(1);
+        trie.prune(100);
 
-        assert_eq!(serial.root(), parallel.root(), "roots should match after prune");
+        assert_eq!(nodes_before, trie.revealed_node_count(), "deep prune should have no effect");
+    }
+
+    #[test]
+    fn test_prune_extension_node_depth_semantics() {
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        let value = large_account_value();
+
+        trie.update_leaf(Nibbles::from_nibbles([0, 1, 2, 3, 0, 5, 6, 7]), value.clone(), &provider)
+            .unwrap();
+        trie.update_leaf(Nibbles::from_nibbles([0, 1, 2, 3, 1, 5, 6, 7]), value.clone(), &provider)
+            .unwrap();
+
+        let root_before = trie.root();
+        trie.prune(1);
+
+        assert_eq!(root_before, trie.root(), "root hash should be preserved");
+        assert_eq!(trie.revealed_node_count(), 2, "should have root + extension after prune(1)");
+    }
+
+    #[test]
+    fn test_prune_embedded_node_preserved() {
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        let small_value = vec![0x80];
+        trie.update_leaf(Nibbles::from_nibbles([0x0]), small_value.clone(), &provider).unwrap();
+        trie.update_leaf(Nibbles::from_nibbles([0x1]), small_value.clone(), &provider).unwrap();
+
+        let root_before = trie.root();
+        let nodes_before = trie.revealed_node_count();
+
+        trie.prune(0);
+
+        assert_eq!(root_before, trie.root(), "root hash must be preserved");
+
+        if trie.revealed_node_count() == nodes_before {
+            assert!(trie.get_leaf_value(&Nibbles::from_nibbles([0x0])).is_some());
+            assert!(trie.get_leaf_value(&Nibbles::from_nibbles([0x1])).is_some());
+        }
+    }
+
+    #[test]
+    fn test_prune_mixed_embedded_and_hashed() {
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        let large_value = large_account_value();
+        let small_value = vec![0x80];
+
+        for i in 0..8u8 {
+            let value = if i < 4 { large_value.clone() } else { small_value.clone() };
+            trie.update_leaf(Nibbles::from_nibbles([i, 0x1, 0x2, 0x3]), value, &provider).unwrap();
+        }
+
+        let root_before = trie.root();
+        trie.prune(0);
+        assert_eq!(root_before, trie.root(), "root hash must be preserved");
     }
 
     #[test]
     fn test_prune_many_lower_subtries() {
-        // Test prune with keys spanning all 256 lower subtries to exercise parallel code path.
-
         let provider = DefaultTrieNodeProvider;
 
-        let large_value = {
-            let account = Account {
-                nonce: 0x123456789abcdef,
-                balance: U256::from(0x123456789abcdef0123456789abcdef_u128),
-                ..Default::default()
-            };
-            let mut buf = Vec::new();
-            account.into_trie_account(EMPTY_ROOT_HASH).encode(&mut buf);
-            buf
-        };
+        let large_value = large_account_value();
 
-        // Create keys spanning all 256 lower subtries (first 2 nibbles determine subtrie index)
         let mut keys = Vec::new();
         for first in 0..16u8 {
             for second in 0..16u8 {
@@ -7374,31 +7406,20 @@ mod tests {
             }
         }
 
-        let mut parallel = ParallelSparseTrie::default();
-        let mut serial = SerialSparseTrie::default();
+        let mut trie = ParallelSparseTrie::default();
 
         for key in &keys {
-            parallel.update_leaf(key.clone(), large_value.clone(), &provider).unwrap();
-            serial.update_leaf(key.clone(), large_value.clone(), &provider).unwrap();
+            trie.update_leaf(key.clone(), large_value.clone(), &provider).unwrap();
         }
 
-        let root_before = parallel.root();
-        assert_eq!(root_before, serial.root());
+        let root_before = trie.root();
+        let pruned = trie.prune(1);
 
-        let pruned_parallel = parallel.prune(1);
-        let pruned_serial = serial.prune(1);
+        assert!(pruned > 0, "should have pruned some nodes");
+        assert_eq!(root_before, trie.root(), "root hash should be preserved");
 
-        assert_eq!(pruned_parallel, pruned_serial, "same number of nodes should be pruned");
-        assert_eq!(parallel.root(), serial.root(), "roots should match after prune");
-        assert_eq!(
-            parallel.revealed_node_count(),
-            serial.revealed_node_count(),
-            "revealed node counts should match"
-        );
-
-        // All values should be pruned away
         for key in &keys {
-            assert!(parallel.get_leaf_value(key).is_none(), "value should be pruned");
+            assert!(trie.get_leaf_value(key).is_none(), "value should be pruned");
         }
     }
 }
