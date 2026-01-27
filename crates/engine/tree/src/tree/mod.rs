@@ -2788,9 +2788,6 @@ where
 
         let executed = execute(&mut self.payload_validator, input, ctx)?;
 
-        // Update the storage filter with accounts that have storage changes
-        self.update_storage_filter_from_bundle(&executed.execution_output.state);
-
         // if the parent is the canonical head, we can insert the block as the pending block
         if self.state.tree_state.canonical_block_hash() == executed.recovered_block().parent_hash()
         {
@@ -3097,56 +3094,6 @@ where
 
         debug!(target: "engine::tree", %hash, "no canonical state found for block");
         Ok(None)
-    }
-
-    /// Updates the storage account filter from a bundle state after block execution.
-    ///
-    /// This inserts accounts that have new non-zero storage and removes accounts
-    /// that were destroyed.
-    fn update_storage_filter_from_bundle(
-        &self,
-        bundle_state: &revm::database::BundleState,
-    ) -> reth_trie_common::StorageFilterUpdateStats {
-        use reth_trie_common::{KeccakKeyHasher, KeyHasher, StorageFilterUpdateStats};
-
-        let mut stats = StorageFilterUpdateStats::default();
-        let mut filter = self.storage_filter.write();
-
-        for (address, account) in &bundle_state.state {
-            let hashed_address = KeccakKeyHasher::hash_key(*address);
-
-            if account.was_destroyed() {
-                if filter.remove(hashed_address) {
-                    stats.removed += 1;
-                }
-            } else {
-                // Check if account has any non-zero storage values
-                let has_storage = account
-                    .storage
-                    .values()
-                    .any(|slot| slot.present_value != alloy_primitives::U256::ZERO);
-
-                if has_storage {
-                    if filter.insert(hashed_address).is_err() {
-                        stats.insert_failures += 1;
-                    } else {
-                        stats.inserted += 1;
-                    }
-                }
-            }
-        }
-
-        if stats.inserted > 0 || stats.removed > 0 || stats.insert_failures > 0 {
-            trace!(
-                target: "engine::tree",
-                inserted = stats.inserted,
-                removed = stats.removed,
-                insert_failures = stats.insert_failures,
-                "Updated storage filter from bundle state"
-            );
-        }
-
-        stats
     }
 }
 
