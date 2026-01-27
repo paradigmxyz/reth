@@ -226,6 +226,7 @@ where
         multiproof_provider_factory: F,
         config: &TreeConfig,
         bal: Option<Arc<BlockAccessList>>,
+        storage_filter: Option<Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -286,6 +287,7 @@ where
             storage_worker_count,
             account_worker_count,
             v2_proofs_enabled,
+            storage_filter,
         );
 
         if !config.enable_sparse_trie_as_cache() {
@@ -1282,6 +1284,7 @@ mod tests {
             OverlayStateProviderFactory::new(provider_factory, ChangesetCache::new()),
             &TreeConfig::default(),
             None, // No BAL for test
+            None,
         );
 
         let mut state_hook = handle.state_hook();
