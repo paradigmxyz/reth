@@ -1,6 +1,8 @@
 use super::{collect_history_indices, collect_storage_history_indices};
 use crate::{stages::utils::load_storage_history, StageCheckpoint, StageId};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_db_api::Tables;
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
     tables,
@@ -115,7 +117,6 @@ where
                 // but this is safe for first_sync because if we crash before commit, the
                 // checkpoint stays at 0 and we'll just clear and rebuild again on restart. The
                 // source data (changesets) is intact.
-                #[cfg(all(unix, feature = "rocksdb"))]
                 provider.rocksdb_provider().clear::<tables::StoragesHistory>()?;
             } else {
                 provider.tx_ref().clear::<tables::StoragesHistory>()?;
@@ -146,6 +147,12 @@ where
                 .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
             Ok(((), writer.into_raw_rocksdb_batch()))
         })?;
+
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if use_rocksdb {
+            provider.commit_pending_rocksdb_batches()?;
+            provider.rocksdb_provider().flush(&[Tables::StoragesHistory.name()])?;
+        }
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }

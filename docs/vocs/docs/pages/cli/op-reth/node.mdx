@@ -501,6 +501,11 @@ RPC State Cache:
 
           [default: 512]
 
+      --rpc-cache.max-cached-tx-hashes <MAX_CACHED_TX_HASHES>
+          Maximum number of transaction hashes to cache for transaction lookups
+
+          [default: 30000]
+
 Gas Price Oracle:
       --gpo.blocks <BLOCKS>
           Number of recent blocks to check for gas price
@@ -948,9 +953,6 @@ Engine:
 
       --engine.disable-prewarming
           Disable parallel prewarming
-
-      --engine.disable-parallel-sparse-trie
-          Disable the parallel sparse trie in the engine
 
       --engine.state-provider-metrics
           Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls

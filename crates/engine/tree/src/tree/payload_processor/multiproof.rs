@@ -777,10 +777,21 @@ impl MultiProofTask {
         // [`MultiAddedRemovedKeys`]. Even if there are not any known removed keys for the account,
         // we still want to optimistically fetch extension children for the leaf addition case.
         // V2 multiproofs don't need this.
+        //
+        // Only clone the AddedRemovedKeys for accounts in the targets, not the entire accumulated
+        // set, to avoid O(n) cloning with many buffered blocks.
         let multi_added_removed_keys =
             if let VersionedMultiProofTargets::Legacy(legacy_targets) = &targets {
                 self.multi_added_removed_keys.touch_accounts(legacy_targets.keys().copied());
-                Some(Arc::new(self.multi_added_removed_keys.clone()))
+                Some(Arc::new(MultiAddedRemovedKeys {
+                    account: self.multi_added_removed_keys.account.clone(),
+                    storages: legacy_targets
+                        .keys()
+                        .filter_map(|k| {
+                            self.multi_added_removed_keys.storages.get(k).map(|v| (*k, v.clone()))
+                        })
+                        .collect(),
+                }))
             } else {
                 None
             };
@@ -1516,8 +1527,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::tree::cached_state::CachedStateProvider;
+
     use super::*;
-    use crate::tree::cached_state::{CachedStateProvider, ExecutionCacheBuilder};
     use alloy_eip7928::{AccountChanges, BalanceChange};
     use alloy_primitives::Address;
     use reth_provider::{
@@ -1577,7 +1589,7 @@ mod tests {
     {
         let db_provider = factory.database_provider_ro().unwrap();
         let state_provider: StateProviderBox = Box::new(LatestStateProvider::new(db_provider));
-        let cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let cache = crate::tree::cached_state::ExecutionCache::new(1000);
         CachedStateProvider::new(state_provider, cache, Default::default())
     }
 

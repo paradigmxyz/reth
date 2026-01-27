@@ -11,7 +11,7 @@ use reth_trie_common::{HashedPostState, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE};
 use reth_trie_sparse::{
     errors::SparseStateTrieResult,
     provider::{DefaultTrieNodeProvider, DefaultTrieNodeProviderFactory},
-    SparseStateTrie, SparseTrie, SparseTrieInterface,
+    RevealableSparseTrie, SparseStateTrie, SparseTrie,
 };
 
 /// Trait for stateless trie implementations that can be used for stateless validation.
@@ -245,7 +245,7 @@ fn calculate_state_root(
     for (address, storage) in state.storages.into_iter().sorted_unstable_by_key(|(addr, _)| *addr) {
         // Take the existing storage trie (or create an empty, “revealed” one)
         let mut storage_trie =
-            trie.take_storage_trie(&address).unwrap_or_else(SparseTrie::revealed_empty);
+            trie.take_storage_trie(&address).unwrap_or_else(RevealableSparseTrie::revealed_empty);
 
         if storage.wiped {
             storage_trie.wipe()?;
