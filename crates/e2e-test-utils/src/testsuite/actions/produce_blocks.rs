@@ -227,7 +227,7 @@ where
                 suggested_fee_recipient: alloy_primitives::Address::random(),
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
-                slot_number: Some(0),
+                slot_number: None,
             };
 
             env.active_node_state_mut()?
@@ -300,7 +300,7 @@ where
                     suggested_fee_recipient: alloy_primitives::Address::random(),
                     withdrawals: Some(vec![]),
                     parent_beacon_block_root: Some(B256::ZERO),
-                    slot_number: Some(0),
+                    slot_number: None,
                 };
 
                 let fresh_fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(

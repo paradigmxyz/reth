@@ -207,7 +207,7 @@ mod tests {
         header.extra_fields = Some(HeaderExt {
             requests_hash: Some(B256::random()),
             block_access_list_hash: Some(B256::random()),
-            slot_number: Some(0),
+            slot_number: None,
         });
 
         let mut encoded_header = vec![];

@@ -9105,6 +9105,7 @@ dependencies = [
  "reth-eth-wire-types",
  "reth-ethereum-forks",
  "reth-ethereum-primitives",
+ "reth-evm-ethereum",
  "reth-fs-util",
  "reth-metrics",
  "reth-net-banlist",
@@ -9972,6 +9973,7 @@ dependencies = [
  "parking_lot",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-evm",
  "reth-metrics",
  "reth-optimism-chainspec",
  "reth-optimism-evm",
@@ -10190,6 +10192,7 @@ dependencies = [
  "reth-stages",
  "reth-stages-types",
  "reth-static-file-types",
+ "reth-storage-api",
  "reth-testing-utils",
  "reth-tokio-util",
  "reth-tracing",
@@ -11024,6 +11027,8 @@ dependencies = [
  "reth-chainspec",
  "reth-eth-wire-types",
  "reth-ethereum-primitives",
+ "reth-evm",
+ "reth-evm-ethereum",
  "reth-execution-types",
  "reth-fs-util",
  "reth-metrics",
@@ -11032,6 +11037,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-tracing",
+ "revm",
  "revm-interpreter",
  "revm-primitives",
  "rustc-hash",
@@ -12272,9 +12278,9 @@ dependencies = [
 
 [[package]]
 name = "siphasher"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56199f7ddabf13fe5074ce809e7d3f42b42ae711800501b5b16ea82ad029c39d"
+checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 
 [[package]]
 name = "sketches-ddsketch"

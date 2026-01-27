@@ -36,7 +36,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
-use revm::database::State;
+use revm::{database::State, primitives::hardfork::SpecId};
 
 pub mod either;
 /// EVM environment configuration.
@@ -204,6 +204,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
                     + FromRecoveredTx<TxTy<Self::Primitives>>
                     + FromTxWithEncoded<TxTy<Self::Primitives>>,
             Precompiles = PrecompilesMap,
+            Spec: Into<SpecId>,
         >,
     >;
 

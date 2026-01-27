@@ -22,11 +22,11 @@ use reth_provider::{
     StageCheckpointReader,
 };
 use reth_prune::PruneModes;
-use reth_stages::{prelude::*, Pipeline, StageId, StageSet};
+use reth_stages::{prelude::*, ControlFlow, Pipeline, StageId, StageSet};
 use reth_static_file::StaticFileProducer;
 use std::{path::Path, sync::Arc};
 use tokio::sync::watch;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// Configuration for importing blocks from RLP files.
 #[derive(Debug, Clone, Default)]
@@ -35,6 +35,9 @@ pub struct ImportConfig {
     pub no_state: bool,
     /// Chunk byte length to read from file.
     pub chunk_len: Option<u64>,
+    /// If true, fail immediately when an invalid block is encountered.
+    /// By default (false), the import stops at the last valid block and exits successfully.
+    pub fail_on_invalid_block: bool,
 }
 
 /// Result of an import operation.
@@ -48,6 +51,12 @@ pub struct ImportResult {
     pub total_imported_blocks: usize,
     /// Total number of transactions imported into the database.
     pub total_imported_txns: usize,
+    /// Whether the import was stopped due to an invalid block.
+    pub stopped_on_invalid_block: bool,
+    /// The block number that was invalid, if any.
+    pub bad_block: Option<u64>,
+    /// The last valid block number when stopped due to invalid block.
+    pub last_valid_block: Option<u64>,
 }
 
 impl ImportResult {
@@ -55,6 +64,14 @@ impl ImportResult {
     pub fn is_complete(&self) -> bool {
         self.total_decoded_blocks == self.total_imported_blocks &&
             self.total_decoded_txns == self.total_imported_txns
+    }
+
+    /// Returns true if the import was successful, considering stop-on-invalid-block mode.
+    ///
+    /// In stop-on-invalid-block mode, a partial import is considered successful if we
+    /// stopped due to an invalid block (leaving the DB at the last valid block).
+    pub fn is_successful(&self) -> bool {
+        self.is_complete() || self.stopped_on_invalid_block
     }
 }
 
@@ -103,6 +120,11 @@ where
     let static_file_producer =
         StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 
+    // Track if we stopped due to an invalid block
+    let mut stopped_on_invalid_block = false;
+    let mut bad_block_number: Option<u64> = None;
+    let mut last_valid_block_number: Option<u64> = None;
+
     while let Some(file_client) =
         reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?
     {
@@ -137,12 +159,51 @@ where
 
         // Run pipeline
         info!(target: "reth::import", "Starting sync pipeline");
-        tokio::select! {
-            res = pipeline.run() => res?,
-            _ = tokio::signal::ctrl_c() => {
-                info!(target: "reth::import", "Import interrupted by user");
-                break;
-            },
+        if import_config.fail_on_invalid_block {
+            // Original behavior: fail on unwind
+            tokio::select! {
+                res = pipeline.run() => res?,
+                _ = tokio::signal::ctrl_c() => {
+                    info!(target: "reth::import", "Import interrupted by user");
+                    break;
+                },
+            }
+        } else {
+            // Default behavior: Use run_loop() to handle unwinds gracefully
+            let result = tokio::select! {
+                res = pipeline.run_loop() => res,
+                _ = tokio::signal::ctrl_c() => {
+                    info!(target: "reth::import", "Import interrupted by user");
+                    break;
+                },
+            };
+
+            match result {
+                Ok(ControlFlow::Unwind { target, bad_block }) => {
+                    // An invalid block was encountered; stop at last valid block
+                    let bad = bad_block.block.number;
+                    warn!(
+                        target: "reth::import",
+                        bad_block = bad,
+                        last_valid_block = target,
+                        "Invalid block encountered during import; stopping at last valid block"
+                    );
+                    stopped_on_invalid_block = true;
+                    bad_block_number = Some(bad);
+                    last_valid_block_number = Some(target);
+                    break;
+                }
+                Ok(ControlFlow::Continue { block_number }) => {
+                    debug!(target: "reth::import", block_number, "Pipeline chunk completed");
+                }
+                Ok(ControlFlow::NoProgress { block_number }) => {
+                    debug!(target: "reth::import", ?block_number, "Pipeline made no progress");
+                }
+                Err(e) => {
+                    // Propagate other pipeline errors
+                    return Err(e.into());
+                }
+            }
         }
 
         sealed_header = provider_factory
@@ -160,9 +221,20 @@ where
         total_decoded_txns,
         total_imported_blocks,
         total_imported_txns,
+        stopped_on_invalid_block,
+        bad_block: bad_block_number,
+        last_valid_block: last_valid_block_number,
     };
 
-    if !result.is_complete() {
+    if result.stopped_on_invalid_block {
+        info!(target: "reth::import",
+            total_imported_blocks,
+            total_imported_txns,
+            bad_block = ?result.bad_block,
+            last_valid_block = ?result.last_valid_block,
+            "Import stopped at last valid block due to invalid block"
+        );
+    } else if !result.is_complete() {
         error!(target: "reth::import",
             total_decoded_blocks,
             total_imported_blocks,

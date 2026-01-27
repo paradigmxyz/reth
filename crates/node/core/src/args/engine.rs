@@ -22,7 +22,6 @@ pub struct DefaultEngineValues {
     legacy_state_root_task_enabled: bool,
     state_cache_disabled: bool,
     prewarming_disabled: bool,
-    parallel_sparse_trie_disabled: bool,
     state_provider_metrics: bool,
     cross_block_cache_size: usize,
     state_root_task_compare_updates: bool,
@@ -78,12 +77,6 @@ impl DefaultEngineValues {
     /// Set whether to disable prewarming by default
     pub const fn with_prewarming_disabled(mut self, v: bool) -> Self {
         self.prewarming_disabled = v;
-        self
-    }
-
-    /// Set whether to disable parallel sparse trie by default
-    pub const fn with_parallel_sparse_trie_disabled(mut self, v: bool) -> Self {
-        self.parallel_sparse_trie_disabled = v;
         self
     }
 
@@ -189,7 +182,6 @@ impl Default for DefaultEngineValues {
             legacy_state_root_task_enabled: false,
             state_cache_disabled: false,
             prewarming_disabled: false,
-            parallel_sparse_trie_disabled: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             state_root_task_compare_updates: false,
@@ -244,14 +236,14 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-prewarming", alias = "engine.disable-caching-and-prewarming", default_value_t = DefaultEngineValues::get_global().prewarming_disabled)]
     pub prewarming_disabled: bool,
 
-    /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-parallel-sparse-trie
-    /// if you want to disable usage of the `ParallelSparseTrie`.
+    /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
     #[deprecated]
     #[arg(long = "engine.parallel-sparse-trie", default_value = "true", hide = true)]
     pub parallel_sparse_trie_enabled: bool,
 
-    /// Disable the parallel sparse trie in the engine.
-    #[arg(long = "engine.disable-parallel-sparse-trie", default_value_t = DefaultEngineValues::get_global().parallel_sparse_trie_disabled)]
+    /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
+    #[deprecated]
+    #[arg(long = "engine.disable-parallel-sparse-trie", default_value = "false", hide = true)]
     pub parallel_sparse_trie_disabled: bool,
 
     /// Enable state provider latency metrics. This allows the engine to collect and report stats
@@ -343,7 +335,6 @@ impl Default for EngineArgs {
             legacy_state_root_task_enabled,
             state_cache_disabled,
             prewarming_disabled,
-            parallel_sparse_trie_disabled,
             state_provider_metrics,
             cross_block_cache_size,
             state_root_task_compare_updates,
@@ -369,7 +360,7 @@ impl Default for EngineArgs {
             state_cache_disabled,
             prewarming_disabled,
             parallel_sparse_trie_enabled: true,
-            parallel_sparse_trie_disabled,
+            parallel_sparse_trie_disabled: false,
             state_provider_metrics,
             cross_block_cache_size,
             accept_execution_requests_hash,
@@ -398,7 +389,6 @@ impl EngineArgs {
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
-            .with_disable_parallel_sparse_trie(self.parallel_sparse_trie_disabled)
             .with_state_provider_metrics(self.state_provider_metrics)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
@@ -457,7 +447,7 @@ mod tests {
             state_cache_disabled: true,
             prewarming_disabled: true,
             parallel_sparse_trie_enabled: true,
-            parallel_sparse_trie_disabled: true,
+            parallel_sparse_trie_disabled: false,
             state_provider_metrics: true,
             cross_block_cache_size: 256,
             state_root_task_compare_updates: true,
@@ -485,7 +475,6 @@ mod tests {
             "--engine.legacy-state-root",
             "--engine.disable-state-cache",
             "--engine.disable-prewarming",
-            "--engine.disable-parallel-sparse-trie",
             "--engine.state-provider-metrics",
             "--engine.cross-block-cache-size",
             "256",
