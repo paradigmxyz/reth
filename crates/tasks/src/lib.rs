@@ -243,7 +243,7 @@ impl TaskManager {
         drop(self.signal);
         let when = timeout.map(|t| std::time::Instant::now() + t);
         while self.graceful_tasks.load(Ordering::Relaxed) > 0 {
-            if when.map(|when| std::time::Instant::now() > when).unwrap_or(false) {
+            if when.is_some_and(|when| std::time::Instant::now() > when) {
                 debug!("graceful shutdown timed out");
                 return false
             }

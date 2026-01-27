@@ -442,7 +442,7 @@ impl InvalidPoolTransactionError {
     /// Returns true if the this type is a [`InvalidPoolTransactionError::Other`] of that error
     /// type. Returns false otherwise.
     pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
-        self.as_other().map(|err| err.as_any().is::<T>()).unwrap_or(false)
+        self.as_other().is_some_and(|err| err.as_any().is::<T>())
     }
 }
 
