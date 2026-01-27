@@ -39,7 +39,7 @@ impl TransactionTestContext {
     }
 
     /// Creates a transfer with a specific nonce and signs it, returning bytes.
-    /// Uses high max_fee_per_gas (1000 gwei) to ensure tx acceptance regardless of basefee.
+    /// Uses high `max_fee_per_gas` (1000 gwei) to ensure tx acceptance regardless of basefee.
     pub async fn transfer_tx_bytes_with_nonce(
         chain_id: u64,
         wallet: PrivateKeySigner,

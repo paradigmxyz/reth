@@ -20,7 +20,7 @@ use std::{sync::Arc, time::Duration};
 const ROCKSDB_POLL_TIMEOUT: Duration = Duration::from_secs(60);
 const ROCKSDB_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-/// Polls RPC until the given tx_hash is visible as pending (not yet mined).
+/// Polls RPC until the given `tx_hash` is visible as pending (not yet mined).
 /// Prevents race conditions where `advance_block` is called before txs are in the pool.
 /// Returns the pending transaction.
 async fn wait_for_pending_tx<C: ClientT>(client: &C, tx_hash: B256) -> Transaction {
@@ -47,8 +47,8 @@ async fn wait_for_pending_tx<C: ClientT>(client: &C, tx_hash: B256) -> Transacti
     }
 }
 
-/// Polls RocksDB until the given tx_hash appears in `TransactionHashNumbers`.
-/// Returns the tx_number on success, or panics on timeout.
+/// Polls `RocksDB` until the given `tx_hash` appears in `TransactionHashNumbers`.
+/// Returns the `tx_number` on success, or panics on timeout.
 async fn poll_tx_in_rocksdb<P: RocksDBProviderFactory>(provider: &P, tx_hash: B256) -> u64 {
     let start = std::time::Instant::now();
     let mut interval = ROCKSDB_POLL_INTERVAL;
