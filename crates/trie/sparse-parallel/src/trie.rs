@@ -677,7 +677,9 @@ impl SparseTrie for ParallelSparseTrie {
             let branch_path = branch_parent_path.as_ref().unwrap();
 
             if let Some(new_ext_node) = Self::extension_changes_on_leaf_removal(
+                &ext_path,
                 shortkey,
+                branch_path,
                 branch_parent_node.as_ref().unwrap(),
             ) {
                 ext_subtrie.nodes.insert(ext_path, new_ext_node.clone());
@@ -1577,20 +1579,14 @@ impl ParallelSparseTrie {
         Ok(remaining_child_node)
     }
 
-    /// Computes the replacement node for a branch when it has only one remaining child after
-    /// a leaf removal.
+    /// Given the path to a parent branch node and a child node which is the sole remaining child on
+    /// that branch after removing a leaf, returns a node to replace the parent branch node and a
+    /// boolean indicating if the child should be deleted.
     ///
-    /// Given a parent branch node's path and the remaining child's path and node, this function
-    /// determines what the branch should be replaced with:
-    /// - If the child is a leaf: collapse into a leaf with prepended nibble
-    /// - If the child is an extension: collapse into a longer extension
-    /// - If the child is a branch: downgrade to a one-nibble extension
+    /// ## Panics
     ///
-    /// # Returns
-    ///
-    /// A tuple of:
-    /// - The replacement node for the branch
-    /// - `true` if the child node should be removed, `false` if it should be kept
+    /// - If either parent or child node is not already revealed.
+    /// - If parent's path is not a prefix of the child's path.
     fn branch_changes_on_leaf_removal(
         parent_path: &Nibbles,
         remaining_child_path: &Nibbles,
@@ -1601,20 +1597,30 @@ impl ParallelSparseTrie {
 
         let remaining_child_nibble = remaining_child_path.get_unchecked(parent_path.len());
 
+        // If we swap the branch node out either an extension or leaf, depending on
+        // what its remaining child is.
         match remaining_child_node {
             SparseNode::Empty | SparseNode::Hash(_) => {
                 panic!("remaining child must have been revealed already")
             }
+            // If the only child is a leaf node, we downgrade the branch node into a
+            // leaf node, prepending the nibble to the key, and delete the old
+            // child.
             SparseNode::Leaf { key, .. } => {
                 let mut new_key = Nibbles::from_nibbles_unchecked([remaining_child_nibble]);
                 new_key.extend(key);
                 (SparseNode::new_leaf(new_key), true)
             }
+            // If the only child node is an extension node, we downgrade the branch
+            // node into an even longer extension node, prepending the nibble to the
+            // key, and delete the old child.
             SparseNode::Extension { key, .. } => {
                 let mut new_key = Nibbles::from_nibbles_unchecked([remaining_child_nibble]);
                 new_key.extend(key);
                 (SparseNode::new_ext(new_key), true)
             }
+            // If the only child is a branch node, we downgrade the current branch
+            // node into a one-nibble extension node.
             SparseNode::Branch { .. } => (
                 SparseNode::new_ext(Nibbles::from_nibbles_unchecked([remaining_child_nibble])),
                 false,
