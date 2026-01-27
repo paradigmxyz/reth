@@ -120,6 +120,8 @@ pub(crate) struct EngineMetrics {
     pub(crate) executed_new_block_cache_miss: Counter,
     /// Histogram of persistence operation durations (in seconds)
     pub(crate) persistence_duration: Histogram,
+    /// Duration of the last persistence operation (in seconds)
+    pub(crate) persistence_duration_last: Gauge,
     /// Tracks the how often we failed to deliver a newPayload response.
     ///
     /// This effectively tracks how often the message sender dropped the channel and indicates a CL
@@ -130,6 +132,8 @@ pub(crate) struct EngineMetrics {
     pub(crate) failed_forkchoice_updated_response_deliveries: Counter,
     /// block insert duration
     pub(crate) block_insert_total_duration: Histogram,
+    /// Duration of the last block insert operation (in seconds)
+    pub(crate) block_insert_total_duration_last: Gauge,
 }
 
 /// Metrics for engine forkchoiceUpdated responses.

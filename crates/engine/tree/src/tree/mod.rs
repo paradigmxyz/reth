@@ -1369,7 +1369,9 @@ where
         last_persisted_hash_num: Option<BlockNumHash>,
         start_time: Instant,
     ) -> Result<(), AdvancePersistenceError> {
-        self.metrics.engine.persistence_duration.record(start_time.elapsed());
+        let elapsed = start_time.elapsed();
+        self.metrics.engine.persistence_duration.record(elapsed);
+        self.metrics.engine.persistence_duration_last.set(elapsed.as_secs_f64());
 
         let Some(BlockNumHash {
             hash: last_persisted_block_hash,
@@ -2662,10 +2664,9 @@ where
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
-        self.metrics
-            .engine
-            .block_insert_total_duration
-            .record(block_insert_start.elapsed().as_secs_f64());
+        let block_insert_elapsed = block_insert_start.elapsed().as_secs_f64();
+        self.metrics.engine.block_insert_total_duration.record(block_insert_elapsed);
+        self.metrics.engine.block_insert_total_duration_last.set(block_insert_elapsed);
         debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
     }
