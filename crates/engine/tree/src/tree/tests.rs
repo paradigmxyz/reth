@@ -259,6 +259,7 @@ impl TestHarness {
             current_canonical_head: blocks.last().unwrap().recovered_block().num_hash(),
             parent_to_child,
             engine_kind: EngineApiKind::Ethereum,
+            cached_canonical_overlay: None,
         };
 
         let last_executed_block = blocks.last().unwrap().clone();
