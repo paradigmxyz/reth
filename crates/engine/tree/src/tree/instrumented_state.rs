@@ -36,11 +36,6 @@ pub(crate) struct AtomicDuration {
 }
 
 impl AtomicDuration {
-    /// Returns a zero duration.
-    pub(crate) const fn zero() -> Self {
-        Self { nanos: AtomicU64::new(0) }
-    }
-
     /// Returns the duration as a [`Duration`]
     pub(crate) fn duration(&self) -> Duration {
         let nanos = self.nanos.load(Ordering::Relaxed);

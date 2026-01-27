@@ -103,6 +103,28 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     }
 }
 
+/// Trie context needed for [`BasicEngineValidator::spawn_deferred_trie_task`]
+#[derive(Debug)]
+struct TrieCtx<P> {
+    hashed_state: Arc<HashedPostState>,
+    trie_output: Arc<TrieUpdates>,
+    overlay_factory: OverlayStateProviderFactory<P>,
+}
+
+impl<P> TrieCtx<P> {
+    fn new(
+        hashed_state: HashedPostState,
+        trie_output: TrieUpdates,
+        overlay_factory: OverlayStateProviderFactory<P>,
+    ) -> Self {
+        Self {
+            hashed_state: Arc::new(hashed_state),
+            trie_output: Arc::new(trie_output),
+            overlay_factory,
+        }
+    }
+}
+
 /// A helper type that provides reusable payload validation logic for network-specific validators.
 ///
 /// This type satisfies [`EngineValidator`] and is responsible for executing blocks/payloads.
@@ -467,9 +489,13 @@ where
         {
             let instrumented_state_provider =
                 InstrumentedStateProvider::new(state_provider, "engine");
-            let handle = instrumented_state_provider.handle();
+            let handle = self
+                .config
+                .slow_block_threshold()
+                .is_some()
+                .then(|| instrumented_state_provider.handle());
             state_provider = Box::new(instrumented_state_provider);
-            self.config.slow_block_threshold().is_some().then_some(handle)
+            handle
         } else {
             None
         };
@@ -808,9 +834,7 @@ where
             block,
             output,
             &ctx,
-            hashed_state,
-            trie_output,
-            overlay_factory,
+            TrieCtx::new(hashed_state, trie_output, overlay_factory),
             timing_stats,
         ))
     }
@@ -1421,9 +1445,7 @@ where
         block: RecoveredBlock<N::Block>,
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
-        hashed_state: HashedPostState,
-        trie_output: TrieUpdates,
-        overlay_factory: OverlayStateProviderFactory<P>,
+        trie_ctx: TrieCtx<P>,
         timing_stats: Option<ExecutionTimingStats>,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
@@ -1440,8 +1462,8 @@ where
 
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
         let deferred_trie_data = DeferredTrieData::pending(
-            Arc::new(hashed_state),
-            Arc::new(trie_output),
+            trie_ctx.hashed_state,
+            trie_ctx.trie_output,
             anchor_hash,
             ancestors,
         );
@@ -1491,7 +1513,7 @@ where
 
                 // Get a provider from the overlay factory for trie cursor access
                 let changeset_result =
-                    overlay_factory.database_provider_ro().and_then(|provider| {
+                    trie_ctx.overlay_factory.database_provider_ro().and_then(|provider| {
                         reth_trie::changesets::compute_trie_changesets(
                             &provider,
                             &computed.trie_updates,
