@@ -884,9 +884,10 @@ where
 
         trace!(target: "trie::sparse", ?address, "Updating account");
         let nibbles = Nibbles::unpack(address);
-        self.account_rlp_buf.clear();
-        account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+        let mut rlp_buf = core::mem::take(&mut self.account_rlp_buf);
+        rlp_buf.clear();
+        account.into_trie_account(storage_root).encode(&mut rlp_buf);
+        self.update_account_leaf(nibbles, rlp_buf, provider_factory)?;
 
         Ok(true)
     }
