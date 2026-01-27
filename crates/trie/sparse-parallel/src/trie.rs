@@ -969,28 +969,36 @@ impl SparseTrieExt for ParallelSparseTrie {
                     }
                 }
                 SparseNode::Branch { state_mask, .. } => {
-                    let state_mask = *state_mask;
-                    for nibble in 0..16u8 {
-                        if state_mask.is_bit_set(nibble) {
-                            let mut child = path;
-                            child.push_unchecked(nibble);
-                            if depth == max_depth {
-                                let child_subtrie =
-                                    if SparseSubtrieType::path_len_is_upper(child.len()) {
-                                        Some(&*self.upper_subtrie)
-                                    } else {
-                                        self.lower_subtrie_for_path(&child)
-                                    };
-                                if let Some(hash) = child_subtrie
-                                    .and_then(|s| s.nodes.get(&child))
-                                    .filter(|n| !matches!(n, SparseNode::Hash(_)))
-                                    .and_then(|n| n.hash())
-                                {
-                                    effective_pruned_roots.push((child, hash));
-                                }
+                    // Iterate only over set bits in state_mask (typically 2-3 children per branch).
+                    // This avoids checking all 16 nibbles when most are empty.
+                    //
+                    // Algorithm: `trailing_zeros()` finds the index of the lowest set bit,
+                    // then `mask &= mask - 1` clears that bit for the next iteration.
+                    // Example: mask=0b1010 -> nibble=1, mask=0b1000 -> nibble=3, mask=0b0000 ->
+                    // done
+                    let mut mask = state_mask.get();
+                    while mask != 0 {
+                        let nibble = mask.trailing_zeros() as u8;
+                        mask &= mask - 1;
+
+                        let mut child = path;
+                        child.push_unchecked(nibble);
+                        if depth == max_depth {
+                            let child_subtrie = if SparseSubtrieType::path_len_is_upper(child.len())
+                            {
+                                Some(&*self.upper_subtrie)
                             } else {
-                                stack.push((child, depth + 1));
+                                self.lower_subtrie_for_path(&child)
+                            };
+                            if let Some(hash) = child_subtrie
+                                .and_then(|s| s.nodes.get(&child))
+                                .filter(|n| !matches!(n, SparseNode::Hash(_)))
+                                .and_then(|n| n.hash())
+                            {
+                                effective_pruned_roots.push((child, hash));
                             }
+                        } else {
+                            stack.push((child, depth + 1));
                         }
                     }
                 }
@@ -1038,23 +1046,47 @@ impl SparseTrieExt for ParallelSparseTrie {
             "prune roots must be prefix-free"
         );
 
-        // Fast path: If a pruned root exactly matches a lower subtrie's root path, we can
-        // clear the entire subtrie in O(1) instead of scanning with retain().
-        // Track which lower subtries have been fully cleared to skip retain() for them.
+        // Fast path: Clear entire lower subtries in O(1) when possible, avoiding O(n) retain().
+        // Two cases enable fast-clearing:
+        // 1. A pruned root in roots_by_lower exactly matches a lower subtrie's root path
+        // 2. An upper prune root is a prefix of a lower subtrie's root path (entire subtrie is
+        //    below the prune boundary)
         let mut fully_pruned_subtries = [false; NUM_LOWER_SUBTRIES];
 
+        // Case 1: Lower prune roots that exactly match subtrie root paths
         for (idx, bucket) in roots_by_lower.iter().enumerate() {
             for (path, hash) in bucket {
-                // Only lower subtries can be fully cleared (upper subtrie root is always empty
-                // path)
                 if let Some(subtrie) = self.lower_subtries[idx].as_revealed_mut() &&
                     &subtrie.path == path
                 {
-                    // Fast-clear: O(1) instead of O(n) retain()
                     subtrie.nodes.clear();
                     subtrie.inner.values.clear();
                     subtrie.nodes.insert(*path, SparseNode::Hash(*hash));
                     fully_pruned_subtries[idx] = true;
+                }
+            }
+        }
+
+        // Case 2: Upper prune roots that are prefixes of lower subtrie root paths
+        // When an upper root is a prefix of subtrie.path, the entire subtrie lies below the
+        // prune boundary and can be cleared without scanning.
+        if !roots_upper.is_empty() {
+            for (idx, subtrie) in self.lower_subtries.iter_mut().enumerate() {
+                if fully_pruned_subtries[idx] {
+                    continue;
+                }
+                if let Some(s) = subtrie.as_revealed_mut() {
+                    // Check if any upper root is a prefix of this subtrie's root path
+                    let search_idx = roots_upper.partition_point(|(root, _)| root <= &s.path);
+                    if search_idx > 0 {
+                        let (candidate_root, _) = &roots_upper[search_idx - 1];
+                        if s.path.starts_with(candidate_root) {
+                            // Entire subtrie is below prune boundary - clear it
+                            s.nodes.clear();
+                            s.inner.values.clear();
+                            fully_pruned_subtries[idx] = true;
+                        }
+                    }
                 }
             }
         }
@@ -1110,28 +1142,65 @@ impl SparseTrieExt for ParallelSparseTrie {
 
         #[cfg(feature = "std")]
         {
-            use rayon::iter::{
-                IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
-            };
+            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
-            self.lower_subtries.par_iter_mut().enumerate().for_each(|(subtrie_idx, subtrie)| {
-                // Skip subtries that were fully cleared via the fast path
-                if fully_pruned_subtries[subtrie_idx] {
-                    return;
+            // Collect indices of revealed subtries that need processing (not fully cleared)
+            let revealed_indices: Vec<usize> = (0..NUM_LOWER_SUBTRIES)
+                .filter(|&idx| {
+                    !fully_pruned_subtries[idx] &&
+                        self.lower_subtries[idx].as_revealed_ref().is_some()
+                })
+                .collect();
+
+            // Only use parallelism if there are enough subtries to process
+            if revealed_indices.len() >= 4 {
+                // Take out the subtries we need to process
+                let mut subtries_to_process: Vec<_> = revealed_indices
+                    .iter()
+                    .map(|&idx| {
+                        let subtrie = core::mem::replace(
+                            &mut self.lower_subtries[idx],
+                            LowerSparseSubtrie::Blind(None),
+                        );
+                        (idx, subtrie)
+                    })
+                    .collect();
+
+                // Process in parallel
+                subtries_to_process.par_iter_mut().for_each(|(subtrie_idx, subtrie)| {
+                    if let Some(s) = subtrie.as_revealed_mut() {
+                        let bucket = &roots_by_lower[*subtrie_idx];
+                        s.nodes.retain(|p, _| {
+                            !is_strict_descendant_in(bucket, p) &&
+                                !is_strict_descendant_in(&roots_upper, p)
+                        });
+                        s.inner.values.retain(|p, _| {
+                            !starts_with_pruned_in(bucket, p) &&
+                                !starts_with_pruned_in(&roots_upper, p)
+                        });
+                    }
+                });
+
+                // Put subtries back
+                for (idx, subtrie) in subtries_to_process {
+                    self.lower_subtries[idx] = subtrie;
                 }
-                if let Some(s) = subtrie.as_revealed_mut() {
-                    let bucket = &roots_by_lower[subtrie_idx];
-                    // Check both the subtrie's own bucket and upper roots (upper roots can have
-                    // descendants in lower subtries when pruned at shallow depths)
-                    s.nodes.retain(|p, _| {
-                        !is_strict_descendant_in(bucket, p) &&
-                            !is_strict_descendant_in(&roots_upper, p)
-                    });
-                    s.inner.values.retain(|p, _| {
-                        !starts_with_pruned_in(bucket, p) && !starts_with_pruned_in(&roots_upper, p)
-                    });
+            } else {
+                // Process serially for small number of revealed subtries
+                for idx in revealed_indices {
+                    if let Some(s) = self.lower_subtries[idx].as_revealed_mut() {
+                        let bucket = &roots_by_lower[idx];
+                        s.nodes.retain(|p, _| {
+                            !is_strict_descendant_in(bucket, p) &&
+                                !is_strict_descendant_in(&roots_upper, p)
+                        });
+                        s.inner.values.retain(|p, _| {
+                            !starts_with_pruned_in(bucket, p) &&
+                                !starts_with_pruned_in(&roots_upper, p)
+                        });
+                    }
                 }
-            });
+            }
         }
 
         #[cfg(not(feature = "std"))]
