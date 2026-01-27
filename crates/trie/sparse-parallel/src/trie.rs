@@ -10,7 +10,7 @@ use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
-    ProofTrieNode, RlpNode, TrieMaskExt, TrieNode, CHILD_INDEX_RANGE,
+    ProofTrieNode, RlpNode, TrieNode, CHILD_INDEX_RANGE,
 };
 use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider},
@@ -27,6 +27,51 @@ pub const UPPER_TRIE_MAX_DEPTH: usize = 2;
 
 /// Number of lower subtries which are managed by the [`ParallelSparseTrie`].
 pub const NUM_LOWER_SUBTRIES: usize = 16usize.pow(UPPER_TRIE_MAX_DEPTH as u32);
+
+/// Default minimum capacity threshold for post-prune shrinking.
+/// Shrinking is skipped if total capacity is below this to avoid overhead on small tries.
+pub const DEFAULT_SHRINK_CAPACITY_THRESHOLD: usize = 1024;
+
+/// Default ratio of pruned nodes that triggers shrinking (75% = 0.75).
+/// If `pruned_count > initial_count * ratio`, shrinking may be triggered.
+pub const DEFAULT_SHRINK_PRUNE_RATIO: f64 = 0.75;
+
+/// Default headroom factor for shrinking (25% = 0.25).
+/// After shrinking, capacity is set to `len + len * headroom`.
+pub const DEFAULT_SHRINK_HEADROOM: f64 = 0.25;
+
+/// Configuration for post-prune shrinking behavior.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShrinkConfig {
+    /// Whether post-prune shrinking is enabled.
+    pub enabled: bool,
+    /// Minimum total capacity before shrinking is considered.
+    /// Tries with capacity below this are not shrunk to avoid overhead.
+    pub capacity_threshold: usize,
+    /// Ratio of pruned nodes that triggers shrinking.
+    /// If `pruned_count > initial_count * ratio`, shrinking is triggered.
+    pub prune_ratio: f64,
+    /// Headroom factor when shrinking (e.g., 0.25 means 25% extra capacity).
+    pub headroom: f64,
+}
+
+impl Default for ShrinkConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            capacity_threshold: DEFAULT_SHRINK_CAPACITY_THRESHOLD,
+            prune_ratio: DEFAULT_SHRINK_PRUNE_RATIO,
+            headroom: DEFAULT_SHRINK_HEADROOM,
+        }
+    }
+}
+
+impl ShrinkConfig {
+    /// Creates a disabled shrink configuration.
+    pub const fn disabled() -> Self {
+        Self { enabled: false, capacity_threshold: 0, prune_ratio: 0.0, headroom: 0.0 }
+    }
+}
 
 /// Configuration for controlling when parallelism is enabled in [`ParallelSparseTrie`] operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -123,6 +168,8 @@ pub struct ParallelSparseTrie {
     update_actions_buffers: Vec<Vec<SparseTrieUpdatesAction>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ParallelismThresholds,
+    /// Configuration for post-prune shrinking behavior.
+    shrink_config: ShrinkConfig,
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ParallelSparseTrieMetrics,
@@ -141,6 +188,7 @@ impl Default for ParallelSparseTrie {
             branch_node_masks: BranchNodeMasksMap::default(),
             update_actions_buffers: Vec::default(),
             parallelism_thresholds: Default::default(),
+            shrink_config: Default::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -922,11 +970,19 @@ impl SparseTrieExt for ParallelSparseTrie {
     }
 
     fn prune(&mut self, max_depth: usize) -> usize {
-        let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::new();
-        let mut stack = vec![(Nibbles::default(), 0usize)];
+        let estimated_capacity = core::cmp::min(self.revealed_node_count() / 4, 1024);
+        let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::with_capacity(estimated_capacity);
+        let mut stack: SmallVec<[(Nibbles, usize); 32]> =
+            SmallVec::from_buf_and_len([(Nibbles::default(), 0usize); 32], 1);
 
         while let Some((path, depth)) = stack.pop() {
-            let Some(subtrie) = self.subtrie_for_path(&path) else { continue };
+            let subtrie = if SparseSubtrieType::path_len_is_upper(path.len()) {
+                &*self.upper_subtrie
+            } else if let Some(s) = self.lower_subtrie_for_path(&path) {
+                s
+            } else {
+                continue
+            };
             let Some(node) = subtrie.nodes.get(&path) else { continue };
 
             match node {
@@ -935,8 +991,12 @@ impl SparseTrieExt for ParallelSparseTrie {
                     let mut child = path;
                     child.extend(key);
                     if depth == max_depth {
-                        if let Some(hash) = self
-                            .subtrie_for_path(&child)
+                        let child_subtrie = if SparseSubtrieType::path_len_is_upper(child.len()) {
+                            Some(&*self.upper_subtrie)
+                        } else {
+                            self.lower_subtrie_for_path(&child)
+                        };
+                        if let Some(hash) = child_subtrie
                             .and_then(|s| s.nodes.get(&child))
                             .filter(|n| !matches!(n, SparseNode::Hash(_)))
                             .and_then(|n| n.hash())
@@ -948,20 +1008,28 @@ impl SparseTrieExt for ParallelSparseTrie {
                     }
                 }
                 SparseNode::Branch { state_mask, .. } => {
-                    for nibble in state_mask.iter_set_bits() {
-                        let mut child = path;
-                        child.push_unchecked(nibble);
-                        if depth == max_depth {
-                            if let Some(hash) = self
-                                .subtrie_for_path(&child)
-                                .and_then(|s| s.nodes.get(&child))
-                                .filter(|n| !matches!(n, SparseNode::Hash(_)))
-                                .and_then(|n| n.hash())
-                            {
-                                effective_pruned_roots.push((child, hash));
+                    let state_mask = *state_mask;
+                    for nibble in 0..16u8 {
+                        if state_mask.is_bit_set(nibble) {
+                            let mut child = path;
+                            child.push_unchecked(nibble);
+                            if depth == max_depth {
+                                let child_subtrie =
+                                    if SparseSubtrieType::path_len_is_upper(child.len()) {
+                                        Some(&*self.upper_subtrie)
+                                    } else {
+                                        self.lower_subtrie_for_path(&child)
+                                    };
+                                if let Some(hash) = child_subtrie
+                                    .and_then(|s| s.nodes.get(&child))
+                                    .filter(|n| !matches!(n, SparseNode::Hash(_)))
+                                    .and_then(|n| n.hash())
+                                {
+                                    effective_pruned_roots.push((child, hash));
+                                }
+                            } else {
+                                stack.push((child, depth + 1));
                             }
-                        } else {
-                            stack.push((child, depth + 1));
                         }
                     }
                 }
