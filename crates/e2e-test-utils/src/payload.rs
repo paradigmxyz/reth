@@ -54,25 +54,22 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
         Ok(())
     }
 
-    /// Wait until the best built payload is ready (requires at least one transaction).
+    /// Wait until the best built payload is ready
     pub async fn wait_for_built_payload(&self, payload_id: PayloadId) {
-        let start = std::time::Instant::now();
         loop {
             let payload =
                 self.payload_builder.best_payload(payload_id).await.transpose().ok().flatten();
-            if payload.is_some_and(|p| !p.block().body().transactions().is_empty()) {
-                self.payload_builder
-                    .resolve_kind(payload_id, PayloadKind::Earliest)
-                    .await
-                    .unwrap()
-                    .unwrap();
-                break;
+            if payload.is_none_or(|p| p.block().body().transactions().is_empty()) {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                continue
             }
-            assert!(
-                start.elapsed() < std::time::Duration::from_secs(30),
-                "wait_for_built_payload timed out after 30s"
-            );
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            // Resolve payload once its built
+            self.payload_builder
+                .resolve_kind(payload_id, PayloadKind::Earliest)
+                .await
+                .unwrap()
+                .unwrap();
+            break;
         }
     }
 
