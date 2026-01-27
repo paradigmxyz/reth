@@ -850,7 +850,7 @@ impl SparseTrieTrait for SerialSparseTrie {
 
                         // If the remaining child node is not yet revealed then we have to reveal
                         // it here, otherwise it's not possible to know how to collapse the branch.
-                        let remaining_child = self.reveal_remaining_child_on_leaf_removal(
+                        let child = self.reveal_remaining_child_on_leaf_removal(
                             &provider,
                             full_path,
                             &child_path,
@@ -858,7 +858,7 @@ impl SparseTrieTrait for SerialSparseTrie {
                         )?;
 
                         let mut delete_child = false;
-                        let new_node = match &remaining_child {
+                        let new_node = match &child {
                             SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
                             &SparseNode::Hash(hash) => {
                                 return Err(SparseTrieErrorKind::BlindedNode {
