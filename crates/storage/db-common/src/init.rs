@@ -932,8 +932,6 @@ mod tests {
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
 
-        let settings = factory.cached_storage_settings();
-
         let expected_accounts = vec![
             (ShardedKey::new(address_with_balance, u64::MAX), IntegerList::new([0]).unwrap()),
             (ShardedKey::new(address_with_storage, u64::MAX), IntegerList::new([0]).unwrap()),
@@ -943,40 +941,49 @@ mod tests {
             IntegerList::new([0]).unwrap(),
         )];
 
-        if settings.account_history_in_rocksdb {
-            let rocksdb = factory.rocksdb_provider();
-            let accounts_history: Vec<_> = rocksdb
-                .iter::<tables::AccountsHistory>()
-                .expect("failed to iter")
-                .collect::<Result<Vec<_>, _>>()
-                .expect("failed to collect");
-            assert_eq!(accounts_history, expected_accounts);
-        } else {
+        let collect_from_mdbx = |factory: &ProviderFactory<MockNodeTypesWithDB>| {
             let provider = factory.provider().unwrap();
             let tx = provider.tx_ref();
-            assert_eq!(
-                collect_table_entries::<Arc<DatabaseEnv>, tables::AccountsHistory>(tx)
-                    .expect("failed to collect"),
-                expected_accounts,
-            );
+            (
+                collect_table_entries::<Arc<DatabaseEnv>, tables::AccountsHistory>(tx).unwrap(),
+                collect_table_entries::<Arc<DatabaseEnv>, tables::StoragesHistory>(tx).unwrap(),
+            )
+        };
+
+        #[cfg(feature = "edge")]
+        {
+            let settings = factory.cached_storage_settings();
+            let rocksdb = factory.rocksdb_provider();
+
+            let collect_rocksdb = |rocksdb: &reth_provider::providers::RocksDBProvider| {
+                (
+                    rocksdb
+                        .iter::<tables::AccountsHistory>()
+                        .unwrap()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap(),
+                    rocksdb
+                        .iter::<tables::StoragesHistory>()
+                        .unwrap()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap(),
+                )
+            };
+
+            let (accounts, storages) = if settings.account_history_in_rocksdb {
+                collect_rocksdb(&rocksdb)
+            } else {
+                collect_from_mdbx(&factory)
+            };
+            assert_eq!(accounts, expected_accounts);
+            assert_eq!(storages, expected_storages);
         }
 
-        if settings.storages_history_in_rocksdb {
-            let rocksdb = factory.rocksdb_provider();
-            let storages_history: Vec<_> = rocksdb
-                .iter::<tables::StoragesHistory>()
-                .expect("failed to iter")
-                .collect::<Result<Vec<_>, _>>()
-                .expect("failed to collect");
-            assert_eq!(storages_history, expected_storages);
-        } else {
-            let provider = factory.provider().unwrap();
-            let tx = provider.tx_ref();
-            assert_eq!(
-                collect_table_entries::<Arc<DatabaseEnv>, tables::StoragesHistory>(tx)
-                    .expect("failed to collect"),
-                expected_storages,
-            );
+        #[cfg(not(feature = "edge"))]
+        {
+            let (accounts, storages) = collect_from_mdbx(&factory);
+            assert_eq!(accounts, expected_accounts);
+            assert_eq!(storages, expected_storages);
         }
     }
 
