@@ -1,9 +1,9 @@
 //! Types and traits for validating blocks and payloads.
 
 use crate::tree::{
-    cached_state::CachedStateProvider,
+    cached_state::{CachedStateMetrics, CachedStateProvider},
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-    instrumented_state::InstrumentedStateProvider,
+    instrumented_state::{InstrumentedStateProvider, InstrumentedStateProviderHandle},
     payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
@@ -52,7 +52,7 @@ use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
@@ -660,171 +660,16 @@ where
             .into())
         }
 
-        let timing_stats = if let Some(instrumented_handle) = instrumented_state_provider_handle {
-            let accounts_read = instrumented_handle.total_account_fetches();
-            let storage_read = instrumented_handle.total_storage_fetches();
-            let code_read = instrumented_handle.total_code_fetches();
-            let code_bytes_read = instrumented_handle.total_code_fetched_bytes();
-
-            // Write stats from BundleState (final state changes)
-            let accounts_changed = output.state.state.len();
-            let accounts_deleted =
-                output.state.state.values().filter(|acc| acc.was_destroyed()).count();
-            let storage_slots_changed =
-                output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
-            // Storage slots deleted = slots where present_value is zero and previous was non-zero
-            let storage_slots_deleted = output
-                .state
-                .state
-                .values()
-                .flat_map(|account| account.storage.values())
-                .filter(|slot| {
-                    slot.present_value.is_zero() && !slot.previous_or_original_value.is_zero()
-                })
-                .count();
-            // Count only NEW contract deployments (bytecode that will be persisted to DB).
-            // A contract is newly deployed when an account now has non-empty code_hash but
-            // previously had no code. This filters out bytecode that was merely loaded
-            // from the cache during execution (e.g., EXTCODESIZE on existing contracts).
-            let bytecodes_changed = output
-                .state
-                .state
-                .values()
-                .filter(|acc| {
-                    // Account now has code (non-empty code_hash)
-                    let has_code_now =
-                        acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
-                    // Account previously had no code (either didn't exist or had KECCAK_EMPTY)
-                    let had_no_code_before = acc
-                        .original_info
-                        .as_ref()
-                        .map(|info| info.code_hash == KECCAK_EMPTY)
-                        .unwrap_or(true); // None means account was created = had no code
-                    has_code_now && had_no_code_before
-                })
-                .count();
-            // Sum bytecode sizes for UNIQUE newly deployed bytecodes only.
-            // This counts actual bytes persisted to the DB's code table, not duplicates.
-            // Example: Factory deploying 3 identical contracts = code_bytes of 1 unique bytecode.
-            let unique_new_code_hashes: std::collections::HashSet<_> = output
-                .state
-                .state
-                .values()
-                .filter_map(|acc| {
-                    let has_code_now =
-                        acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
-                    let had_no_code_before = acc
-                        .original_info
-                        .as_ref()
-                        .map(|info| info.code_hash == KECCAK_EMPTY)
-                        .unwrap_or(true);
-                    if has_code_now && had_no_code_before {
-                        acc.info.as_ref().map(|info| info.code_hash)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            let code_bytes_written: usize = unique_new_code_hashes
-                .iter()
-                .filter_map(|hash| {
-                    output.state.contracts.get(hash).map(|bytecode| bytecode.original_bytes().len())
-                })
-                .sum();
-
-            // Capture state_read_ms from TimingStatsHandle (time spent fetching state during
-            // execution)
-            let state_read_duration = instrumented_handle.total_account_fetch_latency() +
-                instrumented_handle.total_storage_fetch_latency() +
-                instrumented_handle.total_code_fetch_latency();
-
-            // EIP-7702 delegation tracking from bytecode changes
-            // Count new EIP-7702 bytecodes as delegations set
-            let eip7702_delegations_set =
-                output.state.contracts.values().filter(|bytecode| bytecode.is_eip7702()).count();
-            // Delegations cleared: accounts where bytecode changed FROM EIP-7702 TO empty
-            // This detects when an EIP-7702 delegation is removed by setting code to empty
-            // Note: Clearing a delegation does NOT destroy the account - it just empties the
-            // bytecode
-            let eip7702_delegations_cleared = output
-                .state
-                .state
-                .values()
-                .filter(|acc| {
-                    // Check if original bytecode was EIP-7702
-                    let original_was_eip7702 = acc
-                        .original_info
-                        .as_ref()
-                        .and_then(|info| info.code.as_ref())
-                        .map(|bytecode| bytecode.is_eip7702())
-                        .unwrap_or(false);
-
-                    // Check if current code is empty (delegation cleared)
-                    let code_now_empty = acc
-                        .info
-                        .as_ref()
-                        .map(|info| info.code_hash == KECCAK_EMPTY)
-                        .unwrap_or(false);
-
-                    original_was_eip7702 && code_now_empty
-                })
-                .count();
-
-            // Get cache statistics for slow block logging
-            let (
-                account_cache_hits,
-                account_cache_misses,
-                storage_cache_hits,
-                storage_cache_misses,
-                code_cache_hits,
-                code_cache_misses,
-            ) = handle
-                .cache_metrics()
-                .map(|metrics| {
-                    (
-                        metrics.account_hits(),
-                        metrics.account_misses(),
-                        metrics.storage_hits(),
-                        metrics.storage_misses(),
-                        metrics.code_hits(),
-                        metrics.code_misses(),
-                    )
-                })
-                .unwrap_or((0, 0, 0, 0, 0, 0));
-
-            // Build execution timing stats for slow block logging
-            // Note: state_hash_ms will be updated after state root computation,
-            // commit_ms will be added by persistence service after database commit
-            Some(ExecutionTimingStats {
-                block_number: block.number(),
-                block_hash: block.hash(),
-                gas_used: output.result.gas_used,
-                tx_count: block.transaction_count(),
+        let timing_stats = instrumented_state_provider_handle.map(|instrumented_handle| {
+            self.calculate_timing_stats(
+                &block,
+                instrumented_handle,
+                handle.cache_metrics(),
+                &output,
                 execution_duration,
-                state_read_duration,
-                state_hash_duration: root_elapsed,
-                accounts_read,
-                storage_read,
-                code_read,
-                code_bytes_read,
-                accounts_changed,
-                accounts_deleted,
-                storage_slots_changed,
-                storage_slots_deleted,
-                bytecodes_changed,
-                code_bytes_written,
-                eip7702_delegations_set,
-                eip7702_delegations_cleared,
-                account_cache_hits,
-                account_cache_misses,
-                storage_cache_hits,
-                storage_cache_misses,
-                code_cache_hits,
-                code_cache_misses,
-            })
-        } else {
-            None
-        };
+                root_elapsed,
+            )
+        });
 
         if let Some(valid_block_tx) = valid_block_tx {
             let _ = valid_block_tx.send(());
@@ -1565,6 +1410,174 @@ where
             executed_block.with_timing_stats(stats)
         } else {
             executed_block
+        }
+    }
+
+    fn calculate_timing_stats(
+        &self,
+        block: &RecoveredBlock<N::Block>,
+        instrumented_handle: InstrumentedStateProviderHandle,
+        cache_metrics: Option<CachedStateMetrics>,
+        output: &BlockExecutionOutput<N::Receipt>,
+        execution_duration: Duration,
+        state_hash_duration: Duration,
+    ) -> ExecutionTimingStats {
+        let accounts_read = instrumented_handle.total_account_fetches();
+        let storage_read = instrumented_handle.total_storage_fetches();
+        let code_read = instrumented_handle.total_code_fetches();
+        let code_bytes_read = instrumented_handle.total_code_fetched_bytes();
+
+        // Write stats from BundleState (final state changes)
+        let accounts_changed = output.state.state.len();
+        let accounts_deleted =
+            output.state.state.values().filter(|acc| acc.was_destroyed()).count();
+        let storage_slots_changed =
+            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
+        // Storage slots deleted = slots where present_value is zero and previous was non-zero
+        let storage_slots_deleted = output
+            .state
+            .state
+            .values()
+            .flat_map(|account| account.storage.values())
+            .filter(|slot| {
+                slot.present_value.is_zero() && !slot.previous_or_original_value.is_zero()
+            })
+            .count();
+        // Count only NEW contract deployments (bytecode that will be persisted to DB).
+        // A contract is newly deployed when an account now has non-empty code_hash but
+        // previously had no code. This filters out bytecode that was merely loaded
+        // from the cache during execution (e.g., EXTCODESIZE on existing contracts).
+        let bytecodes_changed = output
+            .state
+            .state
+            .values()
+            .filter(|acc| {
+                // Account now has code (non-empty code_hash)
+                let has_code_now =
+                    acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
+                // Account previously had no code (either didn't exist or had KECCAK_EMPTY)
+                let had_no_code_before = acc
+                    .original_info
+                    .as_ref()
+                    .map(|info| info.code_hash == KECCAK_EMPTY)
+                    .unwrap_or(true); // None means account was created = had no code
+                has_code_now && had_no_code_before
+            })
+            .count();
+        // Sum bytecode sizes for UNIQUE newly deployed bytecodes only.
+        // This counts actual bytes persisted to the DB's code table, not duplicates.
+        // Example: Factory deploying 3 identical contracts = code_bytes of 1 unique bytecode.
+        let unique_new_code_hashes: std::collections::HashSet<_> = output
+            .state
+            .state
+            .values()
+            .filter_map(|acc| {
+                let has_code_now =
+                    acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
+                let had_no_code_before = acc
+                    .original_info
+                    .as_ref()
+                    .map(|info| info.code_hash == KECCAK_EMPTY)
+                    .unwrap_or(true);
+                if has_code_now && had_no_code_before {
+                    acc.info.as_ref().map(|info| info.code_hash)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let code_bytes_written: usize = unique_new_code_hashes
+            .iter()
+            .filter_map(|hash| {
+                output.state.contracts.get(hash).map(|bytecode| bytecode.original_bytes().len())
+            })
+            .sum();
+
+        // Capture state_read_ms from TimingStatsHandle (time spent fetching state during
+        // execution)
+        let state_read_duration = instrumented_handle.total_account_fetch_latency() +
+            instrumented_handle.total_storage_fetch_latency() +
+            instrumented_handle.total_code_fetch_latency();
+
+        // EIP-7702 delegation tracking from bytecode changes
+        // Count new EIP-7702 bytecodes as delegations set
+        let eip7702_delegations_set =
+            output.state.contracts.values().filter(|bytecode| bytecode.is_eip7702()).count();
+        // Delegations cleared: accounts where bytecode changed FROM EIP-7702 TO empty
+        // This detects when an EIP-7702 delegation is removed by setting code to empty
+        // Note: Clearing a delegation does NOT destroy the account - it just empties the
+        // bytecode
+        let eip7702_delegations_cleared = output
+            .state
+            .state
+            .values()
+            .filter(|acc| {
+                // Check if original bytecode was EIP-7702
+                let original_was_eip7702 = acc
+                    .original_info
+                    .as_ref()
+                    .and_then(|info| info.code.as_ref())
+                    .map(|bytecode| bytecode.is_eip7702())
+                    .unwrap_or(false);
+
+                // Check if current code is empty (delegation cleared)
+                let code_now_empty =
+                    acc.info.as_ref().map(|info| info.code_hash == KECCAK_EMPTY).unwrap_or(false);
+
+                original_was_eip7702 && code_now_empty
+            })
+            .count();
+
+        // Get cache statistics for slow block logging
+        let (
+            account_cache_hits,
+            account_cache_misses,
+            storage_cache_hits,
+            storage_cache_misses,
+            code_cache_hits,
+            code_cache_misses,
+        ) = cache_metrics
+            .map(|metrics| {
+                (
+                    metrics.account_hits(),
+                    metrics.account_misses(),
+                    metrics.storage_hits(),
+                    metrics.storage_misses(),
+                    metrics.code_hits(),
+                    metrics.code_misses(),
+                )
+            })
+            .unwrap_or((0, 0, 0, 0, 0, 0));
+
+        // Build execution timing stats for slow block logging
+        // Note: state_hash_ms will be updated after state root computation,
+        // commit_ms will be added by persistence service after database commit
+        ExecutionTimingStats {
+            block_number: block.number(),
+            block_hash: block.hash(),
+            gas_used: output.result.gas_used,
+            tx_count: block.transaction_count(),
+            execution_duration,
+            state_read_duration,
+            state_hash_duration,
+            accounts_read,
+            storage_read,
+            code_read,
+            code_bytes_read,
+            accounts_changed,
+            accounts_deleted,
+            storage_slots_changed,
+            storage_slots_deleted,
+            bytecodes_changed,
+            code_bytes_written,
+            eip7702_delegations_set,
+            eip7702_delegations_cleared,
+            account_cache_hits,
+            account_cache_misses,
+            storage_cache_hits,
+            storage_cache_misses,
+            code_cache_hits,
+            code_cache_misses,
         }
     }
 }
