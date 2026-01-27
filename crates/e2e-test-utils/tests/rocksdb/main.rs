@@ -102,7 +102,7 @@ fn test_attributes_generator(timestamp: u64) -> EthPayloadBuilderAttributes {
 /// a race where the static file writer expects sequential block numbers but receives
 /// them out of order, resulting in `UnexpectedStaticFileBlockNumber` errors.
 ///
-/// RocksDB routing is automatically enabled by default when the `edge` feature is set
+/// `RocksDB` routing is automatically enabled by default when the `edge` feature is set
 /// (see `default_rocksdb_flag()` in `reth-node-core`), so no explicit configuration is needed.
 fn without_static_file_changesets<C>(mut config: NodeConfig<C>) -> NodeConfig<C> {
     config.static_files.storage_changesets = false;
