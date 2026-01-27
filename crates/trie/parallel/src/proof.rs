@@ -207,6 +207,7 @@ impl ParallelProof {
                 0,
                 HashedPostState::default(),
                 account_multiproof_start_time,
+                None,
             ),
         };
 

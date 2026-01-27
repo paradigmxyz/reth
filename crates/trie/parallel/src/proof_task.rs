@@ -359,6 +359,7 @@ impl ProofWorkerHandle {
                         sequence_number: seq,
                         state,
                         start_time: start,
+                        tx_index,
                     } = input.into_proof_result_sender();
 
                     let _ = result_tx.send(ProofResultMessage {
@@ -366,6 +367,7 @@ impl ProofWorkerHandle {
                         result: Err(ParallelStateRootError::Provider(error.clone())),
                         elapsed: start.elapsed(),
                         state,
+                        tx_index,
                     });
                 }
 
@@ -694,6 +696,8 @@ pub struct ProofResultMessage {
     pub elapsed: Duration,
     /// Original state update that triggered this proof
     pub state: HashedPostState,
+    /// The transaction index that triggered this state update (if from transaction execution).
+    pub tx_index: Option<usize>,
 }
 
 /// Context for sending proof calculation results back to `MultiProofTask`.
@@ -710,6 +714,8 @@ pub struct ProofResultContext {
     pub state: HashedPostState,
     /// Calculation start time for measuring elapsed duration
     pub start_time: Instant,
+    /// The transaction index that triggered this state update (if from transaction execution).
+    pub tx_index: Option<usize>,
 }
 
 impl ProofResultContext {
@@ -719,8 +725,9 @@ impl ProofResultContext {
         sequence_number: u64,
         state: HashedPostState,
         start_time: Instant,
+        tx_index: Option<usize>,
     ) -> Self {
-        Self { sender, sequence_number, state, start_time }
+        Self { sender, sequence_number, state, start_time, tx_index }
     }
 }
 
@@ -1455,6 +1462,7 @@ where
             sequence_number: seq,
             state,
             start_time: start,
+            tx_index,
         } = proof_result_sender;
 
         let proof_elapsed = proof_start.elapsed();
@@ -1468,6 +1476,7 @@ where
                 result,
                 elapsed: total_elapsed,
                 state,
+                tx_index,
             })
             .is_err()
         {

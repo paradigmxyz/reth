@@ -46,6 +46,16 @@ impl std::fmt::Debug for Source {
     }
 }
 
+impl Source {
+    /// Returns the transaction index if this source is from a transaction.
+    pub const fn tx_index(&self) -> Option<usize> {
+        match self {
+            Self::Evm(StateChangeSource::Transaction(idx)) => Some(*idx),
+            _ => None,
+        }
+    }
+}
+
 impl From<StateChangeSource> for Source {
     fn from(source: StateChangeSource) -> Self {
         Self::Evm(source)
@@ -73,6 +83,8 @@ pub struct SparseTrieUpdate {
     pub(crate) state: HashedPostState,
     /// The calculated multiproof
     pub(crate) multiproof: ProofResult,
+    /// The highest transaction index included in this update (if from transaction execution).
+    pub(crate) highest_tx_index: Option<usize>,
 }
 
 impl SparseTrieUpdate {
@@ -88,6 +100,7 @@ impl SparseTrieUpdate {
         Ok(Self {
             state: HashedPostState::default(),
             multiproof: ProofResult::Legacy(multiproof.try_into()?, stats),
+            highest_tx_index: None,
         })
     }
 
@@ -95,6 +108,11 @@ impl SparseTrieUpdate {
     pub(super) fn extend(&mut self, other: Self) {
         self.state.extend(other.state);
         self.multiproof.extend(other.multiproof);
+        self.highest_tx_index = match (self.highest_tx_index, other.highest_tx_index) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (Some(a), None) | (None, Some(a)) => Some(a),
+            (None, None) => None,
+        };
     }
 }
 
@@ -114,6 +132,8 @@ pub(super) enum MultiProofMessage {
         sequence_number: u64,
         /// The state update that was used to calculate the proof
         state: HashedPostState,
+        /// The transaction index that triggered this state update (if from transaction execution).
+        tx_index: Option<usize>,
     },
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
     ///
@@ -388,9 +408,11 @@ struct MultiproofInput {
 impl MultiproofInput {
     /// Destroys the input and sends a [`MultiProofMessage::EmptyProof`] message to the sender.
     fn send_empty_proof(self) {
+        let tx_index = self.source.and_then(|s| s.tx_index());
         let _ = self.state_root_message_sender.send(MultiProofMessage::EmptyProof {
             sequence_number: self.proof_sequence_number,
             state: self.hashed_state_update,
+            tx_index,
         });
     }
 }
@@ -483,6 +505,7 @@ impl MultiproofManager {
         );
 
         let start = Instant::now();
+        let tx_index = source.and_then(|s| s.tx_index());
 
         // Workers will send ProofResultMessage directly to proof_result_rx
         let proof_result_sender = ProofResultContext::new(
@@ -490,6 +513,7 @@ impl MultiproofManager {
             proof_sequence_number,
             hashed_state_update,
             start,
+            tx_index,
         );
 
         let input = match proof_targets {
@@ -885,6 +909,7 @@ impl MultiProofTask {
             let _ = self.tx.send(MultiProofMessage::EmptyProof {
                 sequence_number: self.proof_sequencer.next_sequence(),
                 state: fetched_state_update,
+                tx_index: source.tx_index(),
             });
             state_updates += 1;
         }
@@ -1035,7 +1060,7 @@ impl MultiProofTask {
                             accumulated_count += next_count;
                             ctx.accumulated_prefetch_targets.push(next_targets);
                         }
-                        Ok(MultiProofMessage::EmptyProof { sequence_number, state }) => {
+                        Ok(MultiProofMessage::EmptyProof { sequence_number, state, tx_index }) => {
                             // Handle inline - very fast, don't break batching
                             batch_metrics.proofs_processed += 1;
                             if let Some(combined_update) = self.on_proof(
@@ -1043,6 +1068,7 @@ impl MultiProofTask {
                                 SparseTrieUpdate {
                                     state,
                                     multiproof: ProofResult::empty(self.v2_proofs_enabled),
+                                    highest_tx_index: tx_index,
                                 },
                             ) {
                                 let _ = self.to_sparse_trie.send(combined_update);
@@ -1167,7 +1193,7 @@ impl MultiProofTask {
                 false
             }
             // Handle proof result with no trie nodes (state unchanged)
-            MultiProofMessage::EmptyProof { sequence_number, state } => {
+            MultiProofMessage::EmptyProof { sequence_number, state, tx_index } => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::EmptyProof");
 
                 batch_metrics.proofs_processed += 1;
@@ -1177,6 +1203,7 @@ impl MultiProofTask {
                     SparseTrieUpdate {
                         state,
                         multiproof: ProofResult::empty(self.v2_proofs_enabled),
+                        highest_tx_index: tx_index,
                     },
                 ) {
                     let _ = self.to_sparse_trie.send(combined_update);
@@ -1281,6 +1308,7 @@ impl MultiProofTask {
                                     let update = SparseTrieUpdate {
                                         state: proof_result.state,
                                         multiproof: proof_result_data,
+                                        highest_tx_index: proof_result.tx_index,
                                     };
 
                                     if let Some(combined_update) =

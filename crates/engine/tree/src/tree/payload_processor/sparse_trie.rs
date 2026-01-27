@@ -140,10 +140,10 @@ pub struct StateRootComputeOutcome {
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
-#[instrument(level = "debug", target = "engine::tree::payload_processor::sparse_trie", skip_all)]
+#[instrument(level = "debug", target = "engine::tree::payload_processor::sparse_trie", skip_all, fields(?highest_tx_index))]
 pub(crate) fn update_sparse_trie<BPF, A, S>(
     trie: &mut SparseStateTrie<A, S>,
-    SparseTrieUpdate { mut state, multiproof }: SparseTrieUpdate,
+    SparseTrieUpdate { mut state, multiproof, highest_tx_index }: SparseTrieUpdate,
     blinded_provider_factory: &BPF,
 ) -> SparseStateTrieResult<Duration>
 where
