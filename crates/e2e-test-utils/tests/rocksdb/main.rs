@@ -96,7 +96,7 @@ fn test_attributes_generator(timestamp: u64) -> EthPayloadBuilderAttributes {
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
 
-/// Verifies that RocksDB CLI defaults match `StorageSettings::base()`.
+/// Verifies that `RocksDB` CLI defaults match `StorageSettings::base()`.
 #[test]
 fn test_rocksdb_defaults_match_storage_settings() {
     use reth_provider::StorageSettings;
