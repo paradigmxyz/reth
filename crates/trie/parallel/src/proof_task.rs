@@ -124,8 +124,6 @@ pub struct ProofWorkerHandle {
     account_worker_count: usize,
     /// Whether V2 storage proofs are enabled
     v2_proofs_enabled: bool,
-    /// Optional storage filter for skipping storage proofs of accounts without storage
-    storage_filter: Option<Arc<RwLock<StorageAccountFilter>>>,
 }
 
 impl ProofWorkerHandle {
@@ -269,7 +267,6 @@ impl ProofWorkerHandle {
             storage_worker_count,
             account_worker_count,
             v2_proofs_enabled,
-            storage_filter,
         }
     }
 

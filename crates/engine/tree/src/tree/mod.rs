@@ -37,7 +37,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_trie_db::{ChangesetCache, StorageFilterBuilder};
+use reth_trie_db::{ChangesetCache, StorageFilterFactoryBuilder};
 use revm::state::EvmState;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Instant};
@@ -411,9 +411,11 @@ where
             kind,
         );
 
-        // Build the storage filter from the database
-        let db_provider = provider.database_provider_ro().expect("failed to get db provider");
-        let filter = db_provider.build_storage_filter().expect("failed to build storage filter");
+        // Build the storage filter from the database in parallel
+        let num_threads = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1);
+        let filter = provider
+            .build_storage_filter_parallel(num_threads)
+            .expect("failed to build storage filter");
         let storage_filter = std::sync::Arc::new(parking_lot::RwLock::new(filter));
 
         // Set the storage filter on the payload validator for use in proof calculation
