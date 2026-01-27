@@ -96,6 +96,9 @@ impl MultiProofTargets {
     }
 }
 
+/// Maximum number of account targets per chunk.
+const MAX_ACCOUNT_TARGETS_PER_CHUNK: usize = 5;
+
 /// An iterator that yields chunks of the proof targets of at most `size` account and storage
 /// targets.
 ///
@@ -116,6 +119,9 @@ impl MultiProofTargets {
 /// It follows two rules:
 /// - If account has associated storage slots, each storage slot is counted towards the chunk size.
 /// - If account has no associated storage slots, the account is counted towards the chunk size.
+///
+/// Additionally, each chunk is limited to at most [`MAX_ACCOUNT_TARGETS_PER_CHUNK`] account
+/// targets.
 #[derive(Debug)]
 pub struct ChunkedMultiProofTargets {
     flattened_targets: alloc::vec::IntoIter<(B256, Option<B256>)>,
@@ -147,16 +153,34 @@ impl Iterator for ChunkedMultiProofTargets {
     type Item = MultiProofTargets;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let chunk = self.flattened_targets.by_ref().take(self.size).fold(
-            MultiProofTargets::default(),
-            |mut acc, (address, slot)| {
-                let entry = acc.entry(address).or_default();
-                if let Some(slot) = slot {
-                    entry.insert(slot);
-                }
-                acc
-            },
-        );
+        let mut chunk = MultiProofTargets::default();
+        let mut count = 0;
+        let mut last_address: Option<B256> = None;
+
+        for (address, slot) in self.flattened_targets.by_ref() {
+            let is_new_account = last_address != Some(address);
+
+            // Check if adding a new account would exceed the account limit
+            if is_new_account && chunk.len() >= MAX_ACCOUNT_TARGETS_PER_CHUNK {
+                // Put this item back by reconstructing remaining items
+                let remaining = core::iter::once((address, slot))
+                    .chain(self.flattened_targets.by_ref())
+                    .collect::<Vec<_>>();
+                self.flattened_targets = remaining.into_iter();
+                break;
+            }
+
+            let entry = chunk.entry(address).or_default();
+            if let Some(slot) = slot {
+                entry.insert(slot);
+            }
+            last_address = Some(address);
+
+            count += 1;
+            if count >= self.size {
+                break;
+            }
+        }
 
         if chunk.is_empty() {
             None

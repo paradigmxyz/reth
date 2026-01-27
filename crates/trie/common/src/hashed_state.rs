@@ -819,6 +819,9 @@ impl From<HashedPostStateSorted> for HashedPostState {
 /// An iterator that yields chunks of the state updates of at most `size` account and storage
 /// targets.
 ///
+/// Additionally, each chunk is limited to at most [`MAX_ACCOUNT_TARGETS_PER_CHUNK`] account
+/// targets.
+///
 /// # Notes
 /// 1. Chunks are expected to be applied in order, because of storage wipes. If applied out of
 ///    order, it's possible to wipe more storage than in the original state update.
@@ -828,6 +831,9 @@ pub struct ChunkedHashedPostState {
     flattened: alloc::vec::IntoIter<(B256, FlattenedHashedPostStateItem)>,
     size: usize,
 }
+
+/// Maximum number of account targets per chunk.
+const MAX_ACCOUNT_TARGETS_PER_CHUNK: usize = 5;
 
 /// Order discriminant for sorting flattened state items.
 /// Ordering: `StorageWipe` < `StorageUpdate` (by slot) < `Account`
@@ -887,10 +893,23 @@ impl Iterator for ChunkedHashedPostState {
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut chunk = HashedPostState::default();
+        let mut last_address: Option<B256> = None;
 
         let mut current_size = 0;
         while current_size < self.size {
             let Some((address, item)) = self.flattened.next() else { break };
+
+            let is_new_account = last_address != Some(address);
+
+            // Check if adding a new account would exceed the account limit
+            if is_new_account && chunk.accounts.len() + chunk.storages.len() >= MAX_ACCOUNT_TARGETS_PER_CHUNK {
+                // Put this item back by reconstructing remaining items
+                let remaining = core::iter::once((address, item))
+                    .chain(self.flattened.by_ref())
+                    .collect::<Vec<_>>();
+                self.flattened = remaining.into_iter();
+                break;
+            }
 
             match item {
                 FlattenedHashedPostStateItem::Account(account) => {
@@ -904,6 +923,7 @@ impl Iterator for ChunkedHashedPostState {
                 }
             }
 
+            last_address = Some(address);
             current_size += 1;
         }
 
