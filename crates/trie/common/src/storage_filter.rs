@@ -17,7 +17,7 @@ use cuckoofilter::{CuckooError, CuckooFilter};
 /// False negatives are impossible - if an account has storage, the filter will
 /// always report it as potentially having storage.
 pub struct StorageAccountFilter {
-    filter: CuckooFilter<FbHasher<20>>,
+    filter: CuckooFilter<FbHasher<32>>,
 }
 
 impl fmt::Debug for StorageAccountFilter {
