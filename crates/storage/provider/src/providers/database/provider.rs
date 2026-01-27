@@ -3319,6 +3319,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         Ok(())
     }
 
+    /// Appends blocks with their execution state to the database.
+    ///
+    /// **Note:** This function is only used in tests.
+    ///
+    /// History indices are written to the appropriate backend based on storage settings:
+    /// MDBX when `*_history_in_rocksdb` is false, `RocksDB` when true.
+    ///
     /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually
     fn append_blocks_with_state(
         &self,
@@ -3376,8 +3383,31 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
 
         // Use pre-computed transitions for history indices since static file
         // writes aren't visible until commit.
-        self.insert_account_history_index(account_transitions)?;
-        self.insert_storage_history_index(storage_transitions)?;
+        // Note: For MDBX we use insert_*_history_index. For RocksDB we use
+        // append_*_history_shard which handles read-merge-write internally.
+        let storage_settings = self.cached_storage_settings();
+        if storage_settings.account_history_in_rocksdb {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            self.with_rocksdb_batch(|mut batch| {
+                for (address, blocks) in account_transitions {
+                    batch.append_account_history_shard(address, blocks)?;
+                }
+                Ok(((), Some(batch.into_inner())))
+            })?;
+        } else {
+            self.insert_account_history_index(account_transitions)?;
+        }
+        if storage_settings.storages_history_in_rocksdb {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            self.with_rocksdb_batch(|mut batch| {
+                for ((address, key), blocks) in storage_transitions {
+                    batch.append_storage_history_shard(address, key, blocks)?;
+                }
+                Ok(((), Some(batch.into_inner())))
+            })?;
+        } else {
+            self.insert_storage_history_index(storage_transitions)?;
+        }
         durations_recorder.record_relative(metrics::Action::InsertHistoryIndices);
 
         // Update pipeline progress

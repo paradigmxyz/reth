@@ -175,7 +175,7 @@ RocksDB:
       --rocksdb.storages-history <STORAGES_HISTORY>
           Route storages history tables to `RocksDB` instead of MDBX.
 
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
 
           [default: false]
           [possible values: true, false]
@@ -183,7 +183,7 @@ RocksDB:
       --rocksdb.account-history <ACCOUNT_HISTORY>
           Route account history tables to `RocksDB` instead of MDBX.
 
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
 
           [default: false]
           [possible values: true, false]
