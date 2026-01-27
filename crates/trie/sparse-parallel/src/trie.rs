@@ -1032,9 +1032,9 @@ impl SparseTrieExt for ParallelSparseTrie {
         }
 
         // Sort for binary search (roots are prefix-free by node-depth).
-        roots_upper.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        roots_upper.sort_unstable_by_key(|(a, _)| *a);
         for bucket in &mut roots_by_lower {
-            bucket.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+            bucket.sort_unstable_by_key(|(a, _)| *a);
         }
 
         debug_assert!(
