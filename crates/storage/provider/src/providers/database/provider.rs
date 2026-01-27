@@ -3383,50 +3383,27 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
 
         // Use pre-computed transitions for history indices since static file
         // writes aren't visible until commit.
-        // Note: For MDBX we must use insert_*_history_index which properly merges with
-        // existing shards. For RocksDB we read-merge-write to preserve existing history.
+        // Note: For MDBX we use insert_*_history_index. For RocksDB we use
+        // append_*_history_shard which handles read-merge-write internally.
         let storage_settings = self.cached_storage_settings();
         if storage_settings.account_history_in_rocksdb {
-            self.with_rocksdb_batch(|batch| {
-                let mut writer = EitherWriter::new_accounts_history(self, batch)?;
+            #[cfg(all(unix, feature = "rocksdb"))]
+            self.with_rocksdb_batch(|mut batch| {
                 for (address, blocks) in account_transitions {
-                    // Read existing history and merge with new blocks
-                    let mut merged: Vec<u64> =
-                        if let Some(existing) = writer.get_last_account_history_shard(address)? {
-                            existing.iter().collect()
-                        } else {
-                            Vec::new()
-                        };
-                    merged.extend(blocks);
-                    merged.sort_unstable();
-                    merged.dedup();
-                    let list = BlockNumberList::new(merged).map_err(ProviderError::other)?;
-                    writer.upsert_account_history(ShardedKey::last(address), &list)?;
+                    batch.append_account_history_shard(address, blocks)?;
                 }
-                Ok(((), writer.into_raw_rocksdb_batch()))
+                Ok(((), Some(batch.into_inner())))
             })?;
         } else {
             self.insert_account_history_index(account_transitions)?;
         }
         if storage_settings.storages_history_in_rocksdb {
-            self.with_rocksdb_batch(|batch| {
-                let mut writer = EitherWriter::new_storages_history(self, batch)?;
+            #[cfg(all(unix, feature = "rocksdb"))]
+            self.with_rocksdb_batch(|mut batch| {
                 for ((address, key), blocks) in storage_transitions {
-                    // Read existing history and merge with new blocks
-                    let mut merged: Vec<u64> = if let Some(existing) =
-                        writer.get_last_storage_history_shard(address, key)?
-                    {
-                        existing.iter().collect()
-                    } else {
-                        Vec::new()
-                    };
-                    merged.extend(blocks);
-                    merged.sort_unstable();
-                    merged.dedup();
-                    let list = BlockNumberList::new(merged).map_err(ProviderError::other)?;
-                    writer.upsert_storage_history(StorageShardedKey::last(address, key), &list)?;
+                    batch.append_storage_history_shard(address, key, blocks)?;
                 }
-                Ok(((), writer.into_raw_rocksdb_batch()))
+                Ok(((), Some(batch.into_inner())))
             })?;
         } else {
             self.insert_storage_history_index(storage_transitions)?;
