@@ -1508,7 +1508,7 @@ fn dispatch_storage_proofs(
     multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
     storage_filter: Option<&Arc<RwLock<StorageAccountFilter>>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
-    use reth_trie_common::EMPTY_ROOT_HASH;
+
 
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(targets.len(), Default::default());
@@ -1521,32 +1521,10 @@ fn dispatch_storage_proofs(
         // Create channel for receiving ProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
-        // Check if this account is known to have no storage AND has no slots to prove.
-        // We can only skip if both conditions are met - if there are slots to prove,
-        // we must compute the proof regardless of the filter.
-        let skip_storage_proof = target_slots.is_empty()
-            && storage_filter
-                .as_ref()
-                .is_some_and(|filter| !filter.read().may_have_storage(*hashed_address));
-
-        if skip_storage_proof {
-            // Account has no slots to prove AND is not in the filter, so it has no storage.
-            // Send an empty storage proof result directly.
-            trace!(
-                target: "trie::proof_task",
-                ?hashed_address,
-                "Skipping storage proof for account with no slots and not in filter"
-            );
-            let empty_proof = DecodedStorageMultiProof {
-                root: EMPTY_ROOT_HASH,
-                subtree: Default::default(),
-                branch_node_masks: Default::default(),
-            };
-            let _ = result_tx.send(StorageProofResultMessage {
-                hashed_address: *hashed_address,
-                result: Ok(StorageProofResult::Legacy { proof: empty_proof }),
-            });
-        } else {
+        // TODO: Storage filter optimization disabled pending fix for Sparse(Blind) errors.
+        // The filter was incorrectly skipping proofs that the sparse trie still needs.
+        let _ = storage_filter; // suppress unused warning
+        {
             // Create computation input and dispatch to worker
             let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
             let input = StorageProofInput::legacy(
