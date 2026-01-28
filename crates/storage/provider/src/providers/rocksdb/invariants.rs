@@ -787,19 +787,23 @@ mod tests {
             // Delete TransactionBlocks entries for tx > 5 (i.e., for blocks 3-5)
             // TransactionBlocks maps last_tx_in_block -> block_number
             // After unwind, only entries for blocks 0-2 should remain (tx 5 -> block 2)
-            let mut cursor = provider.tx_ref().cursor_write::<tables::TransactionBlocks>().unwrap();
-            // Walk and delete entries where block > 2
-            let mut to_delete = Vec::new();
-            let mut walker = cursor.walk(Some(0)).unwrap();
-            while let Some((tx_num, block_num)) = walker.next().transpose().unwrap() {
-                if block_num > 2 {
-                    to_delete.push(tx_num);
+            {
+                let mut cursor =
+                    provider.tx_ref().cursor_write::<tables::TransactionBlocks>().unwrap();
+                // Walk and delete entries where block > 2
+                let mut to_delete = Vec::new();
+                {
+                    let mut walker = cursor.walk(Some(0)).unwrap();
+                    while let Some((tx_num, block_num)) = walker.next().transpose().unwrap() {
+                        if block_num > 2 {
+                            to_delete.push(tx_num);
+                        }
+                    }
                 }
-            }
-            drop(walker);
-            for tx_num in to_delete {
-                cursor.seek_exact(tx_num).unwrap();
-                cursor.delete_current().unwrap();
+                for tx_num in to_delete {
+                    cursor.seek_exact(tx_num).unwrap();
+                    cursor.delete_current().unwrap();
+                }
             }
 
             // Set checkpoint to block 2

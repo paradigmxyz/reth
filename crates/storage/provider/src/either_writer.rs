@@ -1398,14 +1398,14 @@ mod rocksdb_tests {
     }
 
     // Type aliases for cursor types (needed for EitherWriter/EitherReader type inference)
-    type AccountsHistoryWriteCursor =
-        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RW, tables::AccountsHistory>;
-    type StoragesHistoryWriteCursor =
-        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RW, tables::StoragesHistory>;
-    type AccountsHistoryReadCursor =
-        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RO, tables::AccountsHistory>;
-    type StoragesHistoryReadCursor =
-        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RO, tables::StoragesHistory>;
+    type AccountsHistoryWriteCursor<'a> =
+        reth_db::mdbx::cursor::Cursor<'a, reth_db::mdbx::RW, tables::AccountsHistory>;
+    type StoragesHistoryWriteCursor<'a> =
+        reth_db::mdbx::cursor::Cursor<'a, reth_db::mdbx::RW, tables::StoragesHistory>;
+    type AccountsHistoryReadCursor<'a> =
+        reth_db::mdbx::cursor::Cursor<'a, reth_db::mdbx::RO, tables::AccountsHistory>;
+    type StoragesHistoryReadCursor<'a> =
+        reth_db::mdbx::cursor::Cursor<'a, reth_db::mdbx::RO, tables::StoragesHistory>;
 
     /// Runs the same account history queries against both MDBX and `RocksDB` backends,
     /// asserting they produce identical results.
@@ -1421,11 +1421,11 @@ mod rocksdb_tests {
         let (temp_dir, rocks_provider) = create_rocksdb_provider();
 
         // Create writers for both backends
-        let mut mdbx_writer: EitherWriter<'_, AccountsHistoryWriteCursor, EthPrimitives> =
+        let mut mdbx_writer: EitherWriter<'_, AccountsHistoryWriteCursor<'_>, EthPrimitives> =
             EitherWriter::Database(
                 mdbx_provider.tx_ref().cursor_write::<tables::AccountsHistory>().unwrap(),
             );
-        let mut rocks_writer: EitherWriter<'_, AccountsHistoryWriteCursor, EthPrimitives> =
+        let mut rocks_writer: EitherWriter<'_, AccountsHistoryWriteCursor<'_>, EthPrimitives> =
             EitherWriter::RocksDB(rocks_provider.batch());
 
         // Write identical data to both backends in a single loop
@@ -1449,7 +1449,7 @@ mod rocksdb_tests {
 
         for (i, query) in queries.iter().enumerate() {
             // MDBX query via EitherReader
-            let mut mdbx_reader: EitherReader<'_, AccountsHistoryReadCursor, EthPrimitives> =
+            let mut mdbx_reader: EitherReader<'_, AccountsHistoryReadCursor<'_>, EthPrimitives> =
                 EitherReader::Database(
                     mdbx_ro.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap(),
                     PhantomData,
@@ -1459,7 +1459,7 @@ mod rocksdb_tests {
                 .unwrap();
 
             // RocksDB query via EitherReader
-            let mut rocks_reader: EitherReader<'_, AccountsHistoryReadCursor, EthPrimitives> =
+            let mut rocks_reader: EitherReader<'_, AccountsHistoryReadCursor<'_>, EthPrimitives> =
                 EitherReader::RocksDB(&rocks_tx);
             let rocks_result = rocks_reader
                 .account_history_info(address, query.block_number, query.lowest_available)
@@ -1513,11 +1513,11 @@ mod rocksdb_tests {
         let (temp_dir, rocks_provider) = create_rocksdb_provider();
 
         // Create writers for both backends
-        let mut mdbx_writer: EitherWriter<'_, StoragesHistoryWriteCursor, EthPrimitives> =
+        let mut mdbx_writer: EitherWriter<'_, StoragesHistoryWriteCursor<'_>, EthPrimitives> =
             EitherWriter::Database(
                 mdbx_provider.tx_ref().cursor_write::<tables::StoragesHistory>().unwrap(),
             );
-        let mut rocks_writer: EitherWriter<'_, StoragesHistoryWriteCursor, EthPrimitives> =
+        let mut rocks_writer: EitherWriter<'_, StoragesHistoryWriteCursor<'_>, EthPrimitives> =
             EitherWriter::RocksDB(rocks_provider.batch());
 
         // Write identical data to both backends in a single loop
@@ -1541,7 +1541,7 @@ mod rocksdb_tests {
 
         for (i, query) in queries.iter().enumerate() {
             // MDBX query via EitherReader
-            let mut mdbx_reader: EitherReader<'_, StoragesHistoryReadCursor, EthPrimitives> =
+            let mut mdbx_reader: EitherReader<'_, StoragesHistoryReadCursor<'_>, EthPrimitives> =
                 EitherReader::Database(
                     mdbx_ro.tx_ref().cursor_read::<tables::StoragesHistory>().unwrap(),
                     PhantomData,
@@ -1556,7 +1556,7 @@ mod rocksdb_tests {
                 .unwrap();
 
             // RocksDB query via EitherReader
-            let mut rocks_reader: EitherReader<'_, StoragesHistoryReadCursor, EthPrimitives> =
+            let mut rocks_reader: EitherReader<'_, StoragesHistoryReadCursor<'_>, EthPrimitives> =
                 EitherReader::RocksDB(&rocks_tx);
             let rocks_result = rocks_reader
                 .storage_history_info(
