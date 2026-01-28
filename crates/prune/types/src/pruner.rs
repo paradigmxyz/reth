@@ -19,18 +19,20 @@ impl From<PruneProgress> for PrunerOutput {
 }
 
 impl PrunerOutput {
-    /// Returns a human-readable log message summarizing the pruner run.
+    /// Logs a human-readable summary of the pruner run at DEBUG level.
     ///
     /// Format: `"Pruner finished tip=24328929 deleted=10886 in 148ms
     /// segments=AccountHistory[24318865, done] ..."`
     #[inline]
-    pub fn to_log_message(
+    pub fn debug_log(
         &self,
         tip_block_number: BlockNumber,
         deleted_entries: usize,
-        elapsed_ms: u64,
-    ) -> alloc::string::String {
+        elapsed: core::time::Duration,
+    ) {
         use alloc::string::ToString;
+
+        let elapsed_ms = elapsed.as_millis() as u64;
 
         let status = match self.progress {
             PruneProgress::HasMoreData(_) => "Pruner interrupted, has more data",
@@ -52,10 +54,11 @@ impl PrunerOutput {
             })
             .collect();
 
-        alloc::format!(
+        tracing::debug!(
+            target: "pruner",
             "{status} tip={tip_block_number} deleted={deleted_entries} in {elapsed_ms}ms segments={}",
             segments.join(" ")
-        )
+        );
     }
 }
 

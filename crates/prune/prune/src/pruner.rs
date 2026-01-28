@@ -149,11 +149,7 @@ where
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        debug!(
-            target: "pruner",
-            "{}",
-            output.to_log_message(tip_block_number, deleted_entries, elapsed.as_millis() as u64),
-        );
+        output.debug_log(tip_block_number, deleted_entries, elapsed);
 
         self.event_sender.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
 
