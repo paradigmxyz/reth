@@ -154,13 +154,19 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     account_updates: B256Map<LeafUpdate>,
     /// Storage trie updates. hashed address -> slot -> update.
     storage_updates: B256Map<B256Map<LeafUpdate>>,
-    /// Pending account updates awaiting storage root calculation to complete.
+    /// Account updates that are blocked by storage root calculation or account reveal.
     ///
     /// Those are being moved into `account_updates` once storage roots
     /// are revealed and/or calculated.
     ///
     /// Invariant: for each entry in `pending_account_updates` there is a corresponding
     /// [`LeafUpdate::Touched`] entry in `account_updates`.
+    ///
+    /// Values can be either of:
+    ///   - None: account had a storage update and is awaiting storage root calculation and/or
+    ///     account node reveal to complete.
+    ///   - Some(_): account was changed/destroyed and is awaiting storage root calculation/reveal
+    ///     to complete.
     pending_account_updates: B256Map<Option<Option<Account>>>,
 }
 
@@ -312,48 +318,25 @@ where
                     .insert(slot, LeafUpdate::Changed(encoded));
             }
 
-            match self.account_updates.entry(address) {
-                Entry::Vacant(vacant) => {
-                    // Record account as touched to make sure its revealed in accounts trie for
-                    // storage root calculation.
-                    vacant.insert(LeafUpdate::Touched);
+            // Make sure account is tracked in `account_updates` so that it is revealed in accounts
+            // trie for storage root update.
+            self.account_updates.entry(address).or_insert(LeafUpdate::Touched);
 
-                    // Record account in `pending_account_updates` as awaiting the storage root
-                    // calculation.
-                    self.pending_account_updates.insert(address, None);
-                }
-                Entry::Occupied(_) => {
-                    // already touched or changed, no need to override
-                }
-            }
+            // Make sure account is tracked in `pending_account_updates` so that once storage root
+            // is computed, it will be updated in the accounts trie.
+            self.pending_account_updates.entry(address).or_insert(None);
         }
 
         for (address, account) in hashed_state_update.accounts {
-            if self.pending_account_updates.contains_key(&address) {
-                // overwrite an existing pending account update, if any
-                self.pending_account_updates.insert(address, account);
-            } else if let Some(storage_root) = self.latest_storage_root_for(&address) {
-                // If we have latest storage root for the account, we can encode it into a leaf
-                // update right away.
-                let encoded = if account.is_none_or(|account| account.is_empty()) &&
-                    storage_root == EMPTY_ROOT_HASH
-                {
-                    Vec::new()
-                } else {
-                    // TODO: optimize allocation
-                    alloy_rlp::encode(&account.unwrap_or_default().into_trie_account(storage_root))
-                };
+            // Track account as touched.
+            //
+            // This might overwrite an existing update, which is fine, because storage root from it
+            // is already tracked in the trie and can be easily fetched again.
+            self.account_updates.insert(address, LeafUpdate::Touched);
 
-                self.account_updates.insert(address, LeafUpdate::Changed(encoded));
-            } else {
-                // If we don't have latest storage root for the account, account update is
-                // considered pending.
-                self.pending_account_updates.insert(address, Some(account));
-
-                // Still track account as touched to make sure its revealed in the accounts trie
-                // while storage root is being computed.
-                self.account_updates.insert(address, LeafUpdate::Touched);
-            }
+            // Track account in `pending_account_updates` so that once storage root is computed,
+            // it will be updated in the accounts trie.
+            self.pending_account_updates.insert(address, account);
         }
     }
 
@@ -370,56 +353,10 @@ where
         })
     }
 
-    /// Returns whether account's storage root is pending, meaning that account update can't be
-    /// encoded yet.
-    fn is_storage_root_pending_for(&self, address: &B256) -> bool {
-        if let Some(storage_updates) = self.storage_updates.get(address) {
-            // If we have pending updates for this address, storage root is still not known
-            !storage_updates.is_empty()
-        } else {
-            // If we didn't have any updates for account yet, we should wait for its node to be
-            // revealed in the accounts trie.
-            !self.trie.is_account_revealed(*address)
-        }
-    }
-
-    /// Returns latest known storage root for the given address.
-    ///
-    /// This will return [`None`] in cases when
-    ///   - Account has pending storage updates in `storage_updates`
-    ///   - Account did not have any storage updates and was not revealed in the accounts trie yet.
-    fn latest_storage_root_for(&mut self, address: &B256) -> Option<B256> {
-        if let Some(updates) = self.storage_updates.get(address) {
-            if !updates.is_empty() {
-                None
-            } else {
-                self.trie
-                    .storage_root(*address)
-                    .expect("storage root should be revealed after processing all updates")
-                    .into()
-            }
-        } else {
-            if self.trie.is_account_revealed(*address) {
-                self.trie
-                    .get_account_value(address)
-                    .map(|value| {
-                        TrieAccount::decode(&mut &value[..])
-                            .expect("invalid account RLP")
-                            .storage_root
-                    })
-                    .unwrap_or(EMPTY_ROOT_HASH)
-                    .into()
-            } else {
-                None
-            }
-        }
-    }
-
     /// Applies updates to the sparse trie and dispathes requested multiproof targets.
     fn process_updates(&mut self) {
         let mut proof_targets = MultiProofTargetsV2::default();
 
-        // Call `update_leaves` for each storage trie and fill the storage targets.
         for (addr, updates) in &mut self.storage_updates {
             let trie = self.trie.get_or_create_storage_trie_mut(*addr);
 
@@ -427,12 +364,13 @@ where
             //     proof_targets.storage.entry(addr).or_default().push(target);
             // });
 
-            // If all storage updates were processed, we can now update account trie with the
-            // new root.
+            // If all storage updates were processed, we can now compute the new storage root.
             if updates.is_empty() {
                 let storage_root =
-                    trie.root().expect("updates are drained, trie should be revealedby now");
+                    trie.root().expect("updates are drained, trie should be revealed by now");
 
+                // If there is a pending account update for this address with known info, we can
+                // encode it into proper update right away.
                 if let Entry::Occupied(entry) = self.pending_account_updates.entry(*addr) &&
                     entry.get().is_some()
                 {
@@ -452,28 +390,30 @@ where
             }
         }
 
-        // Now handle pending account updates that had their storage roots revealed in the accounts
-        // trie.
+        // Now handle pending account updates that can be upgraded to a proper update.
         self.pending_account_updates.retain(|addr, account| {
             // If account has pending storage updates, it is still pending.
             if self.storage_updates.get(addr).is_some_and(|updates| !updates.is_empty()) {
                 return true;
             }
 
-            // If account was not yet revealed in the accounts trie we can't do anything yet.
-            if !self.trie.is_account_revealed(*addr) {
+            // Get the current account state either from the trie or from latest account update.
+            let trie_account = if let Some(LeafUpdate::Changed(encoded)) = self.account_updates.get(addr) {
+                Some(encoded).filter(|encoded| !encoded.is_empty())
+            } else if self.trie.is_account_revealed(*addr) {
+                self.trie.get_account_value(addr)
+            } else {
+                // Needs to be revealed first
                 return true;
-            }
+            };
 
-            let trie_account = self.trie.get_account_value(addr).map(|value| {
-                TrieAccount::decode(&mut &value[..]).expect("invalid account RLP")
-            });
+            let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
 
             let (account, storage_root) = if let Some(account) = account.take() {
                 // If account is Some(_) here it means it didn't have any storage updates 
                 // and we can fetch the storage root directly from the account trie.
                 //
-                // If it did have storage updates, we would've had processed it above.
+                // If it did have storage updates, we would've had processed it above when iterating over storage tries.
                 let storage_root = trie_account.map(|account| account.storage_root).unwrap_or(EMPTY_ROOT_HASH);
 
                 (account, storage_root)
