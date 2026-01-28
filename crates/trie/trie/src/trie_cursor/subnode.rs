@@ -60,8 +60,9 @@ impl CursorSubNode {
         let position = node.as_ref().filter(|n| n.root_hash.is_none()).map_or(
             SubNodePosition::ParentBranch,
             |n| {
+                let mut child_index_range = CHILD_INDEX_RANGE;
                 SubNodePosition::Child(
-                    CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)).unwrap(),
+                    child_index_range.find(|i| n.state_mask.is_bit_set(*i)).unwrap(),
                 )
             },
         );
