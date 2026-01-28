@@ -24,9 +24,9 @@ pub enum PruneSegment {
     Receipts,
     /// Prune segment responsible for some rows in `Receipts` table filtered by logs.
     ContractLogs,
-    /// Prune segment responsible for the `AccountChangeSets` and `AccountsHistory` tables.
+    /// Prunes account changesets (static files/MDBX) and `AccountsHistory`.
     AccountHistory,
-    /// Prune segment responsible for the `StorageChangeSets` and `StoragesHistory` tables.
+    /// Prunes storage changesets (static files/MDBX) and `StoragesHistory`.
     StorageHistory,
     #[deprecated = "Variant indexes cannot be changed"]
     #[strum(disabled)]

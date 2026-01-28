@@ -11,7 +11,7 @@ use reth_db_api::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
     },
-    table::{Compress, Decode, Decompress, DupSort, Encode, Table},
+    table::{Compress, Decode, Decompress, DupSort, Encode, IntoVec, Table},
 };
 use reth_libmdbx::{ffi, Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
@@ -256,27 +256,26 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<'_, K, T> {
     ) -> Result<DupWalker<'_, T, Self>, DatabaseError> {
         let start = match (key, subkey) {
             (Some(key), Some(subkey)) => {
-                // encode key and decode it after.
-                let key: Vec<u8> = key.encode().into();
+                let encoded_key = key.encode();
                 self.inner_mut()
-                    .get_both_range(key.as_ref(), subkey.encode().as_ref())
+                    .get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
                     .map_err(|e| DatabaseError::Read(e.into()))?
-                    .map(|val| decoder::<T>((Cow::Owned(key), val)))
+                    .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
             }
             (Some(key), None) => {
-                let key: Vec<u8> = key.encode().into();
+                let encoded_key = key.encode();
                 self.inner_mut()
-                    .set(key.as_ref())
+                    .set(encoded_key.as_ref())
                     .map_err(|e| DatabaseError::Read(e.into()))?
-                    .map(|val| decoder::<T>((Cow::Owned(key), val)))
+                    .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
             }
             (None, Some(subkey)) => {
                 if let Some((key, _)) = self.first()? {
-                    let key: Vec<u8> = key.encode().into();
+                    let encoded_key = key.encode();
                     self.inner_mut()
-                        .get_both_range(key.as_ref(), subkey.encode().as_ref())
+                        .get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
                         .map_err(|e| DatabaseError::Read(e.into()))?
-                        .map(|val| decoder::<T>((Cow::Owned(key), val)))
+                        .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
                 } else {
                     Some(Err(DatabaseError::Read(MDBXError::NotFound.into())))
                 }
@@ -303,19 +302,17 @@ impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
             Operation::CursorUpsert,
             Some(value.unwrap_or(&self.buf).len()),
             |this| {
-                // Get value bytes and copy to a temporary if from buf to avoid borrow conflict
                 let value_bytes: &[u8] = match value {
                     Some(v) => v,
                     None => &this.buf,
                 };
-                // Need to get the inner cursor pointer before the put call
                 let inner = this.inner.as_mut().expect("cursor already taken");
                 inner.put(key.as_ref(), value_bytes, WriteFlags::UPSERT).map_err(|e| {
                     DatabaseWriteError {
                         info: e.into(),
                         operation: DatabaseWriteOperation::CursorUpsert,
                         table_name: T::NAME,
-                        key: key.into(),
+                        key: key.into_vec(),
                     }
                     .into()
                 })
@@ -340,7 +337,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
                         info: e.into(),
                         operation: DatabaseWriteOperation::CursorInsert,
                         table_name: T::NAME,
-                        key: key.into(),
+                        key: key.into_vec(),
                     }
                     .into()
                 })
@@ -367,7 +364,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
                         info: e.into(),
                         operation: DatabaseWriteOperation::CursorAppend,
                         table_name: T::NAME,
-                        key: key.into(),
+                        key: key.into_vec(),
                     }
                     .into()
                 })
@@ -408,7 +405,7 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<'_, RW, T> {
                         info: e.into(),
                         operation: DatabaseWriteOperation::CursorAppendDup,
                         table_name: T::NAME,
-                        key: key.into(),
+                        key: key.into_vec(),
                     }
                     .into()
                 })

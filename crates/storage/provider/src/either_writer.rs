@@ -13,24 +13,24 @@ use crate::{
     providers::{history_info, HistoryInfo, StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
 };
-use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
-    models::AccountBeforeTx,
+    models::{AccountBeforeTx, StorageBeforeTx},
     static_file::TransactionSenderMask,
     table::Value,
     transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut, DupCursorMutTy, DupCursorTy},
 };
 use reth_db_api::{
     cursor::DbCursorRW,
-    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress, ShardedKey},
     tables,
     tables::BlockNumberList,
 };
 use reth_errors::ProviderError;
 use reth_node_types::NodePrimitives;
-use reth_primitives_traits::ReceiptTy;
+use reth_primitives_traits::{ReceiptTy, StorageEntry};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
@@ -86,14 +86,17 @@ pub type RawRocksDBBatch = ();
 
 /// Helper type for `RocksDB` transaction reference argument in reader constructors.
 ///
-/// When `rocksdb` feature is enabled, this is a reference to a `RocksDB` transaction.
-/// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
+/// When `rocksdb` feature is enabled, this is an optional reference to a `RocksDB` transaction.
+/// The `Option` allows callers to skip transaction creation when `RocksDB` isn't needed
+/// (e.g., on legacy MDBX-only nodes).
+/// When `rocksdb` feature is disabled, it's `()` (unit type) to allow the same API without
+/// feature gates.
 #[cfg(all(unix, feature = "rocksdb"))]
-pub type RocksTxRefArg<'a> = &'a crate::providers::rocksdb::RocksTx<'a>;
+pub type RocksTxRefArg<'a> = Option<&'a crate::providers::rocksdb::RocksTx<'a>>;
 /// Helper type for `RocksDB` transaction reference argument in reader constructors.
 ///
-/// When `rocksdb` feature is enabled, this is a reference to a `RocksDB` transaction.
-/// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
+/// When `rocksdb` feature is disabled, it's `()` (unit type) to allow the same API without
+/// feature gates.
 #[cfg(not(all(unix, feature = "rocksdb")))]
 pub type RocksTxRefArg<'a> = ();
 
@@ -174,6 +177,27 @@ impl<'a> EitherWriter<'a, (), ()> {
         }
     }
 
+    /// Creates a new [`EitherWriter`] for storage changesets based on storage settings.
+    pub fn new_storage_changesets<P>(
+        provider: &'a P,
+        block_number: BlockNumber,
+    ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::StorageChangeSets>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTxMut,
+    {
+        if provider.cached_storage_settings().storage_changesets_in_static_files {
+            Ok(EitherWriter::StaticFile(
+                provider
+                    .get_static_file_writer(block_number, StaticFileSegment::StorageChangeSets)?,
+            ))
+        } else {
+            Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_dup_write::<tables::StorageChangeSets>()?,
+            ))
+        }
+    }
+
     /// Returns the destination for writing receipts.
     ///
     /// The rules are as follows:
@@ -205,6 +229,19 @@ impl<'a> EitherWriter<'a, (), ()> {
         provider: &P,
     ) -> EitherWriterDestination {
         if provider.cached_storage_settings().account_changesets_in_static_files {
+            EitherWriterDestination::StaticFile
+        } else {
+            EitherWriterDestination::Database
+        }
+    }
+
+    /// Returns the destination for writing storage changesets.
+    ///
+    /// This determines the destination based solely on storage settings.
+    pub fn storage_changesets_destination<P: DBProvider + StorageSettingsCache>(
+        provider: &P,
+    ) -> EitherWriterDestination {
+        if provider.cached_storage_settings().storage_changesets_in_static_files {
             EitherWriterDestination::StaticFile
         } else {
             EitherWriterDestination::Database
@@ -515,14 +552,71 @@ where
             Self::RocksDB(batch) => batch.delete::<tables::StoragesHistory>(key),
         }
     }
+
+    /// Appends a storage history entry (for first sync - more efficient).
+    pub fn append_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.append(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
+        }
+    }
+
+    /// Upserts a storage history entry (for incremental sync).
+    pub fn upsert_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
+        }
+    }
+
+    /// Gets the last shard for an address and storage key (keyed with `u64::MAX`).
+    pub fn get_last_storage_history_shard(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        let key = StorageShardedKey::last(address, storage_key);
+        match self {
+            Self::Database(cursor) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.get::<tables::StoragesHistory>(key),
+        }
+    }
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
 where
     CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
 {
-    /// Puts an account history entry.
-    pub fn put_account_history(
+    /// Appends an account history entry (for first sync - more efficient).
+    pub fn append_account_history(
+        &mut self,
+        key: ShardedKey<Address>,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.append(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, value),
+        }
+    }
+
+    /// Upserts an account history entry (for incremental sync).
+    pub fn upsert_account_history(
         &mut self,
         key: ShardedKey<Address>,
         value: &BlockNumberList,
@@ -532,6 +626,21 @@ where
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, value),
+        }
+    }
+
+    /// Gets the last shard for an address (keyed with `u64::MAX`).
+    pub fn get_last_account_history_shard(
+        &mut self,
+        address: Address,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        match self {
+            Self::Database(cursor) => {
+                Ok(cursor.seek_exact(ShardedKey::last(address))?.map(|(_, v)| v))
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.get::<tables::AccountsHistory>(ShardedKey::last(address)),
         }
     }
 
@@ -573,6 +682,41 @@ where
             }
             Self::StaticFile(writer) => {
                 writer.append_account_changeset(changeset, block_number)?;
+            }
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbDupCursorRW<tables::StorageChangeSets>,
+{
+    /// Append storage changeset for a block.
+    ///
+    /// NOTE: This _sorts_ the changesets by address and storage key before appending.
+    pub fn append_storage_changeset(
+        &mut self,
+        block_number: BlockNumber,
+        mut changeset: Vec<StorageBeforeTx>,
+    ) -> ProviderResult<()> {
+        changeset.par_sort_by_key(|change| (change.address, change.key));
+
+        match self {
+            Self::Database(cursor) => {
+                for change in changeset {
+                    let storage_id = BlockNumberAddress((block_number, change.address));
+                    cursor.append_dup(
+                        storage_id,
+                        StorageEntry { key: change.key, value: change.value },
+                    )?;
+                }
+            }
+            Self::StaticFile(writer) => {
+                writer.append_storage_changeset(changeset, block_number)?;
             }
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
@@ -624,7 +768,9 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().storages_history_in_rocksdb {
-            return Ok(EitherReader::RocksDB(_rocksdb_tx));
+            return Ok(EitherReader::RocksDB(
+                _rocksdb_tx.expect("storages_history_in_rocksdb requires rocksdb tx"),
+            ));
         }
 
         Ok(EitherReader::Database(
@@ -644,7 +790,9 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            return Ok(EitherReader::RocksDB(_rocksdb_tx));
+            return Ok(EitherReader::RocksDB(
+                _rocksdb_tx.expect("transaction_hash_numbers_in_rocksdb requires rocksdb tx"),
+            ));
         }
 
         Ok(EitherReader::Database(
@@ -664,7 +812,9 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().account_history_in_rocksdb {
-            return Ok(EitherReader::RocksDB(_rocksdb_tx));
+            return Ok(EitherReader::RocksDB(
+                _rocksdb_tx.expect("account_history_in_rocksdb requires rocksdb tx"),
+            ));
         }
 
         Ok(EitherReader::Database(
@@ -913,6 +1063,19 @@ impl EitherWriterDestination {
     {
         // Write account changesets to static files only if they're explicitly enabled
         if provider.cached_storage_settings().account_changesets_in_static_files {
+            Self::StaticFile
+        } else {
+            Self::Database
+        }
+    }
+
+    /// Returns the destination for writing storage changesets based on storage settings.
+    pub fn storage_changesets<P>(provider: &P) -> Self
+    where
+        P: StorageSettingsCache,
+    {
+        // Write storage changesets to static files only if they're explicitly enabled
+        if provider.cached_storage_settings().storage_changesets_in_static_files {
             Self::StaticFile
         } else {
             Self::Database
@@ -1269,8 +1432,8 @@ mod rocksdb_tests {
         for (highest_block, blocks) in shards {
             let key = ShardedKey::new(address, *highest_block);
             let value = IntegerList::new(blocks.clone()).unwrap();
-            mdbx_writer.put_account_history(key.clone(), &value).unwrap();
-            rocks_writer.put_account_history(key, &value).unwrap();
+            mdbx_writer.upsert_account_history(key.clone(), &value).unwrap();
+            rocks_writer.upsert_account_history(key, &value).unwrap();
         }
 
         // Commit both backends
@@ -1662,5 +1825,21 @@ mod rocksdb_tests {
             Some(tx_num2),
             "Data should be visible after provider.commit()"
         );
+    }
+
+    /// Test that `EitherReader::new_accounts_history` panics when settings require
+    /// `RocksDB` but no tx is provided (`None`). This is an invariant violation that
+    /// indicates a bug - `with_rocksdb_tx` should always provide a tx when needed.
+    #[test]
+    #[should_panic(expected = "account_history_in_rocksdb requires rocksdb tx")]
+    fn test_settings_mismatch_panics() {
+        let factory = create_test_provider_factory();
+
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+        );
+
+        let provider = factory.database_provider_ro().unwrap();
+        let _ = EitherReader::<(), ()>::new_accounts_history(&provider, None);
     }
 }

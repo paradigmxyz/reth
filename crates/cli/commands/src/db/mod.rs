@@ -39,7 +39,7 @@ pub enum Subcommands {
     Stats(stats::Command),
     /// Lists the contents of a table
     List(list::Command),
-    /// Calculates the content checksum of a table
+    /// Calculates the content checksum of a table or static file segment
     Checksum(checksum::Command),
     /// Create a diff between two database tables or two entire databases.
     Diff(diff::Command),
@@ -162,7 +162,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 let access_rights =
                     if command.dry_run { AccessRights::RO } else { AccessRights::RW };
                 db_exec!(self.env, tool, N, access_rights, {
-                    command.execute(&tool, ctx.task_executor.clone(), &data_dir)?;
+                    command.execute(&tool, ctx.task_executor, &data_dir)?;
                 });
             }
             Subcommands::StaticFileHeader(command) => {

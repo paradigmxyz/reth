@@ -694,7 +694,6 @@ mod tests {
         BlockWriter, Chain, DBProvider, DatabaseProviderFactory, TransactionVariant,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
-    use std::collections::BTreeMap;
 
     fn empty_finalized_header_stream() -> ForkChoiceStream<SealedHeader> {
         let (tx, rx) = watch::channel(None);
@@ -796,12 +795,7 @@ mod tests {
         block1.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![block1.clone()],
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            )),
+            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
         };
 
         // Push the first notification
@@ -819,12 +813,7 @@ mod tests {
         block2.set_block_number(20);
 
         let notification2 = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![block2.clone()],
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            )),
+            new: Arc::new(Chain::new(vec![block2.clone()], Default::default(), Default::default())),
         };
 
         exex_manager.push_notification(notification2.clone());
@@ -867,12 +856,7 @@ mod tests {
         block1.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![block1.clone()],
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            )),
+            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
         };
 
         exex_manager.push_notification(notification1.clone());
@@ -1100,7 +1084,6 @@ mod tests {
                 vec![Default::default()],
                 Default::default(),
                 Default::default(),
-                Default::default(),
             )),
         };
 
@@ -1171,7 +1154,6 @@ mod tests {
                 vec![Default::default()],
                 Default::default(),
                 Default::default(),
-                Default::default(),
             )),
         };
 
@@ -1216,12 +1198,7 @@ mod tests {
         block1.set_block_number(10);
 
         let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![block1.clone()],
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            )),
+            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
         };
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
@@ -1370,17 +1347,11 @@ mod tests {
             new: Arc::new(Chain::new(
                 vec![genesis_block.clone()],
                 Default::default(),
-                BTreeMap::new(),
-                BTreeMap::new(),
+                Default::default(),
             )),
         };
         let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(
-                vec![block.clone()],
-                Default::default(),
-                BTreeMap::new(),
-                BTreeMap::new(),
-            )),
+            new: Arc::new(Chain::new(vec![block.clone()], Default::default(), Default::default())),
         };
 
         let (finalized_headers_tx, rx) = watch::channel(None);
@@ -1492,12 +1463,7 @@ mod tests {
         let mut make_notif = |id: u64| {
             let block = random_block(&mut rng, id, BlockParams::default()).try_recover().unwrap();
             ExExNotification::ChainCommitted {
-                new: Arc::new(Chain::new(
-                    vec![block],
-                    Default::default(),
-                    Default::default(),
-                    Default::default(),
-                )),
+                new: Arc::new(Chain::new(vec![block], Default::default(), Default::default())),
             }
         };
 

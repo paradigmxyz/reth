@@ -1,5 +1,7 @@
-use crate::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
+use crate::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor};
+use alloy_evm::{block::ExecutableTxParts, RecoveredTx};
 use rayon::prelude::*;
+use reth_primitives_traits::TxTy;
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
 pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
@@ -61,11 +63,16 @@ where
 
 /// Iterator over executable transactions.
 pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
-    ExecutableTxTuple<Tx: ExecutableTxFor<Evm>>
+    ExecutableTxTuple<Tx: ExecutableTxFor<Evm, Recovered = Self::Recovered>>
 {
+    /// HACK: for some reason, this duplicated AT is the only way to enforce the inner Recovered:
+    /// Send + Sync bound. Effectively alias for `Self::Tx::Recovered`.
+    type Recovered: RecoveredTx<TxTy<Evm::Primitives>> + Send + Sync;
 }
 
-impl<T, Evm: ConfigureEvm> ExecutableTxIterator<Evm> for T where
-    T: ExecutableTxTuple<Tx: ExecutableTxFor<Evm>>
+impl<T, Evm: ConfigureEvm> ExecutableTxIterator<Evm> for T
+where
+    T: ExecutableTxTuple<Tx: ExecutableTxFor<Evm, Recovered: Send + Sync>>,
 {
+    type Recovered = <T::Tx as ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>>>::Recovered;
 }

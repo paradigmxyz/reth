@@ -17,7 +17,10 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
+use reth_trie::{
+    updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData,
+    TrieInputSorted,
+};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -948,24 +951,36 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
         match blocks {
             [] => Chain::default(),
             [first, rest @ ..] => {
+                let trie_data_handle = first.trie_data_handle();
                 let mut chain = Chain::from_block(
                     first.recovered_block().clone(),
                     ExecutionOutcome::from((
                         first.execution_outcome().clone(),
                         first.block_number(),
                     )),
-                    first.trie_updates(),
-                    first.hashed_state(),
+                    LazyTrieData::deferred(move || {
+                        let trie_data = trie_data_handle.wait_cloned();
+                        SortedTrieData {
+                            hashed_state: trie_data.hashed_state,
+                            trie_updates: trie_data.trie_updates,
+                        }
+                    }),
                 );
                 for exec in rest {
+                    let trie_data_handle = exec.trie_data_handle();
                     chain.append_block(
                         exec.recovered_block().clone(),
                         ExecutionOutcome::from((
                             exec.execution_outcome().clone(),
                             exec.block_number(),
                         )),
-                        exec.trie_updates(),
-                        exec.hashed_state(),
+                        LazyTrieData::deferred(move || {
+                            let trie_data = trie_data_handle.wait_cloned();
+                            SortedTrieData {
+                                hashed_state: trie_data.hashed_state,
+                                trie_updates: trie_data.trie_updates,
+                            }
+                        }),
                     );
                 }
                 chain
@@ -1542,15 +1557,12 @@ mod tests {
         // Test commit notification
         let chain_commit = NewCanonicalChain::Commit { new: vec![block0.clone(), block1.clone()] };
 
-        // Build expected trie updates map
-        let mut expected_trie_updates = BTreeMap::new();
-        expected_trie_updates.insert(0, block0.trie_updates());
-        expected_trie_updates.insert(1, block1.trie_updates());
-
-        // Build expected hashed state map
-        let mut expected_hashed_state = BTreeMap::new();
-        expected_hashed_state.insert(0, block0.hashed_state());
-        expected_hashed_state.insert(1, block1.hashed_state());
+        // Build expected trie data map
+        let mut expected_trie_data = BTreeMap::new();
+        expected_trie_data
+            .insert(0, LazyTrieData::ready(block0.hashed_state(), block0.trie_updates()));
+        expected_trie_data
+            .insert(1, LazyTrieData::ready(block1.hashed_state(), block1.trie_updates()));
 
         // Build expected execution outcome (first_block matches first block number)
         let commit_execution_outcome = ExecutionOutcome {
@@ -1566,8 +1578,7 @@ mod tests {
                 new: Arc::new(Chain::new(
                     vec![block0.recovered_block().clone(), block1.recovered_block().clone()],
                     commit_execution_outcome,
-                    expected_trie_updates,
-                    expected_hashed_state
+                    expected_trie_data,
                 ))
             }
         );
@@ -1578,25 +1589,17 @@ mod tests {
             old: vec![block1.clone(), block2.clone()],
         };
 
-        // Build expected trie updates for old chain
-        let mut old_trie_updates = BTreeMap::new();
-        old_trie_updates.insert(1, block1.trie_updates());
-        old_trie_updates.insert(2, block2.trie_updates());
+        // Build expected trie data for old chain
+        let mut old_trie_data = BTreeMap::new();
+        old_trie_data.insert(1, LazyTrieData::ready(block1.hashed_state(), block1.trie_updates()));
+        old_trie_data.insert(2, LazyTrieData::ready(block2.hashed_state(), block2.trie_updates()));
 
-        // Build expected trie updates for new chain
-        let mut new_trie_updates = BTreeMap::new();
-        new_trie_updates.insert(1, block1a.trie_updates());
-        new_trie_updates.insert(2, block2a.trie_updates());
-
-        // Build expected hashed state for old chain
-        let mut old_hashed_state = BTreeMap::new();
-        old_hashed_state.insert(1, block1.hashed_state());
-        old_hashed_state.insert(2, block2.hashed_state());
-
-        // Build expected hashed state for new chain
-        let mut new_hashed_state = BTreeMap::new();
-        new_hashed_state.insert(1, block1a.hashed_state());
-        new_hashed_state.insert(2, block2a.hashed_state());
+        // Build expected trie data for new chain
+        let mut new_trie_data = BTreeMap::new();
+        new_trie_data
+            .insert(1, LazyTrieData::ready(block1a.hashed_state(), block1a.trie_updates()));
+        new_trie_data
+            .insert(2, LazyTrieData::ready(block2a.hashed_state(), block2a.trie_updates()));
 
         // Build expected execution outcome for reorg chains (first_block matches first block
         // number)
@@ -1613,14 +1616,12 @@ mod tests {
                 old: Arc::new(Chain::new(
                     vec![block1.recovered_block().clone(), block2.recovered_block().clone()],
                     reorg_execution_outcome.clone(),
-                    old_trie_updates,
-                    old_hashed_state
+                    old_trie_data,
                 )),
                 new: Arc::new(Chain::new(
                     vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()],
                     reorg_execution_outcome,
-                    new_trie_updates,
-                    new_hashed_state
+                    new_trie_data,
                 ))
             }
         );

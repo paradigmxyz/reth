@@ -10,6 +10,7 @@ use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
     DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
+    StorageChangeSetReader,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursor, HashedPostStateCursorFactory},
@@ -131,6 +132,8 @@ impl<F> OverlayStateProviderFactory<F> {
     /// This overlay will be applied on top of any reverts applied via `with_block_hash`.
     pub fn with_overlay_source(mut self, source: Option<OverlaySource>) -> Self {
         self.overlay_source = source;
+        // Clear the overlay cache since we've updated the source.
+        self.overlay_cache = Default::default();
         self
     }
 
@@ -139,6 +142,8 @@ impl<F> OverlayStateProviderFactory<F> {
     /// Convenience method that wraps the lazy overlay in `OverlaySource::Lazy`.
     pub fn with_lazy_overlay(mut self, lazy_overlay: Option<LazyOverlay>) -> Self {
         self.overlay_source = lazy_overlay.map(OverlaySource::Lazy);
+        // Clear the overlay cache since we've updated the source.
+        self.overlay_cache = Default::default();
         self
     }
 
@@ -154,6 +159,8 @@ impl<F> OverlayStateProviderFactory<F> {
                 trie: Arc::new(TrieUpdatesSorted::default()),
                 state,
             });
+            // Clear the overlay cache since we've updated the source.
+            self.overlay_cache = Default::default();
         }
         self
     }
@@ -165,12 +172,12 @@ impl<F> OverlayStateProviderFactory<F> {
     pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
         match &mut self.overlay_source {
             Some(OverlaySource::Immediate { state, .. }) => {
-                Arc::make_mut(state).extend_ref(&other);
+                Arc::make_mut(state).extend_ref_and_sort(&other);
             }
             Some(OverlaySource::Lazy(lazy)) => {
                 // Resolve lazy overlay and convert to immediate with extension
                 let (trie, mut state) = lazy.as_overlay();
-                Arc::make_mut(&mut state).extend_ref(&other);
+                Arc::make_mut(&mut state).extend_ref_and_sort(&other);
                 self.overlay_source = Some(OverlaySource::Immediate { trie, state });
             }
             None => {
@@ -180,6 +187,8 @@ impl<F> OverlayStateProviderFactory<F> {
                 });
             }
         }
+        // Clear the overlay cache since we've updated the source.
+        self.overlay_cache = Default::default();
         self
     }
 }
@@ -190,6 +199,7 @@ where
     F::Provider: StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
+        + StorageChangeSetReader
         + DBProvider
         + BlockNumReader,
 {
@@ -344,7 +354,7 @@ where
             let trie_updates = if trie_reverts.is_empty() {
                 overlay_trie
             } else if !overlay_trie.is_empty() {
-                trie_reverts.extend_ref(&overlay_trie);
+                trie_reverts.extend_ref_and_sort(&overlay_trie);
                 Arc::new(trie_reverts)
             } else {
                 Arc::new(trie_reverts)
@@ -353,7 +363,7 @@ where
             let hashed_state_updates = if hashed_state_reverts.is_empty() {
                 overlay_state
             } else if !overlay_state.is_empty() {
-                hashed_state_reverts.extend_ref(&overlay_state);
+                hashed_state_reverts.extend_ref_and_sort(&overlay_state);
                 Arc::new(hashed_state_reverts)
             } else {
                 Arc::new(hashed_state_reverts)
@@ -440,7 +450,11 @@ where
 impl<F> DatabaseProviderROFactory for OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: StageCheckpointReader + PruneCheckpointReader + BlockNumReader + ChangeSetReader,
+    F::Provider: StageCheckpointReader
+        + PruneCheckpointReader
+        + BlockNumReader
+        + ChangeSetReader
+        + StorageChangeSetReader,
 {
     type Provider = OverlayStateProvider<F::Provider>;
 

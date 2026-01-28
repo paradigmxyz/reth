@@ -38,6 +38,18 @@ impl TransactionTestContext {
         signed.encoded_2718().into()
     }
 
+    /// Creates a transfer with a specific nonce and signs it, returning bytes.
+    /// Uses high `max_fee_per_gas` (1000 gwei) to ensure tx acceptance regardless of basefee.
+    pub async fn transfer_tx_bytes_with_nonce(
+        chain_id: u64,
+        wallet: PrivateKeySigner,
+        nonce: u64,
+    ) -> Bytes {
+        let tx = tx(chain_id, 21000, None, None, nonce, Some(1000e9 as u128));
+        let signed = Self::sign_tx(wallet, tx).await;
+        signed.encoded_2718().into()
+    }
+
     /// Creates a deployment transaction and signs it, returning an envelope.
     pub async fn deploy_tx(
         chain_id: u64,

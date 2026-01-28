@@ -456,17 +456,22 @@ pub struct EthereumPoolBuilder {
     // TODO add options for txpool args
 }
 
-impl<Types, Node> PoolBuilder<Node> for EthereumPoolBuilder
+impl<Types, Node, Evm> PoolBuilder<Node, Evm> for EthereumPoolBuilder
 where
     Types: NodeTypes<
         ChainSpec: EthereumHardforks,
         Primitives: NodePrimitives<SignedTx = TransactionSigned>,
     >,
     Node: FullNodeTypes<Types = Types>,
+    Evm: ConfigureEvm<Primitives = PrimitivesTy<Types>> + Clone + 'static,
 {
-    type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
+    type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore, Evm>;
 
-    async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
+    async fn build_pool(
+        self,
+        ctx: &BuilderContext<Node>,
+        evm_config: Evm,
+    ) -> eyre::Result<Self::Pool> {
         let pool_config = ctx.pool_config();
 
         let blobs_disabled = ctx.config().txpool.disable_blobs_support ||
@@ -492,17 +497,17 @@ where
         let blob_store =
             reth_node_builder::components::create_blob_store_with_cache(ctx, blob_cache_size)?;
 
-        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
-            .with_head_timestamp(ctx.head().timestamp)
-            .set_eip4844(!blobs_disabled)
-            .kzg_settings(ctx.kzg_settings()?)
-            .with_max_tx_input_bytes(ctx.config().txpool.max_tx_input_bytes)
-            .with_local_transactions_config(pool_config.local_transactions_config.clone())
-            .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
-            .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
-            .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
-            .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone(), evm_config)
+                .set_eip4844(!blobs_disabled)
+                .kzg_settings(ctx.kzg_settings()?)
+                .with_max_tx_input_bytes(ctx.config().txpool.max_tx_input_bytes)
+                .with_local_transactions_config(pool_config.local_transactions_config.clone())
+                .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
+                .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
+                .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
+                .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
+                .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
         if validator.validator().eip4844() {
             // initializing the KZG settings can be expensive, this should be done upfront so that

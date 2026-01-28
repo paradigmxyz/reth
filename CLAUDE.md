@@ -249,7 +249,7 @@ Write comments that remain valuable after the PR is merged. Future readers won't
 unsafe impl GlobalAlloc for LimitedAllocator { ... }
 
 // Binary search requires sorted input. Panics on unsorted slices.
-fn find_index(items: &[Item], target: &Item) -> Option
+fn find_index(items: &[Item], target: &Item) -> Option<usize>
 
 // Timeout set to 5s to match EVM block processing limits
 const TRACER_TIMEOUT: Duration = Duration::from_secs(5);

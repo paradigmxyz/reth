@@ -343,7 +343,7 @@ where
     }
 
     /// Position at first key-value pair greater than or equal to specified, return both key and
-    /// data, and the return code depends on a exact match.
+    /// data, and the return code depends on an exact match.
     ///
     /// For non DupSort-ed collections this works the same as [`Self::set_range()`], but returns
     /// [false] if key found exactly and [true] if greater key was found.

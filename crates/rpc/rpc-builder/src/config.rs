@@ -122,6 +122,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             max_receipts: self.rpc_state_cache.max_receipts,
             max_headers: self.rpc_state_cache.max_headers,
             max_concurrent_db_requests: self.rpc_state_cache.max_concurrent_db_requests,
+            max_cached_tx_hashes: self.rpc_state_cache.max_cached_tx_hashes,
         }
     }
 
