@@ -4,14 +4,49 @@ use core::fmt::Debug;
 
 use alloc::{borrow::Cow, vec, vec::Vec};
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256Map, HashMap, HashSet},
     B256,
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, Target, TrieNode};
 
 use crate::provider::TrieNodeProvider;
+
+/// Describes an update to a leaf in the sparse trie.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeafUpdate {
+    /// The leaf value has been changed to the given RLP-encoded value.
+    /// Empty Vec indicates the leaf has been removed.
+    Changed(Vec<u8>),
+    /// The leaf value is likely changed, but the new value is not yet known.
+    /// Used in prewarming contexts where transactions run out-of-order
+    /// to optimistically reveal the trie.
+    Touched,
+}
+
+impl LeafUpdate {
+    /// Returns `true` if this is a [`LeafUpdate::Changed`] variant.
+    #[inline]
+    pub const fn is_changed(&self) -> bool {
+        matches!(self, Self::Changed(_))
+    }
+
+    /// Returns `true` if this is a [`LeafUpdate::Touched`] variant.
+    #[inline]
+    pub const fn is_touched(&self) -> bool {
+        matches!(self, Self::Touched)
+    }
+
+    /// Returns the value if this is a [`LeafUpdate::Changed`], or `None` otherwise.
+    #[inline]
+    pub fn value(&self) -> Option<&Vec<u8>> {
+        match self {
+            Self::Changed(v) => Some(v),
+            Self::Touched => None,
+        }
+    }
+}
 
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
@@ -232,11 +267,10 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     fn shrink_values_to(&mut self, size: usize);
 }
 
-/// Extension trait for sparse tries that support pruning.
+/// Extension trait for sparse tries that support pruning and batch operations.
 ///
-/// This trait provides the `prune` method for sparse trie implementations that support
-/// converting nodes beyond a certain depth into hash stubs. This is useful for reducing
-/// memory usage when caching tries across payload validations.
+/// This trait provides additional methods for sparse trie implementations including
+/// pruning nodes beyond a certain depth and batch leaf updates.
 pub trait SparseTrieExt: SparseTrie {
     /// Returns the number of revealed (non-Hash) nodes in the trie.
     fn revealed_node_count(&self) -> usize;
@@ -260,6 +294,24 @@ pub trait SparseTrieExt: SparseTrie {
     ///
     /// The number of nodes converted to hash stubs.
     fn prune(&mut self, max_depth: usize) -> usize;
+
+    /// Applies leaf updates to the sparse trie.
+    ///
+    /// When a [`LeafUpdate::Changed`] is successfully applied, it is removed from the
+    /// given [`B256Map`]. If it could not be applied due to blinded nodes, it remains
+    /// in the map and the callback is invoked with the required proof target.
+    ///
+    /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
+    /// `updates` map can be reused to retry the update.
+    ///
+    /// Proof targets are not passed to the callback twice for the same path.
+    ///
+    /// [`LeafUpdate::Touched`] behaves identically except it does not modify the leaf value.
+    fn update_leaves(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        proof_required_fn: impl FnMut(Target),
+    ) -> SparseTrieResult<()>;
 }
 
 /// Tracks modifications to the sparse trie structure.

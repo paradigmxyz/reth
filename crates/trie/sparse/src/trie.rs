@@ -1,6 +1,7 @@
 use crate::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
+    LeafLookup, LeafLookupError, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieExt,
+    SparseTrieUpdates,
 };
 use alloc::{
     borrow::Cow,
@@ -1098,6 +1099,201 @@ impl SparseTrieTrait for SerialSparseTrie {
     }
 }
 
+impl SparseTrieExt for SerialSparseTrie {
+    fn revealed_node_count(&self) -> usize {
+        self.nodes.values().filter(|n| !n.is_hash()).count()
+    }
+
+    fn prune(&mut self, max_depth: usize) -> usize {
+        let mut pruned_count = 0;
+        let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::new();
+        let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
+        stack.push((Nibbles::default(), 0));
+
+        // DFS traversal to find nodes at max_depth that can be pruned
+        while let Some((path, depth)) = stack.pop() {
+            let Some(node) = self.nodes.get(&path) else { continue };
+
+            match node {
+                SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {}
+                SparseNode::Extension { key, .. } => {
+                    let mut child = path;
+                    child.extend(key);
+                    if depth == max_depth {
+                        if let Some(hash) =
+                            self.nodes.get(&child).and_then(|n| n.hash_if_prunable())
+                        {
+                            effective_pruned_roots.push((child, hash));
+                        }
+                    } else {
+                        stack.push((child, depth + 1));
+                    }
+                }
+                SparseNode::Branch { state_mask, .. } => {
+                    for nibble in CHILD_INDEX_RANGE {
+                        if state_mask.is_bit_set(nibble) {
+                            let mut child = path;
+                            child.push_unchecked(nibble);
+                            if depth == max_depth {
+                                if let Some(hash) =
+                                    self.nodes.get(&child).and_then(|n| n.hash_if_prunable())
+                                {
+                                    effective_pruned_roots.push((child, hash));
+                                }
+                            } else {
+                                stack.push((child, depth + 1));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Remove descendants and replace with hash stubs
+        for (path, hash) in effective_pruned_roots {
+            self.remove_descendants(&path);
+            self.nodes.insert(path, SparseNode::Hash(hash));
+            pruned_count += 1;
+        }
+
+        pruned_count
+    }
+
+    fn update_leaves(
+        &mut self,
+        updates: &mut alloy_primitives::map::B256Map<LeafUpdate>,
+        mut proof_required_fn: impl FnMut(reth_trie_common::Target),
+    ) -> SparseTrieResult<()> {
+        use crate::provider::ShortCircuitTrieNodeProvider;
+
+        // Sort keys for cache-friendly traversal
+        let mut keys: Vec<_> = updates.keys().copied().collect();
+        keys.sort_unstable();
+
+        for key in keys {
+            let path = Nibbles::unpack(key);
+
+            // Check if path is blinded before attempting update
+            if let Some((blinded_path, _hash)) = self.find_blinded_on_path(&path) {
+                let min_len = (blinded_path.len() + 1) as u8;
+                proof_required_fn(reth_trie_common::Target::new(key).with_min_len(min_len));
+                continue;
+            }
+
+            // Path is revealed, apply the update
+            let update = updates.get(&key).unwrap();
+            let result = match update {
+                LeafUpdate::Changed(value) => {
+                    if value.is_empty() {
+                        self.remove_leaf(&path, ShortCircuitTrieNodeProvider)
+                    } else {
+                        self.update_leaf(path, value.clone(), ShortCircuitTrieNodeProvider)
+                    }
+                }
+                LeafUpdate::Touched => {
+                    // Touched just verifies path is revealed, no actual update
+                    Ok(())
+                }
+            };
+
+            match result {
+                Ok(()) => {
+                    updates.remove(&key);
+                }
+                Err(err) => {
+                    match err.kind() {
+                        SparseTrieErrorKind::BlindedNode { path, .. } => {
+                            let min_len = (path.len() + 1) as u8;
+                            proof_required_fn(
+                                reth_trie_common::Target::new(key).with_min_len(min_len),
+                            );
+                            continue;
+                        }
+                        SparseTrieErrorKind::NodeNotFoundInProvider { path } => {
+                            // This can happen during remove_leaf when a blinded sibling needs
+                            // to be revealed for branch collapse. Look up the hash at that path
+                            // and request a proof for it.
+                            let min_len = (path.len() + 1) as u8;
+                            proof_required_fn(
+                                reth_trie_common::Target::new(key).with_min_len(min_len),
+                            );
+                            continue;
+                        }
+                        _ => return Err(err),
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl SerialSparseTrie {
+    /// Traverses the trie read-only to find the first blinded hash node on the path.
+    fn find_blinded_on_path(&self, full_path: &Nibbles) -> Option<(Nibbles, B256)> {
+        let mut current = Nibbles::default();
+        loop {
+            let node = self.nodes.get(&current)?;
+            match node {
+                SparseNode::Empty => return None,
+                &SparseNode::Hash(hash) => return Some((current, hash)),
+                SparseNode::Leaf { key, .. } => {
+                    current.extend(key);
+                    return None;
+                }
+                SparseNode::Extension { key, .. } => {
+                    current.extend(key);
+                    if !full_path.starts_with(&current) {
+                        if let Some(&SparseNode::Hash(hash)) = self.nodes.get(&current) {
+                            return Some((current, hash));
+                        }
+                        return None;
+                    }
+                }
+                SparseNode::Branch { state_mask, .. } => {
+                    let nibble = full_path.get_unchecked(current.len());
+                    current.push_unchecked(nibble);
+                    if !state_mask.is_bit_set(nibble) {
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Removes all descendants of a node (used during pruning).
+    fn remove_descendants(&mut self, path: &Nibbles) {
+        let mut stack = vec![*path];
+        while let Some(current) = stack.pop() {
+            if let Some(node) = self.nodes.remove(&current) {
+                match node {
+                    SparseNode::Extension { key, .. } => {
+                        let mut child = current;
+                        child.extend(&key);
+                        stack.push(child);
+                    }
+                    SparseNode::Branch { state_mask, .. } => {
+                        for nibble in CHILD_INDEX_RANGE {
+                            if state_mask.is_bit_set(nibble) {
+                                let mut child = current;
+                                child.push_unchecked(nibble);
+                                stack.push(child);
+                            }
+                        }
+                    }
+                    SparseNode::Leaf { key, .. } => {
+                        let mut full = current;
+                        full.extend(&key);
+                        self.values.remove(&full);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
 impl SerialSparseTrie {
     /// Creates a new revealed sparse trie from the given root node.
     ///
@@ -1912,6 +2108,19 @@ impl SparseNode {
         match self {
             Self::Empty => None,
             Self::Hash(hash) => Some(*hash),
+            Self::Leaf { hash, .. } | Self::Extension { hash, .. } | Self::Branch { hash, .. } => {
+                *hash
+            }
+        }
+    }
+
+    /// Returns the hash of the node if it can be pruned (has a computed hash and is not a
+    /// hash stub or embedded node).
+    pub const fn hash_if_prunable(&self) -> Option<B256> {
+        match self {
+            // Hash stubs and empty nodes can't be pruned (no descendants)
+            Self::Empty | Self::Hash(_) => None,
+            // Nodes with computed hashes can be pruned
             Self::Leaf { hash, .. } | Self::Extension { hash, .. } | Self::Branch { hash, .. } => {
                 *hash
             }
@@ -3722,5 +3931,484 @@ Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
 ";
 
         assert_eq!(alternate_printed, expected);
+    }
+
+    #[test]
+    fn update_leaves_empty_updates() {
+        let mut sparse = SerialSparseTrie::default();
+        let mut updates = alloy_primitives::map::B256Map::default();
+        let mut proof_targets = Vec::new();
+
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert!(updates.is_empty());
+        assert!(proof_targets.is_empty());
+    }
+
+    #[test]
+    fn update_leaves_single_insert() {
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+        let key = B256::repeat_byte(0x11);
+        let value = b"test_value".to_vec();
+
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(key, LeafUpdate::Changed(value.clone()));
+        let mut proof_targets = Vec::new();
+
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert!(updates.is_empty(), "Update should be removed after successful application");
+        assert!(proof_targets.is_empty(), "No proofs should be required for empty trie");
+
+        let path = Nibbles::unpack(key);
+        assert_eq!(sparse.get_leaf_value(&path), Some(&value));
+    }
+
+    #[test]
+    fn update_leaves_multiple_inserts() {
+        let mut sparse = SerialSparseTrie::default();
+        let key1 = B256::repeat_byte(0x11);
+        let key2 = B256::repeat_byte(0x22);
+        let key3 = B256::repeat_byte(0x33);
+        let value1 = b"value1".to_vec();
+        let value2 = b"value2".to_vec();
+        let value3 = b"value3".to_vec();
+
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(key1, LeafUpdate::Changed(value1.clone()));
+        updates.insert(key2, LeafUpdate::Changed(value2.clone()));
+        updates.insert(key3, LeafUpdate::Changed(value3.clone()));
+        let mut proof_targets = Vec::new();
+
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert!(updates.is_empty());
+        assert!(proof_targets.is_empty());
+
+        assert_eq!(sparse.get_leaf_value(&Nibbles::unpack(key1)), Some(&value1));
+        assert_eq!(sparse.get_leaf_value(&Nibbles::unpack(key2)), Some(&value2));
+        assert_eq!(sparse.get_leaf_value(&Nibbles::unpack(key3)), Some(&value3));
+    }
+
+    #[test]
+    fn update_leaves_deletion() {
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+        let key = B256::repeat_byte(0x11);
+        let value = b"test_value".to_vec();
+
+        sparse.update_leaf(Nibbles::unpack(key), value.clone(), &provider).unwrap();
+        assert_eq!(sparse.get_leaf_value(&Nibbles::unpack(key)), Some(&value));
+
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(key, LeafUpdate::Changed(Vec::new()));
+        let mut proof_targets = Vec::new();
+
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert!(updates.is_empty());
+        assert!(proof_targets.is_empty());
+        assert!(sparse.get_leaf_value(&Nibbles::unpack(key)).is_none());
+    }
+
+    #[test]
+    fn update_leaves_update_existing() {
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+        let key = B256::repeat_byte(0x11);
+        let old_value = b"old_value".to_vec();
+        let new_value = b"new_value".to_vec();
+
+        sparse.update_leaf(Nibbles::unpack(key), old_value.clone(), &provider).unwrap();
+
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(key, LeafUpdate::Changed(new_value.clone()));
+        let mut proof_targets = Vec::new();
+
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert!(updates.is_empty());
+        assert!(proof_targets.is_empty());
+        assert_eq!(sparse.get_leaf_value(&Nibbles::unpack(key)), Some(&new_value));
+    }
+
+    #[test]
+    fn update_leaves_touched_noop() {
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+        let key = B256::repeat_byte(0x11);
+        let value = b"test_value".to_vec();
+
+        sparse.update_leaf(Nibbles::unpack(key), value.clone(), &provider).unwrap();
+
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(key, LeafUpdate::Touched);
+        let mut proof_targets = Vec::new();
+
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert!(updates.is_empty(), "Touched update should be removed");
+        assert!(proof_targets.is_empty());
+        assert_eq!(sparse.get_leaf_value(&Nibbles::unpack(key)), Some(&value));
+    }
+
+    #[test]
+    fn update_leaves_blinded_node_requests_proof() {
+        let mut sparse = SerialSparseTrie::default();
+        let blinded_hash = B256::repeat_byte(0xBB);
+
+        sparse.nodes.insert(Nibbles::default(), SparseNode::Hash(blinded_hash));
+
+        let key = B256::repeat_byte(0x11);
+        let value = b"test_value".to_vec();
+
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(key, LeafUpdate::Changed(value));
+        let mut proof_targets = Vec::new();
+
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert_eq!(updates.len(), 1, "Update should remain for retry");
+        assert_eq!(proof_targets.len(), 1, "Should request proof for blinded node");
+        assert_eq!(proof_targets[0].key(), key);
+        assert_eq!(proof_targets[0].min_len, 1);
+    }
+
+    #[test]
+    fn update_leaves_partial_blinding() {
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+
+        let revealed_key = B256::repeat_byte(0x11);
+        let revealed_value = b"revealed".to_vec();
+        sparse
+            .update_leaf(Nibbles::unpack(revealed_key), revealed_value.clone(), &provider)
+            .unwrap();
+
+        let blinded_hash = B256::repeat_byte(0xCC);
+        let blinded_child_path = Nibbles::from_nibbles([0x2]);
+        sparse.nodes.insert(blinded_child_path, SparseNode::Hash(blinded_hash));
+
+        if let Some(SparseNode::Branch { state_mask, .. }) =
+            sparse.nodes.get_mut(&Nibbles::default())
+        {
+            state_mask.set_bit(0x2);
+        } else {
+            let mut state_mask = TrieMask::default();
+            state_mask.set_bit(0x1);
+            state_mask.set_bit(0x2);
+            sparse.nodes.insert(
+                Nibbles::default(),
+                SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None },
+            );
+        }
+
+        let blinded_key = B256::repeat_byte(0x22);
+        let blinded_value = b"blinded".to_vec();
+        let update_revealed_value = b"updated_revealed".to_vec();
+
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(revealed_key, LeafUpdate::Changed(update_revealed_value.clone()));
+        updates.insert(blinded_key, LeafUpdate::Changed(blinded_value));
+        let mut proof_targets = Vec::new();
+
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert_eq!(updates.len(), 1, "Only blinded update should remain");
+        assert!(updates.contains_key(&blinded_key));
+        assert!(!updates.contains_key(&revealed_key));
+
+        assert_eq!(proof_targets.len(), 1);
+        assert_eq!(proof_targets[0].key(), blinded_key);
+
+        assert_eq!(
+            sparse.get_leaf_value(&Nibbles::unpack(revealed_key)),
+            Some(&update_revealed_value)
+        );
+    }
+
+    #[test]
+    fn update_leaves_mixed_operations() {
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+
+        let key1 = B256::repeat_byte(0x11);
+        let key2 = B256::repeat_byte(0x22);
+        let key3 = B256::repeat_byte(0x33);
+
+        sparse.update_leaf(Nibbles::unpack(key1), b"value1".to_vec(), &provider).unwrap();
+        sparse.update_leaf(Nibbles::unpack(key2), b"value2".to_vec(), &provider).unwrap();
+
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(key1, LeafUpdate::Changed(b"new_value1".to_vec()));
+        updates.insert(key2, LeafUpdate::Changed(Vec::new()));
+        updates.insert(key3, LeafUpdate::Changed(b"value3".to_vec()));
+        let mut proof_targets = Vec::new();
+
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert!(updates.is_empty());
+        assert!(proof_targets.is_empty());
+
+        assert_eq!(sparse.get_leaf_value(&Nibbles::unpack(key1)), Some(&b"new_value1".to_vec()));
+        assert!(sparse.get_leaf_value(&Nibbles::unpack(key2)).is_none());
+        assert_eq!(sparse.get_leaf_value(&Nibbles::unpack(key3)), Some(&b"value3".to_vec()));
+    }
+
+    #[test]
+    fn update_leaves_root_consistency() {
+        let provider = DefaultTrieNodeProvider;
+
+        let mut sparse1 = SerialSparseTrie::default();
+        let key1 = B256::repeat_byte(0x11);
+        let key2 = B256::repeat_byte(0x22);
+        let value1 = b"value1".to_vec();
+        let value2 = b"value2".to_vec();
+
+        sparse1.update_leaf(Nibbles::unpack(key1), value1.clone(), &provider).unwrap();
+        sparse1.update_leaf(Nibbles::unpack(key2), value2.clone(), &provider).unwrap();
+        let root1 = sparse1.root();
+
+        let mut sparse2 = SerialSparseTrie::default();
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(key1, LeafUpdate::Changed(value1));
+        updates.insert(key2, LeafUpdate::Changed(value2));
+        sparse2.update_leaves(&mut updates, |_| {}).unwrap();
+        let root2 = sparse2.root();
+
+        assert_eq!(root1, root2, "Roots should match regardless of update method");
+    }
+
+    #[test]
+    fn update_leaves_no_duplicate_proof_requests() {
+        let mut sparse = SerialSparseTrie::default();
+        let blinded_hash = B256::repeat_byte(0xBB);
+        sparse.nodes.insert(Nibbles::default(), SparseNode::Hash(blinded_hash));
+
+        let key1 = B256::repeat_byte(0x11);
+        let key2 = B256::repeat_byte(0x12);
+
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(key1, LeafUpdate::Changed(b"value1".to_vec()));
+        updates.insert(key2, LeafUpdate::Changed(b"value2".to_vec()));
+
+        let mut proof_targets = Vec::new();
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert_eq!(proof_targets.len(), 2, "Each key should request its own proof");
+        let keys: std::collections::HashSet<_> = proof_targets.iter().map(|t| t.key()).collect();
+        assert!(keys.contains(&key1));
+        assert!(keys.contains(&key2));
+    }
+
+    #[test]
+    fn update_leaves_retry_after_reveal() {
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+
+        // Insert TWO leaves to create a branch at root
+        let existing_key1 = B256::repeat_byte(0x11);
+        let existing_key2 = B256::repeat_byte(0x00); // Different first nibble to force branch
+        sparse
+            .update_leaf(Nibbles::unpack(existing_key1), b"existing1".to_vec(), &provider)
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::unpack(existing_key2), b"existing2".to_vec(), &provider)
+            .unwrap();
+
+        // Now root is a branch. Add a blinded sibling at nibble 0x2
+        let blinded_hash = B256::repeat_byte(0xCC);
+        let blinded_path = Nibbles::from_nibbles([0x2]);
+        sparse.nodes.insert(blinded_path, SparseNode::Hash(blinded_hash));
+
+        // Update root branch to include blinded sibling
+        if let Some(SparseNode::Branch { state_mask, .. }) =
+            sparse.nodes.get_mut(&Nibbles::default())
+        {
+            state_mask.set_bit(0x2);
+        } else {
+            panic!(
+                "Root should be a branch after inserting two leaves with different first nibbles"
+            );
+        }
+
+        // Try to insert a key that would go through the blinded path
+        let blinded_key = B256::repeat_byte(0x22);
+
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(blinded_key, LeafUpdate::Changed(b"new_value".to_vec()));
+
+        let mut proof_targets = Vec::new();
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert_eq!(updates.len(), 1, "Update should remain for retry");
+        assert!(!proof_targets.is_empty());
+        assert_eq!(proof_targets[0].key(), blinded_key);
+
+        // Simulate revealing the blinded node: remove the hash and insert a revealed leaf
+        sparse.nodes.remove(&blinded_path);
+        // The revealed leaf should have the full remaining key from the blinded path
+        let revealed_key = Nibbles::unpack(blinded_key);
+        let leaf_key = revealed_key.slice(1..); // Key stored in leaf is remaining nibbles after path
+        sparse.nodes.insert(blinded_path, SparseNode::new_leaf(leaf_key));
+        sparse.values.insert(revealed_key, b"new_value".to_vec());
+
+        // Now retry - should fail at a deeper level or succeed depending on reveal
+        proof_targets.clear();
+        updates.insert(blinded_key, LeafUpdate::Changed(b"updated_value".to_vec()));
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        // The update should now succeed since the path is revealed
+        assert!(updates.is_empty(), "Update should succeed after reveal");
+        assert!(proof_targets.is_empty(), "No more proofs needed");
+    }
+
+    #[test]
+    fn leaf_update_methods() {
+        let changed = LeafUpdate::Changed(b"value".to_vec());
+        let touched = LeafUpdate::Touched;
+        let deletion = LeafUpdate::Changed(Vec::new());
+
+        assert!(changed.is_changed());
+        assert!(!changed.is_touched());
+        assert_eq!(changed.value(), Some(&b"value".to_vec()));
+
+        assert!(!touched.is_changed());
+        assert!(touched.is_touched());
+        assert!(touched.value().is_none());
+
+        assert!(deletion.is_changed());
+        assert_eq!(deletion.value(), Some(&Vec::new()));
+    }
+
+    #[test]
+    fn update_leaves_min_len_at_root() {
+        // Blinded node at root (depth 0) should produce min_len = 1
+        let mut sparse = SerialSparseTrie::default();
+        let blinded_hash = B256::repeat_byte(0xAA);
+        sparse.nodes.insert(Nibbles::default(), SparseNode::Hash(blinded_hash));
+
+        let key = B256::repeat_byte(0x11);
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(key, LeafUpdate::Changed(b"value".to_vec()));
+        let mut proof_targets = Vec::new();
+
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert_eq!(proof_targets.len(), 1);
+        assert_eq!(
+            proof_targets[0].min_len, 1,
+            "Blinded at root (len 0) should produce min_len = 1"
+        );
+    }
+
+    #[test]
+    fn update_leaves_min_len_at_depth_1() {
+        // Blinded node at depth 1 should produce min_len = 2
+        let mut sparse = SerialSparseTrie::default();
+        let blinded_hash = B256::repeat_byte(0xBB);
+
+        // Create a branch at root with one blinded child at nibble 0x1
+        let mut state_mask = TrieMask::default();
+        state_mask.set_bit(0x1);
+        sparse.nodes.insert(
+            Nibbles::default(),
+            SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None },
+        );
+        sparse.nodes.insert(Nibbles::from_nibbles([0x1]), SparseNode::Hash(blinded_hash));
+
+        let key = B256::repeat_byte(0x11);
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(key, LeafUpdate::Changed(b"value".to_vec()));
+        let mut proof_targets = Vec::new();
+
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert_eq!(proof_targets.len(), 1);
+        assert_eq!(
+            proof_targets[0].min_len, 2,
+            "Blinded at depth 1 (len 1) should produce min_len = 2"
+        );
+    }
+
+    #[test]
+    fn update_leaves_min_len_at_depth_2() {
+        // Blinded node at depth 2 should produce min_len = 3
+        let mut sparse = SerialSparseTrie::default();
+        let blinded_hash = B256::repeat_byte(0xCC);
+
+        // Create branch at root -> branch at 0x1 -> blinded at 0x1, 0x1
+        let mut state_mask = TrieMask::default();
+        state_mask.set_bit(0x1);
+        sparse.nodes.insert(
+            Nibbles::default(),
+            SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None },
+        );
+        sparse.nodes.insert(
+            Nibbles::from_nibbles([0x1]),
+            SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None },
+        );
+        sparse.nodes.insert(Nibbles::from_nibbles([0x1, 0x1]), SparseNode::Hash(blinded_hash));
+
+        let key = B256::repeat_byte(0x11);
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(key, LeafUpdate::Changed(b"value".to_vec()));
+        let mut proof_targets = Vec::new();
+
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        assert_eq!(proof_targets.len(), 1);
+        assert_eq!(
+            proof_targets[0].min_len, 3,
+            "Blinded at depth 2 (len 2) should produce min_len = 3"
+        );
+    }
+
+    #[test]
+    fn update_leaves_removal_with_blinded_sibling() {
+        // Test that removing a leaf when a sibling is blinded correctly requests a proof
+        // This exercises the NodeNotFoundInProvider -> proof target path
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
+
+        // Insert two leaves so the root is a branch with multiple children
+        let key1 = B256::repeat_byte(0x11);
+        let key2 = B256::repeat_byte(0x22);
+        sparse.update_leaf(Nibbles::unpack(key1), b"value1".to_vec(), &provider).unwrap();
+        sparse.update_leaf(Nibbles::unpack(key2), b"value2".to_vec(), &provider).unwrap();
+
+        // Add a blinded third sibling at nibble 0x3
+        let blinded_hash = B256::repeat_byte(0xDD);
+        let blinded_path = Nibbles::from_nibbles([0x3]);
+        sparse.nodes.insert(blinded_path, SparseNode::Hash(blinded_hash));
+
+        // Update the root branch to include the blinded sibling
+        if let Some(SparseNode::Branch { state_mask, .. }) =
+            sparse.nodes.get_mut(&Nibbles::default())
+        {
+            state_mask.set_bit(0x3);
+        }
+
+        // Remove one of the leaves - this should still succeed since we have 2+ remaining children
+        let mut updates = alloy_primitives::map::B256Map::default();
+        updates.insert(key1, LeafUpdate::Changed(Vec::new())); // Empty = removal
+        let mut proof_targets = Vec::new();
+
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        // With 2+ remaining children at root (key2 leaf + blinded), removal should succeed
+        assert!(updates.is_empty(), "Removal should succeed with multiple remaining siblings");
+        assert!(proof_targets.is_empty(), "No proofs needed when branch has multiple children");
+        assert!(sparse.get_leaf_value(&Nibbles::unpack(key1)).is_none(), "key1 should be removed");
+        assert_eq!(sparse.get_leaf_value(&Nibbles::unpack(key2)), Some(&b"value2".to_vec()));
+
+        // Now remove key2 - this WILL require revealing the blinded sibling for collapse
+        updates.insert(key2, LeafUpdate::Changed(Vec::new()));
+        sparse.update_leaves(&mut updates, |target| proof_targets.push(target)).unwrap();
+
+        // The removal should not complete because the sibling is blinded (branch collapse needs it)
+        assert_eq!(updates.len(), 1, "Removal should remain for retry due to blinded sibling");
+        assert_eq!(proof_targets.len(), 1, "Should request proof for the blinded sibling path");
     }
 }

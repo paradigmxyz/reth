@@ -64,6 +64,22 @@ impl TrieNodeProvider for DefaultTrieNodeProvider {
     }
 }
 
+/// A trie node provider that always returns `Ok(None)`.
+///
+/// This is used by [`SparseTrieExt::update_leaves`](crate::SparseTrieExt::update_leaves) to force
+/// [`BlindedNode`](reth_execution_errors::SparseTrieErrorKind::BlindedNode) errors when the trie
+/// traversal hits a hash node, rather than attempting to fetch from a database. This enables a
+/// "short-circuit" pattern where blinded nodes are detected and collected for batch proof fetching
+/// instead of being resolved one-at-a-time.
+#[derive(PartialEq, Eq, Clone, Copy, Default, Debug)]
+pub struct ShortCircuitTrieNodeProvider;
+
+impl TrieNodeProvider for ShortCircuitTrieNodeProvider {
+    fn trie_node(&self, _path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+        Ok(None)
+    }
+}
+
 /// Right pad the path with 0s and return as [`B256`].
 #[inline]
 pub fn pad_path_to_key(path: &Nibbles) -> B256 {
