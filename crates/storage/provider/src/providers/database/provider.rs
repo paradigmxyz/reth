@@ -40,7 +40,8 @@ use reth_db_api::{
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
-        ShardedKey, StorageBeforeTx, StorageSettings, StoredBlockBodyIndices,
+        BlockNumberAddressRange, ShardedKey, StorageBeforeTx, StorageSettings,
+        StoredBlockBodyIndices,
     },
     table::Table,
     tables,
@@ -1384,14 +1385,14 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
 
     fn storage_changesets_range(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         if self.cached_storage_settings().storage_changesets_in_static_files {
             self.static_file_provider.storage_changesets_range(range)
         } else {
             self.tx
                 .cursor_dup_read::<tables::StorageChangeSets>()?
-                .walk_range(BlockNumberAddress::range(range))?
+                .walk_range(BlockNumberAddressRange::from(range))?
                 .map(|r| r.map_err(Into::into))
                 .collect()
         }
@@ -2834,11 +2835,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
-        let changesets = self
-            .tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(range)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let changesets = self.account_changesets_range(range)?;
         self.unwind_account_hashing(changesets.iter())
     }
 
@@ -2896,13 +2893,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
 
     fn unwind_storage_hashing_range(
         &self,
-        range: impl RangeBounds<BlockNumberAddress>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
-        let changesets = self
-            .tx
-            .cursor_read::<tables::StorageChangeSets>()?
-            .walk_range(range)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let changesets = self.storage_changesets_range(range)?;
         self.unwind_storage_hashing(changesets.into_iter())
     }
 
@@ -2997,11 +2990,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<usize> {
-        let changesets = self
-            .tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(range)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let changesets = self.account_changesets_range(range)?;
         self.unwind_account_history_indices(changesets.iter())
     }
 
@@ -3063,13 +3052,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
 
     fn unwind_storage_history_indices_range(
         &self,
-        range: impl RangeBounds<BlockNumberAddress>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<usize> {
-        let changesets = self
-            .tx
-            .cursor_read::<tables::StorageChangeSets>()?
-            .walk_range(range)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let changesets = self.storage_changesets_range(range)?;
         self.unwind_storage_history_indices(changesets.into_iter())
     }
 
