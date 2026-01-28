@@ -758,7 +758,7 @@ mod tests {
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::noop::NoopTransactionPool;
     use serde_json::json;
-    use tokio::net::TcpListener;
+    use tokio::{net::TcpListener, sync::Notify};
     use tokio_tungstenite::tungstenite::protocol::{frame::Utf8Bytes, Message};
 
     const TEST_HOST: &str = "127.0.0.1";
@@ -871,5 +871,51 @@ mod tests {
             matches!(result, Err(EthStatsError::InvalidUrl(_))),
             "Should detect invalid URL format"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn report_latency_lock_order_regression() {
+        // Simulate a live connection so a pong handler (report_latency) can grab conn.read().
+        let (server_url, server_handle) = setup_mock_server().await;
+        let ethstats_url = format!("test-node:test-secret@{server_url}");
+
+        let network = NoopNetwork::default();
+        let provider = NoopProvider::default();
+        let pool = NoopTransactionPool::default();
+
+        let service = EthStatsService::new(&ethstats_url, network, provider, pool)
+            .await
+            .expect("Service should connect");
+
+        // Keep last_ping set to mimic an outstanding ping while a pong is being handled.
+        let mut last_ping_guard = service.last_ping.lock().await;
+        *last_ping_guard = Some(Instant::now());
+
+        let started = Arc::new(Notify::new());
+        let started_clone = started.clone();
+        let service_clone = service.clone();
+        let handle = tokio::spawn(async move {
+            started_clone.notify_one();
+            let _ = service_clone.report_latency().await;
+        });
+
+        // Let the pong handler start and (in the unfixed version) hold conn.read().
+        started.notified().await;
+        tokio::task::yield_now().await;
+
+        // This represents the timeout task trying to take conn.write() to close after a timeout.
+        // In the unfixed lock order, it would block because report_latency holds conn.read().
+        let write_guard =
+            tokio::time::timeout(std::time::Duration::from_millis(100), service.conn.write())
+                .await
+                .expect(
+                    "conn write lock should not be held while report_latency waits on last_ping",
+                );
+
+        drop(write_guard);
+        drop(last_ping_guard);
+
+        let _ = handle.await;
+        server_handle.abort();
     }
 }
