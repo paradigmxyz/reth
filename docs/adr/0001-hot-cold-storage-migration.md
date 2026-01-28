@@ -2,7 +2,6 @@
 
 - **Status:** Draft
 - **Date:** 2026-01-28
-- **Authors:** @joshie, @emma, @mattsse, @georgios, @Dan Cline
 
 ## Context
 
@@ -22,16 +21,17 @@ We will deprecate legacy MDBX-only configurations and establish a clear timeline
 
 | Milestone | Target | Action |
 |-----------|--------|--------|
-| Hot/cold experimental (v1.11.0) | First week of Feb 2026 | Release behind feature flag |
-| Hot/cold GA | Q1 2026 | Announce deprecation of legacy configs |
-| Deprecation window | +3 months post-GA | No guarantees of legacy support |
-| Legacy MDBX cutoff | Before Glamsterdam (H1 2026) | Remove legacy support |
+| Hot/cold experimental (v1.11.0) | w/c 2nd of Feb 2026 | Release behind feature flag |
+| Hot/cold GA | w/c 9th of Feb 2026| Announce deprecation of legacy configs |
+| Deprecation window | w/c 16th of Feb 2026 | No guarantees of legacy support |
+| Legacy MDBX cutoff | w/c 23rd of Feb 2026 | Remove legacy support |
+| Glamsterdam | 27th of Feb 2026 | Glamsterdam Live |
 
 **Key constraint:** DB break must happen before Glamsterdam, not during devnets.
 
 ### Migration Strategy
 
-**There is no in-place migration path.** The MDBX freelist structure makes `mdbx_copy`-style migrations infeasible.
+**There is no in-place migration path.** 
 
 **Solution: Snapshots**
 - Operators will download fresh snapshots from new nodes
@@ -39,6 +39,9 @@ We will deprecate legacy MDBX-only configurations and establish a clear timeline
   - Simplicity
   - Reduced downtime concerns
   - Easier communication to operators
+
+**Solution: Full resync**
+- Operators can also do a full resync if they prefer
 
 ### External Operators
 
