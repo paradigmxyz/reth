@@ -1083,6 +1083,87 @@ impl SparseTrieExt for ParallelSparseTrie {
 
         nodes_converted
     }
+
+    fn update_leaves(
+        &mut self,
+        updates: &mut alloy_primitives::map::B256Map<reth_trie_sparse::LeafUpdate>,
+        mut proof_required_fn: impl FnMut(Nibbles, u8),
+    ) -> SparseTrieResult<()> {
+        use alloy_primitives::map::HashSet;
+        use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
+
+        let mut requested: HashSet<(Nibbles, u8)> = HashSet::default();
+
+        let keys: Vec<B256> = updates.keys().copied().collect();
+
+        for key in keys {
+            let full_path = Nibbles::unpack(key);
+            let update = updates.get(&key).unwrap().clone();
+
+            match update {
+                LeafUpdate::Changed(value) => {
+                    if value.is_empty() {
+                        let old_value = self.upper_subtrie.inner.values.get(&full_path).cloned();
+
+                        match self.remove_leaf(&full_path, NoRevealProvider) {
+                            Ok(()) => {
+                                updates.remove(&key);
+                            }
+                            Err(e) => {
+                                if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
+                                    if let Some(old) = old_value {
+                                        self.upper_subtrie.inner.values.insert(full_path, old);
+                                    }
+
+                                    let min_len = (path.len() as u8).min(64);
+                                    if requested.insert((full_path, min_len)) {
+                                        proof_required_fn(full_path, min_len);
+                                    }
+                                } else {
+                                    return Err(e);
+                                }
+                            }
+                        }
+                    } else {
+                        let existed = self.upper_subtrie.inner.values.contains_key(&full_path);
+
+                        match self.update_leaf(full_path, value, NoRevealProvider) {
+                            Ok(()) => {
+                                updates.remove(&key);
+                            }
+                            Err(e) => {
+                                if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
+                                    if !existed {
+                                        self.upper_subtrie.inner.values.remove(&full_path);
+                                    }
+
+                                    let min_len = (path.len() as u8).min(64);
+                                    if requested.insert((full_path, min_len)) {
+                                        proof_required_fn(full_path, min_len);
+                                    }
+                                } else {
+                                    return Err(e);
+                                }
+                            }
+                        }
+                    }
+                }
+                LeafUpdate::Touched => match self.find_leaf(&full_path, None) {
+                    Err(LeafLookupError::BlindedNode { path, .. }) => {
+                        let min_len = (path.len() as u8).min(64);
+                        if requested.insert((full_path, min_len)) {
+                            proof_required_fn(full_path, min_len);
+                        }
+                    }
+                    Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {
+                        updates.remove(&key);
+                    }
+                },
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl ParallelSparseTrie {
@@ -7652,5 +7733,388 @@ mod tests {
 
         // The trie should still be functional
         let _ = trie.root();
+    }
+
+    // ==================== update_leaves tests ====================
+
+    #[test]
+    fn test_update_leaves_successful_update() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create a leaf in the trie using a full-length key
+        let b256_key = B256::with_last_byte(42);
+        let key = Nibbles::unpack(b256_key);
+        let value = encode_account_value(1);
+        trie.update_leaf(key, value, &provider).unwrap();
+
+        // Create update map with a new value for the same key
+        let new_value = encode_account_value(2);
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Changed(new_value));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Update should succeed: map empty, callback not invoked
+        assert!(updates.is_empty(), "Update map should be empty after successful update");
+        assert!(
+            proof_targets.borrow().is_empty(),
+            "Callback should not be invoked for revealed paths"
+        );
+    }
+
+    #[test]
+    fn test_update_leaves_blinded_node() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        // Create a trie with a blinded node
+        // Use a small value that fits in RLP encoding
+        let small_value = alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec();
+        let leaf = LeafNode::new(
+            Nibbles::default(), // short key for RLP encoding
+            small_value,
+        );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)), // blinded child at 0
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut trie = ParallelSparseTrie::from_root(
+            branch.clone(),
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::new(0b01),
+                tree_mask: TrieMask::default(),
+            }),
+            false,
+        )
+        .unwrap();
+
+        // Reveal only the branch and one child, leaving child 0 as a Hash node
+        trie.reveal_node(
+            Nibbles::default(),
+            branch,
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::default(),
+                tree_mask: TrieMask::new(0b01),
+            }),
+        )
+        .unwrap();
+        trie.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
+
+        // The path 0x0... is blinded (Hash node)
+        // Create an update targeting the blinded path using a full B256 key
+        let b256_key = B256::ZERO; // starts with 0x0...
+
+        let new_value = encode_account_value(42);
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Changed(new_value));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Update should remain in map (blinded node)
+        assert!(!updates.is_empty(), "Update should remain in map when hitting blinded node");
+
+        // Callback should be invoked
+        let targets = proof_targets.borrow();
+        assert!(!targets.is_empty(), "Callback should be invoked for blinded path");
+
+        // min_len should equal the blinded node's path length (1 nibble)
+        assert_eq!(targets[0].1, 1, "min_len should equal blinded node path length");
+    }
+
+    #[test]
+    fn test_update_leaves_removal() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create two leaves so removal doesn't result in empty trie issues
+        // Use full-length keys
+        let b256_key1 = B256::with_last_byte(1);
+        let b256_key2 = B256::with_last_byte(2);
+        let key1 = Nibbles::unpack(b256_key1);
+        let key2 = Nibbles::unpack(b256_key2);
+        let value = encode_account_value(1);
+        trie.update_leaf(key1, value.clone(), &provider).unwrap();
+        trie.update_leaf(key2, value, &provider).unwrap();
+
+        // Create an update to remove key1 (empty value = removal)
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key1, LeafUpdate::Changed(vec![])); // empty = removal
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Removal should succeed: map empty
+        assert!(updates.is_empty(), "Update map should be empty after successful removal");
+    }
+
+    #[test]
+    fn test_update_leaves_removal_blinded() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        // Create a trie with a blinded node
+        // Use a small value that fits in RLP encoding
+        let small_value = alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec();
+        let leaf = LeafNode::new(
+            Nibbles::default(), // short key for RLP encoding
+            small_value,
+        );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)), // blinded child at 0
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut trie = ParallelSparseTrie::from_root(
+            branch.clone(),
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::new(0b01),
+                tree_mask: TrieMask::default(),
+            }),
+            false,
+        )
+        .unwrap();
+
+        trie.reveal_node(
+            Nibbles::default(),
+            branch,
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::default(),
+                tree_mask: TrieMask::new(0b01),
+            }),
+        )
+        .unwrap();
+        trie.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
+
+        // Simulate having a known value behind the blinded node
+        let b256_key = B256::ZERO; // starts with 0x0...
+        let full_path = Nibbles::unpack(b256_key);
+
+        // Insert the value into the trie's values map (simulating we know about it)
+        let old_value = encode_account_value(99);
+        trie.upper_subtrie.inner.values.insert(full_path, old_value.clone());
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Changed(vec![])); // empty = removal
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Callback should be invoked
+        assert!(
+            !proof_targets.borrow().is_empty(),
+            "Callback should be invoked when removal hits blinded node"
+        );
+
+        // Update should remain in map
+        assert!(!updates.is_empty(), "Update should remain in map when removal hits blinded node");
+
+        // Original value should be preserved (reverted)
+        assert_eq!(
+            trie.upper_subtrie.inner.values.get(&full_path),
+            Some(&old_value),
+            "Original value should be preserved after failed removal"
+        );
+    }
+
+    #[test]
+    fn test_update_leaves_touched() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create a leaf in the trie using a full-length key
+        let b256_key = B256::with_last_byte(42);
+        let key = Nibbles::unpack(b256_key);
+        let value = encode_account_value(1);
+        trie.update_leaf(key, value, &provider).unwrap();
+
+        // Create a Touched update for the existing key
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Touched);
+
+        let proof_targets = RefCell::new(Vec::new());
+
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Update should be removed (path is accessible)
+        assert!(updates.is_empty(), "Touched update should be removed for accessible path");
+
+        // No callback
+        assert!(
+            proof_targets.borrow().is_empty(),
+            "Callback should not be invoked for accessible path"
+        );
+    }
+
+    #[test]
+    fn test_update_leaves_touched_blinded() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        // Create a trie with a blinded node
+        // Use a small value that fits in RLP encoding
+        let small_value = alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec();
+        let leaf = LeafNode::new(
+            Nibbles::default(), // short key for RLP encoding
+            small_value,
+        );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)), // blinded child at 0
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut trie = ParallelSparseTrie::from_root(
+            branch.clone(),
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::new(0b01),
+                tree_mask: TrieMask::default(),
+            }),
+            false,
+        )
+        .unwrap();
+
+        trie.reveal_node(
+            Nibbles::default(),
+            branch,
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::default(),
+                tree_mask: TrieMask::new(0b01),
+            }),
+        )
+        .unwrap();
+        trie.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
+
+        // Create a Touched update targeting the blinded path using full B256 key
+        let b256_key = B256::ZERO; // starts with 0x0...
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Touched);
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Callback should be invoked
+        assert!(!proof_targets.borrow().is_empty(), "Callback should be invoked for blinded path");
+
+        // Update should remain in map
+        assert!(!updates.is_empty(), "Touched update should remain in map for blinded path");
+    }
+
+    #[test]
+    fn test_update_leaves_deduplication() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        // Create a trie with a blinded node
+        // Use a small value that fits in RLP encoding
+        let small_value = alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec();
+        let leaf = LeafNode::new(
+            Nibbles::default(), // short key for RLP encoding
+            small_value,
+        );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)), // blinded child at 0
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut trie = ParallelSparseTrie::from_root(
+            branch.clone(),
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::new(0b01),
+                tree_mask: TrieMask::default(),
+            }),
+            false,
+        )
+        .unwrap();
+
+        trie.reveal_node(
+            Nibbles::default(),
+            branch,
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::default(),
+                tree_mask: TrieMask::new(0b01),
+            }),
+        )
+        .unwrap();
+        trie.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
+
+        // Create multiple updates that would all hit the same blinded node at path 0x0
+        // Use full B256 keys that all start with 0x0
+        let b256_key1 = B256::ZERO;
+        let b256_key2 = B256::with_last_byte(1); // still starts with 0x0
+        let b256_key3 = B256::with_last_byte(2); // still starts with 0x0
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        let value = encode_account_value(42);
+
+        updates.insert(b256_key1, LeafUpdate::Changed(value.clone()));
+        updates.insert(b256_key2, LeafUpdate::Changed(value.clone()));
+        updates.insert(b256_key3, LeafUpdate::Changed(value));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // The callback should be invoked 3 times - once for each unique full_path
+        // The deduplication is by (full_path, min_len), not by blinded node
+        let targets = proof_targets.borrow();
+        assert_eq!(targets.len(), 3, "Callback should be invoked for each unique key");
+
+        // All should have the same min_len (1) since they all hit blinded node at path 0x0
+        for (_, min_len) in targets.iter() {
+            assert_eq!(*min_len, 1, "All should have min_len 1 from blinded node at 0x0");
+        }
     }
 }

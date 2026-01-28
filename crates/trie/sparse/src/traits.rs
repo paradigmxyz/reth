@@ -4,7 +4,7 @@ use core::fmt::Debug;
 
 use alloc::{borrow::Cow, vec, vec::Vec};
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256Map, HashMap, HashSet},
     B256,
 };
 use alloy_trie::BranchNodeCompact;
@@ -12,6 +12,18 @@ use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 
 use crate::provider::TrieNodeProvider;
+
+/// Describes an update to a leaf in the sparse trie.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeafUpdate {
+    /// The leaf value has been changed to the given RLP-encoded value.
+    /// Empty Vec indicates the leaf has been removed.
+    Changed(Vec<u8>),
+    /// The leaf value is likely changed, but the new value is not yet known.
+    /// Used in prewarming contexts where transactions run out-of-order
+    /// to optimistically reveal the trie.
+    Touched,
+}
 
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
@@ -260,6 +272,24 @@ pub trait SparseTrieExt: SparseTrie {
     ///
     /// The number of nodes converted to hash stubs.
     fn prune(&mut self, max_depth: usize) -> usize;
+
+    /// Applies leaf updates to the sparse trie.
+    ///
+    /// When a [`LeafUpdate::Changed`] is successfully applied, it is removed from the
+    /// given [`B256Map`]. If it could not be applied due to blinded nodes, it remains
+    /// in the map and the callback is invoked with the required proof target.
+    ///
+    /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
+    /// `updates` map can be reused to retry the update.
+    ///
+    /// Proof targets are not passed to the callback twice for the same path.
+    ///
+    /// [`LeafUpdate::Touched`] behaves identically except it does not modify the leaf value.
+    fn update_leaves(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        proof_required_fn: impl FnMut(Nibbles, u8),
+    ) -> SparseTrieResult<()>;
 }
 
 /// Tracks modifications to the sparse trie structure.
