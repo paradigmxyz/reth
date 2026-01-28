@@ -2,7 +2,8 @@ use crate::tree::metrics::BlockBufferMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber};
 use reth_primitives_traits::{Block, SealedBlock};
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::{BTreeMap, VecDeque};
 
 /// Contains the tree of pending blocks that cannot be executed due to missing parent.
 /// It allows to store unconnected blocks for potential future inclusion.
@@ -18,14 +19,14 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 #[derive(Debug)]
 pub struct BlockBuffer<B: Block> {
     /// All blocks in the buffer stored by their block hash.
-    pub(crate) blocks: HashMap<BlockHash, SealedBlock<B>>,
+    pub(crate) blocks: FxHashMap<BlockHash, SealedBlock<B>>,
     /// Map of any parent block hash (even the ones not currently in the buffer)
     /// to the buffered children.
     /// Allows connecting buffered blocks by parent.
-    pub(crate) parent_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
+    pub(crate) parent_to_child: FxHashMap<BlockHash, FxHashSet<BlockHash>>,
     /// `BTreeMap` tracking the earliest blocks by block number.
     /// Used for removal of old blocks that precede finalization.
-    pub(crate) earliest_blocks: BTreeMap<BlockNumber, HashSet<BlockHash>>,
+    pub(crate) earliest_blocks: BTreeMap<BlockNumber, FxHashSet<BlockHash>>,
     /// FIFO queue tracking block insertion order for eviction.
     /// When the buffer reaches its capacity limit, the oldest block is evicted first.
     pub(crate) block_queue: VecDeque<BlockHash>,
@@ -38,12 +39,13 @@ pub struct BlockBuffer<B: Block> {
 impl<B: Block> BlockBuffer<B> {
     /// Create new buffer with max limit of blocks
     pub fn new(limit: u32) -> Self {
+        let capacity = limit as usize;
         Self {
-            blocks: Default::default(),
-            parent_to_child: Default::default(),
-            earliest_blocks: Default::default(),
-            block_queue: VecDeque::default(),
-            max_blocks: limit as usize,
+            blocks: FxHashMap::with_capacity_and_hasher(capacity, Default::default()),
+            parent_to_child: FxHashMap::with_capacity_and_hasher(capacity, Default::default()),
+            earliest_blocks: BTreeMap::default(),
+            block_queue: VecDeque::with_capacity(capacity),
+            max_blocks: capacity,
             metrics: Default::default(),
         }
     }
@@ -104,7 +106,7 @@ impl<B: Block> BlockBuffer<B> {
 
     /// Discard all blocks that precede block number from the buffer.
     pub fn remove_old_blocks(&mut self, block_number: BlockNumber) {
-        let mut block_hashes_to_remove = Vec::new();
+        let mut block_hashes_to_remove = Vec::with_capacity(64);
 
         // discard all blocks that are before the finalized number.
         while let Some(entry) = self.earliest_blocks.first_entry() {
@@ -164,7 +166,7 @@ impl<B: Block> BlockBuffer<B> {
         // remove all parent child connection and all the child children blocks that are connected
         // to the discarded parent blocks.
         let mut remove_parent_children = parent_hashes;
-        let mut removed_blocks = Vec::new();
+        let mut removed_blocks = Vec::with_capacity(32);
         while let Some(parent_hash) = remove_parent_children.pop() {
             // get this child blocks children and add them to the remove list.
             if let Some(parent_children) = self.parent_to_child.remove(&parent_hash) {
