@@ -1,9 +1,8 @@
 # ADR: Hot/Cold Storage Migration & Legacy MDBX Deprecation
 
-- **Status:** Proposed
+- **Status:** Draft
 - **Date:** 2026-01-28
 - **Authors:** @joshie, @emma, @mattsse, @georgios, @Dan Cline
-- **Discussion:** [Slack thread](https://tempoxyz.slack.com/archives/C09FQDW2ZRP/p1768925785386699)
 
 ## Context
 
@@ -23,7 +22,7 @@ We will deprecate legacy MDBX-only configurations and establish a clear timeline
 
 | Milestone | Target | Action |
 |-----------|--------|--------|
-| Hot/cold experimental (v1.11.0) | ~Feb 2026 | Release behind feature flag |
+| Hot/cold experimental (v1.11.0) | First week of Feb 2026 | Release behind feature flag |
 | Hot/cold GA | Q1 2026 | Announce deprecation of legacy configs |
 | Deprecation window | +3 months post-GA | No guarantees of legacy support |
 | Legacy MDBX cutoff | Before Glamsterdam (H1 2026) | Remove legacy support |
@@ -55,10 +54,6 @@ We will deprecate legacy MDBX-only configurations and establish a clear timeline
 - Clear documentation and advance notice are critical
 
 ### Tempo Internal
-
-**Key differences from external reth users:**
-- Slightly easier to coordinate (smaller, more responsive user base)
-- Protocol changes like state root are still on the table, so DB breaks are acceptable
 
 **Requirements:**
 1. Define cutover plan (coordinated restart vs. phased rollout)
