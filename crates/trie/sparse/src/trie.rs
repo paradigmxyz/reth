@@ -2,14 +2,7 @@ use crate::{
     provider::{RevealedNode, TrieNodeProvider},
     LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
 };
-use alloc::{
-    borrow::Cow,
-    boxed::Box,
-    fmt,
-    string::String,
-    vec,
-    vec::Vec,
-};
+use alloc::{borrow::Cow, boxed::Box, fmt, string::String, vec, vec::Vec};
 use alloy_primitives::{
     hex, keccak256,
     map::{Entry, HashMap, HashSet},
