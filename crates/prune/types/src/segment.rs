@@ -62,10 +62,15 @@ impl PruneSegment {
         Self::iter()
     }
 
+    /// Minimum number of blocks to keep for receipts and bodies to handle reorgs safely.
+    /// 2 epochs (32 blocks each) ensures we have data for any consensus-valid reorg.
+    const MIN_RECEIPTS_BODIES_BLOCKS: u64 = 64;
+
     /// Returns minimum number of blocks to keep in the database for this segment.
     pub const fn min_blocks(&self) -> u64 {
         match self {
-            Self::SenderRecovery | Self::TransactionLookup | Self::Receipts | Self::Bodies => 0,
+            Self::SenderRecovery | Self::TransactionLookup => 0,
+            Self::Receipts | Self::Bodies => Self::MIN_RECEIPTS_BODIES_BLOCKS,
             Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
                 MINIMUM_PRUNING_DISTANCE
             }
