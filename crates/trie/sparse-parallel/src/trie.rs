@@ -1071,55 +1071,72 @@ impl SparseTrieExt for ParallelSparseTrie {
         use alloy_primitives::map::HashSet;
         use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
 
+        const MAX_NIBBLE_PATH_LEN: u8 = 64;
+
         let mut requested: HashSet<(Nibbles, u8)> = HashSet::default();
+
+        let mut request_proof =
+            |requested: &mut HashSet<(Nibbles, u8)>, full_path: Nibbles, blinded_path: &Nibbles| {
+                let min_len = (blinded_path.len() as u8).min(MAX_NIBBLE_PATH_LEN);
+                if requested.insert((full_path, min_len)) {
+                    proof_required_fn(full_path, min_len);
+                }
+            };
 
         let keys: Vec<B256> = updates.keys().copied().collect();
 
         for key in keys {
             let full_path = Nibbles::unpack(key);
-            let update = updates.get(&key).unwrap().clone();
+
+            let Some(update) = updates.remove(&key) else { continue };
 
             match update {
                 LeafUpdate::Changed(value) => {
                     if value.is_empty() {
-                        let old_value = self.upper_subtrie.inner.values.get(&full_path).cloned();
+                        // Removal: snapshot old value from correct subtrie
+                        let old_value = self.get_leaf_value(&full_path).cloned();
 
                         match self.remove_leaf(&full_path, NoRevealProvider) {
                             Ok(()) => {
-                                updates.remove(&key);
+                                // Success - update already removed from map
                             }
                             Err(e) => {
                                 if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
+                                    // Revert: restore old value to correct subtrie
                                     if let Some(old) = old_value {
-                                        self.upper_subtrie.inner.values.insert(full_path, old);
+                                        self.subtrie_for_path_mut(&full_path)
+                                            .inner
+                                            .values
+                                            .insert(full_path, old);
                                     }
-
-                                    let min_len = (path.len() as u8).min(64);
-                                    if requested.insert((full_path, min_len)) {
-                                        proof_required_fn(full_path, min_len);
-                                    }
+                                    request_proof(&mut requested, full_path, path);
+                                    // Re-insert update for retry
+                                    updates.insert(key, LeafUpdate::Changed(value));
                                 } else {
                                     return Err(e);
                                 }
                             }
                         }
                     } else {
+                        // Update/insert: check existence in upper subtrie where update_leaf inserts
+                        // Note: update_leaf always inserts into upper_subtrie.inner.values first
                         let existed = self.upper_subtrie.inner.values.contains_key(&full_path);
 
-                        match self.update_leaf(full_path, value, NoRevealProvider) {
+                        match self.update_leaf(full_path, value.clone(), NoRevealProvider) {
                             Ok(()) => {
-                                updates.remove(&key);
+                                // Success - update already removed from map
                             }
                             Err(e) => {
                                 if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
+                                    // Revert: remove value from upper subtrie if it was newly
+                                    // inserted update_leaf
+                                    // always inserts into upper_subtrie.inner.values
                                     if !existed {
                                         self.upper_subtrie.inner.values.remove(&full_path);
                                     }
-
-                                    let min_len = (path.len() as u8).min(64);
-                                    if requested.insert((full_path, min_len)) {
-                                        proof_required_fn(full_path, min_len);
-                                    }
+                                    request_proof(&mut requested, full_path, path);
+                                    // Re-insert update for retry
+                                    updates.insert(key, LeafUpdate::Changed(value));
                                 } else {
                                     return Err(e);
                                 }
@@ -1129,13 +1146,12 @@ impl SparseTrieExt for ParallelSparseTrie {
                 }
                 LeafUpdate::Touched => match self.find_leaf(&full_path, None) {
                     Err(LeafLookupError::BlindedNode { path, .. }) => {
-                        let min_len = (path.len() as u8).min(64);
-                        if requested.insert((full_path, min_len)) {
-                            proof_required_fn(full_path, min_len);
-                        }
+                        request_proof(&mut requested, full_path, &path);
+                        // Re-insert update for retry
+                        updates.insert(key, LeafUpdate::Touched);
                     }
                     Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {
-                        updates.remove(&key);
+                        // Success - update already removed from map
                     }
                 },
             }
@@ -8143,5 +8159,233 @@ mod tests {
         for (_, min_len) in targets.iter() {
             assert_eq!(*min_len, 1, "All should have min_len 1 from blinded node at 0x0");
         }
+    }
+
+    #[test]
+    fn test_update_leaves_multiple_keys() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create multiple leaves with different prefixes
+        let keys: Vec<B256> =
+            vec![B256::repeat_byte(0xAB), B256::repeat_byte(0xCD), B256::repeat_byte(0xEF)];
+
+        for (i, &b256_key) in keys.iter().enumerate() {
+            let key = Nibbles::unpack(b256_key);
+            let value = encode_account_value(i as u64);
+            trie.update_leaf(key, value, &provider).unwrap();
+        }
+
+        // Update all values using update_leaves
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        for (i, &b256_key) in keys.iter().enumerate() {
+            updates.insert(b256_key, LeafUpdate::Changed(encode_account_value((i + 100) as u64)));
+        }
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        assert!(updates.is_empty(), "All updates should succeed");
+        assert!(proof_targets.borrow().is_empty(), "No proofs should be needed");
+
+        // Verify all values were updated
+        for (i, &b256_key) in keys.iter().enumerate() {
+            let key = Nibbles::unpack(b256_key);
+            let expected = encode_account_value((i + 100) as u64);
+            assert_eq!(trie.get_leaf_value(&key), Some(&expected), "Value should be updated");
+        }
+    }
+
+    #[test]
+    fn test_update_leaves_batch_removal() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create multiple leaves
+        let keys: Vec<B256> =
+            vec![B256::repeat_byte(0xAB), B256::repeat_byte(0xCD), B256::repeat_byte(0xEF)];
+
+        for (i, &b256_key) in keys.iter().enumerate() {
+            let key = Nibbles::unpack(b256_key);
+            let value = encode_account_value(i as u64);
+            trie.update_leaf(key, value, &provider).unwrap();
+        }
+
+        // Remove first key using update_leaves (empty value = removal)
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(keys[0], LeafUpdate::Changed(vec![]));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        let key1 = Nibbles::unpack(keys[0]);
+        let key2 = Nibbles::unpack(keys[1]);
+        let key3 = Nibbles::unpack(keys[2]);
+
+        assert!(updates.is_empty(), "Removal should succeed");
+        assert!(trie.get_leaf_value(&key1).is_none(), "Value should be removed");
+        assert!(trie.get_leaf_value(&key2).is_some(), "Other values should remain");
+        assert!(trie.get_leaf_value(&key3).is_some(), "Other values should remain");
+    }
+
+    #[test]
+    fn test_update_leaves_rollback_on_blinded_node() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        // Use the same blinded node setup as test_update_leaves_blinded_node
+        let small_value = alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec();
+        let leaf = LeafNode::new(Nibbles::default(), small_value);
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)), // blinded child at 0
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut trie = ParallelSparseTrie::from_root(
+            branch.clone(),
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::new(0b01),
+                tree_mask: TrieMask::default(),
+            }),
+            false,
+        )
+        .unwrap();
+
+        trie.reveal_node(
+            Nibbles::default(),
+            branch,
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::default(),
+                tree_mask: TrieMask::new(0b01),
+            }),
+        )
+        .unwrap();
+        trie.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
+
+        // Attempt update targeting blinded path
+        let b256_key = B256::ZERO;
+        let full_path = Nibbles::unpack(b256_key);
+
+        // Check no value exists before
+        assert!(trie.get_leaf_value(&full_path).is_none(), "No value should exist before update");
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Changed(encode_account_value(42)));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // After failed update, trie should be unchanged
+        assert!(
+            trie.get_leaf_value(&full_path).is_none(),
+            "No value should exist after failed update (rollback)"
+        );
+        assert!(!updates.is_empty(), "Update should remain in map");
+        assert!(!proof_targets.borrow().is_empty(), "Proof should be requested");
+    }
+
+    #[test]
+    fn test_update_leaves_retry_after_reveal() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create two leaves: one at 0x1... (revealed) and prepare to add at 0x0... (initially
+        // empty)
+        let revealed_key = B256::with_last_byte(0x10);
+        let revealed_path = Nibbles::unpack(revealed_key);
+        trie.update_leaf(revealed_path, encode_account_value(1), &provider).unwrap();
+
+        // Compute root to establish state
+        let _ = trie.root();
+
+        // Now try to add a leaf at a new location
+        let new_key = B256::with_last_byte(0x20);
+        let new_value = encode_account_value(42);
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(new_key, LeafUpdate::Changed(new_value.clone()));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // In this case, the trie is fully revealed so update should succeed
+        assert!(updates.is_empty(), "Update should succeed on revealed trie");
+
+        // Verify the value was added
+        let new_path = Nibbles::unpack(new_key);
+        assert_eq!(trie.get_leaf_value(&new_path), Some(&new_value));
+    }
+
+    #[test]
+    fn test_update_leaves_batch_update_and_insert() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create an existing leaf
+        let existing_key = B256::repeat_byte(0xAA);
+        let existing_path = Nibbles::unpack(existing_key);
+        trie.update_leaf(existing_path, encode_account_value(1), &provider).unwrap();
+
+        // Now use update_leaves to both update existing and insert new
+        let new_key = B256::repeat_byte(0xBB);
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(existing_key, LeafUpdate::Changed(encode_account_value(100))); // update
+        updates.insert(new_key, LeafUpdate::Changed(encode_account_value(200))); // insert
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Both should succeed
+        assert!(updates.is_empty(), "All updates should succeed");
+        assert!(proof_targets.borrow().is_empty(), "No proofs should be needed");
+
+        // Verify values
+        let new_path = Nibbles::unpack(new_key);
+        assert_eq!(
+            trie.get_leaf_value(&existing_path),
+            Some(&encode_account_value(100)),
+            "Existing value should be updated"
+        );
+        assert_eq!(
+            trie.get_leaf_value(&new_path),
+            Some(&encode_account_value(200)),
+            "New value should be inserted"
+        );
     }
 }
