@@ -1222,7 +1222,7 @@ impl ParallelSparseTrie {
     ///
     /// Handles three update variants:
     /// - `Changed(empty)`: Remove leaf, restore value on blinded node error
-    /// - `Changed(value)`: Insert/update leaf, clean up on blinded node error  
+    /// - `Changed(value)`: Insert/update leaf, clean up on blinded node error
     /// - `Touched`: Check path accessibility without mutation
     fn apply_single_update(
         &mut self,
@@ -1241,10 +1241,15 @@ impl ParallelSparseTrie {
                     Err(e) => {
                         if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
                             if let Some(old) = old_value {
-                                self.subtrie_for_path_mut(full_path)
-                                    .inner
-                                    .values
-                                    .insert(*full_path, old);
+                                // Mirror get_leaf_value logic: check if lower subtrie exists and
+                                // is non-empty before inserting there
+                                if let Some(subtrie) = self.lower_subtrie_for_path_mut(full_path) &&
+                                    !subtrie.is_empty()
+                                {
+                                    subtrie.inner.values.insert(*full_path, old);
+                                } else {
+                                    self.upper_subtrie.inner.values.insert(*full_path, old);
+                                }
                             }
                             Err(UpdateLeafOutcome::Blinded { blinded_path: *path })
                         } else {
