@@ -3589,7 +3589,6 @@ version = "0.0.0"
 dependencies = [
  "alloy-eips",
  "alloy-evm",
- "alloy-sol-macro",
  "alloy-sol-types",
  "eyre",
  "reth-ethereum",
@@ -13202,9 +13201,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-logfmt"
-version = "0.3.6"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b567204f58bb0258b9bfe141193d7dd6c649033712eb01b8f3ceafff89c80a3"
+checksum = "6b1f47d22deb79c3f59fcf2a1f00f60cbdc05462bf17d1cd356c1fefa3f444bd"
 dependencies = [
  "time",
  "tracing",
