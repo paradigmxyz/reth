@@ -18,6 +18,37 @@ impl From<PruneProgress> for PrunerOutput {
     }
 }
 
+impl PrunerOutput {
+    /// Returns a human-readable log message summarizing the pruner run.
+    ///
+    /// Format: `"Pruner finished in 148ms segments=AccountHistory[24318865, done] ..."`
+    pub fn to_log_message(&self, elapsed_ms: u64) -> alloc::string::String {
+        use alloc::string::ToString;
+
+        let status = match self.progress {
+            PruneProgress::HasMoreData(_) => "Pruner interrupted, has more data",
+            PruneProgress::Finished => "Pruner finished",
+        };
+
+        let segments: Vec<_> = self
+            .segments
+            .iter()
+            .filter(|(_, seg)| seg.pruned > 0)
+            .map(|(segment, seg)| {
+                let block = seg
+                    .checkpoint
+                    .and_then(|c| c.block_number)
+                    .map(|b| b.to_string())
+                    .unwrap_or_else(|| "?".to_string());
+                let progress = if seg.progress.is_finished() { "done" } else { "in_progress" };
+                alloc::format!("{segment}[{block}, {progress}]")
+            })
+            .collect();
+
+        alloc::format!("{status} in {elapsed_ms}ms segments={}", segments.join(" "))
+    }
+}
+
 /// Represents information of a pruner run for a segment.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 #[display("(table={segment}, pruned={pruned}, status={progress})")]

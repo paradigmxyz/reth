@@ -149,33 +149,12 @@ where
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        let message = match output.progress {
-            PruneProgress::HasMoreData(_) => "Pruner interrupted and has more data to prune",
-            PruneProgress::Finished => "Pruner finished",
-        };
-
-        let segments_summary: Vec<_> = output
-            .segments
-            .iter()
-            .filter(|(_, seg)| seg.pruned > 0)
-            .map(|(segment, seg)| {
-                let block = seg
-                    .checkpoint
-                    .and_then(|c| c.block_number)
-                    .map(|b| b.to_string())
-                    .unwrap_or_else(|| "?".to_string());
-                let status = if seg.progress.is_finished() { "done" } else { "in_progress" };
-                format!("{segment}[{block}, {status}]")
-            })
-            .collect();
-
         debug!(
             target: "pruner",
             tip_block_number,
             deleted_entries,
-            elapsed_ms = elapsed.as_millis() as u64,
-            segments = %segments_summary.join(" "),
-            "{message}",
+            "{}",
+            output.to_log_message(elapsed.as_millis() as u64),
         );
 
         self.event_sender.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
