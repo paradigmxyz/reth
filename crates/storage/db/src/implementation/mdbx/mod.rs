@@ -602,14 +602,14 @@ impl DatabaseEnv {
             let mut version_cursor = tx.cursor_write::<tables::VersionHistory>()?;
 
             let last_version = version_cursor.last()?.map(|(_, v)| v);
-            if Some(&version) != last_version.as_ref() {
+            if Some(&version) == last_version.as_ref() {
+                false
+            } else {
                 version_cursor.upsert(
                     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
                     &version,
                 )?;
                 true
-            } else {
-                false
             }
         };
 

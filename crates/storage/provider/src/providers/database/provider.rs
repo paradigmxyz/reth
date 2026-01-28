@@ -4008,57 +4008,59 @@ mod tests {
         assert_eq!(num_entries, 5);
 
         // Verify account trie updates were written correctly
-        let tx = provider_rw.tx_ref();
-        let mut cursor = tx.cursor_read::<tables::AccountsTrie>().unwrap();
+        {
+            let tx = provider_rw.tx_ref();
+            let mut cursor = tx.cursor_read::<tables::AccountsTrie>().unwrap();
 
-        // Check first account node was updated
-        let nibbles1 = StoredNibbles(Nibbles::from_nibbles([0x1, 0x2]));
-        let entry1 = cursor.seek_exact(nibbles1).unwrap();
-        assert!(entry1.is_some(), "Updated account node should exist");
-        let expected_mask = reth_trie::TrieMask::new(0b1111_1111_1111_1111);
-        assert_eq!(
-            entry1.unwrap().1.state_mask,
-            expected_mask,
-            "Account node should have updated state_mask"
-        );
+            // Check first account node was updated
+            let nibbles1 = StoredNibbles(Nibbles::from_nibbles([0x1, 0x2]));
+            let entry1 = cursor.seek_exact(nibbles1).unwrap();
+            assert!(entry1.is_some(), "Updated account node should exist");
+            let expected_mask = reth_trie::TrieMask::new(0b1111_1111_1111_1111);
+            assert_eq!(
+                entry1.unwrap().1.state_mask,
+                expected_mask,
+                "Account node should have updated state_mask"
+            );
 
-        // Check deleted account node no longer exists
-        let nibbles2 = StoredNibbles(Nibbles::from_nibbles([0x3, 0x4]));
-        let entry2 = cursor.seek_exact(nibbles2).unwrap();
-        assert!(entry2.is_none(), "Deleted account node should not exist");
+            // Check deleted account node no longer exists
+            let nibbles2 = StoredNibbles(Nibbles::from_nibbles([0x3, 0x4]));
+            let entry2 = cursor.seek_exact(nibbles2).unwrap();
+            assert!(entry2.is_none(), "Deleted account node should not exist");
 
-        // Check new account node exists
-        let nibbles3 = StoredNibbles(Nibbles::from_nibbles([0x5, 0x6]));
-        let entry3 = cursor.seek_exact(nibbles3).unwrap();
-        assert!(entry3.is_some(), "New account node should exist");
+            // Check new account node exists
+            let nibbles3 = StoredNibbles(Nibbles::from_nibbles([0x5, 0x6]));
+            let entry3 = cursor.seek_exact(nibbles3).unwrap();
+            assert!(entry3.is_some(), "New account node should exist");
 
-        // Verify storage trie updates were written correctly
-        let mut storage_cursor = tx.cursor_dup_read::<tables::StoragesTrie>().unwrap();
+            // Verify storage trie updates were written correctly
+            let mut storage_cursor = tx.cursor_dup_read::<tables::StoragesTrie>().unwrap();
 
-        // Check storage for address1
-        let storage_entries1: Vec<_> = storage_cursor
-            .walk_dup(Some(storage_address1), None)
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(
-            storage_entries1.len(),
-            1,
-            "Storage address1 should have 1 entry after deletion"
-        );
-        assert_eq!(
-            storage_entries1[0].1.nibbles.0,
-            Nibbles::from_nibbles([0x1, 0x0]),
-            "Remaining entry should be [0x1, 0x0]"
-        );
+            // Check storage for address1
+            let storage_entries1: Vec<_> = storage_cursor
+                .walk_dup(Some(storage_address1), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(
+                storage_entries1.len(),
+                1,
+                "Storage address1 should have 1 entry after deletion"
+            );
+            assert_eq!(
+                storage_entries1[0].1.nibbles.0,
+                Nibbles::from_nibbles([0x1, 0x0]),
+                "Remaining entry should be [0x1, 0x0]"
+            );
 
-        // Check storage for address2 was wiped
-        let storage_entries2: Vec<_> = storage_cursor
-            .walk_dup(Some(storage_address2), None)
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
+            // Check storage for address2 was wiped
+            let storage_entries2: Vec<_> = storage_cursor
+                .walk_dup(Some(storage_address2), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
+        }
 
         provider_rw.commit().unwrap();
     }
