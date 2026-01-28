@@ -982,8 +982,7 @@ where
 
     /// Returns true if parallelism should be enabled for pruning the given number of tries.
     /// Will always return false in `no_std` builds.
-    #[allow(clippy::unused_self)]
-    const fn is_prune_parallelism_enabled(&self, num_tries: usize) -> bool {
+    const fn is_prune_parallelism_enabled(num_tries: usize) -> bool {
         #[cfg(not(feature = "std"))]
         return false;
 
@@ -1051,7 +1050,7 @@ where
         }
 
         // Prune storage tries that are kept
-        if self.is_prune_parallelism_enabled(tries_to_keep.len()) {
+        if Self::is_prune_parallelism_enabled(tries_to_keep.len()) {
             #[cfg(feature = "std")]
             {
                 use rayon::prelude::*;
