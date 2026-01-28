@@ -69,9 +69,7 @@ where
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    pub(super) fn run(
-        &mut self,
-    ) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         self.run_inner()
     }
 
@@ -129,11 +127,9 @@ where
         Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
 
-    /// Prepares the trie for reuse in subsequent payload validations.
+    /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
     ///
-    /// This prunes the trie to reduce memory, shrinks allocations to the given capacities,
-    /// and returns the trie ready for storage. Should be called after the state root result
-    /// has been sent to avoid blocking the critical path.
+    /// Should be called after the state root result has been sent.
     pub(super) fn into_trie_for_reuse(
         mut self,
         max_nodes_capacity: usize,

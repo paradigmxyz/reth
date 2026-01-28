@@ -325,7 +325,6 @@ where
         let (state_root_tx, state_root_rx) = channel();
 
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
-        // Pass parent_hash for continuation detection and block_hash to store with the result.
         self.spawn_sparse_trie_task(
             sparse_trie_rx,
             proof_handle,
@@ -512,8 +511,7 @@ where
 
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     ///
-    /// The trie is preserved across payload validations when the new payload is a direct
-    /// child of the previous one, reducing memory allocations and improving performance.
+    /// The trie is preserved when the new payload is a child of the previous one.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task<BPF>(
         &self,
@@ -568,6 +566,8 @@ where
             );
 
             let result = task.run();
+            let succeeded = result.is_ok();
+
             // Send state root computation result immediately - don't block on cleanup
             if state_root_tx.send(result).is_err() {
                 // Receiver dropped - payload was likely invalid or cancelled.
@@ -584,14 +584,27 @@ where
                 return;
             }
 
-            // Prune and preserve the trie for potential reuse.
+            // Only preserve the trie if computation succeeded - a failed computation
+            // may have left the trie in a partially updated/inconsistent state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            let trie = task.into_trie_for_reuse(
-                SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-            );
-            preserved_sparse_trie.store(PreservedSparseTrie::new(trie, block_hash));
+            if succeeded {
+                let trie = task.into_trie_for_reuse(
+                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                );
+                preserved_sparse_trie.store(PreservedSparseTrie::new(trie, block_hash));
+            } else {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    "State root computation failed, clearing trie"
+                );
+                let trie = task.into_cleared_trie(
+                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                );
+                preserved_sparse_trie.store(PreservedSparseTrie::new(trie, block_hash));
+            }
         });
     }
 
