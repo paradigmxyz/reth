@@ -223,14 +223,14 @@ where
             let mut failures = 0usize;
 
             // Process destroyed accounts (accounts with None value)
-            for (addr, account) in hashed_state.accounts.iter() {
+            for (addr, account) in &hashed_state.accounts {
                 if account.is_none() && filter_guard.remove(*addr) {
                     removed += 1;
                 }
             }
 
             // Process accounts with non-zero storage
-            for (addr, storage) in hashed_state.storages.iter() {
+            for (addr, storage) in &hashed_state.storages {
                 let has_non_zero =
                     storage.storage.iter().any(|(_, value)| *value != alloy_primitives::U256::ZERO);
 

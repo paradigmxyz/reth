@@ -1088,24 +1088,56 @@ where
 
         let mut storage_prefix_sets = std::mem::take(&mut prefix_sets.storage_prefix_sets);
 
+        // Early filter: identify accounts with empty storage before dispatching.
+        // This avoids chunking/dispatching work for accounts known to have no storage.
+        let (targets_to_dispatch, empty_storage_receivers) =
+            if let Some(storage_filter) = self.storage_filter.as_ref() {
+                let filter = storage_filter.read();
+                let mut filtered_targets = MultiProofTargets::default();
+                let mut empty_receivers =
+                    B256Map::<CrossbeamReceiver<StorageProofResultMessage>>::default();
+
+                for (hashed_address, slots) in targets.iter() {
+                    if filter.may_have_storage(*hashed_address) {
+                        filtered_targets.insert(*hashed_address, slots.clone());
+                    } else {
+                        // Create immediate response for accounts with no storage
+                        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+                        let empty_proof = DecodedStorageMultiProof::empty();
+                        let _ = result_tx.send(StorageProofResultMessage {
+                            hashed_address: *hashed_address,
+                            result: Ok(StorageProofResult::Legacy { proof: empty_proof }),
+                        });
+                        empty_receivers.insert(*hashed_address, result_rx);
+                    }
+                }
+
+                let skipped = empty_receivers.len() as u64;
+                #[cfg(feature = "metrics")]
+                if skipped > 0 {
+                    self.metrics.increment_storage_proofs_skipped(skipped);
+                }
+
+                (filtered_targets, empty_receivers)
+            } else {
+                (targets.clone(), B256Map::default())
+            };
+
         let storage_root_targets_len =
             StorageRootTargets::count(&prefix_sets.account_prefix_set, &storage_prefix_sets);
 
         tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
-        let (storage_proof_receivers, skipped_storage_proofs) = dispatch_storage_proofs(
+        let mut storage_proof_receivers = dispatch_storage_proofs(
             &self.storage_work_tx,
-            &targets,
+            &targets_to_dispatch,
             &mut storage_prefix_sets,
             collect_branch_node_masks,
             multi_added_removed_keys.as_ref(),
-            self.storage_filter.as_ref(),
         )?;
 
-        #[cfg(feature = "metrics")]
-        if skipped_storage_proofs > 0 {
-            self.metrics.increment_storage_proofs_skipped(skipped_storage_proofs);
-        }
+        // Merge in the empty storage receivers
+        storage_proof_receivers.extend(empty_storage_receivers);
 
         let account_prefix_set = std::mem::take(&mut prefix_sets.account_prefix_set);
 
@@ -1505,20 +1537,15 @@ where
 /// (not in the filter) will be skipped and an empty storage proof will be returned directly.
 ///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
-///
-/// Returns a tuple of (receivers, skipped_count) where skipped_count is the number of
-/// storage proofs that were skipped due to the storage filter optimization.
 fn dispatch_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     targets: &MultiProofTargets,
     storage_prefix_sets: &mut B256Map<PrefixSet>,
     with_branch_node_masks: bool,
     multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
-    storage_filter: Option<&Arc<RwLock<StorageAccountFilter>>>,
-) -> Result<(B256Map<CrossbeamReceiver<StorageProofResultMessage>>, u64), ParallelStateRootError> {
+) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(targets.len(), Default::default());
-    let mut skipped_count = 0u64;
 
     let mut sorted_targets: Vec<_> = targets.iter().collect();
     sorted_targets.sort_unstable_by_key(|(addr, _)| *addr);
@@ -1528,44 +1555,29 @@ fn dispatch_storage_proofs(
         // Create channel for receiving ProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
-        // Check if this account is known to have no storage.
-        // If the filter says the account has no storage, we can skip the proof entirely.
-        let skip_storage_proof = storage_filter
-            .as_ref()
-            .is_some_and(|filter| !filter.read().may_have_storage(*hashed_address));
+        // Create computation input and dispatch to worker
+        let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
+        let input = StorageProofInput::legacy(
+            *hashed_address,
+            prefix_set,
+            target_slots.clone(),
+            with_branch_node_masks,
+            multi_added_removed_keys.cloned(),
+        );
 
-        if skip_storage_proof {
-            skipped_count += 1;
-            let empty_proof = DecodedStorageMultiProof::empty();
-            let _ = result_tx.send(StorageProofResultMessage {
-                hashed_address: *hashed_address,
-                result: Ok(StorageProofResult::Legacy { proof: empty_proof }),
-            });
-        } else {
-            // Create computation input and dispatch to worker
-            let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
-            let input = StorageProofInput::legacy(
-                *hashed_address,
-                prefix_set,
-                target_slots.clone(),
-                with_branch_node_masks,
-                multi_added_removed_keys.cloned(),
-            );
-
-            storage_work_tx
-                .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
-                .map_err(|_| {
-                    ParallelStateRootError::Other(format!(
-                        "Failed to queue storage proof for {}: storage worker pool unavailable",
-                        hashed_address
-                    ))
-                })?;
-        }
+        storage_work_tx
+            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
+            .map_err(|_| {
+                ParallelStateRootError::Other(format!(
+                    "Failed to queue storage proof for {}: storage worker pool unavailable",
+                    hashed_address
+                ))
+            })?;
 
         storage_proof_receivers.insert(*hashed_address, result_rx);
     }
 
-    Ok((storage_proof_receivers, skipped_count))
+    Ok(storage_proof_receivers)
 }
 
 /// Queues V2 storage proofs for all accounts in the targets and returns receivers.
