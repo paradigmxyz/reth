@@ -229,6 +229,11 @@ impl Command {
             call_forkchoice_updated(&auth_provider, payload.version, fcu_state, None).await?;
 
             info!(gas_ramp_payload = i + 1, "Gas ramp payload executed successfully");
+
+            if let Some(w) = &mut waiter {
+                w.on_block(payload.block_number).await?;
+            }
+
             parent_hash = payload.file.block_hash;
         }
 
