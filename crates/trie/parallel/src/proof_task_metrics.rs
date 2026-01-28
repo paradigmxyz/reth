@@ -29,8 +29,8 @@ pub struct ProofTaskTrieMetrics {
     deferred_encoder_from_cache: Histogram,
     /// Histogram for `Sync` deferred encoder variant count.
     deferred_encoder_sync: Histogram,
-    /// Counter for storage proofs skipped due to storage filter optimization.
-    storage_proofs_skipped: Counter,
+    /// Counter for empty storage proofs that we skipped the calculation of.
+    empty_storage_proofs: Counter,
 }
 
 impl ProofTaskTrieMetrics {
@@ -61,9 +61,9 @@ impl ProofTaskTrieMetrics {
         self.deferred_encoder_sync.record(stats.sync_count as f64);
     }
 
-    /// Increment the count of skipped storage proofs.
-    pub fn increment_storage_proofs_skipped(&self, count: u64) {
-        self.storage_proofs_skipped.increment(count);
+    /// Increment the count of empty storage proofs.
+    pub fn increment_empty_storage_proofs(&self, count: u64) {
+        self.empty_storage_proofs.increment(count);
     }
 }
 
