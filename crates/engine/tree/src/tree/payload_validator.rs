@@ -792,6 +792,11 @@ where
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
         let mut transactions = transactions.into_iter();
+        // Some executors may execute transactions that do not append receipts during the
+        // main loop (e.g., system transactions whose receipts are added during finalization).
+        // In that case, invoking the callback on every transaction would resend the previous
+        // receipt with the same index and can panic the ordered root builder.
+        let mut last_sent_len = 0usize;
         loop {
             // Measure time spent waiting for next transaction from iterator
             // (e.g., parallel signature recovery)
@@ -818,10 +823,14 @@ where
             let gas_used = executor.execute_transaction(tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
-            // Send the latest receipt to the background task for incremental root computation
-            if let Some(receipt) = executor.receipts().last() {
-                let tx_index = executor.receipts().len() - 1;
-                let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+            let current_len = executor.receipts().len();
+            if current_len > last_sent_len {
+                last_sent_len = current_len;
+                // Send the latest receipt to the background task for incremental root computation.
+                if let Some(receipt) = executor.receipts().last() {
+                    let tx_index = current_len - 1;
+                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                }
             }
 
             enter.record("gas_used", gas_used);
