@@ -598,7 +598,7 @@ impl TransactionPtr {
     where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
-        let _lck = self.lock();
+        // let _lck = self.lock();
 
         // No race condition with the `TxnManager` timing out the transaction is possible here,
         // because we're taking a lock for any actions on the transaction pointer, including a call
