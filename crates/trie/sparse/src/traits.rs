@@ -230,9 +230,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Shrink the capacity of the sparse trie's value storage to the given size.
     /// This will reduce memory usage if the current capacity is higher than the given size.
     fn shrink_values_to(&mut self, size: usize);
-
-    /// Returns the number of revealed (non-Hash) nodes in the trie.
-    fn revealed_node_count(&self) -> usize;
 }
 
 /// Extension trait for sparse tries that support pruning.
@@ -241,6 +238,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 /// converting nodes beyond a certain depth into hash stubs. This is useful for reducing
 /// memory usage when caching tries across payload validations.
 pub trait SparseTrieExt: SparseTrie {
+    /// Returns the number of revealed (non-Hash) nodes in the trie.
+    fn revealed_node_count(&self) -> usize;
+
     /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
     ///
     /// Depth counts nodes traversed (not nibbles), so extension nodes count as 1 depth
@@ -254,7 +254,6 @@ pub trait SparseTrieExt: SparseTrie {
     /// # Behavior
     ///
     /// - Embedded nodes (RLP < 32 bytes) are preserved since they have no hash
-    /// - Clears `prefix_set` and update tracking (this is cache eviction, not a state transition)
     /// - Returns 0 if `max_depth` exceeds trie depth or trie is empty
     ///
     /// # Returns
