@@ -48,9 +48,9 @@ We will deprecate legacy MDBX-only configurations and establish a clear timeline
 **Scope:** Full node operators only (light clients and archive snapshot users unaffected)
 
 **Requirements:**
-- Share snapshot URLs & link here
-- Communicate breakage timeline clearly in advance
-- Provide clear instructions for snapshot download and fresh sync
+1. Share snapshot URLs & link here
+2. Communicate breakage timeline clearly in advance
+3. Provide clear instructions for snapshot download and fresh sync
 
 ### Tempo Internal
 
@@ -77,11 +77,11 @@ We will deprecate legacy MDBX-only configurations and establish a clear timeline
 
 ## Action Items
 
-- [ ] Release hot/cold behind flag in v1.11.0 (next week)
-- [ ] Prepare snapshot-serving infrastructure for external operators
-- [ ] Draft operator communication plan (deprecation announcement)
-- [ ] Coordinate with pandaops on dashboard integration
-- [ ] Define Tempo internal cutover procedure
+- [ ] Release hot/cold behind flag in v1.11.0 (due: w/c 2nd of Feb 2026)
+- [ ] Prepare snapshots infrastructure for external operators (due: w/c 26th of Jan 2026)
+- [ ] Draft deprecation announcement for external operators (due: w/c 26th of Jan 2026)
+- [ ] Define Tempo internal cutover procedure (due: w/c 26th of Jan 2026)
+- [ ] Coordinate with pandaops on dashboard integration (due: w/c 9th of Feb 2026)
 - [ ] Finalize exact cutoff date (before Glamsterdam)
 
 ## Updates Log
