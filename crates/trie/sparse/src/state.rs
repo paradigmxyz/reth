@@ -1044,10 +1044,43 @@ where
         }
 
         // Prune storage tries that are kept
-        for hash in &tries_to_keep {
-            if let Some(RevealableSparseTrie::Revealed(trie)) = self.storage.tries.get_mut(hash) {
-                trie.prune(max_depth);
+        #[cfg(feature = "std")]
+        {
+            use rayon::prelude::*;
+
+            const PARALLEL_PRUNE_THRESHOLD: usize = 16;
+
+            if tries_to_keep.len() >= PARALLEL_PRUNE_THRESHOLD {
+                self.storage.tries.par_iter_mut().for_each(|(hash, trie)| {
+                    if tries_to_keep.contains(hash) &&
+                        let RevealableSparseTrie::Revealed(t) = trie
+                    {
+                        t.prune(max_depth);
+                    }
+                });
+            } else {
+                for hash in &tries_to_keep {
+                    if let Some(RevealableSparseTrie::Revealed(trie)) =
+                        self.storage.tries.get_mut(hash)
+                    {
+                        trie.prune(max_depth);
+                    }
+                }
             }
+        }
+
+        #[cfg(not(feature = "std"))]
+        {
+            for hash in &tries_to_keep {
+                if let Some(RevealableSparseTrie::Revealed(trie)) = self.storage.tries.get_mut(hash)
+                {
+                    trie.prune(max_depth);
+                }
+            }
+        }
+
+        // Clear revealed_paths for kept tries (must be done serially)
+        for hash in &tries_to_keep {
             if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
                 paths.clear();
             }

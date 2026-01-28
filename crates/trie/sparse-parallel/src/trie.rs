@@ -910,14 +910,13 @@ impl SparseTrie for ParallelSparseTrie {
 
 impl SparseTrieExt for ParallelSparseTrie {
     fn revealed_node_count(&self) -> usize {
-        let upper_count =
-            self.upper_subtrie.nodes.values().filter(|n| !matches!(n, SparseNode::Hash(_))).count();
+        let upper_count = self.upper_subtrie.nodes.values().filter(|n| !n.is_hash()).count();
 
         let lower_count: usize = self
             .lower_subtries
             .iter()
             .filter_map(|s| s.as_revealed_ref())
-            .map(|s| s.nodes.values().filter(|n| !matches!(n, SparseNode::Hash(_))).count())
+            .map(|s| s.nodes.values().filter(|n| !n.is_hash()).count())
             .sum();
 
         upper_count + lower_count
