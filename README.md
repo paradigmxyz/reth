@@ -18,6 +18,11 @@
 [gh-lint]: https://github.com/paradigmxyz/reth/actions/workflows/lint.yml
 [tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fparadigm%5Freth
 
+> **Note: OP-Reth has moved**
+>
+> The Optimism (op-reth) crates have been moved to [ethereum-optimism/optimism](https://github.com/ethereum-optimism/optimism).
+> Git contribution history has been preserved. If you are looking for op-reth, please see the new repository.
+
 ## What is Reth?
 
 Reth (short for Rust Ethereum, [pronunciation](https://x.com/kelvinfichter/status/1597653609411268608)) is a new Ethereum full node implementation that is focused on being user-friendly, highly modular, as well as being fast and efficient. Reth is an Execution Layer (EL) and is compatible with all Ethereum Consensus Layer (CL) implementations that support the [Engine API](https://github.com/ethereum/execution-apis/tree/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine). It is originally built and driven forward by [Paradigm](https://paradigm.xyz/), and is licensed under the Apache and MIT licenses.
@@ -32,7 +37,7 @@ More concretely, our goals are:
 2. **Performance**: Reth aims to be fast, so we use Rust and the [Erigon staged-sync](https://erigon.substack.com/p/erigon-stage-sync-and-control-flows) node architecture. We also use our Ethereum libraries (including [Alloy](https://github.com/alloy-rs/alloy/) and [revm](https://github.com/bluealloy/revm/)) which we've battle-tested and optimized via [Foundry](https://github.com/foundry-rs/foundry/).
 3. **Free for anyone to use any way they want**: Reth is free open source software, built for the community, by the community. By licensing the software under the Apache/MIT license, we want developers to use it without being bound by business licenses, or having to think about the implications of GPL-like licenses.
 4. **Client Diversity**: The Ethereum protocol becomes more antifragile when no node implementation dominates. This ensures that if there's a software bug, the network does not finalize a bad block. By building a new client, we hope to contribute to Ethereum's antifragility.
-5. **Support as many EVM chains as possible**: We aspire that Reth can full-sync not only Ethereum, but also other chains like Optimism, Polygon, BNB Smart Chain, and more. If you're working on any of these projects, please reach out.
+5. **Support as many EVM chains as possible**: We aspire that Reth can full-sync not only Ethereum, but also other chains like Polygon, BNB Smart Chain, and more. If you're working on any of these projects, please reach out. Note: OP-Reth has moved to [ethereum-optimism/optimism](https://github.com/ethereum-optimism/optimism).
 6. **Configurability**: We want to solve for node operators that care about fast historical queries, but also for hobbyists who cannot operate on large hardware. We also want to support teams and individuals who want both sync from genesis and via "fast sync". We envision that Reth will be configurable enough and provide configurable "profiles" for the tradeoffs that each team faces.
 
 ## Status

@@ -119,11 +119,6 @@ jobs:
     name: MSRV
     runs-on: depot-ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      matrix:
-        include:
-          - binary: reth
-          - binary: op-reth
     steps:
       - uses: actions/checkout@v6
       - uses: rui314/setup-mold@v1
@@ -134,7 +129,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo build --bin "${{ matrix.binary }}" --workspace
+      - run: cargo build --bin reth --workspace
         env:
           RUSTFLAGS: -D warnings
 
@@ -198,10 +193,9 @@ jobs:
         with:
           cache-on-failure: true
       - run: cargo build --bin reth --workspace
-      - run: cargo build --bin op-reth --workspace
         env:
           RUSTFLAGS: -D warnings
-      - run: ./docs/cli/update.sh target/debug/reth target/debug/op-reth
+      - run: ./docs/cli/update.sh target/debug/reth
       - name: Check docs changes
         run: git diff --exit-code
 
