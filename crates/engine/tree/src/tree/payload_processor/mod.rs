@@ -41,7 +41,7 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
+    ClearedSparseStateTrie, RevealableSparseTrie, SparseStateTrie,
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
@@ -57,14 +57,11 @@ use std::{
 use tracing::{debug, debug_span, instrument, warn, Span};
 
 pub mod bal;
-mod configured_sparse_trie;
 pub mod executor;
 pub mod multiproof;
 pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
-
-use configured_sparse_trie::ConfiguredSparseTrie;
 
 /// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
 ///
@@ -131,12 +128,8 @@ where
     /// A cleared `SparseStateTrie`, kept around to be reused for the state root computation so
     /// that allocations can be minimized.
     sparse_state_trie: Arc<
-        parking_lot::Mutex<
-            Option<ClearedSparseStateTrie<ConfiguredSparseTrie, ConfiguredSparseTrie>>,
-        >,
+        parking_lot::Mutex<Option<ClearedSparseStateTrie<ParallelSparseTrie, ParallelSparseTrie>>>,
     >,
-    /// Whether to disable the parallel sparse trie.
-    disable_parallel_sparse_trie: bool,
     /// Maximum concurrency for prewarm task.
     prewarm_max_concurrency: usize,
     /// Whether to disable cache metrics recording.
@@ -171,7 +164,6 @@ where
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_state_trie: Arc::default(),
-            disable_parallel_sparse_trie: config.disable_parallel_sparse_trie(),
             prewarm_max_concurrency: config.prewarm_max_concurrency(),
             disable_cache_metrics: config.disable_cache_metrics(),
         }
@@ -294,9 +286,7 @@ where
         let multi_proof_task = MultiProofTask::new(
             proof_handle.clone(),
             to_sparse_trie,
-            config
-                .multiproof_chunking_enabled()
-                .then_some(config.effective_multiproof_chunk_size()),
+            config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
             to_multi_proof.clone(),
             from_multi_proof,
         )
@@ -514,7 +504,6 @@ where
         BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
     {
         let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
-        let disable_parallel_sparse_trie = self.disable_parallel_sparse_trie;
         let trie_metrics = self.trie_metrics.clone();
         let span = Span::current();
 
@@ -524,14 +513,10 @@ where
             // Reuse a stored SparseStateTrie, or create a new one using the desired configuration
             // if there's none to reuse.
             let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
-                let default_trie = SparseTrie::blind_from(if disable_parallel_sparse_trie {
-                    ConfiguredSparseTrie::Serial(Default::default())
-                } else {
-                    ConfiguredSparseTrie::Parallel(Box::new(
-                        ParallelSparseTrie::default()
-                            .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
-                    ))
-                });
+                let default_trie = RevealableSparseTrie::blind_from(
+                    ParallelSparseTrie::default()
+                        .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
+                );
                 ClearedSparseStateTrie::from_state_trie(
                     SparseStateTrie::new()
                         .with_accounts_trie(default_trie.clone())
@@ -540,12 +525,13 @@ where
                 )
             });
 
-            let task = SparseTrieTask::<_, ConfiguredSparseTrie, ConfiguredSparseTrie>::new_with_cleared_trie(
-                sparse_trie_rx,
-                proof_worker_handle,
-                trie_metrics,
-                sparse_state_trie,
-            );
+            let task =
+                SparseTrieTask::<_, ParallelSparseTrie, ParallelSparseTrie>::new_with_cleared_trie(
+                    sparse_trie_rx,
+                    proof_worker_handle,
+                    trie_metrics,
+                    sparse_state_trie,
+                );
 
             let (result, trie) = task.run();
             // Send state root computation result

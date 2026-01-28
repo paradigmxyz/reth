@@ -1492,6 +1492,10 @@ where
                                     self.on_maybe_tree_event(res.event.take())?;
                                 }
 
+                                if let Err(ref err) = output {
+                                    error!(target: "engine::tree", %err, ?state, "Error processing forkchoice update");
+                                }
+
                                 self.metrics.engine.forkchoice_updated.update_response_metrics(
                                     start,
                                     &mut self.metrics.engine.new_payload.latest_finish_at,

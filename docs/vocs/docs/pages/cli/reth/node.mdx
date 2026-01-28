@@ -919,7 +919,7 @@ RocksDB:
       --rocksdb.storages-history <STORAGES_HISTORY>
           Route storages history tables to `RocksDB` instead of MDBX.
 
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
 
           [default: false]
           [possible values: true, false]
@@ -927,7 +927,7 @@ RocksDB:
       --rocksdb.account-history <ACCOUNT_HISTORY>
           Route account history tables to `RocksDB` instead of MDBX.
 
-          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+          This is a genesis-initialization-only flag: changing it after genesis requires a re-sync. Defaults to `false`.
 
           [default: false]
           [possible values: true, false]
@@ -953,9 +953,6 @@ Engine:
 
       --engine.disable-prewarming
           Disable parallel prewarming
-
-      --engine.disable-parallel-sparse-trie
-          Disable the parallel sparse trie in the engine
 
       --engine.state-provider-metrics
           Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls

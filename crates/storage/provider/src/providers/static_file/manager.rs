@@ -615,13 +615,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let block_number = block.recovered_block().number();
             let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
-            for account_block_reverts in reverts.accounts {
-                let changeset = account_block_reverts
-                    .into_iter()
-                    .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
-                    .collect::<Vec<_>>();
-                w.append_account_changeset(changeset, block_number)?;
-            }
+            let changeset: Vec<_> = reverts
+                .accounts
+                .into_iter()
+                .flatten()
+                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .collect();
+            w.append_account_changeset(changeset, block_number)?;
         }
         Ok(())
     }
@@ -636,21 +636,21 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let block_number = block.recovered_block().number();
             let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
-            for storage_block_reverts in reverts.storage {
-                let changeset = storage_block_reverts
-                    .into_iter()
-                    .flat_map(|revert| {
-                        revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
-                            StorageBeforeTx {
-                                address: revert.address,
-                                key: B256::new(key.to_be_bytes()),
-                                value: revert_to_slot.to_previous_value(),
-                            }
-                        })
+            let changeset: Vec<_> = reverts
+                .storage
+                .into_iter()
+                .flatten()
+                .flat_map(|revert| {
+                    revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
+                        StorageBeforeTx {
+                            address: revert.address,
+                            key: B256::new(key.to_be_bytes()),
+                            value: revert_to_slot.to_previous_value(),
+                        }
                     })
-                    .collect::<Vec<_>>();
-                w.append_storage_changeset(changeset, block_number)?;
-            }
+                })
+                .collect();
+            w.append_storage_changeset(changeset, block_number)?;
         }
         Ok(())
     }

@@ -242,6 +242,8 @@ pub(crate) struct NewPayloadStatusMetrics {
     pub(crate) new_payload_error: Counter,
     /// The total gas of valid new payload messages received.
     pub(crate) new_payload_total_gas: Histogram,
+    /// The gas used for the last valid new payload.
+    pub(crate) new_payload_total_gas_last: Gauge,
     /// The gas per second of valid new payload messages received.
     pub(crate) new_payload_gas_per_second: Histogram,
     /// The gas per second for the last new payload call.
@@ -283,6 +285,7 @@ impl NewPayloadStatusMetrics {
                 PayloadStatusEnum::Valid => {
                     self.new_payload_valid.increment(1);
                     self.new_payload_total_gas.record(gas_used as f64);
+                    self.new_payload_total_gas_last.set(gas_used as f64);
                     let gas_per_second = gas_used as f64 / elapsed.as_secs_f64();
                     self.new_payload_gas_per_second.record(gas_per_second);
                     self.new_payload_gas_per_second_last.set(gas_per_second);
