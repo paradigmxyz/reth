@@ -23,6 +23,7 @@ impl PrunerOutput {
     ///
     /// Format: `"Pruner finished tip=24328929 deleted=10886 in 148ms
     /// segments=AccountHistory[24318865, done] ..."`
+    #[inline]
     pub fn to_log_message(
         &self,
         tip_block_number: BlockNumber,
