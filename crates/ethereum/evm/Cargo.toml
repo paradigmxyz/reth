@@ -27,6 +27,7 @@ alloy-eips.workspace = true
 alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-rlp.workspace = true
 
 # Misc
 parking_lot = { workspace = true, optional = true }
@@ -57,6 +58,7 @@ std = [
     "derive_more?/std",
     "alloy-rpc-types-engine/std",
     "reth-storage-errors/std",
+    "alloy-rlp/std",
 ]
 test-utils = [
     "std",

@@ -198,7 +198,7 @@ mod tests {
     use alloy_eip7928::{
         AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
     };
-    use alloy_primitives::{Address, Bytes, StorageKey, B256};
+    use alloy_primitives::{Address, Bytes, B256};
     use reth_revm::test_utils::StateProviderTest;
 
     #[test]

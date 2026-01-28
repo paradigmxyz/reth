@@ -11,3 +11,4 @@
 
 /// Collection of consensus validation methods.
 pub mod validation;
+use alloy_primitives as _;

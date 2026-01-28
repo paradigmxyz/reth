@@ -23,7 +23,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitComman
 
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
-        let genesis_block_number = provider_factory.chain_spec().genesis_header().number();
+        let chain_spec = provider_factory.chain_spec();
+        let genesis_block_header = chain_spec.genesis_header();
+
+        tracing::debug!("Genesis Header: {:?}", genesis_block_header);
+        let genesis_block_number = genesis_block_header.number();
+
         let hash = provider_factory
             .block_hash(genesis_block_number)?
             .ok_or_else(|| eyre::eyre!("Genesis hash not found."))?;

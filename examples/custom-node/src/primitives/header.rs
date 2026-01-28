@@ -67,6 +67,9 @@ impl alloy_consensus::BlockHeader for CustomHeader {
         self.inner.beneficiary()
     }
 
+    fn block_access_list_hash(&self) -> Option<B256> {
+        self.inner.block_access_list_hash()
+    }
     fn state_root(&self) -> B256 {
         self.inner.state_root()
     }
@@ -137,6 +140,10 @@ impl alloy_consensus::BlockHeader for CustomHeader {
 
     fn extra_data(&self) -> &Bytes {
         self.inner.extra_data()
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.inner.slot_number()
     }
 }
 

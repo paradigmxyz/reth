@@ -61,6 +61,7 @@ pub(crate) fn prepare_payload_request(
     let cancun_active = chain_spec.is_cancun_active_at_timestamp(timestamp);
     let prague_active = chain_spec.is_prague_active_at_timestamp(timestamp);
     let osaka_active = chain_spec.is_osaka_active_at_timestamp(timestamp);
+    let amsterdam_active = chain_spec.is_amsterdam_active_at_timestamp(timestamp);
 
     // FCU version: V3 for Cancun+Prague+Osaka, V2 for Shanghai, V1 otherwise
     let fcu_version = if cancun_active {
@@ -92,6 +93,7 @@ pub(crate) fn prepare_payload_request(
             suggested_fee_recipient: Address::ZERO,
             withdrawals: shanghai_active.then(Vec::new),
             parent_beacon_block_root: cancun_active.then_some(B256::ZERO),
+            slot_number: amsterdam_active.then_some(0u64),
         },
         forkchoice_state: ForkchoiceState {
             head_block_hash: parent_hash,

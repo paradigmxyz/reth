@@ -449,8 +449,16 @@ impl<B: Block> BlockHeader for RecoveredBlock<B> {
         self.header().requests_hash()
     }
 
+    fn block_access_list_hash(&self) -> Option<B256> {
+        self.header().block_access_list_hash()
+    }
+
     fn extra_data(&self) -> &Bytes {
         self.header().extra_data()
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.header().slot_number()
     }
 }
 
@@ -740,7 +748,6 @@ mod rpc_compat {
             let rlp_length = self.rlp_length();
             let header = self.clone_sealed_header();
             let withdrawals = self.body().withdrawals().cloned();
-
             let transactions = BlockTransactions::Hashes(transactions);
             let uncles =
                 self.body().ommers().unwrap_or(&[]).iter().map(|h| h.hash_slow()).collect();

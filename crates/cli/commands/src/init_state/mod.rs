@@ -85,7 +85,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
             let header = without_evm::read_header_from_file::<
                 <N::Primitives as NodePrimitives>::BlockHeader,
             >(&header)?;
-
+            tracing::debug!("Header: {:?}", header);
             let header_hash = self.header_hash.unwrap_or_else(|| header.hash_slow());
 
             let last_block_number = provider_rw.last_block_number()?;

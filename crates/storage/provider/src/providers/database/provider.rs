@@ -3170,6 +3170,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                     requests: Default::default(),
                     gas_used: 0,
                     blob_gas_used: 0,
+                    block_access_list: Default::default(),
                 },
                 state: Default::default(),
             }),
@@ -3201,6 +3202,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
         for (block_number, body) in &bodies {
+            tracing::debug!(
+                target: "providers::db",
+                body = ?body,
+                "Appending block bodies"
+            );
             // Increment block on static file header.
             tx_writer.increment_block(*block_number)?;
 

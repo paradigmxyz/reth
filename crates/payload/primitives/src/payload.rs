@@ -58,6 +58,9 @@ pub trait ExecutionPayload:
 
     /// Returns the number of transactions in the payload.
     fn transaction_count(&self) -> usize;
+
+    /// Returns the slot number
+    fn slot_number(&self) -> Option<u64>;
 }
 
 impl ExecutionPayload for ExecutionData {
@@ -78,7 +81,7 @@ impl ExecutionPayload for ExecutionData {
     }
 
     fn block_access_list(&self) -> Option<&Bytes> {
-        None
+        self.payload.block_access_list()
     }
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
@@ -95,6 +98,10 @@ impl ExecutionPayload for ExecutionData {
 
     fn transaction_count(&self) -> usize {
         self.payload.as_v1().transactions.len()
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.payload.slot_number()
     }
 }
 
@@ -132,6 +139,22 @@ where
         match self {
             Self::ExecutionPayload(payload) => payload.withdrawals(),
             Self::PayloadAttributes(attributes) => attributes.withdrawals(),
+        }
+    }
+
+    /// Returns `block_access_list` from  payload.
+    pub fn block_access_list(&self) -> Option<&Bytes> {
+        match self {
+            Self::ExecutionPayload(payload) => payload.block_access_list(),
+            Self::PayloadAttributes(_attributes) => None,
+        }
+    }
+
+    /// Returns `slot_number` from  payload.
+    pub fn slot_number(&self) -> Option<u64> {
+        match self {
+            Self::ExecutionPayload(payload) => payload.slot_number(),
+            Self::PayloadAttributes(attributes) => attributes.slot_number(),
         }
     }
 
@@ -206,6 +229,10 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
 
     fn transaction_count(&self) -> usize {
         self.payload.as_v1().transactions.len()
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        None
     }
 }
 
