@@ -1066,6 +1066,7 @@ impl SparseTrieExt for ParallelSparseTrie {
                     false
                 };
 
+            // Retain only nodes/values not descended from any pruned root.
             if !subtrie_cleared && let Some(s) = self.lower_subtries[subtrie_idx].as_revealed_mut()
             {
                 s.nodes.retain(|p, _| {
