@@ -123,11 +123,19 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     pub fn with_transaction_fetcher_config(config: &TransactionFetcherConfig) -> Self {
         let TransactionFetcherConfig {
             max_inflight_requests,
+            max_inflight_requests_per_peer,
+            soft_limit_byte_size_pooled_transactions_response,
+            soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             max_capacity_cache_txns_pending_fetch,
-            ..
         } = *config;
 
-        let info = config.clone().into();
+        let info = TransactionFetcherInfo::new(
+            max_inflight_requests as usize,
+            max_inflight_requests_per_peer,
+            soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+            soft_limit_byte_size_pooled_transactions_response,
+            max_capacity_cache_txns_pending_fetch,
+        );
 
         let metrics = TransactionFetcherMetrics::default();
         metrics.capacity_inflight_requests.increment(max_inflight_requests as u64);
