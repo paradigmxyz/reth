@@ -21,8 +21,14 @@ impl From<PruneProgress> for PrunerOutput {
 impl PrunerOutput {
     /// Returns a human-readable log message summarizing the pruner run.
     ///
-    /// Format: `"Pruner finished in 148ms segments=AccountHistory[24318865, done] ..."`
-    pub fn to_log_message(&self, elapsed_ms: u64) -> alloc::string::String {
+    /// Format: `"Pruner finished tip=24328929 deleted=10886 in 148ms
+    /// segments=AccountHistory[24318865, done] ..."`
+    pub fn to_log_message(
+        &self,
+        tip_block_number: BlockNumber,
+        deleted_entries: usize,
+        elapsed_ms: u64,
+    ) -> alloc::string::String {
         use alloc::string::ToString;
 
         let status = match self.progress {
@@ -45,7 +51,10 @@ impl PrunerOutput {
             })
             .collect();
 
-        alloc::format!("{status} in {elapsed_ms}ms segments={}", segments.join(" "))
+        alloc::format!(
+            "{status} tip={tip_block_number} deleted={deleted_entries} in {elapsed_ms}ms segments={}",
+            segments.join(" ")
+        )
     }
 }
 

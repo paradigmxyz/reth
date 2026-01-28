@@ -151,10 +151,8 @@ where
 
         debug!(
             target: "pruner",
-            tip_block_number,
-            deleted_entries,
             "{}",
-            output.to_log_message(elapsed.as_millis() as u64),
+            output.to_log_message(tip_block_number, deleted_entries, elapsed.as_millis() as u64),
         );
 
         self.event_sender.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
