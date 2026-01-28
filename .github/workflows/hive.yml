@@ -1,6 +1,6 @@
 # Runs `ethereum/hive` tests.
 
-name: hive
+name: Run ethereum/hive tests
 
 on:
   workflow_dispatch:
