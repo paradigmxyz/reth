@@ -28,11 +28,14 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, HashMap, HashSet},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
-use rayon::slice::ParallelSliceMut;
+use rayon::{
+    iter::{IntoParallelIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
@@ -783,7 +786,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         self.unwind_storage_hashing(changed_storages.iter().copied())?;
 
         // Unwind storage history indices.
-        self.unwind_storage_history_indices(changed_storages.iter().copied())?;
+        self.unwind_storage_history_indices(changed_storages.into_iter())?;
 
         // Unwind accounts/storages trie tables using the revert.
         // Get the database tip block number
@@ -2806,16 +2809,19 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
-        // Aggregate all block changesets and make a list of accounts that have been changed.
-        // Note that collecting and then reversing the order is necessary to ensure that the
-        // changes are applied in the correct order.
-        let hashed_accounts = changesets
-            .into_iter()
-            .map(|(_, e)| (keccak256(e.address), e.info))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<BTreeMap<_, _>>();
+        // Deduplicate by address, keeping only the earliest "before" value for each address.
+        // Changesets are ordered by block number ascending, so the first occurrence of each
+        // address contains the state before any of the blocks being unwound.
+        let mut accounts_by_address: HashMap<Address, Option<Account>> = HashMap::default();
+        for (_, entry) in changesets {
+            accounts_by_address.entry(entry.address).or_insert(entry.info);
+        }
+
+        // Hash addresses in parallel and collect into sorted BTreeMap.
+        let hashed_accounts: BTreeMap<B256, Option<Account>> = accounts_by_address
+            .into_par_iter()
+            .map(|(address, info)| (keccak256(address), info))
+            .collect();
 
         // Apply values to HashedState, and remove the account if it's None.
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
@@ -2863,20 +2869,26 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         &self,
         changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
-        // Aggregate all block changesets and make list of accounts that have been changed.
-        let mut hashed_storages = changesets
-            .into_iter()
-            .map(|(BlockNumberAddress((_, address)), storage_entry)| {
-                (keccak256(address), keccak256(storage_entry.key), storage_entry.value)
-            })
-            .collect::<Vec<_>>();
-        hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
+        // Deduplicate by (address, storage_key), keeping only the earliest "before" value.
+        // Changesets are ordered by block number ascending, so the first occurrence of each
+        // (address, key) pair contains the state before any of the blocks being unwound.
+        let mut storage_by_key: HashMap<(Address, B256), U256> = HashMap::default();
+        for (BlockNumberAddress((_, address)), entry) in changesets {
+            storage_by_key.entry((address, entry.key)).or_insert(entry.value);
+        }
 
-        // Apply values to HashedState, and remove the account if it's None.
+        // Hash in parallel and sort by (hashed_address, hashed_key) for sequential cursor access.
+        let mut hashed_storages: Vec<_> = storage_by_key
+            .into_par_iter()
+            .map(|((address, key), value)| (keccak256(address), keccak256(key), value))
+            .collect();
+        hashed_storages.sort_unstable_by_key(|(ha, hk, _)| (*ha, *hk));
+
+        // Apply values to HashedState.
         let mut hashed_storage_keys: HashMap<B256, BTreeSet<B256>> =
             HashMap::with_capacity_and_hasher(hashed_storages.len(), Default::default());
         let mut hashed_storage = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
-        for (hashed_address, key, value) in hashed_storages.into_iter().rev() {
+        for (hashed_address, key, value) in hashed_storages {
             hashed_storage_keys.entry(hashed_address).or_default().insert(key);
 
             if hashed_storage
@@ -2954,12 +2966,20 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     fn unwind_account_history_indices<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
-    ) -> ProviderResult<usize> {
-        let mut last_indices = changesets
-            .into_iter()
-            .map(|(index, account)| (account.address, *index))
-            .collect::<Vec<_>>();
-        last_indices.sort_unstable_by_key(|(a, _)| *a);
+    ) -> ProviderResult<()> {
+        // Deduplicate by address, keeping only the minimum block number per address.
+        // We only need to unwind from the earliest block for each address.
+        let mut min_block_by_address: HashMap<Address, BlockNumber> = HashMap::default();
+        for (block_number, entry) in changesets {
+            min_block_by_address
+                .entry(entry.address)
+                .and_modify(|min| *min = (*min).min(*block_number))
+                .or_insert(*block_number);
+        }
+
+        // Convert to sorted vec for sequential cursor access.
+        let mut last_indices: Vec<_> = min_block_by_address.into_iter().collect();
+        last_indices.sort_unstable_by_key(|(addr, _)| *addr);
 
         if self.cached_storage_settings().account_history_in_rocksdb {
             #[cfg(all(unix, feature = "rocksdb"))]
@@ -2989,14 +3009,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             }
         }
 
-        let changesets = last_indices.len();
-        Ok(changesets)
+        Ok(())
     }
 
     fn unwind_account_history_indices_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<usize> {
+    ) -> ProviderResult<()> {
         let changesets = self
             .tx
             .cursor_read::<tables::AccountChangeSets>()?
