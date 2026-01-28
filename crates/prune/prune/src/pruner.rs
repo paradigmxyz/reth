@@ -15,7 +15,7 @@ use reth_stages_types::StageId;
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// Result of [`Pruner::run`] execution.
 pub type PrunerResult = Result<PrunerOutput, PrunerError>;
@@ -164,8 +164,8 @@ where
                     .and_then(|c| c.block_number)
                     .map(|b| b.to_string())
                     .unwrap_or_else(|| "?".to_string());
-                let status = if seg.progress.is_finished() { "done" } else { "more" };
-                format!("{segment}({} rows to block {}, {})", seg.pruned, block, status)
+                let status = if seg.progress.is_finished() { "done" } else { "in_progress" };
+                format!("{segment}[{block}, {status}]")
             })
             .collect();
 
@@ -174,7 +174,18 @@ where
             tip_block_number,
             deleted_entries,
             elapsed_ms = elapsed.as_millis() as u64,
-            segments = %segments_summary.join(", "),
+            segments = %segments_summary.join(" "),
+            "{message}",
+        );
+
+        trace!(
+            target: "pruner",
+            %tip_block_number,
+            ?elapsed,
+            ?deleted_entries,
+            ?limiter,
+            ?output,
+            ?stats,
             "{message}",
         );
 
