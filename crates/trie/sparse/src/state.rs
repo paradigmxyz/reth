@@ -977,6 +977,19 @@ where
     A: SparseTrieTrait + SparseTrieExt + Default,
     S: SparseTrieTrait + SparseTrieExt + Default + Clone,
 {
+    /// Minimum number of storage tries before parallel pruning is enabled.
+    const PARALLEL_PRUNE_THRESHOLD: usize = 16;
+
+    /// Returns true if parallelism should be enabled for pruning the given number of tries.
+    /// Will always return false in `no_std` builds.
+    #[allow(clippy::unused_self)]
+    const fn is_prune_parallelism_enabled(&self, num_tries: usize) -> bool {
+        #[cfg(not(feature = "std"))]
+        return false;
+
+        num_tries >= Self::PARALLEL_PRUNE_THRESHOLD
+    }
+
     /// Prunes the account trie and selected storage tries to reduce memory usage.
     ///
     /// Storage tries not in the top `max_storage_tries` by revealed node count are cleared
@@ -1038,13 +1051,11 @@ where
         }
 
         // Prune storage tries that are kept
-        #[cfg(feature = "std")]
-        {
-            use rayon::prelude::*;
+        if self.is_prune_parallelism_enabled(tries_to_keep.len()) {
+            #[cfg(feature = "std")]
+            {
+                use rayon::prelude::*;
 
-            const PARALLEL_PRUNE_THRESHOLD: usize = 16;
-
-            if tries_to_keep.len() >= PARALLEL_PRUNE_THRESHOLD {
                 self.storage.tries.par_iter_mut().for_each(|(hash, trie)| {
                     if tries_to_keep.contains(hash) &&
                         let Some(t) = trie.as_revealed_mut()
@@ -1052,19 +1063,8 @@ where
                         t.prune(max_depth);
                     }
                 });
-            } else {
-                for hash in &tries_to_keep {
-                    if let Some(trie) =
-                        self.storage.tries.get_mut(hash).and_then(|t| t.as_revealed_mut())
-                    {
-                        trie.prune(max_depth);
-                    }
-                }
             }
-        }
-
-        #[cfg(not(feature = "std"))]
-        {
+        } else {
             for hash in &tries_to_keep {
                 if let Some(trie) =
                     self.storage.tries.get_mut(hash).and_then(|t| t.as_revealed_mut())
