@@ -1075,7 +1075,9 @@ impl SparseTrieExt for ParallelSparseTrie {
             return Ok(());
         }
 
-        // Step 1: Drain updates into a vec and sort by (subtrie, path) for efficient grouping
+        // Drain updates into a vec, converting B256 keys to Nibbles paths and determining which
+        // subtrie each belongs to. Sort by (subtrie_type, path) to group operations for efficient
+        // batch processing.
         let mut ops: Vec<(B256, Nibbles, SparseSubtrieType, LeafUpdate)> = updates
             .drain()
             .map(|(key, update)| {
@@ -1089,7 +1091,7 @@ impl SparseTrieExt for ParallelSparseTrie {
             subtrie_a.cmp(subtrie_b).then(path_a.cmp(path_b))
         });
 
-        // Step 2: Split into upper and lower operations
+        // Split into upper (short paths) and lower (long paths) subtrie operations.
         let num_upper = ops
             .iter()
             .position(|(_, path, _, _)| !SparseSubtrieType::path_len_is_upper(path.len()))
@@ -1097,11 +1099,11 @@ impl SparseTrieExt for ParallelSparseTrie {
 
         let (upper_ops, lower_ops) = ops.split_at(num_upper);
 
-        // Collect proof requests and failures
+        // Track deduplicated proof requests and failed updates to restore later.
         let mut requested: HashSet<(Nibbles, u8)> = HashSet::default();
         let mut failures: Vec<(B256, LeafUpdate)> = Vec::new();
 
-        // Step 3: Process upper subtrie operations sequentially
+        // Process upper subtrie operations sequentially since they modify shared trie structure.
         for (key, full_path, _, update) in upper_ops {
             match self.apply_single_update(full_path, update.clone()) {
                 Ok(()) => {}
@@ -1121,7 +1123,7 @@ impl SparseTrieExt for ParallelSparseTrie {
             }
         }
 
-        // Step 4: Process lower subtrie operations
+        // Process lower subtrie operations.
         if lower_ops.is_empty() {
             for (k, u) in failures {
                 updates.insert(k, u);
@@ -1129,12 +1131,12 @@ impl SparseTrieExt for ParallelSparseTrie {
             return Ok(());
         }
 
-        // Separate Touched operations (read-only) from Changed operations (mutating).
-        // Touched operations can be processed in parallel since find_leaf takes &self.
+        // Separate Touched (read-only) from Changed (mutating) operations. Touched operations
+        // can run in parallel since find_leaf takes &self, while Changed must be sequential.
         let (touched_ops, changed_ops): (Vec<_>, Vec<_>) =
             lower_ops.iter().partition(|(_, _, _, update)| matches!(update, LeafUpdate::Touched));
 
-        // Process Touched operations with potential parallelism
+        // Process Touched operations with potential parallelism - only checks path accessibility.
         let touched_failures = self.process_touched_ops_parallel(&touched_ops);
         for (key, full_path, min_len) in touched_failures {
             if requested.insert((full_path, min_len)) {
@@ -1143,7 +1145,7 @@ impl SparseTrieExt for ParallelSparseTrie {
             failures.push((key, LeafUpdate::Touched));
         }
 
-        // Process Changed operations sequentially (they mutate the trie)
+        // Process Changed operations sequentially since they mutate the trie structure.
         for (key, full_path, _, update) in changed_ops {
             match self.apply_single_update(full_path, update.clone()) {
                 Ok(()) => {}
@@ -1163,6 +1165,7 @@ impl SparseTrieExt for ParallelSparseTrie {
             }
         }
 
+        // Put failed updates back into the map for caller to retry after revealing proofs.
         for (k, u) in failures {
             updates.insert(k, u);
         }
@@ -1216,6 +1219,11 @@ impl ParallelSparseTrie {
     }
 
     /// Applies a single leaf update, returning Ok(()) on success or the outcome on failure.
+    ///
+    /// Handles three update variants:
+    /// - `Changed(empty)`: Remove leaf, restore value on blinded node error
+    /// - `Changed(value)`: Insert/update leaf, clean up on blinded node error  
+    /// - `Touched`: Check path accessibility without mutation
     fn apply_single_update(
         &mut self,
         full_path: &Nibbles,
@@ -1224,6 +1232,8 @@ impl ParallelSparseTrie {
         use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
 
         match update {
+            // Removal: empty value triggers leaf deletion. Snapshot the value first so we can
+            // restore it if removal fails due to a blinded node.
             LeafUpdate::Changed(value) if value.is_empty() => {
                 let old_value = self.get_leaf_value(full_path).cloned();
                 match self.remove_leaf(full_path, NoRevealProvider) {
@@ -1243,6 +1253,8 @@ impl ParallelSparseTrie {
                     }
                 }
             }
+            // Insert/update: non-empty value creates or updates the leaf. Track whether the leaf
+            // existed so we can clean up if update fails due to a blinded node.
             LeafUpdate::Changed(value) => {
                 let existed = self.get_leaf_value(full_path).is_some();
                 match self.update_leaf(*full_path, value, NoRevealProvider) {
@@ -1262,6 +1274,7 @@ impl ParallelSparseTrie {
                     }
                 }
             }
+            // Touched: read-only check for path accessibility, no mutation.
             LeafUpdate::Touched => match self.find_leaf(full_path, None) {
                 Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => Ok(()),
                 Err(LeafLookupError::BlindedNode { path, .. }) => {
