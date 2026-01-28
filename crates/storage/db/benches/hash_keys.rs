@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use std::{collections::HashSet, path::Path, sync::Arc};
+use std::{collections::HashSet, hint::black_box, path::Path, sync::Arc};
 
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
@@ -184,7 +184,7 @@ where
             crsr.append(black_box(k), black_box(&v)).expect("submit");
         }
     }
-    let _ = black_box(tx.inner.commit().unwrap());
+    tx.commit().unwrap();
     db
 }
 
@@ -199,7 +199,7 @@ where
             crsr.insert(black_box(k), black_box(&v)).expect("submit");
         }
     }
-    let _ = black_box(tx.inner.commit().unwrap());
+    tx.commit().unwrap();
     db
 }
 
@@ -209,7 +209,7 @@ where
 {
     let tx = db.tx_mut().expect("tx");
     for (k, v) in input {
-        tx.put::<T>(k, v).expect("submit");
+        tx.put::<T>(black_box(k), black_box(v)).expect("submit");
     }
     tx.commit().unwrap();
     db
