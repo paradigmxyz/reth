@@ -15,7 +15,7 @@ use reth_stages_types::StageId;
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
-use tracing::{debug, trace};
+use tracing::debug;
 
 /// Result of [`Pruner::run`] execution.
 pub type PrunerResult = Result<PrunerOutput, PrunerError>;
@@ -175,17 +175,6 @@ where
             deleted_entries,
             elapsed_ms = elapsed.as_millis() as u64,
             segments = %segments_summary.join(" "),
-            "{message}",
-        );
-
-        trace!(
-            target: "pruner",
-            %tip_block_number,
-            ?elapsed,
-            ?deleted_entries,
-            ?limiter,
-            ?output,
-            ?stats,
             "{message}",
         );
 
