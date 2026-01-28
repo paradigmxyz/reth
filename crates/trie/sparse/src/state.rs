@@ -979,11 +979,6 @@ where
 {
     /// Prunes the account trie and selected storage tries to reduce memory usage.
     ///
-    /// # Arguments
-    ///
-    /// * `max_depth` - Maximum depth to retain in pruned tries
-    /// * `max_storage_tries` - Maximum number of storage tries to keep (largest by node count)
-    ///
     /// Storage tries not in the top `max_storage_tries` by revealed node count are cleared
     /// entirely.
     ///
