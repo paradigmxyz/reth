@@ -6,13 +6,17 @@ use crate::tree::{
 };
 use alloy_primitives::B256;
 use alloy_rlp::Decodable;
-use crossbeam_channel::Receiver as CrossbeamReceiver;
+use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::{ParallelBridge, ParallelIterator};
+use reth_errors::ProviderError;
 use reth_primitives_traits::Account;
 use reth_revm::state::EvmState;
 use reth_trie::{updates::TrieUpdates, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH};
 use reth_trie_parallel::{
-    proof_task::{ProofResult, ProofResultMessage, ProofWorkerHandle},
+    proof_task::{
+        AccountMultiproofInput, ProofResult, ProofResultContext, ProofResultMessage,
+        ProofWorkerHandle,
+    },
     root::ParallelStateRootError,
     targets_v2::MultiProofTargetsV2,
 };
@@ -142,6 +146,8 @@ where
 }
 
 pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie> {
+    /// Sender for proof results.
+    proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Receiver for proof results directly from workers.
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
     /// Receives updates from the state root task.
@@ -168,6 +174,8 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     ///   - Some(_): account was changed/destroyed and is awaiting storage root calculation/reveal
     ///     to complete.
     pending_account_updates: B256Map<Option<Option<Account>>>,
+    /// Metrics for the sparse trie.
+    metrics: MultiProofTaskMetrics,
 }
 
 impl<A, S> SparseTrieCacheTask<A, S>
@@ -178,18 +186,21 @@ where
     /// Creates a new sparse trie, pre-populating with a [`ClearedSparseStateTrie`].
     pub(super) fn new_with_cleared_trie(
         updates: CrossbeamReceiver<MultiProofMessage>,
-        proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
         proof_worker_handle: ProofWorkerHandle,
+        metrics: MultiProofTaskMetrics,
         sparse_state_trie: ClearedSparseStateTrie<A, S>,
     ) -> Self {
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         Self {
-            updates,
+            proof_result_tx,
             proof_result_rx,
+            updates,
             proof_worker_handle,
             trie: sparse_state_trie.into_inner(),
             account_updates: Default::default(),
             storage_updates: Default::default(),
             pending_account_updates: Default::default(),
+            metrics,
         }
     }
 
@@ -225,11 +236,8 @@ where
         loop {
             crossbeam_channel::select_biased! {
                 recv(self.proof_result_rx) -> message => {
-                    let result = match message {
-                        Ok(m) => m,
-                        Err(_) => {
-                            continue
-                        }
+                    let Ok(result) = message else {
+                        unreachable!("we own the sender half")
                     };
                     self.on_proof_result(result)?;
                 },
@@ -237,7 +245,7 @@ where
                     let update = match message {
                         Ok(m) => m,
                         Err(_) => {
-                            continue
+                            break
                         }
                     };
 
@@ -257,17 +265,33 @@ where
                 }
             }
 
-            self.process_updates();
+            self.process_updates()?;
         }
 
+        loop {
+            self.process_updates()?;
+
+            if !self.account_updates.is_empty() || !self.storage_updates.is_empty() {
+                let Ok(result) = self.proof_result_rx.recv() else {
+                    unreachable!("we own the receiver half")
+                };
+                self.on_proof_result(result)?;
+            } else {
+                break
+            }
+        }
+
+        debug!(target: "engine::root", "All proofs processed, ending calculation");
+
         let start = Instant::now();
-        // let (state_root, trie_updates) =
-        //     self.trie.root_with_updates(&self.blinded_provider_factory).map_err(|e| {
-        //         ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-        //     })?;
-        let (state_root, trie_updates) = todo!();
+        let (state_root, trie_updates) =
+            self.trie.root_with_updates(&self.proof_worker_handle).map_err(|e| {
+                ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
+            })?;
 
         let end = Instant::now();
+        self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
+        self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
@@ -361,14 +385,14 @@ where
     }
 
     /// Applies updates to the sparse trie and dispathes requested multiproof targets.
-    fn process_updates(&mut self) {
-        let mut proof_targets = MultiProofTargetsV2::default();
+    fn process_updates(&mut self) -> Result<(), ProviderError> {
+        let mut targets = MultiProofTargetsV2::default();
 
         for (addr, updates) in &mut self.storage_updates {
             let trie = self.trie.get_or_create_storage_trie_mut(*addr);
 
             // trie.update_leaves(slots, |target| {
-            //     proof_targets.storage.entry(addr).or_default().push(target);
+            //     targets.storage.entry(addr).or_default().push(target);
             // });
 
             // If all storage updates were processed, we can now compute the new storage root.
@@ -443,10 +467,22 @@ where
 
         // Process account trie updates and fill the account targets.
         // self.trie.update_leaves(&mut self.account_updates, |target| {
-        //     proof_targets.account.push(target);
+        //     targets.account.push(target);
         // });
 
-        // TODO: dispatch to workers
+        if !targets.is_empty() {
+            self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput::V2 {
+                targets,
+                proof_result_sender: ProofResultContext::new(
+                    self.proof_result_tx.clone(),
+                    0,
+                    HashedPostState::default(),
+                    Instant::now(),
+                ),
+            })?;
+        }
+
+        Ok(())
     }
 }
 
