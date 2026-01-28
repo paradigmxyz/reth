@@ -199,6 +199,16 @@ impl<B: FullBlock> FileClient<B> {
     }
 }
 
+impl<B: Block> Default for FileClient<B> {
+    fn default() -> Self {
+        Self {
+            headers: HashMap::default(),
+            hash_to_number: HashMap::default(),
+            bodies: HashMap::default(),
+        }
+    }
+}
+
 struct FileClientBuilder<B: Block> {
     pub consensus: Arc<dyn Consensus<B>>,
     pub parent_header: Option<SealedHeader<B::Header>>,
