@@ -30,7 +30,7 @@ const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 #[derive(Debug)]
 pub struct Tx<K: TransactionKind> {
     /// Libmdbx-sys transaction.
-    pub inner: Transaction<K>,
+    inner: Transaction<K>,
 
     /// Cached MDBX DBIs for reuse.
     dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
@@ -60,6 +60,11 @@ impl<K: TransactionKind> Tx<K> {
             })
             .transpose()?;
         Ok(Self { inner, dbis, metrics_handler })
+    }
+
+    /// Returns a reference to the inner libmdbx transaction.
+    pub const fn inner(&self) -> &Transaction<K> {
+        &self.inner
     }
 
     /// Gets this transaction ID.

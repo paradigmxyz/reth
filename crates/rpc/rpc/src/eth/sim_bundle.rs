@@ -318,9 +318,9 @@ where
                             .map(|inner| {
                                 let full_log = alloy_rpc_types_eth::Log {
                                     inner,
-                                    block_hash: None,
-                                    block_number: None,
-                                    block_timestamp: None,
+                                    block_hash: Some(current_block.hash()),
+                                    block_number: Some(current_block.number()),
+                                    block_timestamp: Some(current_block.timestamp()),
                                     transaction_hash: Some(*item.tx.tx_hash()),
                                     transaction_index: Some(tx_index as u64),
                                     log_index: Some(log_index),

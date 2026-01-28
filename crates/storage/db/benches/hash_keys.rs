@@ -16,10 +16,9 @@ use reth_db_api::{
     cursor::DbCursorRW,
     database::Database,
     table::{Table, TableRow},
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_fs_util as fs;
-use std::hint::black_box;
 
 mod utils;
 use utils::*;
@@ -208,16 +207,11 @@ fn put<T>(db: DatabaseEnv, input: Vec<(<T as Table>::Key, <T as Table>::Value)>)
 where
     T: Table,
 {
-    {
-        let tx = db.tx_mut().expect("tx");
-        black_box({
-            for (k, v) in input {
-                tx.put::<T>(k, v).expect("submit");
-            }
-
-            tx.inner.commit().unwrap()
-        });
+    let tx = db.tx_mut().expect("tx");
+    for (k, v) in input {
+        tx.put::<T>(k, v).expect("submit");
     }
+    tx.commit().unwrap();
     db
 }
 
@@ -237,11 +231,11 @@ where
     T: Table,
 {
     db.view(|tx| {
-        let table_db = tx.inner.open_db(Some(T::NAME)).map_err(|_| "Could not open db.").unwrap();
+        let table_db = tx.inner().open_db(Some(T::NAME)).map_err(|_| "Could not open db.").unwrap();
 
         println!(
             "{:?}\n",
-            tx.inner
+            tx.inner()
                 .db_stat(table_db.dbi())
                 .map_err(|_| format!("Could not find table: {}", T::NAME))
                 .map(|stats| {

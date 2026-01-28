@@ -139,7 +139,8 @@ where
                         crsr.append(k, &v).expect("submit");
                     }
                 }
-                tx.inner.commit().unwrap()
+                drop(crsr);
+                tx.commit().unwrap()
             },
         )
     });
@@ -161,6 +162,7 @@ where
                         crsr.insert(k, &v).expect("submit");
                     }
                 }
+                drop(crsr);
                 tx.inner.commit().unwrap()
             },
         )
@@ -224,7 +226,8 @@ where
                         crsr.append_dup(k, v).expect("submit");
                     }
                 }
-                tx.inner.commit().unwrap()
+                drop(crsr);
+                tx.commit().unwrap()
             },
         )
     });
@@ -244,7 +247,7 @@ where
                     let (k, _, v, _) = input.get(index).unwrap().clone();
                     tx.put::<T>(k, v).unwrap();
                 }
-                tx.inner.commit().unwrap();
+                tx.commit().unwrap()
             },
         )
     });
