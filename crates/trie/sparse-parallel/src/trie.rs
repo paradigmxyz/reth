@@ -943,6 +943,8 @@ impl SparseTrieExt for ParallelSparseTrie {
                     let mut child = path;
                     child.extend(key);
                     if depth == max_depth {
+                        // Only prune if child exists, is not already a hash stub, and has a
+                        // computed hash (embedded nodes without hashes are preserved)
                         if let Some(hash) = self
                             .subtrie_for_path(&child)
                             .and_then(|s| s.nodes.get(&child))
@@ -965,6 +967,8 @@ impl SparseTrieExt for ParallelSparseTrie {
                         let mut child = path;
                         child.push_unchecked(nibble);
                         if depth == max_depth {
+                            // Only prune if child exists, is not already a hash stub, and has a
+                            // computed hash (embedded nodes without hashes are preserved)
                             if let Some(hash) = self
                                 .subtrie_for_path(&child)
                                 .and_then(|s| s.nodes.get(&child))
