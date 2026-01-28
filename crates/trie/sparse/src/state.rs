@@ -1039,6 +1039,7 @@ where
             .copied()
             .collect();
 
+        // Evict storage tries that exceeded limit, saving cleared allocations for reuse
         for hash in tries_to_clear {
             if let Some(trie) = self.storage.tries.remove(&hash) {
                 self.storage.cleared_tries.push(trie.clear());
