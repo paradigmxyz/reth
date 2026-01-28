@@ -13,28 +13,14 @@ pub const MIN_WORKER_COUNT: usize = 32;
 
 /// Returns the default number of storage worker threads based on available parallelism.
 fn default_storage_worker_count() -> usize {
-    #[cfg(feature = "std")]
-    {
-        std::thread::available_parallelism().map_or(8, |n| n.get() * 4)
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        8
-    }
+    4
 }
 
 /// Returns the default number of account worker threads.
 ///
 /// Account workers coordinate storage proof collection and account trie traversal.
 fn default_account_worker_count() -> usize {
-    #[cfg(feature = "std")]
-    {
-        std::thread::available_parallelism().map_or(8, |n| n.get() * 4)
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        8
-    }
+    4
 }
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
