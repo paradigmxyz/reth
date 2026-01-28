@@ -6,7 +6,7 @@ use csv::Writer;
 use eyre::OptionExt;
 use reth_primitives_traits::constants::GIGAGAS;
 use serde::{ser::SerializeStruct, Deserialize, Serialize};
-use std::{path::Path, time::Duration};
+use std::{fs, path::Path, time::Duration};
 use tracing::info;
 
 /// This is the suffix for gas output csv files.
@@ -194,6 +194,8 @@ pub(crate) fn write_benchmark_results(
     gas_results: &[TotalGasRow],
     combined_results: Vec<CombinedResult>,
 ) -> eyre::Result<()> {
+    fs::create_dir_all(output_dir)?;
+
     let output_path = output_dir.join(COMBINED_OUTPUT_SUFFIX);
     info!("Writing engine api call latency output to file: {:?}", output_path);
     let mut writer = Writer::from_path(&output_path)?;
