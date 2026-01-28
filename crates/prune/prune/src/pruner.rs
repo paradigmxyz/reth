@@ -160,9 +160,17 @@ where
             .map(|s| format!("{}={}", s.segment, s.pruned))
             .collect();
 
+        let highest_pruned_block = output
+            .segments
+            .iter()
+            .filter(|(_, seg)| seg.pruned > 0)
+            .filter_map(|(_, seg)| seg.checkpoint.and_then(|c| c.block_number))
+            .max();
+
         debug!(
             target: "pruner",
             tip_block_number,
+            ?highest_pruned_block,
             deleted_entries,
             elapsed_ms = elapsed.as_millis() as u64,
             segments = %segments_summary.join(", "),
