@@ -31,6 +31,18 @@ fn default_account_worker_count() -> usize {
     default_storage_worker_count()
 }
 
+/// Returns the default prewarm max concurrency based on available parallelism.
+fn default_prewarm_max_concurrency() -> usize {
+    #[cfg(feature = "std")]
+    {
+        std::thread::available_parallelism().map_or(8, |n| n.get() * 2).min(MIN_WORKER_COUNT)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        8
+    }
+}
+
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 60;
 
@@ -43,9 +55,6 @@ pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2: usize = DEFAULT_MULTIPROOF_TASK
 ///
 /// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
-
-/// Default maximum concurrency for prewarm task.
-pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
@@ -175,7 +184,7 @@ impl Default for TreeConfig {
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
-            prewarm_max_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY,
+            prewarm_max_concurrency: default_prewarm_max_concurrency(),
             allow_unwind_canonical_header: false,
             storage_worker_count: default_storage_worker_count(),
             account_worker_count: default_account_worker_count(),
