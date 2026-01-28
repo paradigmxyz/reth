@@ -4,7 +4,7 @@ use core::fmt::Debug;
 
 use alloc::{borrow::Cow, vec, vec::Vec};
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256Map, HashMap, HashSet},
     B256,
 };
 use alloy_trie::BranchNodeCompact;
@@ -12,6 +12,41 @@ use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 
 use crate::provider::TrieNodeProvider;
+
+/// Describes an update to a leaf in the sparse trie.
+///
+/// Used with [`SparseTrieExt::update_leaves`] for batch leaf operations that
+/// gracefully handle blinded nodes by collecting proof targets instead of failing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeafUpdate {
+    /// The leaf value has been changed to the given RLP-encoded value.
+    ///
+    /// - Non-empty `Vec`: Updates or inserts the leaf with this value
+    /// - Empty `Vec`: Removes the leaf from the trie
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Update a leaf
+    /// updates.insert(key, LeafUpdate::Changed(rlp_encoded_value));
+    ///
+    /// // Remove a leaf
+    /// updates.insert(key, LeafUpdate::Changed(vec![]));
+    /// ```
+    Changed(Vec<u8>),
+
+    /// The leaf value is likely changed, but the new value is not yet known.
+    ///
+    /// Used in prewarming contexts where transactions may execute out-of-order.
+    /// This variant triggers proof fetching for the path without modifying the
+    /// trie structure, enabling optimistic revelation of trie nodes that will
+    /// likely be needed.
+    ///
+    /// When processed:
+    /// - If the path is fully revealed: the update is considered complete
+    /// - If blinded nodes block the path: proof targets are collected
+    Touched,
+}
 
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
@@ -260,6 +295,58 @@ pub trait SparseTrieExt: SparseTrie {
     ///
     /// The number of nodes converted to hash stubs.
     fn prune(&mut self, max_depth: usize) -> usize;
+
+    /// Applies batch leaf updates to the sparse trie.
+    ///
+    /// This method enables efficient batch processing of leaf updates while handling
+    /// blinded (unrevealed) nodes gracefully. Instead of failing on blinded nodes,
+    /// it collects proof targets that can be used to fetch the necessary proofs.
+    ///
+    /// # Arguments
+    ///
+    /// * `updates` - A mutable map of leaf keys to their updates. Successfully applied updates are
+    ///   removed from this map, while updates blocked by blinded nodes remain.
+    /// * `proof_required_fn` - A callback invoked when a proof is needed. Receives the full path
+    ///   (as `Nibbles`) and `min_len` (minimum proof depth to skip already-revealed nodes). The
+    ///   caller can construct a `proof_v2::Target` using these values.
+    ///
+    /// # Update Types
+    ///
+    /// * [`LeafUpdate::Changed(value)`] - Updates or inserts a leaf with the given value. An empty
+    ///   `Vec` indicates removal of the leaf.
+    /// * [`LeafUpdate::Touched`] - Marks a leaf as likely changed without providing a value. Used
+    ///   for prewarming/optimistic revelation where the actual value isn't yet known.
+    ///
+    /// # Behavior
+    ///
+    /// For each update in the map:
+    /// 1. Attempts to apply the update using the existing revealed trie structure
+    /// 2. On success: removes the key from `updates`
+    /// 3. On blinded node: keeps the key in `updates`, invokes `proof_required_fn` with the path
+    ///    and `min_len = blinded_path.len()` (to skip already-revealed prefixes)
+    ///
+    /// Proof targets are deduplicated - the callback is invoked at most once per unique
+    /// `(path, min_len)` pair within a single call.
+    ///
+    /// # Workflow
+    ///
+    /// ```text
+    /// 1. Call update_leaves(updates, callback)
+    /// 2. Callback collects proof targets for blinded paths
+    /// 3. Fetch proofs for those targets
+    /// 4. Reveal proofs via reveal_nodes()
+    /// 5. Call update_leaves(updates, callback) again with remaining updates
+    /// 6. Repeat until updates map is empty
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or an error if a non-blinded-node error occurs.
+    fn update_leaves(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        proof_required_fn: impl FnMut(Nibbles, u8),
+    ) -> SparseTrieResult<()>;
 }
 
 /// Tracks modifications to the sparse trie structure.
