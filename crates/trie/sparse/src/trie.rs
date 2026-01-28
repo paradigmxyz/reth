@@ -1,6 +1,6 @@
 use crate::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait, SparseTrieExt, SparseTrieUpdates,
+    LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
 };
 use alloc::{
     borrow::Cow,
@@ -1095,12 +1095,6 @@ impl SparseTrieTrait for SerialSparseTrie {
 
     fn shrink_values_to(&mut self, size: usize) {
         self.values.shrink_to(size);
-    }
-}
-
-impl SparseTrieExt for SerialSparseTrie {
-    fn prune(&mut self, _max_depth: usize) -> usize {
-        0
     }
 }
 

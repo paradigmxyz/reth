@@ -924,30 +924,14 @@ impl SparseTrieExt for ParallelSparseTrie {
     }
 
     fn prune(&mut self, max_depth: usize) -> usize {
-        // Pruning is cache eviction, not a state transition.
-        // Clear update tracking and prefix set since the pruned trie is a fresh cache state.
-        if let Some(updates) = self.updates.as_mut() {
-            updates.updated_nodes.clear();
-            updates.removed_nodes.clear();
-            updates.wiped = false;
-        }
-        self.prefix_set.clear();
-
         // DFS traversal to find nodes at max_depth that can be pruned.
         // Collects "effective pruned roots" - children of nodes at max_depth with computed hashes.
-        let estimated_capacity = self.upper_subtrie.nodes.len().min(256);
-        let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::with_capacity(estimated_capacity);
+        let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::new();
         let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
         stack.push((Nibbles::default(), 0));
 
         while let Some((path, depth)) = stack.pop() {
-            let subtrie = if SparseSubtrieType::path_len_is_upper(path.len()) {
-                &*self.upper_subtrie
-            } else if let Some(s) = self.lower_subtrie_for_path(&path) {
-                s
-            } else {
-                continue
-            };
+            let Some(subtrie) = self.subtrie_for_path(&path) else { continue };
             let Some(node) = subtrie.nodes.get(&path) else { continue };
 
             match node {
@@ -958,14 +942,10 @@ impl SparseTrieExt for ParallelSparseTrie {
                     let mut child = path;
                     child.extend(key);
                     if depth == max_depth {
-                        let child_subtrie = if SparseSubtrieType::path_len_is_upper(child.len()) {
-                            Some(&*self.upper_subtrie)
-                        } else {
-                            self.lower_subtrie_for_path(&child)
-                        };
-                        if let Some(hash) = child_subtrie
+                        if let Some(hash) = self
+                            .subtrie_for_path(&child)
                             .and_then(|s| s.nodes.get(&child))
-                            .filter(|n| !matches!(n, SparseNode::Hash(_)))
+                            .filter(|n| !n.is_hash())
                             .and_then(|n| n.hash())
                         {
                             effective_pruned_roots.push((child, hash));
@@ -984,15 +964,10 @@ impl SparseTrieExt for ParallelSparseTrie {
                         let mut child = path;
                         child.push_unchecked(nibble);
                         if depth == max_depth {
-                            let child_subtrie = if SparseSubtrieType::path_len_is_upper(child.len())
-                            {
-                                Some(&*self.upper_subtrie)
-                            } else {
-                                self.lower_subtrie_for_path(&child)
-                            };
-                            if let Some(hash) = child_subtrie
+                            if let Some(hash) = self
+                                .subtrie_for_path(&child)
                                 .and_then(|s| s.nodes.get(&child))
-                                .filter(|n| !matches!(n, SparseNode::Hash(_)))
+                                .filter(|n| !n.is_hash())
                                 .and_then(|n| n.hash())
                             {
                                 effective_pruned_roots.push((child, hash));
@@ -1015,70 +990,37 @@ impl SparseTrieExt for ParallelSparseTrie {
 
         let nodes_converted = effective_pruned_roots.len();
 
-        // Partition roots by subtrie for efficient per-subtrie pruning.
-        // Upper subtrie roots (path.len() < UPPER_TRIE_MAX_DEPTH) go to roots_upper.
-        // Lower subtrie roots go to roots_by_lower indexed by their subtrie index.
-        let mut roots_upper = Vec::<(Nibbles, B256)>::new();
-        let mut roots_by_lower: [Vec<(Nibbles, B256)>; NUM_LOWER_SUBTRIES] =
-            core::array::from_fn(|_| Vec::new());
+        // Sort roots by subtrie type (upper first), then by path for efficient partitioning.
+        effective_pruned_roots.sort_unstable_by(|(path_a, _), (path_b, _)| {
+            let subtrie_type_a = SparseSubtrieType::from_path(path_a);
+            let subtrie_type_b = SparseSubtrieType::from_path(path_b);
+            subtrie_type_a.cmp(&subtrie_type_b).then(path_a.cmp(path_b))
+        });
 
-        for (path, hash) in effective_pruned_roots {
-            if SparseSubtrieType::path_len_is_upper(path.len()) {
-                roots_upper.push((path, hash));
-            } else {
-                let idx = path_subtrie_index_unchecked(&path);
-                roots_by_lower[idx].push((path, hash));
-            }
-        }
+        // Split off upper subtrie roots (they come first due to sorting)
+        let num_upper_roots = effective_pruned_roots
+            .iter()
+            .position(|(p, _)| !SparseSubtrieType::path_len_is_upper(p.len()))
+            .unwrap_or(effective_pruned_roots.len());
 
-        // Sort for binary search (roots are prefix-free by node-depth).
-        roots_upper.sort_unstable_by_key(|(a, _)| *a);
-        for bucket in &mut roots_by_lower {
-            bucket.sort_unstable_by_key(|(a, _)| *a);
-        }
+        let roots_upper = &effective_pruned_roots[..num_upper_roots];
+        let roots_lower = &effective_pruned_roots[num_upper_roots..];
 
         debug_assert!(
             {
-                let mut all_roots: Vec<_> = roots_upper
-                    .iter()
-                    .chain(roots_by_lower.iter().flatten())
-                    .map(|(p, _)| p)
-                    .collect();
+                let mut all_roots: Vec<_> = effective_pruned_roots.iter().map(|(p, _)| p).collect();
                 all_roots.sort_unstable();
                 all_roots.windows(2).all(|w| !w[1].starts_with(w[0]))
             },
             "prune roots must be prefix-free"
         );
 
-        // Fast path: Clear entire lower subtries in O(1) when possible, avoiding O(n) retain().
-        // Two cases enable fast-clearing:
-        // 1. A pruned root in roots_by_lower exactly matches a lower subtrie's root path
-        // 2. An upper prune root is a prefix of a lower subtrie's root path (entire subtrie is
-        //    below the prune boundary)
         let mut fully_pruned_subtries = [false; NUM_LOWER_SUBTRIES];
 
-        // Case 1: Lower prune roots that exactly match subtrie root paths
-        for (idx, bucket) in roots_by_lower.iter().enumerate() {
-            for (path, hash) in bucket {
-                if let Some(subtrie) = self.lower_subtries[idx].as_revealed_mut() &&
-                    &subtrie.path == path
-                {
-                    subtrie.nodes.clear();
-                    subtrie.inner.values.clear();
-                    subtrie.nodes.insert(*path, SparseNode::Hash(*hash));
-                    fully_pruned_subtries[idx] = true;
-                }
-            }
-        }
-
-        // Case 2: Upper prune roots that are prefixes of lower subtrie root paths
-        // When an upper root is a prefix of subtrie.path, the entire subtrie lies below the
-        // prune boundary and can be replaced with Blind(None) to avoid leaving an invalid state.
+        // Upper prune roots that are prefixes of lower subtrie root paths cause the entire
+        // subtrie to be replaced with Blind(None).
         if !roots_upper.is_empty() {
             for (idx, subtrie) in self.lower_subtries.iter_mut().enumerate() {
-                if fully_pruned_subtries[idx] {
-                    continue;
-                }
                 let should_clear = subtrie.as_revealed_ref().is_some_and(|s| {
                     let search_idx = roots_upper.partition_point(|(root, _)| root <= &s.path);
                     search_idx > 0 && s.path.starts_with(&roots_upper[search_idx - 1].0)
@@ -1090,62 +1032,61 @@ impl SparseTrieExt for ParallelSparseTrie {
             }
         }
 
-        // Upper subtrie nodes: paths are < UPPER_TRIE_MAX_DEPTH, only check upper roots
-        self.upper_subtrie.nodes.retain(|p, _| !is_strict_descendant_in(&roots_upper, p));
-        // Upper subtrie values can have full paths (values are always stored in upper subtrie).
-        // Check both upper roots (for any path) and the appropriate lower bucket.
+        // Upper subtrie: prune nodes and values
+        self.upper_subtrie.nodes.retain(|p, _| !is_strict_descendant_in(roots_upper, p));
         self.upper_subtrie.inner.values.retain(|p, _| {
-            // Always check upper roots first - they can have descendants at any depth
-            if starts_with_pruned_in(&roots_upper, p) {
-                return false;
-            }
-            // For longer paths, also check the appropriate lower bucket
-            if !SparseSubtrieType::path_len_is_upper(p.len()) {
-                let idx = path_subtrie_index_unchecked(p);
-                if starts_with_pruned_in(&roots_by_lower[idx], p) {
-                    return false;
-                }
-            }
-            true
+            !starts_with_pruned_in(roots_upper, p) && !starts_with_pruned_in(roots_lower, p)
         });
 
-        // Process lower subtries serially - benchmarking shows parallelism adds overhead
-        // without benefit due to the fast per-subtrie retain() operations (~0.3µs each)
-        // and rayon dispatch overhead (~80-100µs).
-        for (subtrie_idx, subtrie) in self.lower_subtries.iter_mut().enumerate() {
-            // Skip subtries that were fully cleared via the fast path
+        // Process lower subtries using chunk_by to group roots by subtrie
+        for roots_group in roots_lower.chunk_by(|(path_a, _), (path_b, _)| {
+            SparseSubtrieType::from_path(path_a) == SparseSubtrieType::from_path(path_b)
+        }) {
+            let subtrie_idx = path_subtrie_index_unchecked(&roots_group[0].0);
             if fully_pruned_subtries[subtrie_idx] {
                 continue;
             }
-            if let Some(s) = subtrie.as_revealed_mut() {
-                let bucket = &roots_by_lower[subtrie_idx];
-                // Check both the subtrie's own bucket and upper roots (upper roots can have
-                // descendants in lower subtries when pruned at shallow depths)
+
+            // Check if any root exactly matches the subtrie root path (fast path: clear entire
+            // subtrie)
+            let subtrie_cleared =
+                if let Some(subtrie) = self.lower_subtries[subtrie_idx].as_revealed_mut() {
+                    if let Some((path, hash)) =
+                        roots_group.iter().find(|(path, _)| path == &subtrie.path)
+                    {
+                        subtrie.clear();
+                        subtrie.nodes.insert(*path, SparseNode::Hash(*hash));
+                        fully_pruned_subtries[subtrie_idx] = true;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+            if !subtrie_cleared && let Some(s) = self.lower_subtries[subtrie_idx].as_revealed_mut()
+            {
                 s.nodes.retain(|p, _| {
-                    !is_strict_descendant_in(bucket, p) && !is_strict_descendant_in(&roots_upper, p)
+                    !is_strict_descendant_in(roots_group, p) &&
+                        !is_strict_descendant_in(roots_upper, p)
                 });
                 s.inner.values.retain(|p, _| {
-                    !starts_with_pruned_in(bucket, p) && !starts_with_pruned_in(&roots_upper, p)
+                    !starts_with_pruned_in(roots_group, p) && !starts_with_pruned_in(roots_upper, p)
                 });
             }
         }
 
-        // Branch node masks: Two-phase pruning with fast path for fully-pruned subtries.
-        // - Upper masks (path.len() < UPPER_TRIE_MAX_DEPTH): check only against roots_upper
-        // - Lower masks: O(1) check for fully-pruned subtries, then check bucket + upper roots
+        // Branch node masks pruning
         self.branch_node_masks.retain(|p, _| {
             if SparseSubtrieType::path_len_is_upper(p.len()) {
-                // Upper masks only need to check upper roots
-                !starts_with_pruned_in(&roots_upper, p)
+                !starts_with_pruned_in(roots_upper, p)
             } else {
                 let idx = path_subtrie_index_unchecked(p);
-                // Fast O(1) check: if subtrie is fully pruned, remove all masks in it
                 if fully_pruned_subtries[idx] {
                     return false;
                 }
-                // Otherwise, check the subtrie's bucket and upper roots
-                !starts_with_pruned_in(&roots_by_lower[idx], p) &&
-                    !starts_with_pruned_in(&roots_upper, p)
+                !starts_with_pruned_in(roots_lower, p) && !starts_with_pruned_in(roots_upper, p)
             }
         });
 
