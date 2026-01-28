@@ -61,28 +61,13 @@ impl Command {
         })
     }
 
-    /// Load JWT secret from either a file or use the provided string directly
-    fn load_jwt_secret(&self) -> Result<Option<String>> {
-        match &self.jwt_secret {
-            Some(secret) => {
-                // Try to read as file first
-                match std::fs::read_to_string(secret) {
-                    Ok(contents) => Ok(Some(contents.trim().to_string())),
-                    // If file read fails, use the string directly
-                    Err(_) => Ok(Some(secret.clone())),
-                }
-            }
-            None => Ok(None),
-        }
-    }
-
     /// Execute the generate payload command
     pub async fn execute(self, _ctx: CliContext) -> Result<()> {
         // Load block
         let block_json = self.read_input()?;
 
         // Load JWT secret
-        let jwt_secret = self.load_jwt_secret()?;
+        let jwt_secret = super::helpers::load_jwt_secret(&self.jwt_secret)?;
 
         // Parse the block
         let block = serde_json::from_str::<AnyRpcBlock>(&block_json)?
