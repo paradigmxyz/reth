@@ -9,6 +9,7 @@ use alloy_rlp::Decodable;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_primitives_traits::Account;
+use reth_revm::state::EvmState;
 use reth_trie::{updates::TrieUpdates, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH};
 use reth_trie_parallel::{
     proof_task::{ProofResult, ProofResultMessage, ProofWorkerHandle},
@@ -21,13 +22,12 @@ use reth_trie_sparse::{
     ClearedSparseStateTrie, LeafUpdate, SerialSparseTrie, SparseStateTrie, SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
-use revm_state::EvmState;
 use smallvec::SmallVec;
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-use tracing::{debug, debug_span, error, instrument, trace};
+use tracing::{debug, debug_span, instrument, trace};
 
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
@@ -177,10 +177,20 @@ where
 {
     /// Creates a new sparse trie, pre-populating with a [`ClearedSparseStateTrie`].
     pub(super) fn new_with_cleared_trie(
-        updates: mpsc::Receiver<MultiProofMessage>,
+        updates: CrossbeamReceiver<MultiProofMessage>,
+        proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
+        proof_worker_handle: ProofWorkerHandle,
         sparse_state_trie: ClearedSparseStateTrie<A, S>,
     ) -> Self {
-        Self { updates, trie: sparse_state_trie.into_inner() }
+        Self {
+            updates,
+            proof_result_rx,
+            proof_worker_handle,
+            trie: sparse_state_trie.into_inner(),
+            account_updates: Default::default(),
+            storage_updates: Default::default(),
+            pending_account_updates: Default::default(),
+        }
     }
 
     /// Runs the sparse trie task to completion.
@@ -224,7 +234,7 @@ where
                     self.on_proof_result(result)?;
                 },
                 recv(self.updates) -> message => {
-                    let message = match message {
+                    let update = match message {
                         Ok(m) => m,
                         Err(_) => {
                             continue
@@ -250,17 +260,14 @@ where
             self.process_updates();
         }
 
-        debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
-
         let start = Instant::now();
-        let (state_root, trie_updates) =
-            self.trie.root_with_updates(&self.blinded_provider_factory).map_err(|e| {
-                ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-            })?;
+        // let (state_root, trie_updates) =
+        //     self.trie.root_with_updates(&self.blinded_provider_factory).map_err(|e| {
+        //         ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
+        //     })?;
+        let (state_root, trie_updates) = todo!();
 
         let end = Instant::now();
-        self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
-        self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
@@ -336,7 +343,7 @@ where
 
             // Track account in `pending_account_updates` so that once storage root is computed,
             // it will be updated in the accounts trie.
-            self.pending_account_updates.insert(address, account);
+            self.pending_account_updates.insert(address, Some(account));
         }
     }
 
@@ -382,7 +389,7 @@ where
                     } else {
                         // TODO: optimize allocation
                         alloy_rlp::encode(
-                            &account.unwrap_or_default().into_trie_account(storage_root),
+                            account.unwrap_or_default().into_trie_account(storage_root),
                         )
                     };
                     self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
@@ -421,13 +428,13 @@ where
                 (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applies to its trie, storage root must be revealed by now"))
             };
 
-            let encoded = if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
+            let encoded = if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
                 Vec::new()
             } else {
                 let account = account.unwrap_or_default().into_trie_account(storage_root);
 
                 // TODO: optimize allocation
-                alloy_rlp::encode(&account)
+                alloy_rlp::encode(account)
             };
             self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
 

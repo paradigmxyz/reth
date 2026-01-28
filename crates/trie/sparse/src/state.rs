@@ -1,7 +1,7 @@
 use crate::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     traits::{SparseTrie as SparseTrieTrait, SparseTrieExt},
-    LeafUpdate, RevealableSparseTrie, SerialSparseTrie,
+    RevealableSparseTrie, SerialSparseTrie,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -1781,7 +1781,7 @@ mod tests {
                 &provider_factory,
             )
             .unwrap();
-        trie_account_1.storage_root = sparse.storage_root(address_1).unwrap();
+        trie_account_1.storage_root = sparse.storage_root(&address_1).unwrap();
         sparse
             .update_account_leaf(
                 address_path_1,
@@ -1791,7 +1791,7 @@ mod tests {
             .unwrap();
 
         sparse.wipe_storage(address_2).unwrap();
-        trie_account_2.storage_root = sparse.storage_root(address_2).unwrap();
+        trie_account_2.storage_root = sparse.storage_root(&address_2).unwrap();
         sparse
             .update_account_leaf(
                 address_path_2,
