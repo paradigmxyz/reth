@@ -1025,7 +1025,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
 
     fn storage_changesets_range(
         &self,
-        _range: RangeInclusive<BlockNumber>,
+        _range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
         Ok(Vec::default())
     }

@@ -728,7 +728,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
 
     fn storage_changesets_range(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         self.consistent_provider()?.storage_changesets_range(range)
     }
