@@ -332,16 +332,19 @@ impl Command {
             results.into_iter().unzip();
 
         if let Some(ref path) = self.output {
-            write_benchmark_results(path, &gas_output_results, combined_results)?;
+            write_benchmark_results(path, &gas_output_results, &combined_results)?;
         }
 
-        let gas_output = TotalGasOutput::new(gas_output_results)?;
+        let gas_output =
+            TotalGasOutput::with_combined_results(gas_output_results, &combined_results)?;
         info!(
             total_gas_used = gas_output.total_gas_used,
             total_duration = ?gas_output.total_duration,
+            execution_duration = ?gas_output.execution_duration,
             blocks_processed = gas_output.blocks_processed,
-            "Total Ggas/s: {:.4}",
-            gas_output.total_gigagas_per_second()
+            wall_clock_ggas_per_second = format_args!("{:.4}", gas_output.total_gigagas_per_second()),
+            execution_ggas_per_second = format_args!("{:.4}", gas_output.execution_gigagas_per_second()),
+            "Benchmark complete"
         );
 
         Ok(())
