@@ -30,6 +30,11 @@ fn main() {
     #[cfg(not(debug_assertions))]
     cc.define("MDBX_DEBUG", "0").define("NDEBUG", None);
 
+    // Enable GC profiling if the feature is enabled
+    if env::var("CARGO_FEATURE_MDBX_PROFGC").is_ok() {
+        cc.define("MDBX_ENABLE_PROFGC", "1");
+    }
+
     // Propagate `-C target-cpu=native`
     let rustflags = env::var("CARGO_ENCODED_RUSTFLAGS").unwrap();
     if rustflags.contains("target-cpu=native") &&

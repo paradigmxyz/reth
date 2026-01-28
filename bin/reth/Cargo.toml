@@ -81,7 +81,7 @@ backon.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["jemalloc", "otlp", "otlp-logs", "reth-revm/portable", "js-tracer", "keccak-cache-global", "asm-keccak"]
+default = ["jemalloc", "otlp", "otlp-logs", "reth-revm/portable", "js-tracer", "keccak-cache-global", "asm-keccak", "mdbx-profgc"]
 
 otlp = [
     "reth-ethereum-cli/otlp",
@@ -181,6 +181,7 @@ min-trace-logs = [
 ]
 
 edge = ["reth-ethereum-cli/edge", "reth-node-core/edge"]
+mdbx-profgc = ["reth-db/mdbx-profgc"]
 
 [[bin]]
 name = "reth"

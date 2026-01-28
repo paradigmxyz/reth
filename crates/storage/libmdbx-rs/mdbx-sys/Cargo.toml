@@ -8,6 +8,9 @@ license = "Apache-2.0"
 homepage.workspace = true
 repository.workspace = true
 
+[features]
+mdbx-profgc = []
+
 [build-dependencies]
 cc.workspace = true
 bindgen = { workspace = true, features = ["runtime"] }

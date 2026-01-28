@@ -97,6 +97,7 @@ op = [
     "reth-primitives-traits/op",
 ]
 disable-lock = []
+mdbx-profgc = ["reth-libmdbx?/mdbx-profgc"]
 
 [[bench]]
 name = "hash_keys"
