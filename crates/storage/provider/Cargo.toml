@@ -57,6 +57,7 @@ eyre.workspace = true
 # test-utils
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync"], optional = true }
+tempfile = { workspace = true, optional = true }
 
 # parallel utils
 rayon.workspace = true
@@ -103,4 +104,5 @@ test-utils = [
     "reth-stages-types/test-utils",
     "revm-state",
     "tokio",
+    "dep:tempfile",
 ]

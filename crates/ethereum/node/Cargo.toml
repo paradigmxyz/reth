@@ -123,3 +123,8 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
     "reth-stages-types/test-utils",
 ]
+edge = [
+    "reth-provider/edge",
+    "reth-stages/edge",
+    "reth-db-common/edge",
+]

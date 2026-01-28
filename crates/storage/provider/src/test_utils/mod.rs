@@ -56,18 +56,19 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     chain_spec: Arc<N::ChainSpec>,
 ) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
     let (static_dir, _) = create_test_static_files_dir();
-    let (rocksdb_dir, _) = create_test_rocksdb_dir();
+    let (rocksdb_dir, rocksdb_path) = create_test_rocksdb_dir();
     let db = create_test_rw_db();
     ProviderFactory::new(
         db,
         chain_spec,
         StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
-        RocksDBBuilder::new(&rocksdb_dir)
+        RocksDBBuilder::new(&rocksdb_path)
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
     )
     .expect("failed to create test provider factory")
+    .with_rocksdb_temp_dir(rocksdb_dir)
 }
 
 /// Inserts the genesis alloc from the provided chain spec into the trie.

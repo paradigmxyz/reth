@@ -150,6 +150,23 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     pub fn into_db(self) -> N::DB {
         self.db
     }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Attaches a temporary RocksDB directory to keep it alive for the lifetime of the factory.
+    /// This prevents the directory from being deleted while tests are running.
+    pub fn with_rocksdb_temp_dir(self, _temp_dir: tempfile::TempDir) -> Self {
+        // The temp_dir is moved into the function and will be dropped when the factory is dropped.
+        // We use a static to keep it alive for the duration of the test.
+        use std::sync::OnceLock;
+        static ROCKSDB_TEMP_DIRS: OnceLock<std::sync::Mutex<Vec<tempfile::TempDir>>> =
+            OnceLock::new();
+        ROCKSDB_TEMP_DIRS
+            .get_or_init(|| std::sync::Mutex::new(Vec::new()))
+            .lock()
+            .unwrap()
+            .push(_temp_dir);
+        self
+    }
 }
 
 impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {
