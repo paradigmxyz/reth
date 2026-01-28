@@ -53,6 +53,16 @@ target "_base" {
     VERGEN_GIT_DESCRIBE = "${VERGEN_GIT_DESCRIBE}"
     VERGEN_GIT_DIRTY   = "${VERGEN_GIT_DIRTY}"
   }
+  secret = [
+    {
+      type = "env"
+      id   = "DEPOT_TOKEN"
+    }
+  ]
+}
+target "_base_profiling" {
+  inherits = ["_base"]
+  platforms  = ["linux/amd64"]
 }
 target "_base_profiling" {
   inherits = ["_base"]
