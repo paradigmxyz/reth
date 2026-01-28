@@ -1074,7 +1074,7 @@ where
             }
         }
 
-        // Clear revealed_paths for kept tries (must be done serially)
+        // Clear revealed_paths for kept tries
         for hash in &tries_to_keep {
             if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
                 paths.clear();
