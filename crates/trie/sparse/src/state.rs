@@ -1052,17 +1052,15 @@ where
 
             if tries_to_keep.len() >= PARALLEL_PRUNE_THRESHOLD {
                 self.storage.tries.par_iter_mut().for_each(|(hash, trie)| {
-                    if tries_to_keep.contains(hash) &&
-                        let RevealableSparseTrie::Revealed(t) = trie
-                    {
-                        t.prune(max_depth);
+                    if tries_to_keep.contains(hash) {
+                        if let Some(t) = trie.as_revealed_mut() {
+                            t.prune(max_depth);
+                        }
                     }
                 });
             } else {
                 for hash in &tries_to_keep {
-                    if let Some(RevealableSparseTrie::Revealed(trie)) =
-                        self.storage.tries.get_mut(hash)
-                    {
+                    if let Some(trie) = self.storage.tries.get_mut(hash).and_then(|t| t.as_revealed_mut()) {
                         trie.prune(max_depth);
                     }
                 }
@@ -1072,8 +1070,7 @@ where
         #[cfg(not(feature = "std"))]
         {
             for hash in &tries_to_keep {
-                if let Some(RevealableSparseTrie::Revealed(trie)) = self.storage.tries.get_mut(hash)
-                {
+                if let Some(trie) = self.storage.tries.get_mut(hash).and_then(|t| t.as_revealed_mut()) {
                     trie.prune(max_depth);
                 }
             }
