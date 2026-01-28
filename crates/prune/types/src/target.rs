@@ -11,6 +11,11 @@ use crate::{PruneCheckpoint, PruneMode, PruneSegment, ReceiptsLogPruneConfig};
 ///    unwind is required.
 pub const MINIMUM_PRUNING_DISTANCE: u64 = 32 * 2 + 10_000;
 
+/// Minimum blocks to retain for receipts and bodies to ensure reorg safety.
+/// This prevents pruning data that may be needed when handling chain reorganizations,
+/// specifically when `canonical_block_by_hash` needs to reconstruct `ExecutedBlock` from disk.
+pub const MINIMUM_RECEIPTS_DISTANCE: u64 = 64;
+
 /// Type of history that can be pruned
 #[derive(Debug, Error, PartialEq, Eq, Clone)]
 pub enum UnwindTargetPrunedError {

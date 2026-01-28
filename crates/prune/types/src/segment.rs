@@ -1,6 +1,6 @@
 #![allow(deprecated)] // necessary to all defining deprecated `PruneSegment` variants
 
-use crate::MINIMUM_PRUNING_DISTANCE;
+use crate::{MINIMUM_PRUNING_DISTANCE, MINIMUM_RECEIPTS_DISTANCE};
 use derive_more::Display;
 use strum::{EnumIter, IntoEnumIterator};
 use thiserror::Error;
@@ -65,7 +65,8 @@ impl PruneSegment {
     /// Returns minimum number of blocks to keep in the database for this segment.
     pub const fn min_blocks(&self) -> u64 {
         match self {
-            Self::SenderRecovery | Self::TransactionLookup | Self::Receipts | Self::Bodies => 0,
+            Self::SenderRecovery | Self::TransactionLookup => 0,
+            Self::Receipts | Self::Bodies => MINIMUM_RECEIPTS_DISTANCE,
             Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
                 MINIMUM_PRUNING_DISTANCE
             }
