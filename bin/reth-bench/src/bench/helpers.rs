@@ -2,6 +2,20 @@
 
 use crate::valid_payload::call_forkchoice_updated;
 
+/// Load a JWT secret either from a file path or use the provided string directly.
+///
+/// Some bench commands accept `--jwt-secret` as either a path to a file containing the secret or
+/// the secret itself.
+pub(crate) fn load_jwt_secret(jwt_secret: &Option<String>) -> eyre::Result<Option<String>> {
+    match jwt_secret {
+        Some(secret) => match std::fs::read_to_string(secret) {
+            Ok(contents) => Ok(Some(contents.trim().to_string())),
+            Err(_) => Ok(Some(secret.clone())),
+        },
+        None => Ok(None),
+    }
+}
+
 /// Parses a gas limit value with optional suffix: K for thousand, M for million, G for billion.
 ///
 /// Examples: "30000000", "30M", "1G", "2G"
