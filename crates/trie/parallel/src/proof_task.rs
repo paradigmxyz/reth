@@ -215,7 +215,7 @@ impl ProofWorkerHandle {
                 .entered();
         // Spawn account workers
         for worker_id in 0..account_worker_count {
-            let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
+            let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id, account_multiproofs = tracing::field::Empty);
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = account_work_rx.clone();
             let storage_work_tx_clone = storage_work_tx.clone();
@@ -447,8 +447,6 @@ where
     fn compute_legacy_storage_proof(
         &self,
         input: StorageProofInput,
-        trie_cursor_metrics: &mut TrieCursorMetricsCache,
-        hashed_cursor_metrics: &mut HashedCursorMetricsCache,
     ) -> Result<StorageProofResult, StateProofError> {
         // Consume the input so we can move large collections (e.g. target slots) without cloning.
         let StorageProofInput::Legacy {
@@ -484,11 +482,7 @@ where
                 .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().copied()))
                 .with_branch_node_masks(with_branch_node_masks)
                 .with_added_removed_keys(added_removed_keys)
-                .with_trie_cursor_metrics(trie_cursor_metrics)
-                .with_hashed_cursor_metrics(hashed_cursor_metrics)
                 .storage_multiproof(target_slots);
-        trie_cursor_metrics.record_span("trie_cursor");
-        hashed_cursor_metrics.record_span("hashed_cursor");
 
         // Decode proof into DecodedStorageMultiProof
         let decoded_result =
@@ -972,8 +966,6 @@ where
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
-        let mut trie_cursor_metrics = TrieCursorMetricsCache::default();
-        let mut hashed_cursor_metrics = HashedCursorMetricsCache::default();
         let hashed_address = input.hashed_address();
         let proof_start = Instant::now();
 
@@ -988,11 +980,7 @@ where
                     "Processing storage proof"
                 );
 
-                proof_tx.compute_legacy_storage_proof(
-                    input,
-                    &mut trie_cursor_metrics,
-                    &mut hashed_cursor_metrics,
-                )
+                proof_tx.compute_legacy_storage_proof(input)
             }
             StorageProofInput::V2 { hashed_address, targets } => {
                 trace!(
@@ -1032,25 +1020,9 @@ where
             hashed_address = ?hashed_address,
             proof_time_us = proof_elapsed.as_micros(),
             total_processed = storage_proofs_processed,
-            trie_cursor_duration_us = trie_cursor_metrics.total_duration.as_micros(),
-            hashed_cursor_duration_us = hashed_cursor_metrics.total_duration.as_micros(),
-            ?trie_cursor_metrics,
-            ?hashed_cursor_metrics,
             ?root,
             "Storage proof completed"
         );
-
-        #[cfg(feature = "metrics")]
-        {
-            // Accumulate per-proof metrics into the worker's cache
-            let per_proof_cache = ProofTaskCursorMetricsCache {
-                account_trie_cursor: TrieCursorMetricsCache::default(),
-                account_hashed_cursor: HashedCursorMetricsCache::default(),
-                storage_trie_cursor: trie_cursor_metrics,
-                storage_hashed_cursor: hashed_cursor_metrics,
-            };
-            cursor_metrics_cache.extend(&per_proof_cache);
-        }
     }
 
     /// Processes a blinded storage node lookup request.
@@ -1265,6 +1237,8 @@ where
 
             idle_start = Instant::now();
         }
+
+        tracing::Span::current().record("account_multiproofs", account_proofs_processed);
 
         trace!(
             target: "trie::proof_task",
@@ -1674,19 +1648,13 @@ where
                                 let root =
                                     StorageProof::new_hashed(provider, provider, hashed_address)
                                         .with_prefix_set_mut(Default::default())
-                                        .with_trie_cursor_metrics(
-                                            &mut proof_cursor_metrics.storage_trie_cursor,
-                                        )
-                                        .with_hashed_cursor_metrics(
-                                            &mut proof_cursor_metrics.storage_hashed_cursor,
-                                        )
                                         .storage_multiproof(
                                             ctx.targets
                                                 .get(&hashed_address)
                                                 .cloned()
                                                 .unwrap_or_default(),
                                         )
-                                        .map_err(|e| {
+                                        .map_err(|e: StateProofError| {
                                             ParallelStateRootError::StorageRoot(
                                                 reth_execution_errors::StorageRootError::Database(
                                                     DatabaseError::Other(e.to_string()),

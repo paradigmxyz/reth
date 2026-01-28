@@ -1629,13 +1629,6 @@ mod tests {
             let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
             let hashed_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
 
-            // Collect metrics for cursors
-            let mut trie_cursor_metrics = TrieCursorMetricsCache::default();
-            let trie_cursor = InstrumentedTrieCursor::new(trie_cursor, &mut trie_cursor_metrics);
-            let mut hashed_cursor_metrics = HashedCursorMetricsCache::default();
-            let hashed_cursor =
-                InstrumentedHashedCursor::new(hashed_cursor, &mut hashed_cursor_metrics);
-
             // Call ProofCalculator::proof with account targets
             let mut value_encoder = SyncAccountValueEncoder::new(
                 self.trie_cursor_factory.clone(),
@@ -1644,10 +1637,6 @@ mod tests {
             let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
             let proof_v2_result =
                 proof_calculator.proof(&mut value_encoder, &mut targets_vec.clone())?;
-
-            // Output metrics
-            trace!(target: TRACE_TARGET, ?trie_cursor_metrics, "V2 trie cursor metrics");
-            trace!(target: TRACE_TARGET, ?hashed_cursor_metrics, "V2 hashed cursor metrics");
 
             // Call Proof::multiproof (legacy implementation)
             let proof_legacy_result =

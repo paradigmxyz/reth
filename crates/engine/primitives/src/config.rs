@@ -13,7 +13,14 @@ pub const MIN_WORKER_COUNT: usize = 32;
 
 /// Returns the default number of storage worker threads based on available parallelism.
 fn default_storage_worker_count() -> usize {
-    4
+    #[cfg(feature = "std")]
+    {
+        std::thread::available_parallelism().map_or(8, |n| n.get() * 4)
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        8
+    }
 }
 
 /// Returns the default number of account worker threads.
