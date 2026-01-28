@@ -125,6 +125,10 @@ mod tests {
     async fn test_receipt_root_task_single_receipt() {
         let receipts: Vec<Receipt> = vec![Receipt::default()];
 
+        // Verify against the standard calculation (before we move receipts)
+        let receipts_with_bloom: Vec<_> = receipts.iter().map(|r| r.with_bloom_ref()).collect();
+        let expected_root = calculate_receipt_root(&receipts_with_bloom);
+
         let (tx, rx) = bounded(1);
         let (result_tx, result_rx) = oneshot::channel();
         let receipts_len = receipts.len();
@@ -132,17 +136,13 @@ mod tests {
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
         let join_handle = tokio::task::spawn_blocking(move || handle.run(receipts_len));
 
-        for (i, receipt) in receipts.clone().into_iter().enumerate() {
+        for (i, receipt) in receipts.into_iter().enumerate() {
             tx.send(IndexedReceipt::new(i, receipt)).unwrap();
         }
         drop(tx);
 
         join_handle.await.unwrap();
         let (root, _bloom) = result_rx.await.unwrap();
-
-        // Verify against the standard calculation
-        let receipts_with_bloom: Vec<_> = receipts.iter().map(|r| r.with_bloom_ref()).collect();
-        let expected_root = calculate_receipt_root(&receipts_with_bloom);
 
         assert_eq!(root, expected_root);
     }
