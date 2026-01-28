@@ -1069,96 +1069,114 @@ impl SparseTrieExt for ParallelSparseTrie {
         mut proof_required_fn: impl FnMut(Nibbles, u8),
     ) -> SparseTrieResult<()> {
         use alloy_primitives::map::HashSet;
-        use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
+        use reth_trie_sparse::LeafUpdate;
 
-        const MAX_NIBBLE_PATH_LEN: u8 = 64;
+        if updates.is_empty() {
+            return Ok(());
+        }
 
+        // Step 1: Drain updates into a vec and sort by (subtrie, path) for efficient grouping
+        let mut ops: Vec<(B256, Nibbles, SparseSubtrieType, LeafUpdate)> = updates
+            .drain()
+            .map(|(key, update)| {
+                let full_path = Nibbles::unpack(key);
+                let subtrie = SparseSubtrieType::from_path(&full_path);
+                (key, full_path, subtrie, update)
+            })
+            .collect();
+
+        ops.sort_unstable_by(|(_, path_a, subtrie_a, _), (_, path_b, subtrie_b, _)| {
+            subtrie_a.cmp(subtrie_b).then(path_a.cmp(path_b))
+        });
+
+        // Step 2: Split into upper and lower operations
+        let num_upper = ops
+            .iter()
+            .position(|(_, path, _, _)| !SparseSubtrieType::path_len_is_upper(path.len()))
+            .unwrap_or(ops.len());
+
+        let (upper_ops, lower_ops) = ops.split_at(num_upper);
+
+        // Collect proof requests and failures
         let mut requested: HashSet<(Nibbles, u8)> = HashSet::default();
+        let mut failures: Vec<(B256, LeafUpdate)> = Vec::new();
 
-        let mut request_proof =
-            |requested: &mut HashSet<(Nibbles, u8)>, full_path: Nibbles, blinded_path: &Nibbles| {
-                let min_len = (blinded_path.len() as u8).min(MAX_NIBBLE_PATH_LEN);
-                if requested.insert((full_path, min_len)) {
-                    proof_required_fn(full_path, min_len);
+        // Step 3: Process upper subtrie operations sequentially
+        for (key, full_path, _, update) in upper_ops {
+            match self.apply_single_update(full_path, update.clone()) {
+                Ok(()) => {}
+                Err(UpdateLeafOutcome::Blinded { blinded_path }) => {
+                    let min_len = Self::compute_min_len(&blinded_path);
+                    if requested.insert((*full_path, min_len)) {
+                        proof_required_fn(*full_path, min_len);
+                    }
+                    failures.push((*key, update.clone()));
                 }
-            };
-
-        let keys: Vec<B256> = updates.keys().copied().collect();
-
-        for key in keys {
-            let full_path = Nibbles::unpack(key);
-
-            let Some(update) = updates.remove(&key) else { continue };
-
-            match update {
-                LeafUpdate::Changed(value) => {
-                    if value.is_empty() {
-                        // Removal: snapshot old value from correct subtrie
-                        let old_value = self.get_leaf_value(&full_path).cloned();
-
-                        match self.remove_leaf(&full_path, NoRevealProvider) {
-                            Ok(()) => {
-                                // Success - update already removed from map
-                            }
-                            Err(e) => {
-                                if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
-                                    // Revert: restore old value to correct subtrie
-                                    if let Some(old) = old_value {
-                                        self.subtrie_for_path_mut(&full_path)
-                                            .inner
-                                            .values
-                                            .insert(full_path, old);
-                                    }
-                                    request_proof(&mut requested, full_path, path);
-                                    // Re-insert update for retry
-                                    updates.insert(key, LeafUpdate::Changed(value));
-                                } else {
-                                    return Err(e);
-                                }
-                            }
-                        }
-                    } else {
-                        // Update/insert: check existence in upper subtrie where update_leaf inserts
-                        // Note: update_leaf always inserts into upper_subtrie.inner.values first
-                        let existed = self.upper_subtrie.inner.values.contains_key(&full_path);
-
-                        match self.update_leaf(full_path, value.clone(), NoRevealProvider) {
-                            Ok(()) => {
-                                // Success - update already removed from map
-                            }
-                            Err(e) => {
-                                if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
-                                    // Revert: remove value from upper subtrie if it was newly
-                                    // inserted update_leaf
-                                    // always inserts into upper_subtrie.inner.values
-                                    if !existed {
-                                        self.upper_subtrie.inner.values.remove(&full_path);
-                                    }
-                                    request_proof(&mut requested, full_path, path);
-                                    // Re-insert update for retry
-                                    updates.insert(key, LeafUpdate::Changed(value));
-                                } else {
-                                    return Err(e);
-                                }
-                            }
-                        }
+                Err(UpdateLeafOutcome::Fatal(e)) => {
+                    for (k, u) in failures {
+                        updates.insert(k, u);
                     }
+                    return Err(e);
                 }
-                LeafUpdate::Touched => match self.find_leaf(&full_path, None) {
-                    Err(LeafLookupError::BlindedNode { path, .. }) => {
-                        request_proof(&mut requested, full_path, &path);
-                        // Re-insert update for retry
-                        updates.insert(key, LeafUpdate::Touched);
-                    }
-                    Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {
-                        // Success - update already removed from map
-                    }
-                },
             }
+        }
+
+        // Step 4: Process lower subtrie operations
+        if lower_ops.is_empty() {
+            for (k, u) in failures {
+                updates.insert(k, u);
+            }
+            return Ok(());
+        }
+
+        // Separate Touched operations (read-only) from Changed operations (mutating).
+        // Touched operations can be processed in parallel since find_leaf takes &self.
+        let (touched_ops, changed_ops): (Vec<_>, Vec<_>) =
+            lower_ops.iter().partition(|(_, _, _, update)| matches!(update, LeafUpdate::Touched));
+
+        // Process Touched operations with potential parallelism
+        let touched_failures = self.process_touched_ops_parallel(&touched_ops);
+        for (key, full_path, min_len) in touched_failures {
+            if requested.insert((full_path, min_len)) {
+                proof_required_fn(full_path, min_len);
+            }
+            failures.push((key, LeafUpdate::Touched));
+        }
+
+        // Process Changed operations sequentially (they mutate the trie)
+        for (key, full_path, _, update) in changed_ops {
+            match self.apply_single_update(full_path, update.clone()) {
+                Ok(()) => {}
+                Err(UpdateLeafOutcome::Blinded { blinded_path }) => {
+                    let min_len = Self::compute_min_len(&blinded_path);
+                    if requested.insert((*full_path, min_len)) {
+                        proof_required_fn(*full_path, min_len);
+                    }
+                    failures.push((*key, update.clone()));
+                }
+                Err(UpdateLeafOutcome::Fatal(e)) => {
+                    for (k, u) in failures {
+                        updates.insert(k, u);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+
+        for (k, u) in failures {
+            updates.insert(k, u);
         }
 
         Ok(())
     }
+}
+
+/// Outcome of attempting to apply a single leaf update
+enum UpdateLeafOutcome {
+    /// Operation hit a blinded node
+    Blinded { blinded_path: Nibbles },
+    /// Fatal error that should be propagated
+    Fatal(reth_execution_errors::SparseTrieError),
 }
 
 impl ParallelSparseTrie {
@@ -1189,6 +1207,100 @@ impl ParallelSparseTrie {
         return false;
 
         num_changed_keys >= self.parallelism_thresholds.min_updated_nodes
+    }
+
+    /// Computes the `min_len` for a proof request from a blinded path.
+    fn compute_min_len(blinded_path: &Nibbles) -> u8 {
+        const MAX_NIBBLE_PATH_LEN: u8 = 64;
+        (blinded_path.len() as u8).min(MAX_NIBBLE_PATH_LEN)
+    }
+
+    /// Applies a single leaf update, returning Ok(()) on success or the outcome on failure.
+    fn apply_single_update(
+        &mut self,
+        full_path: &Nibbles,
+        update: reth_trie_sparse::LeafUpdate,
+    ) -> Result<(), UpdateLeafOutcome> {
+        use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
+
+        match update {
+            LeafUpdate::Changed(value) if value.is_empty() => {
+                let old_value = self.get_leaf_value(full_path).cloned();
+                match self.remove_leaf(full_path, NoRevealProvider) {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
+                            if let Some(old) = old_value {
+                                self.subtrie_for_path_mut(full_path)
+                                    .inner
+                                    .values
+                                    .insert(*full_path, old);
+                            }
+                            Err(UpdateLeafOutcome::Blinded { blinded_path: *path })
+                        } else {
+                            Err(UpdateLeafOutcome::Fatal(e))
+                        }
+                    }
+                }
+            }
+            LeafUpdate::Changed(value) => {
+                let existed = self.get_leaf_value(full_path).is_some();
+                match self.update_leaf(*full_path, value, NoRevealProvider) {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
+                            if !existed {
+                                self.upper_subtrie.inner.values.remove(full_path);
+                                if let Some(subtrie) = self.lower_subtrie_for_path_mut(full_path) {
+                                    subtrie.inner.values.remove(full_path);
+                                }
+                            }
+                            Err(UpdateLeafOutcome::Blinded { blinded_path: *path })
+                        } else {
+                            Err(UpdateLeafOutcome::Fatal(e))
+                        }
+                    }
+                }
+            }
+            LeafUpdate::Touched => match self.find_leaf(full_path, None) {
+                Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => Ok(()),
+                Err(LeafLookupError::BlindedNode { path, .. }) => {
+                    Err(UpdateLeafOutcome::Blinded { blinded_path: path })
+                }
+            },
+        }
+    }
+
+    /// Process Touched operations with potential parallelism.
+    /// Returns a list of `(key, full_path, min_len)` for failures that need proof requests.
+    fn process_touched_ops_parallel(
+        &self,
+        touched_ops: &[&(B256, Nibbles, SparseSubtrieType, reth_trie_sparse::LeafUpdate)],
+    ) -> Vec<(B256, Nibbles, u8)> {
+        #[cfg(feature = "std")]
+        if touched_ops.len() >= self.parallelism_thresholds.min_updated_nodes {
+            use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
+            return touched_ops
+                .into_par_iter()
+                .filter_map(|(key, full_path, _, _)| match self.find_leaf(full_path, None) {
+                    Err(LeafLookupError::BlindedNode { path, .. }) => {
+                        Some((*key, *full_path, Self::compute_min_len(&path)))
+                    }
+                    Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => None,
+                })
+                .collect();
+        }
+
+        touched_ops
+            .iter()
+            .filter_map(|(key, full_path, _, _)| match self.find_leaf(full_path, None) {
+                Err(LeafLookupError::BlindedNode { path, .. }) => {
+                    Some((*key, *full_path, Self::compute_min_len(&path)))
+                }
+                Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => None,
+            })
+            .collect()
     }
 
     /// Creates a new revealed sparse trie from the given root node.
