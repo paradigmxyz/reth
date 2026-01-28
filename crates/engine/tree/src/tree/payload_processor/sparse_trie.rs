@@ -265,38 +265,23 @@ where
         };
 
         for target in targets.account_targets {
-            match self.account_updates.entry(target.key()) {
-                Entry::Vacant(vacant) => {
-                    vacant.insert(LeafUpdate::Touched);
-                }
-                Entry::Occupied(_) => {
-                    // already touched or changed, no need to override
-                }
-            }
+            // Only touch accounts that are not yet present in the updates set.
+            self.account_updates.entry(target.key()).or_insert(LeafUpdate::Touched);
         }
 
         for (address, slots) in targets.storage_targets {
             for slot in slots {
-                match self.storage_updates.entry(address).or_default().entry(slot.key()) {
-                    Entry::Vacant(vacant) => {
-                        vacant.insert(LeafUpdate::Touched);
-                    }
-                    Entry::Occupied(_) => {
-                        // already touched or changed, no need to override
-                    }
-                }
+                // Only touch storages that are not yet present in the updates set.
+                self.storage_updates
+                    .entry(address)
+                    .or_default()
+                    .entry(slot.key())
+                    .or_insert(LeafUpdate::Touched);
             }
 
-            match self.account_updates.entry(address) {
-                Entry::Vacant(vacant) => {
-                    // Record account as touched to make sure its revealed in accounts trie for
-                    // storage root calculation.
-                    vacant.insert(LeafUpdate::Touched);
-                }
-                Entry::Occupied(_) => {
-                    // already touched or changed, no need to override
-                }
-            }
+            // Touch corresponding account leaf to make sure its revealed in accounts trie for
+            // storage root update.
+            self.account_updates.entry(address).or_insert(LeafUpdate::Touched);
         }
     }
 
@@ -345,7 +330,7 @@ where
 
         for (address, account) in hashed_state_update.accounts {
             if self.pending_account_updates.contains_key(&address) {
-                // overwrite an existing pending account update
+                // overwrite an existing pending account update, if any
                 self.pending_account_updates.insert(address, account);
             } else if let Some(storage_root) = self.latest_storage_root_for(&address) {
                 // If we have latest storage root for the account, we can encode it into a leaf
