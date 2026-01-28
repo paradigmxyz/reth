@@ -9,7 +9,7 @@ use alloy_primitives::{
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, Target, TrieNode};
 
 use crate::provider::TrieNodeProvider;
 
@@ -223,6 +223,35 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// This is useful for reusing the trie without needing to reallocate memory.
     fn clear(&mut self);
 
+    /// Batch update multiple leaves, collecting proof targets for any blinded nodes.
+    ///
+    /// This method attempts to apply all leaf updates in the provided map. For any update
+    /// that would hit a blinded node during traversal, it calls `on_blinded` with a
+    /// [`Target`] instead of failing. Successfully applied updates are removed from
+    /// the input map.
+    ///
+    /// This enables batch proof fetching: collect all blinded node targets in one pass,
+    /// fetch proofs in a single database call, reveal them, then retry.
+    ///
+    /// # Arguments
+    ///
+    /// * `updates` - Map of key paths to leaf updates. Modified in place - successful updates are
+    ///   removed.
+    /// * `on_blinded` - Callback invoked for each blinded node encountered. Receives a
+    ///   [`Target`] that can be used to fetch the required proof.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after processing all updates. Blinded nodes don't cause errors;
+    /// they're reported via the callback.
+    fn update_leaves<F>(
+        &mut self,
+        updates: &mut HashMap<Nibbles, LeafUpdate>,
+        on_blinded: F,
+    ) -> SparseTrieResult<()>
+    where
+        F: FnMut(Target);
+
     /// Shrink the capacity of the sparse trie's node storage to the given size.
     /// This will reduce memory usage if the current capacity is higher than the given size.
     fn shrink_nodes_to(&mut self, size: usize);
@@ -276,4 +305,39 @@ pub enum LeafLookup {
     Exists,
     /// Leaf does not exist (exclusion proof found).
     NonExistent,
+}
+
+/// Represents an update operation on a leaf node.
+///
+/// Used with [`SparseTrie::update_leaves`] to specify whether a leaf
+/// should be inserted/updated or deleted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeafUpdate {
+    /// Insert a new leaf or update an existing leaf with the given RLP-encoded value.
+    Upsert(Vec<u8>),
+    /// Delete the leaf at this path.
+    Deleted,
+}
+
+impl LeafUpdate {
+    /// Returns `true` if this is an upsert operation.
+    #[inline]
+    pub const fn is_upsert(&self) -> bool {
+        matches!(self, Self::Upsert(_))
+    }
+
+    /// Returns `true` if this is a delete operation.
+    #[inline]
+    pub const fn is_deleted(&self) -> bool {
+        matches!(self, Self::Deleted)
+    }
+
+    /// Returns the value if this is an upsert, or `None` if it's a delete.
+    #[inline]
+    pub const fn value(&self) -> Option<&Vec<u8>> {
+        match self {
+            Self::Upsert(v) => Some(v),
+            Self::Deleted => None,
+        }
+    }
 }

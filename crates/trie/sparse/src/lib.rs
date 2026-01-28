@@ -14,6 +14,8 @@ pub use trie::*;
 mod traits;
 pub use traits::*;
 
+pub use reth_trie_common::Target;
+
 pub mod provider;
 
 #[cfg(feature = "metrics")]

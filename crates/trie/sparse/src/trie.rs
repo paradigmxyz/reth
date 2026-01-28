@@ -1,6 +1,6 @@
 use crate::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
+    LeafLookup, LeafLookupError, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
 };
 use alloc::{
     borrow::Cow,
@@ -20,7 +20,7 @@ use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeCompact, BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef,
-    LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, TrieMask, TrieNode, CHILD_INDEX_RANGE,
+    LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, Target, TrieMask, TrieNode, CHILD_INDEX_RANGE,
     EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
@@ -609,25 +609,32 @@ impl SparseTrieTrait for SerialSparseTrie {
         value: Vec<u8>,
         provider: P,
     ) -> SparseTrieResult<()> {
-        self.prefix_set.insert(full_path);
-        let existing = self.values.insert(full_path, value);
-        if existing.is_some() {
-            // trie structure unchanged, return immediately
+        // Check if value already exists - if so, update in place and return early
+        if let Some(existing) = self.values.get_mut(&full_path) {
+            *existing = value;
+            self.prefix_set.insert(full_path);
             return Ok(())
         }
 
+        enum NodeOp {
+            Insert(Nibbles, SparseNode),
+            Update(Nibbles, SparseNode),
+        }
+        let mut ops: SmallVec<[NodeOp; 4]> = SmallVec::new();
+
         let mut current = Nibbles::default();
-        while let Some(node) = self.nodes.get_mut(&current) {
+        while let Some(node) = self.nodes.get(&current) {
             match node {
                 SparseNode::Empty => {
-                    *node = SparseNode::new_leaf(full_path);
+                    ops.push(NodeOp::Update(current, SparseNode::new_leaf(full_path)));
                     break
                 }
-                &mut SparseNode::Hash(hash) => {
+                &SparseNode::Hash(hash) => {
                     return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
                 }
                 SparseNode::Leaf { key: current_key, .. } => {
-                    current.extend(current_key);
+                    let current_key = *current_key;
+                    current.extend(&current_key);
 
                     // this leaf is being updated
                     if current == full_path {
@@ -637,37 +644,39 @@ impl SparseTrieTrait for SerialSparseTrie {
                     // find the common prefix
                     let common = current.common_prefix_length(&full_path);
 
-                    // update existing node
+                    // update existing node to extension
                     let new_ext_key = current.slice(current.len() - current_key.len()..common);
-                    *node = SparseNode::new_ext(new_ext_key);
+                    ops.push(NodeOp::Update(
+                        current.slice(..current.len() - current_key.len()),
+                        SparseNode::new_ext(new_ext_key),
+                    ));
 
                     // create a branch node and corresponding leaves
-                    self.nodes.reserve(3);
-                    self.nodes.insert(
+                    ops.push(NodeOp::Insert(
                         current.slice(..common),
                         SparseNode::new_split_branch(
                             current.get_unchecked(common),
                             full_path.get_unchecked(common),
                         ),
-                    );
-                    self.nodes.insert(
+                    ));
+                    ops.push(NodeOp::Insert(
                         full_path.slice(..=common),
                         SparseNode::new_leaf(full_path.slice(common + 1..)),
-                    );
-                    self.nodes.insert(
+                    ));
+                    ops.push(NodeOp::Insert(
                         current.slice(..=common),
                         SparseNode::new_leaf(current.slice(common + 1..)),
-                    );
+                    ));
 
                     break;
                 }
                 SparseNode::Extension { key, .. } => {
-                    current.extend(key);
+                    let key = *key;
+                    current.extend(&key);
 
                     if !full_path.starts_with(&current) {
                         // find the common prefix
                         let common = current.common_prefix_length(&full_path);
-                        *key = current.slice(current.len() - key.len()..common);
 
                         // If branch node updates retention is enabled, we need to query the
                         // extension node child to later set the hash mask for a parent branch node
@@ -700,23 +709,35 @@ impl SparseTrieTrait for SerialSparseTrie {
                             }
                         }
 
+                        // update existing extension node
+                        let new_ext_key = current.slice(current.len() - key.len()..common);
+                        ops.push(NodeOp::Update(
+                            current.slice(..current.len() - key.len()),
+                            SparseNode::new_ext(new_ext_key),
+                        ));
+
                         // create state mask for new branch node
-                        // NOTE: this might overwrite the current extension node
-                        self.nodes.reserve(3);
-                        let branch = SparseNode::new_split_branch(
-                            current.get_unchecked(common),
-                            full_path.get_unchecked(common),
-                        );
-                        self.nodes.insert(current.slice(..common), branch);
+                        ops.push(NodeOp::Insert(
+                            current.slice(..common),
+                            SparseNode::new_split_branch(
+                                current.get_unchecked(common),
+                                full_path.get_unchecked(common),
+                            ),
+                        ));
 
                         // create new leaf
-                        let new_leaf = SparseNode::new_leaf(full_path.slice(common + 1..));
-                        self.nodes.insert(full_path.slice(..=common), new_leaf);
+                        ops.push(NodeOp::Insert(
+                            full_path.slice(..=common),
+                            SparseNode::new_leaf(full_path.slice(common + 1..)),
+                        ));
 
                         // recreate extension to previous child if needed
-                        let key = current.slice(common + 1..);
-                        if !key.is_empty() {
-                            self.nodes.insert(current.slice(..=common), SparseNode::new_ext(key));
+                        let remaining_key = current.slice(common + 1..);
+                        if !remaining_key.is_empty() {
+                            ops.push(NodeOp::Insert(
+                                current.slice(..=common),
+                                SparseNode::new_ext(remaining_key),
+                            ));
                         }
 
                         break;
@@ -726,13 +747,88 @@ impl SparseTrieTrait for SerialSparseTrie {
                     let nibble = full_path.get_unchecked(current.len());
                     current.push_unchecked(nibble);
                     if !state_mask.is_bit_set(nibble) {
-                        state_mask.set_bit(nibble);
-                        let new_leaf = SparseNode::new_leaf(full_path.slice(current.len()..));
-                        self.nodes.insert(current, new_leaf);
+                        let mut new_state_mask = *state_mask;
+                        new_state_mask.set_bit(nibble);
+                        ops.push(NodeOp::Update(
+                            current.slice(..current.len() - 1),
+                            SparseNode::Branch {
+                                state_mask: new_state_mask,
+                                hash: None,
+                                store_in_db_trie: None,
+                            },
+                        ));
+                        ops.push(NodeOp::Insert(
+                            current,
+                            SparseNode::new_leaf(full_path.slice(current.len()..)),
+                        ));
                         break;
                     }
                 }
             };
+        }
+
+        // Apply all staged operations
+        for op in ops {
+            match op {
+                NodeOp::Insert(path, node) | NodeOp::Update(path, node) => {
+                    self.nodes.insert(path, node);
+                }
+            }
+        }
+        self.values.insert(full_path, value);
+        self.prefix_set.insert(full_path);
+
+        Ok(())
+    }
+
+    fn update_leaves<F>(
+        &mut self,
+        updates: &mut HashMap<Nibbles, LeafUpdate>,
+        mut on_blinded: F,
+    ) -> SparseTrieResult<()>
+    where
+        F: FnMut(Target),
+    {
+        use crate::provider::ShortCircuitTrieNodeProvider;
+
+        // Sort keys for cache-friendly traversal (lexicographic order)
+        let mut keys: Vec<_> = updates.keys().copied().collect();
+        keys.sort_unstable();
+
+        for key in keys {
+            // Check if path is blinded before attempting update
+            if let Some((blinded_path, _hash)) = self.find_blinded_on_path(&key) {
+                // Report blinded node - min_len is one level deeper than blinded path
+                let min_len = (blinded_path.len() + 1) as u8;
+                on_blinded(Target::from_nibbles(key, min_len));
+                continue;
+            }
+
+            // Path is revealed, apply the update
+            let update = updates.get(&key).unwrap();
+            let result = match update {
+                LeafUpdate::Upsert(value) => {
+                    self.update_leaf(key, value.clone(), ShortCircuitTrieNodeProvider)
+                }
+                LeafUpdate::Deleted => self.remove_leaf(&key, ShortCircuitTrieNodeProvider),
+            };
+
+            match result {
+                Ok(()) => {
+                    // Successfully applied - remove from updates map
+                    updates.remove(&key);
+                }
+                Err(err) => {
+                    // Check if it's a BlindedNode error (shouldn't happen after our check)
+                    if let SparseTrieErrorKind::BlindedNode { path, .. } = err.kind() {
+                        let min_len = (path.len() + 1) as u8;
+                        on_blinded(Target::from_nibbles(key, min_len));
+                        continue;
+                    }
+                    // Other errors propagate
+                    return Err(err);
+                }
+            }
         }
 
         Ok(())
@@ -1774,6 +1870,44 @@ impl SerialSparseTrie {
 
         debug_assert_eq!(buffers.rlp_node_stack.len(), 1);
         buffers.rlp_node_stack.pop().unwrap().rlp_node
+    }
+
+    /// Traverses the trie read-only to find the first blinded hash node on the path.
+    /// Returns `Some((blinded_path, hash))` if found, `None` if path is fully revealed.
+    fn find_blinded_on_path(&self, full_path: &Nibbles) -> Option<(Nibbles, B256)> {
+        let mut current = Nibbles::default();
+        while let Some(node) = self.nodes.get(&current) {
+            match node {
+                SparseNode::Empty => return None,
+                &SparseNode::Hash(hash) => return Some((current, hash)),
+                SparseNode::Leaf { key, .. } => {
+                    current.extend(key);
+                    // Leaf found - path is revealed (even if it's a different leaf)
+                    return None;
+                }
+                SparseNode::Extension { key, .. } => {
+                    current.extend(key);
+                    // If the path diverges, check if the child at current is blinded
+                    if !full_path.starts_with(&current) {
+                        // Check the extension's child
+                        if let Some(&SparseNode::Hash(hash)) = self.nodes.get(&current) {
+                            return Some((current, hash));
+                        }
+                        return None;
+                    }
+                }
+                SparseNode::Branch { state_mask, .. } => {
+                    let nibble = full_path.get_unchecked(current.len());
+                    current.push_unchecked(nibble);
+                    if !state_mask.is_bit_set(nibble) {
+                        // Child doesn't exist - path is revealed (leaf will be inserted)
+                        return None;
+                    }
+                    // Continue traversing to the child
+                }
+            }
+        }
+        None
     }
 }
 
@@ -3722,5 +3856,120 @@ Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
 ";
 
         assert_eq!(alternate_printed, expected);
+    }
+
+    #[test]
+    fn test_update_leaves_all_revealed() {
+        let mut trie = SerialSparseTrie::default();
+
+        let path1 = Nibbles::unpack(B256::repeat_byte(0x11));
+        let path2 = Nibbles::unpack(B256::repeat_byte(0x22));
+        trie.update_leaf(path1, vec![1, 2, 3], DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(path2, vec![4, 5, 6], DefaultTrieNodeProvider).unwrap();
+
+        let mut updates = HashMap::default();
+        updates.insert(path1, LeafUpdate::Upsert(vec![10, 20, 30]));
+        updates.insert(path2, LeafUpdate::Upsert(vec![40, 50, 60]));
+        let path3 = Nibbles::unpack(B256::repeat_byte(0x33));
+        updates.insert(path3, LeafUpdate::Upsert(vec![7, 8, 9]));
+
+        let mut blinded_targets = Vec::new();
+        trie.update_leaves(&mut updates, |target| blinded_targets.push(target)).unwrap();
+
+        assert!(blinded_targets.is_empty());
+        assert!(updates.is_empty());
+        assert_eq!(trie.get_leaf_value(&path1), Some(&vec![10, 20, 30]));
+        assert_eq!(trie.get_leaf_value(&path2), Some(&vec![40, 50, 60]));
+        assert_eq!(trie.get_leaf_value(&path3), Some(&vec![7, 8, 9]));
+    }
+
+    #[test]
+    fn test_update_leaves_with_blinded_nodes() {
+        let mut trie = SerialSparseTrie::default();
+
+        let hash = B256::repeat_byte(0xaa);
+        trie.nodes.clear();
+        trie.nodes.insert(Nibbles::default(), SparseNode::Hash(hash));
+
+        let path = Nibbles::unpack(B256::repeat_byte(0x11));
+        let mut updates = HashMap::default();
+        updates.insert(path, LeafUpdate::Upsert(vec![1, 2, 3]));
+
+        let mut blinded_targets = Vec::new();
+        trie.update_leaves(&mut updates, |target| blinded_targets.push(target)).unwrap();
+
+        assert_eq!(blinded_targets.len(), 1);
+        assert_eq!(blinded_targets[0].key, path);
+        assert_eq!(blinded_targets[0].min_len, 1);
+        assert!(updates.contains_key(&path));
+    }
+
+    #[test]
+    fn test_update_leaves_mixed() {
+        let mut trie = SerialSparseTrie::default();
+
+        let revealed_path = Nibbles::unpack(B256::repeat_byte(0x11));
+        let other_path = Nibbles::unpack(B256::repeat_byte(0x55));
+        trie.update_leaf(revealed_path, vec![1], DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(other_path, vec![2], DefaultTrieNodeProvider).unwrap();
+
+        let blinded_prefix = Nibbles::from_nibbles([0x2]);
+        let hash = B256::repeat_byte(0xbb);
+        trie.nodes.insert(blinded_prefix, SparseNode::Hash(hash));
+
+        if let Some(SparseNode::Branch { state_mask, .. }) = trie.nodes.get_mut(&Nibbles::default())
+        {
+            state_mask.set_bit(2);
+        }
+
+        let blinded_path = Nibbles::unpack(B256::repeat_byte(0x22));
+        let mut updates = HashMap::default();
+        updates.insert(revealed_path, LeafUpdate::Upsert(vec![10]));
+        updates.insert(blinded_path, LeafUpdate::Upsert(vec![20]));
+
+        let mut blinded_targets = Vec::new();
+        trie.update_leaves(&mut updates, |target| blinded_targets.push(target)).unwrap();
+
+        assert!(!updates.contains_key(&revealed_path));
+        assert_eq!(trie.get_leaf_value(&revealed_path), Some(&vec![10]));
+
+        assert!(updates.contains_key(&blinded_path));
+        assert_eq!(blinded_targets.len(), 1);
+    }
+
+    #[test]
+    fn test_update_leaves_delete() {
+        let mut trie = SerialSparseTrie::default();
+
+        let path1 = Nibbles::unpack(B256::repeat_byte(0x11));
+        let path2 = Nibbles::unpack(B256::repeat_byte(0x22));
+        trie.update_leaf(path1, vec![1], DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(path2, vec![2], DefaultTrieNodeProvider).unwrap();
+
+        let mut updates = HashMap::default();
+        updates.insert(path1, LeafUpdate::Deleted);
+
+        let mut blinded_targets = Vec::new();
+        trie.update_leaves(&mut updates, |target| blinded_targets.push(target)).unwrap();
+
+        assert!(blinded_targets.is_empty());
+        assert!(updates.is_empty());
+        assert_eq!(trie.get_leaf_value(&path1), None);
+        assert_eq!(trie.get_leaf_value(&path2), Some(&vec![2]));
+    }
+
+    #[test]
+    fn test_update_leaf_existing_value_marks_dirty() {
+        let mut trie = SerialSparseTrie::default();
+
+        let path = Nibbles::unpack(B256::repeat_byte(0x11));
+        trie.update_leaf(path, vec![1, 2, 3], DefaultTrieNodeProvider).unwrap();
+
+        trie.prefix_set.clear();
+
+        trie.update_leaf(path, vec![4, 5, 6], DefaultTrieNodeProvider).unwrap();
+
+        let mut frozen = trie.prefix_set.clone().freeze();
+        assert!(frozen.contains(&path));
     }
 }
