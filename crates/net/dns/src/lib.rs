@@ -165,7 +165,8 @@ impl<R: Resolver> DnsDiscoveryService<R> {
 
     /// Starts discovery with all configured bootstrap links
     pub fn bootstrap(&mut self) {
-        for link in self.bootstrap_dns_networks.clone() {
+        let links = self.bootstrap_dns_networks.iter().copied().collect::<Vec<_>>();
+        for link in links {
             self.sync_tree_with_link(link);
         }
     }
