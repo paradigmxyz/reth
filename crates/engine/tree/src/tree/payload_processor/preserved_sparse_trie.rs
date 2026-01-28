@@ -20,9 +20,22 @@ impl SharedPreservedSparseTrie {
         self.0.lock().take()
     }
 
+    /// Acquires a guard that blocks `take()` until dropped.
+    /// Use this before sending the state root result to ensure the next block
+    /// waits for the trie to be stored.
+    pub(super) fn lock(&self) -> PreservedTrieGuard<'_> {
+        PreservedTrieGuard(self.0.lock())
+    }
+}
+
+/// Guard that holds the lock on the preserved trie.
+/// While held, `take()` will block. Call `store()` to save the trie before dropping.
+pub(super) struct PreservedTrieGuard<'a>(parking_lot::MutexGuard<'a, Option<PreservedSparseTrie>>);
+
+impl PreservedTrieGuard<'_> {
     /// Stores a preserved trie for later reuse.
-    pub(super) fn store(&self, trie: PreservedSparseTrie) {
-        self.0.lock().replace(trie);
+    pub(super) fn store(&mut self, trie: PreservedSparseTrie) {
+        self.0.replace(trie);
     }
 }
 
@@ -55,7 +68,13 @@ impl PreservedSparseTrie {
         self.block_hash == parent_hash
     }
 
-    /// Consumes self and returns the trie, clearing it if not a continuation.
+    /// Consumes self and returns the cleared trie for reuse.
+    ///
+    /// Currently always clears the trie because the pruned trie cannot be directly reused:
+    /// - `prune()` deletes values needed for state root computation
+    /// - `revealed_account_paths` is cleared, breaking proof filtering logic
+    ///
+    /// The allocation reuse still provides memory efficiency benefits.
     pub(super) fn into_trie_for(
         self,
         parent_hash: B256,
@@ -64,9 +83,8 @@ impl PreservedSparseTrie {
             debug!(
                 target: "engine::tree::payload_processor",
                 block_hash = %self.block_hash,
-                "Reusing pruned sparse trie for continuation payload"
+                "Reusing sparse trie allocations for continuation payload"
             );
-            self.trie
         } else {
             debug!(
                 target: "engine::tree::payload_processor",
@@ -74,9 +92,9 @@ impl PreservedSparseTrie {
                 new_parent = %parent_hash,
                 "Clearing sparse trie - not a continuation"
             );
-            let mut trie = self.trie;
-            trie.clear();
-            trie
         }
+        let mut trie = self.trie;
+        trie.clear();
+        trie
     }
 }

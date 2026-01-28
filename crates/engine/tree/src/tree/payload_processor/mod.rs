@@ -568,7 +568,14 @@ where
             let result = task.run();
             let succeeded = result.is_ok();
 
-            // Send state root computation result immediately - don't block on cleanup
+            // Acquire the guard before sending the result to prevent a race condition:
+            // Without this, the next block could start after send() but before store(),
+            // causing take() to return None and forcing it to create a new empty trie
+            // instead of reusing the preserved one. Holding the guard ensures the next
+            // block's take() blocks until we've stored the trie for reuse.
+            let mut guard = preserved_sparse_trie.lock();
+
+            // Send state root computation result - next block may start but will block on take()
             if state_root_tx.send(result).is_err() {
                 // Receiver dropped - payload was likely invalid or cancelled.
                 // Clear the trie instead of preserving potentially invalid state.
@@ -580,7 +587,7 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                preserved_sparse_trie.store(PreservedSparseTrie::new(trie, block_hash));
+                guard.store(PreservedSparseTrie::new(trie, block_hash));
                 return;
             }
 
@@ -593,7 +600,7 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                preserved_sparse_trie.store(PreservedSparseTrie::new(trie, block_hash));
+                guard.store(PreservedSparseTrie::new(trie, block_hash));
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
@@ -603,7 +610,7 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                preserved_sparse_trie.store(PreservedSparseTrie::new(trie, block_hash));
+                guard.store(PreservedSparseTrie::new(trie, block_hash));
             }
         });
     }
