@@ -1723,6 +1723,114 @@ impl<'a> RocksDBBatch<'a> {
         }
         Ok(())
     }
+
+    /// Prunes account history for the given address, removing all blocks `<= to_block`.
+    ///
+    /// Returns the number of shards deleted.
+    pub fn prune_account_history_up_to(
+        &mut self,
+        address: Address,
+        to_block: BlockNumber,
+    ) -> ProviderResult<usize> {
+        let shards = self.provider.account_history_shards(address)?;
+        if shards.is_empty() {
+            return Ok(0);
+        }
+
+        let mut deleted = 0;
+
+        // Find the first shard that might contain blocks > to_block
+        let boundary_idx = shards.iter().position(|(key, list)| {
+            key.highest_block_number > to_block ||
+                key.highest_block_number == u64::MAX ||
+                list.iter().any(|b| b > to_block)
+        });
+
+        // No boundary found means all shards are entirely <= to_block
+        let Some(boundary_idx) = boundary_idx else {
+            for (key, _) in &shards {
+                self.delete::<tables::AccountsHistory>(key.clone())?;
+                deleted += 1;
+            }
+            return Ok(deleted);
+        };
+
+        // Delete all shards before the boundary
+        for (key, _) in shards.iter().take(boundary_idx) {
+            self.delete::<tables::AccountsHistory>(key.clone())?;
+            deleted += 1;
+        }
+
+        // Process the boundary shard
+        let (boundary_key, boundary_list) = &shards[boundary_idx];
+        let remaining_blocks: Vec<_> = boundary_list.iter().filter(|&b| b > to_block).collect();
+
+        if remaining_blocks.is_empty() {
+            self.delete::<tables::AccountsHistory>(boundary_key.clone())?;
+            deleted += 1;
+        } else if remaining_blocks.len() != boundary_list.len() as usize {
+            self.delete::<tables::AccountsHistory>(boundary_key.clone())?;
+            let new_list = BlockNumberList::new_pre_sorted(remaining_blocks);
+            self.put::<tables::AccountsHistory>(boundary_key.clone(), &new_list)?;
+        }
+
+        Ok(deleted)
+    }
+
+    /// Prunes storage history for the given `(address, storage_key)` pair,
+    /// removing all blocks `<= to_block`.
+    ///
+    /// Returns the number of shards deleted.
+    pub fn prune_storage_history_up_to(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        to_block: BlockNumber,
+    ) -> ProviderResult<usize> {
+        let shards = self.provider.storage_history_shards(address, storage_key)?;
+        if shards.is_empty() {
+            return Ok(0);
+        }
+
+        let mut deleted = 0;
+
+        // Find the first shard that might contain blocks > to_block
+        let boundary_idx = shards.iter().position(|(key, list)| {
+            key.sharded_key.highest_block_number > to_block ||
+                key.sharded_key.highest_block_number == u64::MAX ||
+                list.iter().any(|b| b > to_block)
+        });
+
+        // No boundary found means all shards are entirely <= to_block
+        let Some(boundary_idx) = boundary_idx else {
+            for (key, _) in &shards {
+                self.delete::<tables::StoragesHistory>(key.clone())?;
+                deleted += 1;
+            }
+            return Ok(deleted);
+        };
+
+        // Delete all shards before the boundary
+        for (key, _) in shards.iter().take(boundary_idx) {
+            self.delete::<tables::StoragesHistory>(key.clone())?;
+            deleted += 1;
+        }
+
+        // Process the boundary shard
+        let (boundary_key, boundary_list) = &shards[boundary_idx];
+        let remaining_blocks: Vec<_> = boundary_list.iter().filter(|&b| b > to_block).collect();
+
+        if remaining_blocks.is_empty() {
+            self.delete::<tables::StoragesHistory>(boundary_key.clone())?;
+            deleted += 1;
+        } else if remaining_blocks.len() != boundary_list.len() as usize {
+            self.delete::<tables::StoragesHistory>(boundary_key.clone())?;
+            let new_list = BlockNumberList::new_pre_sorted(remaining_blocks);
+            self.put::<tables::StoragesHistory>(boundary_key.clone(), &new_list)?;
+        }
+
+        Ok(deleted)
+    }
 }
 
 /// `RocksDB` transaction wrapper providing MDBX-like semantics.

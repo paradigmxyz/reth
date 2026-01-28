@@ -1,5 +1,7 @@
 use crate::PruneLimiter;
 use alloy_primitives::BlockNumber;
+#[cfg(all(unix, feature = "rocksdb"))]
+use alloy_primitives::{Address, B256};
 use itertools::Itertools;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -9,6 +11,8 @@ use reth_db_api::{
     BlockNumberList, DatabaseError, RawKey, RawTable, RawValue,
 };
 use reth_provider::DBProvider;
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::RocksDBProviderFactory;
 use reth_prune_types::{SegmentOutput, SegmentOutputCheckpoint};
 use rustc_hash::FxHashMap;
 
@@ -218,4 +222,88 @@ where
             Ok(PruneShardOutcome::Updated)
         }
     }
+}
+
+/// Finalizes account history pruning using `RocksDB` backend.
+#[cfg(all(unix, feature = "rocksdb"))]
+pub(crate) fn finalize_account_history_prune_rocksdb<Provider>(
+    provider: &Provider,
+    result: HistoryPruneResult<Address>,
+    range_end: BlockNumber,
+    limiter: &PruneLimiter,
+) -> Result<SegmentOutput, DatabaseError>
+where
+    Provider: DBProvider<Tx: DbTxMut> + RocksDBProviderFactory,
+{
+    let HistoryPruneResult { highest_deleted, last_pruned_block, pruned_count, done } = result;
+
+    let last_changeset_pruned_block = last_pruned_block
+        .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
+        .unwrap_or(range_end);
+
+    let rocksdb = provider.rocksdb_provider();
+    let mut batch = rocksdb.batch();
+    let mut deleted = 0usize;
+
+    for (address, block_number) in highest_deleted {
+        let to_block = block_number.min(last_changeset_pruned_block);
+        deleted += batch
+            .prune_account_history_up_to(address, to_block)
+            .map_err(|e| DatabaseError::Other(e.to_string()))?;
+    }
+
+    batch.commit().map_err(|e| DatabaseError::Other(e.to_string()))?;
+
+    let progress = limiter.progress(done);
+
+    Ok(SegmentOutput {
+        progress,
+        pruned: pruned_count + deleted,
+        checkpoint: Some(SegmentOutputCheckpoint {
+            block_number: Some(last_changeset_pruned_block),
+            tx_number: None,
+        }),
+    })
+}
+
+/// Finalizes storage history pruning using `RocksDB` backend.
+#[cfg(all(unix, feature = "rocksdb"))]
+pub(crate) fn finalize_storage_history_prune_rocksdb<Provider>(
+    provider: &Provider,
+    result: HistoryPruneResult<(Address, B256)>,
+    range_end: BlockNumber,
+    limiter: &PruneLimiter,
+) -> Result<SegmentOutput, DatabaseError>
+where
+    Provider: DBProvider<Tx: DbTxMut> + RocksDBProviderFactory,
+{
+    let HistoryPruneResult { highest_deleted, last_pruned_block, pruned_count, done } = result;
+
+    let last_changeset_pruned_block = last_pruned_block
+        .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
+        .unwrap_or(range_end);
+
+    let rocksdb = provider.rocksdb_provider();
+    let mut batch = rocksdb.batch();
+    let mut deleted = 0usize;
+
+    for ((address, storage_key), block_number) in highest_deleted {
+        let to_block = block_number.min(last_changeset_pruned_block);
+        deleted += batch
+            .prune_storage_history_up_to(address, storage_key, to_block)
+            .map_err(|e| DatabaseError::Other(e.to_string()))?;
+    }
+
+    batch.commit().map_err(|e| DatabaseError::Other(e.to_string()))?;
+
+    let progress = limiter.progress(done);
+
+    Ok(SegmentOutput {
+        progress,
+        pruned: pruned_count + deleted,
+        checkpoint: Some(SegmentOutputCheckpoint {
+            block_number: Some(last_changeset_pruned_block),
+            tx_number: None,
+        }),
+    })
 }

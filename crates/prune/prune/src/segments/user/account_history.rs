@@ -1,3 +1,5 @@
+#[cfg(all(unix, feature = "rocksdb"))]
+use crate::segments::user::history::finalize_account_history_prune_rocksdb;
 use crate::{
     db_ext::DbTxPruneExt,
     segments::{
@@ -8,6 +10,8 @@ use crate::{
 };
 use alloy_primitives::BlockNumber;
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::RocksDBProviderFactory;
 use reth_provider::{
     changeset_walker::StaticFileAccountChangesetWalker, DBProvider, EitherWriter,
     StaticFileProviderFactory, StorageSettingsCache,
@@ -37,6 +41,48 @@ impl AccountHistory {
     }
 }
 
+#[cfg(all(unix, feature = "rocksdb"))]
+impl<Provider> Segment<Provider> for AccountHistory
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + StaticFileProviderFactory
+        + StorageSettingsCache
+        + ChangeSetReader
+        + RocksDBProviderFactory,
+{
+    fn segment(&self) -> PruneSegment {
+        PruneSegment::AccountHistory
+    }
+
+    fn mode(&self) -> Option<PruneMode> {
+        Some(self.mode)
+    }
+
+    fn purpose(&self) -> PrunePurpose {
+        PrunePurpose::User
+    }
+
+    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
+    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
+        let range = match input.get_next_block_range() {
+            Some(range) => range,
+            None => {
+                trace!(target: "pruner", "No account history to prune");
+                return Ok(SegmentOutput::done())
+            }
+        };
+        let range_end = *range.end();
+
+        // Check where account changesets are stored
+        if EitherWriter::account_changesets_destination(provider).is_static_file() {
+            self.prune_static_files(provider, input, range, range_end)
+        } else {
+            self.prune_database(provider, input, range, range_end)
+        }
+    }
+}
+
+#[cfg(not(all(unix, feature = "rocksdb")))]
 impl<Provider> Segment<Provider> for AccountHistory
 where
     Provider: DBProvider<Tx: DbTxMut>
@@ -78,6 +124,7 @@ where
 
 impl AccountHistory {
     /// Prunes account history when changesets are stored in static files.
+    #[cfg(all(unix, feature = "rocksdb"))]
     fn prune_static_files<Provider>(
         &self,
         provider: &Provider,
@@ -86,7 +133,11 @@ impl AccountHistory {
         range_end: BlockNumber,
     ) -> Result<SegmentOutput, PrunerError>
     where
-        Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + ChangeSetReader,
+        Provider: DBProvider<Tx: DbTxMut>
+            + StaticFileProviderFactory
+            + ChangeSetReader
+            + StorageSettingsCache
+            + RocksDBProviderFactory,
     {
         let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
             input.limiter.set_deleted_entries_limit(limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE)
@@ -138,6 +189,81 @@ impl AccountHistory {
             pruned_count: pruned_changesets,
             done,
         };
+
+        // Check if account history is stored in RocksDB
+        if provider.cached_storage_settings().account_history_in_rocksdb {
+            finalize_account_history_prune_rocksdb(provider, result, range_end, &limiter)
+                .map_err(Into::into)
+        } else {
+            finalize_history_prune::<_, tables::AccountsHistory, _, _>(
+                provider,
+                result,
+                range_end,
+                &limiter,
+                ShardedKey::new,
+                |a, b| a.key == b.key,
+            )
+            .map_err(Into::into)
+        }
+    }
+
+    /// Prunes account history when changesets are stored in static files.
+    #[cfg(not(all(unix, feature = "rocksdb")))]
+    fn prune_static_files<Provider>(
+        &self,
+        provider: &Provider,
+        input: PruneInput,
+        range: std::ops::RangeInclusive<BlockNumber>,
+        range_end: BlockNumber,
+    ) -> Result<SegmentOutput, PrunerError>
+    where
+        Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + ChangeSetReader,
+    {
+        let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
+            input.limiter.set_deleted_entries_limit(limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE)
+        } else {
+            input.limiter
+        };
+
+        if limiter.is_limit_reached() {
+            return Ok(SegmentOutput::not_done(
+                limiter.interrupt_reason(),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ))
+        }
+
+        let mut highest_deleted_accounts = FxHashMap::default();
+        let mut last_changeset_pruned_block = None;
+        let mut pruned_changesets = 0;
+        let mut done = true;
+
+        let walker = StaticFileAccountChangesetWalker::new(provider, range);
+        for result in walker {
+            if limiter.is_limit_reached() {
+                done = false;
+                break;
+            }
+            let (block_number, changeset) = result?;
+            highest_deleted_accounts.insert(changeset.address, block_number);
+            last_changeset_pruned_block = Some(block_number);
+            pruned_changesets += 1;
+            limiter.increment_deleted_entries_count();
+        }
+
+        // Delete static file jars below the pruned block
+        if let Some(last_block) = last_changeset_pruned_block {
+            provider
+                .static_file_provider()
+                .delete_segment_below_block(StaticFileSegment::AccountChangeSets, last_block + 1)?;
+        }
+        trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets from static files)");
+
+        let result = HistoryPruneResult {
+            highest_deleted: highest_deleted_accounts,
+            last_pruned_block: last_changeset_pruned_block,
+            pruned_count: pruned_changesets,
+            done,
+        };
         finalize_history_prune::<_, tables::AccountsHistory, _, _>(
             provider,
             result,
@@ -149,6 +275,77 @@ impl AccountHistory {
         .map_err(Into::into)
     }
 
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn prune_database<Provider>(
+        &self,
+        provider: &Provider,
+        input: PruneInput,
+        range: std::ops::RangeInclusive<BlockNumber>,
+        range_end: BlockNumber,
+    ) -> Result<SegmentOutput, PrunerError>
+    where
+        Provider: DBProvider<Tx: DbTxMut> + StorageSettingsCache + RocksDBProviderFactory,
+    {
+        let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
+            input.limiter.set_deleted_entries_limit(limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE)
+        } else {
+            input.limiter
+        };
+
+        if limiter.is_limit_reached() {
+            return Ok(SegmentOutput::not_done(
+                limiter.interrupt_reason(),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ))
+        }
+
+        // Deleted account changeset keys (account addresses) with the highest block number deleted
+        // for that key.
+        //
+        // The size of this map is limited by `prune_delete_limit * blocks_since_last_run /
+        // ACCOUNT_HISTORY_TABLES_TO_PRUNE`, and with the current defaults it's usually `3500 * 5 /
+        // 2`, so 8750 entries. Each entry is `160 bit + 64 bit`, so the total size should be up to
+        // ~0.25MB + some hashmap overhead. `blocks_since_last_run` is additionally limited by the
+        // `max_reorg_depth`, so no OOM is expected here.
+        let mut last_changeset_pruned_block = None;
+        let mut highest_deleted_accounts = FxHashMap::default();
+        let (pruned_changesets, done) =
+            provider.tx_ref().prune_table_with_range::<tables::AccountChangeSets>(
+                range,
+                &mut limiter,
+                |_| false,
+                |(block_number, account)| {
+                    highest_deleted_accounts.insert(account.address, block_number);
+                    last_changeset_pruned_block = Some(block_number);
+                },
+            )?;
+        trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets from database)");
+
+        let result = HistoryPruneResult {
+            highest_deleted: highest_deleted_accounts,
+            last_pruned_block: last_changeset_pruned_block,
+            pruned_count: pruned_changesets,
+            done,
+        };
+
+        // Check if account history is stored in RocksDB
+        if provider.cached_storage_settings().account_history_in_rocksdb {
+            finalize_account_history_prune_rocksdb(provider, result, range_end, &limiter)
+                .map_err(Into::into)
+        } else {
+            finalize_history_prune::<_, tables::AccountsHistory, _, _>(
+                provider,
+                result,
+                range_end,
+                &limiter,
+                ShardedKey::new,
+                |a, b| a.key == b.key,
+            )
+            .map_err(Into::into)
+        }
+    }
+
+    #[cfg(not(all(unix, feature = "rocksdb")))]
     fn prune_database<Provider>(
         &self,
         provider: &Provider,
@@ -172,14 +369,6 @@ impl AccountHistory {
             ))
         }
 
-        // Deleted account changeset keys (account addresses) with the highest block number deleted
-        // for that key.
-        //
-        // The size of this map is limited by `prune_delete_limit * blocks_since_last_run /
-        // ACCOUNT_HISTORY_TABLES_TO_PRUNE`, and with the current defaults it's usually `3500 * 5 /
-        // 2`, so 8750 entries. Each entry is `160 bit + 64 bit`, so the total size should be up to
-        // ~0.25MB + some hashmap overhead. `blocks_since_last_run` is additionally limited by the
-        // `max_reorg_depth`, so no OOM is expected here.
         let mut last_changeset_pruned_block = None;
         let mut highest_deleted_accounts = FxHashMap::default();
         let (pruned_changesets, done) =

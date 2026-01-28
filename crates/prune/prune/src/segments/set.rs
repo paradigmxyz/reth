@@ -5,6 +5,8 @@ use crate::segments::{
 use alloy_eips::eip2718::Encodable2718;
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::RocksDBProviderFactory;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, ChainStateBlockReader, DBProvider,
     PruneCheckpointReader, PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache,
@@ -44,6 +46,59 @@ impl<Provider> SegmentSet<Provider> {
     }
 }
 
+#[cfg(all(unix, feature = "rocksdb"))]
+impl<Provider> SegmentSet<Provider>
+where
+    Provider: StaticFileProviderFactory<
+            Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        > + DBProvider<Tx: DbTxMut>
+        + PruneCheckpointWriter
+        + PruneCheckpointReader
+        + BlockReader<Transaction: Encodable2718>
+        + ChainStateBlockReader
+        + StorageSettingsCache
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + RocksDBProviderFactory,
+{
+    /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
+    /// [`PruneModes`].
+    pub fn from_components(
+        _static_file_provider: StaticFileProvider<Provider::Primitives>,
+        prune_modes: PruneModes,
+    ) -> Self {
+        let PruneModes {
+            sender_recovery,
+            transaction_lookup,
+            receipts,
+            account_history,
+            storage_history,
+            bodies_history,
+            receipts_log_filter,
+        } = prune_modes;
+
+        Self::default()
+            // Bodies - run first since file deletion is fast
+            .segment_opt(bodies_history.map(Bodies::new))
+            // Account history
+            .segment_opt(account_history.map(AccountHistory::new))
+            // Storage history
+            .segment_opt(storage_history.map(StorageHistory::new))
+            // User receipts
+            .segment_opt(receipts.map(UserReceipts::new))
+            // Receipts by logs
+            .segment_opt(
+                (!receipts_log_filter.is_empty())
+                    .then(|| ReceiptsByLogs::new(receipts_log_filter.clone())),
+            )
+            // Transaction lookup
+            .segment_opt(transaction_lookup.map(TransactionLookup::new))
+            // Sender recovery
+            .segment_opt(sender_recovery.map(SenderRecovery::new))
+    }
+}
+
+#[cfg(not(all(unix, feature = "rocksdb")))]
 impl<Provider> SegmentSet<Provider>
 where
     Provider: StaticFileProviderFactory<
