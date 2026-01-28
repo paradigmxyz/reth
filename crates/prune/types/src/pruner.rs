@@ -1,7 +1,9 @@
 use crate::{PruneCheckpoint, PruneMode, PruneSegment};
-use alloc::vec::Vec;
+use alloc::{format, string::ToString, vec::Vec};
 use alloy_primitives::{BlockNumber, TxNumber};
+use core::time::Duration;
 use derive_more::Display;
+use tracing::debug;
 
 /// Pruner run output.
 #[derive(Debug)]
@@ -21,20 +23,16 @@ impl From<PruneProgress> for PrunerOutput {
 impl PrunerOutput {
     /// Logs a human-readable summary of the pruner run at DEBUG level.
     ///
-    /// Format: `"Pruner finished tip=24328929 deleted=10886 in 148ms
+    /// Format: `"Pruner finished tip=24328929 deleted=10886 elapsed=148ms
     /// segments=AccountHistory[24318865, done] ..."`
     #[inline]
     pub fn debug_log(
         &self,
         tip_block_number: BlockNumber,
         deleted_entries: usize,
-        elapsed: core::time::Duration,
+        elapsed: Duration,
     ) {
-        use alloc::string::ToString;
-
-        let elapsed_ms = elapsed.as_millis() as u64;
-
-        let status = match self.progress {
+        let message = match self.progress {
             PruneProgress::HasMoreData(_) => "Pruner interrupted, has more data",
             PruneProgress::Finished => "Pruner finished",
         };
@@ -49,15 +47,18 @@ impl PrunerOutput {
                     .and_then(|c| c.block_number)
                     .map(|b| b.to_string())
                     .unwrap_or_else(|| "?".to_string());
-                let progress = if seg.progress.is_finished() { "done" } else { "in_progress" };
-                alloc::format!("{segment}[{block}, {progress}]")
+                let status = if seg.progress.is_finished() { "done" } else { "in_progress" };
+                format!("{segment}[{block}, {status}]")
             })
             .collect();
 
-        tracing::debug!(
+        debug!(
             target: "pruner",
-            "{status} tip={tip_block_number} deleted={deleted_entries} in {elapsed_ms}ms segments={}",
-            segments.join(" ")
+            %tip_block_number,
+            deleted_entries,
+            ?elapsed,
+            segments = %segments.join(" "),
+            "{message}",
         );
     }
 }
