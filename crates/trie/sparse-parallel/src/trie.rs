@@ -926,71 +926,66 @@ impl SparseTrieExt for ParallelSparseTrie {
     fn prune(&mut self, max_depth: usize) -> usize {
         // DFS traversal to find nodes at max_depth that can be pruned.
         // Collects "effective pruned roots" - children of nodes at max_depth with computed hashes.
+        // We replace nodes with Hash stubs inline during traversal.
         let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::new();
         let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
         stack.push((Nibbles::default(), 0));
 
         // DFS traversal: pop path and depth, skip if subtrie or node not found.
         while let Some((path, depth)) = stack.pop() {
-            let Some(subtrie) = self.subtrie_for_path(&path) else { continue };
-            let Some(node) = subtrie.nodes.get(&path) else { continue };
+            // Get children to visit from current node (immutable access)
+            let children: SmallVec<[Nibbles; 16]> = {
+                let Some(subtrie) = self.subtrie_for_path(&path) else { continue };
+                let Some(node) = subtrie.nodes.get(&path) else { continue };
 
-            match node {
-                // Terminal nodes: no children to traverse or prune
-                SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {}
-                // Extension: counts as 1 depth regardless of key length
-                SparseNode::Extension { key, .. } => {
-                    let mut child = path;
-                    child.extend(key);
-                    if depth == max_depth {
-                        // Prune child if it has a computed hash (skip hash stubs and embedded
-                        // nodes)
-                        if let Some(hash) = self
-                            .subtrie_for_path(&child)
-                            .and_then(|s| s.nodes.get(&child))
-                            .filter(|n| !n.is_hash())
-                            .and_then(|n| n.hash())
-                        {
-                            effective_pruned_roots.push((child, hash));
+                match node {
+                    SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {
+                        SmallVec::new()
+                    }
+                    SparseNode::Extension { key, .. } => {
+                        let mut child = path;
+                        child.extend(key);
+                        SmallVec::from_buf_and_len([child; 16], 1)
+                    }
+                    SparseNode::Branch { state_mask, .. } => {
+                        let mut children = SmallVec::new();
+                        let mut mask = state_mask.get();
+                        while mask != 0 {
+                            let nibble = mask.trailing_zeros() as u8;
+                            mask &= mask - 1;
+                            let mut child = path;
+                            child.push_unchecked(nibble);
+                            children.push(child);
                         }
-                    } else {
-                        stack.push((child, depth + 1));
+                        children
                     }
                 }
-                // Branch: iterate over all set children
-                SparseNode::Branch { state_mask, .. } => {
-                    let mut mask = state_mask.get();
-                    while mask != 0 {
-                        let nibble = mask.trailing_zeros() as u8;
-                        mask &= mask - 1;
+            };
 
-                        let mut child = path;
-                        child.push_unchecked(nibble);
-                        if depth == max_depth {
-                            // Prune child if it has a computed hash (skip hash stubs and embedded
-                            // nodes)
-                            if let Some(hash) = self
-                                .subtrie_for_path(&child)
-                                .and_then(|s| s.nodes.get(&child))
-                                .filter(|n| !n.is_hash())
-                                .and_then(|n| n.hash())
-                            {
-                                effective_pruned_roots.push((child, hash));
-                            }
-                        } else {
-                            stack.push((child, depth + 1));
-                        }
+            // Process children - either continue traversal or prune
+            for child in children {
+                if depth == max_depth {
+                    // Check if child has a computed hash and replace inline
+                    let hash = self
+                        .subtrie_for_path(&child)
+                        .and_then(|s| s.nodes.get(&child))
+                        .filter(|n| !n.is_hash())
+                        .and_then(|n| n.hash());
+
+                    if let Some(hash) = hash {
+                        self.subtrie_for_path_mut(&child)
+                            .nodes
+                            .insert(child, SparseNode::Hash(hash));
+                        effective_pruned_roots.push((child, hash));
                     }
+                } else {
+                    stack.push((child, depth + 1));
                 }
             }
         }
 
         if effective_pruned_roots.is_empty() {
             return 0;
-        }
-
-        for (path, hash) in &effective_pruned_roots {
-            self.subtrie_for_path_mut(path).nodes.insert(*path, SparseNode::Hash(*hash));
         }
 
         let nodes_converted = effective_pruned_roots.len();
