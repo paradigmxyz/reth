@@ -16,7 +16,6 @@ reth-mdbx-sys.workspace = true
 
 bitflags.workspace = true
 byteorder.workspace = true
-derive_more.workspace = true
 parking_lot.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true
@@ -28,6 +27,8 @@ dashmap = { workspace = true, features = ["inline"], optional = true }
 default = []
 return-borrowed = []
 read-tx-timeouts = ["dep:dashmap"]
+# Integration tests - need API updates after signet-libmdbx refactor
+integration-tests = []
 
 [dev-dependencies]
 criterion.workspace = true
@@ -37,7 +38,21 @@ tempfile.workspace = true
 [[bench]]
 name = "cursor"
 harness = false
+required-features = ["integration-tests"]
 
 [[bench]]
 name = "transaction"
 harness = false
+required-features = ["integration-tests"]
+
+[[test]]
+name = "cursor"
+required-features = ["integration-tests"]
+
+[[test]]
+name = "transaction"
+required-features = ["integration-tests"]
+
+[[test]]
+name = "environment"
+required-features = ["integration-tests"]

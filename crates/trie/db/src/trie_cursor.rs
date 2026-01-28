@@ -27,12 +27,12 @@ where
     TX: DbTx,
 {
     type AccountTrieCursor<'a>
-        = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>
+        = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<'a, tables::AccountsTrie>>
     where
         Self: 'a;
 
     type StorageTrieCursor<'a>
-        = DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>
+        = DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<'a, tables::StoragesTrie>>
     where
         Self: 'a;
 

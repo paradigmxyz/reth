@@ -37,27 +37,30 @@ use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
 /// Type alias for [`EitherReader`] constructors.
-type EitherReaderTy<'a, P, T> =
-    EitherReader<'a, CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
+type EitherReaderTy<'a, P, T> = EitherReader<
+    'a,
+    CursorTy<'a, <P as DBProvider>::Tx, T>,
+    <P as NodePrimitivesProvider>::Primitives,
+>;
 
 /// Type alias for [`EitherReader`] constructors.
 type DupEitherReaderTy<'a, P, T> = EitherReader<
     'a,
-    DupCursorTy<<P as DBProvider>::Tx, T>,
+    DupCursorTy<'a, <P as DBProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
 /// Type alias for dup [`EitherWriter`] constructors.
 type DupEitherWriterTy<'a, P, T> = EitherWriter<
     'a,
-    DupCursorMutTy<<P as DBProvider>::Tx, T>,
+    DupCursorMutTy<'a, <P as DBProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
 /// Type alias for [`EitherWriter`] constructors.
 type EitherWriterTy<'a, P, T> = EitherWriter<
     'a,
-    CursorMutTy<<P as DBProvider>::Tx, T>,
+    CursorMutTy<'a, <P as DBProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
@@ -247,7 +250,7 @@ impl<'a> EitherWriter<'a, (), ()> {
 
     /// Creates a new [`EitherWriter`] for storages history based on storage settings.
     pub fn new_storages_history<P>(
-        provider: &P,
+        provider: &'a P,
         _rocksdb_batch: RocksBatchArg<'a>,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::StoragesHistory>>
     where
@@ -264,7 +267,7 @@ impl<'a> EitherWriter<'a, (), ()> {
 
     /// Creates a new [`EitherWriter`] for transaction hash numbers based on storage settings.
     pub fn new_transaction_hash_numbers<P>(
-        provider: &P,
+        provider: &'a P,
         _rocksdb_batch: RocksBatchArg<'a>,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionHashNumbers>>
     where
@@ -283,7 +286,7 @@ impl<'a> EitherWriter<'a, (), ()> {
 
     /// Creates a new [`EitherWriter`] for account history based on storage settings.
     pub fn new_accounts_history<P>(
-        provider: &P,
+        provider: &'a P,
         _rocksdb_batch: RocksBatchArg<'a>,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::AccountsHistory>>
     where
@@ -738,7 +741,7 @@ pub enum EitherReader<'a, CURSOR, N> {
 impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for senders based on storage settings.
     pub fn new_senders<P>(
-        provider: &P,
+        provider: &'a P,
     ) -> ProviderResult<EitherReaderTy<'a, P, tables::TransactionSenders>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
@@ -756,7 +759,7 @@ impl<'a> EitherReader<'a, (), ()> {
 
     /// Creates a new [`EitherReader`] for storages history based on storage settings.
     pub fn new_storages_history<P>(
-        provider: &P,
+        provider: &'a P,
         _rocksdb_tx: RocksTxRefArg<'a>,
     ) -> ProviderResult<EitherReaderTy<'a, P, tables::StoragesHistory>>
     where
@@ -778,7 +781,7 @@ impl<'a> EitherReader<'a, (), ()> {
 
     /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
     pub fn new_transaction_hash_numbers<P>(
-        provider: &P,
+        provider: &'a P,
         _rocksdb_tx: RocksTxRefArg<'a>,
     ) -> ProviderResult<EitherReaderTy<'a, P, tables::TransactionHashNumbers>>
     where
@@ -800,7 +803,7 @@ impl<'a> EitherReader<'a, (), ()> {
 
     /// Creates a new [`EitherReader`] for account history based on storage settings.
     pub fn new_accounts_history<P>(
-        provider: &P,
+        provider: &'a P,
         _rocksdb_tx: RocksTxRefArg<'a>,
     ) -> ProviderResult<EitherReaderTy<'a, P, tables::AccountsHistory>>
     where
@@ -822,7 +825,7 @@ impl<'a> EitherReader<'a, (), ()> {
 
     /// Creates a new [`EitherReader`] for account changesets based on storage settings.
     pub fn new_account_changesets<P>(
-        provider: &P,
+        provider: &'a P,
     ) -> ProviderResult<DupEitherReaderTy<'a, P, tables::AccountChangeSets>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,

@@ -178,17 +178,14 @@ fn append<T>(db: DatabaseEnv, input: Vec<(<T as Table>::Key, <T as Table>::Value
 where
     T: Table,
 {
+    let tx = db.tx_mut().expect("tx");
     {
-        let tx = db.tx_mut().expect("tx");
         let mut crsr = tx.cursor_write::<T>().expect("cursor");
-        black_box({
-            for (k, v) in input {
-                crsr.append(k, &v).expect("submit");
-            }
-
-            tx.inner.commit().unwrap()
-        });
+        for (k, v) in input {
+            crsr.append(black_box(k), black_box(&v)).expect("submit");
+        }
     }
+    let _ = black_box(tx.inner.commit().unwrap());
     db
 }
 
@@ -196,17 +193,14 @@ fn insert<T>(db: DatabaseEnv, input: Vec<(<T as Table>::Key, <T as Table>::Value
 where
     T: Table,
 {
+    let tx = db.tx_mut().expect("tx");
     {
-        let tx = db.tx_mut().expect("tx");
         let mut crsr = tx.cursor_write::<T>().expect("cursor");
-        black_box({
-            for (k, v) in input {
-                crsr.insert(k, &v).expect("submit");
-            }
-
-            tx.inner.commit().unwrap()
-        });
+        for (k, v) in input {
+            crsr.insert(black_box(k), black_box(&v)).expect("submit");
+        }
     }
+    let _ = black_box(tx.inner.commit().unwrap());
     db
 }
 

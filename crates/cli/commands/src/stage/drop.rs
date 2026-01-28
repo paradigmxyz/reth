@@ -3,7 +3,7 @@ use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_db::{mdbx::tx::Tx, DatabaseError};
+use reth_db::DatabaseError;
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
@@ -220,8 +220,8 @@ impl<C: ChainSpecParser> Command<C> {
     }
 }
 
-fn reset_prune_checkpoint(
-    tx: &Tx<reth_db::mdbx::RW>,
+fn reset_prune_checkpoint<TX: DbTx + DbTxMut>(
+    tx: &TX,
     prune_segment: PruneSegment,
 ) -> Result<(), DatabaseError> {
     if let Some(mut prune_checkpoint) = tx.get::<tables::PruneCheckpoints>(prune_segment)? {
@@ -233,10 +233,7 @@ fn reset_prune_checkpoint(
     Ok(())
 }
 
-fn reset_stage_checkpoint(
-    tx: &Tx<reth_db::mdbx::RW>,
-    stage_id: StageId,
-) -> Result<(), DatabaseError> {
+fn reset_stage_checkpoint<TX: DbTxMut>(tx: &TX, stage_id: StageId) -> Result<(), DatabaseError> {
     tx.put::<tables::StageCheckpoints>(stage_id.to_string(), Default::default())?;
 
     Ok(())

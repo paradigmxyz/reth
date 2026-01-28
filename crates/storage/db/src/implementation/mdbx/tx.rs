@@ -7,7 +7,7 @@ use crate::{
 };
 use reth_db_api::{
     table::{Compress, DupSort, Encode, IntoVec, Table, TableImporter},
-    transaction::{DbTx, DbTxMut},
+    transaction::{DbTx, DbTxMut, DbTxMutUnsync, DbTxUnsync},
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
@@ -70,14 +70,23 @@ impl<K: TransactionKind> Tx<K> {
     /// Gets a table database handle by name if it exists, otherwise, check the
     /// database, opening the DB if it exists.
     pub fn get_dbi_raw(&self, name: &str) -> Result<MDBX_dbi, DatabaseError> {
-        if let Some(dbi) = self.dbis.get(name) {
-            Ok(*dbi)
+        self.open_db_raw(name).map(|db| db.dbi())
+    }
+
+    /// Opens a database by name, returning the `Database` handle.
+    fn open_db_raw(&self, name: &str) -> Result<reth_libmdbx::Database, DatabaseError> {
+        if let Some(&dbi) = self.dbis.get(name) {
+            // Query the flags from the transaction to ensure DUP_SORT etc. are set correctly
+            let flags = self.inner.db_flags(dbi).map_err(|e| DatabaseError::Open(e.into()))?;
+            Ok(reth_libmdbx::Database::new(dbi, flags))
         } else {
-            self.inner
-                .open_db(Some(name))
-                .map(|db| db.dbi())
-                .map_err(|e| DatabaseError::Open(e.into()))
+            self.inner.open_db(Some(name)).map_err(|e| DatabaseError::Open(e.into()))
         }
+    }
+
+    /// Opens a table's database, returning the `Database` handle.
+    fn open_db<T: Table>(&self) -> Result<reth_libmdbx::Database, DatabaseError> {
+        self.open_db_raw(T::NAME)
     }
 
     /// Gets a table database handle by name if it exists, otherwise, check the
@@ -87,11 +96,9 @@ impl<K: TransactionKind> Tx<K> {
     }
 
     /// Create db Cursor
-    pub fn new_cursor<T: Table>(&self) -> Result<Cursor<K, T>, DatabaseError> {
-        let inner = self
-            .inner
-            .cursor_with_dbi(self.get_dbi::<T>()?)
-            .map_err(|e| DatabaseError::InitCursor(e.into()))?;
+    pub fn new_cursor<T: Table>(&self) -> Result<Cursor<'_, K, T>, DatabaseError> {
+        let db = self.open_db::<T>()?;
+        let inner = self.inner.cursor(db).map_err(|e| DatabaseError::InitCursor(e.into()))?;
 
         Ok(Cursor::new_with_metrics(
             inner,
@@ -282,9 +289,15 @@ impl<K: TransactionKind> Drop for MetricsHandler<K> {
 
 impl TableImporter for Tx<RW> {}
 
-impl<K: TransactionKind> DbTx for Tx<K> {
-    type Cursor<T: Table> = Cursor<K, T>;
-    type DupCursor<T: DupSort> = Cursor<K, T>;
+impl<K: TransactionKind + Send + Sync> DbTx for Tx<K> {
+    type Cursor<'tx, T: Table>
+        = Cursor<'tx, K, T>
+    where
+        Self: 'tx;
+    type DupCursor<'tx, T: DupSort>
+        = Cursor<'tx, K, T>
+    where
+        Self: 'tx;
 
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
         self.get_by_encoded_key::<T>(&key.encode())
@@ -318,12 +331,12 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     }
 
     // Iterate over read only values in database.
-    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<T>, DatabaseError> {
+    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<'_, T>, DatabaseError> {
         self.new_cursor()
     }
 
     /// Iterate over read only values in database.
-    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError> {
+    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<'_, T>, DatabaseError> {
         self.new_cursor()
     }
 
@@ -380,9 +393,10 @@ impl Tx<RW> {
     ) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = value.compress();
+        let db = self.open_db::<T>()?;
         let (operation, write_operation, flags) = kind.into_operation_and_flags();
         self.execute_with_operation_metric::<T, _>(operation, Some(value.as_ref().len()), |tx| {
-            tx.put(self.get_dbi::<T>()?, key.as_ref(), value, flags).map_err(|e| {
+            tx.put(db, key.as_ref(), value, flags).map_err(|e| {
                 DatabaseWriteError {
                     info: e.into(),
                     operation: write_operation,
@@ -396,8 +410,14 @@ impl Tx<RW> {
 }
 
 impl DbTxMut for Tx<RW> {
-    type CursorMut<T: Table> = Cursor<RW, T>;
-    type DupCursorMut<T: DupSort> = Cursor<RW, T>;
+    type CursorMut<'tx, T: Table>
+        = Cursor<'tx, RW, T>
+    where
+        Self: 'tx;
+    type DupCursorMut<'tx, T: DupSort>
+        = Cursor<'tx, RW, T>
+    where
+        Self: 'tx;
 
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         self.put::<T>(PutKind::Upsert, key, value)
@@ -419,23 +439,335 @@ impl DbTxMut for Tx<RW> {
             data = Some(value.as_ref());
         };
 
+        let db = self.open_db::<T>()?;
         self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
-            tx.del(self.get_dbi::<T>()?, key.encode(), data)
-                .map_err(|e| DatabaseError::Delete(e.into()))
+            tx.del(db, key.encode(), data).map_err(|e| DatabaseError::Delete(e.into()))
         })
     }
 
     fn clear<T: Table>(&self) -> Result<(), DatabaseError> {
-        self.inner.clear_db(self.get_dbi::<T>()?).map_err(|e| DatabaseError::Delete(e.into()))?;
+        let db = self.open_db::<T>()?;
+        self.inner.clear_db(db).map_err(|e| DatabaseError::Delete(e.into()))?;
 
         Ok(())
     }
 
-    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError> {
+    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<'_, T>, DatabaseError> {
         self.new_cursor()
     }
 
-    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError> {
+    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<'_, T>, DatabaseError> {
+        self.new_cursor()
+    }
+}
+
+// ============================================================================
+// TxUnsync - Unsynchronized transaction wrapper for single-threaded use
+// ============================================================================
+
+use super::cursor::CursorUnsync;
+
+/// Wrapper for the libmdbx unsynchronized transaction.
+///
+/// This variant skips mutex synchronization and is more efficient when you know
+/// the transaction will only be used from a single thread.
+///
+/// Unlike `Tx`, this type requires `&mut self` for all operations since the underlying
+/// libmdbx transaction requires exclusive access.
+#[derive(Debug)]
+pub struct TxUnsync<K: TransactionKind> {
+    /// Libmdbx-sys unsynchronized transaction.
+    pub inner: reth_libmdbx::TxUnsync<K>,
+
+    /// Cached MDBX DBIs for reuse.
+    dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
+
+    /// Handler for metrics.
+    metrics_handler: Option<MetricsHandler<K>>,
+}
+
+impl<K: TransactionKind> TxUnsync<K> {
+    /// Creates new `TxUnsync` object with a `RO` or `RW` transaction and optionally enables
+    /// metrics.
+    #[inline]
+    #[track_caller]
+    pub(crate) fn new(
+        mut inner: reth_libmdbx::TxUnsync<K>,
+        dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
+        env_metrics: Option<Arc<DatabaseEnvMetrics>>,
+    ) -> reth_libmdbx::Result<Self> {
+        let metrics_handler = env_metrics
+            .map(|env_metrics| {
+                let handler = MetricsHandler::<K>::new(inner.id()?, env_metrics);
+                handler.env_metrics.record_opened_transaction(handler.transaction_mode());
+                handler.log_transaction_opened();
+                Ok(handler)
+            })
+            .transpose()?;
+        Ok(Self { inner, dbis, metrics_handler })
+    }
+
+    /// Gets this transaction ID.
+    pub fn id(&mut self) -> reth_libmdbx::Result<u64> {
+        self.metrics_handler.as_ref().map_or_else(|| self.inner.id(), |handler| Ok(handler.txn_id))
+    }
+
+    /// Opens a database by name, returning the `Database` handle.
+    fn open_db_raw(&mut self, name: &str) -> Result<reth_libmdbx::Database, DatabaseError> {
+        if let Some(&dbi) = self.dbis.get(name) {
+            let flags = self.inner.db_flags(dbi).map_err(|e| DatabaseError::Open(e.into()))?;
+            Ok(reth_libmdbx::Database::new(dbi, flags))
+        } else {
+            self.inner.open_db(Some(name)).map_err(|e| DatabaseError::Open(e.into()))
+        }
+    }
+
+    /// Opens a table's database, returning the `Database` handle.
+    fn open_db<T: Table>(&mut self) -> Result<reth_libmdbx::Database, DatabaseError> {
+        self.open_db_raw(T::NAME)
+    }
+
+    /// Gets a table database handle.
+    pub fn get_dbi<T: Table>(&mut self) -> Result<MDBX_dbi, DatabaseError> {
+        self.open_db::<T>().map(|db| db.dbi())
+    }
+
+    /// Create db Cursor
+    pub fn new_cursor<T: Table>(&mut self) -> Result<CursorUnsync<'_, K, T>, DatabaseError> {
+        let db = self.open_db::<T>()?;
+        let inner = self.inner.cursor(db).map_err(|e| DatabaseError::InitCursor(e.into()))?;
+
+        Ok(CursorUnsync::new_with_metrics(
+            inner,
+            self.metrics_handler.as_ref().map(|h| h.env_metrics.clone()),
+        ))
+    }
+}
+
+impl TxUnsync<reth_libmdbx::RO> {
+    /// Disables the read transaction timeout timer.
+    pub fn disable_timer(&mut self) {
+        let _ = self.inner.try_disable_timer();
+    }
+}
+
+impl<K: TransactionKind> TxUnsync<K> {
+    fn execute_with_close_transaction_metric<R>(
+        mut self,
+        outcome: TransactionOutcome,
+        f: impl FnOnce(Self) -> (R, Option<CommitLatency>),
+    ) -> R {
+        let run = |tx| {
+            let start = Instant::now();
+            let (result, commit_latency) = f(tx);
+            let total_duration = start.elapsed();
+
+            if outcome.is_commit() {
+                debug!(
+                    target: "storage::db::mdbx",
+                    ?total_duration,
+                    ?commit_latency,
+                    is_read_only = K::IS_READ_ONLY,
+                    "Commit (unsync)"
+                );
+            }
+
+            (result, commit_latency, total_duration)
+        };
+
+        if let Some(mut metrics_handler) = self.metrics_handler.take() {
+            metrics_handler.close_recorded = true;
+            metrics_handler.log_backtrace_on_long_read_transaction();
+
+            let (result, commit_latency, close_duration) = run(self);
+            let open_duration = metrics_handler.start.elapsed();
+            metrics_handler.env_metrics.record_closed_transaction(
+                metrics_handler.transaction_mode(),
+                outcome,
+                open_duration,
+                Some(close_duration),
+                commit_latency,
+            );
+
+            result
+        } else {
+            run(self).0
+        }
+    }
+
+    fn execute_with_operation_metric<T: Table, R>(
+        &mut self,
+        operation: Operation,
+        value_size: Option<usize>,
+        f: impl FnOnce(&mut reth_libmdbx::TxUnsync<K>) -> R,
+    ) -> R {
+        if let Some(metrics_handler) = &self.metrics_handler {
+            metrics_handler.log_backtrace_on_long_read_transaction();
+            metrics_handler
+                .env_metrics
+                .record_operation(T::NAME, operation, value_size, || f(&mut self.inner))
+        } else {
+            f(&mut self.inner)
+        }
+    }
+}
+
+impl<K: TransactionKind> DbTxUnsync for TxUnsync<K> {
+    type Cursor<'tx, T: Table>
+        = CursorUnsync<'tx, K, T>
+    where
+        Self: 'tx;
+    type DupCursor<'tx, T: DupSort>
+        = CursorUnsync<'tx, K, T>
+    where
+        Self: 'tx;
+
+    fn get<T: Table>(&mut self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
+        self.get_by_encoded_key::<T>(&key.encode())
+    }
+
+    fn get_by_encoded_key<T: Table>(
+        &mut self,
+        key: &<T::Key as Encode>::Encoded,
+    ) -> Result<Option<T::Value>, DatabaseError> {
+        let dbi = self.get_dbi::<T>()?;
+        self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
+            tx.get(dbi, key.as_ref())
+                .map_err(|e| DatabaseError::Read(e.into()))?
+                .map(decode_one::<T>)
+                .transpose()
+        })
+    }
+
+    fn commit(self) -> Result<(), DatabaseError> {
+        self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
+            match this.inner.commit_with_latency().map_err(|e| DatabaseError::Commit(e.into())) {
+                Ok(latency) => (Ok(()), Some(latency)),
+                Err(e) => (Err(e), None),
+            }
+        })
+    }
+
+    fn abort(self) {
+        self.execute_with_close_transaction_metric(TransactionOutcome::Abort, |this| {
+            (drop(this.inner), None)
+        })
+    }
+
+    fn cursor_read<T: Table>(&mut self) -> Result<Self::Cursor<'_, T>, DatabaseError> {
+        self.new_cursor()
+    }
+
+    fn cursor_dup_read<T: DupSort>(&mut self) -> Result<Self::DupCursor<'_, T>, DatabaseError> {
+        self.new_cursor()
+    }
+
+    fn entries<T: Table>(&mut self) -> Result<usize, DatabaseError> {
+        let dbi = self.get_dbi::<T>()?;
+        Ok(self.inner.db_stat(dbi).map_err(|e| DatabaseError::Stats(e.into()))?.entries())
+    }
+
+    fn disable_long_read_transaction_safety(&mut self) {
+        if let Some(metrics_handler) = self.metrics_handler.as_mut() {
+            metrics_handler.record_backtrace = false;
+        }
+
+        // Timeout is only applicable for RO transactions, handled in specialized impl
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PutKindUnsync {
+    Upsert,
+    Append,
+}
+
+impl PutKindUnsync {
+    const fn into_operation_and_flags(self) -> (Operation, DatabaseWriteOperation, WriteFlags) {
+        match self {
+            Self::Upsert => {
+                (Operation::PutUpsert, DatabaseWriteOperation::PutUpsert, WriteFlags::UPSERT)
+            }
+            Self::Append => {
+                (Operation::PutAppend, DatabaseWriteOperation::PutAppend, WriteFlags::APPEND)
+            }
+        }
+    }
+}
+
+impl TxUnsync<RW> {
+    fn put_inner<T: Table>(
+        &mut self,
+        kind: PutKindUnsync,
+        key: T::Key,
+        value: T::Value,
+    ) -> Result<(), DatabaseError> {
+        let key = key.encode();
+        let value = value.compress();
+        let db = self.open_db::<T>()?;
+        let (operation, write_operation, flags) = kind.into_operation_and_flags();
+        self.execute_with_operation_metric::<T, _>(operation, Some(value.as_ref().len()), |tx| {
+            tx.put(db, key.as_ref(), value, flags).map_err(|e| {
+                DatabaseWriteError {
+                    info: e.into(),
+                    operation: write_operation,
+                    table_name: T::NAME,
+                    key: key.into_vec(),
+                }
+                .into()
+            })
+        })
+    }
+}
+
+impl DbTxMutUnsync for TxUnsync<RW> {
+    type CursorMut<'tx, T: Table>
+        = CursorUnsync<'tx, RW, T>
+    where
+        Self: 'tx;
+    type DupCursorMut<'tx, T: DupSort>
+        = CursorUnsync<'tx, RW, T>
+    where
+        Self: 'tx;
+
+    fn put<T: Table>(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        self.put_inner::<T>(PutKindUnsync::Upsert, key, value)
+    }
+
+    fn append<T: Table>(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        self.put_inner::<T>(PutKindUnsync::Append, key, value)
+    }
+
+    fn delete<T: Table>(
+        &mut self,
+        key: T::Key,
+        value: Option<T::Value>,
+    ) -> Result<bool, DatabaseError> {
+        let mut data = None;
+
+        let value = value.map(Compress::compress);
+        if let Some(value) = &value {
+            data = Some(value.as_ref());
+        };
+
+        let db = self.open_db::<T>()?;
+        self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
+            tx.del(db, key.encode(), data).map_err(|e| DatabaseError::Delete(e.into()))
+        })
+    }
+
+    fn clear<T: Table>(&mut self) -> Result<(), DatabaseError> {
+        let db = self.open_db::<T>()?;
+        self.inner.clear_db(db).map_err(|e| DatabaseError::Delete(e.into()))?;
+
+        Ok(())
+    }
+
+    fn cursor_write<T: Table>(&mut self) -> Result<Self::CursorMut<'_, T>, DatabaseError> {
+        self.new_cursor()
+    }
+
+    fn cursor_dup_write<T: DupSort>(&mut self) -> Result<Self::DupCursorMut<'_, T>, DatabaseError> {
         self.new_cursor()
     }
 }

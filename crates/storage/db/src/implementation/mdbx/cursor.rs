@@ -13,20 +13,25 @@ use reth_db_api::{
     },
     table::{Compress, Decode, Decompress, DupSort, Encode, IntoVec, Table},
 };
-use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
+use reth_libmdbx::{tx::PtrSyncInner, Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds, sync::Arc};
 
-/// Read only Cursor.
-pub type CursorRO<T> = Cursor<RO, T>;
-/// Read write cursor.
-pub type CursorRW<T> = Cursor<RW, T>;
+/// Read only Cursor (synchronized).
+pub type CursorRO<'tx, T> = Cursor<'tx, RO, T>;
+/// Read write cursor (synchronized).
+pub type CursorRW<'tx, T> = Cursor<'tx, RW, T>;
+
+/// Read only Cursor (unsynchronized).
+pub type CursorROUnsync<'tx, T> = CursorUnsync<'tx, RO, T>;
+/// Read write cursor (unsynchronized).
+pub type CursorRWUnsync<'tx, T> = CursorUnsync<'tx, RW, T>;
 
 /// Cursor wrapper to access KV items.
 #[derive(Debug)]
-pub struct Cursor<K: TransactionKind, T: Table> {
+pub struct Cursor<'tx, K: TransactionKind, T: Table> {
     /// Inner `libmdbx` cursor.
-    pub(crate) inner: reth_libmdbx::Cursor<K>,
+    pub(crate) inner: reth_libmdbx::Cursor<'tx, K, PtrSyncInner<K>>,
     /// Cache buffer that receives compressed values.
     buf: Vec<u8>,
     /// Reference to metric handles in the DB environment. If `None`, metrics are not recorded.
@@ -35,9 +40,9 @@ pub struct Cursor<K: TransactionKind, T: Table> {
     _dbi: PhantomData<T>,
 }
 
-impl<K: TransactionKind, T: Table> Cursor<K, T> {
+impl<'tx, K: TransactionKind, T: Table> Cursor<'tx, K, T> {
     pub(crate) const fn new_with_metrics(
-        inner: reth_libmdbx::Cursor<K>,
+        inner: reth_libmdbx::Cursor<'tx, K, PtrSyncInner<K>>,
         metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> Self {
         Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData }
@@ -88,7 +93,7 @@ macro_rules! compress_to_buf_or_ref {
     };
 }
 
-impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
+impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<'_, K, T> {
     fn first(&mut self) -> PairResult<T> {
         decode::<T>(self.inner.first())
     }
@@ -157,7 +162,7 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
     }
 }
 
-impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
+impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<'_, K, T> {
     /// Returns the previous `(key, value)` pair of a DUPSORT table.
     fn prev_dup(&mut self) -> PairResult<T> {
         decode::<T>(self.inner.prev_dup())
@@ -246,7 +251,7 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
     }
 }
 
-impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
+impl<T: Table> DbCursorRW<T> for Cursor<'_, RW, T> {
     /// Database operation that will update an existing row if a specified value already
     /// exists in a table, and insert a new row if the specified value doesn't already exist
     ///
@@ -329,7 +334,307 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     }
 }
 
-impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
+impl<T: DupSort> DbDupCursorRW<T> for Cursor<'_, RW, T> {
+    fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
+        self.execute_with_operation_metric(Operation::CursorDeleteCurrentDuplicates, None, |this| {
+            this.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))
+        })
+    }
+
+    fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        let key = key.encode();
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorAppendDup,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND_DUP)
+                    .map_err(|e| {
+                        DatabaseWriteError {
+                            info: e.into(),
+                            operation: DatabaseWriteOperation::CursorAppendDup,
+                            table_name: T::NAME,
+                            key: key.into_vec(),
+                        }
+                        .into()
+                    })
+            },
+        )
+    }
+}
+
+/// Cursor wrapper to access KV items (unsynchronized variant for single-threaded use).
+#[derive(Debug)]
+pub struct CursorUnsync<'tx, K: TransactionKind, T: Table> {
+    /// Inner `libmdbx` cursor.
+    pub(crate) inner: reth_libmdbx::Cursor<'tx, K, <K as TransactionKind>::Inner>,
+    /// Cache buffer that receives compressed values.
+    buf: Vec<u8>,
+    /// Reference to metric handles in the DB environment. If `None`, metrics are not recorded.
+    metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Phantom data to enforce encoding/decoding.
+    _dbi: PhantomData<T>,
+}
+
+impl<'tx, K: TransactionKind, T: Table> CursorUnsync<'tx, K, T> {
+    pub(crate) const fn new_with_metrics(
+        inner: reth_libmdbx::Cursor<'tx, K, <K as TransactionKind>::Inner>,
+        metrics: Option<Arc<DatabaseEnvMetrics>>,
+    ) -> Self {
+        Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData }
+    }
+
+    fn execute_with_operation_metric<R>(
+        &mut self,
+        operation: Operation,
+        value_size: Option<usize>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        if let Some(metrics) = self.metrics.clone() {
+            metrics.record_operation(T::NAME, operation, value_size, || f(self))
+        } else {
+            f(self)
+        }
+    }
+}
+
+/// Decodes a `(key, value)` pair for unsync cursor.
+#[expect(clippy::type_complexity)]
+pub fn decode_unsync<T>(
+    res: Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, impl Into<DatabaseErrorInfo>>,
+) -> PairResult<T>
+where
+    T: Table,
+    T::Key: Decode,
+    T::Value: Decompress,
+{
+    res.map_err(|e| DatabaseError::Read(e.into()))?.map(decoder::<T>).transpose()
+}
+
+impl<K: TransactionKind, T: Table> DbCursorRO<T> for CursorUnsync<'_, K, T> {
+    fn first(&mut self) -> PairResult<T> {
+        decode_unsync::<T>(self.inner.first())
+    }
+
+    fn seek_exact(&mut self, key: <T as Table>::Key) -> PairResult<T> {
+        decode_unsync::<T>(self.inner.set_key(key.encode().as_ref()))
+    }
+
+    fn seek(&mut self, key: <T as Table>::Key) -> PairResult<T> {
+        decode_unsync::<T>(self.inner.set_range(key.encode().as_ref()))
+    }
+
+    fn next(&mut self) -> PairResult<T> {
+        decode_unsync::<T>(self.inner.next())
+    }
+
+    fn prev(&mut self) -> PairResult<T> {
+        decode_unsync::<T>(self.inner.prev())
+    }
+
+    fn last(&mut self) -> PairResult<T> {
+        decode_unsync::<T>(self.inner.last())
+    }
+
+    fn current(&mut self) -> PairResult<T> {
+        decode_unsync::<T>(self.inner.get_current())
+    }
+
+    fn walk(&mut self, start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError> {
+        let start = if let Some(start_key) = start_key {
+            decode_unsync::<T>(self.inner.set_range(start_key.encode().as_ref())).transpose()
+        } else {
+            self.first().transpose()
+        };
+
+        Ok(Walker::new(self, start))
+    }
+
+    fn walk_range(
+        &mut self,
+        range: impl RangeBounds<T::Key>,
+    ) -> Result<RangeWalker<'_, T, Self>, DatabaseError> {
+        let start = match range.start_bound().cloned() {
+            Bound::Included(key) => self.inner.set_range(key.encode().as_ref()),
+            Bound::Excluded(_key) => {
+                unreachable!("Rust doesn't allow for Bound::Excluded in starting bounds");
+            }
+            Bound::Unbounded => self.inner.first(),
+        };
+        let start = decode_unsync::<T>(start).transpose();
+        Ok(RangeWalker::new(self, start, range.end_bound().cloned()))
+    }
+
+    fn walk_back(
+        &mut self,
+        start_key: Option<T::Key>,
+    ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError> {
+        let start = if let Some(start_key) = start_key {
+            decode_unsync::<T>(self.inner.set_range(start_key.encode().as_ref()))
+        } else {
+            self.last()
+        }
+        .transpose();
+
+        Ok(ReverseWalker::new(self, start))
+    }
+}
+
+impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for CursorUnsync<'_, K, T> {
+    fn prev_dup(&mut self) -> PairResult<T> {
+        decode_unsync::<T>(self.inner.prev_dup())
+    }
+
+    fn next_dup(&mut self) -> PairResult<T> {
+        decode_unsync::<T>(self.inner.next_dup())
+    }
+
+    fn last_dup(&mut self) -> ValueOnlyResult<T> {
+        self.inner
+            .last_dup()
+            .map_err(|e| DatabaseError::Read(e.into()))?
+            .map(decode_one::<T>)
+            .transpose()
+    }
+
+    fn next_no_dup(&mut self) -> PairResult<T> {
+        decode_unsync::<T>(self.inner.next_nodup())
+    }
+
+    fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
+        self.inner
+            .next_dup()
+            .map_err(|e| DatabaseError::Read(e.into()))?
+            .map(decode_value::<T>)
+            .transpose()
+    }
+
+    fn seek_by_key_subkey(
+        &mut self,
+        key: <T as Table>::Key,
+        subkey: <T as DupSort>::SubKey,
+    ) -> ValueOnlyResult<T> {
+        self.inner
+            .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
+            .map_err(|e| DatabaseError::Read(e.into()))?
+            .map(decode_one::<T>)
+            .transpose()
+    }
+
+    fn walk_dup(
+        &mut self,
+        key: Option<T::Key>,
+        subkey: Option<T::SubKey>,
+    ) -> Result<DupWalker<'_, T, Self>, DatabaseError> {
+        let start = match (key, subkey) {
+            (Some(key), Some(subkey)) => {
+                let encoded_key = key.encode();
+                self.inner
+                    .get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
+                    .map_err(|e| DatabaseError::Read(e.into()))?
+                    .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
+            }
+            (Some(key), None) => {
+                let encoded_key = key.encode();
+                self.inner
+                    .set(encoded_key.as_ref())
+                    .map_err(|e| DatabaseError::Read(e.into()))?
+                    .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
+            }
+            (None, Some(subkey)) => {
+                if let Some((key, _)) = self.first()? {
+                    let encoded_key = key.encode();
+                    self.inner
+                        .get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
+                        .map_err(|e| DatabaseError::Read(e.into()))?
+                        .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
+                } else {
+                    Some(Err(DatabaseError::Read(MDBXError::NotFound.into())))
+                }
+            }
+            (None, None) => self.first().transpose(),
+        };
+
+        Ok(DupWalker::<'_, T, Self> { cursor: self, start })
+    }
+}
+
+impl<T: Table> DbCursorRW<T> for CursorUnsync<'_, RW, T> {
+    fn upsert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
+        let key = key.encode();
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorUpsert,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::UPSERT)
+                    .map_err(|e| {
+                        DatabaseWriteError {
+                            info: e.into(),
+                            operation: DatabaseWriteOperation::CursorUpsert,
+                            table_name: T::NAME,
+                            key: key.into_vec(),
+                        }
+                        .into()
+                    })
+            },
+        )
+    }
+
+    fn insert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
+        let key = key.encode();
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorInsert,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::NO_OVERWRITE)
+                    .map_err(|e| {
+                        DatabaseWriteError {
+                            info: e.into(),
+                            operation: DatabaseWriteOperation::CursorInsert,
+                            table_name: T::NAME,
+                            key: key.into_vec(),
+                        }
+                        .into()
+                    })
+            },
+        )
+    }
+
+    fn append(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
+        let key = key.encode();
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorAppend,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND)
+                    .map_err(|e| {
+                        DatabaseWriteError {
+                            info: e.into(),
+                            operation: DatabaseWriteOperation::CursorAppend,
+                            table_name: T::NAME,
+                            key: key.into_vec(),
+                        }
+                        .into()
+                    })
+            },
+        )
+    }
+
+    fn delete_current(&mut self) -> Result<(), DatabaseError> {
+        self.execute_with_operation_metric(Operation::CursorDeleteCurrent, None, |this| {
+            this.inner.del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
+        })
+    }
+}
+
+impl<T: DupSort> DbDupCursorRW<T> for CursorUnsync<'_, RW, T> {
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
         self.execute_with_operation_metric(Operation::CursorDeleteCurrentDuplicates, None, |this| {
             this.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))

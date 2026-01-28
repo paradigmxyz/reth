@@ -133,6 +133,9 @@ pub mod test_utils {
     impl<DB: Database> Database for TempDatabase<DB> {
         type TX = <DB as Database>::TX;
         type TXMut = <DB as Database>::TXMut;
+        type TXUnsync = <DB as Database>::TXUnsync;
+        type TXMutUnsync = <DB as Database>::TXMutUnsync;
+
         fn tx(&self) -> Result<Self::TX, DatabaseError> {
             self.pre_tx_hook.read()();
             let tx = self.db().tx()?;
@@ -142,6 +145,14 @@ pub mod test_utils {
 
         fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
             self.db().tx_mut()
+        }
+
+        fn tx_unsync(&self) -> Result<Self::TXUnsync, DatabaseError> {
+            self.db().tx_unsync()
+        }
+
+        fn tx_mut_unsync(&self) -> Result<Self::TXMutUnsync, DatabaseError> {
+            self.db().tx_mut_unsync()
         }
     }
 
