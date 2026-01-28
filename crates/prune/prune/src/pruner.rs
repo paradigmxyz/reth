@@ -154,26 +154,27 @@ where
             PruneProgress::Finished => "Pruner finished",
         };
 
-        let segments_summary: Vec<_> = stats
-            .iter()
-            .filter(|s| s.pruned > 0)
-            .map(|s| format!("{}={}", s.segment, s.pruned))
-            .collect();
-
-        let highest_pruned_block = output
+        let segments_summary: Vec<_> = output
             .segments
             .iter()
             .filter(|(_, seg)| seg.pruned > 0)
-            .filter_map(|(_, seg)| seg.checkpoint.and_then(|c| c.block_number))
-            .max();
+            .map(|(segment, seg)| {
+                let block = seg
+                    .checkpoint
+                    .and_then(|c| c.block_number)
+                    .map(|b| b.to_string())
+                    .unwrap_or_else(|| "?".to_string());
+                let status = if seg.progress.is_finished() { "" } else { "..." };
+                format!("{segment}={pruned}@{block}{status}", pruned = seg.pruned)
+            })
+            .collect();
 
         debug!(
             target: "pruner",
             tip_block_number,
-            ?highest_pruned_block,
             deleted_entries,
             elapsed_ms = elapsed.as_millis() as u64,
-            segments = %segments_summary.join(", "),
+            segments = %segments_summary.join(" "),
             "{message}",
         );
 
