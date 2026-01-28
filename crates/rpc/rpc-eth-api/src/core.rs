@@ -50,7 +50,7 @@ impl<T> FullEthApiServer for T where
 {
 }
 
-/// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>
+/// Eth rpc interface: <https://ethereum.github.io/execution-apis/eth/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 pub trait EthApi<
