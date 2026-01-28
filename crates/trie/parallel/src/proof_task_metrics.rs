@@ -35,8 +35,8 @@ pub struct ProofTaskTrieMetrics {
     /// (seconds). This is the portion of account worker idle time attributable to storage
     /// worker latency rather than queue wait.
     account_worker_storage_wait_seconds: Histogram,
-    /// Counter for storage proofs skipped due to storage filter optimization.
-    storage_proofs_skipped: Counter,
+    /// Counter for empty storage proofs that we skipped the calculation of.
+    empty_storage_proofs: Counter,
 }
 
 impl ProofTaskTrieMetrics {
@@ -70,9 +70,9 @@ impl ProofTaskTrieMetrics {
         self.account_worker_storage_wait_seconds.record(stats.storage_wait_time.as_secs_f64());
     }
 
-    /// Increment the count of skipped storage proofs.
-    pub fn increment_storage_proofs_skipped(&self, count: u64) {
-        self.storage_proofs_skipped.increment(count);
+    /// Increment the count of empty storage proofs.
+    pub fn increment_empty_storage_proofs(&self, count: u64) {
+        self.empty_storage_proofs.increment(count);
     }
 }
 

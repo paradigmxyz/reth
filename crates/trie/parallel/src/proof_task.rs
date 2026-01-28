@@ -1112,10 +1112,12 @@ where
                     }
                 }
 
-                let skipped = empty_receivers.len() as u64;
                 #[cfg(feature = "metrics")]
-                if skipped > 0 {
-                    self.metrics.increment_storage_proofs_skipped(skipped);
+                {
+                    let empty = empty_receivers.len() as u64;
+                    if empty > 0 {
+                        self.metrics.increment_empty_storage_proofs(empty);
+                    }
                 }
 
                 (filtered_targets, empty_receivers)

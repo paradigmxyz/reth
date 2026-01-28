@@ -39,7 +39,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::spawn_os_thread;
-use reth_trie_db::{ChangesetCache, StorageFilterBuilder, StorageFilterFactoryBuilder};
+use reth_trie_db::{ChangesetCache, StorageFilterFactoryBuilder};
 use revm::interpreter::debug_unreachable;
 use revm::state::EvmState;
 use state::TreeState;
