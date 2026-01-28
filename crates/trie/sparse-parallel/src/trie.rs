@@ -909,6 +909,7 @@ impl SparseTrie for ParallelSparseTrie {
 }
 
 impl SparseTrieExt for ParallelSparseTrie {
+    /// Returns the count of revealed (non-hash) nodes across all subtries.
     fn revealed_node_count(&self) -> usize {
         let upper_count = self.upper_subtrie.nodes.values().filter(|n| !n.is_hash()).count();
 
