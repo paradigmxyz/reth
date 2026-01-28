@@ -990,9 +990,8 @@ where
     /// # Effects
     ///
     /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
-    /// - Clears update tracking state (prefix sets, updated/removed nodes)
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
-        if let RevealableSparseTrie::Revealed(trie) = &mut self.state {
+        if let Some(trie) = self.state.as_revealed_mut() {
             trie.prune(max_depth);
         }
         self.revealed_account_paths.clear();

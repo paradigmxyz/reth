@@ -2850,6 +2850,7 @@ fn is_strict_descendant_in(roots: &[(Nibbles, B256)], path: &Nibbles) -> bool {
     if roots.is_empty() {
         return false;
     }
+    debug_assert!(roots.windows(2).all(|w| w[0].0 <= w[1].0), "roots must be sorted by path");
     let idx = roots.partition_point(|(root, _)| root <= path);
     if idx > 0 {
         let candidate = &roots[idx - 1].0;
@@ -2868,6 +2869,7 @@ fn starts_with_pruned_in(roots: &[(Nibbles, B256)], path: &Nibbles) -> bool {
     if roots.is_empty() {
         return false;
     }
+    debug_assert!(roots.windows(2).all(|w| w[0].0 <= w[1].0), "roots must be sorted by path");
     let idx = roots.partition_point(|(root, _)| root <= path);
     if idx > 0 {
         let candidate = &roots[idx - 1].0;
