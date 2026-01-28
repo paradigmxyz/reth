@@ -68,13 +68,11 @@ impl PreservedSparseTrie {
         self.block_hash == parent_hash
     }
 
-    /// Consumes self and returns the cleared trie for reuse.
+    /// Consumes self and returns the trie for reuse.
     ///
-    /// Currently always clears the trie because the pruned trie cannot be directly reused:
-    /// - `prune()` deletes values needed for state root computation
-    /// - `revealed_account_paths` is cleared, breaking proof filtering logic
-    ///
-    /// The allocation reuse still provides memory efficiency benefits.
+    /// If the new payload is a continuation (its parent is the block we computed this trie for),
+    /// the pruned trie structure is reused directly. Otherwise, the trie is cleared but
+    /// allocations are preserved to reduce memory overhead.
     pub(super) fn into_trie_for(
         self,
         parent_hash: B256,
@@ -83,8 +81,9 @@ impl PreservedSparseTrie {
             debug!(
                 target: "engine::tree::payload_processor",
                 block_hash = %self.block_hash,
-                "Reusing sparse trie allocations for continuation payload"
+                "Reusing sparse trie for continuation payload"
             );
+            self.trie
         } else {
             debug!(
                 target: "engine::tree::payload_processor",
@@ -92,9 +91,9 @@ impl PreservedSparseTrie {
                 new_parent = %parent_hash,
                 "Clearing sparse trie - not a continuation"
             );
+            let mut trie = self.trie;
+            trie.clear();
+            trie
         }
-        let mut trie = self.trie;
-        trie.clear();
-        trie
     }
 }
