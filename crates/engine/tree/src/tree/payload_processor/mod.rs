@@ -558,7 +558,7 @@ where
                         .with_updates(true)
                 });
 
-            let task = SparseTrieTask::<_, ParallelSparseTrie, ParallelSparseTrie>::new(
+            let mut task = SparseTrieTask::<_, ParallelSparseTrie, ParallelSparseTrie>::new(
                 sparse_trie_rx,
                 proof_worker_handle,
                 trie_metrics,
@@ -567,9 +567,22 @@ where
                 max_storage_tries,
             );
 
-            let (result, task) = task.run();
+            let result = task.run();
             // Send state root computation result immediately - don't block on cleanup
-            let _ = state_root_tx.send(result);
+            if state_root_tx.send(result).is_err() {
+                // Receiver dropped - payload was likely invalid or cancelled.
+                // Clear the trie instead of preserving potentially invalid state.
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    "State root receiver dropped, clearing trie"
+                );
+                let trie = task.into_cleared_trie(
+                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                );
+                preserved_sparse_trie.store(PreservedSparseTrie::new(trie, block_hash));
+                return;
+            }
 
             // Prune and preserve the trie for potential reuse.
             let _enter =

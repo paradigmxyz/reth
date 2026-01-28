@@ -57,24 +57,22 @@ where
         Self { updates, metrics, trie, blinded_provider_factory, prune_depth, max_storage_tries }
     }
 
-    /// Runs the sparse trie task to completion.
+    /// Runs the sparse trie task to completion, computing the state root.
     ///
-    /// This waits for new incoming [`SparseTrieUpdate`].
+    /// Receives [`SparseTrieUpdate`]s until the channel is closed, applying each update
+    /// to the trie. Once all updates are processed, computes and returns the final state root.
     ///
-    /// This concludes once the last trie update has been received.
-    ///
-    /// # Returns
-    ///
-    /// - State root computation outcome.
-    /// - The task itself, which can be used to prune the trie and extract it for reuse.
+    /// After this returns, call [`into_trie_for_reuse`](Self::into_trie_for_reuse) to
+    /// prepare the trie for storage and potential reuse in subsequent payload validations.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    pub(super) fn run(mut self) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, Self) {
-        let result = self.run_inner();
-        (result, self)
+    pub(super) fn run(
+        &mut self,
+    ) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+        self.run_inner()
     }
 
     /// Inner function to run the sparse trie task to completion.
@@ -142,6 +140,20 @@ where
         max_values_capacity: usize,
     ) -> SparseStateTrie<A, S> {
         self.trie.prune(self.prune_depth, self.max_storage_tries);
+        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        self.trie
+    }
+
+    /// Clears and shrinks the trie, discarding all state.
+    ///
+    /// Use this when the payload was invalid or cancelled - we don't want to preserve
+    /// potentially invalid trie state, but we keep the allocations for reuse.
+    pub(super) fn into_cleared_trie(
+        mut self,
+        max_nodes_capacity: usize,
+        max_values_capacity: usize,
+    ) -> SparseStateTrie<A, S> {
+        self.trie.clear();
         self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
         self.trie
     }
