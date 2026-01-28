@@ -13,6 +13,18 @@ use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 
 use crate::provider::TrieNodeProvider;
 
+/// Describes an update to a leaf in the sparse trie.
+#[derive(Debug)]
+pub enum LeafUpdate {
+    /// The leaf value has been changed to the given RLP-encoded value.
+    /// Empty Vec indicates the leaf has been removed.
+    Changed(Vec<u8>),
+    /// The leaf value is likely changed, but the new value is not yet known.
+    /// Used in prewarming contexts where transactions run out-of-order
+    /// to optimistically reveal the trie.
+    Touched,
+}
+
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
 /// This trait abstracts over different sparse trie implementations (serial vs parallel)
