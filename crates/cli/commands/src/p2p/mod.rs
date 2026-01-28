@@ -179,7 +179,7 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
         // Load configuration
         let mut config = Config::from_path(&config_path).unwrap_or_default();
 
-        config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
+        config.peers.trusted_nodes.extend(self.network.trusted_peers.iter().cloned());
 
         if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {
             eyre::bail!(
