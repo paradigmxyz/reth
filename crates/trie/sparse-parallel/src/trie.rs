@@ -930,6 +930,7 @@ impl SparseTrieExt for ParallelSparseTrie {
         let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
         stack.push((Nibbles::default(), 0));
 
+        // DFS traversal: pop path and depth, skip if subtrie or node not found.
         while let Some((path, depth)) = stack.pop() {
             let Some(subtrie) = self.subtrie_for_path(&path) else { continue };
             let Some(node) = subtrie.nodes.get(&path) else { continue };
