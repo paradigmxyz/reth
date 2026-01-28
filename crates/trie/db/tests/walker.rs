@@ -37,7 +37,7 @@ fn walk_nodes_with_common_prefix() {
 
     let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
     for (k, v) in &inputs {
-        account_cursor.upsert(k.clone().into(), &v.clone()).unwrap();
+        account_cursor.upsert(k.clone().into(), v).unwrap();
     }
     let account_trie = DatabaseAccountTrieCursor::new(account_cursor);
     test_cursor(account_trie, &expected);
