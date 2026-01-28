@@ -55,13 +55,10 @@ macro_rules! impl_to_rpc_result {
                 F: FnOnce($err) -> (i32, M, Option<&'a [u8]>),
                 M: Into<String>,
             {
-                match self {
-                    Ok(t) => Ok(t),
-                    Err(err) => {
-                        let (code, msg, data) = op(err);
-                        Err($crate::result::rpc_err(code, msg, data))
-                    }
-                }
+                self.map_err(|err| {
+                    let (code, msg, data) = op(err);
+                    $crate::result::rpc_err(code, msg, data)
+                })
             }
 
             #[inline]
@@ -79,24 +76,18 @@ macro_rules! impl_to_rpc_result {
                 F: FnOnce($err) -> (M, &'a [u8]),
                 M: Into<String>,
             {
-                match self {
-                    Ok(t) => Ok(t),
-                    Err(err) => {
-                        let (msg, data) = op(err);
-                        Err($crate::result::internal_rpc_err_with_data(msg, data))
-                    }
-                }
+                self.map_err(|err| {
+                    let (msg, data) = op(err);
+                    $crate::result::internal_rpc_err_with_data(msg, data)
+                })
             }
 
             #[inline]
             fn with_message(self, msg: &str) -> jsonrpsee_core::RpcResult<Ok> {
-                match self {
-                    Ok(t) => Ok(t),
-                    Err(err) => {
-                        let msg = format!("{msg}: {err}");
-                        Err($crate::result::internal_rpc_err(msg))
-                    }
-                }
+                self.map_err(|err| {
+                    let msg = format!("{msg}: {err}");
+                    $crate::result::internal_rpc_err(msg)
+                })
             }
         }
     };
