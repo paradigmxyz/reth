@@ -31,7 +31,7 @@ pub use pruner::{
 };
 pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError};
 pub use target::{
-    PruneModes, UnwindTargetPrunedError, MINIMUM_PRUNING_DISTANCE, MINIMUM_RECEIPTS_DISTANCE,
+    PruneModes, UnwindTargetPrunedError, MINIMUM_DISTANCE, MINIMUM_UNWIND_SAFE_DISTANCE,
 };
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.

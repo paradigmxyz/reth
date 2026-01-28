@@ -85,7 +85,7 @@ impl PruneMode {
 #[cfg(test)]
 mod tests {
     use crate::{
-        PruneMode, PrunePurpose, PruneSegment, PruneSegmentError, MINIMUM_PRUNING_DISTANCE,
+        PruneMode, PrunePurpose, PruneSegment, PruneSegmentError, MINIMUM_UNWIND_SAFE_DISTANCE,
     };
     use assert_matches::assert_matches;
     use serde::Deserialize;
@@ -96,7 +96,7 @@ mod tests {
         let segment = PruneSegment::AccountHistory;
 
         let tests = vec![
-            // MINIMUM_PRUNING_DISTANCE makes this impossible
+            // MINIMUM_UNWIND_SAFE_DISTANCE makes this impossible
             (PruneMode::Full, Err(PruneSegmentError::Configuration(segment))),
             // Nothing to prune
             (PruneMode::Distance(tip + 1), Ok(None)),
@@ -107,12 +107,12 @@ mod tests {
             // Nothing to prune
             (PruneMode::Before(tip + 1), Ok(None)),
             (
-                PruneMode::Before(tip - MINIMUM_PRUNING_DISTANCE),
-                Ok(Some(tip - MINIMUM_PRUNING_DISTANCE - 1)),
+                PruneMode::Before(tip - MINIMUM_UNWIND_SAFE_DISTANCE),
+                Ok(Some(tip - MINIMUM_UNWIND_SAFE_DISTANCE - 1)),
             ),
             (
-                PruneMode::Before(tip - MINIMUM_PRUNING_DISTANCE - 1),
-                Ok(Some(tip - MINIMUM_PRUNING_DISTANCE - 2)),
+                PruneMode::Before(tip - MINIMUM_UNWIND_SAFE_DISTANCE - 1),
+                Ok(Some(tip - MINIMUM_UNWIND_SAFE_DISTANCE - 2)),
             ),
             // Nothing to prune
             (PruneMode::Before(tip - 1), Ok(None)),
@@ -146,13 +146,13 @@ mod tests {
         let tests = vec![
             (PruneMode::Distance(tip + 1), 1, !should_prune),
             (
-                PruneMode::Distance(MINIMUM_PRUNING_DISTANCE + 1),
-                tip - MINIMUM_PRUNING_DISTANCE - 1,
+                PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE + 1),
+                tip - MINIMUM_UNWIND_SAFE_DISTANCE - 1,
                 !should_prune,
             ),
             (
-                PruneMode::Distance(MINIMUM_PRUNING_DISTANCE + 1),
-                tip - MINIMUM_PRUNING_DISTANCE - 2,
+                PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE + 1),
+                tip - MINIMUM_UNWIND_SAFE_DISTANCE - 2,
                 should_prune,
             ),
             (PruneMode::Before(tip + 1), 1, should_prune),

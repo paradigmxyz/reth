@@ -1,6 +1,6 @@
 #![allow(deprecated)] // necessary to all defining deprecated `PruneSegment` variants
 
-use crate::{MINIMUM_PRUNING_DISTANCE, MINIMUM_RECEIPTS_DISTANCE};
+use crate::{MINIMUM_DISTANCE, MINIMUM_UNWIND_SAFE_DISTANCE};
 use derive_more::Display;
 use strum::{EnumIter, IntoEnumIterator};
 use thiserror::Error;
@@ -66,9 +66,9 @@ impl PruneSegment {
     pub const fn min_blocks(&self) -> u64 {
         match self {
             Self::SenderRecovery | Self::TransactionLookup => 0,
-            Self::Receipts | Self::Bodies => MINIMUM_RECEIPTS_DISTANCE,
+            Self::Receipts | Self::Bodies => MINIMUM_DISTANCE,
             Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
-                MINIMUM_PRUNING_DISTANCE
+                MINIMUM_UNWIND_SAFE_DISTANCE
             }
             #[expect(deprecated)]
             #[expect(clippy::match_same_arms)]
