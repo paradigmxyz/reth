@@ -238,7 +238,7 @@ where
         let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
 
         // Extract V2 proofs flag early so we can pass it to prewarm
-        let v2_proofs_enabled = config.enable_proof_v2();
+        let v2_proofs_enabled = !config.disable_proof_v2();
 
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {

@@ -35,7 +35,7 @@ pub struct DefaultEngineValues {
     allow_unwind_canonical_header: bool,
     storage_worker_count: Option<usize>,
     account_worker_count: Option<usize>,
-    enable_proof_v2: bool,
+    disable_proof_v2: bool,
     cache_metrics_disabled: bool,
 }
 
@@ -161,9 +161,9 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set whether to enable proof V2 by default
-    pub const fn with_enable_proof_v2(mut self, v: bool) -> Self {
-        self.enable_proof_v2 = v;
+    /// Set whether to disable proof V2 by default
+    pub const fn with_disable_proof_v2(mut self, v: bool) -> Self {
+        self.disable_proof_v2 = v;
         self
     }
 
@@ -195,7 +195,7 @@ impl Default for DefaultEngineValues {
             allow_unwind_canonical_header: false,
             storage_worker_count: None,
             account_worker_count: None,
-            enable_proof_v2: false,
+            disable_proof_v2: false,
             cache_metrics_disabled: false,
         }
     }
@@ -317,9 +317,9 @@ pub struct EngineArgs {
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
 
-    /// Enable V2 storage proofs for state root calculations
-    #[arg(long = "engine.enable-proof-v2", default_value_t = DefaultEngineValues::get_global().enable_proof_v2)]
-    pub enable_proof_v2: bool,
+    /// Disable V2 storage proofs for state root calculations
+    #[arg(long = "engine.disable-proof-v2", default_value_t = DefaultEngineValues::get_global().disable_proof_v2)]
+    pub disable_proof_v2: bool,
 
     /// Disable cache metrics recording, which can take up to 50ms with large cached state.
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
@@ -348,7 +348,7 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-            enable_proof_v2,
+            disable_proof_v2,
             cache_metrics_disabled,
         } = DefaultEngineValues::get_global().clone();
         Self {
@@ -374,7 +374,7 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-            enable_proof_v2,
+            disable_proof_v2,
             cache_metrics_disabled,
         }
     }
@@ -410,7 +410,7 @@ impl EngineArgs {
             config = config.with_account_worker_count(count);
         }
 
-        config = config.with_enable_proof_v2(self.enable_proof_v2);
+        config = config.with_disable_proof_v2(self.disable_proof_v2);
         config = config.without_cache_metrics(self.cache_metrics_disabled);
 
         config
@@ -462,7 +462,7 @@ mod tests {
             allow_unwind_canonical_header: true,
             storage_worker_count: Some(16),
             account_worker_count: Some(8),
-            enable_proof_v2: false,
+            disable_proof_v2: false,
             cache_metrics_disabled: true,
         };
 
