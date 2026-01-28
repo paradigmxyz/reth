@@ -943,7 +943,8 @@ impl SparseTrieExt for ParallelSparseTrie {
                     let mut child = path;
                     child.extend(key);
                     if depth == max_depth {
-                        // Prune child if it has a computed hash (skip hash stubs and embedded nodes)
+                        // Prune child if it has a computed hash (skip hash stubs and embedded
+                        // nodes)
                         if let Some(hash) = self
                             .subtrie_for_path(&child)
                             .and_then(|s| s.nodes.get(&child))
@@ -966,7 +967,8 @@ impl SparseTrieExt for ParallelSparseTrie {
                         let mut child = path;
                         child.push_unchecked(nibble);
                         if depth == max_depth {
-                            // Prune child if it has a computed hash (skip hash stubs and embedded nodes)
+                            // Prune child if it has a computed hash (skip hash stubs and embedded
+                            // nodes)
                             if let Some(hash) = self
                                 .subtrie_for_path(&child)
                                 .and_then(|s| s.nodes.get(&child))
@@ -1050,35 +1052,17 @@ impl SparseTrieExt for ParallelSparseTrie {
                 continue;
             }
 
-            // Check if any root exactly matches the subtrie root path (fast path: clear entire
-            // subtrie)
-            let subtrie_cleared =
-                if let Some(subtrie) = self.lower_subtries[subtrie_idx].as_revealed_mut() {
-                    if let Some((path, hash)) =
-                        roots_group.iter().find(|(path, _)| path == &subtrie.path)
-                    {
-                        subtrie.clear();
-                        subtrie.nodes.insert(*path, SparseNode::Hash(*hash));
-                        fully_pruned_subtries[subtrie_idx] = true;
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
+            let Some(subtrie) = self.lower_subtries[subtrie_idx].as_revealed_mut() else {
+                continue;
+            };
 
             // Retain only nodes/values not descended from any pruned root.
-            if !subtrie_cleared && let Some(s) = self.lower_subtries[subtrie_idx].as_revealed_mut()
-            {
-                s.nodes.retain(|p, _| {
-                    !is_strict_descendant_in(roots_group, p) &&
-                        !is_strict_descendant_in(roots_upper, p)
-                });
-                s.inner.values.retain(|p, _| {
-                    !starts_with_pruned_in(roots_group, p) && !starts_with_pruned_in(roots_upper, p)
-                });
-            }
+            subtrie.nodes.retain(|p, _| {
+                !is_strict_descendant_in(roots_group, p) && !is_strict_descendant_in(roots_upper, p)
+            });
+            subtrie.inner.values.retain(|p, _| {
+                !starts_with_pruned_in(roots_group, p) && !starts_with_pruned_in(roots_upper, p)
+            });
         }
 
         // Branch node masks pruning
