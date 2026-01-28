@@ -48,13 +48,9 @@ We will deprecate legacy MDBX-only configurations and establish a clear timeline
 **Scope:** Full node operators only (light clients and archive snapshot users unaffected)
 
 **Requirements:**
-1. Spin up new snapshot-serving nodes before release
-2. Communicate breakage timeline clearly in advance
-3. Provide clear instructions for snapshot download and fresh sync
-
-**User considerations:**
-- Hobbyist/limited-resource stakers may lack SSD space for snapshots
-- Clear documentation and advance notice are critical
+- Share snapshot URLs & link here
+- Communicate breakage timeline clearly in advance
+- Provide clear instructions for snapshot download and fresh sync
 
 ### Tempo Internal
 
@@ -87,3 +83,6 @@ We will deprecate legacy MDBX-only configurations and establish a clear timeline
 - [ ] Coordinate with pandaops on dashboard integration
 - [ ] Define Tempo internal cutover procedure
 - [ ] Finalize exact cutoff date (before Glamsterdam)
+
+## Updates Log
+[Make sure to update the status of each action item here]: # 
