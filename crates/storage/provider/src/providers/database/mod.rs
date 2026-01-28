@@ -152,7 +152,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     #[cfg(any(test, feature = "test-utils"))]
-    /// Attaches a temporary RocksDB directory to keep it alive for the lifetime of the factory.
+    /// Attaches a temporary `RocksDB` directory to keep it alive for the lifetime of the factory.
     /// This prevents the directory from being deleted while tests are running.
     pub fn with_rocksdb_temp_dir(self, _temp_dir: tempfile::TempDir) -> Self {
         // The temp_dir is moved into the function and will be dropped when the factory is dropped.

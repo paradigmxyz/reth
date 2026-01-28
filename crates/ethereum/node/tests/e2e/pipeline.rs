@@ -212,8 +212,9 @@ async fn test_pipeline() -> eyre::Result<()> {
             ..Default::default()
         };
         let receipts = [receipt];
-        let receipts_root =
-            calculate_receipt_root(&receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>());
+        let receipts_root = calculate_receipt_root(
+            &receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>(),
+        );
 
         let header = Header {
             parent_hash,
@@ -250,8 +251,13 @@ async fn test_pipeline() -> eyre::Result<()> {
         provider_factory.clone(),
     );
 
-    let pipeline =
-        build_pipeline(provider_factory.clone(), header_downloader, body_downloader, max_block, tip);
+    let pipeline = build_pipeline(
+        provider_factory.clone(),
+        header_downloader,
+        body_downloader,
+        max_block,
+        tip,
+    );
 
     let (mut pipeline, result) = pipeline.run_as_fut(None).await;
     result?;
