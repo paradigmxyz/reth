@@ -989,6 +989,44 @@ where
         num_tries >= Self::PARALLEL_PRUNE_THRESHOLD
     }
 
+    /// Clears all trie data while preserving allocations for reuse.
+    ///
+    /// This resets the trie to an empty state but keeps the underlying memory allocations,
+    /// which can significantly reduce allocation overhead when the trie is reused.
+    pub fn clear(&mut self) {
+        self.state = core::mem::take(&mut self.state).clear();
+        self.revealed_account_paths.clear();
+        self.storage.clear();
+        self.account_rlp_buf.clear();
+    }
+
+    /// Shrinks the capacity of the sparse trie to the given node and value sizes.
+    ///
+    /// This helps reduce memory usage when the trie has excess capacity.
+    /// The capacity is distributed equally across the account trie and all storage tries.
+    pub fn shrink_to(&mut self, node_size: usize, value_size: usize) {
+        // Count total number of storage tries (active + cleared + default)
+        let storage_tries_count = self.storage.tries.len() + self.storage.cleared_tries.len();
+
+        // Total tries = 1 account trie + all storage tries
+        let total_tries = 1 + storage_tries_count;
+
+        // Distribute capacity equally among all tries
+        let node_size_per_trie = node_size / total_tries;
+        let value_size_per_trie = value_size / total_tries;
+
+        // Shrink the account trie
+        self.state.shrink_nodes_to(node_size_per_trie);
+        self.state.shrink_values_to(value_size_per_trie);
+
+        // Give storage tries the remaining capacity after account trie allocation
+        let storage_node_size = node_size.saturating_sub(node_size_per_trie);
+        let storage_value_size = value_size.saturating_sub(value_size_per_trie);
+
+        // Shrink all storage tries (they will redistribute internally)
+        self.storage.shrink_to(storage_node_size, storage_value_size);
+    }
+
     /// Prunes the account trie and selected storage tries to reduce memory usage.
     ///
     /// Storage tries not in the top `max_storage_tries` by revealed node count are cleared

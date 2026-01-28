@@ -41,7 +41,7 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    ClearedSparseStateTrie, RevealableSparseTrie, SparseStateTrie,
+    RevealableSparseTrie, SparseStateTrie,
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
@@ -59,9 +59,12 @@ use tracing::{debug, debug_span, instrument, warn, Span};
 pub mod bal;
 pub mod executor;
 pub mod multiproof;
+mod preserved_sparse_trie;
 pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
+
+use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
 
 /// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
 ///
@@ -125,13 +128,16 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// A cleared `SparseStateTrie`, kept around to be reused for the state root computation so
-    /// that allocations can be minimized.
-    sparse_state_trie: Arc<
-        parking_lot::Mutex<Option<ClearedSparseStateTrie<ParallelSparseTrie, ParallelSparseTrie>>>,
-    >,
+    /// A pruned `SparseStateTrie`, kept around to be reused for the state root computation so
+    /// that allocations can be minimized. Stored with the block hash it was computed for
+    /// to enable trie preservation across sequential payload validations.
+    sparse_state_trie: SharedPreservedSparseTrie,
     /// Maximum concurrency for prewarm task.
     prewarm_max_concurrency: usize,
+    /// Sparse trie prune depth.
+    sparse_trie_prune_depth: usize,
+    /// Maximum storage tries to retain after pruning.
+    sparse_trie_max_storage_tries: usize,
     /// Whether to disable cache metrics recording.
     disable_cache_metrics: bool,
 }
@@ -163,8 +169,10 @@ where
             disable_state_cache: config.disable_state_cache(),
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
-            sparse_state_trie: Arc::default(),
+            sparse_state_trie: SharedPreservedSparseTrie::default(),
             prewarm_max_concurrency: config.prewarm_max_concurrency(),
+            sparse_trie_prune_depth: config.sparse_trie_prune_depth(),
+            sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
             disable_cache_metrics: config.disable_cache_metrics(),
         }
     }
@@ -240,6 +248,10 @@ where
         // Extract V2 proofs flag early so we can pass it to prewarm
         let v2_proofs_enabled = !config.disable_proof_v2();
 
+        // Capture hashes before env is moved into spawn_caching_with
+        let parent_hash = env.parent_hash;
+        let block_hash = env.hash;
+
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {
             // When BAL is present, use BAL prewarming and send BAL to multiproof
@@ -313,7 +325,14 @@ where
         let (state_root_tx, state_root_rx) = channel();
 
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
-        self.spawn_sparse_trie_task(sparse_trie_rx, proof_handle, state_root_tx);
+        // Pass parent_hash for continuation detection and block_hash to store with the result.
+        self.spawn_sparse_trie_task(
+            sparse_trie_rx,
+            proof_handle,
+            state_root_tx,
+            parent_hash,
+            block_hash,
+        );
 
         PayloadHandle {
             to_multi_proof: Some(to_multi_proof),
@@ -492,64 +511,74 @@ where
     }
 
     /// Spawns the [`SparseTrieTask`] for this payload processor.
+    ///
+    /// The trie is preserved across payload validations when the new payload is a direct
+    /// child of the previous one, reducing memory allocations and improving performance.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task<BPF>(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
         proof_worker_handle: BPF,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+        parent_hash: B256,
+        block_hash: B256,
     ) where
         BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
         BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
         BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
     {
-        let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
+        let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
         let span = Span::current();
+        let prune_depth = self.sparse_trie_prune_depth;
+        let max_storage_tries = self.sparse_trie_max_storage_tries;
 
         self.executor.spawn_blocking(move || {
             let _enter = span.entered();
 
-            // Reuse a stored SparseStateTrie, or create a new one using the desired configuration
-            // if there's none to reuse.
-            let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
-                let default_trie = RevealableSparseTrie::blind_from(
-                    ParallelSparseTrie::default()
-                        .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
-                );
-                ClearedSparseStateTrie::from_state_trie(
+            // Reuse a stored SparseStateTrie if available, applying continuation logic.
+            // If this payload's parent matches the preserved trie's block, we can reuse
+            // the pruned trie structure. Otherwise, we clear the trie but keep allocations.
+            let sparse_state_trie = preserved_sparse_trie
+                .take()
+                .map(|preserved| preserved.into_trie_for(parent_hash))
+                .unwrap_or_else(|| {
+                    debug!(
+                        target: "engine::tree::payload_processor",
+                        "Creating new sparse trie - no preserved trie available"
+                    );
+                    let default_trie = RevealableSparseTrie::blind_from(
+                        ParallelSparseTrie::default().with_parallelism_thresholds(
+                            PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS,
+                        ),
+                    );
                     SparseStateTrie::new()
                         .with_accounts_trie(default_trie.clone())
                         .with_default_storage_trie(default_trie)
-                        .with_updates(true),
-                )
-            });
+                        .with_updates(true)
+                });
 
-            let task =
-                SparseTrieTask::<_, ParallelSparseTrie, ParallelSparseTrie>::new_with_cleared_trie(
-                    sparse_trie_rx,
-                    proof_worker_handle,
-                    trie_metrics,
-                    sparse_state_trie,
-                );
+            let task = SparseTrieTask::<_, ParallelSparseTrie, ParallelSparseTrie>::new(
+                sparse_trie_rx,
+                proof_worker_handle,
+                trie_metrics,
+                sparse_state_trie,
+                prune_depth,
+                max_storage_tries,
+            );
 
-            let (result, trie) = task.run();
-            // Send state root computation result
+            let (result, task) = task.run();
+            // Send state root computation result immediately - don't block on cleanup
             let _ = state_root_tx.send(result);
 
-            // Clear the SparseStateTrie, shrink, and replace it back into the mutex _after_ sending
-            // results to the next step, so that time spent clearing doesn't block the step after
-            // this one.
-            let _enter = debug_span!(target: "engine::tree::payload_processor", "clear").entered();
-            let mut cleared_trie = ClearedSparseStateTrie::from_state_trie(trie);
-
-            // Shrink the sparse trie so that we don't have ever increasing memory.
-            cleared_trie.shrink_to(
+            // Prune and preserve the trie for potential reuse.
+            let _enter =
+                debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
+            let trie = task.into_trie_for_reuse(
                 SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                 SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
             );
-
-            cleared_sparse_trie.lock().replace(cleared_trie);
+            preserved_sparse_trie.store(PreservedSparseTrie::new(trie, block_hash));
         });
     }
 

@@ -8,7 +8,7 @@ use reth_trie_parallel::{proof_task::ProofResult, root::ParallelStateRootError};
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrie,
+    SerialSparseTrie, SparseStateTrie, SparseTrie, SparseTrieExt,
 };
 use smallvec::SmallVec;
 use std::{
@@ -31,6 +31,10 @@ where
     pub(super) metrics: MultiProofTaskMetrics,
     /// Trie node provider factory.
     blinded_provider_factory: BPF,
+    /// Depth for sparse trie pruning after state root computation.
+    prune_depth: usize,
+    /// Maximum number of storage tries to retain after pruning.
+    max_storage_tries: usize,
 }
 
 impl<BPF, A, S> SparseTrieTask<BPF, A, S>
@@ -38,17 +42,19 @@ where
     BPF: TrieNodeProviderFactory + Send + Sync + Clone,
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-    A: SparseTrie + Send + Sync + Default,
-    S: SparseTrie + Send + Sync + Default + Clone,
+    A: SparseTrie + SparseTrieExt + Send + Sync + Default,
+    S: SparseTrie + SparseTrieExt + Send + Sync + Default + Clone,
 {
-    /// Creates a new sparse trie, pre-populating with a [`ClearedSparseStateTrie`].
-    pub(super) fn new_with_cleared_trie(
+    /// Creates a new sparse trie task with the given trie.
+    pub(super) const fn new(
         updates: mpsc::Receiver<SparseTrieUpdate>,
         blinded_provider_factory: BPF,
         metrics: MultiProofTaskMetrics,
-        sparse_state_trie: ClearedSparseStateTrie<A, S>,
+        trie: SparseStateTrie<A, S>,
+        prune_depth: usize,
+        max_storage_tries: usize,
     ) -> Self {
-        Self { updates, metrics, trie: sparse_state_trie.into_inner(), blinded_provider_factory }
+        Self { updates, metrics, trie, blinded_provider_factory, prune_depth, max_storage_tries }
     }
 
     /// Runs the sparse trie task to completion.
@@ -60,18 +66,15 @@ where
     /// # Returns
     ///
     /// - State root computation outcome.
-    /// - `SparseStateTrie` that needs to be cleared and reused to avoid reallocations.
+    /// - The task itself, which can be used to prune the trie and extract it for reuse.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    pub(super) fn run(
-        mut self,
-    ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, SparseStateTrie<A, S>) {
-        // run the main loop to completion
+    pub(super) fn run(mut self) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, Self) {
         let result = self.run_inner();
-        (result, self.trie)
+        (result, self)
     }
 
     /// Inner function to run the sparse trie task to completion.
@@ -126,6 +129,21 @@ where
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
+    }
+
+    /// Prepares the trie for reuse in subsequent payload validations.
+    ///
+    /// This prunes the trie to reduce memory, shrinks allocations to the given capacities,
+    /// and returns the trie ready for storage. Should be called after the state root result
+    /// has been sent to avoid blocking the critical path.
+    pub(super) fn into_trie_for_reuse(
+        mut self,
+        max_nodes_capacity: usize,
+        max_values_capacity: usize,
+    ) -> SparseStateTrie<A, S> {
+        self.trie.prune(self.prune_depth, self.max_storage_tries);
+        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        self.trie
     }
 }
 
