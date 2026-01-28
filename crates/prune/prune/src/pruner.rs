@@ -154,14 +154,18 @@ where
             PruneProgress::Finished => "Pruner finished",
         };
 
+        let segments_summary: Vec<_> = stats
+            .iter()
+            .filter(|s| s.pruned > 0)
+            .map(|s| format!("{}={}", s.segment, s.pruned))
+            .collect();
+
         debug!(
             target: "pruner",
-            %tip_block_number,
-            ?elapsed,
-            ?deleted_entries,
-            ?limiter,
-            ?output,
-            ?stats,
+            tip_block_number,
+            deleted_entries,
+            elapsed_ms = elapsed.as_millis() as u64,
+            segments = %segments_summary.join(", "),
             "{message}",
         );
 
