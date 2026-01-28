@@ -1360,12 +1360,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         }
     }
 
-    /// Returns an iterator over all _unique_ hashes in the pool
-    #[expect(dead_code)]
-    pub(crate) fn hashes_iter(&self) -> impl Iterator<Item = TxHash> + '_ {
-        self.by_hash.keys().copied()
-    }
-
     /// Returns an iterator over all transactions in the pool
     pub(crate) fn transactions_iter(
         &self,
@@ -3676,17 +3670,15 @@ mod tests {
         pool.set_block_info(block_info);
 
         // 2 txs, that should put the pool over the size limit but not max txs
-        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::Eip4844)
+        // add all the transactions to the parked pool
+        for tx in MockTransactionSet::dependent(a_sender, 0, 2, TxType::Eip4844)
             .into_iter()
             .map(|mut tx| {
                 tx.set_size(default_limits.max_size / 2 + 1);
                 tx.set_max_fee((block_info.pending_basefee - 1).into());
                 tx
             })
-            .collect::<Vec<_>>();
-
-        // add all the transactions to the parked pool
-        for tx in a_txs {
+        {
             pool.add_transaction(f.validated(tx), U256::from(1_000), 0, None).unwrap();
         }
 
@@ -3714,17 +3706,15 @@ mod tests {
         pool.update_basefee(pool_base_fee, |_| {});
 
         // 2 txs, that should put the pool over the size limit but not max txs
-        let a_txs = MockTransactionSet::dependent(a_sender, 0, 3, TxType::Eip1559)
+        // add all the transactions to the parked pool
+        for tx in MockTransactionSet::dependent(a_sender, 0, 3, TxType::Eip1559)
             .into_iter()
             .map(|mut tx| {
                 tx.set_size(default_limits.max_size / 2 + 1);
                 tx.set_max_fee((pool_base_fee - 1).into());
                 tx
             })
-            .collect::<Vec<_>>();
-
-        // add all the transactions to the parked pool
-        for tx in a_txs {
+        {
             pool.add_transaction(f.validated(tx), U256::from(1_000), 0, None).unwrap();
         }
 
