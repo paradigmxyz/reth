@@ -1,6 +1,6 @@
 use crate::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    traits::SparseTrie as SparseTrieTrait,
+    traits::{SparseTrie as SparseTrieTrait, SparseTrieExt},
     RevealableSparseTrie, SerialSparseTrie,
 };
 use alloc::{collections::VecDeque, vec::Vec};
@@ -972,6 +972,117 @@ where
     }
 }
 
+impl<A, S> SparseStateTrie<A, S>
+where
+    A: SparseTrieTrait + SparseTrieExt + Default,
+    S: SparseTrieTrait + SparseTrieExt + Default + Clone,
+{
+    /// Minimum number of storage tries before parallel pruning is enabled.
+    const PARALLEL_PRUNE_THRESHOLD: usize = 16;
+
+    /// Returns true if parallelism should be enabled for pruning the given number of tries.
+    /// Will always return false in `no_std` builds.
+    const fn is_prune_parallelism_enabled(num_tries: usize) -> bool {
+        #[cfg(not(feature = "std"))]
+        return false;
+
+        num_tries >= Self::PARALLEL_PRUNE_THRESHOLD
+    }
+
+    /// Prunes the account trie and selected storage tries to reduce memory usage.
+    ///
+    /// Storage tries not in the top `max_storage_tries` by revealed node count are cleared
+    /// entirely.
+    ///
+    /// # Preconditions
+    ///
+    /// Node hashes must be computed via `root()` before calling this method. Otherwise, nodes
+    /// cannot be converted to hash stubs and pruning will have no effect.
+    ///
+    /// # Effects
+    ///
+    /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
+    pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
+        if let Some(trie) = self.state.as_revealed_mut() {
+            trie.prune(max_depth);
+        }
+        self.revealed_account_paths.clear();
+
+        let mut storage_trie_counts: Vec<(B256, usize)> = self
+            .storage
+            .tries
+            .iter()
+            .map(|(hash, trie)| {
+                let count = match trie {
+                    RevealableSparseTrie::Revealed(t) => t.revealed_node_count(),
+                    RevealableSparseTrie::Blind(_) => 0,
+                };
+                (*hash, count)
+            })
+            .collect();
+
+        // Use O(n) selection instead of O(n log n) sort
+        let tries_to_keep: HashSet<B256> = if storage_trie_counts.len() <= max_storage_tries {
+            storage_trie_counts.iter().map(|(hash, _)| *hash).collect()
+        } else {
+            storage_trie_counts
+                .select_nth_unstable_by(max_storage_tries.saturating_sub(1), |a, b| b.1.cmp(&a.1));
+            storage_trie_counts[..max_storage_tries].iter().map(|(hash, _)| *hash).collect()
+        };
+
+        // Collect keys to avoid borrow conflict
+        let tries_to_clear: Vec<B256> = self
+            .storage
+            .tries
+            .keys()
+            .filter(|hash| !tries_to_keep.contains(*hash))
+            .copied()
+            .collect();
+
+        // Evict storage tries that exceeded limit, saving cleared allocations for reuse
+        for hash in tries_to_clear {
+            if let Some(trie) = self.storage.tries.remove(&hash) {
+                self.storage.cleared_tries.push(trie.clear());
+            }
+            if let Some(mut paths) = self.storage.revealed_paths.remove(&hash) {
+                paths.clear();
+                self.storage.cleared_revealed_paths.push(paths);
+            }
+        }
+
+        // Prune storage tries that are kept
+        if Self::is_prune_parallelism_enabled(tries_to_keep.len()) {
+            #[cfg(feature = "std")]
+            {
+                use rayon::prelude::*;
+
+                self.storage.tries.par_iter_mut().for_each(|(hash, trie)| {
+                    if tries_to_keep.contains(hash) &&
+                        let Some(t) = trie.as_revealed_mut()
+                    {
+                        t.prune(max_depth);
+                    }
+                });
+            }
+        } else {
+            for hash in &tries_to_keep {
+                if let Some(trie) =
+                    self.storage.tries.get_mut(hash).and_then(|t| t.as_revealed_mut())
+                {
+                    trie.prune(max_depth);
+                }
+            }
+        }
+
+        // Clear revealed_paths for kept tries
+        for hash in &tries_to_keep {
+            if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
+                paths.clear();
+            }
+        }
+    }
+}
+
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
 /// of [`SparseStateTrie`] both to help enforce allocation re-use and to allow us to implement
 /// methods like `get_trie_and_revealed_paths` which return multiple mutable borrows.
@@ -1260,7 +1371,7 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNode, BranchNodeMasks, LeafNode, StorageMultiProof, TrieMask,
+        BranchNode, BranchNodeMasks, BranchNodeMasksMap, LeafNode, StorageMultiProof, TrieMask,
     };
 
     #[test]
