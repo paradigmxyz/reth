@@ -700,7 +700,7 @@ impl EnvironmentBuilder {
                     // On Windows, could use std::os::windows::ffi::OsStrExt to encode_wide(),
                     // but we end up with a Vec<u16> instead of a Vec<u8>, so that doesn't
                     // really help.
-                    path.as_ref().to_string_lossy().to_string().into_bytes()
+                    path.as_ref().to_string_lossy().into_owned().into_bytes()
                 }
 
                 let path = match CString::new(path_to_bytes(path)) {
