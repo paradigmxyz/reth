@@ -164,8 +164,8 @@ where
                     .and_then(|c| c.block_number)
                     .map(|b| b.to_string())
                     .unwrap_or_else(|| "?".to_string());
-                let status = if seg.progress.is_finished() { "" } else { "..." };
-                format!("{segment}={pruned}@{block}{status}", pruned = seg.pruned)
+                let status = if seg.progress.is_finished() { "done" } else { "more" };
+                format!("{segment}({} rows to block {}, {})", seg.pruned, block, status)
             })
             .collect();
 
@@ -174,7 +174,7 @@ where
             tip_block_number,
             deleted_entries,
             elapsed_ms = elapsed.as_millis() as u64,
-            segments = %segments_summary.join(" "),
+            segments = %segments_summary.join(", "),
             "{message}",
         );
 
