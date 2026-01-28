@@ -82,6 +82,16 @@ impl From<&'static str> for FileClientError {
     }
 }
 
+impl<B: Block> Default for FileClient<B> {
+    fn default() -> Self {
+        Self {
+            headers: HashMap::default(),
+            hash_to_number: HashMap::default(),
+            bodies: HashMap::default(),
+        }
+    }
+}
+
 impl<B: FullBlock> FileClient<B> {
     /// Create a new file client from a file path.
     pub async fn new<P: AsRef<Path>>(
@@ -196,16 +206,6 @@ impl<B: FullBlock> FileClient<B> {
     /// Returns the current number of transactions in the client.
     pub fn total_transactions(&self) -> usize {
         self.bodies.iter().fold(0, |acc, (_, body)| acc + body.transactions().len())
-    }
-}
-
-impl<B: Block> Default for FileClient<B> {
-    fn default() -> Self {
-        Self {
-            headers: HashMap::default(),
-            hash_to_number: HashMap::default(),
-            bodies: HashMap::default(),
-        }
     }
 }
 

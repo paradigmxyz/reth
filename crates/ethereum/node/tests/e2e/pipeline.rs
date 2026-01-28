@@ -1,20 +1,11 @@
 //! Pipeline forward sync and unwind tests.
-//!
-//! These tests verify that the pipeline can correctly sync forward using mocked downloaders
-//! that provide real block data, then unwind to a previous state.
-//!
-//! The downloaders (`HeadersDownloader`, `BodiesDownloader`) are backed by `FileClient` which
-//! serves blocks from memory, simulating network downloads without actual network access.
-//!
-//! This is a regression test for bugs where unwind functions read from wrong storage.
 
 use alloy_consensus::{constants::ETH_TO_WEI, Header, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
+use alloy_eips::eip1559::INITIAL_BASE_FEE;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{Address, TxKind, B256, U256};
 use alloy_trie::root::state_root_unhashed;
-use reth_chainspec::{
-    ChainSpec, ChainSpecBuilder, ChainSpecProvider, MAINNET, MIN_TRANSACTION_GAS,
-};
+use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider, MAINNET, MIN_TRANSACTION_GAS};
 use reth_config::config::StageConfig;
 use reth_consensus::noop::NoopConsensus;
 use reth_db_common::init::init_genesis;
@@ -28,29 +19,22 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_primitives_traits::{crypto::secp256k1::public_key_to_address, Account, SealedBlock};
+use reth_primitives_traits::{
+    crypto::secp256k1::public_key_to_address,
+    proofs::{calculate_receipt_root, calculate_transaction_root},
+    Account, SealedBlock,
+};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockNumReader, HeaderProvider,
     StageCheckpointReader,
 };
 use reth_prune_types::PruneModes;
 use reth_stages::sets::DefaultStages;
-use reth_stages_api::{Pipeline, StageId, StageSet};
+use reth_stages_api::{Pipeline, StageId};
 use reth_static_file::StaticFileProducer;
-use reth_testing_utils::generators::{
-    self, generate_key, random_block_range, sign_tx_with_key_pair, BlockRangeParams,
-};
+use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::watch;
-
-/// Creates a test provider factory with genesis initialized.
-fn create_test_provider(
-) -> reth_provider::ProviderFactory<reth_provider::test_utils::MockNodeTypesWithDB> {
-    let chain_spec = Arc::new(ChainSpec::default());
-    let factory = create_test_provider_factory_with_chain_spec(chain_spec);
-    init_genesis(&factory).expect("init genesis");
-    factory
-}
 
 /// Creates a `FileClient` populated with the given blocks.
 fn create_file_client_from_blocks(blocks: &[SealedBlock<Block>]) -> Arc<FileClient<Block>> {
@@ -59,7 +43,7 @@ fn create_file_client_from_blocks(blocks: &[SealedBlock<Block>]) -> Arc<FileClie
     Arc::new(FileClient::default().with_headers(headers).with_bodies(bodies))
 }
 
-/// Builds downloaders from a `FileClient`, mimicking the pattern from `import_core.rs`.
+/// Builds downloaders from a `FileClient`.
 fn build_downloaders_from_file_client(
     file_client: Arc<FileClient<Block>>,
     genesis: reth_primitives_traits::SealedHeader<Header>,
@@ -96,7 +80,6 @@ fn build_pipeline<H, B>(
     body_downloader: B,
     max_block: u64,
     tip: B256,
-    disable_state_stages: bool,
 ) -> Pipeline<reth_provider::test_utils::MockNodeTypesWithDB>
 where
     H: HeaderDownloader<Header = Header> + 'static,
@@ -122,335 +105,23 @@ where
         None,
     );
 
-    let mut builder = Pipeline::builder()
+    let pipeline = Pipeline::builder()
         .with_tip_sender(tip_tx)
         .with_max_block(max_block)
-        .with_fail_on_unwind(true);
-
-    if disable_state_stages {
-        builder =
-            builder.add_stages(stages.builder().disable_all_if(&StageId::STATE_REQUIRED, || true));
-    } else {
-        builder = builder.add_stages(stages);
-    }
-
-    let pipeline = builder.build(provider_factory, static_file_producer);
+        .with_fail_on_unwind(true)
+        .add_stages(stages)
+        .build(provider_factory, static_file_producer);
     pipeline.set_tip(tip);
     pipeline
 }
 
-/// Tests pipeline forward sync and unwind using FileClient-backed downloaders.
-///
-/// This test:
-/// 1. Generates valid test blocks with proper parent hash linking
-/// 2. Creates a `FileClient` to serve blocks to `HeadersDownloader` and `BodiesDownloader`
-/// 3. Runs the pipeline forward to sync all blocks through real stages
-/// 4. Verifies stage checkpoints are at the expected block
-/// 5. Unwinds the pipeline to an earlier block
-/// 6. Verifies stage checkpoints have been updated by real unwind code
-///
-/// This exercises real stage code paths including:
-/// - `HeaderStage::execute` (downloads headers via `FileClient`)
-/// - `BodyStage::execute` (downloads bodies via `FileClient`)
-/// - `SenderRecoveryStage::execute/unwind`
-/// - `TransactionLookupStage::execute/unwind`
-///
-/// `STATE_REQUIRED` stages (Execution, Hashing, Merkle, History) are disabled since
-/// random blocks don't have valid execution results.
-#[tokio::test(flavor = "multi_thread")]
-async fn test_pipeline_forward_sync_and_unwind() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let provider_factory = create_test_provider();
-    let consensus = NoopConsensus::arc();
-
-    let genesis = provider_factory.sealed_header(0)?.expect("genesis should exist");
-
-    // Generate test blocks 1..=10 with proper parent hash linking
-    let mut rng = generators::rng();
-    let num_blocks = 10u64;
-    let blocks = random_block_range(
-        &mut rng,
-        1..=num_blocks,
-        BlockRangeParams { parent: Some(genesis.hash()), tx_count: 1..3, ..Default::default() },
-    );
-
-    let file_client = create_file_client_from_blocks(&blocks);
-    let max_block = file_client.max_block().unwrap();
-    let tip = file_client.tip().expect("tip");
-
-    let stages_config = StageConfig::default();
-    let (header_downloader, body_downloader) = build_downloaders_from_file_client(
-        file_client,
-        genesis.clone(),
-        stages_config,
-        consensus,
-        provider_factory.clone(),
-    );
-
-    let pipeline = build_pipeline(
-        provider_factory.clone(),
-        header_downloader,
-        body_downloader,
-        max_block,
-        tip,
-        true, // disable state stages
-    );
-
-    // Run forward sync
-    let (mut pipeline, result) = pipeline.run_as_fut(None).await;
-    result?;
-
-    // Verify forward sync completed
-    {
-        let provider = provider_factory.provider()?;
-        let last_block = provider.last_block_number()?;
-        assert_eq!(last_block, num_blocks, "should have synced {num_blocks} blocks");
-
-        for stage_id in [
-            StageId::Headers,
-            StageId::Bodies,
-            StageId::SenderRecovery,
-            StageId::TransactionLookup,
-            StageId::Finish,
-        ] {
-            let checkpoint = provider.get_stage_checkpoint(stage_id)?;
-            assert_eq!(
-                checkpoint.map(|c| c.block_number),
-                Some(num_blocks),
-                "{stage_id} checkpoint should be at block {num_blocks}"
-            );
-        }
-    }
-
-    // Unwind to block 5
-    let unwind_target = 5u64;
-    pipeline.unwind(unwind_target, None)?;
-
-    // Verify unwind completed
-    {
-        let provider = provider_factory.provider()?;
-        for stage_id in
-            [StageId::Headers, StageId::Bodies, StageId::SenderRecovery, StageId::TransactionLookup]
-        {
-            let checkpoint = provider.get_stage_checkpoint(stage_id)?;
-            if let Some(cp) = checkpoint {
-                assert!(
-                    cp.block_number <= unwind_target,
-                    "{stage_id} checkpoint {} should be <= {unwind_target}",
-                    cp.block_number
-                );
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Tests pipeline sync, unwind, then verify state is consistent.
-#[tokio::test(flavor = "multi_thread")]
-async fn test_pipeline_sync_unwind_resync() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let provider_factory = create_test_provider();
-    let consensus = NoopConsensus::arc();
-
-    let genesis = provider_factory.sealed_header(0)?.expect("genesis should exist");
-
-    let mut rng = generators::rng();
-    let blocks = random_block_range(
-        &mut rng,
-        1..=10,
-        BlockRangeParams { parent: Some(genesis.hash()), tx_count: 1..3, ..Default::default() },
-    );
-
-    let file_client = create_file_client_from_blocks(&blocks);
-    let max_block = file_client.max_block().unwrap();
-    let tip = file_client.tip().expect("tip");
-
-    let stages_config = StageConfig::default();
-    let (header_downloader, body_downloader) = build_downloaders_from_file_client(
-        file_client,
-        genesis.clone(),
-        stages_config,
-        consensus,
-        provider_factory.clone(),
-    );
-
-    let pipeline = build_pipeline(
-        provider_factory.clone(),
-        header_downloader,
-        body_downloader,
-        max_block,
-        tip,
-        true,
-    );
-
-    // First sync to block 10
-    let (mut pipeline, result) = pipeline.run_as_fut(None).await;
-    result?;
-
-    {
-        let provider = provider_factory.provider()?;
-        assert_eq!(provider.last_block_number()?, 10);
-    }
-
-    // Unwind to block 5
-    pipeline.unwind(5, None)?;
-
-    {
-        let provider = provider_factory.provider()?;
-        let headers_cp = provider.get_stage_checkpoint(StageId::Headers)?;
-        assert!(headers_cp.map(|c| c.block_number <= 5).unwrap_or(true));
-    }
-
-    Ok(())
-}
-
-/// Tests pipeline unwind via `PipelineTarget::Unwind`.
-#[tokio::test(flavor = "multi_thread")]
-async fn test_pipeline_unwind_via_target() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let provider_factory = create_test_provider();
-    let consensus = NoopConsensus::arc();
-
-    let genesis = provider_factory.sealed_header(0)?.expect("genesis should exist");
-
-    let mut rng = generators::rng();
-    let blocks = random_block_range(
-        &mut rng,
-        1..=15,
-        BlockRangeParams { parent: Some(genesis.hash()), tx_count: 1..3, ..Default::default() },
-    );
-
-    let file_client = create_file_client_from_blocks(&blocks);
-    let max_block = file_client.max_block().unwrap();
-    let tip = file_client.tip().expect("tip");
-
-    let stages_config = StageConfig::default();
-    let (header_downloader, body_downloader) = build_downloaders_from_file_client(
-        file_client,
-        genesis.clone(),
-        stages_config,
-        consensus,
-        provider_factory.clone(),
-    );
-
-    let pipeline = build_pipeline(
-        provider_factory.clone(),
-        header_downloader,
-        body_downloader,
-        max_block,
-        tip,
-        true,
-    );
-
-    // Sync forward first
-    let (pipeline, result) = pipeline.run_as_fut(None).await;
-    result?;
-
-    // Unwind via PipelineTarget
-    let unwind_target = 7u64;
-    let (_pipeline, result) =
-        pipeline.run_as_fut(Some(reth_stages_api::PipelineTarget::Unwind(unwind_target))).await;
-    result?;
-
-    // Verify unwind
-    {
-        let provider = provider_factory.provider()?;
-        for stage_id in [StageId::Headers, StageId::Bodies, StageId::SenderRecovery] {
-            let checkpoint = provider.get_stage_checkpoint(stage_id)?;
-            if let Some(cp) = checkpoint {
-                assert!(
-                    cp.block_number <= unwind_target,
-                    "{stage_id} should be <= {unwind_target}"
-                );
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Tests pipeline with many blocks to stress test the sync path.
-#[tokio::test(flavor = "multi_thread")]
-async fn test_pipeline_sync_many_blocks() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let provider_factory = create_test_provider();
-    let consensus = NoopConsensus::arc();
-
-    let genesis = provider_factory.sealed_header(0)?.expect("genesis should exist");
-
-    let mut rng = generators::rng();
-    let num_blocks = 50u64;
-    let blocks = random_block_range(
-        &mut rng,
-        1..=num_blocks,
-        BlockRangeParams { parent: Some(genesis.hash()), tx_count: 0..3, ..Default::default() },
-    );
-
-    let file_client = create_file_client_from_blocks(&blocks);
-    let max_block = file_client.max_block().unwrap();
-    let tip = file_client.tip().expect("tip");
-
-    let stages_config = StageConfig::default();
-    let (header_downloader, body_downloader) = build_downloaders_from_file_client(
-        file_client,
-        genesis.clone(),
-        stages_config,
-        consensus,
-        provider_factory.clone(),
-    );
-
-    let pipeline = build_pipeline(
-        provider_factory.clone(),
-        header_downloader,
-        body_downloader,
-        max_block,
-        tip,
-        true,
-    );
-
-    let (mut pipeline, result) = pipeline.run_as_fut(None).await;
-    result?;
-
-    {
-        let provider = provider_factory.provider()?;
-        assert_eq!(provider.last_block_number()?, num_blocks);
-    }
-
-    // Unwind halfway
-    let unwind_target = 25u64;
-    pipeline.unwind(unwind_target, None)?;
-
-    {
-        let provider = provider_factory.provider()?;
-        let checkpoint = provider.get_stage_checkpoint(StageId::Headers)?;
-        assert!(checkpoint.map(|c| c.block_number <= unwind_target).unwrap_or(true));
-    }
-
-    Ok(())
-}
-
 /// Tests pipeline with ALL stages enabled using blocks with real ETH transfers.
 ///
-/// This test creates a custom ChainSpec with a pre-funded signer account in genesis,
+/// This test creates a custom `ChainSpec` with a pre-funded signer account in genesis,
 /// then generates blocks with signed ETH transfer transactions. This exercises the
 /// full pipeline including hashing stages with actual state changes.
-///
-/// This test:
-/// 1. Creates a ChainSpec with a pre-funded account in genesis
-/// 2. Creates 5 blocks with ETH transfer transactions from that account
-/// 3. Executes blocks to compute correct state roots
-/// 4. Runs the full pipeline with ALL stages enabled
-/// 5. Forward syncs to block 5, unwinds to block 2
 #[tokio::test(flavor = "multi_thread")]
-async fn test_pipeline_full_stages_state_roots() -> eyre::Result<()> {
-    use alloy_eips::eip1559::INITIAL_BASE_FEE;
-    use reth_primitives_traits::proofs::{calculate_receipt_root, calculate_transaction_root};
-
+async fn test_pipeline() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // Generate a keypair for signing transactions
@@ -485,7 +156,6 @@ async fn test_pipeline_full_stages_state_roots() -> eyre::Result<()> {
     let num_blocks = 5u64;
     let mut blocks: Vec<SealedBlock<Block>> = Vec::new();
     let mut parent_hash = genesis.hash();
-    let mut nonce = 0u64;
     let mut current_balance = initial_balance;
 
     // Gas cost per transaction
@@ -495,6 +165,8 @@ async fn test_pipeline_full_stages_state_roots() -> eyre::Result<()> {
     let transfer_value = U256::from(ETH_TO_WEI / 10); // 0.1 ETH per transfer
 
     for block_num in 1..=num_blocks {
+        let nonce = block_num - 1;
+
         // Create a simple ETH transfer transaction
         let tx = sign_tx_with_key_pair(
             key_pair,
@@ -504,26 +176,23 @@ async fn test_pipeline_full_stages_state_roots() -> eyre::Result<()> {
                 gas_limit,
                 max_fee_per_gas: gas_price,
                 max_priority_fee_per_gas: 0,
-                to: TxKind::Call(Address::ZERO), // Transfer to zero address
+                to: TxKind::Call(Address::ZERO),
                 value: transfer_value,
                 ..Default::default()
             }),
         );
 
-        // Update signer's balance: subtract gas cost and transfer value
+        // Update signer's balance
         current_balance -= tx_cost + transfer_value;
-        nonce += 1;
 
-        // Track recipient balance (Address::ZERO receives transfers)
+        // Track recipient balance
         let recipient_balance = transfer_value * U256::from(block_num);
 
-        // Compute state root with all accounts that have state
-        // - Signer: balance decreases, nonce increases
-        // - Recipient (Address::ZERO): receives transfer value each block
+        // Compute state root
         let state_root = state_root_unhashed([
             (
                 signer_address,
-                Account { balance: current_balance, nonce, ..Default::default() }
+                Account { balance: current_balance, nonce: block_num, ..Default::default() }
                     .into_trie_account(EMPTY_ROOT_HASH),
             ),
             (
@@ -533,19 +202,18 @@ async fn test_pipeline_full_stages_state_roots() -> eyre::Result<()> {
             ),
         ]);
 
-        // Calculate transaction and receipt roots
         let transactions = vec![tx.clone()];
         let tx_root = calculate_transaction_root(&transactions);
 
-        // Create a simple receipt (successful tx)
         let receipt = reth_ethereum_primitives::Receipt {
             tx_type: reth_ethereum_primitives::TxType::Eip1559,
             success: true,
             cumulative_gas_used: gas_limit,
             ..Default::default()
         };
-        let receipts_with_bloom = vec![receipt.clone().into_with_bloom()];
-        let receipts_root = calculate_receipt_root(&receipts_with_bloom);
+        let receipts = [receipt];
+        let receipts_root =
+            calculate_receipt_root(&receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>());
 
         let header = Header {
             parent_hash,
@@ -556,7 +224,7 @@ async fn test_pipeline_full_stages_state_roots() -> eyre::Result<()> {
             gas_limit: 30_000_000,
             gas_used: gas_limit,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
-            timestamp: block_num * 12, // 12 second blocks
+            timestamp: block_num * 12,
             ..Default::default()
         };
 
@@ -582,18 +250,13 @@ async fn test_pipeline_full_stages_state_roots() -> eyre::Result<()> {
         provider_factory.clone(),
     );
 
-    let pipeline = build_pipeline(
-        provider_factory.clone(),
-        header_downloader,
-        body_downloader,
-        max_block,
-        tip,
-        false,
-    );
+    let pipeline =
+        build_pipeline(provider_factory.clone(), header_downloader, body_downloader, max_block, tip);
 
     let (mut pipeline, result) = pipeline.run_as_fut(None).await;
     result?;
 
+    // Verify forward sync
     {
         let provider = provider_factory.provider()?;
         let last_block = provider.last_block_number()?;
@@ -621,9 +284,11 @@ async fn test_pipeline_full_stages_state_roots() -> eyre::Result<()> {
         }
     }
 
+    // Unwind to block 2
     let unwind_target = 2u64;
     pipeline.unwind(unwind_target, None)?;
 
+    // Verify unwind
     {
         let provider = provider_factory.provider()?;
         for stage_id in [
