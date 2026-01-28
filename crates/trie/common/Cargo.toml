@@ -44,7 +44,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 # misc
 rayon = { workspace = true, optional = true }
-cuckoofilter = "0.5"
+cuckoofilter = { version = "0.5", optional = true }
 
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["serde"] }
@@ -87,6 +87,7 @@ std = [
     "serde_json/std",
     "revm-database/std",
     "revm-state/std",
+    "dep:cuckoofilter",
 ]
 eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
 serde = [
@@ -102,6 +103,7 @@ serde = [
     "reth-codecs?/serde",
     "revm-database/serde",
     "revm-state/serde",
+    "cuckoofilter?/serde",
 ]
 reth-codec = ["dep:reth-codecs", "dep:bytes", "dep:arrayvec"]
 serde-bincode-compat = [
