@@ -1048,10 +1048,13 @@ impl SparseTrieExt for ParallelSparseTrie {
             SparseSubtrieType::from_path(path_a) == SparseSubtrieType::from_path(path_b)
         }) {
             let subtrie_idx = path_subtrie_index_unchecked(&roots_group[0].0);
+
+            // Skip if an upper trie extension already covers this subtrie (replaced with Blind)
             if fully_pruned_subtries[subtrie_idx] {
                 continue;
             }
 
+            // Skip unrevealed subtries - nothing to prune
             let Some(subtrie) = self.lower_subtries[subtrie_idx].as_revealed_mut() else {
                 continue;
             };
