@@ -1164,16 +1164,6 @@ impl<S: SparseTrieTrait> StorageTries<S> {
         let nodes_per_trie = max_nodes / active_count;
         let values_per_trie = max_values / active_count;
 
-        #[cfg(feature = "std")]
-        {
-            use rayon::prelude::*;
-            self.tries.par_iter_mut().for_each(|(_, trie)| {
-                trie.shrink_nodes_to(nodes_per_trie);
-                trie.shrink_values_to(values_per_trie);
-            });
-        }
-
-        #[cfg(not(feature = "std"))]
         for trie in self.tries.values_mut() {
             trie.shrink_nodes_to(nodes_per_trie);
             trie.shrink_values_to(values_per_trie);
