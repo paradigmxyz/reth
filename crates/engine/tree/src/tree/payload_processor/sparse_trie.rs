@@ -141,14 +141,8 @@ where
         max_nodes_capacity: usize,
         max_values_capacity: usize,
     ) -> SparseStateTrie<A, S> {
-        let now = Instant::now();
         self.trie.prune(self.prune_depth, self.max_storage_tries);
-        println!("prune took {:?}", now.elapsed());
-
-        let now = Instant::now();
         self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        println!("shrink took {:?}", now.elapsed());
-
         self.trie
     }
 
