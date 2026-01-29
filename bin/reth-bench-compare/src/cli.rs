@@ -274,10 +274,10 @@ impl Args {
     /// Get the default RPC URL for a given chain
     const fn get_default_rpc_url(chain: &Chain) -> &'static str {
         match chain.id() {
-            8453 => "https://base-mainnet.rpc.ithaca.xyz",  // base
+            8453 => "https://base.reth.rs/rpc",  // base
             84532 => "https://base-sepolia.rpc.ithaca.xyz", // base-sepolia
             27082 => "https://rpc.hoodi.ethpandaops.io",    // hoodi
-            _ => "https://reth-ethereum.ithaca.xyz/rpc",    // mainnet and fallback
+            _ => "https://ethereum.reth.rs/rpc",    // mainnet and fallback
         }
     }
 
