@@ -96,12 +96,12 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
                 limiter,
                 &mut skip_filter,
                 &mut delete_callback,
+                &mut deleted_entries,
             )?;
 
             if done {
                 break true
             }
-            deleted_entries += 1;
         };
 
         Ok((deleted_entries, done))
@@ -120,6 +120,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
         limiter: &mut PruneLimiter,
         skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
         delete_callback: &mut impl FnMut(TableRow<T>),
+        deleted_entries: &mut usize,
     ) -> Result<bool, DatabaseError> {
         let Some(res) = walker.next() else { return Ok(true) };
 
@@ -128,6 +129,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
         if !skip_filter(&row) {
             walker.delete_current()?;
             limiter.increment_deleted_entries_count();
+            *deleted_entries += 1;
             delete_callback(row);
         }
 
