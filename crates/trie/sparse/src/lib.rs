@@ -11,6 +11,8 @@ pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 /// Default number of storage tries to preserve across payload validations.
 pub const DEFAULT_MAX_PRESERVED_STORAGE_TRIES: usize = 100;
 
+mod lru;
+
 mod state;
 pub use state::*;
 

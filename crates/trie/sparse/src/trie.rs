@@ -1,4 +1,5 @@
 use crate::{
+    lru::PruneLruTracker,
     provider::{RevealedNode, TrieNodeProvider},
     LeafLookup, LeafLookupError, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieExt,
     SparseTrieUpdates,
@@ -352,6 +353,10 @@ pub struct SerialSparseTrie {
     updates: Option<SparseTrieUpdates>,
     /// Reusable buffer for RLP encoding of nodes.
     rlp_buf: Vec<u8>,
+    /// Tracks recently updated keys for LRU-based prune retention.
+    prune_lru: PruneLruTracker,
+    /// Set of already-requested proof targets for deduplication in [`SparseTrieExt::update_leaves`].
+    requested_proof_targets: HashSet<(Nibbles, u8)>,
 }
 
 impl fmt::Debug for SerialSparseTrie {
@@ -363,6 +368,7 @@ impl fmt::Debug for SerialSparseTrie {
             .field("prefix_set", &self.prefix_set)
             .field("updates", &self.updates)
             .field("rlp_buf", &hex::encode(&self.rlp_buf))
+            .field("prune_lru", &self.prune_lru)
             .finish_non_exhaustive()
     }
 }
@@ -448,6 +454,8 @@ impl Default for SerialSparseTrie {
             prefix_set: PrefixSetMut::default(),
             updates: None,
             rlp_buf: Vec::new(),
+            prune_lru: PruneLruTracker::default(),
+            requested_proof_targets: HashSet::default(),
         }
     }
 }
@@ -643,7 +651,8 @@ impl SparseTrieTrait for SerialSparseTrie {
         self.prefix_set.insert(full_path);
         let existing = self.values.insert(full_path, value);
         if existing.is_some() {
-            // trie structure unchanged, return immediately
+            // trie structure unchanged, just record the update for LRU
+            self.record_recent_key(full_path);
             return Ok(())
         }
 
@@ -766,6 +775,7 @@ impl SparseTrieTrait for SerialSparseTrie {
             };
         }
 
+        self.record_recent_key(full_path);
         Ok(())
     }
 
@@ -809,6 +819,7 @@ impl SparseTrieTrait for SerialSparseTrie {
             debug_assert!(self.nodes.is_empty());
             self.nodes.insert(Nibbles::default(), SparseNode::Empty);
 
+            self.record_recent_key(*full_path);
             return Ok(())
         }
 
@@ -952,6 +963,7 @@ impl SparseTrieTrait for SerialSparseTrie {
             self.nodes.insert(removed_path, new_node);
         }
 
+        self.record_recent_key(*full_path);
         Ok(())
     }
 
@@ -988,6 +1000,8 @@ impl SparseTrieTrait for SerialSparseTrie {
         self.values = HashMap::default();
         self.prefix_set = PrefixSetMut::all();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
+        self.prune_lru.clear();
+        self.requested_proof_targets.clear();
     }
 
     fn clear(&mut self) {
@@ -999,6 +1013,8 @@ impl SparseTrieTrait for SerialSparseTrie {
         self.prefix_set.clear();
         self.updates = None;
         self.rlp_buf.clear();
+        self.prune_lru.clear();
+        self.requested_proof_targets.clear();
     }
 
     fn find_leaf(
@@ -1129,7 +1145,197 @@ impl SparseTrieTrait for SerialSparseTrie {
     }
 }
 
+impl SparseTrieExt for SerialSparseTrie {
+    fn revealed_node_count(&self) -> usize {
+        self.nodes.values().filter(|n| !n.is_hash()).count()
+    }
+
+    fn prune(&mut self, max_depth: usize) -> usize {
+        // Build the set of node paths to protect based on recently updated keys.
+        // For each recent key, we walk the trie from root and mark all visited node paths.
+        let mut protected = HashSet::<Nibbles>::default();
+        for recent_key in self.prune_lru.iter() {
+            let mut current = Nibbles::default();
+            // Walk the trie following this key path
+            while current.len() < recent_key.len() {
+                protected.insert(current);
+                match self.nodes.get(&current) {
+                    Some(SparseNode::Empty) | None | Some(SparseNode::Hash(_)) => break,
+                    Some(SparseNode::Leaf { key, .. }) => {
+                        current.extend(key);
+                        protected.insert(current);
+                        break;
+                    }
+                    Some(SparseNode::Extension { key, .. }) => {
+                        current.extend(key);
+                    }
+                    Some(SparseNode::Branch { state_mask, .. }) => {
+                        let nibble = recent_key.get_unchecked(current.len());
+                        if !state_mask.is_bit_set(nibble) {
+                            break;
+                        }
+                        current.push_unchecked(nibble);
+                    }
+                }
+            }
+            // Include the final path if we reached it
+            if current.len() <= recent_key.len() {
+                protected.insert(current);
+            }
+        }
+
+        // DFS traversal to find nodes at max_depth that can be pruned.
+        // We collect "effective pruned roots" - children of nodes at max_depth with computed hashes.
+        let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::new();
+        let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
+        stack.push((Nibbles::default(), 0));
+
+        while let Some((path, depth)) = stack.pop() {
+            let Some(node) = self.nodes.get(&path) else { continue };
+
+            let children: SmallVec<[Nibbles; 16]> = match node {
+                SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {
+                    SmallVec::new()
+                }
+                SparseNode::Extension { key, .. } => {
+                    let mut child = path;
+                    child.extend(key);
+                    SmallVec::from_buf_and_len([child; 16], 1)
+                }
+                SparseNode::Branch { state_mask, .. } => {
+                    let mut children = SmallVec::new();
+                    let mut mask = state_mask.get();
+                    while mask != 0 {
+                        let nibble = mask.trailing_zeros() as u8;
+                        mask &= mask - 1;
+                        let mut child = path;
+                        child.push_unchecked(nibble);
+                        children.push(child);
+                    }
+                    children
+                }
+            };
+
+            for child in children {
+                if depth == max_depth {
+                    // Check if child is protected by LRU
+                    if protected.contains(&child) {
+                        // Protected: continue traversal beyond max_depth
+                        stack.push((child, depth + 1));
+                        continue;
+                    }
+
+                    // Check if child has a computed hash and can be pruned
+                    let hash = self
+                        .nodes
+                        .get(&child)
+                        .filter(|n| !n.is_hash())
+                        .and_then(|n| n.hash());
+
+                    if let Some(hash) = hash {
+                        self.nodes.insert(child, SparseNode::Hash(hash));
+                        effective_pruned_roots.push((child, hash));
+                    }
+                } else {
+                    stack.push((child, depth + 1));
+                }
+            }
+        }
+
+        if effective_pruned_roots.is_empty() {
+            return 0;
+        }
+
+        let nodes_converted = effective_pruned_roots.len();
+
+        // Remove descendants of pruned roots
+        for (root, _) in &effective_pruned_roots {
+            self.nodes.retain(|p, _| p == root || !p.starts_with(root));
+            self.values.retain(|p, _| !p.starts_with(root));
+            self.branch_node_masks.retain(|p, _| !p.starts_with(root));
+        }
+
+        nodes_converted
+    }
+
+    fn update_leaves(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        mut proof_required_fn: impl FnMut(Nibbles, u8),
+    ) -> SparseTrieResult<()> {
+        use crate::provider::NoRevealProvider;
+
+        // Collect keys upfront since we mutate `updates` during iteration.
+        let keys: Vec<B256> = updates.keys().copied().collect();
+
+        for key in keys {
+            let full_path = Nibbles::unpack(key);
+            let update = updates.remove(&key).unwrap();
+
+            match update {
+                LeafUpdate::Changed(value) => {
+                    if value.is_empty() {
+                        // Removal
+                        match self.remove_leaf(&full_path, NoRevealProvider) {
+                            Ok(()) => {}
+                            Err(e) => {
+                                if let Some(path) = Self::get_retriable_path(&e) {
+                                    let min_len = (path.len() as u8).min(64);
+                                    if self.requested_proof_targets.insert((full_path, min_len)) {
+                                        proof_required_fn(full_path, min_len);
+                                    }
+                                    updates.insert(key, LeafUpdate::Changed(value));
+                                } else {
+                                    return Err(e);
+                                }
+                            }
+                        }
+                    } else {
+                        // Update/insert
+                        if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider)
+                        {
+                            if let Some(path) = Self::get_retriable_path(&e) {
+                                let min_len = (path.len() as u8).min(64);
+                                if self.requested_proof_targets.insert((full_path, min_len)) {
+                                    proof_required_fn(full_path, min_len);
+                                }
+                                updates.insert(key, LeafUpdate::Changed(value));
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
+                }
+                LeafUpdate::Touched => {
+                    match self.find_leaf(&full_path, None) {
+                        Err(LeafLookupError::BlindedNode { path, .. }) => {
+                            let min_len = (path.len() as u8).min(64);
+                            if self.requested_proof_targets.insert((full_path, min_len)) {
+                                proof_required_fn(full_path, min_len);
+                            }
+                            updates.insert(key, LeafUpdate::Touched);
+                        }
+                        Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {}
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl SerialSparseTrie {
+    /// Checks if an error is retriable (`BlindedNode` or `NodeNotFoundInProvider`) and extracts
+    /// the path if so.
+    const fn get_retriable_path(e: &reth_execution_errors::SparseTrieError) -> Option<Nibbles> {
+        match e.kind() {
+            SparseTrieErrorKind::BlindedNode { path, .. } |
+            SparseTrieErrorKind::NodeNotFoundInProvider { path } => Some(*path),
+            _ => None,
+        }
+    }
+
     /// Creates a new revealed sparse trie from the given root node.
     ///
     /// This function initializes the internal structures and then reveals the root.
@@ -1150,6 +1356,45 @@ impl SerialSparseTrie {
         retain_updates: bool,
     ) -> SparseTrieResult<Self> {
         Self::default().with_root(root, masks, retain_updates)
+    }
+
+    /// Configures LRU-based prune retention capacity.
+    ///
+    /// When `capacity > 0`, the trie tracks the last `capacity` updated leaf keys.
+    /// During [`SparseTrieExt::prune`], ancestor nodes of these keys are preserved
+    /// (not converted to hash stubs) even if they exceed `max_depth`.
+    ///
+    /// When `capacity == 0`, LRU tracking is disabled (default behavior).
+    pub fn with_prune_lru_capacity(mut self, capacity: usize) -> Self {
+        self.prune_lru = PruneLruTracker::new(capacity);
+        self
+    }
+
+    /// Sets the LRU capacity for prune retention.
+    ///
+    /// See [`Self::with_prune_lru_capacity`] for details.
+    pub fn set_prune_lru_capacity(&mut self, capacity: usize) {
+        self.prune_lru.set_capacity(capacity);
+    }
+
+    /// Returns the current LRU capacity for prune retention.
+    pub fn prune_lru_capacity(&self) -> usize {
+        self.prune_lru.capacity()
+    }
+
+    /// Records a recently updated key for LRU-based prune retention.
+    ///
+    /// This is called after successful `update_leaf` or `remove_leaf` operations.
+    fn record_recent_key(&mut self, full_path: Nibbles) {
+        self.prune_lru.record(full_path);
+    }
+
+    /// Clears the set of already-requested proof targets.
+    ///
+    /// Call this when reusing the trie for a new payload to ensure proof callbacks
+    /// are emitted fresh.
+    pub fn clear_requested_proof_targets(&mut self) {
+        self.requested_proof_targets.clear();
     }
 
     /// Returns a reference to the current sparse trie updates.
@@ -2250,6 +2495,8 @@ mod find_leaf_tests {
             prefix_set: Default::default(),
             updates: None,
             rlp_buf: Vec::new(),
+            prune_lru: PruneLruTracker::default(),
+            requested_proof_targets: HashSet::default(),
         };
 
         let result = sparse.find_leaf(&leaf_path, None);
@@ -2291,6 +2538,8 @@ mod find_leaf_tests {
             prefix_set: Default::default(),
             updates: None,
             rlp_buf: Vec::new(),
+            prune_lru: PruneLruTracker::default(),
+            requested_proof_targets: HashSet::default(),
         };
 
         let result = sparse.find_leaf(&search_path, None);
