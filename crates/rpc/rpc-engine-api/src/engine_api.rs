@@ -381,6 +381,31 @@ where
         res
     }
 
+    /// Sends a message to the beacon consensus engine to update the fork choice _with_ slot number,
+    /// but only _after_ amsterdam.
+    ///
+    /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4>
+    pub async fn fork_choice_updated_v4(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V6, state, payload_attrs)
+            .await
+    }
+
+    /// Metrics version of `fork_choice_updated_v4`
+    pub async fn fork_choice_updated_v4_metered(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v4(self, state, payload_attrs).await;
+        self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
+        res
+    }
+
     /// Helper function for retrieving the build payload by id.
     async fn get_built_payload(
         &self,
@@ -1087,6 +1112,18 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         Ok(self.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
+    }
+
+    /// Handler for `engine_forkchoiceUpdatedV4`
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4>
+    async fn fork_choice_updated_v4(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV4");
+        Ok(self.fork_choice_updated_v4_metered(fork_choice_state, payload_attributes).await?)
     }
 
     /// Handler for `engine_getPayloadV1`
