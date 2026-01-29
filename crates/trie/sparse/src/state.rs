@@ -1090,10 +1090,10 @@ where
 
         // Retain only revealed storage paths for leaves that still exist after pruning.
         for hash in &tries_to_keep {
-            if let Some(trie) = self.storage.tries.get(hash).and_then(|t| t.as_revealed_ref()) {
-                if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
-                    paths.retain(|path| trie.get_leaf_value(path).is_some());
-                }
+            if let Some(trie) = self.storage.tries.get(hash).and_then(|t| t.as_revealed_ref()) &&
+                let Some(paths) = self.storage.revealed_paths.get_mut(hash)
+            {
+                paths.retain(|path| trie.get_leaf_value(path).is_some());
             }
         }
     }
