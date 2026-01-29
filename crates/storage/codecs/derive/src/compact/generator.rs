@@ -55,7 +55,7 @@ pub fn generate_from_to(
     // Build function
     quote! {
         #impl_compact {
-            fn to_compact<B>(&self, buf: &mut B) -> usize where B: #reth_codecs::__private::bytes::BufMut + AsMut<[u8]> {
+            fn to_compact<B: #reth_codecs::__private::bytes::BufMut>(&self, buf: &mut B) -> usize {
                 let mut flags = #flags::default();
                 let mut total_length = 0;
                 #(#to_compact)*

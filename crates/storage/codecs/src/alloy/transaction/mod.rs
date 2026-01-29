@@ -10,10 +10,7 @@ impl<Eip4844> Compact for EthereumTypedTransaction<Eip4844>
 where
     Eip4844: Compact + RlpEcdsaEncodableTx,
 {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: BufMut>(&self, buf: &mut B) -> usize {
         let identifier = self.tx_type().to_compact(buf);
         match self {
             Self::Legacy(tx) => tx.to_compact(buf),

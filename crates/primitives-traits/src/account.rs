@@ -131,10 +131,7 @@ impl Bytecode {
 
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for Bytecode {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         use compact_ids::{EIP7702_BYTECODE_ID, LEGACY_ANALYZED_BYTECODE_ID};
 
         let bytecode = match &self.0 {

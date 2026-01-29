@@ -95,10 +95,7 @@ pub struct StaticFileBlockWithdrawals {
 
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for StaticFileBlockWithdrawals {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         buf.put_u8(self.withdrawals.is_some() as u8);
         if let Some(withdrawals) = &self.withdrawals {
             return 1 + withdrawals.to_compact(buf);

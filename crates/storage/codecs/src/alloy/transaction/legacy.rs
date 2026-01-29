@@ -49,10 +49,7 @@ pub(crate) struct TxLegacy {
 }
 
 impl Compact for AlloyTxLegacy {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         let tx = TxLegacy {
             chain_id: self.chain_id,
             nonce: self.nonce,

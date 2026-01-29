@@ -26,10 +26,7 @@ impl ValueWithSubKey for StorageTrieEntry {
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for StorageTrieEntry {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         let nibbles_len = self.nibbles.to_compact(buf);
         let node_len = self.node.to_compact(buf);
         nibbles_len + node_len

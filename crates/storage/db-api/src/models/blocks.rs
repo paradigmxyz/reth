@@ -17,10 +17,7 @@ pub struct StoredBlockOmmers<H = Header> {
 }
 
 impl<H: Compact> Compact for StoredBlockOmmers<H> {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         let mut buffer = bytes::BytesMut::new();
         self.ommers.to_compact(&mut buffer);
         let total_length = buffer.len();

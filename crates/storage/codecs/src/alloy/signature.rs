@@ -4,10 +4,7 @@ use crate::Compact;
 use alloy_primitives::{Signature, U256};
 
 impl Compact for Signature {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         buf.put_slice(&self.r().as_le_bytes());
         buf.put_slice(&self.s().as_le_bytes());
         self.v() as usize

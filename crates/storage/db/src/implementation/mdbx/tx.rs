@@ -6,7 +6,7 @@ use crate::{
     DatabaseError,
 };
 use reth_db_api::{
-    table::{Compress, DupSort, Encode, IntoVec, Table, TableImporter},
+    table::{Compress, DupSort, Encode, IntoVec, SliceBuf, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
@@ -384,18 +384,68 @@ impl Tx<RW> {
         value: T::Value,
     ) -> Result<(), DatabaseError> {
         let key = key.encode();
-        let value = value.compress();
         let (operation, write_operation, flags) = kind.into_operation_and_flags();
-        self.execute_with_operation_metric::<T, _>(operation, Some(value.as_ref().len()), |tx| {
-            tx.put(self.get_dbi::<T>()?, key.as_ref(), value, flags).map_err(|e| {
-                DatabaseWriteError {
-                    info: e.into(),
-                    operation: write_operation,
-                    table_name: T::NAME,
-                    key: key.into_vec(),
-                }
-                .into()
-            })
+
+        // Helper to construct write errors.
+        let make_error = |e: reth_libmdbx::Error, key: Vec<u8>| -> DatabaseError {
+            DatabaseWriteError {
+                info: e.into(),
+                operation: write_operation,
+                table_name: T::NAME,
+                key,
+            }
+            .into()
+        };
+
+        // Fast path for uncompressable types (e.g., B256, Address).
+        if let Some(value_ref) = value.uncompressable_ref() {
+            return self.execute_with_operation_metric::<T, _>(
+                operation,
+                Some(value_ref.len()),
+                |tx| {
+                    tx.put(self.get_dbi::<T>()?, key.as_ref(), value_ref, flags)
+                        .map_err(|e| make_error(e, key.into_vec()))
+                },
+            );
+        }
+
+        // MDBX_RESERVE is not compatible with DUPSORT tables. Fall back to the
+        // allocation-based path for such tables.
+        if T::DUPSORT {
+            let value = value.compress();
+            return self.execute_with_operation_metric::<T, _>(
+                operation,
+                Some(value.as_ref().len()),
+                |tx| {
+                    tx.put(self.get_dbi::<T>()?, key.as_ref(), value.as_ref(), flags)
+                        .map_err(|e| make_error(e, key.into_vec()))
+                },
+            );
+        }
+
+        // Zero-copy path: compute size, reserve MDBX buffer, serialize directly.
+        let value_size = value.compressed_size();
+        self.execute_with_operation_metric::<T, _>(operation, Some(value_size), |tx| {
+            let dbi = self.get_dbi::<T>()?;
+
+            // SAFETY: We write exactly `value_size` bytes to the reserved buffer via
+            // `compress_to_buf`, and `compressed_size()` is required to return the
+            // exact size that will be written.
+            let buf = unsafe {
+                tx.reserve(dbi, key.as_ref(), value_size, flags)
+                    .map_err(|e| make_error(e, key.as_ref().to_vec()))?
+            };
+
+            let mut slice_buf = SliceBuf::new(buf);
+            value.compress_to_buf(&mut slice_buf);
+            debug_assert_eq!(
+                slice_buf.written(),
+                value_size,
+                "compressed_size() mismatch for table {}",
+                T::NAME
+            );
+
+            Ok(())
         })
     }
 }

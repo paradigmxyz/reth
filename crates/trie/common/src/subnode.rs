@@ -14,10 +14,7 @@ pub struct StoredSubNode {
 
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for StoredSubNode {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         let mut len = 0;
 
         buf.put_u16(self.key.len() as u16);

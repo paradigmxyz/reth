@@ -16,10 +16,7 @@ const HASH_BUILDER_TYPE_HASH: u8 = 0;
 const HASH_BUILDER_TYPE_BYTES: u8 = 1;
 
 impl Compact for HashBuilderValue {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: BufMut>(&self, buf: &mut B) -> usize {
         match self.as_ref() {
             HashBuilderValueRef::Hash(hash) => {
                 buf.put_u8(HASH_BUILDER_TYPE_HASH);
@@ -52,10 +49,7 @@ impl Compact for HashBuilderValue {
 }
 
 impl Compact for BranchNodeCompact {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         let mut buf_size = 0;
 
         buf_size += self.state_mask.to_compact(buf);
@@ -109,10 +103,7 @@ impl Compact for BranchNodeCompact {
 }
 
 impl Compact for TrieMask {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         buf.put_u16(self.get());
         2
     }
