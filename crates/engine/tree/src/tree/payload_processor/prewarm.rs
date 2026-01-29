@@ -241,7 +241,16 @@ where
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-            // Perform all cache operations atomically under the lock
+
+            // Wait for block validation OUTSIDE the lock to avoid deadlock.
+            // The valid_block_tx.send() happens after state_root completes in payload_validator,
+            // which may need to acquire the execution cache lock. If we hold the lock while
+            // waiting, we deadlock.
+            let block_valid = valid_block_rx.recv().is_ok();
+            if !block_valid {
+                return;
+            }
+
             execution_cache.update_with_guard(|cached| {
                 // consumes the `SavedCache` held by the prewarming task, which releases its usage
                 // guard
@@ -260,16 +269,8 @@ where
 
                 new_cache.update_metrics();
 
-                if valid_block_rx.recv().is_ok() {
-                    // Replace the shared cache with the new one; the previous cache (if any) is
-                    // dropped.
-                    *cached = Some(new_cache);
-                } else {
-                    // Block was invalid; caches were already mutated by insert_state above,
-                    // so we must clear to prevent using polluted state
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on invalid block");
-                }
+                // Replace the shared cache with the new one
+                *cached = Some(new_cache);
             });
 
             let elapsed = start.elapsed();
