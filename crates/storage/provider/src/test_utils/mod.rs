@@ -58,7 +58,6 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     let (static_dir, _) = create_test_static_files_dir();
     let (rocksdb_dir, _) = create_test_rocksdb_dir();
     let db = create_test_rw_db();
-    // Keep the rocksdb_dir alive for the test duration (similar to static_dir.keep())
     let rocksdb_path = rocksdb_dir.keep();
     ProviderFactory::new(
         db,
