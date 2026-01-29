@@ -586,6 +586,11 @@ impl<B: crate::test_utils::TestBlock> RecoveredBlock<B> {
         self.block.set_block_number(number);
     }
 
+    /// Updates the block timestamp.
+    pub fn set_timestamp(&mut self, timestamp: u64) {
+        self.block.set_timestamp(timestamp);
+    }
+
     /// Updates the block state root.
     pub fn set_state_root(&mut self, state_root: alloy_primitives::B256) {
         self.block.set_state_root(state_root);
@@ -793,12 +798,14 @@ mod rpc_compat {
                 .zip(senders)
                 .enumerate()
                 .map(|(idx, (tx, sender))| {
+                    #[allow(clippy::needless_update)]
                     let tx_info = TransactionInfo {
                         hash: Some(*tx.tx_hash()),
                         block_hash,
                         block_number: Some(block_number),
                         base_fee,
                         index: Some(idx as u64),
+                        ..Default::default()
                     };
 
                     converter(Recovered::new_unchecked(tx, sender), tx_info)

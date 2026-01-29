@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// These should be set during `init_genesis` or `init_db` depending on whether we want dictate
 /// behaviour of new or old nodes respectively.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Compact)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
 pub struct StorageSettings {
@@ -28,9 +28,47 @@ pub struct StorageSettings {
     /// Whether `AccountsHistory` is stored in `RocksDB`.
     #[serde(default)]
     pub account_history_in_rocksdb: bool,
+    /// Whether this node should read and write account changesets from static files.
+    #[serde(default)]
+    pub account_changesets_in_static_files: bool,
+    /// Whether this node should read and write storage changesets from static files.
+    #[serde(default)]
+    pub storage_changesets_in_static_files: bool,
 }
 
 impl StorageSettings {
+    /// Returns the default base `StorageSettings` for this build.
+    ///
+    /// When the `edge` feature is enabled, returns [`Self::edge()`].
+    /// Otherwise, returns [`Self::legacy()`].
+    pub const fn base() -> Self {
+        #[cfg(feature = "edge")]
+        {
+            Self::edge()
+        }
+        #[cfg(not(feature = "edge"))]
+        {
+            Self::legacy()
+        }
+    }
+
+    /// Creates `StorageSettings` for edge nodes with all storage features enabled:
+    /// - Receipts and transaction senders in static files
+    /// - History indices in `RocksDB` (storages, accounts, transaction hashes)
+    /// - Account changesets in static files
+    #[cfg(feature = "edge")]
+    pub const fn edge() -> Self {
+        Self {
+            receipts_in_static_files: true,
+            transaction_senders_in_static_files: true,
+            account_changesets_in_static_files: true,
+            storage_changesets_in_static_files: true,
+            storages_history_in_rocksdb: true,
+            transaction_hash_numbers_in_rocksdb: true,
+            account_history_in_rocksdb: true,
+        }
+    }
+
     /// Creates `StorageSettings` for legacy nodes.
     ///
     /// This explicitly sets `receipts_in_static_files` and `transaction_senders_in_static_files` to
@@ -43,6 +81,8 @@ impl StorageSettings {
             storages_history_in_rocksdb: false,
             transaction_hash_numbers_in_rocksdb: false,
             account_history_in_rocksdb: false,
+            account_changesets_in_static_files: false,
+            storage_changesets_in_static_files: false,
         }
     }
 
@@ -74,5 +114,24 @@ impl StorageSettings {
     pub const fn with_account_history_in_rocksdb(mut self, value: bool) -> Self {
         self.account_history_in_rocksdb = value;
         self
+    }
+
+    /// Sets the `account_changesets_in_static_files` flag to the provided value.
+    pub const fn with_account_changesets_in_static_files(mut self, value: bool) -> Self {
+        self.account_changesets_in_static_files = value;
+        self
+    }
+
+    /// Sets the `storage_changesets_in_static_files` flag to the provided value.
+    pub const fn with_storage_changesets_in_static_files(mut self, value: bool) -> Self {
+        self.storage_changesets_in_static_files = value;
+        self
+    }
+
+    /// Returns `true` if any tables are configured to be stored in `RocksDB`.
+    pub const fn any_in_rocksdb(&self) -> bool {
+        self.transaction_hash_numbers_in_rocksdb ||
+            self.account_history_in_rocksdb ||
+            self.storages_history_in_rocksdb
     }
 }

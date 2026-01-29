@@ -32,8 +32,7 @@
 //!  }
 //!  ```
 //!
-//!  This example sets up a tracer with JSON format logging for journald and terminal-friendly
-//! format  for file logging.
+//! This example sets up a tracer with JSON format logging to stdout.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -48,14 +47,23 @@ pub use tracing;
 pub use tracing_appender;
 pub use tracing_subscriber;
 
+#[cfg(feature = "tracy")]
+tracy_client::register_demangler!();
+
 // Re-export our types
 pub use formatter::LogFormat;
 pub use layers::{FileInfo, FileWorkerGuard, Layers};
 pub use test_tracer::TestTracer;
 
+#[doc(hidden)]
+pub mod __private {
+    pub use super::throttle::*;
+}
+
 mod formatter;
 mod layers;
 mod test_tracer;
+mod throttle;
 
 use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
@@ -71,6 +79,8 @@ pub struct RethTracer {
     journald: Option<String>,
     file: Option<(LayerInfo, FileInfo)>,
     samply: Option<LayerInfo>,
+    #[cfg(feature = "tracy")]
+    tracy: Option<LayerInfo>,
 }
 
 impl RethTracer {
@@ -79,7 +89,14 @@ impl RethTracer {
     /// Initializes with default stdout layer configuration.
     /// Journald and file layers are not set by default.
     pub fn new() -> Self {
-        Self { stdout: LayerInfo::default(), journald: None, file: None, samply: None }
+        Self {
+            stdout: LayerInfo::default(),
+            journald: None,
+            file: None,
+            samply: None,
+            #[cfg(feature = "tracy")]
+            tracy: None,
+        }
     }
 
     /// Sets a custom configuration for the stdout layer.
@@ -113,6 +130,13 @@ impl RethTracer {
     /// Sets the samply layer configuration.
     pub fn with_samply(mut self, config: LayerInfo) -> Self {
         self.samply = Some(config);
+        self
+    }
+
+    /// Sets the tracy layer configuration.
+    #[cfg(feature = "tracy")]
+    pub fn with_tracy(mut self, config: LayerInfo) -> Self {
+        self.tracy = Some(config);
         self
     }
 }
@@ -233,6 +257,11 @@ impl Tracer for RethTracer {
 
         if let Some(config) = self.samply {
             layers.samply(config)?;
+        }
+
+        #[cfg(feature = "tracy")]
+        if let Some(config) = self.tracy {
+            layers.tracy(config)?;
         }
 
         // The error is returned if the global default subscriber is already set,

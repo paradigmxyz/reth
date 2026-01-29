@@ -155,6 +155,14 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         vec![]
     }
 
+    fn append_pooled_transaction_elements(
+        &self,
+        _tx_hashes: &[TxHash],
+        _limit: GetPooledTransactionLimit,
+        _out: &mut Vec<<Self::Transaction as PoolTransaction>::Pooled>,
+    ) {
+    }
+
     fn get_pooled_transaction_element(
         &self,
         _tx_hash: TxHash,
@@ -365,6 +373,7 @@ pub struct MockTransactionValidator<T> {
 
 impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T> {
     type Transaction = T;
+    type Block = reth_ethereum_primitives::Block;
 
     async fn validate_transaction(
         &self,
@@ -401,7 +410,7 @@ impl<T> MockTransactionValidator<T> {
     pub fn no_propagate_local() -> Self {
         Self { propagate_local: false, return_invalid: false, _marker: Default::default() }
     }
-    /// Creates a new [`MockTransactionValidator`] that always return a invalid outcome.
+    /// Creates a new [`MockTransactionValidator`] that always returns an invalid outcome.
     pub fn return_invalid() -> Self {
         Self { propagate_local: false, return_invalid: true, _marker: Default::default() }
     }

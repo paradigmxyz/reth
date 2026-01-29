@@ -64,6 +64,21 @@ impl TrieNodeProvider for DefaultTrieNodeProvider {
     }
 }
 
+/// A provider that never reveals nodes from the database.
+///
+/// This is used by `update_leaves` to attempt trie operations without
+/// performing any database lookups. When the trie encounters a blinded node
+/// that would normally trigger a reveal, this provider returns `None`,
+/// causing the operation to fail with a `BlindedNode` error.
+#[derive(PartialEq, Eq, Clone, Copy, Default, Debug)]
+pub struct NoRevealProvider;
+
+impl TrieNodeProvider for NoRevealProvider {
+    fn trie_node(&self, _path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+        Ok(None)
+    }
+}
+
 /// Right pad the path with 0s and return as [`B256`].
 #[inline]
 pub fn pad_path_to_key(path: &Nibbles) -> B256 {

@@ -2,7 +2,9 @@
 
 use crate::cli::Args;
 use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_eth::SyncStatus;
+use alloy_transport_ws::WsConnect;
 use eyre::{eyre, OptionExt, Result, WrapErr};
 #[cfg(unix)]
 use nix::sys::signal::{killpg, Signal};
@@ -17,6 +19,9 @@ use tokio::{
     time::{sleep, timeout},
 };
 use tracing::{debug, info, warn};
+
+/// Default websocket RPC port used by reth
+const DEFAULT_WS_RPC_PORT: u16 = 8546;
 
 /// Manages reth node lifecycle and operations
 pub(crate) struct NodeManager {
@@ -152,9 +157,13 @@ impl NodeManager {
             metrics_arg,
             "--http".to_string(),
             "--http.api".to_string(),
-            "eth".to_string(),
+            "eth,reth".to_string(),
+            "--ws".to_string(),
+            "--ws.api".to_string(),
+            "eth,reth".to_string(),
             "--disable-discovery".to_string(),
             "--trusted-only".to_string(),
+            "--disable-tx-gossip".to_string(),
         ]);
 
         // Add tracing arguments if OTLP endpoint is configured
@@ -359,8 +368,13 @@ impl NodeManager {
         Ok((child, reth_command))
     }
 
-    /// Wait for the node to be ready and return its current tip
-    pub(crate) async fn wait_for_node_ready_and_get_tip(&self) -> Result<u64> {
+    /// Wait for the node to be ready and return its current tip.
+    ///
+    /// Fails early if the node process exits before becoming ready.
+    pub(crate) async fn wait_for_node_ready_and_get_tip(
+        &self,
+        child: &mut tokio::process::Child,
+    ) -> Result<u64> {
         info!("Waiting for node to be ready and synced...");
 
         let max_wait = Duration::from_secs(120); // 2 minutes to allow for sync
@@ -371,8 +385,23 @@ impl NodeManager {
         let url = rpc_url.parse().map_err(|e| eyre!("Invalid RPC URL '{}': {}", rpc_url, e))?;
         let provider = ProviderBuilder::new().connect_http(url);
 
+        let start_time = tokio::time::Instant::now();
+        let mut iteration = 0;
+
         timeout(max_wait, async {
             loop {
+                iteration += 1;
+                debug!(
+                    "Readiness check iteration {} (elapsed: {:?})",
+                    iteration,
+                    start_time.elapsed()
+                );
+
+                // Check if the node process has exited.
+                if let Some(status) = child.try_wait()? {
+                    return Err(eyre!("Node process exited unexpectedly with {status}"));
+                }
+
                 // First check if RPC is up and node is not syncing
                 match provider.syncing().await {
                     Ok(sync_result) => {
@@ -381,24 +410,48 @@ impl NodeManager {
                                 debug!("Node is still syncing {sync_info:?}, waiting...");
                             }
                             _ => {
+                                debug!("HTTP RPC is up and node is not syncing, checking block number...");
                                 // Node is not syncing, now get the tip
                                 match provider.get_block_number().await {
                                     Ok(tip) => {
-                                        info!("Node is ready and not syncing at block: {}", tip);
-                                        return Ok(tip);
+                                        debug!("HTTP RPC ready at block: {}, checking WebSocket...", tip);
+
+                                        // Verify WebSocket RPC is ready (public endpoint, no JWT required)
+                                        let ws_url = format!("ws://localhost:{}", DEFAULT_WS_RPC_PORT);
+                                        debug!("Attempting WebSocket connection to {} (public endpoint)", ws_url);
+                                        let ws_connect = WsConnect::new(&ws_url);
+
+                                        match RpcClient::connect_pubsub(ws_connect).await
+                                        {
+                                            Ok(_) => {
+                                                info!(
+                                                    "Node is ready (HTTP and WebSocket) at block: {} (took {:?}, {} iterations)",
+                                                    tip, start_time.elapsed(), iteration
+                                                );
+                                                return Ok(tip);
+                                            }
+                                            Err(e) => {
+                                                debug!(
+                                                    "HTTP RPC ready but WebSocket not ready yet (iteration {}): {:?}",
+                                                    iteration, e
+                                                );
+                                                debug!("WebSocket error details: {}", e);
+                                            }
+                                        }
                                     }
                                     Err(e) => {
-                                        debug!("Failed to get block number: {}", e);
+                                        debug!("Failed to get block number (iteration {}): {:?}", iteration, e);
                                     }
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        debug!("Node RPC not ready yet or failed to check sync status: {}", e);
+                        debug!("Node RPC not ready yet or failed to check sync status (iteration {}): {:?}", iteration, e);
                     }
                 }
 
+                debug!("Sleeping for {:?} before next check", check_interval);
                 sleep(check_interval).await;
             }
         })
@@ -406,9 +459,79 @@ impl NodeManager {
         .wrap_err("Timed out waiting for node to be ready and synced")?
     }
 
+    /// Wait for the node RPC to be ready and return its current tip, without waiting for sync.
+    ///
+    /// This is faster than `wait_for_node_ready_and_get_tip` but may return a tip while
+    /// the node is still syncing.
+    pub(crate) async fn wait_for_rpc_and_get_tip(
+        &self,
+        child: &mut tokio::process::Child,
+    ) -> Result<u64> {
+        info!("Waiting for node RPC to be ready (skipping sync wait)...");
+
+        let max_wait = Duration::from_secs(60);
+        let check_interval = Duration::from_secs(2);
+        let rpc_url = "http://localhost:8545";
+
+        let url = rpc_url.parse().map_err(|e| eyre!("Invalid RPC URL '{}': {}", rpc_url, e))?;
+        let provider = ProviderBuilder::new().connect_http(url);
+
+        let start_time = tokio::time::Instant::now();
+        let mut iteration = 0;
+
+        timeout(max_wait, async {
+            loop {
+                iteration += 1;
+                debug!(
+                    "RPC readiness check iteration {} (elapsed: {:?})",
+                    iteration,
+                    start_time.elapsed()
+                );
+
+                if let Some(status) = child.try_wait()? {
+                    return Err(eyre!("Node process exited unexpectedly with {status}"));
+                }
+
+                match provider.get_block_number().await {
+                    Ok(tip) => {
+                        debug!("HTTP RPC ready at block: {}, checking WebSocket...", tip);
+
+                        let ws_url = format!("ws://localhost:{}", DEFAULT_WS_RPC_PORT);
+                        let ws_connect = WsConnect::new(&ws_url);
+
+                        match RpcClient::connect_pubsub(ws_connect).await {
+                            Ok(_) => {
+                                info!(
+                                    "Node RPC is ready at block: {} (took {:?}, {} iterations)",
+                                    tip,
+                                    start_time.elapsed(),
+                                    iteration
+                                );
+                                return Ok(tip);
+                            }
+                            Err(e) => {
+                                debug!(
+                                    "HTTP RPC ready but WebSocket not ready yet (iteration {}): {:?}",
+                                    iteration, e
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        debug!("RPC not ready yet (iteration {}): {:?}", iteration, e);
+                    }
+                }
+
+                sleep(check_interval).await;
+            }
+        })
+        .await
+        .wrap_err("Timed out waiting for node RPC to be ready")?
+    }
+
     /// Stop the reth node gracefully
     pub(crate) async fn stop_node(&self, child: &mut tokio::process::Child) -> Result<()> {
-        let pid = child.id().expect("Child process ID should be available");
+        let pid = child.id().ok_or_eyre("Child process ID should be available")?;
 
         // Check if the process has already exited
         match child.try_wait() {

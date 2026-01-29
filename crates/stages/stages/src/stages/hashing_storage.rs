@@ -3,7 +3,7 @@ use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
-    models::{BlockNumberAddress, CompactU256},
+    models::CompactU256,
     table::Decompress,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -179,7 +179,7 @@ where
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        provider.unwind_storage_hashing_range(BlockNumberAddress::range(range))?;
+        provider.unwind_storage_hashing_range(range)?;
 
         let mut stage_checkpoint =
             input.checkpoint.storage_hashing_stage_checkpoint().unwrap_or_default();
@@ -227,7 +227,7 @@ mod tests {
     use rand::Rng;
     use reth_db_api::{
         cursor::{DbCursorRW, DbDupCursorRO},
-        models::StoredBlockBodyIndices,
+        models::{BlockNumberAddress, StoredBlockBodyIndices},
     };
     use reth_ethereum_primitives::Block;
     use reth_primitives_traits::SealedBlock;
@@ -356,6 +356,7 @@ mod tests {
             );
 
             self.db.insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
+            let mut tx_hash_numbers = Vec::new();
 
             let iter = blocks.iter();
             let mut next_tx_num = 0;
@@ -366,10 +367,7 @@ mod tests {
                 self.db.commit(|tx| {
                     progress.body().transactions.iter().try_for_each(
                         |transaction| -> Result<(), reth_db::DatabaseError> {
-                            tx.put::<tables::TransactionHashNumbers>(
-                                *transaction.tx_hash(),
-                                next_tx_num,
-                            )?;
+                            tx_hash_numbers.push((*transaction.tx_hash(), next_tx_num));
                             tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;
 
                             let (addr, _) = accounts
@@ -419,6 +417,7 @@ mod tests {
                     Ok(())
                 })?;
             }
+            self.db.insert_tx_hash_numbers(tx_hash_numbers)?;
 
             Ok(blocks)
         }

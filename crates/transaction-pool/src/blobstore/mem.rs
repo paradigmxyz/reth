@@ -24,18 +24,23 @@ impl InMemoryBlobStore {
         versioned_hashes: &[B256],
     ) -> Vec<Option<BlobAndProofV2>> {
         let mut result = vec![None; versioned_hashes.len()];
+        let mut missing_count = result.len();
         for (_tx_hash, blob_sidecar) in self.inner.store.read().iter() {
             if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
                 for (hash_idx, match_result) in
                     blob_sidecar.match_versioned_hashes(versioned_hashes)
                 {
                     result[hash_idx] = Some(match_result);
+                    missing_count -= 1;
                 }
             }
 
             // Return early if all blobs are found.
-            if result.iter().all(|blob| blob.is_some()) {
-                break;
+            if missing_count == 0 {
+                // since versioned_hashes may have duplicates, we double check here
+                if result.iter().all(|blob| blob.is_some()) {
+                    break;
+                }
             }
         }
         result
@@ -51,7 +56,7 @@ struct InMemoryBlobStoreInner {
 
 impl PartialEq for InMemoryBlobStoreInner {
     fn eq(&self, other: &Self) -> bool {
-        self.store.read().eq(&other.store.read())
+        self.store.read().eq(&*other.store.read())
     }
 }
 

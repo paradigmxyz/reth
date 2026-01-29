@@ -123,6 +123,12 @@ pub enum Error {
     /// Read transaction has been timed out.
     #[error("read transaction has been timed out")]
     ReadTransactionTimeout,
+    /// The transaction commit was aborted due to previous errors.
+    ///
+    /// This can happen in exceptionally rare cases and it signals the problem coming from inside
+    /// of mdbx.
+    #[error("botched transaction")]
+    BotchedTransaction,
     /// Permission defined
     #[error("permission denied to setup database")]
     Permission,
@@ -204,6 +210,7 @@ impl Error {
             Self::WriteTransactionUnsupportedInReadOnlyMode |
             Self::NestedTransactionsUnsupportedWithWriteMap => ffi::MDBX_EACCESS,
             Self::ReadTransactionTimeout => -96000, // Custom non-MDBX error code
+            Self::BotchedTransaction => -96001,
             Self::Permission => ffi::MDBX_EPERM,
             Self::Other(err_code) => *err_code,
         }
@@ -216,6 +223,14 @@ impl From<Error> for i32 {
     }
 }
 
+/// Parses an MDBX error code into a result type.
+///
+/// Note that this function returns `Ok(false)` on `MDBX_SUCCESS` and
+/// `Ok(true)` on `MDBX_RESULT_TRUE`. The return value requires extra
+/// care since its interpretation depends on the callee being called.
+///
+/// The most unintuitive case is `mdbx_txn_commit` which returns `Ok(true)`
+/// when the commit has been aborted.
 #[inline]
 pub(crate) const fn mdbx_result(err_code: c_int) -> Result<bool> {
     match err_code {

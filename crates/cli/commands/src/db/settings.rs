@@ -40,12 +40,37 @@ enum Subcommands {
 #[clap(rename_all = "snake_case")]
 pub enum SetCommand {
     /// Store receipts in static files instead of the database
-    ReceiptsInStaticFiles {
+    Receipts {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
     /// Store transaction senders in static files instead of the database
-    TransactionSendersInStaticFiles {
+    TransactionSenders {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
+    /// Store account changesets in static files instead of the database
+    AccountChangesets {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
+    /// Store storage history in rocksdb instead of MDBX
+    StoragesHistory {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
+    /// Store transaction hash to number mapping in rocksdb instead of MDBX
+    TransactionHashNumbers {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
+    /// Store account history in rocksdb instead of MDBX
+    AccountHistory {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
+    /// Store storage changesets in static files instead of the database
+    StorageChangesets {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
@@ -94,11 +119,13 @@ impl Command {
             storages_history_in_rocksdb: _,
             transaction_hash_numbers_in_rocksdb: _,
             account_history_in_rocksdb: _,
+            account_changesets_in_static_files: _,
+            storage_changesets_in_static_files: _,
         } = settings.unwrap_or_else(StorageSettings::legacy);
 
         // Update the setting based on the key
         match cmd {
-            SetCommand::ReceiptsInStaticFiles { value } => {
+            SetCommand::Receipts { value } => {
                 if settings.receipts_in_static_files == value {
                     println!("receipts_in_static_files is already set to {}", value);
                     return Ok(());
@@ -106,13 +133,53 @@ impl Command {
                 settings.receipts_in_static_files = value;
                 println!("Set receipts_in_static_files = {}", value);
             }
-            SetCommand::TransactionSendersInStaticFiles { value } => {
+            SetCommand::TransactionSenders { value } => {
                 if settings.transaction_senders_in_static_files == value {
                     println!("transaction_senders_in_static_files is already set to {}", value);
                     return Ok(());
                 }
                 settings.transaction_senders_in_static_files = value;
                 println!("Set transaction_senders_in_static_files = {}", value);
+            }
+            SetCommand::AccountChangesets { value } => {
+                if settings.account_changesets_in_static_files == value {
+                    println!("account_changesets_in_static_files is already set to {}", value);
+                    return Ok(());
+                }
+                settings.account_changesets_in_static_files = value;
+                println!("Set account_changesets_in_static_files = {}", value);
+            }
+            SetCommand::StoragesHistory { value } => {
+                if settings.storages_history_in_rocksdb == value {
+                    println!("storages_history_in_rocksdb is already set to {}", value);
+                    return Ok(());
+                }
+                settings.storages_history_in_rocksdb = value;
+                println!("Set storages_history_in_rocksdb = {}", value);
+            }
+            SetCommand::TransactionHashNumbers { value } => {
+                if settings.transaction_hash_numbers_in_rocksdb == value {
+                    println!("transaction_hash_numbers_in_rocksdb is already set to {}", value);
+                    return Ok(());
+                }
+                settings.transaction_hash_numbers_in_rocksdb = value;
+                println!("Set transaction_hash_numbers_in_rocksdb = {}", value);
+            }
+            SetCommand::AccountHistory { value } => {
+                if settings.account_history_in_rocksdb == value {
+                    println!("account_history_in_rocksdb is already set to {}", value);
+                    return Ok(());
+                }
+                settings.account_history_in_rocksdb = value;
+                println!("Set account_history_in_rocksdb = {}", value);
+            }
+            SetCommand::StorageChangesets { value } => {
+                if settings.storage_changesets_in_static_files == value {
+                    println!("storage_changesets_in_static_files is already set to {}", value);
+                    return Ok(());
+                }
+                settings.storage_changesets_in_static_files = value;
+                println!("Set storage_changesets_in_static_files = {}", value);
             }
         }
 

@@ -48,7 +48,18 @@ export const rethCliSidebar: SidebarItem = {
                 },
                 {
                     text: "reth db checksum",
-                    link: "/cli/reth/db/checksum"
+                    link: "/cli/reth/db/checksum",
+                    collapsed: true,
+                    items: [
+                        {
+                            text: "reth db checksum mdbx",
+                            link: "/cli/reth/db/checksum/mdbx"
+                        },
+                        {
+                            text: "reth db checksum static-file",
+                            link: "/cli/reth/db/checksum/static-file"
+                        }
+                    ]
                 },
                 {
                     text: "reth db diff",
@@ -130,12 +141,32 @@ export const rethCliSidebar: SidebarItem = {
                             collapsed: true,
                             items: [
                                 {
-                                    text: "reth db settings set receipts_in_static_files",
-                                    link: "/cli/reth/db/settings/set/receipts_in_static_files"
+                                    text: "reth db settings set receipts",
+                                    link: "/cli/reth/db/settings/set/receipts"
                                 },
                                 {
-                                    text: "reth db settings set transaction_senders_in_static_files",
-                                    link: "/cli/reth/db/settings/set/transaction_senders_in_static_files"
+                                    text: "reth db settings set transaction_senders",
+                                    link: "/cli/reth/db/settings/set/transaction_senders"
+                                },
+                                {
+                                    text: "reth db settings set account_changesets",
+                                    link: "/cli/reth/db/settings/set/account_changesets"
+                                },
+                                {
+                                    text: "reth db settings set storages_history",
+                                    link: "/cli/reth/db/settings/set/storages_history"
+                                },
+                                {
+                                    text: "reth db settings set transaction_hash_numbers",
+                                    link: "/cli/reth/db/settings/set/transaction_hash_numbers"
+                                },
+                                {
+                                    text: "reth db settings set account_history",
+                                    link: "/cli/reth/db/settings/set/account_history"
+                                },
+                                {
+                                    text: "reth db settings set storage_changesets",
+                                    link: "/cli/reth/db/settings/set/storage_changesets"
                                 }
                             ]
                         }
@@ -231,6 +262,10 @@ export const rethCliSidebar: SidebarItem = {
                 {
                     text: "reth p2p bootnode",
                     link: "/cli/reth/p2p/bootnode"
+                },
+                {
+                    text: "reth p2p enode",
+                    link: "/cli/reth/p2p/enode"
                 }
             ]
         },

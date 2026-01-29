@@ -1,6 +1,5 @@
 //! BAL (Block Access List, EIP-7928) related functionality.
 
-use crate::tree::cached_state::CachedStateProvider;
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{keccak256, Address, StorageKey, U256};
@@ -102,7 +101,7 @@ impl<'a> Iterator for BALSlotIter<'a> {
                     return None;
                 }
 
-                return Some((address, slot));
+                return Some((address, StorageKey::from(slot)));
             }
 
             // Move to next account
@@ -118,7 +117,7 @@ impl<'a> Iterator for BALSlotIter<'a> {
 /// of modified accounts and storage slots.
 pub(crate) fn bal_to_hashed_post_state<P>(
     bal: &BlockAccessList,
-    provider: &CachedStateProvider<P>,
+    provider: P,
 ) -> Result<HashedPostState, ProviderError>
 where
     P: AccountReader,
@@ -178,13 +177,11 @@ where
             let mut storage_map = HashedStorage::new(false);
 
             for slot_changes in &account_changes.storage_changes {
-                let hashed_slot = keccak256(slot_changes.slot);
+                let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
 
                 // Get the last change for this slot
                 if let Some(last_change) = slot_changes.changes.last() {
-                    storage_map
-                        .storage
-                        .insert(hashed_slot, U256::from_be_bytes(last_change.new_value.0));
+                    storage_map.storage.insert(hashed_slot, last_change.new_value);
                 }
             }
 
@@ -198,16 +195,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::cached_state::{ExecutionCache, ExecutionCacheBuilder};
     use alloy_eip7928::{
         AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
     };
     use alloy_primitives::{Address, Bytes, StorageKey, B256};
     use reth_revm::test_utils::StateProviderTest;
-
-    fn new_cache() -> ExecutionCache {
-        ExecutionCacheBuilder::default().build_caches(1000)
-    }
 
     #[test]
     fn test_bal_to_hashed_post_state_basic() {
@@ -224,7 +216,6 @@ mod tests {
         };
 
         let bal = vec![account_changes];
-        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         assert_eq!(result.accounts.len(), 1);
@@ -244,8 +235,8 @@ mod tests {
         let provider = StateProviderTest::default();
 
         let address = Address::random();
-        let slot = StorageKey::random();
-        let value = B256::random();
+        let slot = U256::random();
+        let value = U256::random();
 
         let slot_changes = SlotChanges { slot, changes: vec![StorageChange::new(0, value)] };
 
@@ -259,17 +250,16 @@ mod tests {
         };
 
         let bal = vec![account_changes];
-        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         let hashed_address = keccak256(address);
         assert!(result.storages.contains_key(&hashed_address));
 
         let storage = result.storages.get(&hashed_address).unwrap();
-        let hashed_slot = keccak256(slot);
+        let hashed_slot = keccak256(slot.to_be_bytes::<32>());
 
         let stored_value = storage.storage.get(&hashed_slot).unwrap();
-        assert_eq!(*stored_value, U256::from_be_bytes(value.0));
+        assert_eq!(*stored_value, value);
     }
 
     #[test]
@@ -289,7 +279,6 @@ mod tests {
         };
 
         let bal = vec![account_changes];
-        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         let hashed_address = keccak256(address);
@@ -317,7 +306,6 @@ mod tests {
         };
 
         let bal = vec![account_changes];
-        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         let hashed_address = keccak256(address);
@@ -352,7 +340,6 @@ mod tests {
         };
 
         let bal = vec![account_changes];
-        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         let hashed_address = keccak256(address);
@@ -385,7 +372,6 @@ mod tests {
         };
 
         let bal = vec![account_changes];
-        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         let hashed_address = keccak256(address);
@@ -404,15 +390,15 @@ mod tests {
         let provider = StateProviderTest::default();
 
         let address = Address::random();
-        let slot = StorageKey::random();
+        let slot = U256::random();
 
         // Multiple changes to the same slot - should take the last one
         let slot_changes = SlotChanges {
             slot,
             changes: vec![
-                StorageChange::new(0, B256::from(U256::from(100).to_be_bytes::<32>())),
-                StorageChange::new(1, B256::from(U256::from(200).to_be_bytes::<32>())),
-                StorageChange::new(2, B256::from(U256::from(300).to_be_bytes::<32>())),
+                StorageChange::new(0, U256::from(100)),
+                StorageChange::new(1, U256::from(200)),
+                StorageChange::new(2, U256::from(300)),
             ],
         };
 
@@ -426,12 +412,11 @@ mod tests {
         };
 
         let bal = vec![account_changes];
-        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         let hashed_address = keccak256(address);
         let storage = result.storages.get(&hashed_address).unwrap();
-        let hashed_slot = keccak256(slot);
+        let hashed_slot = keccak256(slot.to_be_bytes::<32>());
 
         let stored_value = storage.storage.get(&hashed_slot).unwrap();
 
@@ -451,15 +436,15 @@ mod tests {
             address: addr1,
             storage_changes: vec![
                 SlotChanges {
-                    slot: StorageKey::from(U256::from(100)),
-                    changes: vec![StorageChange::new(0, B256::ZERO)],
+                    slot: U256::from(100),
+                    changes: vec![StorageChange::new(0, U256::ZERO)],
                 },
                 SlotChanges {
-                    slot: StorageKey::from(U256::from(101)),
-                    changes: vec![StorageChange::new(0, B256::ZERO)],
+                    slot: U256::from(101),
+                    changes: vec![StorageChange::new(0, U256::ZERO)],
                 },
             ],
-            storage_reads: vec![StorageKey::from(U256::from(102))],
+            storage_reads: vec![U256::from(102)],
             balance_changes: vec![],
             nonce_changes: vec![],
             code_changes: vec![],
@@ -469,10 +454,10 @@ mod tests {
         let account2 = AccountChanges {
             address: addr2,
             storage_changes: vec![SlotChanges {
-                slot: StorageKey::from(U256::from(200)),
-                changes: vec![StorageChange::new(0, B256::ZERO)],
+                slot: U256::from(200),
+                changes: vec![StorageChange::new(0, U256::ZERO)],
             }],
-            storage_reads: vec![StorageKey::from(U256::from(201))],
+            storage_reads: vec![U256::from(201)],
             balance_changes: vec![],
             nonce_changes: vec![],
             code_changes: vec![],
@@ -483,15 +468,15 @@ mod tests {
             address: addr3,
             storage_changes: vec![
                 SlotChanges {
-                    slot: StorageKey::from(U256::from(300)),
-                    changes: vec![StorageChange::new(0, B256::ZERO)],
+                    slot: U256::from(300),
+                    changes: vec![StorageChange::new(0, U256::ZERO)],
                 },
                 SlotChanges {
-                    slot: StorageKey::from(U256::from(301)),
-                    changes: vec![StorageChange::new(0, B256::ZERO)],
+                    slot: U256::from(301),
+                    changes: vec![StorageChange::new(0, U256::ZERO)],
                 },
             ],
-            storage_reads: vec![StorageKey::from(U256::from(302))],
+            storage_reads: vec![U256::from(302)],
             balance_changes: vec![],
             nonce_changes: vec![],
             code_changes: vec![],
