@@ -1332,6 +1332,7 @@ mod tests {
     use alloy_consensus::{Header, TxLegacy};
     use alloy_eips::BlockId;
     use alloy_primitives::{Address, Bytes, StorageKey, StorageValue, TxKind, B256, U256};
+    use futures::stream;
     use reth_chainspec::ChainSpec;
     use reth_db_api::models::StoredBlockBodyIndices;
     use reth_evm_ethereum::EthEvmConfig;
@@ -1339,6 +1340,7 @@ mod tests {
     use reth_primitives_traits::{crypto::secp256k1::public_key_to_address, StorageEntry};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
+    use reth_tasks::TokioTaskExecutor;
     use reth_testing_utils::generators::sign_tx_with_key_pair;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use secp256k1::{Keypair, Secp256k1, SecretKey};
@@ -1423,7 +1425,9 @@ mod tests {
         let eth_api =
             EthApi::builder(provider, testing_pool(), NoopNetwork::default(), evm_config).build();
 
-        let debug_api = DebugApi::new(eth_api, BlockingTaskGuard::new(4));
+        let executor = TokioTaskExecutor::default();
+        let events = stream::empty::<ConsensusEngineEvent<<TestEthApi as RpcNodeCore>::Primitives>>();
+        let debug_api = DebugApi::new(eth_api, BlockingTaskGuard::new(4), executor, events);
         (debug_api, BlockId::Hash(block_hash.into()), specs)
     }
 
