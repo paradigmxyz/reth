@@ -1,10 +1,11 @@
+use super::helpers::{load_jwt_secret, read_input};
 use alloy_provider::network::AnyRpcBlock;
 use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
 use eyre::{OptionExt, Result};
 use op_alloy_consensus::OpTxEnvelope;
 use reth_cli_runner::CliContext;
-use std::io::{BufReader, Read, Write};
+use std::io::Write;
 
 /// Command for generating and sending an `engine_newPayload` request constructed from an RPC
 /// block.
@@ -51,38 +52,13 @@ enum Mode {
 }
 
 impl Command {
-    /// Read input from either a file or stdin
-    fn read_input(&self) -> Result<String> {
-        Ok(match &self.path {
-            Some(path) => reth_fs_util::read_to_string(path)?,
-            None => String::from_utf8(
-                BufReader::new(std::io::stdin()).bytes().collect::<Result<Vec<_>, _>>()?,
-            )?,
-        })
-    }
-
-    /// Load JWT secret from either a file or use the provided string directly
-    fn load_jwt_secret(&self) -> Result<Option<String>> {
-        match &self.jwt_secret {
-            Some(secret) => {
-                // Try to read as file first
-                match std::fs::read_to_string(secret) {
-                    Ok(contents) => Ok(Some(contents.trim().to_string())),
-                    // If file read fails, use the string directly
-                    Err(_) => Ok(Some(secret.clone())),
-                }
-            }
-            None => Ok(None),
-        }
-    }
-
     /// Execute the generate payload command
     pub async fn execute(self, _ctx: CliContext) -> Result<()> {
         // Load block
-        let block_json = self.read_input()?;
+        let block_json = read_input(self.path.as_deref())?;
 
         // Load JWT secret
-        let jwt_secret = self.load_jwt_secret()?;
+        let jwt_secret = load_jwt_secret(self.jwt_secret.as_deref())?;
 
         // Parse the block
         let block = serde_json::from_str::<AnyRpcBlock>(&block_json)?

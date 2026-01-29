@@ -1,6 +1,33 @@
 //! Common helpers for reth-bench commands.
 
 use crate::valid_payload::call_forkchoice_updated;
+use eyre::Result;
+use std::io::{BufReader, Read};
+
+/// Read input from either a file path or stdin.
+pub(crate) fn read_input(path: Option<&str>) -> Result<String> {
+    Ok(match path {
+        Some(path) => reth_fs_util::read_to_string(path)?,
+        None => String::from_utf8(
+            BufReader::new(std::io::stdin()).bytes().collect::<Result<Vec<_>, _>>()?,
+        )?,
+    })
+}
+
+/// Load JWT secret from either a file or use the provided string directly.
+pub(crate) fn load_jwt_secret(jwt_secret: Option<&str>) -> Result<Option<String>> {
+    match jwt_secret {
+        Some(secret) => {
+            // Try to read as file first
+            match std::fs::read_to_string(secret) {
+                Ok(contents) => Ok(Some(contents.trim().to_string())),
+                // If file read fails, use the string directly
+                Err(_) => Ok(Some(secret.to_string())),
+            }
+        }
+        None => Ok(None),
+    }
+}
 
 /// Parses a gas limit value with optional suffix: K for thousand, M for million, G for billion.
 ///

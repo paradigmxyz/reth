@@ -3,6 +3,7 @@
 mod invalidation;
 use invalidation::InvalidationConfig;
 
+use super::helpers::{load_jwt_secret, read_input};
 use alloy_primitives::{Address, B256};
 use alloy_provider::network::AnyRpcBlock;
 use alloy_rpc_types_engine::ExecutionPayload;
@@ -10,7 +11,7 @@ use clap::Parser;
 use eyre::{OptionExt, Result};
 use op_alloy_consensus::OpTxEnvelope;
 use reth_cli_runner::CliContext;
-use std::io::{BufReader, Read, Write};
+use std::io::Write;
 
 /// Command for generating and sending an invalid `engine_newPayload` request.
 ///
@@ -180,27 +181,6 @@ enum Mode {
 }
 
 impl Command {
-    /// Read input from either a file or stdin
-    fn read_input(&self) -> Result<String> {
-        Ok(match &self.path {
-            Some(path) => reth_fs_util::read_to_string(path)?,
-            None => String::from_utf8(
-                BufReader::new(std::io::stdin()).bytes().collect::<Result<Vec<_>, _>>()?,
-            )?,
-        })
-    }
-
-    /// Load JWT secret from either a file or use the provided string directly
-    fn load_jwt_secret(&self) -> Result<Option<String>> {
-        match &self.jwt_secret {
-            Some(secret) => match std::fs::read_to_string(secret) {
-                Ok(contents) => Ok(Some(contents.trim().to_string())),
-                Err(_) => Ok(Some(secret.clone())),
-            },
-            None => Ok(None),
-        }
-    }
-
     /// Build `InvalidationConfig` from command flags
     const fn build_invalidation_config(&self) -> InvalidationConfig {
         InvalidationConfig {
@@ -236,8 +216,8 @@ impl Command {
 
     /// Execute the command
     pub async fn execute(self, _ctx: CliContext) -> Result<()> {
-        let block_json = self.read_input()?;
-        let jwt_secret = self.load_jwt_secret()?;
+        let block_json = read_input(self.path.as_deref())?;
+        let jwt_secret = load_jwt_secret(self.jwt_secret.as_deref())?;
 
         let block = serde_json::from_str::<AnyRpcBlock>(&block_json)?
             .into_inner()
