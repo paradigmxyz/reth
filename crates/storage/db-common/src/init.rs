@@ -211,24 +211,23 @@ where
     // Behaviour reserved only for new nodes should be set in the storage settings.
     provider_rw.write_storage_settings(genesis_storage_settings)?;
 
-    // For non-zero genesis blocks, initialize changeset static files BEFORE insert_genesis_state.
-    // This is a workaround: set_block_range(N-1, N-1) makes next_block_number() return N, so
-    // increment_block(N) succeeds. We can't use set_block_range(N, N) because that makes
-    // next_block_number() return N+1. We also can't skip set_block_range because
-    // expected_block_start from find_fixed_range would be 0 (the file range start), not N.
+    // For non-zero genesis blocks, set expected_block_start BEFORE insert_genesis_state.
+    // When block_range is None, next_block_number() uses expected_block_start. By default,
+    // expected_block_start comes from find_fixed_range which returns the file range start (0),
+    // not the genesis block number. This would cause increment_block(N) to fail.
     let static_file_provider = provider_rw.static_file_provider();
     if genesis_block_number > 0 {
         if genesis_storage_settings.account_changesets_in_static_files {
             static_file_provider
                 .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
                 .user_header_mut()
-                .set_block_range(genesis_block_number - 1, genesis_block_number - 1);
+                .set_expected_block_start(genesis_block_number);
         }
         if genesis_storage_settings.storage_changesets_in_static_files {
             static_file_provider
                 .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
                 .user_header_mut()
-                .set_block_range(genesis_block_number - 1, genesis_block_number - 1);
+                .set_expected_block_start(genesis_block_number);
         }
     }
 
