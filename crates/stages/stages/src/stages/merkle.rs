@@ -709,68 +709,14 @@ where
 
     fn unwind(
         &mut self,
-        provider: &Provider,
+        _provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let tx = provider.tx_ref();
-        let range = input.unwind_block_range();
-
-        let mut entities_checkpoint =
-            input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
-                processed: 0,
-                total: (tx.entries::<tables::HashedAccounts>()? +
-                    tx.entries::<tables::HashedStorages>()?) as u64,
-            });
-
-        if input.unwind_to == 0 {
-            tx.clear::<tables::AccountsTrie>()?;
-            tx.clear::<tables::StoragesTrie>()?;
-
-            entities_checkpoint.processed = 0;
-
-            return Ok(UnwindOutput {
-                checkpoint: StageCheckpoint::new(input.unwind_to)
-                    .with_entities_stage_checkpoint(entities_checkpoint),
-            });
-        }
-
-        if range.is_empty() {
-            info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
-        } else {
-            // Load prefix sets from changesets for the unwind range
-            let prefix_sets =
-                load_prefix_sets_with_provider::<_, KeccakKeyHasher>(provider, range)
-                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
-
-            // Create a fresh overlay factory for unwind to ensure we have the latest
-            // database state after the hashing stages have unwound.
-            let overlay_factory =
-                OverlayStateProviderFactory::new(self.factory.clone(), ChangesetCache::new());
-
-            // Use parallel state root computation for unwind
-            let (block_root, updates) = ParallelStateRoot::new(overlay_factory, prefix_sets)
-                .incremental_root_with_updates()
-                .map_err(|e| StageError::Fatal(Box::new(e)))?;
-
-            let target = provider
-                .header_by_number(input.unwind_to)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
-
-            validate_state_root(block_root, SealedHeader::seal_slow(target), input.unwind_to)?;
-
-            provider.write_trie_updates(updates)?;
-
-            let accounts = tx.entries::<tables::HashedAccounts>()?;
-            let storages = tx.entries::<tables::HashedStorages>()?;
-            let total = (accounts + storages) as u64;
-            entities_checkpoint.total = total;
-            entities_checkpoint.processed = total;
-        }
-
-        Ok(UnwindOutput {
-            checkpoint: StageCheckpoint::new(input.unwind_to)
-                .with_entities_stage_checkpoint(entities_checkpoint),
-        })
+        // The parallel merkle stage uses StageId::MerkleExecute, so its unwind should be a no-op.
+        // The actual unwind work is done by MerkleStage::Unwind which runs after the hashing
+        // stages have unwound (so the hashed state in the database reflects the target block).
+        info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
 
