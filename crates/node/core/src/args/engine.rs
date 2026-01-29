@@ -334,7 +334,7 @@ pub struct EngineArgs {
     pub cache_metrics_disabled: bool,
 
     /// Enable sparse trie as cache.
-    #[arg(long = "engine.enable-sparse-trie-as-cache", default_value_t = DefaultEngineValues::get_global().enable_sparse_trie_as_cache, conflicts_with = "engine.disable-proof-v2")]
+    #[arg(long = "engine.enable-sparse-trie-as-cache", default_value_t = DefaultEngineValues::get_global().enable_sparse_trie_as_cache, conflicts_with = "disable_proof_v2")]
     pub enable_sparse_trie_as_cache: bool,
 }
 
