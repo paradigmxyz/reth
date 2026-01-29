@@ -902,7 +902,15 @@ impl SparseTrie for ParallelSparseTrie {
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
-        self.updates.take().unwrap_or_default()
+        // Take the updates but re-initialize if updates were enabled,
+        // so we can continue tracking updates for the next block
+        match self.updates.take() {
+            Some(updates) => {
+                self.updates = Some(SparseTrieUpdates::default());
+                updates
+            }
+            None => SparseTrieUpdates::default(),
+        }
     }
 
     fn wipe(&mut self) {
