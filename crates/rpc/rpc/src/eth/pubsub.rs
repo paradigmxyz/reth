@@ -1,6 +1,6 @@
 //! `eth_` `PubSub` RPC handler implementation
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
@@ -9,8 +9,10 @@ use alloy_rpc_types_eth::{
 };
 use futures::StreamExt;
 use jsonrpsee::{
-    server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
+    core::JsonRawValue, server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink,
+    SubscriptionSink,
 };
+use parking_lot::RwLock;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcHeader;
@@ -50,7 +52,51 @@ impl<Eth> EthPubSub<Eth> {
 
     /// Creates a new, shareable instance.
     pub fn with_spawner(eth_api: Eth, subscription_task_spawner: Box<dyn TaskSpawner>) -> Self {
-        let inner = EthPubSubInner { eth_api, subscription_task_spawner };
+        Self::with_spawner_and_fallback(eth_api, subscription_task_spawner, None)
+    }
+
+    /// Creates a new, shareable instance with a fallback handler for unknown subscription kinds or
+    /// params.
+    pub fn with_spawner_and_fallback_handler<F>(
+        eth_api: Eth,
+        subscription_task_spawner: Box<dyn TaskSpawner>,
+        fallback_handler: F,
+    ) -> Self
+    where
+        F: Fn(String, Option<Box<JsonRawValue>>) -> Result<PubSubStream, ErrorObject<'static>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        Self::with_spawner_and_fallback(
+            eth_api,
+            subscription_task_spawner,
+            Some(Arc::new(fallback_handler)),
+        )
+    }
+
+    /// Registers a handler for an additional subscription kind.
+    pub fn register_handler<F>(&self, kind: impl Into<String>, handler: F)
+    where
+        F: Fn(Option<Box<JsonRawValue>>) -> Result<PubSubStream, ErrorObject<'static>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.inner.additional_handlers.write().insert(kind.into(), Arc::new(handler));
+    }
+
+    fn with_spawner_and_fallback(
+        eth_api: Eth,
+        subscription_task_spawner: Box<dyn TaskSpawner>,
+        fallback_handler: Option<FallbackHandler>,
+    ) -> Self {
+        let inner = EthPubSubInner {
+            eth_api,
+            subscription_task_spawner,
+            additional_handlers: Arc::new(RwLock::new(HashMap::new())),
+            fallback_handler,
+        };
         Self { inner: Arc::new(inner) }
     }
 }
@@ -90,59 +136,80 @@ where
     pub async fn handle_accepted(
         &self,
         accepted_sink: SubscriptionSink,
-        kind: SubscriptionKind,
-        params: Option<Params>,
+        kind: String,
+        raw_params: Option<Box<JsonRawValue>>,
     ) -> Result<(), ErrorObject<'static>> {
-        #[allow(unreachable_patterns)]
-        match kind {
+        let parsed = parse_subscription(kind.as_str(), raw_params.as_deref());
+        self.handle_parsed_or_fallback(accepted_sink, kind, raw_params, parsed).await
+    }
+
+    /// Routes the parsed subscription request to the built-in handler or a fallback path.
+    async fn handle_parsed_or_fallback(
+        &self,
+        accepted_sink: SubscriptionSink,
+        kind: String,
+        raw_params: Option<Box<JsonRawValue>>,
+        parsed: Result<ParsedSubscription, ParseSubscriptionError>,
+    ) -> Result<(), ErrorObject<'static>> {
+        // Parse at the callsite; only unknown kinds fall back to custom handlers.
+        match parsed {
+            Ok(parsed) => self.handle_parsed(accepted_sink, parsed).await,
+            Err(ParseSubscriptionError::UnsupportedKind) => {
+                self.handle_fallback_or_invalid(
+                    accepted_sink,
+                    kind,
+                    raw_params,
+                    ParseSubscriptionError::UnsupportedKind.message(),
+                )
+                .await
+            }
+            Err(ParseSubscriptionError::InvalidParams(message)) => {
+                Err(invalid_params_rpc_err(message))
+            }
+        }
+    }
+
+    /// Dispatches validated subscription kinds to their concrete stream implementations.
+    async fn handle_parsed(
+        &self,
+        accepted_sink: SubscriptionSink,
+        parsed: ParsedSubscription,
+    ) -> Result<(), ErrorObject<'static>> {
+        // Standard subscription handlers operate on validated params.
+        match parsed.kind {
             SubscriptionKind::NewHeads => {
                 pipe_from_stream(accepted_sink, self.new_headers_stream()).await
             }
             SubscriptionKind::Logs => {
-                // if no params are provided, used default filter params
-                let filter = match params {
+                // if no params are provided, use default filter params
+                let filter = match parsed.params {
                     Some(Params::Logs(filter)) => *filter,
-                    Some(Params::Bool(_)) => {
-                        return Err(invalid_params_rpc_err("Invalid params for logs"))
-                    }
                     _ => Default::default(),
                 };
                 pipe_from_stream(accepted_sink, self.log_stream(filter)).await
             }
             SubscriptionKind::NewPendingTransactions => {
-                if let Some(params) = params {
-                    match params {
-                        Params::Bool(true) => {
-                            // full transaction objects requested
-                            let stream = self.full_pending_transaction_stream().filter_map(|tx| {
-                                let tx_value = match self
-                                    .inner
-                                    .eth_api
-                                    .converter()
-                                    .fill_pending(tx.transaction.to_consensus())
-                                {
-                                    Ok(tx) => Some(tx),
-                                    Err(err) => {
-                                        error!(target = "rpc",
-                                            %err,
-                                            "Failed to fill transaction with block context"
-                                        );
-                                        None
-                                    }
-                                };
-                                std::future::ready(tx_value)
-                            });
-                            return pipe_from_stream(accepted_sink, stream).await
-                        }
-                        Params::Bool(false) | Params::None => {
-                            // only hashes requested
-                        }
-                        _ => {
-                            return Err(invalid_params_rpc_err(
-                                "Invalid params for newPendingTransactions",
-                            ))
-                        }
-                    }
+                if matches!(parsed.params, Some(Params::Bool(true))) {
+                    // full transaction objects requested
+                    let stream = self.full_pending_transaction_stream().filter_map(|tx| {
+                        let tx_value = match self
+                            .inner
+                            .eth_api
+                            .converter()
+                            .fill_pending(tx.transaction.to_consensus())
+                        {
+                            Ok(tx) => Some(tx),
+                            Err(err) => {
+                                error!(target = "rpc",
+                                    %err,
+                                    "Failed to fill transaction with block context"
+                                );
+                                None
+                            }
+                        };
+                        std::future::ready(tx_value)
+                    });
+                    return pipe_from_stream(accepted_sink, stream).await
                 }
 
                 pipe_from_stream(accepted_sink, self.pending_transaction_hashes_stream()).await
@@ -192,11 +259,32 @@ where
 
                 Ok(())
             }
-            _ => {
-                // TODO: implement once https://github.com/alloy-rs/alloy/pull/3410 is released
-                Err(invalid_params_rpc_err("Unsupported subscription kind"))
-            }
         }
+    }
+
+    /// Uses additional handlers or a fallback handler for unknown kinds, else returns invalid
+    /// params.
+    async fn handle_fallback_or_invalid(
+        &self,
+        accepted_sink: SubscriptionSink,
+        kind: String,
+        params: Option<Box<JsonRawValue>>,
+        err_msg: &'static str,
+    ) -> Result<(), ErrorObject<'static>> {
+        // Prefer explicit additional handlers over the fallback handler.
+        let handler = self.inner.additional_handlers.read().get(kind.as_str()).cloned();
+        if let Some(handler) = handler {
+            let stream = (handler)(params)?;
+            return pipe_from_stream(accepted_sink, stream).await
+        }
+
+        // Defer to the fallback handler for unknown kinds if configured.
+        if let Some(fallback_handler) = &self.inner.fallback_handler {
+            let stream = (fallback_handler)(kind, params)?;
+            return pipe_from_stream(accepted_sink, stream).await
+        }
+
+        Err(invalid_params_rpc_err(err_msg))
     }
 }
 
@@ -209,13 +297,14 @@ where
     async fn subscribe(
         &self,
         pending: PendingSubscriptionSink,
-        kind: SubscriptionKind,
-        params: Option<Params>,
+        kind: String,
+        params: Option<Box<JsonRawValue>>,
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let pubsub = self.clone();
         self.inner.subscription_task_spawner.spawn(Box::pin(async move {
-            let _ = pubsub.handle_accepted(sink, kind, params).await;
+            let parsed = parse_subscription(kind.as_str(), params.as_deref());
+            let _ = pubsub.handle_parsed_or_fallback(sink, kind, params, parsed).await;
         }));
 
         Ok(())
@@ -276,6 +365,58 @@ where
     }
 }
 
+fn parse_subscription(
+    kind: &str,
+    raw_params: Option<&JsonRawValue>,
+) -> Result<ParsedSubscription, ParseSubscriptionError> {
+    // Decode kind first; only known kinds accept standard params.
+    let kind = parse_subscription_kind(kind).ok_or(ParseSubscriptionError::UnsupportedKind)?;
+    let params = match kind {
+        SubscriptionKind::Logs => {
+            let params = parse_params_or_error(raw_params, "Invalid params for logs")?;
+            if matches!(params, Some(Params::Bool(_))) {
+                return Err(ParseSubscriptionError::InvalidParams("Invalid params for logs"))
+            }
+            params
+        }
+        SubscriptionKind::NewPendingTransactions => {
+            let params =
+                parse_params_or_error(raw_params, "Invalid params for newPendingTransactions")?;
+            if matches!(params, Some(Params::Logs(_))) {
+                return Err(ParseSubscriptionError::InvalidParams(
+                    "Invalid params for newPendingTransactions",
+                ))
+            }
+            params
+        }
+        SubscriptionKind::NewHeads | SubscriptionKind::Syncing => None,
+    };
+
+    Ok(ParsedSubscription { kind, params })
+}
+
+fn parse_subscription_kind(kind: &str) -> Option<SubscriptionKind> {
+    // Match the JSON-RPC wire representation.
+    match kind {
+        "newHeads" => Some(SubscriptionKind::NewHeads),
+        "logs" => Some(SubscriptionKind::Logs),
+        "newPendingTransactions" => Some(SubscriptionKind::NewPendingTransactions),
+        "syncing" => Some(SubscriptionKind::Syncing),
+        _ => None,
+    }
+}
+
+fn parse_params_or_error(
+    raw_params: Option<&JsonRawValue>,
+    err_msg: &'static str,
+) -> Result<Option<Params>, ParseSubscriptionError> {
+    // Normalize serde errors into a stable RPC message.
+    raw_params
+        .map(|raw| serde_json::from_str::<Params>(raw.get()))
+        .transpose()
+        .map_err(|_| ParseSubscriptionError::InvalidParams(err_msg))
+}
+
 impl<Eth> std::fmt::Debug for EthPubSub<Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthPubSub").finish_non_exhaustive()
@@ -289,6 +430,10 @@ struct EthPubSubInner<EthApi> {
     eth_api: EthApi,
     /// The type that's used to spawn subscription tasks.
     subscription_task_spawner: Box<dyn TaskSpawner>,
+    /// Additional handlers keyed by subscription kind.
+    additional_handlers: Arc<RwLock<HashMap<String, SubscriptionHandler>>>,
+    /// Fallback handler for unknown subscription kinds or params.
+    fallback_handler: Option<FallbackHandler>,
 }
 
 // == impl EthPubSubInner ===
@@ -378,5 +523,35 @@ where
                 );
                 futures::stream::iter(all_logs)
             })
+    }
+}
+
+type PubSubStream = Box<dyn Stream<Item = Box<JsonRawValue>> + Send + Unpin>;
+type SubscriptionHandler = Arc<
+    dyn Fn(Option<Box<JsonRawValue>>) -> Result<PubSubStream, ErrorObject<'static>> + Send + Sync,
+>;
+type FallbackHandler = Arc<
+    dyn Fn(String, Option<Box<JsonRawValue>>) -> Result<PubSubStream, ErrorObject<'static>>
+        + Send
+        + Sync,
+>;
+
+struct ParsedSubscription {
+    kind: SubscriptionKind,
+    params: Option<Params>,
+}
+
+#[derive(Debug)]
+enum ParseSubscriptionError {
+    UnsupportedKind,
+    InvalidParams(&'static str),
+}
+
+impl ParseSubscriptionError {
+    const fn message(&self) -> &'static str {
+        match self {
+            Self::UnsupportedKind => "Unsupported subscription kind",
+            Self::InvalidParams(message) => message,
+        }
     }
 }
