@@ -60,7 +60,8 @@ mod locals {
 
 /// Fn creates tx [`Compressor`]
 pub fn create_tx_compressor() -> Compressor<'static> {
-    Compressor::with_dictionary(0, RECEIPT_DICTIONARY).expect("Failed to instantiate tx compressor")
+    Compressor::with_dictionary(0, TRANSACTION_DICTIONARY)
+        .expect("Failed to instantiate tx compressor")
 }
 
 /// Fn creates tx [`Decompressor`]
@@ -146,5 +147,36 @@ impl ReusableDecompressor {
                 existing = self.buf.capacity(),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tx_roundtrip_compression() {
+        let data: Vec<u8> = (0u8..=255).collect();
+
+        let mut compressor = create_tx_compressor();
+        let compressed = compressor.compress(&data).expect("compress tx");
+
+        let mut decompressor = create_tx_decompressor();
+        let decompressed = decompressor.decompress(&compressed);
+
+        assert_eq!(decompressed, &*data);
+    }
+
+    #[test]
+    fn receipt_roundtrip_compression() {
+        let data: Vec<u8> = (0u8..=255).rev().collect();
+
+        let mut compressor = create_receipt_compressor();
+        let compressed = compressor.compress(&data).expect("compress receipt");
+
+        let mut decompressor = create_receipt_decompressor();
+        let decompressed = decompressor.decompress(&compressed);
+
+        assert_eq!(decompressed, &*data);
     }
 }
