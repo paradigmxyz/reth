@@ -1126,35 +1126,45 @@ impl SparseTrieExt for ParallelSparseTrie {
         use alloy_primitives::map::HashSet;
         use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
 
+        // Track which proof targets we've already requested to avoid duplicate callbacks.
+        // Key is (leaf_path, depth_of_blinded_node) to dedupe by both path and depth.
         let mut requested: HashSet<(Nibbles, u8)> = HashSet::default();
 
+        // Collect keys upfront since we mutate `updates` during iteration.
+        // On success, entries are removed; on blinded node failure, they're re-inserted.
         let keys: Vec<B256> = updates.keys().copied().collect();
 
         for key in keys {
             let full_path = Nibbles::unpack(key);
-            let update = updates.get(&key).unwrap().clone();
+            // Remove upfront - we'll re-insert if the operation fails due to blinded node.
+            let update = updates.remove(&key).unwrap();
 
             match update {
                 LeafUpdate::Changed(value) => {
                     if value.is_empty() {
-                        // Mirror get_leaf_value logic to find value AND record which subtrie it's
-                        // in. Use immutable lookup to avoid creating subtries.
+                        // === REMOVAL PATH ===
+                        // Before attempting removal, capture the current value and its location.
+                        // If removal fails due to blinded node, we restore the value to ensure
+                        // atomicity - the trie remains unchanged.
                         let (old_value, value_in_lower) = if let Some(subtrie) =
-                            self.lower_subtrie_for_path(&full_path) &&
-                            !subtrie.is_empty()
+                            self.lower_subtrie_for_path(&full_path)
                         {
-                            (subtrie.inner.values.get(&full_path).cloned(), true)
+                            if let Some(v) = subtrie.inner.values.get(&full_path) {
+                                (Some(v.clone()), true)
+                            } else {
+                                (self.upper_subtrie.inner.values.get(&full_path).cloned(), false)
+                            }
                         } else {
                             (self.upper_subtrie.inner.values.get(&full_path).cloned(), false)
                         };
 
                         match self.remove_leaf(&full_path, NoRevealProvider) {
                             Ok(()) => {
-                                updates.remove(&key);
+                                // Removal succeeded, entry already removed from updates map.
                             }
                             Err(e) => {
                                 if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
-                                    // Restore value to the same location it came from
+                                    // Restore value to maintain atomicity.
                                     if let Some(old) = old_value {
                                         if value_in_lower {
                                             if let Some(subtrie) =
@@ -1167,32 +1177,49 @@ impl SparseTrieExt for ParallelSparseTrie {
                                         }
                                     }
 
+                                    // Request proof and re-insert update for retry.
+                                    // min_len is capped at 64 (max nibbles in a key).
                                     let min_len = (path.len() as u8).min(64);
                                     if requested.insert((full_path, min_len)) {
                                         proof_required_fn(full_path, min_len);
                                     }
+                                    updates.insert(key, LeafUpdate::Changed(value));
                                 } else {
                                     return Err(e);
                                 }
                             }
                         }
                     } else {
-                        let existed = self.upper_subtrie.inner.values.contains_key(&full_path);
+                        // === UPDATE/INSERT PATH ===
+                        // Check if the leaf exists before update. If update fails and leaf didn't
+                        // exist, we need to clean up any partially-inserted value.
+                        let existed = self.upper_subtrie.inner.values.contains_key(&full_path) ||
+                            self.lower_subtrie_for_path(&full_path)
+                                .is_some_and(|s| s.inner.values.contains_key(&full_path));
 
-                        match self.update_leaf(full_path, value, NoRevealProvider) {
+                        match self.update_leaf(full_path, value.clone(), NoRevealProvider) {
                             Ok(()) => {
-                                updates.remove(&key);
+                                // Update succeeded, entry already removed from updates map.
                             }
                             Err(e) => {
                                 if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
+                                    // Clean up: if this was a new leaf, remove from both subtries.
+                                    // Value could end up in either due to trie structure changes.
                                     if !existed {
+                                        if let Some(subtrie) =
+                                            self.lower_subtrie_for_path_mut(&full_path)
+                                        {
+                                            subtrie.inner.values.remove(&full_path);
+                                        }
                                         self.upper_subtrie.inner.values.remove(&full_path);
                                     }
 
+                                    // Request proof and re-insert update for retry.
                                     let min_len = (path.len() as u8).min(64);
                                     if requested.insert((full_path, min_len)) {
                                         proof_required_fn(full_path, min_len);
                                     }
+                                    updates.insert(key, LeafUpdate::Changed(value));
                                 } else {
                                     return Err(e);
                                 }
@@ -1200,17 +1227,22 @@ impl SparseTrieExt for ParallelSparseTrie {
                         }
                     }
                 }
-                LeafUpdate::Touched => match self.find_leaf(&full_path, None) {
-                    Err(LeafLookupError::BlindedNode { path, .. }) => {
-                        let min_len = (path.len() as u8).min(64);
-                        if requested.insert((full_path, min_len)) {
-                            proof_required_fn(full_path, min_len);
+                LeafUpdate::Touched => {
+                    // === TOUCHED PATH ===
+                    // Touched is read-only: we only check if the path is accessible.
+                    // If blinded, request proof for prewarming. Otherwise, no action needed.
+                    match self.find_leaf(&full_path, None) {
+                        Err(LeafLookupError::BlindedNode { path, .. }) => {
+                            let min_len = (path.len() as u8).min(64);
+                            if requested.insert((full_path, min_len)) {
+                                proof_required_fn(full_path, min_len);
+                            }
+                            updates.insert(key, LeafUpdate::Touched);
                         }
+                        // Path is fully revealed (exists or proven non-existent), no action needed.
+                        Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {}
                     }
-                    Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {
-                        updates.remove(&key);
-                    }
-                },
+                }
             }
         }
 
@@ -1550,14 +1582,8 @@ impl ParallelSparseTrie {
         }
     }
 
-    /// Pre-validates that all nodes in a reveal chain are accessible before mutations.
-    ///
-    /// This mirrors the reveal logic in `reveal_remaining_child_on_leaf_removal` with
-    /// `recurse_into_extension: true`, checking that:
-    /// 1. The immediate child can be revealed (if blinded)
-    /// 2. If it reveals to an extension, the grandchild can also be revealed
-    ///
-    /// Returns an error if any node in the chain would fail to reveal.
+    /// Pre-validates reveal chain accessibility before mutations.
+    /// Returns error if any node would fail to reveal.
     fn pre_validate_reveal_chain<P: TrieNodeProvider>(
         &self,
         path: &Nibbles,
@@ -1569,26 +1595,19 @@ impl ParallelSparseTrie {
         };
 
         match subtrie.nodes.get(path) {
-            Some(SparseNode::Hash(hash)) => {
-                // Node is blinded - check if provider can reveal it
-                match provider.trie_node(path)? {
-                    Some(RevealedNode { node, .. }) => {
-                        // If it reveals to an extension, recursively check the grandchild
-                        let decoded = TrieNode::decode(&mut &node[..])?;
-                        if let TrieNode::Extension(ext) = decoded {
-                            let mut grandchild_path = *path;
-                            grandchild_path.extend(&ext.key);
-                            return self.pre_validate_reveal_chain(&grandchild_path, provider);
-                        }
-                        Ok(())
+            Some(SparseNode::Hash(hash)) => match provider.trie_node(path)? {
+                Some(RevealedNode { node, .. }) => {
+                    let decoded = TrieNode::decode(&mut &node[..])?;
+                    if let TrieNode::Extension(ext) = decoded {
+                        let mut grandchild_path = *path;
+                        grandchild_path.extend(&ext.key);
+                        return self.pre_validate_reveal_chain(&grandchild_path, provider);
                     }
-                    None => {
-                        Err(SparseTrieErrorKind::BlindedNode { path: *path, hash: *hash }.into())
-                    }
+                    Ok(())
                 }
-            }
+                None => Err(SparseTrieErrorKind::BlindedNode { path: *path, hash: *hash }.into()),
+            },
             Some(SparseNode::Extension { key, .. }) => {
-                // Extension already revealed - check its child
                 let mut child_path = *path;
                 child_path.extend(key);
                 self.pre_validate_reveal_chain(&child_path, provider)
