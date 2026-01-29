@@ -62,17 +62,6 @@ reth-e2e-test-utils.workspace = true
 reth-tasks.workspace = true
 reth-testing-utils.workspace = true
 reth-stages-types.workspace = true
-reth-config.workspace = true
-reth-consensus.workspace = true
-reth-db-common.workspace = true
-reth-downloaders.workspace = true
-reth-network-p2p.workspace = true
-reth-prune-types.workspace = true
-reth-stages.workspace = true
-reth-stages-api.workspace = true
-reth-static-file.workspace = true
-reth-trie.workspace = true
-reth-trie-db.workspace = true
 tempfile.workspace = true
 jsonrpsee-core.workspace = true
 
@@ -84,8 +73,6 @@ alloy-sol-types.workspace = true
 alloy-contract.workspace = true
 alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
 alloy-consensus.workspace = true
-alloy-trie.workspace = true
-alloy-rlp.workspace = true
 
 futures.workspace = true
 tokio.workspace = true
@@ -125,9 +112,4 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-evm-ethereum/test-utils",
     "reth-stages-types/test-utils",
-]
-edge = [
-    "reth-provider/edge",
-    "reth-stages/edge",
-    "reth-db-common/edge",
 ]
