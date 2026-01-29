@@ -36,7 +36,6 @@ rayon.workspace = true
 itertools.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 crossbeam-channel.workspace = true
-parking_lot.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
