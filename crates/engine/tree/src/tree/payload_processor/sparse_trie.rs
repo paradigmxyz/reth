@@ -99,10 +99,21 @@ where
     fn run_inner(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
+        debug!(
+            target: "trie::sparse_trie_task",
+            "SparseTrieTask::run_inner starting main loop"
+        );
+
         let mut num_iterations = 0;
 
         while let Ok(mut update) = self.updates.recv() {
             num_iterations += 1;
+            debug!(
+                target: "trie::sparse_trie_task",
+                num_iterations,
+                "SparseTrieTask: received update, draining additional updates"
+            );
+
             let mut num_updates = 1;
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor::sparse_trie", "drain updates")
@@ -114,11 +125,12 @@ where
             drop(_enter);
 
             debug!(
-                target: "engine::root",
+                target: "trie::sparse_trie_task",
+                num_iterations,
                 num_updates,
                 account_proofs = update.multiproof.account_proofs_len(),
                 storage_proofs = update.multiproof.storage_proofs_len(),
-                "Updating sparse trie"
+                "SparseTrieTask: calling update_sparse_trie"
             );
 
             let elapsed =
@@ -128,20 +140,43 @@ where
                             "could not calculate state root: {e:?}"
                         ))
                     })?;
+
+            debug!(
+                target: "trie::sparse_trie_task",
+                num_iterations,
+                ?elapsed,
+                "SparseTrieTask: update_sparse_trie completed"
+            );
             self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
             trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
         }
 
+        debug!(
+            target: "trie::sparse_trie_task",
+            num_iterations,
+            "SparseTrieTask: updates channel closed, computing final root"
+        );
         debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
 
         let start = Instant::now();
+        debug!(
+            target: "trie::sparse_trie_task",
+            "SparseTrieTask: calling root_with_updates"
+        );
         let (state_root, trie_updates) =
             self.trie.root_with_updates(&self.blinded_provider_factory).map_err(|e| {
                 ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
             })?;
 
         let end = Instant::now();
-        self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
+        let final_root_elapsed = end.duration_since(start);
+        debug!(
+            target: "trie::sparse_trie_task",
+            ?state_root,
+            ?final_root_elapsed,
+            "SparseTrieTask: root_with_updates completed"
+        );
+        self.metrics.sparse_trie_final_update_duration_histogram.record(final_root_elapsed);
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
@@ -236,68 +271,166 @@ where
     fn run_inner(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
+        debug!(
+            target: "trie::sparse_trie_task",
+            "SparseTrieCacheTask::run_inner starting main loop"
+        );
+
         let mut finished_state_updates = false;
+        let mut loop_iteration = 0u64;
         loop {
+            loop_iteration += 1;
+            debug!(
+                target: "trie::sparse_trie_task",
+                loop_iteration,
+                finished_state_updates,
+                account_updates_len = self.account_updates.len(),
+                storage_updates_len = self.storage_updates.len(),
+                pending_account_updates_len = self.pending_account_updates.len(),
+                "Main loop iteration starting, waiting on select_biased"
+            );
+
             crossbeam_channel::select_biased! {
                 recv(self.proof_result_rx) -> message => {
+                    debug!(
+                        target: "trie::sparse_trie_task",
+                        loop_iteration,
+                        "Received proof result from proof_result_rx"
+                    );
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
                     };
+                    debug!(
+                        target: "trie::sparse_trie_task",
+                        loop_iteration,
+                        "Processing proof result via on_proof_result"
+                    );
                     self.on_proof_result(result)?;
+                    debug!(
+                        target: "trie::sparse_trie_task",
+                        loop_iteration,
+                        "Finished processing proof result"
+                    );
                 },
                 recv(self.updates) -> message => {
                     let update = match message {
                         Ok(m) => m,
                         Err(_) => {
+                            debug!(
+                                target: "trie::sparse_trie_task",
+                                loop_iteration,
+                                "Updates channel closed, breaking main loop"
+                            );
                             break
                         }
                     };
 
-                    tracing::error!("received update: {:?}", update);
+                    debug!(
+                        target: "trie::sparse_trie_task",
+                        loop_iteration,
+                        update_type = ?std::mem::discriminant(&update),
+                        "Received update from updates channel"
+                    );
 
                     match update {
                         MultiProofMessage::PrefetchProofs(targets) => {
+                            debug!(
+                                target: "trie::sparse_trie_task",
+                                loop_iteration,
+                                "Processing PrefetchProofs message"
+                            );
                             self.on_prewarm_targets(targets);
                         }
-                        MultiProofMessage::StateUpdate(_, state) => {
+                        MultiProofMessage::StateUpdate(_seq, state) => {
+                            debug!(
+                                target: "trie::sparse_trie_task",
+                                loop_iteration,
+                                state_len = state.len(),
+                                "Processing StateUpdate message"
+                            );
                             self.on_state_update(state);
                         }
-                        MultiProofMessage::EmptyProof { sequence_number: _, state } => {
+                        MultiProofMessage::EmptyProof { sequence_number, state } => {
+                            debug!(
+                                target: "trie::sparse_trie_task",
+                                loop_iteration,
+                                sequence_number,
+                                accounts_len = state.accounts.len(),
+                                storages_len = state.storages.len(),
+                                "Processing EmptyProof message"
+                            );
                             self.on_hashed_state_update(state);
                         }
                         MultiProofMessage::BlockAccessList(_) => todo!(),
                         MultiProofMessage::FinishedStateUpdates => {
+                            debug!(
+                                target: "trie::sparse_trie_task",
+                                loop_iteration,
+                                "Received FinishedStateUpdates, marking finished_state_updates=true"
+                            );
                             finished_state_updates = true;
                         }
                     }
                 }
             }
 
-            tracing::error!("account updates: {:?}", self.account_updates);
-            tracing::error!("storage updates: {:?}", self.storage_updates);
-            tracing::error!("pending account updates: {:?}", self.pending_account_updates);
+            debug!(
+                target: "trie::sparse_trie_task",
+                loop_iteration,
+                account_updates_len = self.account_updates.len(),
+                storage_updates_len = self.storage_updates.len(),
+                pending_account_updates_len = self.pending_account_updates.len(),
+                "Before process_updates"
+            );
 
             self.process_updates()?;
 
-            tracing::error!("account updates after: {:?}", self.account_updates);
-            tracing::error!("storage updates after: {:?}", self.storage_updates);
-            tracing::error!("pending account updates after: {:?}", self.pending_account_updates);
+            debug!(
+                target: "trie::sparse_trie_task",
+                loop_iteration,
+                account_updates_len = self.account_updates.len(),
+                storage_updates_len = self.storage_updates.len(),
+                pending_account_updates_len = self.pending_account_updates.len(),
+                "After process_updates"
+            );
 
-            if finished_state_updates &&
-                self.account_updates.is_empty() &&
-                self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
-            {
+            let all_storage_empty =
+                self.storage_updates.iter().all(|(_, updates)| updates.is_empty());
+            debug!(
+                target: "trie::sparse_trie_task",
+                loop_iteration,
+                finished_state_updates,
+                account_updates_empty = self.account_updates.is_empty(),
+                all_storage_empty,
+                "Checking loop exit conditions"
+            );
+
+            if finished_state_updates && self.account_updates.is_empty() && all_storage_empty {
+                debug!(
+                    target: "trie::sparse_trie_task",
+                    loop_iteration,
+                    "All conditions met, breaking main loop"
+                );
                 break;
             }
         }
 
         // Process any remaining pending account updates.
         if !self.pending_account_updates.is_empty() {
+            debug!(
+                target: "trie::sparse_trie_task",
+                pending_account_updates_len = self.pending_account_updates.len(),
+                "Processing remaining pending account updates after main loop"
+            );
             self.process_updates()?;
         }
 
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
+        debug!(
+            target: "trie::sparse_trie_task",
+            "Computing final root_with_updates"
+        );
         let start = Instant::now();
         let (state_root, trie_updates) =
             self.trie.root_with_updates(&self.proof_worker_handle).map_err(|e| {
@@ -305,7 +438,14 @@ where
             })?;
 
         let end = Instant::now();
-        self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
+        let final_root_elapsed = end.duration_since(start);
+        debug!(
+            target: "trie::sparse_trie_task",
+            ?state_root,
+            ?final_root_elapsed,
+            "Finished computing root_with_updates"
+        );
+        self.metrics.sparse_trie_final_update_duration_histogram.record(final_root_elapsed);
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
@@ -390,22 +530,60 @@ where
         &mut self,
         result: ProofResultMessage,
     ) -> Result<(), ParallelStateRootError> {
+        debug!(
+            target: "trie::sparse_trie_task",
+            "on_proof_result: extracting proof result"
+        );
         let ProofResult::V2(result) = result.result? else {
             unreachable!("sparse trie as cache must only be used wit hmultiproof v2");
         };
 
+        debug!(
+            target: "trie::sparse_trie_task",
+            account_proofs = result.account_proofs.len(),
+            storage_proofs = result.storage_proofs.len(),
+            "on_proof_result: revealing decoded multiproof v2"
+        );
         self.trie.reveal_decoded_multiproof_v2(result).map_err(|e| {
             ParallelStateRootError::Other(format!("could not reveal multiproof: {e:?}"))
-        })
+        })?;
+        debug!(
+            target: "trie::sparse_trie_task",
+            "on_proof_result: finished revealing multiproof"
+        );
+        Ok(())
     }
 
     /// Applies updates to the sparse trie and dispathes requested multiproof targets.
     fn process_updates(&mut self) -> Result<(), ProviderError> {
+        debug!(
+            target: "trie::sparse_trie_task",
+            storage_updates_count = self.storage_updates.len(),
+            pending_account_updates_count = self.pending_account_updates.len(),
+            account_updates_count = self.account_updates.len(),
+            "process_updates: starting"
+        );
+
         let mut targets = MultiProofTargetsV2::default();
 
+        let mut storage_processed = 0usize;
         for (addr, updates) in &mut self.storage_updates {
+            storage_processed += 1;
+            debug!(
+                target: "trie::sparse_trie_task",
+                ?addr,
+                updates_len = updates.len(),
+                storage_processed,
+                "process_updates: processing storage trie"
+            );
+
             let trie = self.trie.get_or_create_storage_trie_mut(*addr);
 
+            debug!(
+                target: "trie::sparse_trie_task",
+                ?addr,
+                "process_updates: calling update_leaves on storage trie"
+            );
             trie.update_leaves(updates, |path, min_len| {
                 targets
                     .storage_targets
@@ -414,11 +592,28 @@ where
                     .push(Target::from_nibbles(path).with_min_len(min_len));
             })
             .map_err(ProviderError::other)?;
+            debug!(
+                target: "trie::sparse_trie_task",
+                ?addr,
+                updates_remaining = updates.len(),
+                "process_updates: finished update_leaves on storage trie"
+            );
 
             // If all storage updates were processed, we can now compute the new storage root.
             if updates.is_empty() {
+                debug!(
+                    target: "trie::sparse_trie_task",
+                    ?addr,
+                    "process_updates: computing storage root"
+                );
                 let storage_root =
                     trie.root().expect("updates are drained, trie should be revealed by now");
+                debug!(
+                    target: "trie::sparse_trie_task",
+                    ?addr,
+                    ?storage_root,
+                    "process_updates: storage root computed"
+                );
 
                 // If there is a pending account update for this address with known info, we can
                 // encode it into proper update right away.
@@ -437,11 +632,26 @@ where
                         )
                     };
                     self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                    debug!(
+                        target: "trie::sparse_trie_task",
+                        ?addr,
+                        "process_updates: upgraded pending account update to Changed"
+                    );
                 }
             }
         }
+        debug!(
+            target: "trie::sparse_trie_task",
+            storage_processed,
+            "process_updates: finished processing all storage tries"
+        );
 
         // Now handle pending account updates that can be upgraded to a proper update.
+        debug!(
+            target: "trie::sparse_trie_task",
+            pending_count = self.pending_account_updates.len(),
+            "process_updates: processing pending account updates"
+        );
         self.pending_account_updates.retain(|addr, account| {
             // If account has pending storage updates, it is still pending.
             if self.storage_updates.get(addr).is_some_and(|updates| !updates.is_empty()) {
@@ -484,8 +694,17 @@ where
 
             false
         });
+        debug!(
+            target: "trie::sparse_trie_task",
+            remaining_pending = self.pending_account_updates.len(),
+            "process_updates: finished processing pending account updates"
+        );
 
-        tracing::error!("applying account updates: {:?}", self.account_updates);
+        debug!(
+            target: "trie::sparse_trie_task",
+            account_updates_count = self.account_updates.len(),
+            "process_updates: calling update_leaves on account trie"
+        );
         // Process account trie updates and fill the account targets.
         self.trie
             .trie_mut()
@@ -493,9 +712,21 @@ where
                 targets.account_targets.push(Target::from_nibbles(target).with_min_len(min_len));
             })
             .map_err(ProviderError::other)?;
+        debug!(
+            target: "trie::sparse_trie_task",
+            account_updates_remaining = self.account_updates.len(),
+            account_targets = targets.account_targets.len(),
+            storage_targets = targets.storage_targets.len(),
+            "process_updates: finished update_leaves on account trie"
+        );
 
-        tracing::error!("dispatching account multiproof with targets: {:?}", targets);
         if !targets.is_empty() {
+            debug!(
+                target: "trie::sparse_trie_task",
+                account_targets = targets.account_targets.len(),
+                storage_targets = targets.storage_targets.len(),
+                "process_updates: dispatching account multiproof"
+            );
             self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput::V2 {
                 targets,
                 proof_result_sender: ProofResultContext::new(
@@ -505,6 +736,10 @@ where
                     Instant::now(),
                 ),
             })?;
+            debug!(
+                target: "trie::sparse_trie_task",
+                "process_updates: dispatch complete"
+            );
         }
 
         Ok(())
@@ -535,10 +770,23 @@ where
     A: SparseTrie + Send + Sync + Default,
     S: SparseTrie + Send + Sync + Default + Clone,
 {
-    trace!(target: "engine::root::sparse", "Updating sparse trie");
+    debug!(
+        target: "trie::sparse_trie_task",
+        accounts_len = state.accounts.len(),
+        storages_len = state.storages.len(),
+        "update_sparse_trie: starting"
+    );
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
+    debug!(
+        target: "trie::sparse_trie_task",
+        multiproof_type = match &multiproof {
+            ProofResult::Legacy(..) => "Legacy",
+            ProofResult::V2(..) => "V2",
+        },
+        "update_sparse_trie: revealing multiproof"
+    );
     match multiproof {
         ProofResult::Legacy(decoded, _) => {
             trie.reveal_decoded_multiproof(decoded)?;
@@ -548,13 +796,19 @@ where
         }
     }
     let reveal_multiproof_elapsed = started_at.elapsed();
-    trace!(
-        target: "engine::root::sparse",
+    debug!(
+        target: "trie::sparse_trie_task",
         ?reveal_multiproof_elapsed,
-        "Done revealing multiproof"
+        "update_sparse_trie: done revealing multiproof"
     );
 
     // Update storage slots with new values and calculate storage roots.
+    let num_storages = state.storages.len();
+    debug!(
+        target: "trie::sparse_trie_task",
+        num_storages,
+        "update_sparse_trie: starting parallel storage trie updates"
+    );
     let span = tracing::Span::current();
     let results: Vec<_> = state
         .storages
@@ -608,6 +862,14 @@ where
         })
         .collect();
 
+    let storage_elapsed = started_at.elapsed();
+    debug!(
+        target: "trie::sparse_trie_task",
+        num_results = results.len(),
+        ?storage_elapsed,
+        "update_sparse_trie: finished parallel storage trie updates"
+    );
+
     // Defer leaf removals until after updates/additions, so that we don't delete an intermediate
     // branch node during a removal and then re-add that branch back during a later leaf addition.
     // This is an optimization, but also a requirement inherited from multiproof generating, which
@@ -615,6 +877,12 @@ where
     let mut removed_accounts = Vec::new();
 
     // Update account storage roots
+    debug!(
+        target: "trie::sparse_trie_task",
+        num_results = results.len(),
+        remaining_accounts = state.accounts.len(),
+        "update_sparse_trie: processing storage results and account updates"
+    );
     let _enter =
         tracing::debug_span!(target: "engine::tree::payload_processor::sparse_trie", "account trie")
             .entered();
@@ -643,6 +911,11 @@ where
     }
 
     // Update accounts
+    debug!(
+        target: "trie::sparse_trie_task",
+        remaining_accounts = state.accounts.len(),
+        "update_sparse_trie: updating remaining accounts"
+    );
     for (address, account) in state.accounts {
         trace!(target: "engine::root::sparse", ?address, "Updating account");
         if !trie.update_account(address, account.unwrap_or_default(), blinded_provider_factory)? {
@@ -651,6 +924,11 @@ where
     }
 
     // Remove accounts
+    debug!(
+        target: "trie::sparse_trie_task",
+        removed_accounts_len = removed_accounts.len(),
+        "update_sparse_trie: removing accounts"
+    );
     for address in removed_accounts {
         trace!(target: "engine::root::sparse", ?address, "Removing account");
         let nibbles = Nibbles::unpack(address);
@@ -658,18 +936,20 @@ where
     }
 
     let elapsed_before = started_at.elapsed();
-    trace!(
-        target: "engine::root::sparse",
-        "Calculating subtries"
+    debug!(
+        target: "trie::sparse_trie_task",
+        ?elapsed_before,
+        "update_sparse_trie: calculating subtries"
     );
     trie.calculate_subtries();
 
     let elapsed = started_at.elapsed();
-    let below_level_elapsed = elapsed - elapsed_before;
-    trace!(
-        target: "engine::root::sparse",
-        ?below_level_elapsed,
-        "Intermediate nodes calculated"
+    let subtrie_elapsed = elapsed - elapsed_before;
+    debug!(
+        target: "trie::sparse_trie_task",
+        ?subtrie_elapsed,
+        ?elapsed,
+        "update_sparse_trie: completed"
     );
 
     Ok(elapsed)
