@@ -290,7 +290,9 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         self.metrics.inc_branch_nodes_seeked();
 
         if let Some((_, node)) = &entry {
-            assert!(!node.state_mask.is_empty());
+            if node.state_mask.is_empty() {
+                return Err(DatabaseError::Other("branch node state_mask is empty".to_string()))
+            }
         }
 
         Ok(entry)
