@@ -260,7 +260,9 @@ pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
     while !status.is_valid() {
         if status.is_invalid() {
             error!(?status, ?params, "Invalid {method}",);
-            panic!("Invalid {method}: {status:?}");
+            return Err(alloy_json_rpc::RpcError::LocalUsageError(Box::new(std::io::Error::other(
+                format!("Invalid {method}: {status:?}"),
+            ))))
         }
         if status.is_syncing() {
             return Err(alloy_json_rpc::RpcError::UnsupportedFeature(

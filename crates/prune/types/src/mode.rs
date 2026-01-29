@@ -41,8 +41,12 @@ impl PruneMode {
         segment: PruneSegment,
         purpose: PrunePurpose,
     ) -> Result<Option<(BlockNumber, Self)>, PruneSegmentError> {
+        let min_blocks = segment.min_blocks();
         let result = match self {
-            Self::Full if segment.min_blocks() == 0 => Some((tip, *self)),
+            Self::Full if min_blocks == 0 => Some((tip, *self)),
+            // For segments with min_blocks > 0, Full mode behaves like Distance(min_blocks)
+            Self::Full if min_blocks <= tip => Some((tip - min_blocks, *self)),
+            Self::Full => None, // Nothing to prune yet
             Self::Distance(distance) if *distance > tip => None, // Nothing to prune yet
             Self::Distance(distance) if *distance >= segment.min_blocks() => {
                 Some((tip - distance, *self))
@@ -84,9 +88,7 @@ impl PruneMode {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        PruneMode, PrunePurpose, PruneSegment, PruneSegmentError, MINIMUM_PRUNING_DISTANCE,
-    };
+    use crate::{PruneMode, PrunePurpose, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE};
     use assert_matches::assert_matches;
     use serde::Deserialize;
 
@@ -96,8 +98,8 @@ mod tests {
         let segment = PruneSegment::AccountHistory;
 
         let tests = vec![
-            // MINIMUM_PRUNING_DISTANCE makes this impossible
-            (PruneMode::Full, Err(PruneSegmentError::Configuration(segment))),
+            // Full mode with min_blocks > 0 behaves like Distance(min_blocks)
+            (PruneMode::Full, Ok(Some(tip - segment.min_blocks()))),
             // Nothing to prune
             (PruneMode::Distance(tip + 1), Ok(None)),
             (
@@ -107,12 +109,12 @@ mod tests {
             // Nothing to prune
             (PruneMode::Before(tip + 1), Ok(None)),
             (
-                PruneMode::Before(tip - MINIMUM_PRUNING_DISTANCE),
-                Ok(Some(tip - MINIMUM_PRUNING_DISTANCE - 1)),
+                PruneMode::Before(tip - MINIMUM_UNWIND_SAFE_DISTANCE),
+                Ok(Some(tip - MINIMUM_UNWIND_SAFE_DISTANCE - 1)),
             ),
             (
-                PruneMode::Before(tip - MINIMUM_PRUNING_DISTANCE - 1),
-                Ok(Some(tip - MINIMUM_PRUNING_DISTANCE - 2)),
+                PruneMode::Before(tip - MINIMUM_UNWIND_SAFE_DISTANCE - 1),
+                Ok(Some(tip - MINIMUM_UNWIND_SAFE_DISTANCE - 2)),
             ),
             // Nothing to prune
             (PruneMode::Before(tip - 1), Ok(None)),
@@ -146,13 +148,13 @@ mod tests {
         let tests = vec![
             (PruneMode::Distance(tip + 1), 1, !should_prune),
             (
-                PruneMode::Distance(MINIMUM_PRUNING_DISTANCE + 1),
-                tip - MINIMUM_PRUNING_DISTANCE - 1,
+                PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE + 1),
+                tip - MINIMUM_UNWIND_SAFE_DISTANCE - 1,
                 !should_prune,
             ),
             (
-                PruneMode::Distance(MINIMUM_PRUNING_DISTANCE + 1),
-                tip - MINIMUM_PRUNING_DISTANCE - 2,
+                PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE + 1),
+                tip - MINIMUM_UNWIND_SAFE_DISTANCE - 2,
                 should_prune,
             ),
             (PruneMode::Before(tip + 1), 1, should_prune),
