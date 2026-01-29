@@ -222,12 +222,6 @@ pub struct EngineArgs {
     #[arg(long = "engine.legacy-state-root", default_value_t = DefaultEngineValues::get_global().legacy_state_root_task_enabled)]
     pub legacy_state_root_task_enabled: bool,
 
-    /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-caching-and-prewarming
-    /// if you want to disable caching and prewarming
-    #[arg(long = "engine.caching-and-prewarming", default_value = "true", hide = true)]
-    #[deprecated]
-    pub caching_and_prewarming_enabled: bool,
-
     /// Disable state cache
     #[arg(long = "engine.disable-state-cache", default_value_t = DefaultEngineValues::get_global().state_cache_disabled)]
     pub state_cache_disabled: bool,
@@ -235,16 +229,6 @@ pub struct EngineArgs {
     /// Disable parallel prewarming
     #[arg(long = "engine.disable-prewarming", alias = "engine.disable-caching-and-prewarming", default_value_t = DefaultEngineValues::get_global().prewarming_disabled)]
     pub prewarming_disabled: bool,
-
-    /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
-    #[deprecated]
-    #[arg(long = "engine.parallel-sparse-trie", default_value = "true", hide = true)]
-    pub parallel_sparse_trie_enabled: bool,
-
-    /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
-    #[deprecated]
-    #[arg(long = "engine.disable-parallel-sparse-trie", default_value = "false", hide = true)]
-    pub parallel_sparse_trie_disabled: bool,
 
     /// Enable state provider latency metrics. This allows the engine to collect and report stats
     /// about how long state provider calls took during execution, but this does introduce slight
@@ -276,12 +260,6 @@ pub struct EngineArgs {
     /// Configure the number of reserved CPU cores for non-reth processes
     #[arg(long = "engine.reserved-cpu-cores", default_value_t = DefaultEngineValues::get_global().reserved_cpu_cores)]
     pub reserved_cpu_cores: usize,
-
-    /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-precompile-cache
-    /// if you want to disable precompile cache
-    #[arg(long = "engine.precompile-cache", default_value = "true", hide = true)]
-    #[deprecated]
-    pub precompile_cache_enabled: bool,
 
     /// Disable precompile cache
     #[arg(long = "engine.disable-precompile-cache", default_value_t = DefaultEngineValues::get_global().precompile_cache_disabled)]
@@ -326,7 +304,6 @@ pub struct EngineArgs {
     pub cache_metrics_disabled: bool,
 }
 
-#[allow(deprecated)]
 impl Default for EngineArgs {
     fn default() -> Self {
         let DefaultEngineValues {
@@ -356,18 +333,14 @@ impl Default for EngineArgs {
             memory_block_buffer_target,
             legacy_state_root_task_enabled,
             state_root_task_compare_updates,
-            caching_and_prewarming_enabled: true,
             state_cache_disabled,
             prewarming_disabled,
-            parallel_sparse_trie_enabled: true,
-            parallel_sparse_trie_disabled: false,
             state_provider_metrics,
             cross_block_cache_size,
             accept_execution_requests_hash,
             multiproof_chunking_enabled,
             multiproof_chunk_size,
             reserved_cpu_cores,
-            precompile_cache_enabled: true,
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
@@ -437,17 +410,13 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn engine_args() {
         let args = EngineArgs {
             persistence_threshold: 100,
             memory_block_buffer_target: 50,
             legacy_state_root_task_enabled: true,
-            caching_and_prewarming_enabled: true,
             state_cache_disabled: true,
             prewarming_disabled: true,
-            parallel_sparse_trie_enabled: true,
-            parallel_sparse_trie_disabled: false,
             state_provider_metrics: true,
             cross_block_cache_size: 256,
             state_root_task_compare_updates: true,
@@ -455,7 +424,6 @@ mod tests {
             multiproof_chunking_enabled: true,
             multiproof_chunk_size: 512,
             reserved_cpu_cores: 4,
-            precompile_cache_enabled: true,
             precompile_cache_disabled: true,
             state_root_fallback: true,
             always_process_payload_attributes_on_canonical_head: true,
