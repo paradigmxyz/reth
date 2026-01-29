@@ -6,7 +6,7 @@
 use alloy_primitives::B256;
 use core::fmt;
 use cuckoofilter::{CuckooError, CuckooFilter};
-use std::collections::hash_map::DefaultHasher;
+use rustc_hash::FxHasher;
 
 /// A cuckoo filter for tracking which accounts have storage.
 ///
@@ -18,7 +18,7 @@ use std::collections::hash_map::DefaultHasher;
 /// False negatives are impossible - if an account has storage, the filter will
 /// always report it as potentially having storage.
 pub struct StorageAccountFilter {
-    filter: CuckooFilter<DefaultHasher>,
+    filter: CuckooFilter<FxHasher>,
 }
 
 impl fmt::Debug for StorageAccountFilter {

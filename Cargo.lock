@@ -10544,6 +10544,7 @@ dependencies = [
  "reth-primitives-traits",
  "revm-database",
  "revm-state",
+ "rustc-hash",
  "serde",
  "serde_json",
  "serde_with",
