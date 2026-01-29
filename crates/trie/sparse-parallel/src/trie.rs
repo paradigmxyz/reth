@@ -6,7 +6,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::Decodable;
 use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
-use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
+use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
@@ -1143,12 +1143,12 @@ impl SparseTrieExt for ParallelSparseTrie {
                 LeafUpdate::Changed(value) => {
                     if value.is_empty() {
                         // === REMOVAL PATH ===
-                        // remove_leaf with NoRevealProvider is atomic: it returns BlindedNode
+                        // remove_leaf with NoRevealProvider is atomic: it returns a retriable
                         // error BEFORE any mutations (via pre_validate_reveal_chain).
                         match self.remove_leaf(&full_path, NoRevealProvider) {
                             Ok(()) => {}
                             Err(e) => {
-                                if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
+                                if let Some(path) = Self::get_retriable_path(&e) {
                                     let min_len = (path.len() as u8).min(64);
                                     if requested.insert((full_path, min_len)) {
                                         proof_required_fn(full_path, min_len);
@@ -1170,7 +1170,7 @@ impl SparseTrieExt for ParallelSparseTrie {
                         match self.update_leaf(full_path, value.clone(), NoRevealProvider) {
                             Ok(()) => {}
                             Err(e) => {
-                                if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
+                                if let Some(path) = Self::get_retriable_path(&e) {
                                     // Clean up: if this was a new leaf, remove the inserted value.
                                     // Use as_revealed_mut to avoid accidentally revealing subtries.
                                     if !existed {
@@ -1247,6 +1247,20 @@ impl ParallelSparseTrie {
         return false;
 
         num_changed_keys >= self.parallelism_thresholds.min_updated_nodes
+    }
+
+    /// Checks if an error is retriable (`BlindedNode` or `NodeNotFoundInProvider`) and extracts
+    /// the path if so.
+    ///
+    /// Both error types indicate that a node needs to be revealed before the operation can
+    /// succeed. `BlindedNode` occurs when traversing to a Hash node, while `NodeNotFoundInProvider`
+    /// occurs when `retain_updates` is enabled and an extension node's child needs revealing.
+    const fn get_retriable_path(e: &SparseTrieError) -> Option<Nibbles> {
+        match e.kind() {
+            SparseTrieErrorKind::BlindedNode { path, .. } |
+            SparseTrieErrorKind::NodeNotFoundInProvider { path } => Some(*path),
+            _ => None,
+        }
     }
 
     /// Creates a new revealed sparse trie from the given root node.
