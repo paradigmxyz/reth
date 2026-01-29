@@ -27,24 +27,30 @@ use reth_primitives_traits::{
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockNumReader, DBProvider,
     DatabaseProviderFactory, HeaderProvider, OriginalValuesKnown, StageCheckpointReader,
-    StateWriter, StorageSettingsCache,
+    StateWriter,
 };
+#[cfg(feature = "edge")]
+use reth_provider::StaticFileProviderFactory;
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::sets::DefaultStages;
 use reth_stages_api::{Pipeline, StageId};
 use reth_static_file::StaticFileProducer;
-use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
 use std::sync::Arc;
 use tokio::sync::watch;
 
-/// Counter contract deployed bytecode (runtime code after deployment)
-/// Contract: uint256 public count; function `increment()` { count += 1; }
+/// Counter contract deployed bytecode compiled with Solidity 0.8.31.
+/// ```solidity
+/// contract Counter {
+///     uint256 public count;
+///     function increment() public { count += 1; }
+/// }
+/// ```
 const COUNTER_DEPLOYED_BYTECODE: Bytes = bytes!(
-    "6080604052348015610010575f5ffd5b506004361061003f575f3560e01c806306661abd14610044578063a87d942c14610062578063d09de08a14610080575b5f5ffd5b61004c61008a565b60405161005991906100c9565b60405180910390f35b61006a61008f565b60405161007791906100c9565b60405180910390f35b610088610097565b005b5f5481565b5f5f54905090565b60015f5f8282546100a8919061010f565b9250508190555056fe5f819050919050565b6100c3816100b1565b82525050565b5f6020820190506100dc5f8301846100ba565b92915050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f610119826100b1565b9150610124836100b1565b925082820190508082111561013c5761013b6100e2565b5b9291505056fea264697066735822122041c62c65ccf4b20acbc63a6536de7fdc8a59427c5be486fd28cab33ad20a095c64736f6c63430008"
+    "6080604052348015600e575f5ffd5b50600436106030575f3560e01c806306661abd146034578063d09de08a14604e575b5f5ffd5b603a6056565b604051604591906089565b60405180910390f35b6054605b565b005b5f5481565b60015f5f828254606a919060cd565b92505081905550565b5f819050919050565b6083816073565b82525050565b5f602082019050609a5f830184607c565b92915050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f60d5826073565b915060de836073565b925082820190508082111560f35760f260a0565b5b9291505056fea2646970667358221220576016d010ec2f4f83b992fb97d16efd1bc54110c97aa5d5cb47d20d3b39a35264736f6c634300081f0033"
 );
 
 /// `increment()` function selector: `keccak256("increment()")`[:4]
@@ -177,7 +183,7 @@ async fn test_pipeline() -> eyre::Result<()> {
                 .into(),
                 ..MAINNET.genesis.clone()
             })
-            .paris_activated()
+            .shanghai_activated()
             .build(),
     );
 
@@ -221,7 +227,7 @@ async fn test_pipeline() -> eyre::Result<()> {
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: base_nonce + 1,
-                gas_limit: 50_000,
+                gas_limit: 100_000, // Enough gas for SSTORE operations
                 max_fee_per_gas: gas_price,
                 max_priority_fee_per_gas: 0,
                 to: TxKind::Call(CONTRACT_ADDRESS),
@@ -368,27 +374,38 @@ async fn test_pipeline() -> eyre::Result<()> {
                 "{stage_id} checkpoint should be at block 5"
             );
         }
+
+        // Verify the counter contract's storage was updated
+        // After 5 blocks with 1 increment each, slot 0 should be 5
+        use reth_storage_api::StateProvider;
+        let state = provider.latest();
+        let counter_storage = state.storage(CONTRACT_ADDRESS, B256::ZERO)?;
+        assert_eq!(
+            counter_storage,
+            Some(U256::from(5)),
+            "Counter storage slot 0 should be 5 after 5 increments"
+        );
     }
 
-    // Safety check: verify changesets are queryable from the correct storage location
+    // Verify changesets are queryable from static files before unwind (edge feature requirement)
+    // This validates that the #21561 fix works - unwind needs to read changesets from static files
+    #[cfg(feature = "edge")]
     {
-        let provider = pipeline_provider_factory.provider()?;
-        let settings = provider.cached_storage_settings();
-        if settings.storage_changesets_in_static_files {
-            // If changesets should be in static files, verify we can query them
-            let storage_changesets = provider.storage_changesets_range(1..=5)?;
-            assert!(
-                !storage_changesets.is_empty(),
-                "storage changesets should be queryable from static files"
-            );
-        }
-        if settings.account_changesets_in_static_files {
-            let account_changesets = provider.account_changesets_range(1..=5)?;
-            assert!(
-                !account_changesets.is_empty(),
-                "account changesets should be queryable from static files"
-            );
-        }
+        let static_file_provider = pipeline_provider_factory.static_file_provider();
+        static_file_provider.initialize_index()?;
+
+        use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
+        let storage_changesets = static_file_provider.storage_changesets_range(1..=5)?;
+        let account_changesets = static_file_provider.account_changesets_range(1..=5)?;
+
+        assert!(
+            !storage_changesets.is_empty(),
+            "storage changesets should be queryable from static files for blocks 1-5"
+        );
+        assert!(
+            !account_changesets.is_empty(),
+            "account changesets should be queryable from static files for blocks 1-5"
+        );
     }
 
     // Unwind to block 2
