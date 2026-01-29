@@ -162,6 +162,12 @@ pub(crate) struct ForkchoiceUpdatedMetrics {
     pub(crate) forkchoice_updated_latency: Histogram,
     /// Latency for the last forkchoice updated call.
     pub(crate) forkchoice_updated_last: Gauge,
+    /// The last valid head block.
+    pub(crate) forkchoice_last_valid_head: Gauge,
+    /// The last valid safe block.
+    pub(crate) forkchoice_last_valid_safe: Gauge,
+    /// The last valid finalized block.
+    pub(crate) forkchoice_last_valid_finalized: Gauge,
     /// Time diff between new payload call response and the next forkchoice updated call request.
     pub(crate) new_payload_forkchoice_updated_time_diff: Histogram,
     /// Time from previous forkchoice updated finish to current forkchoice updated start (idle
@@ -173,6 +179,13 @@ pub(crate) struct ForkchoiceUpdatedMetrics {
 }
 
 impl ForkchoiceUpdatedMetrics {
+    /// Updates the last valid forkchoice state metrics.
+    pub(crate) fn set_last_valid(&self, head_num: u64, safe_num: u64, finalized_num: u64) {
+        self.forkchoice_last_valid_head.set(head_num as f64);
+        self.forkchoice_last_valid_safe.set(safe_num as f64);
+        self.forkchoice_last_valid_finalized.set(finalized_num as f64);
+    }
+
     /// Increment the forkchoiceUpdated counter based on the given result
     pub(crate) fn update_response_metrics(
         &mut self,
