@@ -541,7 +541,7 @@ impl<H: BlockHeader> ChainSpec<H> {
                     }
                 }
 
-                bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
+                bf_params.first().map(|(_, params)| *params).unwrap_or_else(BaseFeeParams::ethereum)
             }
         }
     }
