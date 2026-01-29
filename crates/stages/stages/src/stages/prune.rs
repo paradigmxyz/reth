@@ -2,7 +2,7 @@ use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockReader, ChainStateBlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
-    StageCheckpointReader, StaticFileProviderFactory, StorageSettingsCache,
+    RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_prune::{
     PruneMode, PruneModes, PruneSegment, PrunerBuilder, SegmentOutput, SegmentOutputCheckpoint,
@@ -10,7 +10,7 @@ use reth_prune::{
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
-use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
+use reth_storage_api::{ChangeSetReader, StorageChangeSetReader, StorageSettingsCache};
 use tracing::info;
 
 /// The prune stage that runs the pruner with the provided prune modes.
@@ -49,7 +49,8 @@ where
             Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
         > + StorageSettingsCache
         + ChangeSetReader
-        + StorageChangeSetReader,
+        + StorageChangeSetReader
+        + RocksDBProviderFactory,
 {
     fn id(&self) -> StageId {
         StageId::Prune
@@ -156,7 +157,8 @@ where
             Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
         > + StorageSettingsCache
         + ChangeSetReader
-        + StorageChangeSetReader,
+        + StorageChangeSetReader
+        + RocksDBProviderFactory,
 {
     fn id(&self) -> StageId {
         StageId::PruneSenderRecovery
