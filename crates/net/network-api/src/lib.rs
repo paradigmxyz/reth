@@ -101,6 +101,20 @@ pub trait PeersInfo: Send + Sync {
     /// Note: this should only include established connections and _not_ ongoing attempts.
     fn num_connected_peers(&self) -> usize;
 
+    /// Returns the number of currently connected inbound peers.
+    ///
+    /// Defaults to 0 for no-op/mock implementations, override to return the actual count.
+    fn num_inbound_peers(&self) -> usize {
+        0
+    }
+
+    /// Returns the number of currently connected outbound peers.
+    ///
+    /// Defaults to 0 for no-op/mock implementations, override to return the actual count.
+    fn num_outbound_peers(&self) -> usize {
+        0
+    }
+
     /// Returns the Ethereum Node Record of the node.
     fn local_node_record(&self) -> NodeRecord;
 
