@@ -154,15 +154,17 @@ where
     pipeline
 }
 
-/// Tests pipeline with ALL stages enabled using a pre-deployed Counter contract.
+/// Tests pipeline with ALL stages enabled using both ETH transfers and contract storage changes.
 ///
 /// This test:
-/// 1. Deploys a Counter contract in genesis
-/// 2. Calls increment() in each block, creating storage changes
+/// 1. Pre-funds a signer account and deploys a Counter contract in genesis
+/// 2. Each block contains two transactions:
+///    - ETH transfer to a recipient (account state changes)
+///    - Counter increment() call (storage state changes)
 /// 3. Runs the full pipeline with ALL stages enabled
 /// 4. Forward syncs to block 5, unwinds to block 2
 ///
-/// This exercises storage hashing and history stages with real contract state.
+/// This exercises both account and storage hashing/history stages.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pipeline() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
@@ -171,6 +173,9 @@ async fn test_pipeline() -> eyre::Result<()> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
     let signer_address = public_key_to_address(key_pair.public_key());
+
+    // Recipient address for ETH transfers
+    let recipient_address = Address::new([0x11; 20]);
 
     // Create a chain spec with:
     // - Signer pre-funded with 1000 ETH
@@ -212,16 +217,34 @@ async fn test_pipeline() -> eyre::Result<()> {
     let mut parent_hash = genesis.hash();
 
     let gas_price = INITIAL_BASE_FEE as u128;
+    let transfer_value = U256::from(ETH_TO_WEI); // 1 ETH per block
 
     for block_num in 1..=num_blocks {
-        let nonce = block_num - 1;
+        // Each block has 2 transactions: ETH transfer + Counter increment
+        let base_nonce = (block_num - 1) * 2;
 
-        // Create increment() call transaction
-        let tx = sign_tx_with_key_pair(
+        // Transaction 1: ETH transfer
+        let eth_transfer_tx = sign_tx_with_key_pair(
             key_pair,
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
-                nonce,
+                nonce: base_nonce,
+                gas_limit: 21_000,
+                max_fee_per_gas: gas_price,
+                max_priority_fee_per_gas: 0,
+                to: TxKind::Call(recipient_address),
+                value: transfer_value,
+                input: Bytes::new(),
+                ..Default::default()
+            }),
+        );
+
+        // Transaction 2: Counter increment
+        let counter_tx = sign_tx_with_key_pair(
+            key_pair,
+            Transaction::Eip1559(TxEip1559 {
+                chain_id: chain_spec.chain.id(),
+                nonce: base_nonce + 1,
                 gas_limit: 50_000,
                 max_fee_per_gas: gas_price,
                 max_priority_fee_per_gas: 0,
@@ -232,7 +255,7 @@ async fn test_pipeline() -> eyre::Result<()> {
             }),
         );
 
-        let transactions = vec![tx.clone()];
+        let transactions = vec![eth_transfer_tx, counter_tx];
         let tx_root = calculate_transaction_root(&transactions);
 
         // Build a temporary header for execution
@@ -257,7 +280,7 @@ async fn test_pipeline() -> eyre::Result<()> {
                     withdrawals: None,
                 },
             ),
-            vec![signer_address],
+            vec![signer_address, signer_address], // Both txs from same sender
         );
 
         // Execute in a scope so state_provider is dropped before we use provider for writes
@@ -278,17 +301,9 @@ async fn test_pipeline() -> eyre::Result<()> {
             &hashed_state.clone().into_sorted(),
         )?;
 
-        // Create receipt for receipt root calculation
-        let receipt = reth_ethereum_primitives::Receipt {
-            tx_type: reth_ethereum_primitives::TxType::Eip1559,
-            success: true,
-            cumulative_gas_used: gas_used,
-            ..Default::default()
-        };
-        let receipts = [receipt];
-        let receipts_root = calculate_receipt_root(
-            &receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>(),
-        );
+        // Create receipts for receipt root calculation (one per transaction)
+        let receipts: Vec<_> = output.receipts.iter().map(|r| r.with_bloom_ref()).collect();
+        let receipts_root = calculate_receipt_root(&receipts);
 
         let header = Header {
             parent_hash,
@@ -309,8 +324,6 @@ async fn test_pipeline() -> eyre::Result<()> {
         );
 
         // Write the plain state to database so subsequent blocks build on it
-        // Note: We skip write_state() and update_history_indices() as those require block indices
-        // to exist in the database. We only need plain state for subsequent block execution.
         let plain_state = output.state.to_plain_state(OriginalValuesKnown::Yes);
         provider.write_state_changes(plain_state)?;
         provider.write_hashed_state(&hashed_state.into_sorted())?;
