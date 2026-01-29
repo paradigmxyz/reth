@@ -43,7 +43,7 @@ use reth_provider::{
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, State};
-use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
+use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, StorageAccountFilter};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
@@ -140,7 +140,7 @@ where
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
     /// Optional storage filter for skipping storage proofs of accounts without storage
-    storage_filter: Option<Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>>,
+    storage_filter: Option<Arc<StorageAccountFilter>>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -175,7 +175,7 @@ where
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
-        storage_filter: Option<Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>>,
+        storage_filter: Option<Arc<StorageAccountFilter>>,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
@@ -202,57 +202,40 @@ where
     }
 
     /// Sets the storage filter for skipping storage proofs of accounts without storage.
-    pub fn set_storage_filter(
-        &mut self,
-        filter: Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
-    ) {
+    pub fn set_storage_filter(&mut self, filter: Arc<StorageAccountFilter>) {
         self.storage_filter = Some(filter);
     }
 
-    /// Updates the storage filter with accounts from the hashed post state in background.
-    ///
-    /// This spawns a background thread that inserts accounts with non-zero storage and removes
-    /// destroyed accounts. Called immediately after state root computation completes successfully.
-    fn update_storage_filter(&self, hashed_state: Arc<reth_trie::HashedPostState>) {
-        let Some(filter) = self.storage_filter.clone() else { return };
+    /// Updates the storage filter with accounts from the hashed post state.
+    fn update_storage_filter(&mut self, hashed_state: Arc<reth_trie::HashedPostState>) {
+        let Some(filter) = self.storage_filter.take() else { return };
 
-        self.payload_processor.executor().spawn_blocking(move || {
-            let mut filter_guard = filter.write();
-            let mut inserted = 0usize;
-            let mut removed = 0usize;
-            let mut failures = 0usize;
+        let mut inserted = 0usize;
+        let mut failures = 0usize;
 
-            // Process destroyed accounts (accounts with None value)
-            for (addr, account) in &hashed_state.accounts {
-                if account.is_none() && filter_guard.remove(*addr) {
-                    removed += 1;
+        let mut filter = Arc::unwrap_or_clone(filter);
+        // Process accounts with non-zero storage
+        for (addr, storage) in &hashed_state.storages {
+            let has_non_zero =
+                storage.storage.iter().any(|(_, value)| *value != alloy_primitives::U256::ZERO);
+
+            if has_non_zero {
+                if filter.insert(*addr).is_err() {
+                    failures += 1;
+                } else {
+                    inserted += 1;
                 }
             }
+        }
 
-            // Process accounts with non-zero storage
-            for (addr, storage) in &hashed_state.storages {
-                let has_non_zero =
-                    storage.storage.iter().any(|(_, value)| *value != alloy_primitives::U256::ZERO);
+        self.storage_filter = Some(Arc::new(filter));
 
-                if has_non_zero {
-                    if filter_guard.insert(*addr).is_err() {
-                        failures += 1;
-                    } else {
-                        inserted += 1;
-                    }
-                }
-            }
-
-            if inserted > 0 || removed > 0 || failures > 0 {
-                tracing::trace!(
-                    target: "engine::tree::payload_validator",
-                    inserted,
-                    removed,
-                    failures,
-                    "Updated storage filter after state root"
-                );
-            }
-        });
+        tracing::debug!(
+            target: "engine::tree::payload_validator",
+            inserted,
+            failures,
+            "Updated storage filter"
+        );
     }
 
     /// Converts a [`BlockOrPayload`] to a recovered block.
@@ -1734,11 +1717,7 @@ pub trait EngineValidator<
     ///
     /// This is called after the filter is built from the database.
     /// Default implementation does nothing.
-    fn set_storage_filter(
-        &mut self,
-        _filter: Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
-    ) {
-    }
+    fn set_storage_filter(&mut self, _filter: Arc<StorageAccountFilter>) {}
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1803,10 +1782,7 @@ where
         );
     }
 
-    fn set_storage_filter(
-        &mut self,
-        filter: Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
-    ) {
+    fn set_storage_filter(&mut self, filter: Arc<StorageAccountFilter>) {
         self.storage_filter = Some(filter);
     }
 }
