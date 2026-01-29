@@ -13,6 +13,9 @@ pub enum AdvancePersistenceError {
     /// The persistence channel was closed unexpectedly
     #[error("persistence channel closed")]
     ChannelClosed,
+    /// No progress was made after multiple persistence attempts
+    #[error("no progress in persistence after multiple attempts")]
+    NoProgress,
     /// A provider error
     #[error(transparent)]
     Provider(#[from] ProviderError),

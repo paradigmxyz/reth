@@ -1319,6 +1319,10 @@ where
 
     /// Persists all remaining blocks until none are left.
     fn persist_until_complete(&mut self) -> Result<(), AdvancePersistenceError> {
+        let mut last_persisted_count = 0;
+        let mut no_progress_iterations = 0;
+        const MAX_NO_PROGRESS_ITERATIONS: usize = 3;
+
         loop {
             // Wait for any in-progress persistence to complete (blocking)
             if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
@@ -1333,7 +1337,28 @@ where
                 return Ok(())
             }
 
-            debug!(target: "engine::tree", count = blocks_to_persist.len(), "persisting remaining blocks before shutdown");
+            let current_count = blocks_to_persist.len();
+
+            // Detect if persistence is making progress. If the same number of blocks need to be
+            // persisted after multiple iterations, the persistence task may be failing silently.
+            if current_count == last_persisted_count {
+                no_progress_iterations += 1;
+                if no_progress_iterations >= MAX_NO_PROGRESS_ITERATIONS {
+                    error!(
+                        target: "engine::tree",
+                        count = current_count,
+                        "No progress in persistence after {} iterations",
+                        MAX_NO_PROGRESS_ITERATIONS
+                    );
+                    return Err(AdvancePersistenceError::NoProgress);
+                }
+            } else {
+                no_progress_iterations = 0;
+            }
+
+            last_persisted_count = current_count;
+
+            debug!(target: "engine::tree", count = current_count, "persisting remaining blocks before shutdown");
             self.persist_blocks(blocks_to_persist);
         }
     }
