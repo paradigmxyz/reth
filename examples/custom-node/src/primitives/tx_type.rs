@@ -5,10 +5,7 @@ use reth_codecs::{txtype::COMPACT_EXTENDED_IDENTIFIER_FLAG, Compact};
 pub const PAYMENT_TX_TYPE_ID: u8 = 42;
 
 impl Compact for TxTypeCustom {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: BufMut>(&self, buf: &mut B) -> usize {
         match self {
             Self::Op(ty) => ty.to_compact(buf),
             Self::Payment => {

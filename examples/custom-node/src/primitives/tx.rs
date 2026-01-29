@@ -68,7 +68,7 @@ impl FromTxCompact for CustomTransaction {
 }
 
 impl ToTxCompact for CustomTransaction {
-    fn to_tx_compact(&self, buf: &mut (impl BufMut + AsMut<[u8]>)) {
+    fn to_tx_compact(&self, buf: &mut impl BufMut) {
         match self {
             CustomTransaction::Op(tx) => tx.to_tx_compact(buf),
             CustomTransaction::Payment(tx) => {
@@ -79,10 +79,7 @@ impl ToTxCompact for CustomTransaction {
 }
 
 impl Compact for CustomTransaction {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: BufMut>(&self, buf: &mut B) -> usize {
         <Self as CompactEnvelope>::to_compact(self, buf)
     }
 

@@ -11,7 +11,7 @@ use ffi::{
     MDBX_NEXT_MULTIPLE, MDBX_NEXT_NODUP, MDBX_PREV, MDBX_PREV_DUP, MDBX_PREV_MULTIPLE,
     MDBX_PREV_NODUP, MDBX_SET, MDBX_SET_KEY, MDBX_SET_LOWERBOUND, MDBX_SET_RANGE,
 };
-use std::{borrow::Cow, ffi::c_void, fmt, marker::PhantomData, mem, ptr};
+use std::{borrow::Cow, ffi::c_void, fmt, marker::PhantomData, mem, ptr, slice};
 
 /// A cursor for navigating the items within a database.
 pub struct Cursor<K>
@@ -445,6 +445,31 @@ impl Cursor<RW> {
         })?;
 
         Ok(())
+    }
+
+    /// Returns a buffer which can be used to write a value into the item at the
+    /// given key and with the given length. The buffer must be completely
+    /// filled by the caller.
+    ///
+    /// This uses MDBX's `MDBX_RESERVE` flag to allocate space in the database
+    /// and return a mutable reference to it, avoiding intermediate allocations.
+    #[allow(clippy::mut_from_ref)]
+    pub fn reserve(&mut self, key: &[u8], len: usize, flags: WriteFlags) -> Result<&mut [u8]> {
+        let key_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let mut data_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: len, iov_base: ptr::null_mut::<c_void>() };
+        unsafe {
+            mdbx_result(self.txn.txn_execute(|_| {
+                ffi::mdbx_cursor_put(
+                    self.cursor,
+                    &key_val,
+                    &mut data_val,
+                    flags.bits() | ffi::MDBX_RESERVE,
+                )
+            })?)?;
+            Ok(slice::from_raw_parts_mut(data_val.iov_base as *mut u8, data_val.iov_len))
+        }
     }
 
     /// Deletes the current key/data pair.

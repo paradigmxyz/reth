@@ -10,10 +10,7 @@ const TX_KIND_TYPE_CREATE: usize = 0;
 const TX_KIND_TYPE_CALL: usize = 1;
 
 impl Compact for TxKind {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         match self {
             Self::Create => TX_KIND_TYPE_CREATE,
             Self::Call(address) => {

@@ -401,7 +401,7 @@ where
 {
     fn to_compact<Buf>(&self, buf: &mut Buf) -> usize
     where
-        Buf: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
+        Buf: alloy_rlp::bytes::BufMut,
     {
         buf.put_u8(self.ty());
         match self {

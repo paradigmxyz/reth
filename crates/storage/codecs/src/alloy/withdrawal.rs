@@ -29,10 +29,7 @@ pub(crate) struct Withdrawal {
 }
 
 impl Compact for AlloyWithdrawal {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         let withdrawal = Withdrawal {
             index: self.index,
             validator_index: self.validator_index,
@@ -55,10 +52,7 @@ impl Compact for AlloyWithdrawal {
 }
 
 impl Compact for Withdrawals {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         self.as_ref().to_compact(buf)
     }
 

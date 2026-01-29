@@ -7,10 +7,7 @@ use alloy_primitives::Address;
 
 /// Implement `Compact` for `AccessListItem` and `AccessList`.
 impl Compact for AccessListItem {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         let mut buffer = Vec::new();
         self.address.to_compact(&mut buffer);
         self.storage_keys.specialized_to_compact(&mut buffer);
@@ -29,10 +26,7 @@ impl Compact for AccessListItem {
 }
 
 impl Compact for AccessList {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         let mut buffer = Vec::new();
         self.0.to_compact(&mut buffer);
         buf.put(&buffer[..]);

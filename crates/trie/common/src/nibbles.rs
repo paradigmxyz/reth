@@ -24,10 +24,7 @@ impl From<Vec<u8>> for StoredNibbles {
 
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for StoredNibbles {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         let bytes = self.0.iter().collect::<arrayvec::ArrayVec<u8, 64>>();
         buf.put_slice(&bytes);
         bytes.len()
@@ -71,10 +68,7 @@ impl From<StoredNibblesSubKey> for Nibbles {
 
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for StoredNibblesSubKey {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         assert!(self.0.len() <= 64);
 
         let bytes = self.0.iter().collect::<arrayvec::ArrayVec<u8, 64>>();

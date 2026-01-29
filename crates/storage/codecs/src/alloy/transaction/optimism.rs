@@ -45,10 +45,7 @@ pub(crate) struct TxDeposit {
 }
 
 impl Compact for AlloyTxDeposit {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         let tx = TxDeposit {
             source_hash: self.source_hash,
             from: self.from,
@@ -83,10 +80,7 @@ impl Compact for AlloyTxDeposit {
 }
 
 impl crate::Compact for OpTxType {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         use crate::txtype::*;
 
         match self {
@@ -130,10 +124,7 @@ impl crate::Compact for OpTxType {
 }
 
 impl Compact for OpTypedTransaction {
-    fn to_compact<B>(&self, out: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, out: &mut B) -> usize {
         let identifier = self.tx_type().to_compact(out);
         match self {
             Self::Legacy(tx) => tx.to_compact(out),
@@ -173,7 +164,7 @@ impl Compact for OpTypedTransaction {
 }
 
 impl ToTxCompact for OpTxEnvelope {
-    fn to_tx_compact(&self, buf: &mut (impl BufMut + AsMut<[u8]>)) {
+    fn to_tx_compact(&self, buf: &mut impl BufMut) {
         match self {
             Self::Legacy(tx) => tx.tx().to_compact(buf),
             Self::Eip2930(tx) => tx.tx().to_compact(buf),
@@ -237,10 +228,7 @@ impl Envelope for OpTxEnvelope {
 }
 
 impl Compact for OpTxEnvelope {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: BufMut>(&self, buf: &mut B) -> usize {
         CompactEnvelope::to_compact(self, buf)
     }
 

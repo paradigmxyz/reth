@@ -278,7 +278,7 @@ mod tests {
                 }
             }
             impl reth_codecs::Compact for TestStruct {
-                fn to_compact<B>(&self, buf: &mut B) -> usize where B: reth_codecs::__private::bytes::BufMut + AsMut<[u8]> {
+                fn to_compact<B: reth_codecs::__private::bytes::BufMut>(&self, buf: &mut B) -> usize {
                     let mut flags = TestStructFlags::default();
                     let mut total_length = 0;
                     let mut buffer = reth_codecs::__private::bytes::BytesMut::new();

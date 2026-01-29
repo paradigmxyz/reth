@@ -194,7 +194,7 @@ macro_rules! impl_compression_for_compact {
             impl$(<$($generic: core::fmt::Debug + Send + Sync + Compact),*>)? Compress for $name$(<$($generic),*>)? {
                 type Compressed = Vec<u8>;
 
-                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
+                fn compress_to_buf<B: bytes::BufMut>(&self, buf: &mut B) {
                     let _ = Compact::to_compact(self, buf);
                 }
             }
@@ -255,7 +255,7 @@ macro_rules! impl_compression_fixed_compact {
                     Some(self.as_ref())
                 }
 
-                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
+                fn compress_to_buf<B: bytes::BufMut>(&self, buf: &mut B) {
                     let _ = Compact::to_compact(self, buf);
                 }
             }

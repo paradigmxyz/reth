@@ -52,10 +52,7 @@ impl From<(B256, U256)> for StorageEntry {
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for StorageEntry {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
+    fn to_compact<B: bytes::BufMut>(&self, buf: &mut B) -> usize {
         // for now put full bytes and later compress it.
         buf.put_slice(&self.key[..]);
         self.value.to_compact(buf) + 32
