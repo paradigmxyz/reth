@@ -40,8 +40,8 @@ use crate::{
     stages::{
         AccountHashingStage, BodyStage, EraImportSource, EraStage, ExecutionStage, FinishStage,
         HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
-        ParallelMerkleStage, PruneSenderRecoveryStage, PruneStage, SenderRecoveryStage,
-        StorageHashingStage, TransactionLookupStage,
+        ParallelMerkleStage, ParallelMerkleUnwindStage, PruneSenderRecoveryStage, PruneStage,
+        SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
