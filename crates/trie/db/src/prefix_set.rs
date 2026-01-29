@@ -3,7 +3,12 @@ use alloy_primitives::{
     BlockNumber, B256,
 };
 use core::ops::RangeInclusive;
-use reth_db_api::{cursor::DbCursorRO, models::BlockNumberAddress, tables, transaction::DbTx};
+use reth_db_api::{
+    cursor::DbCursorRO,
+    models::{AccountBeforeTx, BlockNumberAddress},
+    tables,
+    transaction::DbTx,
+};
 use reth_primitives_traits::StorageEntry;
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderError;
