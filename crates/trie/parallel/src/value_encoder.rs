@@ -103,7 +103,7 @@ where
                     })?;
 
                 let wait_start = Instant::now();
-                let result = rx
+                let result = proof_result_rx
                     .recv()
                     .map_err(|_| {
                         StateProofError::Database(DatabaseError::Other(format!(
