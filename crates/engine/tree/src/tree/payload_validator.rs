@@ -135,7 +135,7 @@ where
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
     /// Optional storage filter for skipping storage proofs of accounts without storage
-    storage_filter: Option<Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>>,
+    storage_filter: Option<Arc<reth_trie_common::SharedStorageFilter>>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -168,7 +168,7 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
-        storage_filter: Option<Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>>,
+        storage_filter: Option<Arc<reth_trie_common::SharedStorageFilter>>,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
@@ -196,27 +196,31 @@ where
     /// Sets the storage filter for skipping storage proofs of accounts without storage.
     pub fn set_storage_filter(
         &mut self,
-        filter: Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
+        filter: Arc<reth_trie_common::SharedStorageFilter>,
     ) {
         self.storage_filter = Some(filter);
     }
 
     /// Updates the storage filter with accounts from the hashed post state in background.
     ///
-    /// This spawns a background thread that inserts accounts with non-zero storage and removes
-    /// destroyed accounts. Called immediately after state root computation completes successfully.
+    /// This spawns a background thread that builds a new filter with updates applied, then
+    /// atomically swaps it in. This uses RCU (read-copy-update) semantics so readers on the
+    /// hot path are never blocked.
     fn update_storage_filter(&self, hashed_state: Arc<reth_trie::HashedPostState>) {
         let Some(filter) = self.storage_filter.clone() else { return };
 
         self.payload_processor.executor().spawn_blocking(move || {
-            let mut filter_guard = filter.write();
+            // Load current filter and clone it for modification
+            let current = filter.load();
+            let mut new_filter = (**current).clone();
+
             let mut inserted = 0usize;
             let mut removed = 0usize;
             let mut failures = 0usize;
 
             // Process destroyed accounts (accounts with None value)
             for (addr, account) in &hashed_state.accounts {
-                if account.is_none() && filter_guard.remove(*addr) {
+                if account.is_none() && new_filter.remove(*addr) {
                     removed += 1;
                 }
             }
@@ -227,12 +231,17 @@ where
                     storage.storage.iter().any(|(_, value)| *value != alloy_primitives::U256::ZERO);
 
                 if has_non_zero {
-                    if filter_guard.insert(*addr).is_err() {
+                    if new_filter.insert(*addr).is_err() {
                         failures += 1;
                     } else {
                         inserted += 1;
                     }
                 }
+            }
+
+            // Atomically swap in the new filter
+            if inserted > 0 || removed > 0 {
+                filter.swap(new_filter);
             }
 
             if inserted > 0 || removed > 0 || failures > 0 {
@@ -1428,7 +1437,7 @@ pub trait EngineValidator<
     /// Default implementation does nothing.
     fn set_storage_filter(
         &mut self,
-        _filter: Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
+        _filter: Arc<reth_trie_common::SharedStorageFilter>,
     ) {
     }
 }
@@ -1496,7 +1505,7 @@ where
 
     fn set_storage_filter(
         &mut self,
-        filter: Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
+        filter: Arc<reth_trie_common::SharedStorageFilter>,
     ) {
         self.storage_filter = Some(filter);
     }
