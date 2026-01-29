@@ -17,7 +17,7 @@ use alloy_rpc_types_trace::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::TraceApiServer;
@@ -175,8 +175,6 @@ where
                     // need to apply the state changes of this call before executing the
                     // next call
                     if calls.peek().is_some() {
-                        // need to apply the state changes of this call before executing
-                        // the next call
                         db.commit(res.state)
                     }
                 }
@@ -278,21 +276,13 @@ where
     ///
     /// - if Paris hardfork is activated, no block rewards are given
     /// - if Paris hardfork is not activated, calculate block rewards with block number only
-    /// - if Paris hardfork is unknown, calculate block rewards with block number and ttd
     fn calculate_base_block_reward<H: BlockHeader>(
         &self,
         header: &H,
     ) -> Result<Option<u128>, Eth::Error> {
         let chain_spec = self.provider().chain_spec();
-        let is_paris_activated = if chain_spec.chain() == MAINNET.chain() {
-            Some(header.number()) >= EthereumHardfork::Paris.mainnet_activation_block()
-        } else if chain_spec.chain() == SEPOLIA.chain() {
-            Some(header.number()) >= EthereumHardfork::Paris.sepolia_activation_block()
-        } else {
-            true
-        };
 
-        if is_paris_activated {
+        if chain_spec.is_paris_active_at_block(header.number()) {
             return Ok(None)
         }
 
@@ -382,9 +372,11 @@ where
 
         let mut all_traces = Vec::new();
         let mut block_traces = Vec::with_capacity(self.inner.eth_config.max_tracing_requests);
-        for chunk_start in (start..end).step_by(self.inner.eth_config.max_tracing_requests) {
-            let chunk_end =
-                std::cmp::min(chunk_start + self.inner.eth_config.max_tracing_requests as u64, end);
+        for chunk_start in (start..=end).step_by(self.inner.eth_config.max_tracing_requests) {
+            let chunk_end = std::cmp::min(
+                chunk_start + self.inner.eth_config.max_tracing_requests as u64 - 1,
+                end,
+            );
 
             // fetch all blocks in that chunk
             let blocks = self

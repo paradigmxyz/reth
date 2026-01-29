@@ -94,6 +94,7 @@ impl RethRpcServerConfig for RpcServerArgs {
     fn eth_config(&self) -> EthConfig {
         EthConfig::default()
             .max_tracing_requests(self.rpc_max_tracing_requests)
+            .max_blocking_io_requests(self.rpc_max_blocking_io_requests)
             .max_trace_filter_blocks(self.rpc_max_trace_filter_blocks)
             .max_blocks_per_filter(self.rpc_max_blocks_per_filter.unwrap_or_max())
             .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
@@ -121,6 +122,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             max_receipts: self.rpc_state_cache.max_receipts,
             max_headers: self.rpc_state_cache.max_headers,
             max_concurrent_db_requests: self.rpc_state_cache.max_concurrent_db_requests,
+            max_cached_tx_hashes: self.rpc_state_cache.max_cached_tx_hashes,
         }
     }
 
@@ -138,7 +140,7 @@ impl RethRpcServerConfig for RpcServerArgs {
 
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
         let mut config = TransportRpcModuleConfig::default()
-            .with_config(RpcModuleConfig::new(self.eth_config(), self.flashbots_config()));
+            .with_config(RpcModuleConfig::new(self.eth_config()));
 
         if self.http {
             config = config.with_http(

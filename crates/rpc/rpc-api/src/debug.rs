@@ -1,9 +1,10 @@
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types_debug::{ExecutionWitness, StorageRangeResult as RpcStorageRangeResult};
-use alloy_rpc_types_eth::{Block, Bundle, StateContext};
+use alloy_rpc_types_eth::{Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
@@ -38,7 +39,7 @@ pub trait DebugApi<TxReq: RpcObject> {
 
     /// Returns an array of recent bad blocks that the client has seen on the network.
     #[method(name = "getBadBlocks")]
-    async fn bad_blocks(&self) -> RpcResult<Vec<Block>>;
+    async fn bad_blocks(&self) -> RpcResult<Vec<serde_json::Value>>;
 
     /// Returns the structured logs created during the execution of EVM between two blocks
     /// (excluding start) as a JSON object.
@@ -155,6 +156,10 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         hash: B256,
     ) -> RpcResult<ExecutionWitness>;
+
+    /// Re-executes a block and returns the Block Access List (BAL) as defined in EIP-7928.
+    #[method(name = "getBlockAccessList")]
+    async fn debug_get_block_access_list(&self, block_id: BlockId) -> RpcResult<BlockAccessList>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is
     /// emitted at that location, the stack of the goroutine executing the log statement will

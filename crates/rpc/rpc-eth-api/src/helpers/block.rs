@@ -59,8 +59,8 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
 
             let block = block.clone_into_rpc_block(
                 full.into(),
-                |tx, tx_info| self.tx_resp_builder().fill(tx, tx_info),
-                |header, size| self.tx_resp_builder().convert_header(header, size),
+                |tx, tx_info| self.converter().fill(tx, tx_info),
+                |header, size| self.converter().convert_header(header, size),
             )?;
             Ok(Some(block))
         }
@@ -74,7 +74,11 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<usize>, Self::Error>> + Send {
         async move {
+            // If no pending block from provider, build the pending block locally.
             if block_id.is_pending() {
+                if let Some(pending) = self.local_pending_block().await? {
+                    return Ok(Some(pending.block.body().transaction_count()));
+                }
                 // Pending block can be fetched directly without need for caching
                 return Ok(self
                     .provider()
@@ -155,7 +159,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                     .collect::<Vec<_>>();
 
                 return Ok(self
-                    .tx_resp_builder()
+                    .converter()
                     .convert_receipts_with_block(inputs, block.sealed_block())
                     .map(Some)?)
             }
@@ -256,7 +260,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                         alloy_consensus::Block::<alloy_consensus::TxEnvelope, _>::uncle(header);
                     let size = block.length();
                     let header = self
-                        .tx_resp_builder()
+                        .converter()
                         .convert_header(SealedHeader::new_unhashed(block.header), size)?;
                     Ok(Block {
                         uncles: vec![],

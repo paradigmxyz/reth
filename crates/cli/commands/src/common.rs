@@ -1,5 +1,7 @@
 //! Contains common `reth` arguments
 
+pub use reth_primitives_traits::header::HeaderMut;
+
 use alloy_primitives::B256;
 use clap::Parser;
 use reth_chainspec::EthChainSpec;
@@ -17,12 +19,15 @@ use reth_node_builder::{
     Node, NodeComponents, NodeComponentsBuilder, NodeTypes, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
-    args::{DatabaseArgs, DatadirArgs, StaticFilesArgs},
+    args::{DatabaseArgs, DatadirArgs, RocksDbArgs, StaticFilesArgs},
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider, StaticFileProvider},
-    ProviderFactory, StaticFileProviderFactory,
+    providers::{
+        BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
+        StaticFileProviderBuilder,
+    },
+    ProviderFactory, StaticFileProviderFactory, StorageSettings,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
@@ -61,9 +66,24 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     /// All static files related arguments
     #[command(flatten)]
     pub static_files: StaticFilesArgs,
+
+    /// All `RocksDB` related arguments
+    #[command(flatten)]
+    pub rocksdb: RocksDbArgs,
 }
 
 impl<C: ChainSpecParser> EnvironmentArgs<C> {
+    /// Returns the effective storage settings derived from static-file and `RocksDB` CLI args.
+    pub fn storage_settings(&self) -> StorageSettings {
+        StorageSettings::base()
+            .with_receipts_in_static_files(self.static_files.receipts)
+            .with_transaction_senders_in_static_files(self.static_files.transaction_senders)
+            .with_account_changesets_in_static_files(self.static_files.account_changesets)
+            .with_transaction_hash_numbers_in_rocksdb(self.rocksdb.all || self.rocksdb.tx_hash)
+            .with_storages_history_in_rocksdb(self.rocksdb.all || self.rocksdb.storages_history)
+            .with_account_history_in_rocksdb(self.rocksdb.all || self.rocksdb.account_history)
+    }
+
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
     pub fn init<N: CliNodeTypes>(&self, access: AccessRights) -> eyre::Result<Environment<N>>
@@ -73,10 +93,12 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
+        let rocksdb_path = data_dir.rocksdb();
 
         if access.is_read_write() {
             reth_fs_util::create_dir_all(&db_path)?;
             reth_fs_util::create_dir_all(&sf_path)?;
+            reth_fs_util::create_dir_all(&rocksdb_path)?;
         }
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
@@ -96,21 +118,35 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         }
 
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
+        let genesis_block_number = self.chain.genesis().number.unwrap_or_default();
         let (db, sfp) = match access {
             AccessRights::RW => (
                 Arc::new(init_db(db_path, self.db.database_args())?),
-                StaticFileProvider::read_write(sf_path)?,
+                StaticFileProviderBuilder::read_write(sf_path)
+                    .with_genesis_block_number(genesis_block_number)
+                    .build()?,
             ),
-            AccessRights::RO | AccessRights::RoInconsistent => (
-                Arc::new(open_db_read_only(&db_path, self.db.database_args())?),
-                StaticFileProvider::read_only(sf_path, false)?,
-            ),
+            AccessRights::RO | AccessRights::RoInconsistent => {
+                (Arc::new(open_db_read_only(&db_path, self.db.database_args())?), {
+                    let provider = StaticFileProviderBuilder::read_only(sf_path)
+                        .with_genesis_block_number(genesis_block_number)
+                        .build()?;
+                    provider.watch_directory();
+                    provider
+                })
+            }
         };
+        let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
+            .with_default_tables()
+            .with_database_log_level(self.db.log_level)
+            .with_read_only(!access.is_read_write())
+            .build()?;
 
-        let provider_factory = self.create_provider_factory(&config, db, sfp, access)?;
+        let provider_factory =
+            self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
-            init_genesis_with_settings(&provider_factory, self.static_files.to_settings())?;
+            init_genesis_with_settings(&provider_factory, self.storage_settings())?;
         }
 
         Ok(Environment { config, provider_factory, data_dir })
@@ -126,6 +162,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         config: &Config,
         db: Arc<DatabaseEnv>,
         static_file_provider: StaticFileProvider<N::Primitives>,
+        rocksdb_provider: RocksDBProvider,
         access: AccessRights,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
     where
@@ -136,6 +173,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             db,
             self.chain.clone(),
             static_file_provider,
+            rocksdb_provider,
         )?
         .with_prune_modes(prune_modes.clone());
 
@@ -226,17 +264,6 @@ type FullTypesAdapter<T> = FullNodeTypesAdapter<
     Arc<DatabaseEnv>,
     BlockchainProvider<NodeTypesWithDBAdapter<T, Arc<DatabaseEnv>>>,
 >;
-
-/// Trait for block headers that can be modified through CLI operations.
-pub trait CliHeader {
-    fn set_number(&mut self, number: u64);
-}
-
-impl CliHeader for alloy_consensus::Header {
-    fn set_number(&mut self, number: u64) {
-        self.number = number;
-    }
-}
 
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`] in CLI.

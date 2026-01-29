@@ -13,7 +13,18 @@ The EVM component manages:
 - State management and caching
 
 ## Architecture
+```mermaid
+graph TD
+    Config[EVM Configuration] --> Env[EVM Environment]
+    Config --> Executor[Block Executor]
+    Config --> Builder[Block Builder]
 
+    Executor --> State[(State Database)]
+    Builder --> State
+
+    Builder --> Assembler[Block Assembler]
+    Assembler --> State
+```
 
 ## Key Concepts
 

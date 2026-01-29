@@ -11,13 +11,14 @@ use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
     SegmentOutputCheckpoint,
 };
+use reth_stages_types::StageId;
 use reth_static_file_types::StaticFileSegment;
 pub use set::SegmentSet;
 use std::{fmt::Debug, ops::RangeInclusive};
 use tracing::error;
 pub use user::{
-    AccountHistory, Bodies, MerkleChangeSets, Receipts as UserReceipts, ReceiptsByLogs,
-    SenderRecovery, StorageHistory, TransactionLookup,
+    AccountHistory, Bodies, Receipts as UserReceipts, ReceiptsByLogs, SenderRecovery,
+    StorageHistory, TransactionLookup,
 };
 
 /// Prunes data from static files for a given segment.
@@ -83,6 +84,14 @@ pub trait Segment<Provider>: Debug + Send + Sync {
         Provider: PruneCheckpointWriter,
     {
         provider.save_prune_checkpoint(self.segment(), checkpoint)
+    }
+
+    /// Returns the stage this segment depends on, if any.
+    ///
+    /// If this returns `Some(stage_id)`, the pruner will skip this segment if the stage
+    /// has not yet caught up with the `Finish` stage checkpoint.
+    fn required_stage(&self) -> Option<StageId> {
+        None
     }
 }
 
@@ -226,7 +235,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    &block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -264,7 +273,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    &block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -310,7 +319,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    &block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -346,7 +355,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    &block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }

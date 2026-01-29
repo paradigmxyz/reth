@@ -1,4 +1,6 @@
-use crate::formatter::LogFormat;
+use crate::{formatter::LogFormat, LayerInfo};
+#[cfg(feature = "otlp-logs")]
+use reth_tracing_otlp::{log_layer, OtlpLogsConfig};
 #[cfg(feature = "otlp")]
 use reth_tracing_otlp::{span_layer, OtlpConfig};
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
@@ -130,6 +132,27 @@ impl Layers {
         Ok(guard)
     }
 
+    pub(crate) fn samply(&mut self, config: LayerInfo) -> eyre::Result<()> {
+        self.add_layer(
+            tracing_samply::SamplyLayer::new()
+                .map_err(|e| eyre::eyre!("Failed to create samply layer: {e}"))?
+                .with_filter(build_env_filter(
+                    Some(config.default_directive.parse()?),
+                    &config.filters,
+                )?),
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "tracy")]
+    pub(crate) fn tracy(&mut self, config: LayerInfo) -> eyre::Result<()> {
+        self.add_layer(tracing_tracy::TracyLayer::default().with_filter(build_env_filter(
+            Some(config.default_directive.parse()?),
+            &config.filters,
+        )?));
+        Ok(())
+    }
+
     /// Add OTLP spans layer to the layer collection
     #[cfg(feature = "otlp")]
     pub fn with_span_layer(
@@ -144,6 +167,22 @@ impl Layers {
             .with_filter(filter);
 
         self.add_layer(span_layer);
+
+        Ok(())
+    }
+
+    /// Add OTLP logs layer to the layer collection
+    #[cfg(feature = "otlp-logs")]
+    pub fn with_log_layer(
+        &mut self,
+        otlp_config: OtlpLogsConfig,
+        filter: EnvFilter,
+    ) -> eyre::Result<()> {
+        let log_layer = log_layer(otlp_config)
+            .map_err(|e| eyre::eyre!("Failed to build OTLP log exporter {}", e))?
+            .with_filter(filter);
+
+        self.add_layer(log_layer);
 
         Ok(())
     }

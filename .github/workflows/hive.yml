@@ -15,11 +15,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare-reth:
+  prepare-reth-stable:
     uses: ./.github/workflows/prepare-reth.yml
     with:
       image_tag: ghcr.io/paradigmxyz/reth:latest
       binary_name: reth
+      cargo_features: "asm-keccak"
+      artifact_name: "reth-stable"
+
+  prepare-reth-edge:
+    uses: ./.github/workflows/prepare-reth.yml
+    with:
+      image_tag: ghcr.io/paradigmxyz/reth:latest
+      binary_name: reth
+      cargo_features: "asm-keccak edge"
+      artifact_name: "reth-edge"
 
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'
@@ -45,14 +55,14 @@ jobs:
 
       - name: Restore hive assets cache
         id: cache-hive
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ./hive_assets
-          key: hive-assets-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/assets/hive/build_simulators.sh') }}
+          key: hive-assets-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/scripts/hive/build_simulators.sh') }}
 
       - name: Build hive assets
         if: steps.cache-hive.outputs.cache-hit != 'true'
-        run: .github/assets/hive/build_simulators.sh
+        run: .github/scripts/hive/build_simulators.sh
 
       - name: Load cached Docker images
         if: steps.cache-hive.outputs.cache-hit == 'true'
@@ -68,7 +78,7 @@ jobs:
           chmod +x hive
 
       - name: Upload hive assets
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: hive_assets
           path: ./hive_assets
@@ -77,6 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        storage: [stable, edge]
         # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
         scenario:
@@ -86,7 +97,7 @@ jobs:
           - sim: devp2p
             limit: discv4
           # started failing after https://github.com/ethereum/go-ethereum/pull/31843, no
-          # action on our side, remove from here when we get unxpected passes on these tests
+          # action on our side, remove from here when we get unexpected passes on these tests
           # - sim: devp2p
           #  limit: eth
           #  include:
@@ -176,9 +187,10 @@ jobs:
           - sim: ethereum/eels/consume-rlp
             limit: .*tests/paris.*
     needs:
-      - prepare-reth
+      - prepare-reth-stable
+      - prepare-reth-edge
       - prepare-hive
-    name: run ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
+    name: ${{ matrix.storage }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     runs-on:
       group: Reth
     permissions:
@@ -189,19 +201,19 @@ jobs:
           fetch-depth: 0
 
       - name: Download hive assets
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: hive_assets
           path: /tmp
 
       - name: Download reth image
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
-          name: artifacts
+          name: reth-${{ matrix.storage }}
           path: /tmp
 
       - name: Load Docker images
-        run: .github/assets/hive/load_images.sh
+        run: .github/scripts/hive/load_images.sh
 
       - name: Move hive binary
         run: |
@@ -229,11 +241,11 @@ jobs:
             FILTER="/"
           fi
           echo "filter: $FILTER"
-          .github/assets/hive/run_simulator.sh "${{ matrix.scenario.sim }}" "$FILTER"
+          .github/scripts/hive/run_simulator.sh "${{ matrix.scenario.sim }}" "$FILTER"
 
       - name: Parse hive output
         run: |
-          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/assets/hive/parse.py {} --exclusion .github/assets/hive/expected_failures.yaml --ignored .github/assets/hive/ignored_tests.yaml
+          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/scripts/hive/parse.py {} --exclusion .github/scripts/hive/expected_failures.yaml --ignored .github/scripts/hive/ignored_tests.yaml
 
       - name: Print simulator output
         if: ${{ failure() }}
@@ -247,8 +259,7 @@ jobs:
   notify-on-error:
     needs: test
     if: failure()
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     steps:
       - name: Slack Webhook Action
         uses: rtCamp/action-slack-notify@v2

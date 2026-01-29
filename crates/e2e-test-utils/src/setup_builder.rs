@@ -11,6 +11,7 @@ use reth_node_builder::{
     PayloadTypes,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
+use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TaskManager;
@@ -111,11 +112,13 @@ where
             ..NetworkArgs::default()
         };
 
-        // Apply tree config modifier if present
+        // Apply tree config modifier if present, with test-appropriate defaults
+        let base_tree_config =
+            reth_node_api::TreeConfig::default().with_cross_block_cache_size(1024 * 1024);
         let tree_config = if let Some(modifier) = self.tree_config_modifier {
-            modifier(reth_node_api::TreeConfig::default())
+            modifier(base_tree_config)
         } else {
-            reth_node_api::TreeConfig::default()
+            base_tree_config
         };
 
         let mut nodes = (0..self.num_nodes)
@@ -157,8 +160,8 @@ where
                     .await?;
 
                 let node = NodeTestContext::new(node, self.attributes_generator).await?;
-
-                let genesis = node.block_hash(0);
+                let genesis_number = self.chain_spec.genesis_header().number();
+                let genesis = node.block_hash(genesis_number);
                 node.update_forkchoice(genesis, genesis).await?;
 
                 eyre::Ok(node)

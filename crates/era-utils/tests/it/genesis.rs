@@ -24,7 +24,7 @@ fn test_export_with_genesis_only() {
     assert!(file_path.exists(), "Exported file should exist on disk");
     let file_name = file_path.file_name().unwrap().to_str().unwrap();
     assert!(
-        file_name.starts_with("mainnet-00000-00001-"),
+        file_name.starts_with("mainnet-00000-"),
         "File should have correct prefix with era format"
     );
     assert!(file_name.ends_with(".era1"), "File should have correct extension");

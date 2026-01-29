@@ -15,7 +15,10 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_exex::ExExContext;
 use reth_network::{
-    transactions::{TransactionPropagationPolicy, TransactionsManagerConfig},
+    transactions::{
+        config::{AnnouncementFilteringPolicy, StrictEthAnnouncementFilter},
+        TransactionPropagationPolicy, TransactionsManagerConfig,
+    },
     NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
     NetworkPrimitives,
 };
@@ -533,6 +536,27 @@ where
     }
 
     /// Modifies the addons with the given closure.
+    ///
+    /// This method provides access to methods on the addons type that don't have
+    /// direct builder methods. It's useful for advanced configuration scenarios
+    /// where you need to call addon-specific methods.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use tower::layer::util::Identity;
+    ///
+    /// let builder = NodeBuilder::new(config)
+    ///     .with_types::<EthereumNode>()
+    ///     .with_components(EthereumNode::components())
+    ///     .with_add_ons(EthereumAddOns::default())
+    ///     .map_add_ons(|addons| addons.with_rpc_middleware(Identity::default()));
+    /// ```
+    ///
+    /// # See also
+    ///
+    /// - [`NodeAddOns`] trait for available addon types
+    /// - [`crate::NodeBuilderWithComponents::extend_rpc_modules`] for RPC module configuration
     pub fn map_add_ons<F>(self, f: F) -> Self
     where
         F: FnOnce(AO) -> AO,
@@ -579,10 +603,10 @@ where
     ///     .extend_rpc_modules(|ctx| {
     ///         // Access node components, so they can used by the CustomApi
     ///         let pool = ctx.pool().clone();
-    ///         
+    ///
     ///         // Add custom RPC namespace
     ///         ctx.modules.merge_configured(CustomApi { pool }.into_rpc())?;
-    ///         
+    ///
     ///         Ok(())
     ///     })
     ///     .build()?;
@@ -811,6 +835,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Convenience function to start the network tasks.
     ///
     /// Accepts the config for the transaction task and the policy for propagation.
+    /// Uses the default [`StrictEthAnnouncementFilter`] for announcement filtering.
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
@@ -833,13 +858,51 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         Node::Provider: BlockReaderFor<N>,
         Policy: TransactionPropagationPolicy<N>,
     {
+        self.start_network_with_policies(
+            builder,
+            pool,
+            tx_config,
+            propagation_policy,
+            StrictEthAnnouncementFilter::default(),
+        )
+    }
+
+    /// Convenience function to start the network tasks with custom policies.
+    ///
+    /// Accepts the config for the transaction task, the policy for propagation,
+    /// and a custom announcement filter. This is useful for configuring which tx types are accepted
+    /// in announcements.
+    ///
+    /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
+    /// connected to that network.
+    pub fn start_network_with_policies<Pool, N, PropPolicy, AnnPolicy>(
+        &self,
+        builder: NetworkBuilder<(), (), N>,
+        pool: Pool,
+        tx_config: TransactionsManagerConfig,
+        propagation_policy: PropPolicy,
+        announcement_policy: AnnPolicy,
+    ) -> NetworkHandle<N>
+    where
+        N: NetworkPrimitives,
+        Pool: TransactionPool<
+                Transaction: PoolTransaction<
+                    Consensus = N::BroadcastedTransaction,
+                    Pooled = N::PooledTransaction,
+                >,
+            > + Unpin
+            + 'static,
+        Node::Provider: BlockReaderFor<N>,
+        PropPolicy: TransactionPropagationPolicy<N>,
+        AnnPolicy: AnnouncementFilteringPolicy<N>,
+    {
         let (handle, network, txpool, eth) = builder
-            .transactions_with_policy(pool, tx_config, propagation_policy)
+            .transactions_with_policies(pool, tx_config, propagation_policy, announcement_policy)
             .request_handler(self.provider().clone())
             .split_with_handle();
 
-        self.executor.spawn_critical("p2p txpool", Box::pin(txpool));
-        self.executor.spawn_critical("p2p eth request handler", Box::pin(eth));
+        self.executor.spawn_critical_blocking("p2p txpool", Box::pin(txpool));
+        self.executor.spawn_critical_blocking("p2p eth request handler", Box::pin(eth));
 
         let default_peers_path = self.config().datadir().known_peers();
         let known_peers_file = self.config().network.persistent_peers_file(default_peers_path);

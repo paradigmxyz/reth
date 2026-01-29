@@ -11,14 +11,15 @@ use crate::{
 };
 use alloy_primitives::{
     keccak256,
-    map::{B256Map, B256Set, HashMap, HashSet},
+    map::{B256Map, B256Set, HashSet},
     Address, B256,
 };
 use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    proof::ProofRetainer, AccountProof, MultiProof, MultiProofTargets, StorageMultiProof,
+    proof::ProofRetainer, AccountProof, BranchNodeMasks, BranchNodeMasksMap, MultiProof,
+    MultiProofTargets, StorageMultiProof,
 };
 
 mod trie_node;
@@ -147,6 +148,8 @@ where
                 TrieElement::Leaf(hashed_address, account) => {
                     let proof_targets = targets.remove(&hashed_address);
                     let leaf_is_proof_target = proof_targets.is_some();
+                    let collect_storage_masks =
+                        self.collect_branch_node_masks && leaf_is_proof_target;
                     let storage_prefix_set = self
                         .prefix_sets
                         .storage_prefix_sets
@@ -158,7 +161,7 @@ where
                         hashed_address,
                     )
                     .with_prefix_set_mut(storage_prefix_set)
-                    .with_branch_node_masks(self.collect_branch_node_masks)
+                    .with_branch_node_masks(collect_storage_masks)
                     .storage_multiproof(proof_targets.unwrap_or_default())?;
 
                     // Encode account
@@ -178,20 +181,19 @@ where
         }
         let _ = hash_builder.root();
         let account_subtree = hash_builder.take_proof_nodes();
-        let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
+        let branch_node_masks = if self.collect_branch_node_masks {
             let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
-            (
-                updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
-                updated_branch_nodes
-                    .into_iter()
-                    .map(|(path, node)| (path, node.tree_mask))
-                    .collect(),
-            )
+            updated_branch_nodes
+                .into_iter()
+                .map(|(path, node)| {
+                    (path, BranchNodeMasks { hash_mask: node.hash_mask, tree_mask: node.tree_mask })
+                })
+                .collect()
         } else {
-            (HashMap::default(), HashMap::default())
+            BranchNodeMasksMap::default()
         };
 
-        Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
+        Ok(MultiProof { account_subtree, branch_node_masks, storages })
     }
 }
 
@@ -365,7 +367,7 @@ where
 
         let target_nibbles = targets.into_iter().map(Nibbles::unpack).collect::<Vec<_>>();
         let mut prefix_set = self.prefix_set;
-        prefix_set.extend_keys(target_nibbles.clone());
+        prefix_set.extend_keys(target_nibbles.iter().copied());
 
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
 
@@ -396,19 +398,18 @@ where
 
         let root = hash_builder.root();
         let subtree = hash_builder.take_proof_nodes();
-        let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
+        let branch_node_masks = if self.collect_branch_node_masks {
             let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
-            (
-                updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
-                updated_branch_nodes
-                    .into_iter()
-                    .map(|(path, node)| (path, node.tree_mask))
-                    .collect(),
-            )
+            updated_branch_nodes
+                .into_iter()
+                .map(|(path, node)| {
+                    (path, BranchNodeMasks { hash_mask: node.hash_mask, tree_mask: node.tree_mask })
+                })
+                .collect()
         } else {
-            (HashMap::default(), HashMap::default())
+            BranchNodeMasksMap::default()
         };
 
-        Ok(StorageMultiProof { root, subtree, branch_node_hash_masks, branch_node_tree_masks })
+        Ok(StorageMultiProof { root, subtree, branch_node_masks })
     }
 }

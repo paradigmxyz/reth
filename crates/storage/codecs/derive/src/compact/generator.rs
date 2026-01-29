@@ -69,7 +69,7 @@ pub fn generate_from_to(
     }
 }
 
-/// Generates code to implement the `Compact` trait method `to_compact`.
+/// Generates code to implement the `Compact` trait method `from_compact`.
 fn generate_from_compact(
     fields: &FieldList,
     ident: &Ident,
@@ -155,7 +155,7 @@ fn generate_from_compact(
     }
 }
 
-/// Generates code to implement the `Compact` trait method `from_compact`.
+/// Generates code to implement the `Compact` trait method `to_compact`.
 fn generate_to_compact(
     fields: &FieldList,
     ident: &Ident,
