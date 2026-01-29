@@ -10778,6 +10778,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-trie",
  "reth-trie-db",
+ "reth-trie-parallel",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

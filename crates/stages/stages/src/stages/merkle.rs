@@ -8,7 +8,8 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
-    ChangeSetReader, DBProvider, HeaderProvider, ProviderError, StageCheckpointReader,
+    providers::OverlayStateProviderFactory, BlockNumReader, ChangeSetReader, DBProvider,
+    DatabaseProviderFactory, HeaderProvider, ProviderError, StageCheckpointReader,
     StageCheckpointWriter, StatsReader, StorageChangeSetReader, TrieWriter,
 };
 use reth_stages_api::{
@@ -16,7 +17,8 @@ use reth_stages_api::{
     StageCheckpoint, StageError, StageId, StorageRootMerkleCheckpoint, UnwindInput, UnwindOutput,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::{ChangesetCache, DatabaseHashedPostState, DatabaseStateRoot};
+use reth_trie_parallel::root::ParallelStateRoot;
 use std::fmt::Debug;
 use tracing::*;
 
@@ -436,6 +438,329 @@ fn validate_state_root<H: BlockHeader + Sealable + Debug>(
                 GotExpected { got, expected: expected.state_root() }.into(),
             )),
             block: Box::new(expected.block_with_parent()),
+        })
+    }
+}
+
+/// Parallel merkle stage that uses [`ParallelStateRoot`] for incremental state root computation.
+///
+/// This stage wraps a [`DatabaseProviderFactory`] to enable parallel storage root calculation
+/// across multiple threads, significantly improving performance for state root computation
+/// during staged sync.
+///
+/// Internally, it creates an [`OverlayStateProviderFactory`] that provides the necessary
+/// [`TrieCursorFactory`] and [`HashedCursorFactory`] implementations for [`ParallelStateRoot`].
+#[derive(Debug, Clone)]
+pub struct ParallelMerkleStage<F> {
+    /// The overlay factory that wraps the database provider factory.
+    overlay_factory: OverlayStateProviderFactory<F>,
+    /// The threshold (in number of blocks) for switching from incremental trie building
+    /// of changes to whole rebuild.
+    rebuild_threshold: u64,
+    /// The threshold (in number of blocks) to run the stage in incremental mode.
+    incremental_threshold: u64,
+}
+
+impl<F> ParallelMerkleStage<F> {
+    /// Create a new parallel merkle stage with the given provider factory.
+    ///
+    /// The factory is wrapped in an [`OverlayStateProviderFactory`] internally to provide
+    /// the necessary trie cursor implementations for parallel state root computation.
+    pub fn new(factory: F) -> Self {
+        Self {
+            overlay_factory: OverlayStateProviderFactory::new(factory, ChangesetCache::new()),
+            rebuild_threshold: MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
+            incremental_threshold: MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD,
+        }
+    }
+
+    /// Create a new parallel merkle stage with custom thresholds.
+    pub fn with_thresholds(factory: F, rebuild_threshold: u64, incremental_threshold: u64) -> Self {
+        Self {
+            overlay_factory: OverlayStateProviderFactory::new(factory, ChangesetCache::new()),
+            rebuild_threshold,
+            incremental_threshold,
+        }
+    }
+
+    /// Gets the hashing progress
+    pub fn get_execution_checkpoint(
+        &self,
+        provider: &impl StageCheckpointReader,
+    ) -> Result<Option<MerkleCheckpoint>, StageError> {
+        let buf =
+            provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
+
+        if buf.is_empty() {
+            return Ok(None);
+        }
+
+        let (checkpoint, _) = MerkleCheckpoint::from_compact(&buf, buf.len());
+        Ok(Some(checkpoint))
+    }
+
+    /// Saves the hashing progress
+    pub fn save_execution_checkpoint(
+        &self,
+        provider: &impl StageCheckpointWriter,
+        checkpoint: Option<MerkleCheckpoint>,
+    ) -> Result<(), StageError> {
+        let mut buf = vec![];
+        if let Some(checkpoint) = checkpoint {
+            debug!(
+                target: "sync::stages::merkle::exec",
+                last_account_key = ?checkpoint.last_account_key,
+                "Saving inner merkle checkpoint"
+            );
+            checkpoint.to_compact(&mut buf);
+        }
+        Ok(provider.save_stage_checkpoint_progress(StageId::MerkleExecute, buf)?)
+    }
+}
+
+impl<F, Provider> Stage<Provider> for ParallelMerkleStage<F>
+where
+    F: DatabaseProviderFactory + Clone + Send + Sync + 'static,
+    F::Provider: reth_provider::StageCheckpointReader
+        + reth_provider::PruneCheckpointReader
+        + BlockNumReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + DBProvider,
+    Provider: DBProvider<Tx: DbTxMut>
+        + TrieWriter
+        + StatsReader
+        + HeaderProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + StageCheckpointReader
+        + StageCheckpointWriter
+        + BlockNumReader,
+{
+    fn id(&self) -> StageId {
+        StageId::MerkleExecute
+    }
+
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+        let range = input.next_block_range();
+        let (from_block, to_block) = range.clone().into_inner();
+        let current_block_number = input.checkpoint().block_number;
+
+        let target_block = provider
+            .header_by_number(to_block)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(to_block.into()))?;
+        let target_block_root = target_block.state_root();
+
+        let (trie_root, entities_checkpoint) = if range.is_empty() {
+            (target_block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
+        } else if to_block - from_block > self.rebuild_threshold || from_block == 1 {
+            let mut checkpoint = self.get_execution_checkpoint(provider)?;
+
+            let mut entities_checkpoint = if let Some(checkpoint) =
+                checkpoint.as_ref().filter(|c| c.target_block == to_block)
+            {
+                debug!(
+                    target: "sync::stages::merkle::exec",
+                    current = ?current_block_number,
+                    target = ?to_block,
+                    last_account_key = ?checkpoint.last_account_key,
+                    "Continuing inner merkle checkpoint"
+                );
+
+                input.checkpoint().entities_stage_checkpoint()
+            } else {
+                debug!(
+                    target: "sync::stages::merkle::exec",
+                    current = ?current_block_number,
+                    target = ?to_block,
+                    previous_checkpoint = ?checkpoint,
+                    "Rebuilding trie"
+                );
+                checkpoint = None;
+                self.save_execution_checkpoint(provider, None)?;
+                provider.tx_ref().clear::<tables::AccountsTrie>()?;
+                provider.tx_ref().clear::<tables::StoragesTrie>()?;
+
+                None
+            }
+            .unwrap_or(EntitiesCheckpoint {
+                processed: 0,
+                total: (provider.count_entries::<tables::HashedAccounts>()? +
+                    provider.count_entries::<tables::HashedStorages>()?)
+                    as u64,
+            });
+
+            let tx = provider.tx_ref();
+            let progress = StateRoot::from_tx(tx)
+                .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
+                .root_with_progress()
+                .map_err(|e| {
+                    error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                    StageError::Fatal(Box::new(e))
+                })?;
+            match progress {
+                StateRootProgress::Progress(state, hashed_entries_walked, updates) => {
+                    provider.write_trie_updates(updates)?;
+
+                    let mut checkpoint = MerkleCheckpoint::new(
+                        to_block,
+                        state.account_root_state.last_hashed_key,
+                        state
+                            .account_root_state
+                            .walker_stack
+                            .into_iter()
+                            .map(StoredSubNode::from)
+                            .collect(),
+                        state.account_root_state.hash_builder.into(),
+                    );
+
+                    if let Some(storage_state) = state.storage_root_state {
+                        checkpoint.storage_root_checkpoint =
+                            Some(StorageRootMerkleCheckpoint::new(
+                                storage_state.state.last_hashed_key,
+                                storage_state
+                                    .state
+                                    .walker_stack
+                                    .into_iter()
+                                    .map(StoredSubNode::from)
+                                    .collect(),
+                                storage_state.state.hash_builder.into(),
+                                storage_state.account.nonce,
+                                storage_state.account.balance,
+                                storage_state.account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+                            ));
+                    }
+                    self.save_execution_checkpoint(provider, Some(checkpoint))?;
+
+                    entities_checkpoint.processed += hashed_entries_walked as u64;
+
+                    return Ok(ExecOutput {
+                        checkpoint: input
+                            .checkpoint()
+                            .with_entities_stage_checkpoint(entities_checkpoint),
+                        done: false,
+                    });
+                }
+                StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
+                    provider.write_trie_updates(updates)?;
+                    entities_checkpoint.processed += hashed_entries_walked as u64;
+                    (root, entities_checkpoint)
+                }
+            }
+        } else {
+            // Use parallel state root computation for incremental updates
+            debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in parallel");
+            let mut final_root = None;
+            for start_block in range.step_by(self.incremental_threshold as usize) {
+                let chunk_to = std::cmp::min(start_block + self.incremental_threshold, to_block);
+                let chunk_range = start_block..=chunk_to;
+                debug!(
+                    target: "sync::stages::merkle::exec",
+                    current = ?current_block_number,
+                    target = ?to_block,
+                    incremental_threshold = self.incremental_threshold,
+                    chunk_range = ?chunk_range,
+                    "Processing chunk with parallel state root"
+                );
+
+                // Load the hashed post state from the database for this range
+                let hashed_state =
+                    reth_trie::HashedPostStateSorted::from_reverts::<reth_trie::KeccakKeyHasher>(
+                        provider,
+                        chunk_range,
+                    )
+                    .map_err(|e| {
+                        error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Failed to load hashed post state! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                        StageError::Fatal(Box::new(e))
+                    })?;
+
+                let prefix_sets = hashed_state.construct_prefix_sets().freeze();
+
+                let (root, updates) =
+                    ParallelStateRoot::new(self.overlay_factory.clone(), prefix_sets)
+                        .incremental_root_with_updates()
+                        .map_err(|e| {
+                            error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Parallel state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                            StageError::Fatal(Box::new(e))
+                        })?;
+                provider.write_trie_updates(updates)?;
+                final_root = Some(root);
+            }
+
+            let final_root = final_root.ok_or(StageError::Fatal(
+                "Parallel merkle hashing did not produce a final root".into(),
+            ))?;
+
+            let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
+                provider.count_entries::<tables::HashedStorages>()?)
+                as u64;
+
+            let entities_checkpoint =
+                EntitiesCheckpoint { processed: total_hashed_entries, total: total_hashed_entries };
+            (final_root, entities_checkpoint)
+        };
+
+        self.save_execution_checkpoint(provider, None)?;
+        validate_state_root(trie_root, SealedHeader::seal_slow(target_block), to_block)?;
+
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(to_block)
+                .with_entities_stage_checkpoint(entities_checkpoint),
+            done: true,
+        })
+    }
+
+    fn unwind(
+        &mut self,
+        provider: &Provider,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, StageError> {
+        let tx = provider.tx_ref();
+        let range = input.unwind_block_range();
+
+        let mut entities_checkpoint =
+            input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
+                processed: 0,
+                total: (tx.entries::<tables::HashedAccounts>()? +
+                    tx.entries::<tables::HashedStorages>()?) as u64,
+            });
+
+        if input.unwind_to == 0 {
+            tx.clear::<tables::AccountsTrie>()?;
+            tx.clear::<tables::StoragesTrie>()?;
+
+            entities_checkpoint.processed = 0;
+
+            return Ok(UnwindOutput {
+                checkpoint: StageCheckpoint::new(input.unwind_to)
+                    .with_entities_stage_checkpoint(entities_checkpoint),
+            });
+        }
+
+        if range.is_empty() {
+            info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
+        } else {
+            let (block_root, updates) = StateRoot::incremental_root_with_updates(provider, range)
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
+
+            let target = provider
+                .header_by_number(input.unwind_to)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
+
+            validate_state_root(block_root, SealedHeader::seal_slow(target), input.unwind_to)?;
+
+            provider.write_trie_updates(updates)?;
+
+            let accounts = tx.entries::<tables::HashedAccounts>()?;
+            let storages = tx.entries::<tables::HashedStorages>()?;
+            let total = (accounts + storages) as u64;
+            entities_checkpoint.total = total;
+            entities_checkpoint.processed = total;
+        }
+
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(input.unwind_to)
+                .with_entities_stage_checkpoint(entities_checkpoint),
         })
     }
 }
