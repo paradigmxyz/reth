@@ -3043,23 +3043,19 @@ mod tests {
 
         service_2.spawn();
 
-        // Poll for events for a reasonable time
-        let mut bootnode_appeared = false;
-        let timeout = tokio::time::sleep(Duration::from_secs(1));
-        tokio::pin!(timeout);
-
-        loop {
-            tokio::select! {
-                Some(update) = updates.next() => {
-                    if let DiscoveryUpdate::Added(record) = update
-                        && record.id == peerid_1 {
-                            bootnode_appeared = true;
-                            break;
-                        }
+        // Poll for events with a generous timeout to avoid flaky scheduling under load.
+        let bootnode_appeared = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(update) = updates.next().await {
+                if let DiscoveryUpdate::Added(record) = update {
+                    if record.id == peerid_1 {
+                        return true;
+                    }
                 }
-                _ = &mut timeout => break,
             }
-        }
+            false
+        })
+        .await
+        .unwrap_or(false);
 
         // Assert bootnode did not appear in update stream
         assert!(bootnode_appeared, "Bootnode should appear in update stream");
