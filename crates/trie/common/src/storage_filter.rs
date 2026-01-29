@@ -21,12 +21,6 @@ pub struct StorageAccountFilter {
     filter: CuckooFilter<FxHasher>,
 }
 
-impl Clone for StorageAccountFilter {
-    fn clone(&self) -> Self {
-        Self { filter: CuckooFilter::from(self.filter.export()) }
-    }
-}
-
 impl fmt::Debug for StorageAccountFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StorageAccountFilter")
