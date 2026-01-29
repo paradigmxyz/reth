@@ -74,7 +74,9 @@ humantime.workspace = true
 human_bytes.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
+flate2 = "1.0"
 lz4.workspace = true
+urlencoding = "2.1"
 zstd.workspace = true
 serde.workspace = true
 serde_json.workspace = true

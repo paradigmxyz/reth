@@ -27,7 +27,7 @@ mod set;
 
 use crate::{
     BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, PipelineError, Stage,
-    StageError, StageExt, UnwindInput,
+    StageError, StageExt, UnwindInput, DEBUG_REPORT_SUGGESTION,
 };
 pub use builder::*;
 use progress::*;
@@ -600,7 +600,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                         target: "sync::pipeline",
                         stage = %stage_id,
                         bad_block = %block.block.number,
-                        "Stage encountered an execution error: {execution_error}"
+                        "Stage encountered an execution error: {execution_error} {DEBUG_REPORT_SUGGESTION}"
                     );
 
                     // We unwind because of an execution error. If the unwind itself
