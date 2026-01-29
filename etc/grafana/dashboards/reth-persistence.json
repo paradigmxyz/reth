@@ -784,7 +784,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(reth_storage_providers_database_save_blocks_insert_block_last{$instance_label=\"$instance\"})",
+          "expr": "reth_storage_providers_database_save_blocks_insert_block_last{$instance_label=\"$instance\"}",
           "legendFormat": "block",
           "range": true,
           "refId": "A"
@@ -795,7 +795,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(reth_storage_providers_database_save_blocks_write_state_last{$instance_label=\"$instance\"})",
+          "expr": "reth_storage_providers_database_save_blocks_write_state_last{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "state",
@@ -808,7 +808,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(reth_storage_providers_database_save_blocks_write_hashed_state_last{$instance_label=\"$instance\"})",
+          "expr": "reth_storage_providers_database_save_blocks_write_hashed_state_last{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "hashed state",
@@ -821,7 +821,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(reth_storage_providers_database_save_blocks_write_trie_updates_last{$instance_label=\"$instance\"})",
+          "expr": "reth_storage_providers_database_save_blocks_write_trie_updates_last{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "trie updates",
@@ -834,7 +834,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(reth_storage_providers_database_save_blocks_update_history_indices_last{$instance_label=\"$instance\"})",
+          "expr": "reth_storage_providers_database_save_blocks_update_history_indices_last{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "history indices",
@@ -847,7 +847,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(reth_storage_providers_database_save_blocks_update_pipeline_stages_last{$instance_label=\"$instance\"})",
+          "expr": "reth_storage_providers_database_save_blocks_update_pipeline_stages_last{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "pipeline stages",
@@ -951,7 +951,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(reth_storage_providers_database_save_blocks_mdbx_last{$instance_label=\"$instance\"})",
+          "expr": "reth_storage_providers_database_save_blocks_mdbx_last{$instance_label=\"$instance\"}",
           "legendFormat": "MDBX",
           "range": true,
           "refId": "A"
@@ -962,7 +962,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(reth_storage_providers_database_save_blocks_sf_last{$instance_label=\"$instance\"})",
+          "expr": "reth_storage_providers_database_save_blocks_sf_last{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Static Files",
@@ -975,7 +975,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(reth_storage_providers_database_save_blocks_rocksdb_last{$instance_label=\"$instance\"})",
+          "expr": "reth_storage_providers_database_save_blocks_rocksdb_last{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "RocksDB",
@@ -1079,7 +1079,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(reth_storage_providers_database_save_blocks_commit_mdbx_last{$instance_label=\"$instance\"})",
+          "expr": "reth_storage_providers_database_save_blocks_commit_mdbx_last{$instance_label=\"$instance\"}",
           "legendFormat": "MDBX Commit",
           "range": true,
           "refId": "A"
