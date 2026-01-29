@@ -252,6 +252,17 @@ pub trait SparseTrieExt: SparseTrie {
     /// Returns the number of revealed (non-Hash) nodes in the trie.
     fn revealed_node_count(&self) -> usize;
 
+    /// Returns a cheap O(1) size hint for the trie.
+    ///
+    /// This is used as a heuristic for prioritizing which storage tries to keep
+    /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
+    ///
+    /// The default implementation returns `revealed_node_count()`, but implementations
+    /// should override this with a cheaper metric like `nodes.len()` when available.
+    fn size_hint(&self) -> usize {
+        self.revealed_node_count()
+    }
+
     /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
     ///
     /// Depth counts nodes traversed (not nibbles), so extension nodes count as 1 depth

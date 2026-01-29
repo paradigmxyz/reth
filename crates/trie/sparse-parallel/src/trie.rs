@@ -1054,6 +1054,14 @@ impl SparseTrieExt for ParallelSparseTrie {
         upper_count + lower_count
     }
 
+    /// O(1) size hint based on total node count (including hash stubs).
+    fn size_hint(&self) -> usize {
+        let upper_count = self.upper_subtrie.nodes.len();
+        let lower_count: usize =
+            self.lower_subtries.iter().filter_map(|s| s.as_revealed_ref()).map(|s| s.nodes.len()).sum();
+        upper_count + lower_count
+    }
+
     fn prune(&mut self, max_depth: usize) -> usize {
         // Decay heat for subtries not modified this cycle
         self.subtrie_heat.decay_and_reset();
