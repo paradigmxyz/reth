@@ -383,7 +383,7 @@ where
         result: ProofResultMessage,
     ) -> Result<(), ParallelStateRootError> {
         let ProofResult::V2(result) = result.result? else {
-            unreachable!("sparse trie as cache must only be used wit hmultiproof v2");
+            unreachable!("sparse trie as cache must only be used with multiproof v2");
         };
 
         self.trie.reveal_decoded_multiproof_v2(result).map_err(|e| {
@@ -461,7 +461,7 @@ where
 
                 (account, storage_root)
             } else {
-                (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applies to its trie, storage root must be revealed by now"))
+                (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
             };
 
             let encoded = if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
