@@ -58,6 +58,16 @@ impl StorageAccountFilter {
         self.filter.add(&hashed_address)
     }
 
+    /// Removes an account from the filter.
+    ///
+    /// Returns `true` if the account was present and removed, `false` otherwise.
+    /// This should only be called when an account is destroyed and all its
+    /// storage is cleared.
+    #[inline]
+    pub fn remove(&mut self, hashed_address: B256) -> bool {
+        self.filter.delete(&hashed_address)
+    }
+
     /// Returns the number of accounts tracked by the filter.
     #[inline]
     pub fn len(&self) -> usize {
@@ -88,7 +98,8 @@ impl Default for StorageAccountFilter {
 pub struct StorageFilterUpdateStats {
     /// Number of accounts inserted (had new storage).
     pub inserted: usize,
-
+    /// Number of accounts removed (were destroyed).
+    pub removed: usize,
     /// Number of insertion failures (filter too full).
     pub insert_failures: usize,
 }
@@ -113,5 +124,30 @@ mod tests {
         assert!(filter.may_have_storage(addr1));
         assert!(!filter.may_have_storage(addr2));
         assert_eq!(filter.len(), 1);
+    }
+
+    #[test]
+    fn test_remove() {
+        let mut filter = StorageAccountFilter::with_capacity(100);
+
+        let addr = b256!("0000000000000000000000000000000000000000000000000000000000000001");
+
+        filter.insert(addr).unwrap();
+        assert!(filter.may_have_storage(addr));
+
+        let removed = filter.remove(addr);
+        assert!(removed);
+        assert!(!filter.may_have_storage(addr));
+        assert_eq!(filter.len(), 0);
+    }
+
+    #[test]
+    fn test_remove_nonexistent() {
+        let mut filter = StorageAccountFilter::with_capacity(100);
+
+        let addr = b256!("0000000000000000000000000000000000000000000000000000000000000001");
+
+        let removed = filter.remove(addr);
+        assert!(!removed);
     }
 }
