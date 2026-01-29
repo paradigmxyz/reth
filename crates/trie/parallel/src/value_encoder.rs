@@ -32,6 +32,9 @@ pub(crate) struct ValueEncoderStats {
     pub(crate) from_cache_count: u64,
     /// Number of times the `Sync` variant was used (synchronous computation).
     pub(crate) sync_count: u64,
+    /// Number of times a dispatched storage proof had no root node and fell back to sync
+    /// computation.
+    pub(crate) dispatched_missing_root_count: u64,
 }
 
 impl ValueEncoderStats {
@@ -41,6 +44,7 @@ impl ValueEncoderStats {
         self.dispatched_count += other.dispatched_count;
         self.from_cache_count += other.from_cache_count;
         self.sync_count += other.sync_count;
+        self.dispatched_missing_root_count += other.dispatched_missing_root_count;
     }
 }
 
@@ -55,6 +59,11 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNode>>>>,
         /// Shared stats for tracking wait time and counts.
         stats: Rc<RefCell<ValueEncoderStats>>,
+        /// Shared storage proof calculator for synchronous fallback when dispatched proof has no
+        /// root.
+        storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
+        /// Cache to store computed storage roots for future reuse.
+        cached_storage_roots: Arc<DashMap<B256, B256>>,
     },
     /// The storage root was found in cache.
     FromCache { account: Account, root: B256 },
@@ -82,6 +91,8 @@ where
                 proof_result_rx,
                 storage_proof_results,
                 stats,
+                storage_calculator,
+                cached_storage_roots,
             } => {
                 let wait_start = Instant::now();
                 let result = proof_result_rx?
@@ -94,11 +105,34 @@ where
                     .result?;
                 stats.borrow_mut().storage_wait_time += wait_start.elapsed();
 
-                let StorageProofResult::V2 { root: Some(root), proof } = result else {
-                    panic!("StorageProofResult is not V2 with root: {result:?}")
+                let StorageProofResult::V2 { root, proof } = result else {
+                    panic!("StorageProofResult is not V2: {result:?}")
                 };
 
                 storage_proof_results.borrow_mut().insert(hashed_address, proof);
+
+                let root = match root {
+                    Some(root) => root,
+                    None => {
+                        // In `compute_v2_account_multiproof` we ensure that all dispatched storage
+                        // proofs computations for which there is also an account proof will return
+                        // a root node, but it could happen randomly that an account which is not in
+                        // the account proof targets, but _is_ in storage proof targets, will need
+                        // to be encoded as part of general trie traversal, so we need to handle
+                        // that case here.
+                        stats.borrow_mut().dispatched_missing_root_count += 1;
+
+                        let mut calculator = storage_calculator.borrow_mut();
+                        let proof =
+                            calculator.storage_proof(hashed_address, &mut [B256::ZERO.into()])?;
+                        let storage_root = calculator
+                            .compute_root_hash(&proof)?
+                            .expect("storage_proof with dummy target always returns root");
+
+                        cached_storage_roots.insert(hashed_address, storage_root);
+                        storage_root
+                    }
+                };
 
                 (account, root)
             }
@@ -235,6 +269,8 @@ where
                 proof_result_rx: Ok(rx),
                 storage_proof_results: self.storage_proof_results.clone(),
                 stats: self.stats.clone(),
+                storage_calculator: self.storage_calculator.clone(),
+                cached_storage_roots: self.cached_storage_roots.clone(),
             }
         }
 

@@ -394,14 +394,13 @@ impl<T: SparseTrieExt + Default> RevealableSparseTrie<T> {
     pub fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
-        mut proof_required_fn: impl FnMut(Nibbles, u8),
+        mut proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()> {
         match self {
             Self::Blind(_) => {
                 // Nothing is revealed - emit proof targets for all keys with min_len = 0
                 for key in updates.keys() {
-                    let full_path = Nibbles::unpack(*key);
-                    proof_required_fn(full_path, 0);
+                    proof_required_fn(*key, 0);
                 }
                 // All updates remain in the map for retry after proofs are fetched
                 Ok(())

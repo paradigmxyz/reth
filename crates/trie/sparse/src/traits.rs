@@ -281,15 +281,18 @@ pub trait SparseTrieExt: SparseTrie {
     /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
     /// `updates` map can be reused to retry the update.
     ///
-    /// Proof targets are deduplicated by `(full_path, min_len)` across all calls to this method.
-    /// The callback will only be invoked once per unique target, even across retry loops.
-    /// A deeper blinded node (higher `min_len`) for the same path is considered a new target.
+    /// The callback receives `(key, min_len)` where `key` is the full 32-byte hashed key
+    /// (right-padded with zeros from the blinded path) and `min_len` is the minimum depth
+    /// at which proof nodes should be returned.
+    ///
+    /// The callback may be invoked multiple times for the same target across retry loops.
+    /// Callers should deduplicate if needed.
     ///
     /// [`LeafUpdate::Touched`] behaves identically except it does not modify the leaf value.
     fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
-        proof_required_fn: impl FnMut(Nibbles, u8),
+        proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()>;
 }
 
