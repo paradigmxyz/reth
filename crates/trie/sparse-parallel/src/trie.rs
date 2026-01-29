@@ -1183,37 +1183,36 @@ impl SparseTrieExt for ParallelSparseTrie {
             .position(|(_, path, _, _)| !SparseSubtrieType::path_len_is_upper(path.len()))
             .unwrap_or(ops.len());
 
-        let (upper_ops, lower_ops) = ops.split_at(num_upper);
+        // Split off lower subtrie ops, consuming the vec to avoid clones.
+        let lower_ops = ops.split_off(num_upper);
 
         // Track deduplicated proof requests.
         let mut requested: HashSet<(Nibbles, u8)> = HashSet::default();
 
-        // Process upper subtrie operations sequentially since they modify shared trie structure.
-        for (key, full_path, _, update) in upper_ops {
-            match self.apply_single_update(full_path, update.clone()) {
+        // Process upper subtrie operations sequentially.
+        for (key, full_path, _, update) in ops {
+            match self.apply_single_update(&full_path, update) {
                 Ok(()) => {}
-                Err(UpdateLeafOutcome::Blinded { blinded_path }) => {
+                Err((update, UpdateLeafOutcome::Blinded { blinded_path })) => {
                     let min_len = Self::compute_min_len(&blinded_path);
-                    if requested.insert((*full_path, min_len)) {
-                        proof_required_fn(*full_path, min_len);
+                    if requested.insert((full_path, min_len)) {
+                        proof_required_fn(full_path, min_len);
                     }
-                    updates.insert(*key, update.clone());
+                    updates.insert(key, update);
                 }
-                Err(UpdateLeafOutcome::Fatal(e)) => return Err(e),
+                Err((_, UpdateLeafOutcome::Fatal(e))) => return Err(e),
             }
         }
 
-        // Process lower subtrie operations.
         if lower_ops.is_empty() {
             return Ok(());
         }
 
-        // Separate Touched (read-only) from Changed (mutating) operations. Touched operations
-        // can run in parallel since find_leaf takes &self, while Changed must be sequential.
-        let (touched_ops, changed_ops): (Vec<_>, Vec<_>) =
-            lower_ops.iter().partition(|(_, _, _, update)| matches!(update, LeafUpdate::Touched));
+        // Partition: Touched (read-only, parallelizable) vs Changed (mutating, sequential).
+        let (touched_ops, changed_ops): (Vec<_>, Vec<_>) = lower_ops
+            .into_iter()
+            .partition(|(_, _, _, update)| matches!(update, LeafUpdate::Touched));
 
-        // Process Touched operations with potential parallelism - only checks path accessibility.
         let touched_failures = self.process_touched_ops_parallel(&touched_ops);
         for (key, full_path, min_len) in touched_failures {
             if requested.insert((full_path, min_len)) {
@@ -1222,18 +1221,17 @@ impl SparseTrieExt for ParallelSparseTrie {
             updates.insert(key, LeafUpdate::Touched);
         }
 
-        // Process Changed operations sequentially since they mutate the trie structure.
         for (key, full_path, _, update) in changed_ops {
-            match self.apply_single_update(full_path, update.clone()) {
+            match self.apply_single_update(&full_path, update) {
                 Ok(()) => {}
-                Err(UpdateLeafOutcome::Blinded { blinded_path }) => {
+                Err((update, UpdateLeafOutcome::Blinded { blinded_path })) => {
                     let min_len = Self::compute_min_len(&blinded_path);
-                    if requested.insert((*full_path, min_len)) {
-                        proof_required_fn(*full_path, min_len);
+                    if requested.insert((full_path, min_len)) {
+                        proof_required_fn(full_path, min_len);
                     }
-                    updates.insert(*key, update.clone());
+                    updates.insert(key, update);
                 }
-                Err(UpdateLeafOutcome::Fatal(e)) => return Err(e),
+                Err((_, UpdateLeafOutcome::Fatal(e))) => return Err(e),
             }
         }
 
@@ -1295,25 +1293,19 @@ impl ParallelSparseTrie {
         }
     }
 
-    /// Applies a single leaf update, returning Ok(()) on success or the outcome on failure.
+    /// Applies a single leaf update, taking ownership of the update.
     ///
-    /// Handles three update variants:
-    /// - `Changed(empty)`: Remove leaf, restore value on blinded node error
-    /// - `Changed(value)`: Insert/update leaf, clean up on blinded node error
-    /// - `Touched`: Check path accessibility without mutation
+    /// Returns `Ok(())` on success. On failure, returns the original update along with
+    /// the outcome so it can be re-inserted into the updates map without cloning.
     fn apply_single_update(
         &mut self,
         full_path: &Nibbles,
         update: reth_trie_sparse::LeafUpdate,
-    ) -> Result<(), UpdateLeafOutcome> {
+    ) -> Result<(), (reth_trie_sparse::LeafUpdate, UpdateLeafOutcome)> {
         use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
 
         match update {
-            // Removal: empty value triggers leaf deletion. Snapshot the value and its location
-            // first so we can restore it if removal fails due to a retriable error.
             LeafUpdate::Changed(value) if value.is_empty() => {
-                // Mirror get_leaf_value logic to find value AND record which subtrie it's in.
-                // Use immutable lookup to avoid creating subtries.
                 let (old_value, value_in_lower) = if let Some(subtrie) =
                     self.lower_subtrie_for_path(full_path) &&
                     !subtrie.is_empty()
@@ -1327,7 +1319,6 @@ impl ParallelSparseTrie {
                     Ok(()) => Ok(()),
                     Err(e) => {
                         if let Some(path) = Self::get_retriable_path(&e) {
-                            // Restore value to the same location it came from
                             if let Some(old) = old_value {
                                 if value_in_lower {
                                     if let Some(subtrie) =
@@ -1339,67 +1330,61 @@ impl ParallelSparseTrie {
                                     self.upper_subtrie.inner.values.insert(*full_path, old);
                                 }
                             }
-                            Err(UpdateLeafOutcome::Blinded { blinded_path: path })
+                            Err((
+                                LeafUpdate::Changed(value),
+                                UpdateLeafOutcome::Blinded { blinded_path: path },
+                            ))
                         } else {
-                            Err(UpdateLeafOutcome::Fatal(e))
+                            Err((LeafUpdate::Changed(value), UpdateLeafOutcome::Fatal(e)))
                         }
                     }
                 }
             }
-            // Insert/update: non-empty value creates or updates the leaf.
-            // update_leaf handles its own cleanup on error.
             LeafUpdate::Changed(value) => {
-                match self.update_leaf(*full_path, value, NoRevealProvider) {
+                match self.update_leaf(*full_path, value.clone(), NoRevealProvider) {
                     Ok(()) => Ok(()),
                     Err(e) => {
                         if let Some(path) = Self::get_retriable_path(&e) {
-                            Err(UpdateLeafOutcome::Blinded { blinded_path: path })
+                            Err((
+                                LeafUpdate::Changed(value),
+                                UpdateLeafOutcome::Blinded { blinded_path: path },
+                            ))
                         } else {
-                            Err(UpdateLeafOutcome::Fatal(e))
+                            Err((LeafUpdate::Changed(value), UpdateLeafOutcome::Fatal(e)))
                         }
                     }
                 }
             }
-            // Touched: read-only check for path accessibility, no mutation.
             LeafUpdate::Touched => match self.find_leaf(full_path, None) {
                 Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => Ok(()),
                 Err(LeafLookupError::BlindedNode { path, .. }) => {
-                    Err(UpdateLeafOutcome::Blinded { blinded_path: path })
+                    Err((LeafUpdate::Touched, UpdateLeafOutcome::Blinded { blinded_path: path }))
                 }
             },
         }
     }
 
-    /// Process Touched operations with potential parallelism.
-    /// Returns a list of `(key, full_path, min_len)` for failures that need proof requests.
+    /// Process Touched operations, returning `(key, full_path, min_len)` for blinded failures.
     fn process_touched_ops_parallel(
         &self,
-        touched_ops: &[&(B256, Nibbles, SparseSubtrieType, reth_trie_sparse::LeafUpdate)],
+        touched_ops: &[(B256, Nibbles, SparseSubtrieType, reth_trie_sparse::LeafUpdate)],
     ) -> Vec<(B256, Nibbles, u8)> {
+        let check_leaf = |(key, full_path, _, _): &(B256, Nibbles, _, _)| match self
+            .find_leaf(full_path, None)
+        {
+            Err(LeafLookupError::BlindedNode { path, .. }) => {
+                Some((*key, *full_path, Self::compute_min_len(&path)))
+            }
+            Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => None,
+        };
+
         #[cfg(feature = "std")]
         if touched_ops.len() >= self.parallelism_thresholds.min_updated_nodes {
             use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
-            return touched_ops
-                .into_par_iter()
-                .filter_map(|(key, full_path, _, _)| match self.find_leaf(full_path, None) {
-                    Err(LeafLookupError::BlindedNode { path, .. }) => {
-                        Some((*key, *full_path, Self::compute_min_len(&path)))
-                    }
-                    Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => None,
-                })
-                .collect();
+            return touched_ops.into_par_iter().filter_map(check_leaf).collect();
         }
 
-        touched_ops
-            .iter()
-            .filter_map(|(key, full_path, _, _)| match self.find_leaf(full_path, None) {
-                Err(LeafLookupError::BlindedNode { path, .. }) => {
-                    Some((*key, *full_path, Self::compute_min_len(&path)))
-                }
-                Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => None,
-            })
-            .collect()
+        touched_ops.iter().filter_map(check_leaf).collect()
     }
 
     /// Creates a new revealed sparse trie from the given root node.
