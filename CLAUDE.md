@@ -18,7 +18,7 @@ Reth is a high-performance Ethereum execution client written in Rust, focusing o
 6. **Pipeline (`crates/stages/`)**: Staged sync architecture for blockchain synchronization
 7. **Trie (`crates/trie/`)**: Merkle Patricia Trie implementation with parallel state root computation
 8. **Node Builder (`crates/node/`)**: High-level node orchestration and configuration
-9  **The Consensus Engine (`crates/engine/`)**: Handles processing blocks received from the consensus layer with the Engine API (newPayload, forkchoiceUpdated)
+9. **The Consensus Engine (`crates/engine/`)**: Handles processing blocks received from the consensus layer with the Engine API (newPayload, forkchoiceUpdated)
 
 ### Key Design Principles
 
@@ -249,7 +249,7 @@ Write comments that remain valuable after the PR is merged. Future readers won't
 unsafe impl GlobalAlloc for LimitedAllocator { ... }
 
 // Binary search requires sorted input. Panics on unsorted slices.
-fn find_index(items: &[Item], target: &Item) -> Option
+fn find_index(items: &[Item], target: &Item) -> Option<usize>
 
 // Timeout set to 5s to match EVM block processing limits
 const TRACER_TIMEOUT: Duration = Duration::from_secs(5);

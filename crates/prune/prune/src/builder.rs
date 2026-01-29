@@ -10,6 +10,7 @@ use reth_provider::{
     StageCheckpointReader, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune_types::PruneModes;
+use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
 use std::time::Duration;
 use tokio::sync::watch;
 
@@ -82,6 +83,8 @@ impl PrunerBuilder {
                                 + ChainStateBlockReader
                                 + StorageSettingsCache
                                 + StageCheckpointReader
+                                + ChangeSetReader
+                                + StorageChangeSetReader
                                 + StaticFileProviderFactory<
                     Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
                 >,
@@ -116,7 +119,9 @@ impl PrunerBuilder {
             + PruneCheckpointWriter
             + PruneCheckpointReader
             + StorageSettingsCache
-            + StageCheckpointReader,
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader,
     {
         let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
 

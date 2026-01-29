@@ -61,19 +61,21 @@ impl Command {
     }
 
     /// Generate [`ListFilter`] from command.
-    pub fn list_filter(&self) -> ListFilter {
-        let search = self
-            .search
-            .as_ref()
-            .map(|search| {
+    pub fn list_filter(&self) -> eyre::Result<ListFilter> {
+        let search = match self.search.as_deref() {
+            Some(search) => {
                 if let Some(search) = search.strip_prefix("0x") {
-                    return hex::decode(search).unwrap()
+                    hex::decode(search).wrap_err(
+                        "Invalid hex content after 0x prefix in --search (expected valid hex like 0xdeadbeef).",
+                    )?
+                } else {
+                    search.as_bytes().to_vec()
                 }
-                search.as_bytes().to_vec()
-            })
-            .unwrap_or_default();
+            }
+            None => Vec::new(),
+        };
 
-        ListFilter {
+        Ok(ListFilter {
             skip: self.skip,
             len: self.len,
             search,
@@ -82,7 +84,7 @@ impl Command {
             min_value_size: self.min_value_size,
             reverse: self.reverse,
             only_count: self.count,
-        }
+        })
     }
 }
 
@@ -99,8 +101,8 @@ impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
             // We may be using the tui for a long time
             tx.disable_long_read_transaction_safety();
 
-            let table_db = tx.inner.open_db(Some(self.args.table.name())).wrap_err("Could not open db.")?;
-            let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", self.args.table.name()))?;
+            let table_db = tx.inner().open_db(Some(self.args.table.name())).wrap_err("Could not open db.")?;
+                    let stats = tx.inner().db_stat(table_db.dbi()).wrap_err(format!("Could not find table: {}", self.args.table.name()))?;
             let total_entries = stats.entries();
             let final_entry_idx = total_entries.saturating_sub(1);
             if self.args.skip > final_entry_idx {
@@ -115,7 +117,7 @@ impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
             }
 
 
-            let list_filter = self.args.list_filter();
+            let list_filter = self.args.list_filter()?;
 
             if self.args.json || self.args.count {
                 let (list, count) = self.tool.list::<T>(&list_filter)?;

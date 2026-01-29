@@ -76,7 +76,7 @@ jobs:
       - name: Run Wasm checks
         run: |
           sudo apt update && sudo apt install gcc-multilib
-          .github/assets/check_wasm.sh
+          .github/scripts/check_wasm.sh
 
   riscv:
     runs-on: depot-ubuntu-latest
@@ -94,7 +94,7 @@ jobs:
           cache-on-failure: true
       - uses: dcarbone/install-jq-action@v3
       - name: Run RISC-V checks
-        run: .github/assets/check_rv32imac.sh
+        run: .github/scripts/check_rv32imac.sh
 
   crate-checks:
     name: crate-checks (${{ matrix.partition }}/${{ matrix.total_partitions }})
@@ -285,7 +285,7 @@ jobs:
       - run: zepter run check
 
   deny:
-    uses: ithacaxyz/ci/.github/workflows/deny.yml@main
+    uses: tempoxyz/ci/.github/workflows/deny.yml@main
 
   lint-success:
     name: lint success
