@@ -1057,8 +1057,12 @@ impl SparseTrieExt for ParallelSparseTrie {
     /// O(1) size hint based on total node count (including hash stubs).
     fn size_hint(&self) -> usize {
         let upper_count = self.upper_subtrie.nodes.len();
-        let lower_count: usize =
-            self.lower_subtries.iter().filter_map(|s| s.as_revealed_ref()).map(|s| s.nodes.len()).sum();
+        let lower_count: usize = self
+            .lower_subtries
+            .iter()
+            .filter_map(|s| s.as_revealed_ref())
+            .map(|s| s.nodes.len())
+            .sum();
         upper_count + lower_count
     }
 

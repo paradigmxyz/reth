@@ -1096,12 +1096,8 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             trie_info.iter().map(|(hash, size, _)| (*hash, *size)).collect();
 
         // Collect keys to evict
-        let tries_to_clear: Vec<B256> = self
-            .tries
-            .keys()
-            .filter(|hash| !tries_to_keep.contains_key(*hash))
-            .copied()
-            .collect();
+        let tries_to_clear: Vec<B256> =
+            self.tries.keys().filter(|hash| !tries_to_keep.contains_key(*hash)).copied().collect();
 
         // Evict storage tries that exceeded limit, saving cleared allocations for reuse
         for hash in tries_to_clear {
