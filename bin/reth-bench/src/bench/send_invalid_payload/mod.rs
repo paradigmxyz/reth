@@ -190,17 +190,6 @@ impl Command {
         })
     }
 
-    /// Load JWT secret from either a file or use the provided string directly
-    fn load_jwt_secret(&self) -> Result<Option<String>> {
-        match &self.jwt_secret {
-            Some(secret) => match std::fs::read_to_string(secret) {
-                Ok(contents) => Ok(Some(contents.trim().to_string())),
-                Err(_) => Ok(Some(secret.clone())),
-            },
-            None => Ok(None),
-        }
-    }
-
     /// Build `InvalidationConfig` from command flags
     const fn build_invalidation_config(&self) -> InvalidationConfig {
         InvalidationConfig {
@@ -237,7 +226,7 @@ impl Command {
     /// Execute the command
     pub async fn execute(self, _ctx: CliContext) -> Result<()> {
         let block_json = self.read_input()?;
-        let jwt_secret = self.load_jwt_secret()?;
+        let jwt_secret = super::helpers::load_jwt_secret(&self.jwt_secret)?;
 
         let block = serde_json::from_str::<AnyRpcBlock>(&block_json)?
             .into_inner()
