@@ -209,15 +209,13 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     // Check that a pipeline sync isn't in progress.
     verify_checkpoints(provider_rw.as_ref())?;
 
-    // Create cursors for making modifications with
-    let tx = provider_rw.tx_mut();
-    tx.disable_long_read_transaction_safety();
+    // Disable long read transaction safety first
+    provider_rw.tx_mut().disable_long_read_transaction_safety();
+
+    // Create cursors and factories from the transaction reference
+    let tx = provider_rw.tx_ref();
     let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
     let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
-
-    // Create the cursor factories. These cannot accept the `&mut` tx above because they require it
-    // to be AsRef.
-    let tx = provider_rw.tx_ref();
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
     let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
 
@@ -303,6 +301,10 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
             }
         }
     }
+
+    // Drop cursors and factories before commit to release the borrow on provider_rw
+    drop(account_trie_cursor);
+    drop(storage_trie_cursor);
 
     if inconsistent_nodes == 0 {
         info!("No inconsistencies found");

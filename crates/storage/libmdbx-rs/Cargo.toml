@@ -16,7 +16,6 @@ reth-mdbx-sys.workspace = true
 
 bitflags.workspace = true
 byteorder.workspace = true
-derive_more.workspace = true
 parking_lot.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true
@@ -30,14 +29,4 @@ return-borrowed = []
 read-tx-timeouts = ["dep:dashmap"]
 
 [dev-dependencies]
-criterion.workspace = true
-rand.workspace = true
 tempfile.workspace = true
-
-[[bench]]
-name = "cursor"
-harness = false
-
-[[bench]]
-name = "transaction"
-harness = false

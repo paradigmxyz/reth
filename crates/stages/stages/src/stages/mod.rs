@@ -196,7 +196,7 @@ mod tests {
                 assert!(acc_indexing_stage.execute(&provider, input).is_err());
             } else {
                 acc_indexing_stage.execute(&provider, input).unwrap();
-                let mut account_history: Cursor<RW, AccountsHistory> =
+                let mut account_history: Cursor<'_, RW, AccountsHistory> =
                     provider.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap();
                 assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
             }
@@ -373,8 +373,10 @@ mod tests {
         value: &T::Value,
     ) {
         let provider_rw = db.factory.provider_rw().unwrap();
-        let mut cursor = provider_rw.tx_ref().cursor_write::<T>().unwrap();
-        cursor.insert(key, value).unwrap();
+        {
+            let mut cursor = provider_rw.tx_ref().cursor_write::<T>().unwrap();
+            cursor.insert(key, value).unwrap();
+        }
         provider_rw.commit().unwrap();
 
         assert!(matches!(

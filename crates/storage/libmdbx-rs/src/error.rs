@@ -1,11 +1,60 @@
-use std::{ffi::c_int, result};
+//! Error types and result handling for MDBX operations.
+
+use std::{convert::Infallible, ffi::c_int, result};
 
 /// An MDBX result.
-pub type Result<T> = result::Result<T, Error>;
+pub type MdbxResult<T, E = MdbxError> = result::Result<T, E>;
+
+/// Result type for codec operations.
+pub type ReadResult<T, E = ReadError> = Result<T, E>;
+
+/// Error type for reading from the database.
+///
+/// This encapsulates errors that can occur during DB operations via
+/// `Self::Mdbx` as well as post-read during the [`TableObject`] decoding
+/// step via `Self::Decoding`.
+///
+/// For simplicity, the decoding error is boxed. [`Self::decoding`] can be used
+/// to create such an error from any error type fits the bounds. E.g.
+/// `result.map_err(ReadError::decoding)`.
+///
+/// [`TableObject`]: crate::codec::TableObject
+#[derive(thiserror::Error, Debug)]
+pub enum ReadError {
+    /// Mdbx error during decoding.
+    #[error(transparent)]
+    Mdbx(#[from] MdbxError),
+    /// Type-associated error while decoding.
+    #[error(transparent)]
+    Decoding(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
+}
+
+impl ReadError {
+    /// Creates a new decoding error from a boxed error.
+    pub fn decoding<E>(err: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::Decoding(Box::new(err))
+    }
+}
+
+impl From<ReadError> for i32 {
+    fn from(err: ReadError) -> Self {
+        match err {
+            ReadError::Mdbx(e) => e.into(),
+            // Use a dedicated error code for decoding errors
+            ReadError::Decoding(_) => -1,
+        }
+    }
+}
 
 /// An MDBX error kind.
+///
+/// This represents various error conditions that can occur when interacting
+/// with the MDBX database.
 #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
-pub enum Error {
+pub enum MdbxError {
     /// Key/data pair already exists.
     #[error("key/data pair already exists")]
     KeyExist,
@@ -48,10 +97,11 @@ pub enum Error {
     /// Page has no more space.
     #[error("page has no more space")]
     PageFull,
-    /// The database engine was unable to extend mapping, e.g. the address space is unavailable or
-    /// busy.
+    /// The database engine was unable to extend mapping, e.g. the address
+    /// space is unavailable or busy.
     ///
     /// This can mean:
+    ///
     /// - The database size was extended by other processes beyond the environment map size, and
     ///   the engine was unable to extend the mapping while starting a read transaction. The
     ///   environment should be re-opened to continue.
@@ -86,8 +136,8 @@ pub enum Error {
     /// Wrong signature of a runtime object(s).
     #[error("wrong signature of a runtime object(s)")]
     BadSignature,
-    /// Database should be recovered, but cannot be done automatically since it's in read-only
-    /// mode.
+    /// Database should be recovered, but cannot be done automatically since
+    /// it's in read-only mode.
     #[error(
         "database should be recovered, but cannot be done automatically since it's in read-only mode"
     )]
@@ -108,16 +158,18 @@ pub enum Error {
     TooLarge,
     /// Decode error length difference:
     ///
-    /// An invalid parameter was specified, or the environment has an active write transaction.
+    /// An invalid parameter was specified, or the environment has an active
+    /// write transaction.
     #[error("invalid parameter specified or active write transaction")]
     DecodeErrorLenDiff,
     /// If the [Environment](crate::Environment) was opened with
-    /// [`EnvironmentKind::WriteMap`](crate::EnvironmentKind::WriteMap) flag, nested transactions
-    /// are not supported.
+    /// [`EnvironmentKind::WriteMap`](crate::sys::EnvironmentKind::WriteMap) flag,
+    /// nested transactions are not supported.
     #[error("nested transactions are not supported with WriteMap")]
     NestedTransactionsUnsupportedWithWriteMap,
-    /// If the [Environment](crate::Environment) was opened with in read-only mode
-    /// [`Mode::ReadOnly`](crate::flags::Mode::ReadOnly), write transactions can't be opened.
+    /// If the [Environment](crate::Environment) was opened with in read-only
+    /// mode [`Mode::ReadOnly`](crate::flags::Mode::ReadOnly), write
+    /// transactions can't be opened.
     #[error("write transactions are not supported in read-only mode")]
     WriteTransactionUnsupportedInReadOnlyMode,
     /// Read transaction has been timed out.
@@ -125,8 +177,8 @@ pub enum Error {
     ReadTransactionTimeout,
     /// The transaction commit was aborted due to previous errors.
     ///
-    /// This can happen in exceptionally rare cases and it signals the problem coming from inside
-    /// of mdbx.
+    /// This can happen in exceptionally rare cases and it signals the problem
+    /// coming from inside of mdbx.
     #[error("botched transaction")]
     BotchedTransaction,
     /// Permission defined
@@ -135,10 +187,16 @@ pub enum Error {
     /// Unknown error code.
     #[error("unknown error code: {0}")]
     Other(i32),
+    /// Operation requires DUP_SORT flag on database.
+    #[error("operation requires DUP_SORT flag on database")]
+    RequiresDupSort,
+    /// Operation requires DUP_FIXED flag on database.
+    #[error("operation requires DUP_FIXED flag on database")]
+    RequiresDupFixed,
 }
 
-impl Error {
-    /// Converts a raw error code to an [Error].
+impl MdbxError {
+    /// Converts a raw error code to an [`MdbxError`].
     pub const fn from_err_code(err_code: c_int) -> Self {
         match err_code {
             ffi::MDBX_KEYEXIST => Self::KeyExist,
@@ -175,7 +233,7 @@ impl Error {
         }
     }
 
-    /// Converts an [Error] to the raw error code.
+    /// Converts an [`MdbxError`] to the raw error code.
     pub const fn to_err_code(&self) -> i32 {
         match self {
             Self::KeyExist => ffi::MDBX_KEYEXIST,
@@ -211,14 +269,16 @@ impl Error {
             Self::NestedTransactionsUnsupportedWithWriteMap => ffi::MDBX_EACCESS,
             Self::ReadTransactionTimeout => -96000, // Custom non-MDBX error code
             Self::BotchedTransaction => -96001,
+            Self::RequiresDupSort => -96002,
+            Self::RequiresDupFixed => -96003,
             Self::Permission => ffi::MDBX_EPERM,
             Self::Other(err_code) => *err_code,
         }
     }
 }
 
-impl From<Error> for i32 {
-    fn from(value: Error) -> Self {
+impl From<MdbxError> for i32 {
+    fn from(value: MdbxError) -> Self {
         value.to_err_code()
     }
 }
@@ -232,19 +292,60 @@ impl From<Error> for i32 {
 /// The most unintuitive case is `mdbx_txn_commit` which returns `Ok(true)`
 /// when the commit has been aborted.
 #[inline]
-pub(crate) const fn mdbx_result(err_code: c_int) -> Result<bool> {
+pub(crate) const fn mdbx_result(err_code: c_int) -> MdbxResult<bool> {
     match err_code {
         ffi::MDBX_SUCCESS => Ok(false),
         ffi::MDBX_RESULT_TRUE => Ok(true),
-        other => Err(Error::from_err_code(other)),
+        other => Err(MdbxError::from_err_code(other)),
     }
 }
 
+impl From<MdbxError> for Infallible {
+    fn from(_value: MdbxError) -> Self {
+        unreachable!()
+    }
+}
+
+/// Parses an MDBX error code into a result type.
+///
+/// This function returns `Ok(())` on both `MDBX_SUCCESS` and
+/// `MDBX_RESULT_TRUE`, effectively treating them both as non-error outcomes.
+/// This is useful in scenarios where the distinction between these two
+/// success codes is not relevant to the caller, e.g. on a `get` operation
+/// where either outcome indicates a successful operation.
+#[inline]
+#[allow(dead_code)]
+pub(crate) const fn mdbx_result_unit(err_code: c_int) -> MdbxResult<()> {
+    match err_code {
+        ffi::MDBX_SUCCESS => Ok(()),
+        ffi::MDBX_RESULT_TRUE => Ok(()),
+        other => Err(MdbxError::from_err_code(other)),
+    }
+}
+
+/// Unwrap a `Result<Option<T>, MdbxError>`, or return `Ok(None)` if the error
+/// is `NotFound` or `NoData`.
 #[macro_export]
 macro_rules! mdbx_try_optional {
     ($expr:expr) => {{
         match $expr {
-            Err(Error::NotFound | Error::NoData) => return Ok(None),
+            Err(MdbxError::NotFound | MdbxError::NoData) => return Ok(None),
+            Err(e) => return Err(e),
+            Ok(v) => v,
+        }
+    }};
+}
+
+/// Like `mdbx_try_optional!` but for [`ReadError`].
+#[macro_export]
+macro_rules! codec_try_optional {
+    ($expr:expr) => {{
+        match $expr {
+            Err($crate::error::ReadError::Mdbx(
+                $crate::MdbxError::NotFound | $crate::MdbxError::NoData,
+            )) => {
+                return Ok(None);
+            }
             Err(e) => return Err(e),
             Ok(v) => v,
         }
@@ -259,14 +360,14 @@ mod tests {
     fn test_description() {
         assert_eq!(
             "the environment opened in read-only, check <https://reth.rs/run/troubleshooting.html> for more",
-            Error::from_err_code(13).to_string()
+            MdbxError::from_err_code(13).to_string()
         );
 
-        assert_eq!("file is not an MDBX file", Error::Invalid.to_string());
+        assert_eq!("file is not an MDBX file", MdbxError::Invalid.to_string());
     }
 
     #[test]
     fn test_conversion() {
-        assert_eq!(Error::from_err_code(ffi::MDBX_KEYEXIST), Error::KeyExist);
+        assert_eq!(MdbxError::from_err_code(ffi::MDBX_KEYEXIST), MdbxError::KeyExist);
     }
 }

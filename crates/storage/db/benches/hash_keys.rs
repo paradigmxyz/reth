@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use std::{collections::HashSet, path::Path, sync::Arc};
+use std::{collections::HashSet, hint::black_box, path::Path, sync::Arc};
 
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
@@ -178,11 +178,12 @@ where
     T: Table,
 {
     let tx = db.tx_mut().expect("tx");
-    let mut crsr = tx.cursor_write::<T>().expect("cursor");
-    for (k, v) in input {
-        crsr.append(k, &v).expect("submit");
+    {
+        let mut crsr = tx.cursor_write::<T>().expect("cursor");
+        for (k, v) in input {
+            crsr.append(black_box(k), black_box(&v)).expect("submit");
+        }
     }
-    drop(crsr);
     tx.commit().unwrap();
     db
 }
@@ -192,11 +193,12 @@ where
     T: Table,
 {
     let tx = db.tx_mut().expect("tx");
-    let mut crsr = tx.cursor_write::<T>().expect("cursor");
-    for (k, v) in input {
-        crsr.insert(k, &v).expect("submit");
+    {
+        let mut crsr = tx.cursor_write::<T>().expect("cursor");
+        for (k, v) in input {
+            crsr.insert(black_box(k), black_box(&v)).expect("submit");
+        }
     }
-    drop(crsr);
     tx.commit().unwrap();
     db
 }
@@ -207,7 +209,7 @@ where
 {
     let tx = db.tx_mut().expect("tx");
     for (k, v) in input {
-        tx.put::<T>(k, v).expect("submit");
+        tx.put::<T>(black_box(k), black_box(v)).expect("submit");
     }
     tx.commit().unwrap();
     db

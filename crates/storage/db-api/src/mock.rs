@@ -12,7 +12,7 @@ use crate::{
     database::Database,
     database_metrics::DatabaseMetrics,
     table::{DupSort, Encode, Table, TableImporter},
-    transaction::{DbTx, DbTxMut},
+    transaction::{DbTx, DbTxMut, DbTxMutUnsync, DbTxUnsync},
     DatabaseError,
 };
 use core::ops::Bound;
@@ -34,6 +34,8 @@ pub struct DatabaseMock {
 impl Database for DatabaseMock {
     type TX = TxMock;
     type TXMut = TxMock;
+    type TXUnsync = TxMock;
+    type TXMutUnsync = TxMock;
 
     /// Creates a new read-only transaction.
     ///
@@ -48,6 +50,16 @@ impl Database for DatabaseMock {
     /// This always succeeds and returns a default [`TxMock`] instance.
     /// The mock transaction doesn't actually perform any database operations.
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
+        Ok(TxMock::default())
+    }
+
+    /// Creates a new unsynchronized read-only transaction.
+    fn tx_unsync(&self) -> Result<Self::TXUnsync, DatabaseError> {
+        Ok(TxMock::default())
+    }
+
+    /// Creates a new unsynchronized read-write transaction.
+    fn tx_mut_unsync(&self) -> Result<Self::TXMutUnsync, DatabaseError> {
         Ok(TxMock::default())
     }
 }
@@ -66,8 +78,14 @@ pub struct TxMock {
 }
 
 impl DbTx for TxMock {
-    type Cursor<T: Table> = CursorMock;
-    type DupCursor<T: DupSort> = CursorMock;
+    type Cursor<'tx, T: Table>
+        = CursorMock
+    where
+        Self: 'tx;
+    type DupCursor<'tx, T: DupSort>
+        = CursorMock
+    where
+        Self: 'tx;
 
     /// Retrieves a value by key from the specified table.
     ///
@@ -108,7 +126,7 @@ impl DbTx for TxMock {
     ///
     /// **Mock behavior**: Returns a default [`CursorMock`] that will not
     /// iterate over any data (all cursor operations return `None`).
-    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<T>, DatabaseError> {
+    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<'_, T>, DatabaseError> {
         Ok(CursorMock { _cursor: 0 })
     }
 
@@ -116,7 +134,7 @@ impl DbTx for TxMock {
     ///
     /// **Mock behavior**: Returns a default [`CursorMock`] that will not
     /// iterate over any data (all cursor operations return `None`).
-    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError> {
+    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<'_, T>, DatabaseError> {
         Ok(CursorMock { _cursor: 0 })
     }
 
@@ -136,8 +154,14 @@ impl DbTx for TxMock {
 }
 
 impl DbTxMut for TxMock {
-    type CursorMut<T: Table> = CursorMock;
-    type DupCursorMut<T: DupSort> = CursorMock;
+    type CursorMut<'tx, T: Table>
+        = CursorMock
+    where
+        Self: 'tx;
+    type DupCursorMut<'tx, T: DupSort>
+        = CursorMock
+    where
+        Self: 'tx;
 
     /// Inserts or updates a key-value pair in the specified table.
     ///
@@ -172,7 +196,7 @@ impl DbTxMut for TxMock {
     ///
     /// **Mock behavior**: Returns a default [`CursorMock`] that will not
     /// iterate over any data and all write operations will be no-ops.
-    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError> {
+    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<'_, T>, DatabaseError> {
         Ok(CursorMock { _cursor: 0 })
     }
 
@@ -180,7 +204,7 @@ impl DbTxMut for TxMock {
     ///
     /// **Mock behavior**: Returns a default [`CursorMock`] that will not
     /// iterate over any data and all write operations will be no-ops.
-    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError> {
+    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<'_, T>, DatabaseError> {
         Ok(CursorMock { _cursor: 0 })
     }
 }
@@ -390,5 +414,82 @@ impl<T: DupSort> DbDupCursorRW<T> for CursorMock {
     /// **Mock behavior**: Always succeeds without modifying any data.
     fn append_dup(&mut self, _key: <T>::Key, _value: <T>::Value) -> Result<(), DatabaseError> {
         Ok(())
+    }
+}
+
+impl DbTxUnsync for TxMock {
+    type Cursor<'tx, T: Table>
+        = CursorMock
+    where
+        Self: 'tx;
+    type DupCursor<'tx, T: DupSort>
+        = CursorMock
+    where
+        Self: 'tx;
+
+    fn get<T: Table>(&mut self, _key: T::Key) -> Result<Option<T::Value>, DatabaseError> {
+        Ok(None)
+    }
+
+    fn get_by_encoded_key<T: Table>(
+        &mut self,
+        _key: &<T::Key as Encode>::Encoded,
+    ) -> Result<Option<T::Value>, DatabaseError> {
+        Ok(None)
+    }
+
+    fn commit(self) -> Result<(), DatabaseError> {
+        Ok(())
+    }
+
+    fn abort(self) {}
+
+    fn cursor_read<T: Table>(&mut self) -> Result<Self::Cursor<'_, T>, DatabaseError> {
+        Ok(CursorMock { _cursor: 0 })
+    }
+
+    fn cursor_dup_read<T: DupSort>(&mut self) -> Result<Self::DupCursor<'_, T>, DatabaseError> {
+        Ok(CursorMock { _cursor: 0 })
+    }
+
+    fn entries<T: Table>(&mut self) -> Result<usize, DatabaseError> {
+        Ok(self._table.len())
+    }
+
+    fn disable_long_read_transaction_safety(&mut self) {}
+}
+
+impl DbTxMutUnsync for TxMock {
+    type CursorMut<'tx, T: Table>
+        = CursorMock
+    where
+        Self: 'tx;
+    type DupCursorMut<'tx, T: DupSort>
+        = CursorMock
+    where
+        Self: 'tx;
+
+    fn put<T: Table>(&mut self, _key: T::Key, _value: T::Value) -> Result<(), DatabaseError> {
+        Ok(())
+    }
+
+    fn delete<T: Table>(
+        &mut self,
+        _key: T::Key,
+        _value: Option<T::Value>,
+    ) -> Result<bool, DatabaseError> {
+        Ok(true)
+    }
+
+    fn clear<T: Table>(&mut self) -> Result<(), DatabaseError> {
+        Ok(())
+    }
+
+    fn cursor_write<T: Table>(&mut self) -> Result<Self::CursorMut<'_, T>, DatabaseError> {
+        Ok(CursorMock { _cursor: 0 })
+    }
+
+    fn cursor_dup_write<T: DupSort>(&mut self) -> Result<Self::DupCursorMut<'_, T>, DatabaseError> {
+        Ok(CursorMock { _cursor: 0 })
     }
 }
