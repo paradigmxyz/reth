@@ -301,14 +301,30 @@ impl SparseTrie for ParallelSparseTrie {
         value: Vec<u8>,
         provider: P,
     ) -> SparseTrieResult<()> {
-        self.prefix_set.insert(full_path);
-        let existing = self.upper_subtrie.inner.values.insert(full_path, value.clone());
-        if existing.is_some() {
-            // upper trie structure unchanged, return immediately
-            return Ok(())
+        // Check if the value already exists - if so, just update it (no structural changes needed)
+        if self.upper_subtrie.inner.values.contains_key(&full_path) {
+            self.prefix_set.insert(full_path);
+            self.upper_subtrie.inner.values.insert(full_path, value);
+            return Ok(());
+        }
+        // Also check lower subtries for existing value
+        if let Some(subtrie) = self.lower_subtrie_for_path(&full_path) &&
+            subtrie.inner.values.contains_key(&full_path)
+        {
+            self.prefix_set.insert(full_path);
+            self.lower_subtrie_for_path_mut(&full_path)
+                .expect("subtrie exists")
+                .inner
+                .values
+                .insert(full_path, value);
+            return Ok(());
         }
 
         let retain_updates = self.updates_enabled();
+
+        // Insert value into upper subtrie temporarily. We'll move it to the correct subtrie
+        // during traversal, or clean it up if we error.
+        self.upper_subtrie.inner.values.insert(full_path, value.clone());
 
         // Start at the root, traversing until we find either the node to update or a subtrie to
         // update.
@@ -330,7 +346,16 @@ impl SparseTrie for ParallelSparseTrie {
         {
             // Traverse the next node, keeping track of any changed nodes and the next step in the
             // trie
-            match self.upper_subtrie.update_next_node(current, &full_path, retain_updates)? {
+            let step_result =
+                self.upper_subtrie.update_next_node(current, &full_path, retain_updates);
+
+            // If traversal fails, clean up the value we inserted and propagate the error
+            if step_result.is_err() {
+                self.upper_subtrie.inner.values.remove(&full_path);
+                return step_result.map(|_| ());
+            }
+
+            match step_result? {
                 LeafUpdateStep::Continue { next_node } => {
                     next = Some(next_node);
                 }
@@ -351,10 +376,22 @@ impl SparseTrie for ParallelSparseTrie {
                                 leaf_full_path = ?full_path,
                                 "Extension node child not revealed in update_leaf, falling back to db",
                             );
-                            if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                provider.trie_node(&reveal_path)?
+                            let revealed_node = match provider.trie_node(&reveal_path) {
+                                Ok(node) => node,
+                                Err(e) => {
+                                    self.upper_subtrie.inner.values.remove(&full_path);
+                                    return Err(e);
+                                }
+                            };
+                            if let Some(RevealedNode { node, tree_mask, hash_mask }) = revealed_node
                             {
-                                let decoded = TrieNode::decode(&mut &node[..])?;
+                                let decoded = match TrieNode::decode(&mut &node[..]) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        self.upper_subtrie.inner.values.remove(&full_path);
+                                        return Err(e.into());
+                                    }
+                                };
                                 trace!(
                                     target: "trie::parallel_sparse",
                                     ?reveal_path,
@@ -364,9 +401,13 @@ impl SparseTrie for ParallelSparseTrie {
                                     "Revealing child (from upper)",
                                 );
                                 let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
-                                subtrie.reveal_node(reveal_path, &decoded, masks)?;
+                                if let Err(e) = subtrie.reveal_node(reveal_path, &decoded, masks) {
+                                    self.upper_subtrie.inner.values.remove(&full_path);
+                                    return Err(e);
+                                }
                                 masks
                             } else {
+                                self.upper_subtrie.inner.values.remove(&full_path);
                                 return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
                                     path: reveal_path,
                                 }
@@ -448,12 +489,23 @@ impl SparseTrie for ParallelSparseTrie {
 
             // If we didn't update the target leaf, we need to call update_leaf on the subtrie
             // to ensure that the leaf is updated correctly.
-            if let Some((revealed_path, revealed_masks)) =
-                subtrie.update_leaf(full_path, value, provider, retain_updates)?
-            {
-                self.branch_node_masks.insert(revealed_path, revealed_masks);
+            match subtrie.update_leaf(full_path, value, provider, retain_updates) {
+                Ok(Some((revealed_path, revealed_masks))) => {
+                    self.branch_node_masks.insert(revealed_path, revealed_masks);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    // Clean up: remove the value from lower subtrie if it was inserted
+                    if let Some(lower) = self.lower_subtrie_for_path_mut(&full_path) {
+                        lower.inner.values.remove(&full_path);
+                    }
+                    return Err(e);
+                }
             }
         }
+
+        // Insert into prefix_set only after all operations succeed
+        self.prefix_set.insert(full_path);
 
         Ok(())
     }
@@ -564,6 +616,42 @@ impl SparseTrie for ParallelSparseTrie {
                     }
                 }
             };
+        }
+
+        // Before mutating, check if branch collapse would require revealing a blinded node.
+        // This ensures remove_leaf is atomic: if it errors, the trie is unchanged.
+        if let (Some(branch_path), Some(SparseNode::Branch { state_mask, .. })) =
+            (&branch_parent_path, &branch_parent_node)
+        {
+            let mut check_mask = *state_mask;
+            let child_nibble = leaf_path.get_unchecked(branch_path.len());
+            check_mask.unset_bit(child_nibble);
+
+            if check_mask.count_bits() == 1 {
+                // Branch will collapse - check if remaining child needs revealing
+                let remaining_child_path = {
+                    let mut p = *branch_path;
+                    p.push_unchecked(
+                        check_mask.first_set_bit_index().expect("state mask is not empty"),
+                    );
+                    p
+                };
+
+                // Check if remaining child is blinded and would need provider reveal.
+                // We check leaf_subtrie since the remaining child is in the same subtrie as
+                // the leaf we're removing (they're siblings under the same branch).
+                if let Some(SparseNode::Hash(hash)) = leaf_subtrie.nodes.get(&remaining_child_path)
+                {
+                    // Try to get from provider - if it fails, error now before mutations
+                    if provider.trie_node(&remaining_child_path)?.is_none() {
+                        return Err(SparseTrieErrorKind::BlindedNode {
+                            path: remaining_child_path,
+                            hash: *hash,
+                        }
+                        .into());
+                    }
+                }
+            }
         }
 
         // We've traversed to the leaf and collected its ancestors as necessary. Remove the leaf
@@ -1251,20 +1339,13 @@ impl ParallelSparseTrie {
                     }
                 }
             }
-            // Insert/update: non-empty value creates or updates the leaf. Track whether the leaf
-            // existed so we can clean up if update fails due to a retriable error.
+            // Insert/update: non-empty value creates or updates the leaf.
+            // update_leaf handles its own cleanup on error.
             LeafUpdate::Changed(value) => {
-                let existed = self.get_leaf_value(full_path).is_some();
                 match self.update_leaf(*full_path, value, NoRevealProvider) {
                     Ok(()) => Ok(()),
                     Err(e) => {
                         if let Some(path) = Self::get_retriable_path(&e) {
-                            if !existed {
-                                self.upper_subtrie.inner.values.remove(full_path);
-                                if let Some(subtrie) = self.lower_subtrie_for_path_mut(full_path) {
-                                    subtrie.inner.values.remove(full_path);
-                                }
-                            }
                             Err(UpdateLeafOutcome::Blinded { blinded_path: path })
                         } else {
                             Err(UpdateLeafOutcome::Fatal(e))
