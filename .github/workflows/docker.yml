@@ -5,7 +5,7 @@
 #   - Schedule: builds nightly + profiling
 #   - Manual: builds git-sha or nightly
 
-name: docker
+name: docker (builds git-sha or nightly)
 
 on:
   push:
