@@ -411,7 +411,7 @@ where
                     .storage_targets
                     .entry(*addr)
                     .or_default()
-                    .push(Target::from_nibbles(path).with_min_len(min_len));
+                    .push(Target::new(path).with_min_len(min_len));
             })
             .map_err(ProviderError::other)?;
 
@@ -490,7 +490,7 @@ where
         self.trie
             .trie_mut()
             .update_leaves(&mut self.account_updates, |target, min_len| {
-                targets.account_targets.push(Target::from_nibbles(target).with_min_len(min_len));
+                targets.account_targets.push(Target::new(target).with_min_len(min_len));
             })
             .map_err(ProviderError::other)?;
 

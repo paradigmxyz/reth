@@ -16,11 +16,6 @@ impl Target {
     pub fn new(key: B256) -> Self {
         // SAFETY: key is a B256 and so is exactly 32-bytes.
         let key = unsafe { Nibbles::unpack_unchecked(key.as_slice()) };
-        Self::from_nibbles(key)
-    }
-
-    /// Returns a new [`Target`] which matches all trie nodes whose path is a prefix of this key.
-    pub const fn from_nibbles(key: Nibbles) -> Self {
         Self { key, min_len: 0 }
     }
 
