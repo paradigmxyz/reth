@@ -1,6 +1,5 @@
 //! Common helpers for reth-bench commands.
 
-use crate::valid_payload::call_forkchoice_updated;
 use eyre::Result;
 use std::io::{BufReader, Read};
 
