@@ -479,7 +479,7 @@ impl SparseTrie for ParallelSparseTrie {
         // and grandparent.
 
         let leaf_path;
-        let leaf_subtrie;
+        let leaf_subtrie_type;
 
         let mut branch_parent_path: Option<Nibbles> = None;
         let mut branch_parent_node: Option<SparseNode> = None;
@@ -488,13 +488,18 @@ impl SparseTrie for ParallelSparseTrie {
         let mut ext_grandparent_node: Option<SparseNode> = None;
 
         let mut curr_path = Nibbles::new(); // start traversal from root
-        let mut curr_subtrie = self.upper_subtrie.as_mut();
-        let mut curr_subtrie_is_upper = true;
+        let mut curr_subtrie_type = SparseSubtrieType::Upper;
 
         // List of node paths which need to have their hashes reset
         let mut paths_to_reset_hashes = Vec::new();
 
         loop {
+            let curr_subtrie = match curr_subtrie_type {
+                SparseSubtrieType::Upper => &mut self.upper_subtrie,
+                SparseSubtrieType::Lower(idx) => {
+                    self.lower_subtries[idx].as_revealed_mut().expect("lower subtrie is revealed")
+                }
+            };
             let curr_node = curr_subtrie.nodes.get_mut(&curr_path).unwrap();
 
             match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
@@ -505,7 +510,7 @@ impl SparseTrie for ParallelSparseTrie {
                 FindNextToLeafOutcome::Found => {
                     // this node is the target leaf
                     leaf_path = curr_path;
-                    leaf_subtrie = curr_subtrie;
+                    leaf_subtrie_type = curr_subtrie_type;
                     break;
                 }
                 FindNextToLeafOutcome::ContinueFrom(next_path) => {
@@ -551,24 +556,53 @@ impl SparseTrie for ParallelSparseTrie {
 
                     curr_path = next_path;
 
-                    // If we were previously looking at the upper trie, and the new path is in the
-                    // lower trie, we need to pull out a ref to the lower trie.
-                    if curr_subtrie_is_upper &&
-                        let SparseSubtrieType::Lower(idx) =
-                            SparseSubtrieType::from_path(&curr_path)
+                    // Update subtrie type if we're crossing into the lower trie.
+                    let next_subtrie_type = SparseSubtrieType::from_path(&curr_path);
+                    if matches!(curr_subtrie_type, SparseSubtrieType::Upper) &&
+                        matches!(next_subtrie_type, SparseSubtrieType::Lower(_))
                     {
-                        curr_subtrie = self.lower_subtries[idx]
-                            .as_revealed_mut()
-                            .expect("lower subtrie is revealed");
-                        curr_subtrie_is_upper = false;
+                        curr_subtrie_type = next_subtrie_type;
                     }
                 }
             };
         }
 
+        // Before mutating, check if branch collapse would require revealing a blinded node.
+        // This ensures remove_leaf is atomic: if it errors, the trie is unchanged.
+        if let (Some(branch_path), Some(SparseNode::Branch { state_mask, .. })) =
+            (&branch_parent_path, &branch_parent_node)
+        {
+            let mut check_mask = *state_mask;
+            let child_nibble = leaf_path.get_unchecked(branch_path.len());
+            check_mask.unset_bit(child_nibble);
+
+            if check_mask.count_bits() == 1 {
+                // Branch will collapse - check if remaining child needs revealing
+                let remaining_child_path = {
+                    let mut p = *branch_path;
+                    p.push_unchecked(
+                        check_mask.first_set_bit_index().expect("state mask is not empty"),
+                    );
+                    p
+                };
+
+                // Pre-validate the entire reveal chain (including extension grandchildren).
+                // This check mirrors the logic in `reveal_remaining_child_on_leaf_removal` with
+                // `recurse_into_extension: true` to ensure all nodes that would be revealed
+                // are accessible before any mutations occur.
+                self.pre_validate_reveal_chain(&remaining_child_path, &provider)?;
+            }
+        }
+
         // We've traversed to the leaf and collected its ancestors as necessary. Remove the leaf
         // from its SparseSubtrie and reset the hashes of the nodes along the path.
         self.prefix_set.insert(*full_path);
+        let leaf_subtrie = match leaf_subtrie_type {
+            SparseSubtrieType::Upper => &mut self.upper_subtrie,
+            SparseSubtrieType::Lower(idx) => {
+                self.lower_subtries[idx].as_revealed_mut().expect("lower subtrie is revealed")
+            }
+        };
         leaf_subtrie.inner.values.remove(full_path);
         for (subtrie_type, path) in paths_to_reset_hashes {
             let node = match subtrie_type {
@@ -1103,7 +1137,16 @@ impl SparseTrieExt for ParallelSparseTrie {
             match update {
                 LeafUpdate::Changed(value) => {
                     if value.is_empty() {
-                        let old_value = self.upper_subtrie.inner.values.get(&full_path).cloned();
+                        // Mirror get_leaf_value logic to find value AND record which subtrie it's
+                        // in. Use immutable lookup to avoid creating subtries.
+                        let (old_value, value_in_lower) = if let Some(subtrie) =
+                            self.lower_subtrie_for_path(&full_path) &&
+                            !subtrie.is_empty()
+                        {
+                            (subtrie.inner.values.get(&full_path).cloned(), true)
+                        } else {
+                            (self.upper_subtrie.inner.values.get(&full_path).cloned(), false)
+                        };
 
                         match self.remove_leaf(&full_path, NoRevealProvider) {
                             Ok(()) => {
@@ -1111,8 +1154,17 @@ impl SparseTrieExt for ParallelSparseTrie {
                             }
                             Err(e) => {
                                 if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
+                                    // Restore value to the same location it came from
                                     if let Some(old) = old_value {
-                                        self.upper_subtrie.inner.values.insert(full_path, old);
+                                        if value_in_lower {
+                                            if let Some(subtrie) =
+                                                self.lower_subtrie_for_path_mut(&full_path)
+                                            {
+                                                subtrie.inner.values.insert(full_path, old);
+                                            }
+                                        } else {
+                                            self.upper_subtrie.inner.values.insert(full_path, old);
+                                        }
                                     }
 
                                     let min_len = (path.len() as u8).min(64);
@@ -1495,6 +1547,53 @@ impl ParallelSparseTrie {
             }
             // For a branch node, we just leave the extension node as-is.
             SparseNode::Branch { .. } => None,
+        }
+    }
+
+    /// Pre-validates that all nodes in a reveal chain are accessible before mutations.
+    ///
+    /// This mirrors the reveal logic in `reveal_remaining_child_on_leaf_removal` with
+    /// `recurse_into_extension: true`, checking that:
+    /// 1. The immediate child can be revealed (if blinded)
+    /// 2. If it reveals to an extension, the grandchild can also be revealed
+    ///
+    /// Returns an error if any node in the chain would fail to reveal.
+    fn pre_validate_reveal_chain<P: TrieNodeProvider>(
+        &self,
+        path: &Nibbles,
+        provider: &P,
+    ) -> SparseTrieResult<()> {
+        let subtrie = match self.subtrie_for_path(path) {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+
+        match subtrie.nodes.get(path) {
+            Some(SparseNode::Hash(hash)) => {
+                // Node is blinded - check if provider can reveal it
+                match provider.trie_node(path)? {
+                    Some(RevealedNode { node, .. }) => {
+                        // If it reveals to an extension, recursively check the grandchild
+                        let decoded = TrieNode::decode(&mut &node[..])?;
+                        if let TrieNode::Extension(ext) = decoded {
+                            let mut grandchild_path = *path;
+                            grandchild_path.extend(&ext.key);
+                            return self.pre_validate_reveal_chain(&grandchild_path, provider);
+                        }
+                        Ok(())
+                    }
+                    None => {
+                        Err(SparseTrieErrorKind::BlindedNode { path: *path, hash: *hash }.into())
+                    }
+                }
+            }
+            Some(SparseNode::Extension { key, .. }) => {
+                // Extension already revealed - check its child
+                let mut child_path = *path;
+                child_path.extend(key);
+                self.pre_validate_reveal_chain(&child_path, provider)
+            }
+            _ => Ok(()),
         }
     }
 
