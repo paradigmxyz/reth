@@ -433,8 +433,19 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             }
         }
 
-        // Sync all data (rows, offsets, sidecar) before committing config
-        self.sync_all()?;
+        // For changeset segments, sync the sidecar file before committing the main file.
+        // This ensures crash consistency: the sidecar is durable before the header references it.
+        // NOTE: We only sync the sidecar here, NOT the main writer. The main writer is synced
+        // by self.writer.commit() below to avoid calling commit_offsets() twice which can
+        // corrupt the offset file due to BufWriter position issues.
+        if let Some(offset) = self.current_changeset_offset.take() {
+            if let Some(writer) = &mut self.changeset_offsets {
+                writer.append(&offset).map_err(ProviderError::other)?;
+            }
+        }
+        if let Some(writer) = &mut self.changeset_offsets {
+            writer.sync().map_err(ProviderError::other)?;
+        }
 
         if self.writer.is_dirty() {
             debug!(
