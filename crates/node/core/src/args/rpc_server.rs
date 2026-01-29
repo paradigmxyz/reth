@@ -645,7 +645,7 @@ pub struct RpcServerArgs {
     ///
     /// When enabled, transactions that fail execution will be skipped, and all subsequent
     /// transactions from the same sender will also be skipped.
-    #[arg(long = "testing.skip-invalid-transactions", default_value_t = false)]
+    #[arg(long = "testing.skip-invalid-transactions", default_value_t = true)]
     pub testing_skip_invalid_transactions: bool,
 }
 
