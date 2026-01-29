@@ -22,7 +22,7 @@ use tower::Service;
 /// An enum representing the different transports that can be used to connect to a runtime.
 /// Only meant to be used internally by [`AuthenticatedTransport`].
 #[derive(Clone, Debug)]
-pub enum InnerTransport {
+pub(crate) enum InnerTransport {
     /// HTTP transport
     Http(ReqwestTransport),
     /// `WebSocket` transport
@@ -196,7 +196,7 @@ fn build_auth(secret: JwtSecret) -> eyre::Result<(Authorization, Claims)> {
 
 /// This specifies how to connect to an authenticated transport.
 #[derive(Clone, Debug)]
-pub struct AuthenticatedTransportConnect {
+pub(crate) struct AuthenticatedTransportConnect {
     /// The URL to connect to.
     url: Url,
     /// The JWT secret is used to authenticate the transport.
@@ -205,7 +205,7 @@ pub struct AuthenticatedTransportConnect {
 
 impl AuthenticatedTransportConnect {
     /// Create a new builder with the given URL.
-    pub const fn new(url: Url, jwt: JwtSecret) -> Self {
+    pub(crate) const fn new(url: Url, jwt: JwtSecret) -> Self {
         Self { url, jwt }
     }
 }

@@ -8,9 +8,13 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
-mod authenticated_transport;
+// Used by main.rs only
+use color_eyre as _;
+use reth_cli_util as _;
+
+pub(crate) mod authenticated_transport;
 pub mod bench;
-mod bench_mode;
+pub(crate) mod bench_mode;
 pub mod valid_payload;
