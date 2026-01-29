@@ -51,7 +51,7 @@ use reth_trie::{
     trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieCursorMetricsCache},
     walker::TrieWalker,
     DecodedMultiProof, DecodedMultiProofV2, DecodedStorageMultiProof, HashBuilder, HashedPostState,
-    MultiProofTargets, Nibbles, ProofTrieNode, ProofTrieNodeV2, SharedStorageAccountFilter,
+    MultiProofTargets, Nibbles, ProofTrieNode, ProofTrieNodeV2, StorageAccountFilter,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{
@@ -140,7 +140,7 @@ impl ProofWorkerHandle {
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         halve_workers: bool,
-        storage_filter: Option<SharedStorageAccountFilter>,
+        storage_filter: Option<Arc<StorageAccountFilter>>,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -902,7 +902,7 @@ struct AccountProofWorker<Factory> {
     /// Cached storage roots
     cached_storage_roots: Arc<DashMap<B256, B256>>,
     /// Optional storage filter for skipping storage proofs of accounts without storage
-    storage_filter: Option<SharedStorageAccountFilter>,
+    storage_filter: Option<Arc<StorageAccountFilter>>,
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
@@ -924,7 +924,7 @@ where
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         available_workers: Arc<AtomicUsize>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
-        storage_filter: Option<SharedStorageAccountFilter>,
+        storage_filter: Option<Arc<StorageAccountFilter>>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
         #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
@@ -1091,14 +1091,13 @@ where
         // Early filter: identify accounts with empty storage before dispatching.
         // This avoids chunking/dispatching work for accounts known to have no storage.
         let (targets_to_dispatch, empty_storage_receivers) =
-            if let Some(storage_filter) = self.storage_filter.as_ref() {
-                let filter = storage_filter.load();
+            if let Some(storage_filter) = self.storage_filter.clone() {
                 let mut filtered_targets = MultiProofTargets::default();
                 let mut empty_receivers =
                     B256Map::<CrossbeamReceiver<StorageProofResultMessage>>::default();
 
                 for (hashed_address, slots) in targets.iter() {
-                    if filter.may_have_storage(*hashed_address) {
+                    if storage_filter.may_have_storage(*hashed_address) {
                         filtered_targets.insert(*hashed_address, slots.clone());
                     } else {
                         // Create immediate response for accounts with no storage

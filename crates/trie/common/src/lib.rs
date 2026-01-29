@@ -75,7 +75,7 @@ mod utils;
 
 /// Cuckoo filter for tracking accounts with storage.
 mod storage_filter;
-pub use storage_filter::{SharedStorageAccountFilter, StorageAccountFilter, StorageFilterUpdateStats};
+pub use storage_filter::{StorageAccountFilter, StorageFilterUpdateStats};
 
 /// Bincode-compatible serde implementations for trie types.
 ///
