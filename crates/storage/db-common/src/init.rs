@@ -249,8 +249,6 @@ where
             .set_block_range(genesis_block_number, genesis_block_number);
     }
 
-    // Changesets are written by `write_state_reverts`, but for non-zero genesis blocks we must
-    // initialize the static file block range here so the writer expects the correct starting block.
     if genesis_storage_settings.account_changesets_in_static_files {
         static_file_provider
             .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
