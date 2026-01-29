@@ -9,6 +9,10 @@ repository.workspace = true
 description = "Benchmarking for ethereum nodes"
 default-run = "reth-bench"
 
+[lib]
+name = "reth_bench"
+path = "src/lib.rs"
+
 [lints]
 workspace = true
 

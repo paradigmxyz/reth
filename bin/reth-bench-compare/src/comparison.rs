@@ -4,7 +4,8 @@ use crate::cli::Args;
 use chrono::{DateTime, Utc};
 use csv::Reader;
 use eyre::{eyre, Result, WrapErr};
-use serde::{Deserialize, Serialize};
+use reth_bench::bench::output::{CombinedLatencyCsvRow, TotalGasCsvRow};
+use serde::Serialize;
 use std::{
     cmp::Ordering,
     collections::HashMap,
@@ -29,30 +30,10 @@ pub(crate) struct ComparisonGenerator {
 #[derive(Debug, Clone)]
 pub(crate) struct BenchmarkResults {
     pub ref_name: String,
-    pub combined_latency_data: Vec<CombinedLatencyRow>,
+    pub combined_latency_data: Vec<CombinedLatencyCsvRow>,
     pub summary: BenchmarkSummary,
     pub start_timestamp: Option<DateTime<Utc>>,
     pub end_timestamp: Option<DateTime<Utc>>,
-}
-
-/// Combined latency CSV row structure
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub(crate) struct CombinedLatencyRow {
-    pub block_number: u64,
-    #[serde(default)]
-    pub transaction_count: Option<u64>,
-    pub gas_used: u64,
-    pub new_payload_latency: u128,
-}
-
-/// Total gas CSV row structure
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub(crate) struct TotalGasRow {
-    pub block_number: u64,
-    #[serde(default)]
-    pub transaction_count: Option<u64>,
-    pub gas_used: u64,
-    pub time: u128,
 }
 
 /// Summary statistics for a benchmark run.
@@ -301,13 +282,13 @@ impl ComparisonGenerator {
     }
 
     /// Load combined latency CSV data
-    fn load_combined_latency_csv(&self, path: &Path) -> Result<Vec<CombinedLatencyRow>> {
+    fn load_combined_latency_csv(&self, path: &Path) -> Result<Vec<CombinedLatencyCsvRow>> {
         let mut reader = Reader::from_path(path)
             .wrap_err_with(|| format!("Failed to open combined latency CSV: {path:?}"))?;
 
         let mut rows = Vec::new();
         for result in reader.deserialize() {
-            let row: CombinedLatencyRow = result
+            let row: CombinedLatencyCsvRow = result
                 .wrap_err_with(|| format!("Failed to parse combined latency row in {path:?}"))?;
             rows.push(row);
         }
@@ -320,13 +301,13 @@ impl ComparisonGenerator {
     }
 
     /// Load total gas CSV data
-    fn load_total_gas_csv(&self, path: &Path) -> Result<Vec<TotalGasRow>> {
+    fn load_total_gas_csv(&self, path: &Path) -> Result<Vec<TotalGasCsvRow>> {
         let mut reader = Reader::from_path(path)
             .wrap_err_with(|| format!("Failed to open total gas CSV: {path:?}"))?;
 
         let mut rows = Vec::new();
         for result in reader.deserialize() {
-            let row: TotalGasRow =
+            let row: TotalGasCsvRow =
                 result.wrap_err_with(|| format!("Failed to parse total gas row in {path:?}"))?;
             rows.push(row);
         }
@@ -345,8 +326,8 @@ impl ComparisonGenerator {
     /// `total_gas_data`. Percentiles (p50/p90/p99) use linear interpolation on sorted latencies.
     fn calculate_summary(
         &self,
-        combined_data: &[CombinedLatencyRow],
-        total_gas_data: &[TotalGasRow],
+        combined_data: &[CombinedLatencyCsvRow],
+        total_gas_data: &[TotalGasCsvRow],
     ) -> Result<BenchmarkSummary> {
         if combined_data.is_empty() || total_gas_data.is_empty() {
             return Err(eyre!("Cannot calculate summary for empty data"));
@@ -480,7 +461,7 @@ impl ComparisonGenerator {
         baseline: &BenchmarkResults,
         feature: &BenchmarkResults,
     ) -> Result<Vec<BlockComparison>> {
-        let mut baseline_map: HashMap<u64, &CombinedLatencyRow> = HashMap::new();
+        let mut baseline_map: HashMap<u64, &CombinedLatencyCsvRow> = HashMap::new();
         for row in &baseline.combined_latency_data {
             baseline_map.insert(row.block_number, row);
         }

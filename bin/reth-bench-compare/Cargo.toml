@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 # reth
+reth-bench = { path = "../reth-bench", default-features = false }
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
 reth-node-core.workspace = true
@@ -62,40 +63,55 @@ nix = { version = "0.29", features = ["signal", "process"] }
 default = ["jemalloc"]
 
 asm-keccak = [
-    "reth-node-core/asm-keccak",
-    "alloy-primitives/asm-keccak",
+	"reth-node-core/asm-keccak",
+	"alloy-primitives/asm-keccak",
+	"reth-bench/asm-keccak"
 ]
 
 jemalloc = [
-    "reth-cli-util/jemalloc",
-    "reth-node-core/jemalloc",
+	"reth-cli-util/jemalloc",
+	"reth-node-core/jemalloc",
+	"reth-bench/jemalloc"
 ]
-jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
-tracy-allocator = ["reth-cli-util/tracy-allocator", "tracy"]
+jemalloc-prof = [
+	"reth-cli-util/jemalloc-prof",
+	"reth-bench/jemalloc-prof"
+]
+tracy-allocator = [
+	"reth-cli-util/tracy-allocator",
+	"tracy",
+	"reth-bench/tracy-allocator"
+]
 tracy = [
-    "reth-node-core/tracy",
-    "reth-tracing/tracy",
+	"reth-node-core/tracy",
+	"reth-tracing/tracy",
+	"reth-bench/tracy"
 ]
 
 min-error-logs = [
-    "tracing/release_max_level_error",
-    "reth-node-core/min-error-logs",
+	"tracing/release_max_level_error",
+	"reth-node-core/min-error-logs",
+	"reth-bench/min-error-logs"
 ]
 min-warn-logs = [
-    "tracing/release_max_level_warn",
-    "reth-node-core/min-warn-logs",
+	"tracing/release_max_level_warn",
+	"reth-node-core/min-warn-logs",
+	"reth-bench/min-warn-logs"
 ]
 min-info-logs = [
-    "tracing/release_max_level_info",
-    "reth-node-core/min-info-logs",
+	"tracing/release_max_level_info",
+	"reth-node-core/min-info-logs",
+	"reth-bench/min-info-logs"
 ]
 min-debug-logs = [
-    "tracing/release_max_level_debug",
-    "reth-node-core/min-debug-logs",
+	"tracing/release_max_level_debug",
+	"reth-node-core/min-debug-logs",
+	"reth-bench/min-debug-logs"
 ]
 min-trace-logs = [
-    "tracing/release_max_level_trace",
-    "reth-node-core/min-trace-logs",
+	"tracing/release_max_level_trace",
+	"reth-node-core/min-trace-logs",
+	"reth-bench/min-trace-logs"
 ]
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices

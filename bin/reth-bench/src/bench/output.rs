@@ -10,13 +10,13 @@ use std::{fs, path::Path, time::Duration};
 use tracing::info;
 
 /// This is the suffix for gas output csv files.
-pub(crate) const GAS_OUTPUT_SUFFIX: &str = "total_gas.csv";
+pub const GAS_OUTPUT_SUFFIX: &str = "total_gas.csv";
 
 /// This is the suffix for combined output csv files.
-pub(crate) const COMBINED_OUTPUT_SUFFIX: &str = "combined_latency.csv";
+pub const COMBINED_OUTPUT_SUFFIX: &str = "combined_latency.csv";
 
 /// This is the suffix for new payload output csv files.
-pub(crate) const NEW_PAYLOAD_OUTPUT_SUFFIX: &str = "new_payload_latency.csv";
+pub const NEW_PAYLOAD_OUTPUT_SUFFIX: &str = "new_payload_latency.csv";
 
 /// Serialized format for gas ramp payloads on disk.
 #[derive(Debug, Serialize, Deserialize)]
@@ -151,6 +151,49 @@ pub(crate) struct TotalGasRow {
     pub(crate) gas_used: u64,
     /// Time since the start of the benchmark.
     pub(crate) time: Duration,
+}
+
+/// CSV row structure for total gas data.
+///
+/// This is the flattened representation used for CSV serialization/deserialization,
+/// with time stored as microseconds for CSV compatibility.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TotalGasCsvRow {
+    /// The block number of the block being processed.
+    pub block_number: u64,
+    /// The number of transactions in the block.
+    #[serde(default)]
+    pub transaction_count: Option<u64>,
+    /// The total gas used in the block.
+    pub gas_used: u64,
+    /// Time since the start of the benchmark, in microseconds.
+    pub time: u128,
+}
+
+/// CSV row structure for combined latency data.
+///
+/// This is the flattened representation used for CSV serialization/deserialization,
+/// with latencies stored as microseconds for CSV compatibility.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CombinedLatencyCsvRow {
+    /// The block number of the block being processed.
+    pub block_number: u64,
+    /// The gas limit of the block.
+    #[serde(default)]
+    pub gas_limit: Option<u64>,
+    /// The number of transactions in the block.
+    #[serde(default)]
+    pub transaction_count: Option<u64>,
+    /// The gas used in the `newPayload` call.
+    pub gas_used: u64,
+    /// The latency of the `newPayload` call, in microseconds.
+    pub new_payload_latency: u128,
+    /// The latency of the `forkchoiceUpdated` call, in microseconds.
+    #[serde(default)]
+    pub fcu_latency: Option<u128>,
+    /// The total latency of both calls combined, in microseconds.
+    #[serde(default)]
+    pub total_latency: Option<u128>,
 }
 
 /// This represents the aggregated output, meant to show gas per second metrics, of a benchmark run.

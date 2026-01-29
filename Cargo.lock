@@ -7713,6 +7713,7 @@ dependencies = [
  "ctrlc",
  "eyre",
  "nix 0.29.0",
+ "reth-bench",
  "reth-chainspec",
  "reth-cli-runner",
  "reth-cli-util",

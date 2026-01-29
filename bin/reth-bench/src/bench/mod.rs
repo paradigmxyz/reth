@@ -14,7 +14,7 @@ pub use generate_big_block::{
 };
 mod new_payload_fcu;
 mod new_payload_only;
-mod output;
+pub mod output;
 mod persistence_waiter;
 mod replay_payloads;
 mod send_invalid_payload;
