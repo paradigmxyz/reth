@@ -347,8 +347,8 @@ impl SparseTrie for ParallelSparseTrie {
             next.filter(|next| SparseSubtrieType::path_len_is_upper(next.len()))
         {
             // Save original node for potential rollback (only if not already saved)
-            if modified_original.is_none()
-                && let Some(node) = self.upper_subtrie.nodes.get(&current)
+            if modified_original.is_none() &&
+                let Some(node) = self.upper_subtrie.nodes.get(&current)
             {
                 modified_original = Some((current, node.clone()));
             }
@@ -1220,9 +1220,8 @@ impl SparseTrieExt for ParallelSparseTrie {
             match update {
                 LeafUpdate::Changed(value) => {
                     if value.is_empty() {
-                        // === REMOVAL PATH ===
-                        // remove_leaf with NoRevealProvider is atomic: it returns a retriable
-                        // error BEFORE any mutations (via pre_validate_reveal_chain).
+                        // Removal: remove_leaf with NoRevealProvider is atomic - returns a
+                        // retriable error before any mutations (via pre_validate_reveal_chain).
                         match self.remove_leaf(&full_path, NoRevealProvider) {
                             Ok(()) => {}
                             Err(e) => {
@@ -1238,8 +1237,7 @@ impl SparseTrieExt for ParallelSparseTrie {
                             }
                         }
                     } else {
-                        // === UPDATE/INSERT PATH ===
-                        // update_leaf is atomic - cleans up on error.
+                        // Update/insert: update_leaf is atomic - cleans up on error.
                         if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider)
                         {
                             if let Some(path) = Self::get_retriable_path(&e) {
@@ -1255,9 +1253,7 @@ impl SparseTrieExt for ParallelSparseTrie {
                     }
                 }
                 LeafUpdate::Touched => {
-                    // === TOUCHED PATH ===
-                    // Touched is read-only: we only check if the path is accessible.
-                    // If blinded, request proof for prewarming. Otherwise, no action needed.
+                    // Touched is read-only: check if path is accessible, request proof if blinded.
                     match self.find_leaf(&full_path, None) {
                         Err(LeafLookupError::BlindedNode { path, .. }) => {
                             let min_len = (path.len() as u8).min(64);
@@ -7920,7 +7916,7 @@ mod tests {
         let _ = trie.root();
     }
 
-    // ==================== update_leaves tests ====================
+    // update_leaves tests
 
     #[test]
     fn test_update_leaves_successful_update() {
