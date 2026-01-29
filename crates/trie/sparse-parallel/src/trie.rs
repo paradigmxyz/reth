@@ -1186,7 +1186,7 @@ impl SparseTrieExt for ParallelSparseTrie {
     fn update_leaves(
         &mut self,
         updates: &mut alloy_primitives::map::B256Map<reth_trie_sparse::LeafUpdate>,
-        mut proof_required_fn: impl FnMut(Nibbles, u8),
+        mut proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()> {
         use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
 
@@ -1208,8 +1208,9 @@ impl SparseTrieExt for ParallelSparseTrie {
                             Ok(()) => {}
                             Err(e) => {
                                 if let Some(path) = Self::get_retriable_path(&e) {
+                                    let target_key = Self::nibbles_to_padded_b256(&path);
                                     let min_len = (path.len() as u8).min(64);
-                                    proof_required_fn(full_path, min_len);
+                                    proof_required_fn(target_key, min_len);
                                     updates.insert(key, LeafUpdate::Changed(value));
                                 } else {
                                     return Err(e);
@@ -1221,8 +1222,9 @@ impl SparseTrieExt for ParallelSparseTrie {
                         if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider)
                         {
                             if let Some(path) = Self::get_retriable_path(&e) {
+                                let target_key = Self::nibbles_to_padded_b256(&path);
                                 let min_len = (path.len() as u8).min(64);
-                                proof_required_fn(full_path, min_len);
+                                proof_required_fn(target_key, min_len);
                                 updates.insert(key, LeafUpdate::Changed(value));
                             } else {
                                 return Err(e);
@@ -1234,8 +1236,9 @@ impl SparseTrieExt for ParallelSparseTrie {
                     // Touched is read-only: check if path is accessible, request proof if blinded.
                     match self.find_leaf(&full_path, None) {
                         Err(LeafLookupError::BlindedNode { path, .. }) => {
+                            let target_key = Self::nibbles_to_padded_b256(&path);
                             let min_len = (path.len() as u8).min(64);
-                            proof_required_fn(full_path, min_len);
+                            proof_required_fn(target_key, min_len);
                             updates.insert(key, LeafUpdate::Touched);
                         }
                         // Path is fully revealed (exists or proven non-existent), no action needed.
@@ -1291,6 +1294,14 @@ impl ParallelSparseTrie {
             SparseTrieErrorKind::NodeNotFoundInProvider { path } => Some(*path),
             _ => None,
         }
+    }
+
+    /// Converts a nibbles path to a B256, right-padding with zeros to 64 nibbles.
+    fn nibbles_to_padded_b256(path: &Nibbles) -> B256 {
+        let packed = path.pack();
+        let mut bytes = [0u8; 32];
+        bytes[..packed.len()].copy_from_slice(&packed);
+        B256::from(bytes)
     }
 
     /// Rolls back a partial update by removing the value, removing any inserted nodes,
