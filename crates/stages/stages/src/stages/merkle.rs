@@ -16,11 +16,10 @@ use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
     StageCheckpoint, StageError, StageId, StorageRootMerkleCheckpoint, UnwindInput, UnwindOutput,
 };
-use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
-use reth_trie_db::{
-    load_prefix_sets_with_provider, ChangesetCache, DatabaseHashedPostState, DatabaseStateRoot,
-    KeccakKeyHasher,
+use reth_trie::{
+    IntermediateStateRootState, KeccakKeyHasher, StateRoot, StateRootProgress, StoredSubNode,
 };
+use reth_trie_db::{load_prefix_sets_with_provider, ChangesetCache, DatabaseStateRoot};
 use reth_trie_parallel::root::ParallelStateRoot;
 use std::fmt::Debug;
 use tracing::*;
