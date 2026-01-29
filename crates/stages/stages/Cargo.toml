@@ -119,6 +119,7 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
 ]
 rocksdb = ["reth-provider/rocksdb"]
+edge = ["reth-provider/edge", "reth-stages-api/edge"]
 
 [[bench]]
 name = "criterion"

@@ -3753,6 +3753,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-edge-to-mdbx-migration"
+version = "0.0.0"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "eyre",
+ "reth-db",
+ "reth-db-api",
+ "reth-ethereum",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-stages",
+ "reth-static-file-types",
+ "reth-storage-api",
+ "tracing",
+ "tracing-subscriber 0.3.22",
+]
+
+[[package]]
 name = "example-engine-api-access"
 version = "0.0.0"
 dependencies = [

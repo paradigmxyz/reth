@@ -1,0 +1,29 @@
+[package]
+name = "example-edge-to-mdbx-migration"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-db-api.workspace = true
+reth-provider = { workspace = true, features = ["rocksdb"] }
+reth-ethereum = { workspace = true, features = ["node"] }
+reth-static-file-types.workspace = true
+reth-storage-api.workspace = true
+reth-primitives-traits.workspace = true
+# Workaround: reth-stages must have rocksdb enabled when reth-provider/rocksdb is enabled,
+# otherwise the RocksBatchArg type alias doesn't match. This is a workspace-level feature
+# unification issue.
+reth-stages = { workspace = true, features = ["rocksdb"] }
+
+alloy-primitives.workspace = true
+clap = { workspace = true, features = ["derive"] }
+eyre.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+[target.'cfg(not(unix))'.dependencies]
+clap = { workspace = true, features = ["derive"] }
+eyre.workspace = true
