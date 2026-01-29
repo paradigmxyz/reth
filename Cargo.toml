@@ -481,7 +481,7 @@ revm-primitives = { version = "22.0.0", default-features = false }
 revm-interpreter = { version = "32.0.0", default-features = false }
 revm-database-interface = { version = "9.0.0", default-features = false }
 op-revm = { version = "15.0.0", default-features = false }
-revm-inspectors = "0.34.0"
+revm-inspectors = "0.34.1"
 
 # eth
 alloy-chains = { version = "0.2.5", default-features = false }
@@ -816,7 +816,7 @@ revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "f3b
 revm-handler = { git = "https://github.com/bluealloy/revm", rev = "f3b74d4ff0c6c88a09ca281323a100257fa61ebf" }
 revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "f3b74d4ff0c6c88a09ca281323a100257fa61ebf" }
 op-revm = { git = "https://github.com/bluealloy/revm", rev = "f3b74d4ff0c6c88a09ca281323a100257fa61ebf" }
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "fccc4ac50775f5eac9a766725507dc3d6a47804b" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", branch = "staging" }
 
 # alloy-evm bal-devnet2 patches
 alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "bal-devnet2" }
