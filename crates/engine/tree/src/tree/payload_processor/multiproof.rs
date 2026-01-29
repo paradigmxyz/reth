@@ -100,7 +100,7 @@ impl SparseTrieUpdate {
 
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
-pub(super) enum MultiProofMessage {
+pub enum MultiProofMessage {
     /// Prefetch proof targets
     PrefetchProofs(VersionedMultiProofTargets),
     /// New state update from transaction execution with its source
@@ -257,7 +257,7 @@ fn extend_multiproof_targets(dest: &mut MultiProofTargets, src: &VersionedMultiP
 
 /// A set of multiproof targets which can be either in the legacy or V2 representations.
 #[derive(Debug)]
-pub(super) enum VersionedMultiProofTargets {
+pub enum VersionedMultiProofTargets {
     /// Legacy targets
     Legacy(MultiProofTargets),
     /// V2 targets

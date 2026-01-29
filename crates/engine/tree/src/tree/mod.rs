@@ -3,7 +3,7 @@ use crate::{
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
-    tree::{error::InsertPayloadError, metrics::EngineApiMetrics, payload_validator::TreeCtx},
+    tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
@@ -55,7 +55,7 @@ pub mod error;
 pub mod instrumented_state;
 mod invalid_headers;
 mod metrics;
-mod payload_processor;
+pub mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;
 pub mod precompile_cache;
@@ -66,7 +66,9 @@ mod trie_updates;
 
 use crate::tree::error::AdvancePersistenceError;
 pub use block_buffer::BlockBuffer;
+pub use cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache, SavedCache};
 pub use invalid_headers::InvalidHeaderCache;
+pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
@@ -134,14 +136,14 @@ where
 #[derive(Debug)]
 pub struct EngineApiTreeState<N: NodePrimitives> {
     /// Tracks the state of the blockchain tree.
-    tree_state: TreeState<N>,
+    pub tree_state: TreeState<N>,
     /// Tracks the forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// Buffer of detached blocks.
     buffer: BlockBuffer<N::Block>,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
-    invalid_headers: InvalidHeaderCache,
+    pub invalid_headers: InvalidHeaderCache,
 }
 
 impl<N: NodePrimitives> EngineApiTreeState<N> {

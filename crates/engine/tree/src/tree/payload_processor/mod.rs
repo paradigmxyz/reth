@@ -142,7 +142,7 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     /// Returns a reference to the workload executor driving payload tasks.
-    pub(super) const fn executor(&self) -> &WorkloadExecutor {
+    pub const fn executor(&self) -> &WorkloadExecutor {
         &self.executor
     }
 
@@ -328,7 +328,7 @@ where
     ///
     /// Returns a [`PayloadHandle`] to communicate with the task.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
-    pub(super) fn spawn_cache_exclusive<P, I: ExecutableTxIterator<Evm>>(
+    pub fn spawn_cache_exclusive<P, I: ExecutableTxIterator<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
         transactions: I,
@@ -560,7 +560,7 @@ where
     ///
     /// The cache enables subsequent blocks to reuse account, storage, and bytecode data without
     /// hitting the database, maintaining performance consistency.
-    pub(crate) fn on_inserted_executed_block(
+    pub fn on_inserted_executed_block(
         &self,
         block_with_parent: BlockWithParent,
         bundle_state: &BundleState,
@@ -657,19 +657,19 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     }
 
     /// Returns a clone of the caches used by prewarming
-    pub(super) fn caches(&self) -> Option<ExecutionCache> {
+    pub fn caches(&self) -> Option<ExecutionCache> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
     }
 
     /// Returns a clone of the cache metrics used by prewarming
-    pub(super) fn cache_metrics(&self) -> Option<CachedStateMetrics> {
+    pub fn cache_metrics(&self) -> Option<CachedStateMetrics> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.metrics().clone())
     }
 
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
-    pub(super) fn stop_prewarming_execution(&self) {
+    pub fn stop_prewarming_execution(&self) {
         self.prewarm_handle.stop_prewarming_execution()
     }
 
@@ -680,7 +680,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// path without cloning the expensive `BundleState`.
     ///
     /// Returns a sender for the channel that should be notified on block validation success.
-    pub(super) fn terminate_caching(
+    pub fn terminate_caching(
         &mut self,
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
     ) -> Option<mpsc::Sender<()>> {
@@ -700,7 +700,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
 /// prewarm task without cloning the expensive `BundleState`.
 #[derive(Debug)]
-pub(crate) struct CacheTaskHandle<R> {
+pub struct CacheTaskHandle<R> {
     /// The shared cache the task operates with.
     saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
@@ -711,7 +711,7 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
-    pub(super) fn stop_prewarming_execution(&self) {
+    pub fn stop_prewarming_execution(&self) {
         self.to_prewarm_task
             .as_ref()
             .map(|tx| tx.send(PrewarmTaskEvent::TerminateTransactionExecution).ok());
@@ -722,7 +722,7 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive `BundleState`.
     #[must_use = "sender must be used and notified on block validation success"]
-    pub(super) fn terminate_caching(
+    pub fn terminate_caching(
         &mut self,
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
     ) -> Option<mpsc::Sender<()>> {
@@ -776,7 +776,7 @@ impl<R> Drop for CacheTaskHandle<R> {
 /// - Prepares data for state root proof computation
 /// - Runs concurrently but must not interfere with cache saves
 #[derive(Clone, Debug, Default)]
-struct PayloadExecutionCache {
+pub struct PayloadExecutionCache {
     /// Guarded cloneable cache identified by a block hash.
     inner: Arc<RwLock<Option<SavedCache>>>,
     /// Metrics for cache operations.
@@ -856,7 +856,7 @@ impl PayloadExecutionCache {
     ///
     /// Violating this requirement can result in cache corruption, incorrect state data,
     /// and potential consensus failures.
-    pub(crate) fn update_with_guard<F>(&self, update_fn: F)
+    pub fn update_with_guard<F>(&self, update_fn: F)
     where
         F: FnOnce(&mut Option<SavedCache>),
     {
