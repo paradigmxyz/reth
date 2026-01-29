@@ -825,25 +825,36 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        // Get the execution checkpoint to determine the highest block with valid state.
-        // During pipeline sync, headers/bodies can be ahead of execution, so we must check
-        // against the execution checkpoint, not best_block_number() (which uses Finish).
-        let executed_tip = self
+        // Determine the highest block with valid state on disk. State is valid when execution
+        // has completed and receipts are written. We use two sources:
+        //
+        // 1. Execution checkpoint: Updated by pipeline's Execution stage
+        // 2. Receipts static file: Written by both pipeline Execution stage AND engine persistence
+        //
+        // Taking max handles both cases:
+        // - Pipeline sync: Execution checkpoint is authoritative
+        // - Engine sync: Receipts segment reflects engine-persisted blocks (checkpoint stale)
+        let execution_checkpoint = self
             .get_stage_checkpoint(StageId::Execution)?
             .map(|c| c.block_number)
             .unwrap_or_default();
+        let receipts_block = self
+            .static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Receipts)
+            .unwrap_or_default();
+        let state_tip = execution_checkpoint.max(receipts_block);
 
-        // Reject requests for blocks that haven't been executed yet
-        if block_number > executed_tip {
-            return Err(ProviderError::BlockNotExecuted {
-                requested: block_number,
-                executed: executed_tip,
-            });
+        // If requesting state at the tip, use the latest state provider
+        if block_number == state_tip {
+            return Ok(Box::new(LatestStateProvider::new(self)));
         }
 
-        // If requesting state at the executed tip, use the latest state provider
-        if block_number == executed_tip {
-            return Ok(Box::new(LatestStateProvider::new(self)));
+        // Reject requests for blocks that don't have valid state yet
+        if block_number > state_tip {
+            return Err(ProviderError::BlockNotExecuted {
+                requested: block_number,
+                executed: state_tip,
+            });
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
