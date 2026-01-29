@@ -179,10 +179,10 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     ///     to complete.
     pending_account_updates: B256Map<Option<Option<Account>>>,
     /// Cache of account proof targets that were already fetched/requested from the proof workers.
-    /// account -> lowest min_len requested.
+    /// account -> lowest `min_len` requested.
     fetched_account_targets: B256Map<u8>,
     /// Cache of storage proof targets that have already been fetched/requested from the proof
-    /// workers. account -> slot -> lowest min_len requested.
+    /// workers. account -> slot -> lowest `min_len` requested.
     fetched_storage_targets: B256Map<B256Map<u8>>,
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
