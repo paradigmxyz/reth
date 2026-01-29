@@ -35,7 +35,7 @@ use reth_provider::{
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_tasks::{ForEachOrdered, Runtime};
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, StorageAccountFilter,
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, SharedStorageAccountFilter,
 };
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
@@ -271,7 +271,7 @@ where
         multiproof_provider_factory: F,
         config: &TreeConfig,
         bal: Option<Arc<BlockAccessList>>,
-        storage_filter: Option<Arc<StorageAccountFilter>>,
+        storage_filter: Option<SharedStorageAccountFilter>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
