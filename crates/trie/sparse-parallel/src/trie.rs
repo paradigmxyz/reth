@@ -1143,42 +1143,12 @@ impl SparseTrieExt for ParallelSparseTrie {
                 LeafUpdate::Changed(value) => {
                     if value.is_empty() {
                         // === REMOVAL PATH ===
-                        // Before attempting removal, capture the current value and its location.
-                        // If removal fails due to blinded node, we restore the value to ensure
-                        // atomicity - the trie remains unchanged.
-                        let (old_value, value_in_lower) = if let Some(subtrie) =
-                            self.lower_subtrie_for_path(&full_path)
-                        {
-                            if let Some(v) = subtrie.inner.values.get(&full_path) {
-                                (Some(v.clone()), true)
-                            } else {
-                                (self.upper_subtrie.inner.values.get(&full_path).cloned(), false)
-                            }
-                        } else {
-                            (self.upper_subtrie.inner.values.get(&full_path).cloned(), false)
-                        };
-
+                        // remove_leaf with NoRevealProvider is atomic: it returns BlindedNode
+                        // error BEFORE any mutations (via pre_validate_reveal_chain).
                         match self.remove_leaf(&full_path, NoRevealProvider) {
-                            Ok(()) => {
-                                // Removal succeeded, entry already removed from updates map.
-                            }
+                            Ok(()) => {}
                             Err(e) => {
                                 if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
-                                    // Restore value to maintain atomicity.
-                                    if let Some(old) = old_value {
-                                        if value_in_lower {
-                                            if let Some(subtrie) =
-                                                self.lower_subtrie_for_path_mut(&full_path)
-                                            {
-                                                subtrie.inner.values.insert(full_path, old);
-                                            }
-                                        } else {
-                                            self.upper_subtrie.inner.values.insert(full_path, old);
-                                        }
-                                    }
-
-                                    // Request proof and re-insert update for retry.
-                                    // min_len is capped at 64 (max nibbles in a key).
                                     let min_len = (path.len() as u8).min(64);
                                     if requested.insert((full_path, min_len)) {
                                         proof_required_fn(full_path, min_len);
@@ -1198,23 +1168,22 @@ impl SparseTrieExt for ParallelSparseTrie {
                                 .is_some_and(|s| s.inner.values.contains_key(&full_path));
 
                         match self.update_leaf(full_path, value.clone(), NoRevealProvider) {
-                            Ok(()) => {
-                                // Update succeeded, entry already removed from updates map.
-                            }
+                            Ok(()) => {}
                             Err(e) => {
                                 if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
-                                    // Clean up: if this was a new leaf, remove from both subtries.
-                                    // Value could end up in either due to trie structure changes.
+                                    // Clean up: if this was a new leaf, remove the inserted value.
+                                    // Use as_revealed_mut to avoid accidentally revealing subtries.
                                     if !existed {
-                                        if let Some(subtrie) =
-                                            self.lower_subtrie_for_path_mut(&full_path)
+                                        if let SparseSubtrieType::Lower(idx) =
+                                            SparseSubtrieType::from_path(&full_path) &&
+                                            let Some(subtrie) =
+                                                self.lower_subtries[idx].as_revealed_mut()
                                         {
                                             subtrie.inner.values.remove(&full_path);
                                         }
                                         self.upper_subtrie.inner.values.remove(&full_path);
                                     }
 
-                                    // Request proof and re-insert update for retry.
                                     let min_len = (path.len() as u8).min(64);
                                     if requested.insert((full_path, min_len)) {
                                         proof_required_fn(full_path, min_len);
@@ -7887,6 +7856,43 @@ mod tests {
         assert!(
             proof_targets.borrow().is_empty(),
             "Callback should not be invoked for revealed paths"
+        );
+    }
+
+    #[test]
+    fn test_update_leaves_insert_new_leaf() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let mut trie = ParallelSparseTrie::default();
+
+        // Insert a NEW leaf (key doesn't exist yet) via update_leaves
+        let b256_key = B256::with_last_byte(99);
+        let new_value = encode_account_value(42);
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Changed(new_value.clone()));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Insert should succeed: map empty, callback not invoked
+        assert!(updates.is_empty(), "Update map should be empty after successful insert");
+        assert!(
+            proof_targets.borrow().is_empty(),
+            "Callback should not be invoked for new leaf insert"
+        );
+
+        // Verify the leaf was actually inserted
+        let full_path = Nibbles::unpack(b256_key);
+        assert_eq!(
+            trie.get_leaf_value(&full_path),
+            Some(&new_value),
+            "New leaf value should be retrievable"
         );
     }
 
