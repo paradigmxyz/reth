@@ -51,7 +51,10 @@ impl Config {
         let path = path.as_ref();
         match std::fs::read_to_string(path) {
             Ok(cfg_string) => {
-                toml::from_str(&cfg_string).map_err(|e| eyre::eyre!("Failed to parse TOML: {e}"))
+                let config: Self = toml::from_str(&cfg_string)
+                    .map_err(|e| eyre::eyre!("Failed to parse TOML: {e}"))?;
+                config.static_files.validate()?;
+                Ok(config)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 if let Some(parent) = path.parent() {
@@ -1171,6 +1174,40 @@ connect_trusted_nodes_only = true
         for enode in expected_enodes {
             let node = TrustedPeer::from_str(enode).unwrap();
             assert!(conf.peers.trusted_nodes.contains(&node));
+        }
+    }
+
+    #[test]
+    fn test_static_files_config_validation_on_load() {
+        let invalid_toml = r#"[static_files.blocks_per_file]
+headers = 0"#;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.toml");
+        std::fs::write(&path, invalid_toml).unwrap();
+
+        let result = Config::from_path(&path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Headers segment"));
+    }
+
+    #[test]
+    fn test_static_files_config_validation_all_segments() {
+        let cases = [
+            ("headers = 0", "Headers segment"),
+            ("transactions = 0", "Transactions segment"),
+            ("receipts = 0", "Receipts segment"),
+            ("transaction_senders = 0", "Transaction senders segment"),
+        ];
+
+        for (field, expected) in cases {
+            let toml = format!("[static_files.blocks_per_file]\n{}", field);
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("test.toml");
+            std::fs::write(&path, toml).unwrap();
+
+            let err = Config::from_path(&path).unwrap_err().to_string();
+            assert!(err.contains(expected), "expected '{}' in: {}", expected, err);
         }
     }
 }
