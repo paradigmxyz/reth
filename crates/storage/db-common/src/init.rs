@@ -211,20 +211,24 @@ where
     // Behaviour reserved only for new nodes should be set in the storage settings.
     provider_rw.write_storage_settings(genesis_storage_settings)?;
 
-    // For non-zero genesis blocks, ensure changeset static file writers are created with the
-    // correct expected_block_start BEFORE insert_genesis_state. This is needed because write_state
-    // writes changesets and increment_block checks against expected_block_start when block_range
-    // is None. Creating the writer via get_writer(genesis_block_number, ...) sets this correctly.
+    // For non-zero genesis blocks, initialize changeset static files BEFORE insert_genesis_state.
+    // This is a workaround: set_block_range(N-1, N-1) makes next_block_number() return N, so
+    // increment_block(N) succeeds. We can't use set_block_range(N, N) because that makes
+    // next_block_number() return N+1. We also can't skip set_block_range because
+    // expected_block_start from find_fixed_range would be 0 (the file range start), not N.
     let static_file_provider = provider_rw.static_file_provider();
     if genesis_block_number > 0 {
         if genesis_storage_settings.account_changesets_in_static_files {
-            // Just get the writer to ensure it's initialized with the correct expected block range
-            let _ = static_file_provider
-                .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?;
+            static_file_provider
+                .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
+                .user_header_mut()
+                .set_block_range(genesis_block_number - 1, genesis_block_number - 1);
         }
         if genesis_storage_settings.storage_changesets_in_static_files {
-            let _ = static_file_provider
-                .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?;
+            static_file_provider
+                .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
+                .user_header_mut()
+                .set_block_range(genesis_block_number - 1, genesis_block_number - 1);
         }
     }
 
