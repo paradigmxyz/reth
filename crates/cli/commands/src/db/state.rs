@@ -256,16 +256,13 @@ impl Command {
                                 let mut local_keys = BTreeSet::new();
                                 let mut entries_in_chunk = 0usize;
 
-                                if let Some(walker) =
-                                    changeset_cursor.walk_range(start_key..=end_key).ok()
+                                if let Ok(walker) = changeset_cursor.walk_range(start_key..=end_key)
                                 {
-                                    for entry in walker {
-                                        if let Ok((block_addr, storage_entry)) = entry {
-                                            if block_addr.address() == address {
-                                                local_keys.insert(storage_entry.key);
-                                            }
-                                            entries_in_chunk += 1;
+                                    for (block_addr, storage_entry) in walker.flatten() {
+                                        if block_addr.address() == address {
+                                            local_keys.insert(storage_entry.key);
                                         }
+                                        entries_in_chunk += 1;
                                     }
                                 }
 
@@ -323,14 +320,12 @@ impl Command {
         // Iterate over StoragesHistory entries
         // StorageShardedKey is (address, storage_key, highest_block_number)
         if let Ok(iter) = rocksdb.iter::<tables::StoragesHistory>() {
-            for item in iter {
-                if let Ok((key, _)) = item {
-                    if key.address == address {
-                        keys.insert(key.sharded_key.key);
-                    } else if key.address > address {
-                        // Keys are sorted by address, so we can stop early
-                        break;
-                    }
+            for (key, _) in iter.flatten() {
+                if key.address == address {
+                    keys.insert(key.sharded_key.key);
+                } else if key.address > address {
+                    // Keys are sorted by address, so we can stop early
+                    break;
                 }
             }
         }

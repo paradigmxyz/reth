@@ -123,7 +123,7 @@ impl RocksDBProvider {
     /// Creates an iterator over all entries in the specified table (stub implementation).
     ///
     /// Returns an empty iterator since there is no `RocksDB` when the feature is disabled.
-    pub fn iter<T: reth_db_api::table::Table>(&self) -> ProviderResult<RocksDBIter<T>> {
+    pub const fn iter<T: reth_db_api::table::Table>(&self) -> ProviderResult<RocksDBIter<T>> {
         Ok(RocksDBIter(std::marker::PhantomData))
     }
 }
