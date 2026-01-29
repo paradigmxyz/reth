@@ -326,7 +326,7 @@ pub trait SparseTrieExt: SparseTrie {
     ///    and `min_len = blinded_path.len()` (to skip already-revealed prefixes)
     ///
     /// Proof targets are deduplicated - the callback is invoked at most once per unique
-    /// `(path, min_len)` pair within a single call.
+    /// `(full_path, min_len)` pair within a single call, where `full_path` is the leaf key path.
     ///
     /// # Workflow
     ///
@@ -342,6 +342,12 @@ pub trait SparseTrieExt: SparseTrie {
     /// # Returns
     ///
     /// `Ok(())` on success, or an error if a non-blinded-node error occurs.
+    ///
+    /// # Partial Application
+    ///
+    /// Updates are applied individually. If a fatal (non-blinded) error occurs, previously
+    /// successful updates in the same call remain applied. The `updates` map will contain
+    /// only the updates that were not yet attempted when the error occurred.
     fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
