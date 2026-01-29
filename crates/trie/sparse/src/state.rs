@@ -1556,10 +1556,7 @@ mod tests {
         sparse.reveal_account_v2_proof_nodes(v2_proof_nodes.clone()).unwrap();
 
         // Check that the state trie contains the leaf node and value
-        assert!(sparse
-            .state_trie_ref()
-            .unwrap()
-            .has_node_at_path(&Nibbles::from_nibbles([0x0])));
+        assert!(sparse.state_trie_ref().unwrap().has_node_at_path(&Nibbles::from_nibbles([0x0])));
         assert_eq!(
             sparse.state_trie_ref().unwrap().get_leaf_value(&Nibbles::from_nibbles([0x0])),
             Some(&leaf_value)

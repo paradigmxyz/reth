@@ -28,7 +28,7 @@ use reth_trie_common::{
 use smallvec::SmallVec;
 use tracing::{debug, instrument, trace};
 
-/// Index into a [`NodeArena`]. Uses `NonZeroU32` for `Option<NodeId>` optimization.
+/// Index into a [`NodeArena`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NodeId(NonZeroU32);
 
@@ -36,19 +36,18 @@ impl NodeId {
     /// Creates a new `NodeId` from a raw index.
     ///
     /// # Panics
+    ///
     /// Panics if `index` is `u32::MAX` (reserved for `None` representation).
     #[inline]
     pub const fn new(index: u32) -> Self {
-        match NonZeroU32::new(index.wrapping_add(1)) {
-            Some(v) => Self(v),
-            None => panic!("NodeId index overflow"),
-        }
+        Self(NonZeroU32::new(index.wrapping_add(1)).expect("NodeId index overflow"))
     }
 
     /// Returns the underlying index.
     #[inline]
     pub const fn index(self) -> usize {
-        (self.0.get() - 1) as usize
+        // SAFETY: `NonZero` - 1 can't overflow.
+        (unsafe { self.0.get().unchecked_sub(1) }) as usize
     }
 }
 
@@ -469,14 +468,14 @@ fn encode_nibbles(nibbles: &Nibbles) -> String {
 
 impl fmt::Display for SerialSparseTrie {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // This prints the trie in preorder traversal, using a stack with NodeIds
+        // This prints the trie in preorder traversal, using a stack
         let mut stack = Vec::new();
         let mut visited = HashSet::new();
 
         // 4 spaces as indent per level
         const INDENT: &str = "    ";
 
-        // Track path, NodeId, and depth
+        // Track both path and depth
         stack.push((Nibbles::default(), self.root, 0usize));
 
         while let Some((path, node_id, depth)) = stack.pop() {
@@ -522,12 +521,13 @@ impl fmt::Display for SerialSparseTrie {
                     writeln!(f, "{packed_path} -> {display_node:?}")?;
 
                     for i in CHILD_INDEX_RANGE.rev() {
-                        if state_mask.is_bit_set(i)
-                            && let Some(child_id) = children[i as usize] {
-                                let mut child_path = path;
-                                child_path.push_unchecked(i);
-                                stack.push((child_path, child_id, depth + 1));
-                            }
+                        if state_mask.is_bit_set(i) &&
+                            let Some(child_id) = children[i as usize]
+                        {
+                            let mut child_path = path;
+                            child_path.push_unchecked(i);
+                            stack.push((child_path, child_id, depth + 1));
+                        }
                     }
                 }
             }
@@ -1248,11 +1248,13 @@ impl SerialSparseTrie {
 
         // If the node is already revealed (not a hash and not empty), do nothing.
         // We need to allow revealing over Empty nodes (e.g., the initial root).
-        if let Some(existing_node) = self.node_at_path(&path)
-            && !existing_node.is_hash() && !matches!(existing_node, SparseNode::Empty) {
-                // Return the existing NodeId
-                return Ok(self.traverse_to_node_id(&path));
-            }
+        if let Some(existing_node) = self.node_at_path(&path) &&
+            !existing_node.is_hash() &&
+            !matches!(existing_node, SparseNode::Empty)
+        {
+            // Return the existing NodeId
+            return Ok(self.traverse_to_node_id(&path));
+        }
 
         if let Some(branch_masks) = masks {
             self.branch_node_masks.insert(path, branch_masks);
@@ -1567,12 +1569,13 @@ impl SerialSparseTrie {
                 }
                 SparseNode::Branch { state_mask, children, .. } => {
                     for i in (0..16).rev() {
-                        if state_mask.is_bit_set(i)
-                            && let Some(child_id) = children[i as usize] {
-                                let mut child_path = path;
-                                child_path.push(i);
-                                stack.push((child_path, child_id));
-                            }
+                        if state_mask.is_bit_set(i) &&
+                            let Some(child_id) = children[i as usize]
+                        {
+                            let mut child_path = path;
+                            child_path.push(i);
+                            stack.push((child_path, child_id));
+                        }
                     }
                 }
                 SparseNode::Leaf { .. } | SparseNode::Hash(_) | SparseNode::Empty => {}
@@ -1671,10 +1674,9 @@ impl SerialSparseTrie {
         }
 
         // Reveal the node and get its NodeId directly
-        self.reveal_node_impl(path, TrieNode::decode(&mut &child[..])?, None)?
-            .ok_or_else(|| {
-                SparseTrieErrorKind::Reveal { path, node: Box::new(SparseNode::Empty) }.into()
-            })
+        self.reveal_node_impl(path, TrieNode::decode(&mut &child[..])?, None)?.ok_or_else(|| {
+            SparseTrieErrorKind::Reveal { path, node: Box::new(SparseNode::Empty) }.into()
+        })
     }
 
     /// Traverse the trie from the root down to the leaf at the given path,
@@ -1774,11 +1776,7 @@ impl SerialSparseTrie {
                         None
                     });
 
-                    nodes.push(RemovedSparseNode {
-                        path: current,
-                        node_id,
-                        unset_branch_nibble,
-                    });
+                    nodes.push(RemovedSparseNode { path: current, node_id, unset_branch_nibble });
 
                     current.push_unchecked(nibble);
 
@@ -2434,10 +2432,8 @@ impl SparseNode {
 
     /// Create new [`SparseNode::Branch`] with two bits set and corresponding child pointers.
     pub const fn new_split_branch(bit_a: u8, bit_b: u8) -> Self {
-        let state_mask = TrieMask::new(
-            // set bits for both children
-            (1u16 << bit_a) | (1u16 << bit_b),
-        );
+        // set bits for both children
+        let state_mask = TrieMask::new((1u16 << bit_a) | (1u16 << bit_b));
         Self::Branch { state_mask, children: EMPTY_CHILDREN, hash: None, store_in_db_trie: None }
     }
 
