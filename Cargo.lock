@@ -9757,6 +9757,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "ringbuffer",
+ "serde",
  "serde_json",
  "test-case",
  "tokio",
