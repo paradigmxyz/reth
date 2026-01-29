@@ -35,8 +35,8 @@ where
     // We still need direct access to HashedAccounts table
     let mut account_hashed_state_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
 
-    for (_, account_before_tx) in account_changesets {
-        let hashed_address = KH::hash_key(account_before_tx.address);
+    for (_, AccountBeforeTx { address, .. }) in account_changesets {
+        let hashed_address = KH::hash_key(address);
         account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
         if account_hashed_state_cursor.seek_exact(hashed_address)?.is_none() {
