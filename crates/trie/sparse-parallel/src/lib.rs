@@ -4,6 +4,8 @@
 
 extern crate alloc;
 
+mod lru;
+
 mod trie;
 pub use trie::*;
 

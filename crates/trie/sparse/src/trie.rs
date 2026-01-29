@@ -355,7 +355,8 @@ pub struct SerialSparseTrie {
     rlp_buf: Vec<u8>,
     /// Tracks recently updated keys for LRU-based prune retention.
     prune_lru: PruneLruTracker,
-    /// Set of already-requested proof targets for deduplication in [`SparseTrieExt::update_leaves`].
+    /// Set of already-requested proof targets for deduplication in
+    /// [`SparseTrieExt::update_leaves`].
     requested_proof_targets: HashSet<(Nibbles, u8)>,
 }
 
@@ -1185,7 +1186,8 @@ impl SparseTrieExt for SerialSparseTrie {
         }
 
         // DFS traversal to find nodes at max_depth that can be pruned.
-        // We collect "effective pruned roots" - children of nodes at max_depth with computed hashes.
+        // We collect "effective pruned roots" - children of nodes at max_depth with computed
+        // hashes.
         let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::new();
         let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
         stack.push((Nibbles::default(), 0));
@@ -1226,11 +1228,8 @@ impl SparseTrieExt for SerialSparseTrie {
                     }
 
                     // Check if child has a computed hash and can be pruned
-                    let hash = self
-                        .nodes
-                        .get(&child)
-                        .filter(|n| !n.is_hash())
-                        .and_then(|n| n.hash());
+                    let hash =
+                        self.nodes.get(&child).filter(|n| !n.is_hash()).and_then(|n| n.hash());
 
                     if let Some(hash) = hash {
                         self.nodes.insert(child, SparseNode::Hash(hash));
@@ -1306,18 +1305,16 @@ impl SparseTrieExt for SerialSparseTrie {
                         }
                     }
                 }
-                LeafUpdate::Touched => {
-                    match self.find_leaf(&full_path, None) {
-                        Err(LeafLookupError::BlindedNode { path, .. }) => {
-                            let min_len = (path.len() as u8).min(64);
-                            if self.requested_proof_targets.insert((full_path, min_len)) {
-                                proof_required_fn(full_path, min_len);
-                            }
-                            updates.insert(key, LeafUpdate::Touched);
+                LeafUpdate::Touched => match self.find_leaf(&full_path, None) {
+                    Err(LeafLookupError::BlindedNode { path, .. }) => {
+                        let min_len = (path.len() as u8).min(64);
+                        if self.requested_proof_targets.insert((full_path, min_len)) {
+                            proof_required_fn(full_path, min_len);
                         }
-                        Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {}
+                        updates.insert(key, LeafUpdate::Touched);
                     }
-                }
+                    Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {}
+                },
             }
         }
 

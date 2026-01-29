@@ -1,7 +1,7 @@
-use crate::LowerSparseSubtrie;
+use crate::{lru::PruneLruTracker, LowerSparseSubtrie};
 use alloc::borrow::Cow;
 use alloy_primitives::{
-    map::{Entry, HashMap},
+    map::{Entry, HashMap, HashSet},
     B256,
 };
 use alloy_rlp::Decodable;
@@ -126,6 +126,8 @@ pub struct ParallelSparseTrie {
     /// Tracks proof targets already requested via `update_leaves` to avoid duplicate callbacks
     /// across retry calls. Key is (`leaf_path`, `min_depth`).
     requested_proof_targets: alloy_primitives::map::HashSet<(Nibbles, u8)>,
+    /// Tracks recently updated keys for LRU-based prune retention.
+    prune_lru: PruneLruTracker,
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ParallelSparseTrieMetrics,
@@ -145,6 +147,7 @@ impl Default for ParallelSparseTrie {
             update_actions_buffers: Vec::default(),
             parallelism_thresholds: Default::default(),
             requested_proof_targets: Default::default(),
+            prune_lru: PruneLruTracker::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -536,6 +539,7 @@ impl SparseTrie for ParallelSparseTrie {
 
         // Insert into prefix_set only after all operations succeed
         self.prefix_set.insert(full_path);
+        self.prune_lru.record(full_path);
 
         Ok(())
     }
@@ -804,6 +808,7 @@ impl SparseTrie for ParallelSparseTrie {
             }
         }
 
+        self.prune_lru.record(*full_path);
         Ok(())
     }
 
@@ -921,6 +926,7 @@ impl SparseTrie for ParallelSparseTrie {
         self.prefix_set.clear();
         self.updates = None;
         self.branch_node_masks.clear();
+        self.prune_lru.clear();
         // `update_actions_buffers` doesn't need to be cleared; we want to reuse the Vecs it has
         // buffered, and all of those are already inherently cleared when they get used.
     }
@@ -1040,6 +1046,42 @@ impl SparseTrieExt for ParallelSparseTrie {
     }
 
     fn prune(&mut self, max_depth: usize) -> usize {
+        // Build the set of node paths to protect based on recently updated keys.
+        // For each recent key, we walk the trie from root and mark all visited node paths.
+        let mut protected: HashSet<Nibbles> = HashSet::default();
+        for recent_key in self.prune_lru.iter() {
+            let mut current = Nibbles::default();
+            // Walk the trie following this key path
+            while current.len() < recent_key.len() {
+                protected.insert(current);
+                let Some(subtrie) = self.subtrie_for_path(&current) else { break };
+                let Some(node) = subtrie.nodes.get(&current) else { break };
+                match node {
+                    SparseNode::Empty | SparseNode::Hash(_) => break,
+                    SparseNode::Leaf { key, .. } => {
+                        let mut leaf_path = current;
+                        leaf_path.extend(key);
+                        protected.insert(leaf_path);
+                        break;
+                    }
+                    SparseNode::Extension { key, .. } => {
+                        current.extend(key);
+                    }
+                    SparseNode::Branch { state_mask, .. } => {
+                        let nibble = recent_key.get_unchecked(current.len());
+                        if !state_mask.is_bit_set(nibble) {
+                            break;
+                        }
+                        current.push_unchecked(nibble);
+                    }
+                }
+            }
+            // Include the final path if we reached it
+            if current.len() <= recent_key.len() {
+                protected.insert(current);
+            }
+        }
+
         // DFS traversal to find nodes at max_depth that can be pruned.
         // Collects "effective pruned roots" - children of nodes at max_depth with computed hashes.
         // We replace nodes with Hash stubs inline during traversal.
@@ -1081,6 +1123,12 @@ impl SparseTrieExt for ParallelSparseTrie {
             // Process children - either continue traversal or prune
             for child in children {
                 if depth == max_depth {
+                    // Check if child is protected by LRU - if so, continue traversal
+                    if protected.contains(&child) {
+                        stack.push((child, depth + 1));
+                        continue;
+                    }
+
                     // Check if child has a computed hash and replace inline
                     let hash = self
                         .subtrie_for_path(&child)
@@ -1256,6 +1304,23 @@ impl ParallelSparseTrie {
     pub const fn with_parallelism_thresholds(mut self, thresholds: ParallelismThresholds) -> Self {
         self.parallelism_thresholds = thresholds;
         self
+    }
+
+    /// Sets the capacity for LRU-based prune retention tracking.
+    ///
+    /// When pruning, ancestor nodes of recently updated keys are preserved even if they exceed
+    /// `max_depth`. This capacity controls how many recent keys are tracked.
+    pub fn with_prune_lru_capacity(mut self, capacity: usize) -> Self {
+        self.prune_lru = PruneLruTracker::new(capacity);
+        self
+    }
+
+    /// Updates the capacity for LRU-based prune retention tracking.
+    ///
+    /// When pruning, ancestor nodes of recently updated keys are preserved even if they exceed
+    /// `max_depth`. This capacity controls how many recent keys are tracked.
+    pub fn set_prune_lru_capacity(&mut self, capacity: usize) {
+        self.prune_lru = PruneLruTracker::new(capacity);
     }
 
     /// Returns true if retaining updates is enabled for the overall trie.
