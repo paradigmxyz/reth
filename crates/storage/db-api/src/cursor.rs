@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     fmt,
     ops::{Bound, RangeBounds},
 };
@@ -373,5 +374,52 @@ impl<T: DupSort, CURSOR: DbDupCursorRO<T>> Iterator for DupWalker<'_, T, CURSOR>
             return start
         }
         self.cursor.next_dup().transpose()
+    }
+}
+
+/// A wrapper around a cursor that returns it to a cell on drop.
+///
+/// This allows cursors to be reused across multiple operations,
+/// reducing the overhead of repeatedly creating new cursors.
+pub struct ReusableCursor<'cell, T: Table, C: DbCursorRO<T>> {
+    cursor: Option<C>,
+    cell: &'cell Cell<Option<C>>,
+    _phantom: std::marker::PhantomData<T>,
+}
+
+impl<T, C> fmt::Debug for ReusableCursor<'_, T, C>
+where
+    T: Table,
+    C: DbCursorRO<T> + fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReusableCursor").field("cursor", &self.cursor).finish()
+    }
+}
+
+impl<'cell, T: Table, C: DbCursorRO<T>> ReusableCursor<'cell, T, C> {
+    /// Creates a new `ReusableCursor` from a cursor and a cell to return it to.
+    pub const fn new(cursor: C, cell: &'cell Cell<Option<C>>) -> Self {
+        Self { cursor: Some(cursor), cell, _phantom: std::marker::PhantomData }
+    }
+}
+
+impl<T: Table, C: DbCursorRO<T>> Drop for ReusableCursor<'_, T, C> {
+    fn drop(&mut self) {
+        self.cell.set(self.cursor.take());
+    }
+}
+
+impl<T: Table, C: DbCursorRO<T>> std::ops::Deref for ReusableCursor<'_, T, C> {
+    type Target = C;
+
+    fn deref(&self) -> &Self::Target {
+        self.cursor.as_ref().expect("cursor always exists")
+    }
+}
+
+impl<T: Table, C: DbCursorRO<T>> std::ops::DerefMut for ReusableCursor<'_, T, C> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.cursor.as_mut().expect("cursor always exists")
     }
 }
