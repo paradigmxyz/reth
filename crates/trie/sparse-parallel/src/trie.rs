@@ -1641,21 +1641,28 @@ impl ParallelSparseTrie {
     }
 
     /// Pre-validates reveal chain accessibility before mutations.
-    /// Returns error if any node would fail to reveal.
+    ///
+    /// Walks the trie path checking that all nodes can be revealed. This is called before
+    /// any mutations to ensure the operation will succeed atomically.
+    ///
+    /// Returns `BlindedNode` error if any node in the chain cannot be revealed by the provider.
     fn pre_validate_reveal_chain<P: TrieNodeProvider>(
         &self,
         path: &Nibbles,
         provider: &P,
     ) -> SparseTrieResult<()> {
+        // Find the subtrie containing this path, or return Ok if path doesn't exist
         let subtrie = match self.subtrie_for_path(path) {
             Some(s) => s,
             None => return Ok(()),
         };
 
         match subtrie.nodes.get(path) {
+            // Hash node: attempt to reveal from provider
             Some(SparseNode::Hash(hash)) => match provider.trie_node(path)? {
                 Some(RevealedNode { node, .. }) => {
                     let decoded = TrieNode::decode(&mut &node[..])?;
+                    // Extension nodes have children that also need validation
                     if let TrieNode::Extension(ext) = decoded {
                         let mut grandchild_path = *path;
                         grandchild_path.extend(&ext.key);
@@ -1663,13 +1670,16 @@ impl ParallelSparseTrie {
                     }
                     Ok(())
                 }
+                // Provider cannot reveal this node - operation would fail
                 None => Err(SparseTrieErrorKind::BlindedNode { path: *path, hash: *hash }.into()),
             },
+            // Already-revealed extension: recursively validate its child
             Some(SparseNode::Extension { key, .. }) => {
                 let mut child_path = *path;
                 child_path.extend(key);
                 self.pre_validate_reveal_chain(&child_path, provider)
             }
+            // Leaf, Branch, Empty, or missing: no further validation needed
             _ => Ok(()),
         }
     }
