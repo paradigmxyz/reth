@@ -37,7 +37,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_trie_db::ChangesetCache;
+use reth_trie_db::{ChangesetCache, StorageFilterFactoryBuilder};
 use revm::state::EvmState;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Instant};
@@ -282,6 +282,9 @@ where
     evm_config: C,
     /// Changeset cache for in-memory trie changesets
     changeset_cache: ChangesetCache,
+    /// Cuckoo filter for tracking accounts with storage.
+    /// Used to skip storage proof calculations for accounts without storage.
+    storage_filter: std::sync::Arc<reth_trie_common::SharedStorageFilter>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -291,8 +294,8 @@ where
     C: Debug + ConfigureEvm<Primitives = N>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EngineApiTreeHandler")
-            .field("provider", &self.provider)
+        let mut s = f.debug_struct("EngineApiTreeHandler");
+        s.field("provider", &self.provider)
             .field("consensus", &self.consensus)
             .field("payload_validator", &self.payload_validator)
             .field("state", &self.state)
@@ -307,6 +310,7 @@ where
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
             .field("changeset_cache", &self.changeset_cache)
+            .field("storage_filter", &self.storage_filter)
             .finish()
     }
 }
@@ -346,6 +350,7 @@ where
         engine_kind: EngineApiKind,
         evm_config: C,
         changeset_cache: ChangesetCache,
+        storage_filter: std::sync::Arc<reth_trie_common::SharedStorageFilter>,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -367,6 +372,7 @@ where
             engine_kind,
             evm_config,
             changeset_cache,
+            storage_filter,
         }
     }
 
@@ -405,6 +411,18 @@ where
             kind,
         );
 
+        // Build the storage filter from the database in parallel
+        let num_threads = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1);
+        let filter = provider
+            .build_storage_filter_parallel(num_threads)
+            .expect("failed to build storage filter");
+        let storage_filter =
+            std::sync::Arc::new(reth_trie_common::SharedStorageFilter::new(filter));
+
+        // Set the storage filter on the payload validator for use in proof calculation
+        let mut payload_validator = payload_validator;
+        payload_validator.set_storage_filter(storage_filter.clone());
+
         let task = Self::new(
             provider,
             consensus,
@@ -419,6 +437,7 @@ where
             kind,
             evm_config,
             changeset_cache,
+            storage_filter,
         );
         let incoming = task.incoming_tx.clone();
         std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();

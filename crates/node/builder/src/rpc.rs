@@ -1351,6 +1351,7 @@ where
             tree_config,
             invalid_block_hook,
             changeset_cache,
+            None, // storage_filter - will be set by EngineApiTreeHandler
         ))
     }
 }
