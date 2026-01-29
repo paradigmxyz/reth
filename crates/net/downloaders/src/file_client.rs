@@ -85,9 +85,12 @@ impl From<&'static str> for FileClientError {
 impl<B: FullBlock> FileClient<B> {
     /// Create a new file client from a slice of sealed blocks.
     pub fn from_blocks(blocks: impl IntoIterator<Item = SealedBlock<B>>) -> Self {
-        let mut headers = HashMap::default();
-        let mut hash_to_number = HashMap::default();
-        let mut bodies = HashMap::default();
+        let blocks: Vec<_> = blocks.into_iter().collect();
+        let capacity = blocks.len();
+
+        let mut headers = HashMap::with_capacity(capacity);
+        let mut hash_to_number = HashMap::with_capacity(capacity);
+        let mut bodies = HashMap::with_capacity(capacity);
 
         for block in blocks {
             let number = block.number();
