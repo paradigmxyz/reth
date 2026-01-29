@@ -292,7 +292,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     async fn get_bals_by_range_v1(&self, start: U64, count: U64) -> RpcResult<Vec<Bytes>>;
 }
 
-/// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>
+/// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/eth/>
 ///
 /// This also includes additional eth functions required by optimism.
 ///
