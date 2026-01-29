@@ -1480,13 +1480,6 @@ impl SerialSparseTrie {
         self.arena.get(id)
     }
 
-    /// Returns a mutable reference to the node at the given [`NodeId`].
-    #[inline]
-    #[allow(dead_code)]
-    fn node_mut(&mut self, id: NodeId) -> &mut SparseNode {
-        self.arena.get_mut(id)
-    }
-
     /// Traverses from root to the node at the given path using child pointers.
     ///
     /// Returns `None` if the path doesn't exist or a node along the path doesn't have
