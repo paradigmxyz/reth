@@ -713,10 +713,130 @@ where
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         // The parallel merkle stage uses StageId::MerkleExecute, so its unwind should be a no-op.
-        // The actual unwind work is done by MerkleStage::Unwind which runs after the hashing
-        // stages have unwound (so the hashed state in the database reflects the target block).
+        // The actual unwind work is done by ParallelMerkleUnwindStage which runs before the
+        // hashing stages unwind.
         info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+    }
+}
+
+/// Parallel merkle unwind stage that uses [`ParallelStateRoot`] for state root computation
+/// during unwind operations.
+///
+/// This stage runs before the hashing stages unwind (similar to [`MerkleStage::Unwind`]) and
+/// uses parallel state root computation for better performance.
+///
+/// For each unwind operation, it creates a fresh [`OverlayStateProviderFactory`] to ensure
+/// the factory reflects the current database state.
+#[derive(Debug, Clone)]
+pub struct ParallelMerkleUnwindStage<F> {
+    /// The underlying database provider factory used to create overlay factories.
+    factory: F,
+}
+
+impl<F> ParallelMerkleUnwindStage<F> {
+    /// Create a new parallel merkle unwind stage with the given provider factory.
+    pub const fn new(factory: F) -> Self {
+        Self { factory }
+    }
+}
+
+impl<F, Provider> Stage<Provider> for ParallelMerkleUnwindStage<F>
+where
+    F: DatabaseProviderFactory + Clone + Send + Sync + 'static,
+    F::Provider: reth_provider::StageCheckpointReader
+        + reth_provider::PruneCheckpointReader
+        + BlockNumReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + DBProvider,
+    Provider: DBProvider<Tx: DbTxMut>
+        + TrieWriter
+        + StatsReader
+        + HeaderProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + StageCheckpointReader
+        + StageCheckpointWriter
+        + BlockNumReader,
+{
+    fn id(&self) -> StageId {
+        StageId::MerkleUnwind
+    }
+
+    fn execute(
+        &mut self,
+        _provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError> {
+        // This stage is unwind-only; execute is a no-op.
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
+    }
+
+    fn unwind(
+        &mut self,
+        provider: &Provider,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, StageError> {
+        let tx = provider.tx_ref();
+        let range = input.unwind_block_range();
+
+        let mut entities_checkpoint =
+            input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
+                processed: 0,
+                total: (tx.entries::<tables::HashedAccounts>()? +
+                    tx.entries::<tables::HashedStorages>()?) as u64,
+            });
+
+        if input.unwind_to == 0 {
+            tx.clear::<tables::AccountsTrie>()?;
+            tx.clear::<tables::StoragesTrie>()?;
+
+            entities_checkpoint.processed = 0;
+
+            return Ok(UnwindOutput {
+                checkpoint: StageCheckpoint::new(input.unwind_to)
+                    .with_entities_stage_checkpoint(entities_checkpoint),
+            });
+        }
+
+        if range.is_empty() {
+            info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
+        } else {
+            // Load prefix sets from changesets for the unwind range
+            let prefix_sets =
+                load_prefix_sets_with_provider::<_, KeccakKeyHasher>(provider, range)
+                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
+
+            // Create a fresh overlay factory for unwind to ensure we have the latest
+            // database state.
+            let overlay_factory =
+                OverlayStateProviderFactory::new(self.factory.clone(), ChangesetCache::new());
+
+            // Use parallel state root computation for unwind
+            let (block_root, updates) = ParallelStateRoot::new(overlay_factory, prefix_sets)
+                .incremental_root_with_updates()
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
+
+            let target = provider
+                .header_by_number(input.unwind_to)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
+
+            validate_state_root(block_root, SealedHeader::seal_slow(target), input.unwind_to)?;
+
+            provider.write_trie_updates(updates)?;
+
+            let accounts = tx.entries::<tables::HashedAccounts>()?;
+            let storages = tx.entries::<tables::HashedStorages>()?;
+            let total = (accounts + storages) as u64;
+            entities_checkpoint.total = total;
+            entities_checkpoint.processed = total;
+        }
+
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(input.unwind_to)
+                .with_entities_stage_checkpoint(entities_checkpoint),
+        })
     }
 }
 

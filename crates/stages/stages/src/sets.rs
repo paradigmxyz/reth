@@ -626,13 +626,13 @@ where
         + reth_provider::StorageChangeSetReader
         + reth_provider::DBProvider,
     ParallelMerkleStage<F>: Stage<Provider>,
-    MerkleStage: Stage<Provider>,
+    ParallelMerkleUnwindStage<F>: Stage<Provider>,
     AccountHashingStage: Stage<Provider>,
     StorageHashingStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
-            .add_stage(MerkleStage::default_unwind())
+            .add_stage(ParallelMerkleUnwindStage::new(self.provider_factory.clone()))
             .add_stage(AccountHashingStage::new(
                 self.stages_config.account_hashing,
                 self.stages_config.etl.clone(),
