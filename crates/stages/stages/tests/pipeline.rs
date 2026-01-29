@@ -27,10 +27,8 @@ use reth_primitives_traits::{
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockNumReader, DBProvider,
     DatabaseProviderFactory, HeaderProvider, OriginalValuesKnown, StageCheckpointReader,
-    StateWriter,
+    StateWriter, StaticFileProviderFactory,
 };
-#[cfg(feature = "edge")]
-use reth_provider::StaticFileProviderFactory;
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::sets::DefaultStages;
@@ -62,6 +60,70 @@ const CONTRACT_ADDRESS: Address = Address::new([0x42; 20]);
 /// Creates a `FileClient` populated with the given blocks.
 fn create_file_client_from_blocks(blocks: Vec<SealedBlock<Block>>) -> Arc<FileClient<Block>> {
     Arc::new(FileClient::from_blocks(blocks))
+}
+
+/// Verifies that changesets are queryable from the correct source based on storage settings.
+///
+/// Queries static files when changesets are configured to be stored there, otherwise queries MDBX.
+fn assert_changesets_queryable(
+    provider_factory: &reth_provider::ProviderFactory<
+        reth_provider::test_utils::MockNodeTypesWithDB,
+    >,
+    block_range: std::ops::RangeInclusive<u64>,
+) -> eyre::Result<()> {
+    use reth_db_api::{cursor::DbCursorRO, models::BlockNumberAddress, transaction::DbTx};
+    use reth_storage_api::{ChangeSetReader, StorageChangeSetReader, StorageSettingsCache};
+
+    let provider = provider_factory.provider()?;
+    let settings = provider.cached_storage_settings();
+
+    // Verify storage changesets
+    if settings.storage_changesets_in_static_files {
+        let static_file_provider = provider_factory.static_file_provider();
+        static_file_provider.initialize_index()?;
+        let storage_changesets = static_file_provider.storage_changesets_range(block_range.clone())?;
+        assert!(
+            !storage_changesets.is_empty(),
+            "storage changesets should be queryable from static files for blocks {:?}",
+            block_range
+        );
+    } else {
+        let storage_changesets: Vec<_> = provider
+            .tx_ref()
+            .cursor_dup_read::<reth_db::tables::StorageChangeSets>()?
+            .walk_range(BlockNumberAddress::range(block_range.clone()))?
+            .collect::<Result<Vec<_>, _>>()?;
+        assert!(
+            !storage_changesets.is_empty(),
+            "storage changesets should be queryable from MDBX for blocks {:?}",
+            block_range
+        );
+    }
+
+    // Verify account changesets
+    if settings.account_changesets_in_static_files {
+        let static_file_provider = provider_factory.static_file_provider();
+        static_file_provider.initialize_index()?;
+        let account_changesets = static_file_provider.account_changesets_range(block_range.clone())?;
+        assert!(
+            !account_changesets.is_empty(),
+            "account changesets should be queryable from static files for blocks {:?}",
+            block_range
+        );
+    } else {
+        let account_changesets: Vec<_> = provider
+            .tx_ref()
+            .cursor_read::<reth_db::tables::AccountChangeSets>()?
+            .walk_range(block_range.clone())?
+            .collect::<Result<Vec<_>, _>>()?;
+        assert!(
+            !account_changesets.is_empty(),
+            "account changesets should be queryable from MDBX for blocks {:?}",
+            block_range
+        );
+    }
+
+    Ok(())
 }
 
 /// Builds downloaders from a `FileClient`.
@@ -387,26 +449,9 @@ async fn test_pipeline() -> eyre::Result<()> {
         );
     }
 
-    // Verify changesets are queryable from static files before unwind (edge feature requirement)
-    // This validates that the #21561 fix works - unwind needs to read changesets from static files
-    #[cfg(feature = "edge")]
-    {
-        let static_file_provider = pipeline_provider_factory.static_file_provider();
-        static_file_provider.initialize_index()?;
-
-        use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
-        let storage_changesets = static_file_provider.storage_changesets_range(1..=5)?;
-        let account_changesets = static_file_provider.account_changesets_range(1..=5)?;
-
-        assert!(
-            !storage_changesets.is_empty(),
-            "storage changesets should be queryable from static files for blocks 1-5"
-        );
-        assert!(
-            !account_changesets.is_empty(),
-            "account changesets should be queryable from static files for blocks 1-5"
-        );
-    }
+    // Verify changesets are queryable before unwind
+    // This validates that the #21561 fix works - unwind needs to read changesets from the correct source
+    assert_changesets_queryable(&pipeline_provider_factory, 1..=5)?;
 
     // Unwind to block 2
     let unwind_target = 2u64;
