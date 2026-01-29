@@ -207,9 +207,7 @@ impl TestHarness {
             None, // storage_filter
         );
 
-        let storage_filter = std::sync::Arc::new(parking_lot::RwLock::new(
-            reth_trie_common::StorageAccountFilter::default(),
-        ));
+        let storage_filter = std::sync::Arc::new(reth_trie_common::SharedStorageFilter::default());
         let tree = EngineApiTreeHandler::new(
             provider.clone(),
             consensus,

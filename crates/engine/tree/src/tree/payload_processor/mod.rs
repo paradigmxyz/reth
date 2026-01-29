@@ -269,7 +269,7 @@ where
         multiproof_provider_factory: F,
         config: &TreeConfig,
         bal: Option<Arc<BlockAccessList>>,
-        storage_filter: Option<Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>>,
+        storage_filter: Option<Arc<reth_trie_common::SharedStorageFilter>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
