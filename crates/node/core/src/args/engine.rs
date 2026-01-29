@@ -37,6 +37,7 @@ pub struct DefaultEngineValues {
     account_worker_count: Option<usize>,
     disable_proof_v2: bool,
     cache_metrics_disabled: bool,
+    enable_sparse_trie_as_cache: bool,
 }
 
 impl DefaultEngineValues {
@@ -172,6 +173,12 @@ impl DefaultEngineValues {
         self.cache_metrics_disabled = v;
         self
     }
+
+    /// Set whether to enable sparse trie as cache by default
+    pub const fn with_enable_sparse_trie_as_cache(mut self, v: bool) -> Self {
+        self.enable_sparse_trie_as_cache = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -197,6 +204,7 @@ impl Default for DefaultEngineValues {
             account_worker_count: None,
             disable_proof_v2: false,
             cache_metrics_disabled: false,
+            enable_sparse_trie_as_cache: false,
         }
     }
 }
@@ -324,6 +332,10 @@ pub struct EngineArgs {
     /// Disable cache metrics recording, which can take up to 50ms with large cached state.
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
+
+    /// Enable sparse trie as cache.
+    #[arg(long = "engine.enable-sparse-trie-as-cache", default_value_t = DefaultEngineValues::get_global().enable_sparse_trie_as_cache, conflicts_with = "disable_proof_v2")]
+    pub enable_sparse_trie_as_cache: bool,
 }
 
 #[allow(deprecated)]
@@ -350,6 +362,7 @@ impl Default for EngineArgs {
             account_worker_count,
             disable_proof_v2,
             cache_metrics_disabled,
+            enable_sparse_trie_as_cache,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -376,6 +389,7 @@ impl Default for EngineArgs {
             account_worker_count,
             disable_proof_v2,
             cache_metrics_disabled,
+            enable_sparse_trie_as_cache,
         }
     }
 }
@@ -412,6 +426,7 @@ impl EngineArgs {
 
         config = config.with_disable_proof_v2(self.disable_proof_v2);
         config = config.without_cache_metrics(self.cache_metrics_disabled);
+        config = config.with_enable_sparse_trie_as_cache(self.enable_sparse_trie_as_cache);
 
         config
     }
@@ -464,6 +479,7 @@ mod tests {
             account_worker_count: Some(8),
             disable_proof_v2: false,
             cache_metrics_disabled: true,
+            enable_sparse_trie_as_cache: false,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
