@@ -30,7 +30,7 @@ pub use reth_db_models::{
     AccountBeforeTx, ClientVersion, StaticFileBlockWithdrawals, StorageBeforeTx,
     StoredBlockBodyIndices, StoredBlockWithdrawals,
 };
-pub use sharded_key::ShardedKey;
+pub use sharded_key::{ShardedHistoryKey, ShardedKey};
 
 /// Macro that implements [`Encode`] and [`Decode`] for uint types.
 macro_rules! impl_uints {

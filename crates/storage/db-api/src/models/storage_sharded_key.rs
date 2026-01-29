@@ -7,7 +7,7 @@ use alloy_primitives::{Address, BlockNumber, B256};
 use derive_more::AsRef;
 use serde::{Deserialize, Serialize};
 
-use super::ShardedKey;
+use super::{ShardedHistoryKey, ShardedKey};
 
 /// Number of indices in one shard.
 pub const NUM_OF_INDICES_IN_SHARD: usize = 2_000;
@@ -91,6 +91,20 @@ impl Decode for StorageShardedKey {
     }
 }
 
+impl ShardedHistoryKey for StorageShardedKey {
+    type Prefix = (Address, B256);
+
+    #[inline]
+    fn new_sharded(prefix: Self::Prefix, highest_block_number: u64) -> Self {
+        Self::new(prefix.0, prefix.1, highest_block_number)
+    }
+
+    #[inline]
+    fn prefix(&self) -> Self::Prefix {
+        (self.address, self.sharded_key.key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +143,16 @@ mod tests {
         let encoded = key.encode();
         let decoded = StorageShardedKey::decode(&encoded).unwrap();
         assert_eq!(decoded.sharded_key.highest_block_number, u64::MAX);
+    }
+
+    #[test]
+    fn sharded_history_key_trait_roundtrip() {
+        let addr = address!("0102030405060708091011121314151617181920");
+        let storage_key = b256!("0001020304050607080910111213141516171819202122232425262728293031");
+        let block_num = 0x123456789ABCDEFu64;
+
+        let key = StorageShardedKey::new_sharded((addr, storage_key), block_num);
+        assert_eq!(key.prefix(), (addr, storage_key));
+        assert_eq!(key.sharded_key.highest_block_number, block_num);
     }
 }
