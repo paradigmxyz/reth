@@ -389,7 +389,7 @@ impl SparseTrie for ParallelSparseTrie {
                             let revealed_node = match provider.trie_node(&reveal_path) {
                                 Ok(node) => node,
                                 Err(e) => {
-                                    self.rollback_update(
+                                    self.rollback_insert(
                                         &full_path,
                                         &new_nodes,
                                         modified_original.take(),
@@ -402,7 +402,7 @@ impl SparseTrie for ParallelSparseTrie {
                                 let decoded = match TrieNode::decode(&mut &node[..]) {
                                     Ok(d) => d,
                                     Err(e) => {
-                                        self.rollback_update(
+                                        self.rollback_insert(
                                             &full_path,
                                             &new_nodes,
                                             modified_original.take(),
@@ -420,7 +420,7 @@ impl SparseTrie for ParallelSparseTrie {
                                 );
                                 let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
                                 if let Err(e) = subtrie.reveal_node(reveal_path, &decoded, masks) {
-                                    self.rollback_update(
+                                    self.rollback_insert(
                                         &full_path,
                                         &new_nodes,
                                         modified_original.take(),
@@ -429,7 +429,7 @@ impl SparseTrie for ParallelSparseTrie {
                                 }
                                 masks
                             } else {
-                                self.rollback_update(
+                                self.rollback_insert(
                                     &full_path,
                                     &new_nodes,
                                     modified_original.take(),
@@ -1300,7 +1300,7 @@ impl ParallelSparseTrie {
     /// and restoring any modified original node.
     /// This ensures `update_leaf` is atomic - either it succeeds completely or leaves the trie
     /// unchanged.
-    fn rollback_update(
+    fn rollback_insert(
         &mut self,
         full_path: &Nibbles,
         inserted_nodes: &[Nibbles],
