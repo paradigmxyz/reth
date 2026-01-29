@@ -1559,8 +1559,7 @@ mod tests {
         assert!(sparse
             .state_trie_ref()
             .unwrap()
-            .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])));
+            .has_node_at_path(&Nibbles::from_nibbles([0x0])));
         assert_eq!(
             sparse.state_trie_ref().unwrap().get_leaf_value(&Nibbles::from_nibbles([0x0])),
             Some(&leaf_value)
@@ -1613,8 +1612,7 @@ mod tests {
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
-            .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])));
+            .has_node_at_path(&Nibbles::from_nibbles([0x0])));
         assert_eq!(
             sparse
                 .storage_trie_ref(&B256::ZERO)

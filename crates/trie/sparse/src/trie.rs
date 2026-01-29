@@ -526,13 +526,12 @@ impl fmt::Display for SerialSparseTrie {
                     writeln!(f, "{packed_path} -> {display_node:?}")?;
 
                     for i in CHILD_INDEX_RANGE.rev() {
-                        if state_mask.is_bit_set(i) {
-                            if let Some(child_id) = children[i as usize] {
+                        if state_mask.is_bit_set(i)
+                            && let Some(child_id) = children[i as usize] {
                                 let mut child_path = path;
                                 child_path.push_unchecked(i);
                                 stack.push((child_path, child_id, depth + 1));
                             }
-                        }
                     }
                 }
             }
@@ -753,17 +752,17 @@ impl SparseTrieTrait for SerialSparseTrie {
                         // Handle the old extension's child - may need a new extension
                         let remaining_key = current.slice(common + 1..);
                         let child_ext_path = current.slice(..=common);
-                        let old_child_branch_id = if !remaining_key.is_empty() {
+                        let old_child_branch_id = if remaining_key.is_empty() {
+                            // Branch points directly to old extension's child
+                            self.traverse_to_node_id(&current)
+                                .expect("old extension child must exist")
+                        } else {
                             // Need a new extension between branch and old child
                             // First, find the old extension's child NodeId
                             let old_child_id = self.traverse_to_node_id(&current);
                             let mut new_child_ext = SparseNode::new_ext(remaining_key);
                             new_child_ext.set_ext_child(old_child_id);
                             self.insert_node(child_ext_path, new_child_ext)
-                        } else {
-                            // Branch points directly to old extension's child
-                            self.traverse_to_node_id(&current)
-                                .expect("old extension child must exist")
                         };
 
                         // Create the branch with child pointers already set
@@ -1249,7 +1248,7 @@ impl SparseTrieTrait for SerialSparseTrie {
 }
 
 impl SerialSparseTrie {
-    /// Internal implementation of reveal_node that returns the NodeId of the revealed node.
+    /// Internal implementation of `reveal_node` that returns the `NodeId` of the revealed node.
     ///
     /// Returns `Ok(Some(id))` if a node was inserted or replaced.
     /// Returns `Ok(None)` if the node already existed (early return).
@@ -1263,12 +1262,11 @@ impl SerialSparseTrie {
 
         // If the node is already revealed (not a hash and not empty), do nothing.
         // We need to allow revealing over Empty nodes (e.g., the initial root).
-        if let Some(existing_node) = self.node_at_path(&path) {
-            if !existing_node.is_hash() && !matches!(existing_node, SparseNode::Empty) {
+        if let Some(existing_node) = self.node_at_path(&path)
+            && !existing_node.is_hash() && !matches!(existing_node, SparseNode::Empty) {
                 // Return the existing NodeId
                 return Ok(self.traverse_to_node_id(&path));
             }
-        }
 
         if let Some(branch_masks) = masks {
             self.branch_node_masks.insert(path, branch_masks);
@@ -1461,7 +1459,7 @@ impl SerialSparseTrie {
         Ok(Some(node_id))
     }
 
-    /// Inserts a node into the arena, returning the NodeId.
+    /// Inserts a node into the arena, returning the `NodeId`.
     ///
     /// If the path is the root path, also updates the `root` field.
     /// Note: This always allocates a new arena slot. Use `replace_node` if the node
@@ -1477,7 +1475,7 @@ impl SerialSparseTrie {
     /// Replaces the node at the given path in the arena.
     ///
     /// If the node doesn't exist in the arena yet, allocates a new one.
-    /// Uses pointer traversal to find existing NodeId, falling back to allocation.
+    /// Uses pointer traversal to find existing `NodeId`, falling back to allocation.
     fn replace_node(&mut self, path: Nibbles, node: SparseNode) -> NodeId {
         // Try to find existing NodeId via pointer traversal
         if let Some(node_id) = self.traverse_to_node_id(&path) {
@@ -1587,13 +1585,12 @@ impl SerialSparseTrie {
                 }
                 SparseNode::Branch { state_mask, children, .. } => {
                     for i in (0..16).rev() {
-                        if state_mask.is_bit_set(i) {
-                            if let Some(child_id) = children[i as usize] {
+                        if state_mask.is_bit_set(i)
+                            && let Some(child_id) = children[i as usize] {
                                 let mut child_path = path;
                                 child_path.push(i);
                                 stack.push((child_path, child_id));
                             }
-                        }
                     }
                 }
                 SparseNode::Leaf { .. } | SparseNode::Hash(_) | SparseNode::Empty => {}
@@ -1651,7 +1648,7 @@ impl SerialSparseTrie {
     /// Will error if there's a conflict between a new hash node and an existing one
     /// at the same path.
     ///
-    /// Returns the NodeId of the inserted/existing node.
+    /// Returns the `NodeId` of the inserted/existing node.
     fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<NodeId> {
         if child.len() == B256::len_bytes() + 1 {
             let hash = B256::from_slice(&child[1..]);
@@ -1664,10 +1661,10 @@ impl SerialSparseTrie {
             let action = match self.traverse_to_node_id(&path) {
                 Some(node_id) => {
                     if let SparseNode::Hash(previous_hash) = self.node(node_id) {
-                        if previous_hash != &hash {
-                            HashAction::Conflict(hash)
-                        } else {
+                        if previous_hash == &hash {
                             HashAction::AlreadyExistsAt(node_id)
+                        } else {
+                            HashAction::Conflict(hash)
                         }
                     } else {
                         HashAction::AlreadyExistsAt(node_id)
@@ -1714,7 +1711,7 @@ impl SerialSparseTrie {
     ///
     /// Returns an error if a blinded node or an empty node is encountered unexpectedly,
     /// as these prevent proper removal of the leaf.
-    fn take_nodes_for_path(&mut self, path: &Nibbles) -> SparseTrieResult<Vec<RemovedSparseNode>> {
+    fn take_nodes_for_path(&self, path: &Nibbles) -> SparseTrieResult<Vec<RemovedSparseNode>> {
         let mut current = Nibbles::default(); // Start traversal from the root
         let mut nodes = Vec::new(); // Collect traversed nodes
 
@@ -2420,7 +2417,7 @@ pub enum SparseNode {
         /// The bitmask representing children present in the branch node.
         state_mask: TrieMask,
         /// Direct pointers to child nodes in the arena, indexed by nibble (0-15).
-        /// `None` means the child exists (per state_mask) but pointer not yet set,
+        /// `None` means the child exists (per `state_mask`) but pointer not yet set,
         /// or the child doesn't exist.
         children: [Option<NodeId>; 16],
         /// Pre-computed hash of the sparse node.
@@ -2534,7 +2531,7 @@ impl SparseNode {
     }
 
     /// Sets the child pointer for an extension node.
-    pub fn set_ext_child(&mut self, new_child: Option<NodeId>) {
+    pub const fn set_ext_child(&mut self, new_child: Option<NodeId>) {
         if let Self::Extension { child, hash, store_in_db_trie, .. } = self {
             *child = new_child;
             *hash = None;
@@ -2543,7 +2540,7 @@ impl SparseNode {
     }
 
     /// Sets a child pointer for a branch node at the given nibble index.
-    pub fn set_branch_child(&mut self, nibble: u8, child_id: Option<NodeId>) {
+    pub const fn set_branch_child(&mut self, nibble: u8, child_id: Option<NodeId>) {
         if let Self::Branch { children, hash, store_in_db_trie, .. } = self {
             children[nibble as usize] = child_id;
             *hash = None;
@@ -2552,7 +2549,7 @@ impl SparseNode {
     }
 
     /// Sets a bit in the state mask for a branch node, preserving existing children.
-    pub fn set_state_mask_bit(&mut self, nibble: u8) {
+    pub const fn set_state_mask_bit(&mut self, nibble: u8) {
         if let Self::Branch { state_mask, hash, store_in_db_trie, .. } = self {
             state_mask.set_bit(nibble);
             *hash = None;
@@ -2579,7 +2576,7 @@ impl SparseNode {
     ///
     /// This is useful for comparing nodes while ignoring pointer values,
     /// which can differ based on allocation order.
-    pub fn without_child_pointers(&self) -> Self {
+    pub const fn without_child_pointers(&self) -> Self {
         match self {
             Self::Empty => Self::Empty,
             Self::Hash(hash) => Self::Hash(*hash),
@@ -2876,7 +2873,7 @@ mod find_leaf_tests {
             hash: None,
             store_in_db_trie: None,
         };
-        let branch_id = arena.alloc(branch_node.clone());
+        let branch_id = arena.alloc(branch_node);
 
         // Create extension at 0x12 pointing to branch
         let ext2_node = SparseNode::Extension {
@@ -2885,7 +2882,7 @@ mod find_leaf_tests {
             hash: None,
             store_in_db_trie: None,
         };
-        let ext2_id = arena.alloc(ext2_node.clone());
+        let ext2_id = arena.alloc(ext2_node);
 
         // Create root extension pointing to ext2
         let root_node = SparseNode::Extension {
@@ -2894,7 +2891,7 @@ mod find_leaf_tests {
             hash: None,
             store_in_db_trie: None,
         };
-        let root_id = arena.alloc(root_node.clone());
+        let root_id = arena.alloc(root_node);
 
         let sparse = SerialSparseTrie {
             arena,
@@ -2929,7 +2926,7 @@ mod find_leaf_tests {
         // Create revealed leaf at 0x5
         let path_revealed_leaf = Nibbles::from_nibbles_unchecked([0x5, 0x6, 0x7, 0x8]);
         let leaf_node = SparseNode::new_leaf(Nibbles::from_nibbles_unchecked([0x6, 0x7, 0x8]));
-        let leaf_id = arena.alloc(leaf_node.clone());
+        let leaf_id = arena.alloc(leaf_node);
 
         // Root is a branch with child 0x1 (blinded) and 0x5 (revealed leaf)
         let state_mask = TrieMask::new(0b100010);
@@ -2942,7 +2939,7 @@ mod find_leaf_tests {
             hash: None,
             store_in_db_trie: None,
         };
-        let root_id = arena.alloc(root_node.clone());
+        let root_id = arena.alloc(root_node);
 
         let mut values = HashMap::default();
         values.insert(path_revealed_leaf, VALUE_A());
@@ -3069,7 +3066,7 @@ mod tests {
         nibbles
     }
 
-    /// Convert a map of nodes to a BTreeMap with child pointers stripped for comparison.
+    /// Convert a map of nodes to a `BTreeMap` with child pointers stripped for comparison.
     fn nodes_without_pointers(
         nodes: &HashMap<Nibbles, SparseNode>,
     ) -> BTreeMap<Nibbles, SparseNode> {
