@@ -1208,9 +1208,12 @@ where
         _block_hashes: Vec<BlockHash>,
     ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
         trace!(target: "rpc::engine", "Serving engine_getBALsByHashV1");
-        Err(EngineApiError::EngineObjectValidationError(
+        let start = std::time::Instant::now();
+        let result = Err(EngineApiError::EngineObjectValidationError(
             reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
+        ));
+        self.inner.metrics.latency.get_bals_by_hash_v1.record(start.elapsed());
+        result?
     }
 
     /// Handler for `engine_getBALsByRangeV1`
@@ -1222,9 +1225,12 @@ where
         _count: U64,
     ) -> RpcResult<Vec<alloy_primitives::Bytes>> {
         trace!(target: "rpc::engine", "Serving engine_getBALsByRangeV1");
-        Err(EngineApiError::EngineObjectValidationError(
+        let start = std::time::Instant::now();
+        let result = Err(EngineApiError::EngineObjectValidationError(
             reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-        ))?
+        ));
+        self.inner.metrics.latency.get_bals_by_range_v1.record(start.elapsed());
+        result?
     }
 }
 
