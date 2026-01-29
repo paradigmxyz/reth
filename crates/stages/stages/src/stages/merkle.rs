@@ -449,7 +449,7 @@ fn validate_state_root<H: BlockHeader + Sealable + Debug>(
 /// during staged sync.
 ///
 /// Internally, it creates an [`OverlayStateProviderFactory`] that provides the necessary
-/// [`TrieCursorFactory`] and [`HashedCursorFactory`] implementations for [`ParallelStateRoot`].
+/// trie cursor factory and hashed cursor factory implementations for [`ParallelStateRoot`].
 #[derive(Debug, Clone)]
 pub struct ParallelMerkleStage<F> {
     /// The overlay factory that wraps the database provider factory.

@@ -555,11 +555,9 @@ where
 /// - [`MerkleStage`] (unwind)
 /// - [`AccountHashingStage`]
 /// - [`StorageHashingStage`]
-/// - [`MerkleStage`] or [`ParallelMerkleStage`] (execute)
+/// - [`MerkleStage`] (execute)
 ///
-/// When a provider factory is supplied via [`HashingStages::with_parallel_merkle`], the
-/// [`ParallelMerkleStage`] is used for incremental state root computation, which calculates
-/// storage roots in parallel across multiple threads.
+/// For parallel state root computation, use [`ParallelHashingStages`] instead.
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct HashingStages {
