@@ -176,13 +176,6 @@ impl SparseTrie for ParallelSparseTrie {
     }
 
     fn reveal_nodes(&mut self, mut nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()> {
-        debug!(
-            target: "trie::parallel_sparse",
-            num_nodes = nodes.len(),
-            node_paths = ?nodes.iter().map(|n| &n.path).collect::<Vec<_>>(),
-            "reveal_nodes called"
-        );
-
         if nodes.is_empty() {
             return Ok(())
         }
@@ -312,13 +305,6 @@ impl SparseTrie for ParallelSparseTrie {
         value: Vec<u8>,
         provider: P,
     ) -> SparseTrieResult<()> {
-        debug!(
-            target: "trie::parallel_sparse",
-            ?full_path,
-            value_len = value.len(),
-            "ParallelSparseTrie::update_leaf called"
-        );
-
         // Check if the value already exists - if so, just update it (no structural changes needed)
         if self.upper_subtrie.inner.values.contains_key(&full_path) {
             self.prefix_set.insert(full_path);
@@ -559,12 +545,6 @@ impl SparseTrie for ParallelSparseTrie {
         full_path: &Nibbles,
         provider: P,
     ) -> SparseTrieResult<()> {
-        debug!(
-            target: "trie::parallel_sparse",
-            ?full_path,
-            "ParallelSparseTrie::remove_leaf called"
-        );
-
         // When removing a leaf node it's possibly necessary to modify its parent node, and possibly
         // the parent's parent node. It is not ever necessary to descend further than that; once an
         // extension node is hit it must terminate in a branch or the root, which won't need further
@@ -2145,75 +2125,22 @@ impl SparseSubtrie {
         provider: impl TrieNodeProvider,
         retain_updates: bool,
     ) -> SparseTrieResult<Option<(Nibbles, BranchNodeMasks)>> {
-        debug!(
-            target: "trie::parallel_sparse",
-            ?full_path,
-            subtrie_path = ?self.path,
-            value_len = value.len(),
-            num_nodes = self.nodes.len(),
-            "SparseSubtrie::update_leaf called"
-        );
-
         debug_assert!(full_path.starts_with(&self.path));
-
-        // Check if value already exists - if so, just update it (no structural changes needed)
-        if let Entry::Occupied(mut e) = self.inner.values.entry(full_path) {
-            debug!(
-                target: "trie::parallel_sparse",
-                ?full_path,
-                "SparseSubtrie::update_leaf - value already exists, returning early"
-            );
-            e.insert(value);
+        let existing = self.inner.values.insert(full_path, value);
+        if existing.is_some() {
+            // trie structure unchanged, return immediately
             return Ok(None)
         }
 
         // Here we are starting at the root of the subtrie, and traversing from there.
         let mut current = Some(self.path);
         let mut revealed = None;
-
-        // Track inserted nodes and modified original for rollback on error
-        let mut inserted_nodes: Vec<Nibbles> = Vec::new();
-        let mut modified_original: Option<(Nibbles, SparseNode)> = None;
-
-        debug!(
-            target: "trie::parallel_sparse",
-            ?full_path,
-            starting_path = ?self.path,
-            "SparseSubtrie::update_leaf - starting traversal"
-        );
         while let Some(current_path) = current {
-            debug!(
-                target: "trie::parallel_sparse",
-                ?current_path,
-                ?full_path,
-                node_at_current = ?self.nodes.get(&current_path),
-                "SparseSubtrie::update_leaf - about to call update_next_node"
-            );
-
-            // Save original node for potential rollback (only if not already saved)
-            if modified_original.is_none() &&
-                let Some(node) = self.nodes.get(&current_path)
-            {
-                modified_original = Some((current_path, node.clone()));
-            }
-
-            let step_result = self.update_next_node(current_path, &full_path, retain_updates);
-
-            // Handle errors from update_next_node - rollback and propagate
-            if let Err(e) = step_result {
-                self.rollback_leaf_insert(&full_path, &inserted_nodes, modified_original.take());
-                return Err(e);
-            }
-
-            match step_result? {
+            match self.update_next_node(current_path, &full_path, retain_updates)? {
                 LeafUpdateStep::Continue { next_node } => {
                     current = Some(next_node);
-                    // Clear modified_original since we haven't actually modified anything yet
-                    modified_original = None;
                 }
-                LeafUpdateStep::Complete { inserted_nodes: new_inserted, reveal_path } => {
-                    inserted_nodes.extend(new_inserted);
-
+                LeafUpdateStep::Complete { reveal_path, .. } => {
                     if let Some(reveal_path) = reveal_path &&
                         self.nodes.get(&reveal_path).expect("node must exist").is_hash()
                     {
@@ -2223,29 +2150,10 @@ impl SparseSubtrie {
                             leaf_full_path = ?full_path,
                             "Extension node child not revealed in update_leaf, falling back to db",
                         );
-                        let revealed_node = match provider.trie_node(&reveal_path) {
-                            Ok(node) => node,
-                            Err(e) => {
-                                self.rollback_leaf_insert(
-                                    &full_path,
-                                    &inserted_nodes,
-                                    modified_original.take(),
-                                );
-                                return Err(e);
-                            }
-                        };
-                        if let Some(RevealedNode { node, tree_mask, hash_mask }) = revealed_node {
-                            let decoded = match TrieNode::decode(&mut &node[..]) {
-                                Ok(d) => d,
-                                Err(e) => {
-                                    self.rollback_leaf_insert(
-                                        &full_path,
-                                        &inserted_nodes,
-                                        modified_original.take(),
-                                    );
-                                    return Err(e.into());
-                                }
-                            };
+                        if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                            provider.trie_node(&reveal_path)?
+                        {
+                            let decoded = TrieNode::decode(&mut &node[..])?;
                             trace!(
                                 target: "trie::parallel_sparse",
                                 ?reveal_path,
@@ -2255,14 +2163,7 @@ impl SparseSubtrie {
                                 "Revealing child (from lower)",
                             );
                             let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
-                            if let Err(e) = self.reveal_node(reveal_path, &decoded, masks) {
-                                self.rollback_leaf_insert(
-                                    &full_path,
-                                    &inserted_nodes,
-                                    modified_original.take(),
-                                );
-                                return Err(e);
-                            }
+                            self.reveal_node(reveal_path, &decoded, masks)?;
 
                             debug_assert_eq!(
                                 revealed, None,
@@ -2270,11 +2171,6 @@ impl SparseSubtrie {
                             );
                             revealed = masks.map(|masks| (reveal_path, masks));
                         } else {
-                            self.rollback_leaf_insert(
-                                &full_path,
-                                &inserted_nodes,
-                                modified_original.take(),
-                            );
                             return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
                                 path: reveal_path,
                             }
@@ -2290,34 +2186,7 @@ impl SparseSubtrie {
             }
         }
 
-        // Only insert the value after all structural changes succeed
-        self.inner.values.insert(full_path, value);
-
         Ok(revealed)
-    }
-
-    /// Rollback structural changes made during a failed leaf insert.
-    ///
-    /// This removes any nodes that were inserted and restores the original node
-    /// that was modified, ensuring atomicity of `update_leaf`.
-    fn rollback_leaf_insert(
-        &mut self,
-        full_path: &Nibbles,
-        inserted_nodes: &[Nibbles],
-        modified_original: Option<(Nibbles, SparseNode)>,
-    ) {
-        // Remove any values that may have been inserted
-        self.inner.values.remove(full_path);
-
-        // Remove all inserted nodes
-        for node_path in inserted_nodes {
-            self.nodes.remove(node_path);
-        }
-
-        // Restore the original node that was modified
-        if let Some((path, original_node)) = modified_original {
-            self.nodes.insert(path, original_node);
-        }
     }
 
     /// Processes the current node, returning what to do next in the leaf update process.
@@ -2332,44 +2201,14 @@ impl SparseSubtrie {
         path: &Nibbles,
         retain_updates: bool,
     ) -> SparseTrieResult<LeafUpdateStep> {
-        debug!(
-            target: "trie::parallel_sparse",
-            ?current,
-            ?path,
-            subtrie_path = ?self.path,
-            "SparseSubtrie::update_next_node called"
-        );
-
         debug_assert!(path.starts_with(&self.path));
         debug_assert!(current.starts_with(&self.path));
         debug_assert!(path.starts_with(&current));
         let Some(node) = self.nodes.get_mut(&current) else {
-            debug!(
-                target: "trie::parallel_sparse",
-                ?current,
-                ?path,
-                "SparseSubtrie::update_next_node - node not found at current path"
-            );
             return Ok(LeafUpdateStep::NodeNotFound);
         };
-
-        debug!(
-            target: "trie::parallel_sparse",
-            ?current,
-            ?path,
-            ?node,
-            "SparseSubtrie::update_next_node - found node"
-        );
-
         match node {
             SparseNode::Empty => {
-                debug!(
-                    target: "trie::parallel_sparse",
-                    ?current,
-                    ?path,
-                    subtrie_path = ?self.path,
-                    "SparseSubtrie::update_next_node - empty node, creating leaf"
-                );
                 // We need to insert the node with a different path and key depending on the path of
                 // the subtrie.
                 let path = path.slice(self.path.len()..);
@@ -2377,54 +2216,22 @@ impl SparseSubtrie {
                 Ok(LeafUpdateStep::complete_with_insertions(vec![current], None))
             }
             SparseNode::Hash(hash) => {
-                debug!(
-                    target: "trie::parallel_sparse",
-                    ?current,
-                    ?path,
-                    ?hash,
-                    "SparseSubtrie::update_next_node - hit blinded node"
-                );
                 Err(SparseTrieErrorKind::BlindedNode { path: current, hash: *hash }.into())
             }
             SparseNode::Leaf { key: current_key, .. } => {
-                let original_current = current;
                 current.extend(current_key);
 
-                debug!(
-                    target: "trie::parallel_sparse",
-                    original_current = ?original_current,
-                    extended_current = ?current,
-                    ?path,
-                    ?current_key,
-                    "SparseSubtrie::update_next_node - leaf node, splitting"
+                // this leaf is being updated
+                debug_assert!(
+                    &current != path,
+                    "we already checked leaf presence in the beginning"
                 );
-
-                // If the extended current path equals the target path, this leaf already exists
-                // structurally. This can happen if a previous update_leaf partially succeeded
-                // (created the leaf node) but then failed and the value was cleaned up.
-                // In this case, we treat the leaf as already complete - the caller will insert
-                // the value.
-                if &current == path {
-                    debug!(
-                        target: "trie::parallel_sparse",
-                        ?current,
-                        ?path,
-                        "SparseSubtrie::update_next_node - leaf already exists structurally"
-                    );
-                    return Ok(LeafUpdateStep::complete_with_insertions(vec![], None));
-                }
 
                 // find the common prefix
                 let common = current.common_prefix_length(path);
 
                 // update existing node
                 let new_ext_key = current.slice(current.len() - current_key.len()..common);
-                debug!(
-                    target: "trie::parallel_sparse",
-                    ?common,
-                    ?new_ext_key,
-                    "SparseSubtrie::update_next_node - converting leaf to extension"
-                );
                 *node = SparseNode::new_ext(new_ext_key);
 
                 // create a branch node and corresponding leaves
@@ -2432,16 +2239,6 @@ impl SparseSubtrie {
                 let branch_path = current.slice(..common);
                 let new_leaf_path = path.slice(..=common);
                 let existing_leaf_path = current.slice(..=common);
-
-                debug!(
-                    target: "trie::parallel_sparse",
-                    ?branch_path,
-                    ?new_leaf_path,
-                    ?existing_leaf_path,
-                    current_nibble = current.get_unchecked(common),
-                    path_nibble = path.get_unchecked(common),
-                    "SparseSubtrie::update_next_node - inserting branch and leaves"
-                );
 
                 self.nodes.insert(
                     branch_path,
@@ -2460,29 +2257,11 @@ impl SparseSubtrie {
                 ))
             }
             SparseNode::Extension { key, .. } => {
-                let original_current = current;
                 current.extend(key);
-
-                debug!(
-                    target: "trie::parallel_sparse",
-                    original_current = ?original_current,
-                    extended_current = ?current,
-                    ?path,
-                    ?key,
-                    path_starts_with_current = path.starts_with(&current),
-                    "SparseSubtrie::update_next_node - extension node"
-                );
 
                 if !path.starts_with(&current) {
                     // find the common prefix
                     let common = current.common_prefix_length(path);
-
-                    debug!(
-                        target: "trie::parallel_sparse",
-                        ?common,
-                        "SparseSubtrie::update_next_node - extension diverges, splitting"
-                    );
-
                     *key = current.slice(current.len() - key.len()..common);
 
                     // If branch node updates retention is enabled, we need to query the
@@ -2500,14 +2279,6 @@ impl SparseSubtrie {
                         path.get_unchecked(common),
                     );
 
-                    debug!(
-                        target: "trie::parallel_sparse",
-                        ?branch_path,
-                        ?new_leaf_path,
-                        ?reveal_path,
-                        "SparseSubtrie::update_next_node - inserting branch for extension split"
-                    );
-
                     self.nodes.insert(branch_path, branch);
 
                     // create new leaf
@@ -2520,12 +2291,6 @@ impl SparseSubtrie {
                     let key = current.slice(common + 1..);
                     if !key.is_empty() {
                         let ext_path = current.slice(..=common);
-                        debug!(
-                            target: "trie::parallel_sparse",
-                            ?ext_path,
-                            ?key,
-                            "SparseSubtrie::update_next_node - recreating extension to previous child"
-                        );
                         self.nodes.insert(ext_path, SparseNode::new_ext(key));
                         inserted_nodes.push(ext_path);
                     }
@@ -2533,46 +2298,19 @@ impl SparseSubtrie {
                     return Ok(LeafUpdateStep::complete_with_insertions(inserted_nodes, reveal_path))
                 }
 
-                debug!(
-                    target: "trie::parallel_sparse",
-                    next = ?current,
-                    "SparseSubtrie::update_next_node - extension continues"
-                );
                 Ok(LeafUpdateStep::continue_with(current))
             }
             SparseNode::Branch { state_mask, .. } => {
                 let nibble = path.get_unchecked(current.len());
-                let is_bit_set = state_mask.is_bit_set(nibble);
                 current.push_unchecked(nibble);
-
-                debug!(
-                    target: "trie::parallel_sparse",
-                    ?current,
-                    ?nibble,
-                    ?is_bit_set,
-                    ?state_mask,
-                    "SparseSubtrie::update_next_node - branch node"
-                );
-
-                if !is_bit_set {
+                if !state_mask.is_bit_set(nibble) {
                     state_mask.set_bit(nibble);
                     let new_leaf = SparseNode::new_leaf(path.slice(current.len()..));
-                    debug!(
-                        target: "trie::parallel_sparse",
-                        ?current,
-                        leaf_key = ?path.slice(current.len()..),
-                        "SparseSubtrie::update_next_node - inserting new leaf in branch"
-                    );
                     self.nodes.insert(current, new_leaf);
                     return Ok(LeafUpdateStep::complete_with_insertions(vec![current], None))
                 }
 
                 // If the nibble is set, we can continue traversing the branch.
-                debug!(
-                    target: "trie::parallel_sparse",
-                    next = ?current,
-                    "SparseSubtrie::update_next_node - branch continues to existing child"
-                );
                 Ok(LeafUpdateStep::continue_with(current))
             }
         }
@@ -8885,160 +8623,6 @@ mod tests {
         assert_eq!(
             value_count_before, value_count_after,
             "Value count should be unchanged after atomic failure (no dangling values)"
-        );
-    }
-
-    /// Tests that SparseSubtrie::update_leaf is atomic when an extension split in a lower
-    /// subtrie fails due to NodeNotFoundInProvider.
-    ///
-    /// This specifically tests the scenario where:
-    /// 1. A leaf update traverses to a lower subtrie containing an extension node
-    /// 2. The extension needs to be split, creating structural changes
-    /// 3. The provider fails to reveal the extension's child (returns None)
-    /// 4. The structural changes must be rolled back
-    /// 5. On retry with a working provider, the update succeeds
-    ///
-    /// This test covers the bug where structural changes in lower subtries were not
-    /// being rolled back, causing panics on retry when the trie contained a leaf node
-    /// structurally but not in the values map.
-    #[test]
-    fn test_lower_subtrie_update_leaf_atomicity() {
-        use reth_trie_sparse::provider::NoRevealProvider;
-
-        // Create a trie structure that will trigger an extension split in a lower subtrie.
-        // Structure:
-        // - Root: Branch with child at nibble 1
-        // - Path 0x1: Branch with child at nibble 7
-        // - Path 0x17: Extension with key 0x481e pointing to a hash (blinded)
-        //
-        // When we insert a leaf that shares prefix 0x1748 with the extension but
-        // diverges (0x17481 vs 0x17481e), the extension must be split. With
-        // retain_updates=true, this requires revealing the extension's child,
-        // which will fail with NoRevealProvider.
-
-        let child_hash = B256::repeat_byte(0xCD);
-        let lower_subtrie_hash = B256::repeat_byte(0xEF);
-
-        // Extension in lower subtrie: key = 0x481e (so full path would be 0x17481e...)
-        let extension_key = Nibbles::from_nibbles([0x4, 0x8, 0x1, 0xe]);
-        let extension_node =
-            TrieNode::Extension(ExtensionNode::new(extension_key, RlpNode::word_rlp(&child_hash)));
-
-        // Build root branch: child at nibble 1 (pointing to hash of branch at 0x1)
-        let root_branch = TrieNode::Branch(BranchNode::new(
-            vec![RlpNode::word_rlp(&lower_subtrie_hash)],
-            TrieMask::new(1u16 << 1),
-        ));
-
-        // Create trie with retain_updates = true
-        let mut trie =
-            ParallelSparseTrie::from_root(root_branch, None, true).expect("from_root failed");
-
-        // Reveal the branch at 0x1 (child at nibble 7 pointing to hash)
-        let branch_at_1 = TrieNode::Branch(BranchNode::new(
-            vec![RlpNode::word_rlp(&lower_subtrie_hash)],
-            TrieMask::new(1u16 << 7),
-        ));
-        trie.reveal_nodes(vec![ProofTrieNode {
-            path: Nibbles::from_nibbles([0x1]),
-            node: branch_at_1,
-            masks: None,
-        }])
-        .expect("reveal branch at 0x1");
-
-        // Reveal the extension in the lower subtrie at 0x17
-        trie.reveal_nodes(vec![ProofTrieNode {
-            path: Nibbles::from_nibbles([0x1, 0x7]),
-            node: extension_node.clone(),
-            masks: None,
-        }])
-        .expect("reveal extension at 0x17");
-
-        // Record state before update
-        let count_all_nodes = |t: &ParallelSparseTrie| {
-            t.upper_subtrie.nodes.len() +
-                t.lower_subtries
-                    .iter()
-                    .filter_map(|s| s.as_revealed_ref())
-                    .map(|s| s.nodes.len())
-                    .sum::<usize>()
-        };
-
-        let count_all_values = |t: &ParallelSparseTrie| {
-            t.upper_subtrie.inner.values.len() +
-                t.lower_subtries
-                    .iter()
-                    .filter_map(|s| s.as_revealed_ref())
-                    .map(|s| s.inner.values.len())
-                    .sum::<usize>()
-        };
-
-        let node_count_before = count_all_nodes(&trie);
-        let value_count_before = count_all_values(&trie);
-
-        // Create a path that would cause an extension split.
-        // Extension is at 0x17 with key 0x481e, so child is at 0x17481e.
-        // We insert at 0x174810... which diverges at nibble 5 (0 vs e).
-        let insert_path = {
-            let mut k = B256::ZERO;
-            k.0[0] = 0x17;
-            k.0[1] = 0x48;
-            k.0[2] = 0x10; // nibbles 1, 0 - diverges from extension's 1, e at position 5
-            Nibbles::unpack(k)
-        };
-
-        let new_value = encode_account_value(42);
-
-        // First update attempt with NoRevealProvider - should fail and rollback
-        let result = trie.update_leaf(insert_path, new_value.clone(), NoRevealProvider);
-
-        // Assert: should fail with NodeNotFoundInProvider
-        assert!(result.is_err(), "First update should fail due to blinded extension child");
-        let err = result.unwrap_err();
-        assert_matches!(err.into_kind(), SparseTrieErrorKind::NodeNotFoundInProvider { .. });
-
-        // Assert: structural state is unchanged after rollback
-        let node_count_after_first = count_all_nodes(&trie);
-        let value_count_after_first = count_all_values(&trie);
-        assert_eq!(
-            node_count_before, node_count_after_first,
-            "Node count should be unchanged after atomic failure in lower subtrie"
-        );
-        assert_eq!(
-            value_count_before, value_count_after_first,
-            "Value count should be unchanged after atomic failure in lower subtrie"
-        );
-
-        // Now retry with a provider that returns the extension's child
-        let mut provider = MockTrieNodeProvider::new();
-
-        // The extension child path is at 0x17481e
-        let child_path = Nibbles::from_nibbles([0x1, 0x7, 0x4, 0x8, 0x1, 0xe]);
-        // Add a branch node as the child (with all nibbles set)
-        let child_branch = TrieNode::Branch(BranchNode::new(
-            (0..16).map(|_| RlpNode::word_rlp(&B256::repeat_byte(0xAA))).collect(),
-            TrieMask::new(0xFFFF),
-        ));
-        let mut child_rlp = Vec::new();
-        child_branch.encode(&mut child_rlp);
-        provider.add_revealed_node(
-            child_path,
-            RevealedNode { node: child_rlp.into(), tree_mask: None, hash_mask: None },
-        );
-
-        // Retry the update with the working provider
-        let result = trie.update_leaf(insert_path, new_value.clone(), &provider);
-        assert!(result.is_ok(), "Second update with provider should succeed: {:?}", result);
-
-        // Assert: the value is now in the trie
-        let lookup_result = trie.get_leaf_value(&insert_path);
-        assert_eq!(lookup_result, Some(&new_value), "Inserted value should be retrievable");
-
-        // Assert: node count increased (extension split into branch + leaves + maybe extension)
-        let node_count_after_success = count_all_nodes(&trie);
-        assert!(
-            node_count_after_success > node_count_before,
-            "Node count should increase after successful insert"
         );
     }
 }
