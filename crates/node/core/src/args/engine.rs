@@ -324,6 +324,10 @@ pub struct EngineArgs {
     /// Disable cache metrics recording, which can take up to 50ms with large cached state.
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
+
+    /// Enable experimental sparse trie as cache feature.
+    #[arg(long = "engine.experimental-sparse-trie-cache", default_value_t = false)]
+    pub experimental_sparse_trie_cache: bool,
 }
 
 #[allow(deprecated)]
@@ -376,6 +380,7 @@ impl Default for EngineArgs {
             account_worker_count,
             disable_proof_v2,
             cache_metrics_disabled,
+            experimental_sparse_trie_cache: false,
         }
     }
 }
@@ -412,6 +417,7 @@ impl EngineArgs {
 
         config = config.with_disable_proof_v2(self.disable_proof_v2);
         config = config.without_cache_metrics(self.cache_metrics_disabled);
+        config = config.with_sparse_trie_as_cache(self.experimental_sparse_trie_cache);
 
         config
     }
@@ -464,6 +470,7 @@ mod tests {
             account_worker_count: Some(8),
             disable_proof_v2: false,
             cache_metrics_disabled: true,
+            experimental_sparse_trie_cache: true,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -494,6 +501,7 @@ mod tests {
             "--engine.account-worker-count",
             "8",
             "--engine.disable-cache-metrics",
+            "--engine.experimental-sparse-trie-cache",
         ])
         .args;
 

@@ -1027,9 +1027,15 @@ where
     /// Will always return false in `no_std` builds.
     const fn is_prune_parallelism_enabled(num_tries: usize) -> bool {
         #[cfg(not(feature = "std"))]
-        return false;
+        {
+            let _ = num_tries;
+            return false;
+        }
 
-        num_tries >= Self::PARALLEL_PRUNE_THRESHOLD
+        #[cfg(feature = "std")]
+        {
+            num_tries >= Self::PARALLEL_PRUNE_THRESHOLD
+        }
     }
 
     /// Prunes the account trie and selected storage tries to reduce memory usage.

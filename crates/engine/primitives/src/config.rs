@@ -216,6 +216,7 @@ impl TreeConfig {
         account_worker_count: usize,
         disable_proof_v2: bool,
         disable_cache_metrics: bool,
+        enable_sparse_trie_as_cache: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -242,7 +243,7 @@ impl TreeConfig {
             account_worker_count,
             disable_proof_v2,
             disable_cache_metrics,
-            enable_sparse_trie_as_cache: false,
+            enable_sparse_trie_as_cache,
         }
     }
 
@@ -548,5 +549,11 @@ impl TreeConfig {
     /// Returns whether sparse trie as cache is enabled.
     pub const fn enable_sparse_trie_as_cache(&self) -> bool {
         self.enable_sparse_trie_as_cache
+    }
+
+    /// Setter for whether to enable sparse trie as cache.
+    pub const fn with_sparse_trie_as_cache(mut self, enabled: bool) -> Self {
+        self.enable_sparse_trie_as_cache = enabled;
+        self
     }
 }
