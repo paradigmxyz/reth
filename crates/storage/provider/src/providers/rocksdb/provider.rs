@@ -1302,7 +1302,7 @@ pub struct RocksDBBatch<'a> {
     /// Used to handle multiple calls to `append_account_history_shard` for the same address
     /// within a single batch, since the batch cannot read its own pending writes.
     pending_account_history: HashMap<Address, BlockNumberList>,
-    /// Pending storage history shards ((address, storage_key) -> merged indices).
+    /// Pending storage history shards ((address, `storage_key`) -> merged indices).
     /// Used to handle multiple calls to `append_storage_history_shard` for the same key
     /// within a single batch, since the batch cannot read its own pending writes.
     pending_storage_history: HashMap<(Address, B256), BlockNumberList>,
@@ -1575,7 +1575,7 @@ impl<'a> RocksDBBatch<'a> {
     /// Appends indices to a storage history shard with proper shard management.
     ///
     /// Indices are accumulated in memory and written to the database when `commit()` is called.
-    /// This allows multiple calls for the same (address, storage_key) pair within a single batch.
+    /// This allows multiple calls for the same (address, `storage_key`) pair within a single batch.
     ///
     /// # Requirements
     ///
