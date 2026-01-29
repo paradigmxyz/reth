@@ -761,11 +761,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// This includes calculating the resulted state root and comparing it with the parent block
     /// state root.
     pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
-        let changed_accounts = self
-            .tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(from..)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let changed_accounts = self.account_changesets_range(from..)?;
 
         // Unwind account hashes.
         self.unwind_account_hashing(changed_accounts.iter())?;
@@ -773,12 +769,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Unwind account history indices.
         self.unwind_account_history_indices(changed_accounts.iter())?;
 
-        let storage_start = BlockNumberAddress((from, Address::ZERO));
-        let changed_storages = self
-            .tx
-            .cursor_read::<tables::StorageChangeSets>()?
-            .walk_range(storage_start..)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let changed_storages = self.storage_changesets_range(from..)?;
 
         // Unwind storage hashes.
         self.unwind_storage_hashing(changed_storages.iter().copied())?;
