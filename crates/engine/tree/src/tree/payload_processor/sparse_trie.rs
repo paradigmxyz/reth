@@ -154,7 +154,7 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Receiver for proof results directly from workers.
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
-    /// Receives updates from the state root task.
+    /// Receives updates from execution and prewarming.
     updates: CrossbeamReceiver<MultiProofMessage>,
     /// `SparseStateTrie` used for computing the state root.
     trie: SparseStateTrie<A, S>,
@@ -210,9 +210,10 @@ where
 
     /// Runs the sparse trie task to completion.
     ///
-    /// This waits for new incoming [`SparseTrieUpdate`].
+    /// This waits for new incoming [`MultiProofMessage`]s, applies updates to the trie and
+    /// schedules proof fetching when needed.
     ///
-    /// This concludes once the last trie update has been received.
+    /// This concludes once the last state update has been received and processed.
     ///
     /// # Returns
     ///
@@ -390,7 +391,7 @@ where
         })
     }
 
-    /// Applies updates to the sparse trie and dispathes requested multiproof targets.
+    /// Applies updates to the sparse trie and dispatches requested multiproof targets.
     fn process_updates(&mut self) -> Result<(), ProviderError> {
         let mut targets = MultiProofTargetsV2::default();
 
