@@ -57,6 +57,9 @@ mod proofs;
 pub use proofs::triehash;
 pub use proofs::*;
 
+mod range_proof;
+pub use range_proof::*;
+
 pub mod root;
 
 /// Incremental ordered trie root computation.
