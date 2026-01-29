@@ -104,6 +104,18 @@ impl StaticFileProviderMetrics {
                 .record(duration.as_secs_f64() / count as f64);
         }
     }
+
+    pub(crate) fn record_commit_bytes_written(
+        &self,
+        segment: StaticFileSegment,
+        bytes_written: u64,
+    ) {
+        self.segment_operations
+            .get(&(segment, StaticFileProviderOperation::CommitWriter))
+            .expect("segment operation metrics should exist")
+            .commit_bytes_written
+            .record(bytes_written as f64);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
@@ -148,4 +160,6 @@ pub(crate) struct StaticFileProviderOperationMetrics {
     calls_total: Counter,
     /// The time it took to execute the static file jar provider operation that writes data.
     write_duration_seconds: Histogram,
+    /// The number of bytes written during a commit operation.
+    commit_bytes_written: Histogram,
 }

@@ -412,20 +412,24 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 "Committing writer to disk"
             );
 
+            let segment = self.writer.user_header().segment();
+            let bytes_written = self.writer.take_bytes_written();
+
             // Commits offsets and new user_header to disk
             self.writer.commit().map_err(ProviderError::other)?;
 
             if let Some(metrics) = &self.metrics {
                 metrics.record_segment_operation(
-                    self.writer.user_header().segment(),
+                    segment,
                     StaticFileProviderOperation::CommitWriter,
                     Some(start.elapsed()),
                 );
+                metrics.record_commit_bytes_written(segment, bytes_written);
             }
 
             debug!(
                 target: "provider::static_file",
-                segment = ?self.writer.user_header().segment(),
+                segment = ?segment,
                 path = ?self.data_path,
                 duration = ?start.elapsed(),
                 "Committed writer to disk"
@@ -450,20 +454,24 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             "Committing writer to disk (without sync)"
         );
 
+        let segment = self.writer.user_header().segment();
+        let bytes_written = self.writer.take_bytes_written();
+
         // Commits offsets and new user_header to disk
         self.writer.commit_without_sync_all().map_err(ProviderError::other)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
-                self.writer.user_header().segment(),
+                segment,
                 StaticFileProviderOperation::CommitWriter,
                 Some(start.elapsed()),
             );
+            metrics.record_commit_bytes_written(segment, bytes_written);
         }
 
         debug!(
             target: "provider::static_file",
-            segment = ?self.writer.user_header().segment(),
+            segment = ?segment,
             path = ?self.data_path,
             duration = ?start.elapsed(),
             "Committed writer to disk (without sync)"

@@ -43,6 +43,8 @@ pub struct NippyJarWriter<H: NippyJarHeader = ()> {
     column: usize,
     /// Whether the writer has changed data that needs to be committed.
     dirty: bool,
+    /// Tracks the total bytes written since the last commit.
+    bytes_written: u64,
 }
 
 impl<H: NippyJarHeader> NippyJarWriter<H> {
@@ -79,6 +81,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             offsets: Vec::with_capacity(1_000_000),
             column: 0,
             dirty: false,
+            bytes_written: 0,
         };
 
         if !is_created {
@@ -111,6 +114,11 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     /// Sets writer as dirty.
     pub const fn set_dirty(&mut self) {
         self.dirty = true
+    }
+
+    /// Returns the total bytes written since the last reset and resets the counter to zero.
+    pub fn take_bytes_written(&mut self) -> u64 {
+        std::mem::take(&mut self.bytes_written)
     }
 
     /// Gets total writer rows in jar.
@@ -237,6 +245,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             value.len()
         };
 
+        self.bytes_written += len as u64;
         self.column += 1;
 
         if self.jar.columns == self.column {
