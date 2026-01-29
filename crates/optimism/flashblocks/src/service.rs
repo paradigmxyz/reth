@@ -6,8 +6,10 @@ use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
 use metrics::{Gauge, Histogram};
 use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
+use reth_engine_primitives::ConsensusEngineHandle;
 use reth_evm::ConfigureEvm;
 use reth_metrics::Metrics;
+use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy};
 use reth_revm::cached::CachedReads;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
@@ -28,6 +30,7 @@ const CONNECTION_BACKOUT_PERIOD: Duration = Duration::from_secs(5);
 /// [`FlashBlock`]s.
 #[derive(Debug)]
 pub struct FlashBlockService<
+    P: PayloadTypes,
     N: NodePrimitives,
     S,
     EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>,
@@ -47,15 +50,18 @@ pub struct FlashBlockService<
     /// Currently running block build job with start time and result receiver.
     job: Option<BuildJob<N>>,
     /// Manages flashblock sequences with caching and intelligent build selection.
-    sequences: SequenceManager<N::SignedTx>,
+    sequences: Arc<SequenceManager<P, N::SignedTx>>,
 
     /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
 }
 
-impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
+impl<P, N, S, EvmConfig, Provider> FlashBlockService<P, N, S, EvmConfig, Provider>
 where
+    P: PayloadTypes,
     N: NodePrimitives,
+    N::BlockHeader: reth_primitives_traits::header::HeaderMut,
+    P::BuiltPayload: reth_payload_primitives::BuiltPayload<Primitives = N>,
     S: Stream<Item = eyre::Result<FlashBlock>> + Unpin + 'static,
     EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>
         + Clone
@@ -76,7 +82,7 @@ where
         evm_config: EvmConfig,
         provider: Provider,
         spawner: TaskExecutor,
-        compute_state_root: bool,
+        engine_handle: ConsensusEngineHandle<P>,
     ) -> Self {
         let (in_progress_tx, _) = watch::channel(None);
         let (received_flashblocks_tx, _) = tokio::sync::broadcast::channel(128);
@@ -87,7 +93,7 @@ where
             builder: FlashBlockBuilder::new(evm_config, provider),
             spawner,
             job: None,
-            sequences: SequenceManager::new(compute_state_root),
+            sequences: Arc::new(SequenceManager::new(engine_handle)),
             metrics: FlashBlockServiceMetrics::default(),
         }
     }
@@ -100,7 +106,7 @@ where
     }
 
     /// Returns the sender half for the flashblock sequence broadcast channel.
-    pub const fn block_sequence_broadcaster(
+    pub fn block_sequence_broadcaster(
         &self,
     ) -> &tokio::sync::broadcast::Sender<FlashBlockCompleteSequence> {
         self.sequences.block_sequence_broadcaster()
@@ -139,14 +145,34 @@ where
 
                     match result {
                         Ok(Some((pending, cached_reads))) => {
+                            // Update the new pending state immediately after execution for eth api handler
                             let parent_hash = pending.parent_hash();
                             self.sequences
-                                .on_build_complete(parent_hash, Some((pending.clone(), cached_reads)));
+                                .on_build_complete(parent_hash, cached_reads).await;
+                            let _ = tx.send(Some(pending.clone()));
 
                             let elapsed = start_time.elapsed();
                             self.metrics.execution_duration.record(elapsed.as_secs_f64());
 
-                            let _ = tx.send(Some(pending));
+                            // For sync and flashblocks consensus. Calculate the state root if missing
+                            if pending.compute_state_root {
+                                let sequences = Arc::clone(&self.sequences);
+                                let builder = self.builder.clone();
+                                self.spawner.spawn(async move {
+                                    match builder.compute_state_root(pending) {
+                                        Ok(execution) => {
+                                            if let Some(computed_block) = execution {
+                                                sequences.on_state_root_complete(parent_hash, computed_block).await;
+                                            }
+                                        }
+                                        Err(err) => {
+                                            warn!(target: "flashblocks", %err, "Failed to compute state root");
+                                        }
+                                    }
+                                });
+                            }
+
+
                         }
                         Ok(None) => {
                             trace!(target: "flashblocks", "Build job returned None");
@@ -162,17 +188,17 @@ where
                     match result {
                         Some(Ok(flashblock)) => {
                             // Process first flashblock
-                            self.process_flashblock(flashblock);
+                            self.process_flashblock(flashblock).await;
 
                             // Batch process all other immediately available flashblocks
                             while let Some(result) = self.incoming_flashblock_rx.next().now_or_never().flatten() {
                                 match result {
-                                    Ok(fb) => self.process_flashblock(fb),
+                                    Ok(fb) => self.process_flashblock(fb).await,
                                     Err(err) => warn!(target: "flashblocks", %err, "Error receiving flashblock"),
                                 }
                             }
 
-                            self.try_start_build_job();
+                            self.try_start_build_job().await;
                         }
                         Some(Err(err)) => {
                             warn!(
@@ -195,14 +221,14 @@ where
 
     /// Processes a single flashblock: notifies subscribers, records metrics, and inserts into
     /// sequence.
-    fn process_flashblock(&mut self, flashblock: FlashBlock) {
+    async fn process_flashblock(&self, flashblock: FlashBlock) {
         self.notify_received_flashblock(&flashblock);
 
         if flashblock.index == 0 {
-            self.metrics.last_flashblock_length.record(self.sequences.pending().count() as f64);
+            self.metrics.last_flashblock_length.record(self.sequences.pending_count().await as f64);
         }
 
-        if let Err(err) = self.sequences.insert_flashblock(flashblock) {
+        if let Err(err) = self.sequences.insert_flashblock(flashblock).await {
             trace!(target: "flashblocks", %err, "Failed to insert flashblock");
         }
     }
@@ -215,7 +241,7 @@ where
     }
 
     /// Attempts to build a block if no job is currently running and a buildable sequence exists.
-    fn try_start_build_job(&mut self) {
+    async fn try_start_build_job(&mut self) {
         if self.job.is_some() {
             return; // Already building
         }
@@ -224,9 +250,14 @@ where
             return;
         };
 
-        let Some(args) = self.sequences.next_buildable_args(latest.hash(), latest.timestamp())
+        let Some(args) =
+            self.sequences.next_buildable_args(latest.hash(), latest.timestamp()).await
         else {
-            return; // Nothing buildable
+            // Nothing buildable, skipping - state mismatch between local chainstate tip and
+            // flashblock sequences cache.
+            debug!(target: "flashblocks", local_latest=?latest.num_hash(),
+                "No buildable jobs available, chainstate mismatch between flashblock cache and local chainstate tip");
+            return;
         };
 
         // Spawn build job

@@ -86,6 +86,7 @@ impl EngineMessageStore {
                     })?,
                 )?;
             }
+            BeaconEngineMessage::FlashblocksSequence { .. } => {}
         };
         Ok(())
     }
