@@ -6,7 +6,7 @@ use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
-    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress, ShardedKey},
+    models::BlockNumberAddress,
     table::Table,
     tables,
     transaction::DbTx,
@@ -257,69 +257,6 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         Ok(slots)
     }
 
-    fn history_info<T, K>(
-        &self,
-        key: K,
-        key_filter: impl Fn(&K) -> bool,
-        lowest_available_block_number: Option<BlockNumber>,
-    ) -> ProviderResult<HistoryInfo>
-    where
-        T: Table<Key = K, Value = BlockNumberList>,
-    {
-        let mut cursor = self.tx().cursor_read::<T>()?;
-
-        // Lookup the history chunk in the history index. If they key does not appear in the
-        // index, the first chunk for the next key will be returned so we filter out chunks that
-        // have a different key.
-        if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1 .0) {
-            // Get the rank of the first entry before or equal to our block.
-            let mut rank = chunk.rank(self.block_number);
-
-            // Adjust the rank, so that we have the rank of the first entry strictly before our
-            // block (not equal to it).
-            if rank.checked_sub(1).and_then(|rank| chunk.select(rank)) == Some(self.block_number) {
-                rank -= 1
-            };
-
-            let block_number = chunk.select(rank);
-
-            // If our block is before the first entry in the index chunk and this first entry
-            // doesn't equal to our block, it might be before the first write ever. To check, we
-            // look at the previous entry and check if the key is the same.
-            // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
-            // short-circuit) and when it passes we save a full seek into the changeset/plain state
-            // table.
-            if rank == 0 &&
-                block_number != Some(self.block_number) &&
-                !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
-            {
-                if let (Some(_), Some(block_number)) = (lowest_available_block_number, block_number)
-                {
-                    // The key may have been written, but due to pruning we may not have changesets
-                    // and history, so we need to make a changeset lookup.
-                    Ok(HistoryInfo::InChangeset(block_number))
-                } else {
-                    // The key is written to, but only after our block.
-                    Ok(HistoryInfo::NotYetWritten)
-                }
-            } else if let Some(block_number) = block_number {
-                // The chunk contains an entry for a write after our block, return it.
-                Ok(HistoryInfo::InChangeset(block_number))
-            } else {
-                // The chunk does not contain an entry for a write after our block. This can only
-                // happen if this is the last chunk and so we need to look in the plain state.
-                Ok(HistoryInfo::InPlainState)
-            }
-        } else if lowest_available_block_number.is_some() {
-            // The key may have been written, but due to pruning we may not have changesets and
-            // history, so we need to make a plain state lookup.
-            Ok(HistoryInfo::MaybeInPlainState)
-        } else {
-            // The key has not been written to at all.
-            Ok(HistoryInfo::NotYetWritten)
-        }
-    }
-
     /// Set the lowest block number at which the account history is available.
     pub const fn with_lowest_available_account_history_block_number(
         mut self,
@@ -557,8 +494,9 @@ impl<Provider: DBProvider + BlockNumReader> BytecodeReader
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> StorageRangeProvider
-    for HistoricalStateProviderRef<'_, Provider>
+impl<
+        Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader,
+    > StorageRangeProvider for HistoricalStateProviderRef<'_, Provider>
 {
     fn storage_range(
         &self,

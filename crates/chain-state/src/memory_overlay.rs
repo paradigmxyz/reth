@@ -278,4 +278,6 @@ impl<N: NodePrimitives> MemoryOverlayStateProvider<N> {
 }
 
 // Delegates all provider impls to [`MemoryOverlayStateProviderRef`]
-reth_storage_api::macros::delegate_provider_impls!(MemoryOverlayStateProvider<N> where [N: NodePrimitives]);
+reth_storage_api::macros::delegate_provider_impls_no_storage_range!(
+    MemoryOverlayStateProvider<N> where [N: NodePrimitives]
+);

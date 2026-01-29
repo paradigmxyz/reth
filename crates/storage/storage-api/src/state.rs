@@ -29,7 +29,7 @@ pub trait StateReader: Send {
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
 /// Type alias of boxed [`StorageRangeProvider`].
-pub type StorageRangeProviderBox = Box<dyn StorageRangeProvider + Send + 'static>;
+pub type StorageRangeProviderBox = Box<dyn StorageRangeProvider>;
 /// Result of a storage range query matching the semantics of `debug_storageRangeAt`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StorageRangeResult {
@@ -109,7 +109,7 @@ pub trait StateProvider:
 
 /// Optional trait for providers that can iterate storage slots in key order.
 #[auto_impl(&, Arc, Box)]
-pub trait StorageRangeProvider: Send + Sync {
+pub trait StorageRangeProvider {
     /// Returns storage slots for `account` starting at `start_key` (inclusive) and capped by
     /// `max_slots`. When additional slots are available beyond `max_slots`, `next_key` in the
     /// result indicates where the caller should resume.

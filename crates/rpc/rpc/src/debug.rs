@@ -29,13 +29,13 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, StorageDiffInspector, StorageDiffs, StorageRangeOverlay, TraceExt},
-    FromEthApiError, FromEvmError, RpcNodeCore,
+    FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProviderFactory, StateRootProvider,
+    StateProofProvider, StateProviderFactory, StateRootProvider, StorageRangeProvider,
     StorageRangeResult as ProviderStorageRangeResult, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner};
