@@ -634,21 +634,25 @@ impl TransactionPtr {
 
 /// Commit latencies info.
 ///
-/// Contains information about latency of commit stages.
-/// Inner struct stores this info in 1/65536 of seconds units.
+/// Contains information about latency of commit stages and bytes written.
+/// Inner struct stores time info in 1/65536 of seconds units.
 #[derive(Debug)]
-#[repr(transparent)]
-pub struct CommitLatency(ffi::MDBX_commit_latency);
+pub struct CommitLatency(ffi::MDBX_commit_latency, u64);
 
 impl CommitLatency {
-    /// Create a new `CommitLatency` with zero'd inner struct `ffi::MDBX_commit_latency`.
+    /// Create a new `CommitLatency` with zero'd inner struct.
     pub(crate) const fn new() -> Self {
-        unsafe { Self(std::mem::zeroed()) }
+        unsafe { Self(std::mem::zeroed(), 0) }
     }
 
     /// Returns a mut pointer to `ffi::MDBX_commit_latency`.
     pub(crate) const fn mdb_commit_latency(&mut self) -> *mut ffi::MDBX_commit_latency {
         &mut self.0
+    }
+
+    /// Sets the size of dirty pages generated during this transaction.
+    pub(crate) const fn set_space_dirty(&mut self, space_dirty: u64) {
+        self.1 = space_dirty;
     }
 }
 
@@ -707,6 +711,38 @@ impl CommitLatency {
     #[inline]
     const fn time_to_duration(time: u32) -> Duration {
         Duration::from_nanos(time as u64 * (1_000_000_000 / 65_536))
+    }
+
+    /// Returns the size of dirty pages in bytes that were generated during this transaction.
+    #[inline]
+    pub const fn space_dirty(&self) -> u64 {
+        self.1
+    }
+}
+
+/// Transaction info.
+///
+/// Contains information about the transaction state.
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct TxnInfo(ffi::MDBX_txn_info);
+
+impl TxnInfo {
+    /// Create a new `TxnInfo` with zero'd inner struct.
+    pub(crate) const fn new() -> Self {
+        unsafe { Self(std::mem::zeroed()) }
+    }
+
+    /// Returns a mut pointer to `ffi::MDBX_txn_info`.
+    pub(crate) const fn mdb_txn_info(&mut self) -> *mut ffi::MDBX_txn_info {
+        &mut self.0
+    }
+
+    /// For WRITE transactions: The summarized size in bytes of the dirty database
+    /// pages that were generated during this transaction.
+    #[inline]
+    pub const fn space_dirty(&self) -> u64 {
+        self.0.txn_space_dirty
     }
 }
 
