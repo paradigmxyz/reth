@@ -451,12 +451,14 @@ fn validate_state_root<H: BlockHeader + Sealable + Debug>(
 /// across multiple threads, significantly improving performance for state root computation
 /// during staged sync.
 ///
-/// Internally, it creates an [`OverlayStateProviderFactory`] that provides the necessary
-/// trie cursor factory and hashed cursor factory implementations for [`ParallelStateRoot`].
+/// For each stage execution, it creates a fresh [`OverlayStateProviderFactory`] that provides
+/// the necessary trie cursor factory and hashed cursor factory implementations for
+/// [`ParallelStateRoot`]. This ensures the factory always reflects the current database state,
+/// which is important during reorgs where the hashed state tables may change between executions.
 #[derive(Debug, Clone)]
 pub struct ParallelMerkleStage<F> {
-    /// The overlay factory that wraps the database provider factory.
-    overlay_factory: OverlayStateProviderFactory<F>,
+    /// The underlying database provider factory used to create overlay factories.
+    factory: F,
     /// The threshold (in number of blocks) for switching from incremental trie building
     /// of changes to whole rebuild.
     rebuild_threshold: u64,
@@ -466,12 +468,9 @@ pub struct ParallelMerkleStage<F> {
 
 impl<F> ParallelMerkleStage<F> {
     /// Create a new parallel merkle stage with the given provider factory.
-    ///
-    /// The factory is wrapped in an [`OverlayStateProviderFactory`] internally to provide
-    /// the necessary trie cursor implementations for parallel state root computation.
     pub fn new(factory: F) -> Self {
         Self {
-            overlay_factory: OverlayStateProviderFactory::new(factory, ChangesetCache::new()),
+            factory,
             rebuild_threshold: MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
             incremental_threshold: MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD,
         }
@@ -479,11 +478,7 @@ impl<F> ParallelMerkleStage<F> {
 
     /// Create a new parallel merkle stage with custom thresholds.
     pub fn with_thresholds(factory: F, rebuild_threshold: u64, incremental_threshold: u64) -> Self {
-        Self {
-            overlay_factory: OverlayStateProviderFactory::new(factory, ChangesetCache::new()),
-            rebuild_threshold,
-            incremental_threshold,
-        }
+        Self { factory, rebuild_threshold, incremental_threshold }
     }
 
     /// Gets the hashing progress
@@ -651,7 +646,12 @@ where
                 }
             }
         } else {
-            // Use parallel state root computation for incremental updates
+            // Use parallel state root computation for incremental updates.
+            // Create a fresh overlay factory for each execution to ensure we have the latest
+            // database state, especially important after reorgs.
+            let overlay_factory =
+                OverlayStateProviderFactory::new(self.factory.clone(), ChangesetCache::new());
+
             debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in parallel");
             let mut final_root = None;
             for start_block in range.step_by(self.incremental_threshold as usize) {
@@ -675,7 +675,7 @@ where
                         })?;
 
                 let (root, updates) =
-                    ParallelStateRoot::new(self.overlay_factory.clone(), prefix_sets)
+                    ParallelStateRoot::new(overlay_factory.clone(), prefix_sets)
                         .incremental_root_with_updates()
                         .map_err(|e| {
                             error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Parallel state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
@@ -743,11 +743,15 @@ where
                 load_prefix_sets_with_provider::<_, KeccakKeyHasher>(provider, range)
                     .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
+            // Create a fresh overlay factory for unwind to ensure we have the latest
+            // database state after the hashing stages have unwound.
+            let overlay_factory =
+                OverlayStateProviderFactory::new(self.factory.clone(), ChangesetCache::new());
+
             // Use parallel state root computation for unwind
-            let (block_root, updates) =
-                ParallelStateRoot::new(self.overlay_factory.clone(), prefix_sets)
-                    .incremental_root_with_updates()
-                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            let (block_root, updates) = ParallelStateRoot::new(overlay_factory, prefix_sets)
+                .incremental_root_with_updates()
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             let target = provider
                 .header_by_number(input.unwind_to)?
