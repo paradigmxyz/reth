@@ -21,7 +21,7 @@
         }
       ]
     },
-    "description": "Companion dashboard for https://github.com/samcm/ethereum-metrics-exporter",
+    "description": "Companion dashboard for https://github.com/ethpandaops/ethereum-metrics-exporter",
     "editable": true,
     "fiscalYearStartMonth": 0,
     "gnetId": 16277,

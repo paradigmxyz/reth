@@ -17,8 +17,8 @@ use crate::provider::TrieNodeProvider;
 ///
 /// This trait abstracts over different sparse trie implementations (serial vs parallel)
 /// while providing a unified interface for the core trie operations needed by the
-/// [`crate::SparseTrie`] enum.
-pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
+/// [`crate::RevealableSparseTrie`] enum.
+pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Configures the trie to have the given root node revealed.
     ///
     /// # Arguments
@@ -230,6 +230,36 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     /// Shrink the capacity of the sparse trie's value storage to the given size.
     /// This will reduce memory usage if the current capacity is higher than the given size.
     fn shrink_values_to(&mut self, size: usize);
+}
+
+/// Extension trait for sparse tries that support pruning.
+///
+/// This trait provides the `prune` method for sparse trie implementations that support
+/// converting nodes beyond a certain depth into hash stubs. This is useful for reducing
+/// memory usage when caching tries across payload validations.
+pub trait SparseTrieExt: SparseTrie {
+    /// Returns the number of revealed (non-Hash) nodes in the trie.
+    fn revealed_node_count(&self) -> usize;
+
+    /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
+    ///
+    /// Depth counts nodes traversed (not nibbles), so extension nodes count as 1 depth
+    /// regardless of key length. `max_depth == 0` prunes all children of the root node.
+    ///
+    /// # Preconditions
+    ///
+    /// Must be called after `root()` to ensure all nodes have computed hashes.
+    /// Calling on a trie without computed hashes will result in no pruning.
+    ///
+    /// # Behavior
+    ///
+    /// - Embedded nodes (RLP < 32 bytes) are preserved since they have no hash
+    /// - Returns 0 if `max_depth` exceeds trie depth or trie is empty
+    ///
+    /// # Returns
+    ///
+    /// The number of nodes converted to hash stubs.
+    fn prune(&mut self, max_depth: usize) -> usize;
 }
 
 /// Tracks modifications to the sparse trie structure.

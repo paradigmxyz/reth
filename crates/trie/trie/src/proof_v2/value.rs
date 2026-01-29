@@ -44,7 +44,7 @@ pub trait LeafValueEncoder {
     ///
     /// The returned deferred encoder will be called as late as possible in the algorithm to
     /// maximize the time available for parallel computation (e.g., storage root calculation).
-    fn deferred_encoder(&self, key: B256, value: Self::Value) -> Self::DeferredEncoder;
+    fn deferred_encoder(&mut self, key: B256, value: Self::Value) -> Self::DeferredEncoder;
 }
 
 /// An encoder for storage slot values.
@@ -68,7 +68,7 @@ impl LeafValueEncoder for StorageValueEncoder {
     type Value = U256;
     type DeferredEncoder = StorageDeferredValueEncoder;
 
-    fn deferred_encoder(&self, _key: B256, value: Self::Value) -> Self::DeferredEncoder {
+    fn deferred_encoder(&mut self, _key: B256, value: Self::Value) -> Self::DeferredEncoder {
         StorageDeferredValueEncoder(value)
     }
 }
@@ -109,39 +109,20 @@ where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
 {
-    // Synchronously computes the storage root for this account and RLP-encodes the resulting
-    // `TrieAccount` into `buf`
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
-        // Create cursors for storage proof calculation
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
         let hashed_cursor =
             self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
 
-        // Create storage proof calculator with StorageValueEncoder
         let mut storage_proof_calculator = ProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
-        // Compute storage root by calling storage_proof with the root path as a target.
-        // This returns just the root node of the storage trie.
+        let proof = storage_proof_calculator
+            .storage_proof(self.hashed_address, &mut [B256::ZERO.into()])?;
         let storage_root = storage_proof_calculator
-            .storage_proof(self.hashed_address, &mut [B256::ZERO.into()])
-            .map(|nodes| {
-                // Encode the root node to RLP and hash it
-                let root_node =
-                    nodes.first().expect("storage_proof always returns at least the root");
-                root_node.node.encode(buf);
+            .compute_root_hash(&proof)?
+            .expect("storage_proof with dummy target always returns root");
 
-                let storage_root = alloy_primitives::keccak256(buf.as_slice());
-
-                // Clear the buffer so we can re-use it to encode the TrieAccount
-                buf.clear();
-
-                storage_root
-            })?;
-
-        // Combine account with storage root to create TrieAccount
         let trie_account = self.account.into_trie_account(storage_root);
-
-        // Encode the trie account
         trie_account.encode(buf);
 
         Ok(())
@@ -157,7 +138,7 @@ where
     type DeferredEncoder = SyncAccountDeferredValueEncoder<T, H>;
 
     fn deferred_encoder(
-        &self,
+        &mut self,
         hashed_address: B256,
         account: Self::Value,
     ) -> Self::DeferredEncoder {

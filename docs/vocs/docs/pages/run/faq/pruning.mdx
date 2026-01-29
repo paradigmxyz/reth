@@ -52,6 +52,23 @@ reth node \
     --authrpc.port 8551
 ```
 
+### Minimal Storage Mode
+
+To run Reth in minimal storage mode, follow the steps from the previous chapter on
+[how to run on mainnet or official testnets](/run/ethereum), and add a `--minimal` flag. For example:
+
+```bash
+reth node \
+    --minimal \
+    --authrpc.jwtsecret /path/to/secret \
+    --authrpc.addr 127.0.0.1 \
+    --authrpc.port 8551
+```
+
+Minimal storage mode is a preconfigured pruned node profile that aims to minimize disk usage by fully
+pruning sender recovery, transaction lookup, and receipts, and by keeping only the last 10,064 blocks
+of account history, storage history, and block bodies with smaller static file segments.
+
 ## Size
 
 All numbers are as of April 2024 at block number 19.6M for mainnet.
