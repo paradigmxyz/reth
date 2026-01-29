@@ -688,6 +688,8 @@ impl RocksDBProvider {
             inner: WriteBatchWithTransaction::<true>::default(),
             buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
             auto_commit_threshold: None,
+            pending_account_history: HashMap::new(),
+            pending_storage_history: HashMap::new(),
         }
     }
 
@@ -702,6 +704,8 @@ impl RocksDBProvider {
             inner: WriteBatchWithTransaction::<true>::default(),
             buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
             auto_commit_threshold: Some(DEFAULT_AUTO_COMMIT_THRESHOLD),
+            pending_account_history: HashMap::new(),
+            pending_storage_history: HashMap::new(),
         }
     }
 
@@ -1294,6 +1298,14 @@ pub struct RocksDBBatch<'a> {
     buf: Vec<u8>,
     /// If set, batch auto-commits when size exceeds this threshold (in bytes).
     auto_commit_threshold: Option<usize>,
+    /// Pending account history shards (address -> merged indices).
+    /// Used to handle multiple calls to `append_account_history_shard` for the same address
+    /// within a single batch, since the batch cannot read its own pending writes.
+    pending_account_history: HashMap<Address, BlockNumberList>,
+    /// Pending storage history shards ((address, storage_key) -> merged indices).
+    /// Used to handle multiple calls to `append_storage_history_shard` for the same key
+    /// within a single batch, since the batch cannot read its own pending writes.
+    pending_storage_history: HashMap<(Address, B256), BlockNumberList>,
 }
 
 impl fmt::Debug for RocksDBBatch<'_> {
@@ -1346,6 +1358,9 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// This is called after each `put` or `delete` operation to prevent unbounded memory growth.
     /// Returns immediately if auto-commit is disabled or threshold not reached.
+    ///
+    /// Note: This does NOT flush pending history shards. Those are only flushed on final
+    /// `commit()` to ensure all indices for the same key are properly merged.
     fn maybe_auto_commit(&mut self) -> ProviderResult<()> {
         if let Some(threshold) = self.auto_commit_threshold &&
             self.inner.size_in_bytes() >= threshold
@@ -1369,14 +1384,111 @@ impl<'a> RocksDBBatch<'a> {
         Ok(())
     }
 
+    /// Flushes all pending history shards to the batch with proper shard management.
+    ///
+    /// This writes all accumulated history indices, rechunking into multiple shards
+    /// if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    fn flush_pending_history(&mut self) -> ProviderResult<()> {
+        for (address, shard) in std::mem::take(&mut self.pending_account_history) {
+            self.write_account_history_shard(address, shard)?;
+        }
+
+        for ((address, storage_key), shard) in std::mem::take(&mut self.pending_storage_history) {
+            self.write_storage_history_shard(address, storage_key, shard)?;
+        }
+
+        Ok(())
+    }
+
+    /// Writes an account history shard to the batch, rechunking if necessary.
+    fn write_account_history_shard(
+        &mut self,
+        address: Address,
+        shard: BlockNumberList,
+    ) -> ProviderResult<()> {
+        if shard.is_empty() {
+            return Ok(());
+        }
+
+        // Fast path: all indices fit in one shard
+        if shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            self.put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &shard)?;
+            return Ok(());
+        }
+
+        // Slow path: rechunk into multiple shards
+        let chunks = shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let chunk_shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                chunk_shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+
+            self.put::<tables::AccountsHistory>(
+                ShardedKey::new(address, highest_block_number),
+                &chunk_shard,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Writes a storage history shard to the batch, rechunking if necessary.
+    fn write_storage_history_shard(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        shard: BlockNumberList,
+    ) -> ProviderResult<()> {
+        if shard.is_empty() {
+            return Ok(());
+        }
+
+        // Fast path: all indices fit in one shard
+        if shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            self.put::<tables::StoragesHistory>(
+                StorageShardedKey::last(address, storage_key),
+                &shard,
+            )?;
+            return Ok(());
+        }
+
+        // Slow path: rechunk into multiple shards
+        let chunks = shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let chunk_shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                chunk_shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+
+            self.put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, highest_block_number),
+                &chunk_shard,
+            )?;
+        }
+
+        Ok(())
+    }
+
     /// Commits the batch to the database.
     ///
-    /// This consumes the batch and writes all operations atomically to `RocksDB`.
+    /// This flushes all pending history shards, then writes all operations atomically
+    /// to `RocksDB`.
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len(), batch_size = self.inner.size_in_bytes()))]
-    pub fn commit(self) -> ProviderResult<()> {
+    pub fn commit(mut self) -> ProviderResult<()> {
+        self.flush_pending_history()?;
+
         self.provider.0.db_rw().write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
@@ -1422,15 +1534,14 @@ impl<'a> RocksDBBatch<'a> {
 
     /// Appends indices to an account history shard with proper shard management.
     ///
-    /// Loads the existing shard (if any), appends new indices, and rechunks into
-    /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    /// Indices are accumulated in memory and written to the database when `commit()` is called.
+    /// This allows multiple calls for the same address within a single batch.
     ///
     /// # Requirements
     ///
     /// - The `indices` MUST be strictly increasing and contain no duplicates.
-    /// - This method MUST only be called once per address per batch. The batch reads existing
-    ///   shards from committed DB state, not from pending writes. Calling twice for the same
-    ///   address will cause the second call to overwrite the first.
+    /// - Indices from subsequent calls for the same address MUST be strictly greater than all
+    ///   indices from previous calls.
     pub fn append_account_history_shard(
         &mut self,
         address: Address,
@@ -1448,50 +1559,29 @@ impl<'a> RocksDBBatch<'a> {
             indices
         );
 
-        let last_key = ShardedKey::new(address, u64::MAX);
-        let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
-        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+        let pending = self.pending_account_history.entry(address).or_insert_with(|| {
+            self.provider
+                .get::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX))
+                .ok()
+                .flatten()
+                .unwrap_or_else(BlockNumberList::empty)
+        });
 
-        last_shard.append(indices).map_err(ProviderError::other)?;
-
-        // Fast path: all indices fit in one shard
-        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
-            self.put::<tables::AccountsHistory>(last_key, &last_shard)?;
-            return Ok(());
-        }
-
-        // Slow path: rechunk into multiple shards
-        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
-        let mut chunks_peekable = chunks.into_iter().peekable();
-
-        while let Some(chunk) = chunks_peekable.next() {
-            let shard = BlockNumberList::new_pre_sorted(chunk);
-            let highest_block_number = if chunks_peekable.peek().is_some() {
-                shard.iter().next_back().expect("`chunks` does not return empty list")
-            } else {
-                u64::MAX
-            };
-
-            self.put::<tables::AccountsHistory>(
-                ShardedKey::new(address, highest_block_number),
-                &shard,
-            )?;
-        }
+        pending.append(indices).map_err(ProviderError::other)?;
 
         Ok(())
     }
 
     /// Appends indices to a storage history shard with proper shard management.
     ///
-    /// Loads the existing shard (if any), appends new indices, and rechunks into
-    /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    /// Indices are accumulated in memory and written to the database when `commit()` is called.
+    /// This allows multiple calls for the same (address, storage_key) pair within a single batch.
     ///
     /// # Requirements
     ///
     /// - The `indices` MUST be strictly increasing and contain no duplicates.
-    /// - This method MUST only be called once per (address, `storage_key`) pair per batch. The
-    ///   batch reads existing shards from committed DB state, not from pending writes. Calling
-    ///   twice for the same key will cause the second call to overwrite the first.
+    /// - Indices from subsequent calls for the same key MUST be strictly greater than all indices
+    ///   from previous calls.
     pub fn append_storage_history_shard(
         &mut self,
         address: Address,
@@ -1510,35 +1600,16 @@ impl<'a> RocksDBBatch<'a> {
             indices
         );
 
-        let last_key = StorageShardedKey::last(address, storage_key);
-        let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
-        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+        let key = (address, storage_key);
+        let pending = self.pending_storage_history.entry(key).or_insert_with(|| {
+            self.provider
+                .get::<tables::StoragesHistory>(StorageShardedKey::last(address, storage_key))
+                .ok()
+                .flatten()
+                .unwrap_or_else(BlockNumberList::empty)
+        });
 
-        last_shard.append(indices).map_err(ProviderError::other)?;
-
-        // Fast path: all indices fit in one shard
-        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
-            self.put::<tables::StoragesHistory>(last_key, &last_shard)?;
-            return Ok(());
-        }
-
-        // Slow path: rechunk into multiple shards
-        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
-        let mut chunks_peekable = chunks.into_iter().peekable();
-
-        while let Some(chunk) = chunks_peekable.next() {
-            let shard = BlockNumberList::new_pre_sorted(chunk);
-            let highest_block_number = if chunks_peekable.peek().is_some() {
-                shard.iter().next_back().expect("`chunks` does not return empty list")
-            } else {
-                u64::MAX
-            };
-
-            self.put::<tables::StoragesHistory>(
-                StorageShardedKey::new(address, storage_key, highest_block_number),
-                &shard,
-            )?;
-        }
+        pending.append(indices).map_err(ProviderError::other)?;
 
         Ok(())
     }
@@ -2972,6 +3043,8 @@ mod tests {
             inner: WriteBatchWithTransaction::<true>::default(),
             buf: Vec::new(),
             auto_commit_threshold: Some(1024), // 1KB
+            pending_account_history: HashMap::new(),
+            pending_storage_history: HashMap::new(),
         };
 
         // Write entries until we exceed threshold multiple times
@@ -2994,5 +3067,88 @@ mod tests {
             let value = format!("value_{i:04}").into_bytes();
             assert_eq!(provider.get::<TestTable>(i).unwrap(), Some(value));
         }
+    }
+
+    #[test]
+    fn test_append_storage_history_shard_multiple_calls_same_key() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let storage_key = B256::from([0x01; 32]);
+
+        let mut batch = provider.batch();
+
+        // First append: blocks 10, 20, 30
+        batch.append_storage_history_shard(address, storage_key, [10, 20, 30]).unwrap();
+
+        // Second append for SAME key: blocks 40, 50, 60
+        // This would previously fail with UnsortedInput because the batch couldn't
+        // see its own pending writes
+        batch.append_storage_history_shard(address, storage_key, [40, 50, 60]).unwrap();
+
+        batch.commit().unwrap();
+
+        // Verify all indices are present in the final shard
+        let key = StorageShardedKey::last(address, storage_key);
+        let result = provider.get::<tables::StoragesHistory>(key).unwrap();
+        assert!(result.is_some());
+        let blocks: Vec<u64> = result.unwrap().iter().collect();
+        assert_eq!(blocks, vec![10, 20, 30, 40, 50, 60]);
+    }
+
+    #[test]
+    fn test_append_account_history_shard_multiple_calls_same_key() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        let mut batch = provider.batch();
+
+        // First append
+        batch.append_account_history_shard(address, [100, 200]).unwrap();
+
+        // Second append for SAME address
+        batch.append_account_history_shard(address, [300, 400]).unwrap();
+
+        batch.commit().unwrap();
+
+        // Verify all indices are present
+        let key = ShardedKey::new(address, u64::MAX);
+        let result = provider.get::<tables::AccountsHistory>(key).unwrap();
+        assert!(result.is_some());
+        let blocks: Vec<u64> = result.unwrap().iter().collect();
+        assert_eq!(blocks, vec![100, 200, 300, 400]);
+    }
+
+    #[test]
+    fn test_append_storage_history_shard_merges_with_committed() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let storage_key = B256::from([0x01; 32]);
+
+        // First, commit some initial data
+        {
+            let mut batch = provider.batch();
+            batch.append_storage_history_shard(address, storage_key, [10, 20]).unwrap();
+            batch.commit().unwrap();
+        }
+
+        // Now append more in a new batch
+        {
+            let mut batch = provider.batch();
+            batch.append_storage_history_shard(address, storage_key, [30, 40]).unwrap();
+            batch.commit().unwrap();
+        }
+
+        // Verify merged result
+        let key = StorageShardedKey::last(address, storage_key);
+        let result = provider.get::<tables::StoragesHistory>(key).unwrap();
+        assert!(result.is_some());
+        let blocks: Vec<u64> = result.unwrap().iter().collect();
+        assert_eq!(blocks, vec![10, 20, 30, 40]);
     }
 }
