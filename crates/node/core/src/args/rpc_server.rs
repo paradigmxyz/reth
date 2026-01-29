@@ -859,7 +859,7 @@ impl Default for RpcServerArgs {
             rpc_state_cache,
             gas_price_oracle,
             rpc_send_raw_transaction_sync_timeout,
-            testing_skip_invalid_transactions: false,
+            testing_skip_invalid_transactions: true,
         }
     }
 }
