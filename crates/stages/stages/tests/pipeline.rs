@@ -41,12 +41,12 @@ use std::sync::Arc;
 use tokio::sync::watch;
 
 /// Counter contract deployed bytecode (runtime code after deployment)
-/// Contract: uint256 public count; function increment() { count += 1; }
+/// Contract: uint256 public count; function `increment()` { count += 1; }
 const COUNTER_DEPLOYED_BYTECODE: Bytes = bytes!(
     "6080604052348015610010575f5ffd5b506004361061003f575f3560e01c806306661abd14610044578063a87d942c14610062578063d09de08a14610080575b5f5ffd5b61004c61008a565b60405161005991906100c9565b60405180910390f35b61006a61008f565b60405161007791906100c9565b60405180910390f35b610088610097565b005b5f5481565b5f5f54905090565b60015f5f8282546100a8919061010f565b9250508190555056fe5f819050919050565b6100c3816100b1565b82525050565b5f6020820190506100dc5f8301846100ba565b92915050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f610119826100b1565b9150610124836100b1565b925082820190508082111561013c5761013b6100e2565b5b9291505056fea264697066735822122041c62c65ccf4b20acbc63a6536de7fdc8a59427c5be486fd28cab33ad20a095c64736f6c63430008"
 );
 
-/// increment() function selector: keccak256("increment()")[:4]
+/// `increment()` function selector: `keccak256("increment()")`[:4]
 const INCREMENT_SELECTOR: [u8; 4] = [0xd0, 0x9d, 0xe0, 0x8a];
 
 /// Contract address (deterministic for test)
@@ -135,7 +135,7 @@ where
 /// 1. Pre-funds a signer account and deploys a Counter contract in genesis
 /// 2. Each block contains two transactions:
 ///    - ETH transfer to a recipient (account state changes)
-///    - Counter increment() call (storage state changes)
+///    - Counter `increment()` call (storage state changes)
 /// 3. Runs the full pipeline with ALL stages enabled
 /// 4. Forward syncs to block 5, unwinds to block 2
 ///
