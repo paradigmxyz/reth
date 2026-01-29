@@ -1810,10 +1810,23 @@ fn dispatch_storage_proofs(
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &Vec<proof_v2::Target>,
-    storage_targets: B256Map<Vec<proof_v2::Target>>,
+    mut storage_targets: B256Map<Vec<proof_v2::Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
+
+    // Collect hashed addresses from account targets that need their storage roots computed
+    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+
+    // For storage targets with associated account proofs, ensure the first target has
+    // min_len(0) so the root node is returned for storage root computation
+    for (hashed_address, targets) in &mut storage_targets {
+        if account_target_addresses.contains(hashed_address) &&
+            let Some(first) = targets.first_mut()
+        {
+            *first = first.with_min_len(0);
+        }
+    }
 
     // Dispatch all proofs for targeted storage slots
     for (hashed_address, targets) in storage_targets {

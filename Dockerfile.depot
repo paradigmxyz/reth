@@ -5,7 +5,7 @@
 #   reth:    --build-arg BINARY=reth
 #   op-reth: --build-arg BINARY=op-reth --build-arg MANIFEST_PATH=crates/optimism/bin
 
-FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
+FROM rust:1 AS builder
 WORKDIR /app
 
 LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
@@ -18,14 +18,6 @@ RUN cargo install sccache --locked
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_DIR=/sccache
 ENV SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev
-
-# Builds a cargo-chef plan
-FROM chef AS planner
-COPY --exclude=.git . .
-RUN cargo chef prepare --recipe-path recipe.json
-
-FROM chef AS builder
-COPY --from=planner /app/recipe.json recipe.json
 
 # Binary to build (reth or op-reth)
 ARG BINARY=reth
@@ -52,13 +44,6 @@ ARG VERGEN_GIT_DIRTY="false"
 ENV VERGEN_GIT_SHA=$VERGEN_GIT_SHA
 ENV VERGEN_GIT_DESCRIBE=$VERGEN_GIT_DESCRIBE
 ENV VERGEN_GIT_DIRTY=$VERGEN_GIT_DIRTY
-
-# Build dependencies
-RUN --mount=type=secret,id=DEPOT_TOKEN,env=SCCACHE_WEBDAV_TOKEN \
-    --mount=type=cache,target=/usr/local/cargo/registry,sharing=shared \
-    --mount=type=cache,target=/usr/local/cargo/git,sharing=shared \
-    --mount=type=cache,target=$SCCACHE_DIR,sharing=shared \
-    cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --locked --recipe-path recipe.json --manifest-path $MANIFEST_PATH/Cargo.toml
 
 # Build application
 COPY --exclude=.git . .
