@@ -128,9 +128,9 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// A pruned `SparseStateTrie`, kept around to be reused for the state root computation so
-    /// that allocations can be minimized. Stored with the block hash it was computed for
-    /// to enable trie preservation across sequential payload validations.
+    /// A pruned `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
+    /// re-use allocated memory. Stored with the block hash it was computed for to enable trie
+    /// preservation across sequential payload validations.
     sparse_state_trie: SharedPreservedSparseTrie,
     /// Maximum concurrency for prewarm task.
     prewarm_max_concurrency: usize,
