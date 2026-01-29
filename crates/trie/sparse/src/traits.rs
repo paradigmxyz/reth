@@ -312,8 +312,8 @@ pub trait SparseTrieExt: SparseTrie {
     ///
     /// # Update Types
     ///
-    /// * [`LeafUpdate::Changed`] - Updates or inserts a leaf with the given value. An empty
-    ///   `Vec` indicates removal of the leaf.
+    /// * [`LeafUpdate::Changed`] - Updates or inserts a leaf with the given value. An empty `Vec`
+    ///   indicates removal of the leaf.
     /// * [`LeafUpdate::Touched`] - Marks a leaf as likely changed without providing a value. Used
     ///   for prewarming/optimistic revelation where the actual value isn't yet known.
     ///
