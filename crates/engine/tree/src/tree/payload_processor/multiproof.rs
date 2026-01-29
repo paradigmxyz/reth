@@ -7,6 +7,7 @@ use alloy_primitives::{keccak256, map::HashSet, B256};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
+use rayon::prelude::*;
 use reth_metrics::Metrics;
 use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
@@ -25,16 +26,24 @@ use reth_trie_parallel::{
     targets_v2::{ChunkedMultiProofTargetsV2, MultiProofTargetsV2},
 };
 use revm_primitives::map::{hash_map, B256Map};
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, mem, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
-/// Source of state changes, either from EVM execution or from a Block Access List.
+/// Source of state changes during block processing.
 #[derive(Clone, Copy)]
 pub enum Source {
     /// State changes from EVM execution.
     Evm(StateChangeSource),
     /// State changes from Block Access List (EIP-7928).
     BlockAccessList,
+    /// Batched state changes from multiple transactions.
+    ///
+    /// This variant is used when multiple transaction state updates are merged together
+    /// for more efficient hashing.
+    BatchedTransactions {
+        /// Number of transactions that were batched together.
+        count: usize,
+    },
 }
 
 impl std::fmt::Debug for Source {
@@ -42,6 +51,7 @@ impl std::fmt::Debug for Source {
         match self {
             Self::Evm(source) => source.fmt(f),
             Self::BlockAccessList => f.write_str("BlockAccessList"),
+            Self::BatchedTransactions { count } => write!(f, "BatchedTransactions({count})"),
         }
     }
 }
@@ -199,36 +209,82 @@ impl Drop for StateHookSender {
     }
 }
 
+/// Converts EVM state to hashed post state using parallel iteration.
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::with_capacity(update.len());
+    update
+        .into_par_iter()
+        .filter_map(|(address, account)| {
+            if !account.is_touched() {
+                return None;
+            }
 
-    for (address, account) in update {
-        if account.is_touched() {
             let hashed_address = keccak256(address);
             trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
             let info = if destroyed { None } else { Some(account.info.into()) };
-            hashed_state.accounts.insert(hashed_address, info);
 
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
+            let hashed_storage = if destroyed {
+                Some(HashedStorage::new(true))
+            } else {
+                let storage: Vec<_> = account
+                    .storage
+                    .into_iter()
+                    .filter(|(_slot, value)| value.is_changed())
+                    .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                    .collect();
 
-            if destroyed {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+                if storage.is_empty() {
+                    None
+                } else {
+                    Some(HashedStorage::from_iter(false, storage))
+                }
+            };
+
+            Some((hashed_address, info, hashed_storage))
+        })
+        .collect()
+}
+
+/// Merges multiple EVM states into one, properly combining storage slots.
+///
+/// Unlike `HashMap::extend` which blindly overwrites accounts, this function
+/// properly merges storage slots when the same account appears in multiple states.
+/// For each account that exists in both the target and source:
+/// - Storage slots are merged (existing slots updated, new slots inserted)
+/// - Account info is updated to the latest value
+/// - Status flags are combined using bitwise OR
+fn merge_evm_states(states: Vec<EvmState>) -> EvmState {
+    let mut merged = EvmState::default();
+
+    for state in states {
+        for (address, account) in state {
+            match merged.entry(address) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    let existing = entry.get_mut();
+                    // Merge storage slots - update present_value for existing, insert new
+                    for (slot, value) in account.storage {
+                        existing
+                            .storage
+                            .entry(slot)
+                            .and_modify(|existing_slot| {
+                                existing_slot.present_value = value.present_value;
+                            })
+                            .or_insert(value);
+                    }
+                    // Update account info to latest
+                    existing.info = account.info;
+                    // Combine status flags
+                    existing.status |= account.status;
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(account);
+                }
             }
         }
     }
 
-    hashed_state
+    merged
 }
 
 /// Extends a `MultiProofTargets` with the contents of a `VersionedMultiProofTargets`,
@@ -718,6 +774,10 @@ pub(super) struct MultiProofTask {
     /// Whether or not V2 proof calculation is enabled. If enabled then [`MultiProofTargetsV2`]
     /// will be produced by state updates.
     v2_proofs_enabled: bool,
+    /// Buffer for accumulating raw EVM state updates until block execution finishes.
+    /// These are processed in bulk when `FinishedStateUpdates` is received, allowing
+    /// for more efficient parallel hashing of the combined state.
+    deferred_evm_states: Vec<EvmState>,
 }
 
 impl MultiProofTask {
@@ -750,6 +810,7 @@ impl MultiProofTask {
             metrics,
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             v2_proofs_enabled: false,
+            deferred_evm_states: Vec::new(),
         }
     }
 
@@ -1083,7 +1144,7 @@ impl MultiProofTask {
 
                 false
             }
-            MultiProofMessage::StateUpdate(source, update) => {
+            MultiProofMessage::StateUpdate(_source, update) => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
 
                 if ctx.first_update_time.is_none() {
@@ -1094,14 +1155,13 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                let update_len = update.len();
-                batch_metrics.state_update_proofs_requested += self.on_state_update(source, update);
+                // Buffer this state update for deferred processing
+                self.deferred_evm_states.push(update);
+
                 trace!(
                     target: "engine::tree::payload_processor::multiproof",
-                    ?source,
-                    len = update_len,
-                    state_update_proofs_requested = ?batch_metrics.state_update_proofs_requested,
-                    "Dispatched state update"
+                    buffered_count = self.deferred_evm_states.len(),
+                    "Buffered state update for deferred processing"
                 );
 
                 false
@@ -1151,9 +1211,37 @@ impl MultiProofTask {
                 }
                 false
             }
-            // Signal that no more state updates will arrive
+            // Signal that no more state updates will arrive.
             MultiProofMessage::FinishedStateUpdates => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
+
+                // Take all buffered EVM states
+                let deferred_states = mem::take(&mut self.deferred_evm_states);
+                let num_deferred = deferred_states.len();
+
+                if !deferred_states.is_empty() {
+                    debug!(
+                        target: "engine::tree::payload_processor::multiproof",
+                        num_deferred,
+                        "Processing deferred state updates"
+                    );
+
+                    // Merge all EVM states into one, properly combining storage slots
+                    let merged_state = merge_evm_states(deferred_states);
+
+                    // Hash everything in parallel and process
+                    batch_metrics.state_update_proofs_requested += self.on_state_update(
+                        Source::BatchedTransactions { count: num_deferred },
+                        merged_state,
+                    );
+
+                    trace!(
+                        target: "engine::tree::payload_processor::multiproof",
+                        num_deferred,
+                        state_update_proofs_requested = batch_metrics.state_update_proofs_requested,
+                        "Processed all deferred state updates"
+                    );
+                }
 
                 ctx.updates_finished_time = Some(Instant::now());
 
@@ -2193,6 +2281,8 @@ mod tests {
     }
 
     /// Verifies that a pending message is processed before the next loop iteration (ordering).
+    /// With deferred state update processing, `StateUpdate` messages simply buffer the state
+    /// without trying to batch consecutive messages.
     #[test]
     fn test_pending_message_processed_before_next_iteration() {
         use alloy_evm::block::StateChangeSource;
