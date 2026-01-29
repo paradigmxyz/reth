@@ -831,6 +831,19 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
             return Ok(Box::new(LatestStateProvider::new(self)))
         }
 
+        // Ensure the requested block has been executed. Without this check, we could return
+        // stale or invalid state for blocks that exist in the database but haven't been
+        // executed yet (e.g., during pipeline sync when headers/bodies are ahead of execution).
+        let execution_checkpoint = self.get_stage_checkpoint(StageId::Execution)?;
+        if let Some(checkpoint) = execution_checkpoint {
+            if block_number > checkpoint.block_number {
+                return Err(ProviderError::BlockNotExecuted {
+                    requested: block_number,
+                    executed: checkpoint.block_number,
+                });
+            }
+        }
+
         // +1 as the changeset that we want is the one that was applied after this block.
         block_number += 1;
 
