@@ -82,6 +82,16 @@ impl From<&'static str> for FileClientError {
     }
 }
 
+impl<B: Block> Default for FileClient<B> {
+    fn default() -> Self {
+        Self {
+            headers: HashMap::default(),
+            hash_to_number: HashMap::default(),
+            bodies: HashMap::default(),
+        }
+    }
+}
+
 impl<B: FullBlock> FileClient<B> {
     /// Create a new file client from a file path.
     pub async fn new<P: AsRef<Path>>(
