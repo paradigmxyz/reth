@@ -47,7 +47,6 @@ pub enum LeafUpdate {
     /// - If blinded nodes block the path: proof targets are collected
     Touched,
 }
-
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
 /// This trait abstracts over different sparse trie implementations (serial vs parallel)
@@ -312,8 +311,8 @@ pub trait SparseTrieExt: SparseTrie {
     ///
     /// # Update Types
     ///
-    /// * [`LeafUpdate::Changed`] - Updates or inserts a leaf with the given value. An empty
-    ///   `Vec` indicates removal of the leaf.
+    /// * [`LeafUpdate::Changed`] - Updates or inserts a leaf with the given value. An empty `Vec`
+    ///   indicates removal of the leaf.
     /// * [`LeafUpdate::Touched`] - Marks a leaf as likely changed without providing a value. Used
     ///   for prewarming/optimistic revelation where the actual value isn't yet known.
     ///

@@ -1,7 +1,8 @@
 use crate::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     traits::{SparseTrie as SparseTrieTrait, SparseTrieExt},
-    RevealableSparseTrie, SerialSparseTrie,
+    RevealableSparseTrie, SerialSparseTrie, DEFAULT_MAX_PRESERVED_STORAGE_TRIES,
+    DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -73,6 +74,18 @@ where
     /// Returns the cleared [`SparseStateTrie`], consuming this instance.
     pub fn into_inner(self) -> SparseStateTrie<A, S> {
         self.0
+    }
+}
+
+impl<A, S> ClearedSparseStateTrie<A, S>
+where
+    A: SparseTrieExt + Default,
+    S: SparseTrieExt + Default + Clone,
+{
+    /// Creates a [`ClearedSparseStateTrie`] by pruning the given [`SparseStateTrie`].
+    pub fn pruned(mut trie: SparseStateTrie<A, S>) -> Self {
+        trie.prune(DEFAULT_SPARSE_TRIE_PRUNE_DEPTH, DEFAULT_MAX_PRESERVED_STORAGE_TRIES);
+        Self(trie)
     }
 }
 
@@ -204,6 +217,11 @@ where
         self.state.as_revealed_ref()
     }
 
+    /// Returns mutable reference to state trie if it was revealed.
+    pub fn state_trie_mut(&mut self) -> Option<&mut A> {
+        self.state.as_revealed_mut()
+    }
+
     /// Returns reference to storage trie if it was revealed.
     pub fn storage_trie_ref(&self, address: &B256) -> Option<&S> {
         self.storage.tries.get(address).and_then(|e| e.as_revealed_ref())
@@ -222,6 +240,14 @@ where
     /// Inserts storage trie for the provided address.
     pub fn insert_storage_trie(&mut self, address: B256, storage_trie: RevealableSparseTrie<S>) {
         self.storage.tries.insert(address, storage_trie);
+    }
+
+    /// Returns mutable reference to storage sparse trie, creating a blind one if it doesn't exist.
+    pub fn get_or_create_storage_trie_mut(
+        &mut self,
+        address: B256,
+    ) -> &mut RevealableSparseTrie<S> {
+        self.storage.get_or_create_trie_mut(address)
     }
 
     /// Reveal unknown trie paths from multiproof.
@@ -714,8 +740,8 @@ where
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.
-    pub fn storage_root(&mut self, account: B256) -> Option<B256> {
-        self.storage.tries.get_mut(&account).and_then(|trie| trie.root())
+    pub fn storage_root(&mut self, account: &B256) -> Option<B256> {
+        self.storage.tries.get_mut(account).and_then(|trie| trie.root())
     }
 
     /// Returns mutable reference to the revealed account sparse trie.
@@ -1162,6 +1188,13 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
             .or_insert_with(|| self.cleared_revealed_paths.pop().unwrap_or_default());
 
         (trie, revealed_paths)
+    }
+
+    // Returns mutable reference to storage sparse trie, creating a blind one if it doesn't exist.
+    fn get_or_create_trie_mut(&mut self, address: B256) -> &mut RevealableSparseTrie<S> {
+        self.tries.entry(address).or_insert_with(|| {
+            self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
+        })
     }
 
     /// Takes the storage trie for the account from the internal `HashMap`, creating it if it
@@ -1766,7 +1799,7 @@ mod tests {
                 &provider_factory,
             )
             .unwrap();
-        trie_account_1.storage_root = sparse.storage_root(address_1).unwrap();
+        trie_account_1.storage_root = sparse.storage_root(&address_1).unwrap();
         sparse
             .update_account_leaf(
                 address_path_1,
@@ -1776,7 +1809,7 @@ mod tests {
             .unwrap();
 
         sparse.wipe_storage(address_2).unwrap();
-        trie_account_2.storage_root = sparse.storage_root(address_2).unwrap();
+        trie_account_2.storage_root = sparse.storage_root(&address_2).unwrap();
         sparse
             .update_account_leaf(
                 address_path_2,
