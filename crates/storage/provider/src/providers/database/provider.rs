@@ -825,22 +825,25 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        // if the block number is the same as the currently best block number on disk we can use the
-        // latest state provider here
-        if block_number == self.best_block_number().unwrap_or_default() {
-            return Ok(Box::new(LatestStateProvider::new(self)))
-        }
+        // Get the execution checkpoint to determine the highest block with valid state.
+        // During pipeline sync, headers/bodies can be ahead of execution, so we must check
+        // against the execution checkpoint, not best_block_number() (which uses Finish).
+        let executed_tip = self
+            .get_stage_checkpoint(StageId::Execution)?
+            .map(|c| c.block_number)
+            .unwrap_or_default();
 
-        // Ensure the requested block has been executed. Without this check, we could return
-        // stale or invalid state for blocks that exist in the database but haven't been
-        // executed yet (e.g., during pipeline sync when headers/bodies are ahead of execution).
-        if let Some(checkpoint) = self.get_stage_checkpoint(StageId::Execution)? &&
-            block_number > checkpoint.block_number
-        {
+        // Reject requests for blocks that haven't been executed yet
+        if block_number > executed_tip {
             return Err(ProviderError::BlockNotExecuted {
                 requested: block_number,
-                executed: checkpoint.block_number,
+                executed: executed_tip,
             });
+        }
+
+        // If requesting state at the executed tip, use the latest state provider
+        if block_number == executed_tip {
+            return Ok(Box::new(LatestStateProvider::new(self)));
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
