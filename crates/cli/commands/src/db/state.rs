@@ -9,14 +9,14 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
-use reth_provider::{providers::ProviderNodeTypes, RocksDBProviderFactory};
+use reth_provider::providers::ProviderNodeTypes;
 use reth_storage_api::{BlockNumReader, StateProvider, StorageSettingsCache};
 use std::{
     collections::BTreeSet,
     thread,
     time::{Duration, Instant},
 };
-use tracing::info;
+use tracing::{error, info};
 
 /// Log progress every 5 seconds
 const LOG_INTERVAL: Duration = Duration::from_secs(30);
@@ -125,19 +125,22 @@ impl Command {
         let mut storage_keys = BTreeSet::new();
 
         if history_in_rocksdb {
-            // Collect keys from RocksDB StoragesHistory table
-            self.collect_rocksdb_storage_keys(tool, address, &mut storage_keys)?;
-        } else {
-            // Collect keys from MDBX StorageChangeSets using parallel scanning
-            self.collect_mdbx_storage_keys_parallel(tool, address, &mut storage_keys)?;
+            error!(
+                target: "reth::cli",
+                "Historical storage queries with RocksDB backend are not yet supported. \
+                 Use MDBX for storage history or query current state without --block."
+            );
+            return Ok(());
         }
+
+        // Collect keys from MDBX StorageChangeSets using parallel scanning
+        self.collect_mdbx_storage_keys_parallel(tool, address, &mut storage_keys)?;
 
         info!(
             target: "reth::cli",
             address = %address,
             block = block,
             total_keys = storage_keys.len(),
-            history_backend = if history_in_rocksdb { "rocksdb" } else { "mdbx" },
             "Found storage keys to query"
         );
 
@@ -305,31 +308,6 @@ impl Command {
         );
 
         keys.extend(final_keys);
-        Ok(())
-    }
-
-    /// Collects storage keys from RocksDB's StoragesHistory table for the given address.
-    fn collect_rocksdb_storage_keys<N: NodeTypesWithDB + ProviderNodeTypes>(
-        &self,
-        tool: &DbTool<N>,
-        address: Address,
-        keys: &mut BTreeSet<B256>,
-    ) -> eyre::Result<()> {
-        let rocksdb = tool.provider_factory.rocksdb_provider();
-
-        // Iterate over StoragesHistory entries
-        // StorageShardedKey is (address, storage_key, highest_block_number)
-        if let Ok(iter) = rocksdb.iter::<tables::StoragesHistory>() {
-            for (key, _) in iter.flatten() {
-                if key.address == address {
-                    keys.insert(key.sharded_key.key);
-                } else if key.address > address {
-                    // Keys are sorted by address, so we can stop early
-                    break;
-                }
-            }
-        }
-
         Ok(())
     }
 
