@@ -1091,7 +1091,11 @@ where
                 .filter_map(|hash| {
                     let modified = self.storage.trie_generation.get(hash).copied().unwrap_or(0);
                     let pruned = self.storage.last_pruned_gen.get(hash).copied().unwrap_or(0);
-                    (modified <= pruned).then_some((*hash, modified))
+                    if modified <= pruned {
+                        Some((*hash, modified))
+                    } else {
+                        None
+                    }
                 })
                 .collect();
 
@@ -1155,19 +1159,19 @@ where
                 use rayon::prelude::*;
 
                 self.storage.tries.par_iter_mut().for_each(|(hash, trie)| {
-                    if dirty_set.contains(hash) &&
-                        let Some(trie) = trie.as_revealed_mut()
-                    {
-                        trie.prune(max_depth);
+                    if dirty_set.contains(hash) {
+                        if let Some(trie) = trie.as_revealed_mut() {
+                            trie.prune(max_depth);
+                        }
                     }
                 });
             }
         } else {
             for hash in &dirty_set {
-                if let Some(trie) = self.storage.tries.get_mut(hash) &&
-                    let Some(trie) = trie.as_revealed_mut()
-                {
-                    trie.prune(max_depth);
+                if let Some(trie) = self.storage.tries.get_mut(hash) {
+                    if let Some(trie) = trie.as_revealed_mut() {
+                        trie.prune(max_depth);
+                    }
                 }
             }
         }
