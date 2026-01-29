@@ -8107,6 +8107,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-db-tune"
+version = "1.10.2"
+dependencies = [
+ "clap",
+ "eyre",
+ "humantime",
+ "reth-tracing",
+ "rocksdb",
+ "serde",
+ "serde_json",
+ "toml",
+ "tracing",
+]
+
+[[package]]
 name = "reth-discv4"
 version = "1.10.2"
 dependencies = [
