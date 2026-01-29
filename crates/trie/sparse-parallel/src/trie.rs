@@ -123,9 +123,6 @@ pub struct ParallelSparseTrie {
     update_actions_buffers: Vec<Vec<SparseTrieUpdatesAction>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ParallelismThresholds,
-    /// Tracks proof targets already requested via `update_leaves` to avoid duplicate callbacks
-    /// across retry calls. Key is (`leaf_path`, `min_depth`).
-    requested_proof_targets: alloy_primitives::map::HashSet<(Nibbles, u8)>,
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ParallelSparseTrieMetrics,
@@ -144,7 +141,6 @@ impl Default for ParallelSparseTrie {
             branch_node_masks: BranchNodeMasksMap::default(),
             update_actions_buffers: Vec::default(),
             parallelism_thresholds: Default::default(),
-            requested_proof_targets: Default::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -1266,14 +1262,6 @@ impl ParallelSparseTrie {
     /// Returns true if retaining updates is enabled for the overall trie.
     const fn updates_enabled(&self) -> bool {
         self.updates.is_some()
-    }
-
-    /// Clears the set of already-requested proof targets.
-    ///
-    /// Call this when reusing the trie for a new payload to ensure proof callbacks
-    /// are emitted fresh.
-    pub fn clear_requested_proof_targets(&mut self) {
-        self.requested_proof_targets.clear();
     }
 
     /// Returns true if parallelism should be enabled for revealing the given number of nodes.
