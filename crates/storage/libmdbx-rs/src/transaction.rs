@@ -3,6 +3,7 @@ use crate::{
     environment::Environment,
     error::{mdbx_result, Result},
     flags::{DatabaseFlags, WriteFlags},
+    tx_access::TxPtrAccess,
     txn_manager::{TxnManagerMessage, TxnPtr},
     Cursor, Error, Stat, TableObject,
 };
@@ -36,6 +37,10 @@ pub trait TransactionKind: private::Sealed + Send + Sync + Debug + 'static {
     /// Convenience flag for distinguishing between read-only and read-write transactions.
     #[doc(hidden)]
     const IS_READ_ONLY: bool;
+
+    /// The unsynchronized inner type for this transaction kind.
+    #[doc(hidden)]
+    type UnsyncInner: crate::tx_access::TxPtrAccess;
 }
 
 #[derive(Debug)]
@@ -49,10 +54,12 @@ pub struct RW;
 impl TransactionKind for RO {
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_RDONLY;
     const IS_READ_ONLY: bool = true;
+    type UnsyncInner = crate::tx_access::RoUnsync;
 }
 impl TransactionKind for RW {
     const OPEN_FLAGS: MDBX_txn_flags_t = MDBX_TXN_READWRITE;
     const IS_READ_ONLY: bool = false;
+    type UnsyncInner = crate::tx_access::RwUnsync;
 }
 
 /// An MDBX transaction.
@@ -537,8 +544,12 @@ impl Transaction<RW> {
 }
 
 /// A shareable pointer to an MDBX transaction.
+///
+/// This type provides synchronized access to the underlying MDBX transaction
+/// pointer via a mutex. It implements [`TxPtrAccess`] to enable abstraction
+/// over different access patterns.
 #[derive(Debug, Clone)]
-pub(crate) struct TransactionPtr {
+pub struct TransactionPtr {
     txn: *mut ffi::MDBX_txn,
     #[cfg(feature = "read-tx-timeouts")]
     timed_out: Arc<AtomicBool>,
@@ -715,6 +726,22 @@ unsafe impl Send for TransactionPtr {}
 
 // SAFETY: Access to the transaction is synchronized by the lock.
 unsafe impl Sync for TransactionPtr {}
+
+impl TxPtrAccess for TransactionPtr {
+    fn with_txn_ptr<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> R,
+    {
+        self.txn_execute_fail_on_timeout(f)
+    }
+
+    fn with_txn_ptr_for_cleanup<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> R,
+    {
+        self.txn_execute_renew_on_timeout(f)
+    }
+}
 
 #[cfg(test)]
 mod tests {
