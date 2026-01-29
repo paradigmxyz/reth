@@ -4,7 +4,7 @@ use core::fmt::Debug;
 
 use alloc::{borrow::Cow, vec, vec::Vec};
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256Map, HashMap, HashSet},
     B256,
 };
 use alloy_trie::BranchNodeCompact;
@@ -14,14 +14,13 @@ use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 use crate::provider::TrieNodeProvider;
 
 /// Describes an update to a leaf in the sparse trie.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafUpdate {
     /// The leaf value has been changed to the given RLP-encoded value.
     /// Empty Vec indicates the leaf has been removed.
     Changed(Vec<u8>),
-    /// The leaf value is likely changed, but the new value is not yet known.
-    /// Used in prewarming contexts where transactions run out-of-order
-    /// to optimistically reveal the trie.
+    /// The leaf value may have changed, but the new value is not yet known.
+    /// Used for optimistic prewarming when the actual value is unavailable.
     Touched,
 }
 
@@ -272,6 +271,26 @@ pub trait SparseTrieExt: SparseTrie {
     ///
     /// The number of nodes converted to hash stubs.
     fn prune(&mut self, max_depth: usize) -> usize;
+
+    /// Applies leaf updates to the sparse trie.
+    ///
+    /// When a [`LeafUpdate::Changed`] is successfully applied, it is removed from the
+    /// given [`B256Map`]. If it could not be applied due to blinded nodes, it remains
+    /// in the map and the callback is invoked with the required proof target.
+    ///
+    /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
+    /// `updates` map can be reused to retry the update.
+    ///
+    /// Proof targets are deduplicated by `(full_path, min_len)` within a single call.
+    /// The callback may be invoked again for the same path in subsequent calls if a
+    /// deeper blinded node is discovered (higher `min_len`).
+    ///
+    /// [`LeafUpdate::Touched`] behaves identically except it does not modify the leaf value.
+    fn update_leaves(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        proof_required_fn: impl FnMut(Nibbles, u8),
+    ) -> SparseTrieResult<()>;
 }
 
 /// Tracks modifications to the sparse trie structure.

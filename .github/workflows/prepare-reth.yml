@@ -43,7 +43,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: .github/assets/hive/Dockerfile
+          file: .github/scripts/hive/Dockerfile
           tags: ${{ inputs.image_tag }}
           outputs: type=docker,dest=./artifacts/reth_image.tar
           build-args: |

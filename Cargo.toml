@@ -484,15 +484,15 @@ op-revm = { version = "15.0.0", default-features = false }
 revm-inspectors = "0.34.1"
 
 # eth
+alloy-dyn-abi = "1.5.4"
+alloy-primitives = { version = "1.5.4", default-features = false, features = ["map-foldhash"] }
+alloy-sol-types = { version = "1.5.4", default-features = false }
+
 alloy-chains = { version = "0.2.5", default-features = false }
-alloy-dyn-abi = "1.5.2"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.3.0", default-features = false }
 alloy-evm = { version = "0.27.0", default-features = false }
-alloy-primitives = { version = "1.5.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
-alloy-sol-macro = "1.5.0"
-alloy-sol-types = { version = "1.5.0", default-features = false }
 alloy-trie = { version = "0.9.1", default-features = false }
 
 alloy-hardforks = "0.4.5"
@@ -733,7 +733,7 @@ snap = "1.1.1"
 socket2 = { version = "0.5", default-features = false }
 sysinfo = { version = "0.33", default-features = false }
 tracing-journald = "0.3"
-tracing-logfmt = "0.3.3"
+tracing-logfmt = "=0.3.5"
 tracing-samply = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false }
 tracing-tracy = "0.11"
