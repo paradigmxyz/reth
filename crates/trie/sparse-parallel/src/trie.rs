@@ -124,7 +124,7 @@ pub struct ParallelSparseTrie {
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ParallelismThresholds,
     /// Tracks proof targets already requested via `update_leaves` to avoid duplicate callbacks
-    /// across retry calls. Key is (leaf_path, min_depth).
+    /// across retry calls. Key is (`leaf_path`, `min_depth`).
     requested_proof_targets: alloy_primitives::map::HashSet<(Nibbles, u8)>,
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
