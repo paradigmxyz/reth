@@ -1012,7 +1012,15 @@ where
         if let Some(trie) = self.state.as_revealed_mut() {
             trie.prune(max_depth);
         }
-        self.revealed_account_paths.clear();
+
+        // Retain only paths for accounts whose leaves are still accessible after pruning.
+        // Previously we cleared all paths, but leaf nodes survive pruning - only internal
+        // nodes deeper than max_depth are converted to hash stubs.
+        if let Some(trie) = self.state.as_revealed_ref() {
+            self.revealed_account_paths.retain(|path| trie.get_leaf_value(path).is_some());
+        } else {
+            self.revealed_account_paths.clear();
+        }
 
         let mut storage_trie_counts: Vec<(B256, usize)> = self
             .storage
@@ -1080,10 +1088,12 @@ where
             }
         }
 
-        // Clear revealed_paths for kept tries
+        // Retain only revealed storage paths for leaves that still exist after pruning.
         for hash in &tries_to_keep {
-            if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
-                paths.clear();
+            if let Some(trie) = self.storage.tries.get(hash).and_then(|t| t.as_revealed_ref()) {
+                if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
+                    paths.retain(|path| trie.get_leaf_value(path).is_some());
+                }
             }
         }
     }
