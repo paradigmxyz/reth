@@ -1426,7 +1426,8 @@ mod tests {
             EthApi::builder(provider, testing_pool(), NoopNetwork::default(), evm_config).build();
 
         let executor = TokioTaskExecutor::default();
-        let events = stream::empty::<ConsensusEngineEvent<<TestEthApi as RpcNodeCore>::Primitives>>();
+        let events =
+            stream::empty::<ConsensusEngineEvent<<TestEthApi as RpcNodeCore>::Primitives>>();
         let debug_api = DebugApi::new(eth_api, BlockingTaskGuard::new(4), executor, events);
         (debug_api, BlockId::Hash(block_hash.into()), specs)
     }
