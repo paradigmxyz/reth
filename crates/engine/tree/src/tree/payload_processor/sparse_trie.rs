@@ -130,13 +130,25 @@ where
     /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
     ///
     /// Should be called after the state root result has been sent.
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all,
+        fields(prune_depth = self.prune_depth, max_storage_tries = self.max_storage_tries)
+    )]
     pub(super) fn into_trie_for_reuse(
         mut self,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
     ) -> SparseStateTrie<A, S> {
+        let now = Instant::now();
         self.trie.prune(self.prune_depth, self.max_storage_tries);
+        println!("prune took {:?}", now.elapsed());
+
+        let now = Instant::now();
         self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        println!("shrink took {:?}", now.elapsed());
+
         self.trie
     }
 
