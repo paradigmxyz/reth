@@ -714,18 +714,19 @@
               "AccountHashing": 6,
               "Bodies": 1,
               "Execution": 3,
-              "Finish": 13,
+              "Finish": 14,
               "Headers": 0,
-              "IndexAccountHistory": 11,
-              "IndexStorageHistory": 10,
+              "IndexAccountHistory": 12,
+              "IndexStorageHistory": 11,
+              "MerkleChangeSets": 9,
               "MerkleExecute": 8,
               "MerkleUnwind": 5,
-              "Prune": 12,
+              "Prune": 13,
               "PruneSenderRecovery": 4,
               "SenderRecovery": 2,
               "StorageHashing": 7,
-              "Time": 14,
-              "TransactionLookup": 9
+              "Time": 15,
+              "TransactionLookup": 10
             },
             "renameByName": {}
           }
