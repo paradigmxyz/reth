@@ -3614,7 +3614,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3647,7 +3647,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3684,7 +3684,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3722,7 +3722,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3792,7 +3792,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -4197,7 +4197,7 @@ mod tests {
         // Insert genesis block to have some data
         let data = BlockchainTestData::default();
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
