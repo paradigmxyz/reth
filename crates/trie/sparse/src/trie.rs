@@ -980,7 +980,16 @@ impl SparseTrieTrait for SerialSparseTrie {
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
-        self.updates.take().unwrap_or_default()
+        match self.updates.take() {
+            Some(updates) => {
+                self.updates = Some(SparseTrieUpdates::with_capacity(
+                    updates.updated_nodes.len(),
+                    updates.removed_nodes.len(),
+                ));
+                updates
+            }
+            None => SparseTrieUpdates::default(),
+        }
     }
 
     fn wipe(&mut self) {

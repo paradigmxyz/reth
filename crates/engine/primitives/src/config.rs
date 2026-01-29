@@ -56,7 +56,7 @@ pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 /// Default maximum number of storage tries to keep after pruning.
 ///
 /// Storage tries beyond this limit are cleared (but allocations preserved).
-pub const DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES: usize = 100;
+pub use reth_trie_sparse::DEFAULT_MAX_PRESERVED_STORAGE_TRIES as DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES;
 
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;

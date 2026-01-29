@@ -8349,6 +8349,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-trie-common",
+ "reth-trie-sparse",
  "serde",
  "thiserror 2.0.18",
  "tokio",
