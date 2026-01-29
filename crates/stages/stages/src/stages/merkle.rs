@@ -741,11 +741,10 @@ where
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
             // Load the hashed post state from the database for the unwind range
-            let hashed_state =
-                reth_trie::HashedPostStateSorted::from_reverts::<reth_trie::KeccakKeyHasher>(
-                    provider, range,
-                )
-                .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            let hashed_state = reth_trie::HashedPostStateSorted::from_reverts::<
+                reth_trie::KeccakKeyHasher,
+            >(provider, range)
+            .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             let prefix_sets = hashed_state.construct_prefix_sets().freeze();
 
