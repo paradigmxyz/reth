@@ -27,7 +27,6 @@ toml.workspace = true
 # misc
 eyre.workspace = true
 tracing.workspace = true
-humantime.workspace = true
 
 # reth
 reth-tracing.workspace = true
