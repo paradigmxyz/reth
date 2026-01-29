@@ -20,7 +20,7 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{OpExecutionPayloadValidator, OpPayloadTypes};
 use reth_optimism_primitives::{OpBlock, L2_TO_L1_MESSAGE_PASSER_ADDRESS};
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SignedTransaction};
-use reth_provider::StateProviderFactory;
+use reth_provider::{StateProviderBox, StateProviderFactory};
 use reth_trie_common::{HashedPostState, KeyHasher};
 use std::{marker::PhantomData, sync::Arc};
 
@@ -126,14 +126,11 @@ where
         &self,
         state_updates: &HashedPostState,
         block: &RecoveredBlock<Self::Block>,
+        parent_state: Option<StateProviderBox>,
     ) -> Result<(), ConsensusError> {
         if self.chain_spec().is_isthmus_active_at_timestamp(block.timestamp()) {
-            let Ok(state) = self.provider.state_by_block_hash(block.parent_hash()) else {
-                // FIXME: we don't necessarily have access to the parent block here because the
-                // parent block isn't necessarily part of the canonical chain yet. Instead this
-                // function should receive the list of in memory blocks as input
-                return Ok(())
-            };
+            let parent_hash = block.parent_hash();
+            let state = parent_state.ok_or(ConsensusError::ParentUnknown { hash: parent_hash })?;
             let predeploy_storage_updates = state_updates
                 .storages
                 .get(&self.hashed_addr_l2tol1_msg_passer)
@@ -150,6 +147,10 @@ where
         }
 
         Ok(())
+    }
+
+    fn requires_parent_state_for_post_execution(&self, block: &RecoveredBlock<Self::Block>) -> bool {
+        self.chain_spec().is_isthmus_active_at_timestamp(block.timestamp())
     }
 
     fn convert_payload_to_block(

@@ -947,9 +947,19 @@ where
         drop(_enter);
 
         let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
-        if let Err(err) =
-            self.validator.validate_block_post_execution_with_hashed_state(&hashed_state, block)
-        {
+        let parent_state = if self.validator.requires_parent_state_for_post_execution(block) {
+            self.state_provider_builder(block.parent_hash(), ctx.state())?
+                .map(|builder| builder.build())
+                .transpose()?
+        } else {
+            None
+        };
+
+        if let Err(err) = self.validator.validate_block_post_execution_with_hashed_state(
+            &hashed_state,
+            block,
+            parent_state,
+        ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
             return Err(err.into())
