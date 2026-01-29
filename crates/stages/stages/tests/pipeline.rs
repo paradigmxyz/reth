@@ -27,13 +27,14 @@ use reth_primitives_traits::{
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockNumReader, DBProvider,
     DatabaseProviderFactory, HeaderProvider, OriginalValuesKnown, StageCheckpointReader,
-    StateWriter,
+    StateWriter, StorageSettingsCache,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::sets::DefaultStages;
 use reth_stages_api::{Pipeline, StageId};
 use reth_static_file::StaticFileProducer;
+use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
@@ -365,6 +366,27 @@ async fn test_pipeline() -> eyre::Result<()> {
                 checkpoint.map(|c| c.block_number),
                 Some(5),
                 "{stage_id} checkpoint should be at block 5"
+            );
+        }
+    }
+
+    // Safety check: verify changesets are queryable from the correct storage location
+    {
+        let provider = pipeline_provider_factory.provider()?;
+        let settings = provider.cached_storage_settings();
+        if settings.storage_changesets_in_static_files {
+            // If changesets should be in static files, verify we can query them
+            let storage_changesets = provider.storage_changesets_range(1..=5)?;
+            assert!(
+                !storage_changesets.is_empty(),
+                "storage changesets should be queryable from static files"
+            );
+        }
+        if settings.account_changesets_in_static_files {
+            let account_changesets = provider.account_changesets_range(1..=5)?;
+            assert!(
+                !account_changesets.is_empty(),
+                "account changesets should be queryable from static files"
             );
         }
     }
