@@ -17,7 +17,10 @@ use reth_stages_api::{
     StageCheckpoint, StageError, StageId, StorageRootMerkleCheckpoint, UnwindInput, UnwindOutput,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
-use reth_trie_db::{ChangesetCache, DatabaseHashedPostState, DatabaseStateRoot};
+use reth_trie_db::{
+    load_prefix_sets_with_provider, ChangesetCache, DatabaseHashedPostState, DatabaseStateRoot,
+    KeccakKeyHasher,
+};
 use reth_trie_parallel::root::ParallelStateRoot;
 use std::fmt::Debug;
 use tracing::*;
@@ -663,18 +666,13 @@ where
                     "Processing chunk with parallel state root"
                 );
 
-                // Load the hashed post state from the database for this range
-                let hashed_state =
-                    reth_trie::HashedPostStateSorted::from_reverts::<reth_trie::KeccakKeyHasher>(
-                        provider,
-                        chunk_range,
-                    )
-                    .map_err(|e| {
-                        error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Failed to load hashed post state! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
-                        StageError::Fatal(Box::new(e))
-                    })?;
-
-                let prefix_sets = hashed_state.construct_prefix_sets().freeze();
+                // Load prefix sets from changesets for this range
+                let prefix_sets =
+                    load_prefix_sets_with_provider::<_, KeccakKeyHasher>(provider, chunk_range)
+                        .map_err(|e| {
+                            error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Failed to load prefix sets! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                            StageError::Fatal(Box::new(e))
+                        })?;
 
                 let (root, updates) =
                     ParallelStateRoot::new(self.overlay_factory.clone(), prefix_sets)
@@ -740,13 +738,10 @@ where
         if range.is_empty() {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
-            // Load the hashed post state from the database for the unwind range
-            let hashed_state = reth_trie::HashedPostStateSorted::from_reverts::<
-                reth_trie::KeccakKeyHasher,
-            >(provider, range)
-            .map_err(|e| StageError::Fatal(Box::new(e)))?;
-
-            let prefix_sets = hashed_state.construct_prefix_sets().freeze();
+            // Load prefix sets from changesets for the unwind range
+            let prefix_sets =
+                load_prefix_sets_with_provider::<_, KeccakKeyHasher>(provider, range)
+                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             // Use parallel state root computation for unwind
             let (block_root, updates) =
