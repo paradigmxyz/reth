@@ -1,7 +1,10 @@
 //! Support for producing static files.
 
 use crate::{
-    metrics::StaticFileProducerMetrics, segments, segments::Segment, StaticFileProducerEvent,
+    metrics::{segment_duration_histogram, StaticFileProducerMetrics},
+    segments,
+    segments::Segment,
+    StaticFileProducerEvent,
 };
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
@@ -149,7 +152,7 @@ where
             segment.copy_to_static_files(provider,  block_range.clone())?;
 
             let elapsed = start.elapsed();
-            metrics.segment_duration_seconds.record(elapsed.as_secs_f64());
+            segment_duration_histogram(segment.segment()).record(elapsed.as_secs_f64());
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, ?elapsed, "Finished StaticFileProducer segment");
 
             Ok(())
