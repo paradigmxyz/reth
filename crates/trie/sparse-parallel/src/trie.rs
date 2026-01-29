@@ -494,13 +494,65 @@ impl SparseTrie for ParallelSparseTrie {
         // List of node paths which need to have their hashes reset
         let mut paths_to_reset_hashes = Vec::new();
 
+        // Track the last path where we revealed a blinded node to detect infinite loops
+        let mut last_revealed_path: Option<Nibbles> = None;
+
         loop {
             let curr_node = curr_subtrie.nodes.get_mut(&curr_path).unwrap();
 
             match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
                 FindNextToLeafOutcome::NotFound => return Ok(()), // leaf isn't in the trie
                 FindNextToLeafOutcome::BlindedNode(hash) => {
-                    return Err(SparseTrieErrorKind::BlindedNode { path: curr_path, hash }.into())
+                    // Detect infinite loop: if we're trying to reveal the same path twice
+                    if last_revealed_path == Some(curr_path) {
+                        debug!(
+                            target: "trie::parallel_sparse",
+                            blinded_path = ?curr_path,
+                            blinded_hash = ?hash,
+                            leaf_path = ?full_path,
+                            "BLINDED_NODE_ERROR: Infinite loop detected - same path revealed twice"
+                        );
+                        return Err(SparseTrieErrorKind::BlindedNode { path: curr_path, hash }.into())
+                    }
+
+                    // Try to reveal the blinded node using the provider
+                    debug!(
+                        target: "trie::parallel_sparse",
+                        blinded_path = ?curr_path,
+                        blinded_hash = ?hash,
+                        leaf_path = ?full_path,
+                        "Hit Hash node during leaf removal, attempting to reveal from provider"
+                    );
+                    if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                        provider.trie_node(&curr_path)?
+                    {
+                        let decoded = TrieNode::decode(&mut &node[..])?;
+                        trace!(
+                            target: "trie::parallel_sparse",
+                            ?curr_path,
+                            ?decoded,
+                            ?tree_mask,
+                            ?hash_mask,
+                            "Revealed blinded node during remove_leaf"
+                        );
+                        let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
+                        curr_subtrie.reveal_node(curr_path, &decoded, masks)?;
+                        if let Some(masks) = masks {
+                            self.branch_node_masks.insert(curr_path, masks);
+                        }
+                        last_revealed_path = Some(curr_path);
+                        // Continue the loop - the node is now revealed
+                        continue;
+                    } else {
+                        debug!(
+                            target: "trie::parallel_sparse",
+                            blinded_path = ?curr_path,
+                            blinded_hash = ?hash,
+                            leaf_path = ?full_path,
+                            "BLINDED_NODE_ERROR: Could not reveal node from provider"
+                        );
+                        return Err(SparseTrieErrorKind::BlindedNode { path: curr_path, hash }.into())
+                    }
                 }
                 FindNextToLeafOutcome::Found => {
                     // this node is the target leaf
@@ -1929,6 +1981,14 @@ impl SparseSubtrie {
                 Ok(LeafUpdateStep::complete_with_insertions(vec![current], None))
             }
             SparseNode::Hash(hash) => {
+                debug!(
+                    target: "trie::parallel_sparse",
+                    blinded_path = ?current,
+                    blinded_hash = ?hash,
+                    leaf_path = ?path,
+                    subtrie_root = ?self.path,
+                    "BLINDED_NODE_ERROR: Hit Hash node during leaf update traversal"
+                );
                 Err(SparseTrieErrorKind::BlindedNode { path: current, hash: *hash }.into())
             }
             SparseNode::Leaf { key: current_key, .. } => {

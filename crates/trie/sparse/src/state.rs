@@ -224,6 +224,11 @@ where
         self.storage.tries.insert(address, storage_trie);
     }
 
+    /// Returns the number of storage tries currently tracked.
+    pub fn storage_trie_count(&self) -> usize {
+        self.storage.tries.len()
+    }
+
     /// Reveal unknown trie paths from multiproof.
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_multiproof(&mut self, multiproof: MultiProof) -> SparseStateTrieResult<()> {
@@ -1041,10 +1046,37 @@ where
     ///
     /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
-        if let Some(trie) = self.state.as_revealed_mut() {
-            trie.prune(max_depth);
-        }
+        let account_nodes_before = self
+            .state
+            .as_revealed_ref()
+            .map(|t| t.revealed_node_count())
+            .unwrap_or(0);
+
+        let account_nodes_pruned = if let Some(trie) = self.state.as_revealed_mut() {
+            trie.prune(max_depth)
+        } else {
+            0
+        };
+
+        let account_nodes_after = self
+            .state
+            .as_revealed_ref()
+            .map(|t| t.revealed_node_count())
+            .unwrap_or(0);
+
+        let revealed_account_paths_cleared = self.revealed_account_paths.len();
         self.revealed_account_paths.clear();
+
+        trace!(
+            target: "trie::sparse::state",
+            max_depth,
+            max_storage_tries,
+            account_nodes_before,
+            account_nodes_pruned,
+            account_nodes_after,
+            revealed_account_paths_cleared,
+            "PRUNE: Account trie pruned"
+        );
 
         let mut storage_trie_counts: Vec<(B256, usize)> = self
             .storage
@@ -1058,6 +1090,8 @@ where
                 (*hash, count)
             })
             .collect();
+
+        let total_storage_tries = storage_trie_counts.len();
 
         // Use O(n) selection instead of O(n log n) sort
         let tries_to_keep: HashSet<B256> = if storage_trie_counts.len() <= max_storage_tries {
@@ -1077,12 +1111,19 @@ where
             .copied()
             .collect();
 
+        let evicted_count = tries_to_clear.len();
+
         // Evict storage tries that exceeded limit, saving cleared allocations for reuse
-        for hash in tries_to_clear {
-            if let Some(trie) = self.storage.tries.remove(&hash) {
+        for hash in &tries_to_clear {
+            trace!(
+                target: "trie::sparse::state",
+                address = %hash,
+                "PRUNE: Evicting storage trie (exceeded max_storage_tries limit)"
+            );
+            if let Some(trie) = self.storage.tries.remove(hash) {
                 self.storage.cleared_tries.push(trie.clear());
             }
-            if let Some(mut paths) = self.storage.revealed_paths.remove(&hash) {
+            if let Some(mut paths) = self.storage.revealed_paths.remove(hash) {
                 paths.clear();
                 self.storage.cleared_revealed_paths.push(paths);
             }
@@ -1118,6 +1159,14 @@ where
                 paths.clear();
             }
         }
+
+        trace!(
+            target: "trie::sparse::state",
+            total_storage_tries,
+            kept_count = tries_to_keep.len(),
+            evicted_count,
+            "PRUNE: Storage tries processed"
+        );
     }
 }
 

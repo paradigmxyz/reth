@@ -2,7 +2,7 @@
 
 use alloy_primitives::B256;
 use parking_lot::Mutex;
-use reth_trie_sparse::SparseStateTrie;
+use reth_trie_sparse::{SparseStateTrie, SparseTrieExt};
 use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::sync::Arc;
 use tracing::debug;
@@ -78,10 +78,21 @@ impl PreservedSparseTrie {
         parent_hash: B256,
     ) -> SparseStateTrie<ParallelSparseTrie, ParallelSparseTrie> {
         if self.is_continuation_of(parent_hash) {
+            // Log detailed trie state for debugging
+            let account_node_count = self
+                .trie
+                .state_trie_ref()
+                .map(|t| t.revealed_node_count())
+                .unwrap_or(0);
+            let storage_trie_count = self.trie.storage_trie_count();
+
             debug!(
                 target: "engine::tree::payload_processor",
                 block_hash = %self.block_hash,
-                "Reusing sparse trie for continuation payload"
+                parent_hash = %parent_hash,
+                account_node_count,
+                storage_trie_count,
+                "TRIE_REUSE: Reusing sparse trie for continuation payload"
             );
             self.trie
         } else {
@@ -89,7 +100,7 @@ impl PreservedSparseTrie {
                 target: "engine::tree::payload_processor",
                 previous_hash = %self.block_hash,
                 new_parent = %parent_hash,
-                "Clearing sparse trie - not a continuation"
+                "TRIE_REUSE: Clearing sparse trie - not a continuation"
             );
             let mut trie = self.trie;
             trie.clear();

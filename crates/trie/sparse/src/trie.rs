@@ -762,7 +762,7 @@ impl SparseTrieTrait for SerialSparseTrie {
         // there is no node at the path. When a leaf node is a blinded `Hash`, it will have an entry
         // in `nodes`, but not in the `values`.
 
-        let mut removed_nodes = self.take_nodes_for_path(full_path)?;
+        let mut removed_nodes = self.take_nodes_for_path(full_path, &provider)?;
         // Pop the first node from the stack which is the leaf node we want to remove.
         let mut child = removed_nodes.pop().expect("leaf exists");
         #[cfg(debug_assertions)]
@@ -1192,15 +1192,79 @@ impl SerialSparseTrie {
     ///
     /// Returns an error if a blinded node or an empty node is encountered unexpectedly,
     /// as these prevent proper removal of the leaf.
-    fn take_nodes_for_path(&mut self, path: &Nibbles) -> SparseTrieResult<Vec<RemovedSparseNode>> {
+    fn take_nodes_for_path<P: TrieNodeProvider>(
+        &mut self,
+        path: &Nibbles,
+        provider: &P,
+    ) -> SparseTrieResult<Vec<RemovedSparseNode>> {
         let mut current = Nibbles::default(); // Start traversal from the root
         let mut nodes = Vec::new(); // Collect traversed nodes
 
-        while let Some(node) = self.nodes.remove(&current) {
+        // Track the last path where we revealed a blinded node to detect infinite loops
+        let mut last_revealed_path: Option<Nibbles> = None;
+
+        loop {
+            // First check if this is a Hash node that needs revealing (without removing)
+            if let Some(&SparseNode::Hash(hash)) = self.nodes.get(&current) {
+                // Detect infinite loop: if we're trying to reveal the same path twice
+                if last_revealed_path == Some(current) {
+                    debug!(
+                        target: "trie::sparse",
+                        blinded_path = ?current,
+                        blinded_hash = ?hash,
+                        leaf_path = ?path,
+                        "BLINDED_NODE_ERROR: Infinite loop detected - same path revealed twice"
+                    );
+                    return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
+                }
+
+                // Try to reveal the blinded node using the provider
+                debug!(
+                    target: "trie::sparse",
+                    blinded_path = ?current,
+                    blinded_hash = ?hash,
+                    leaf_path = ?path,
+                    "Hit Hash node during take_nodes_for_path, attempting to reveal from provider"
+                );
+                if let Some(RevealedNode { node: rlp_node, tree_mask, hash_mask }) =
+                    provider.trie_node(&current)?
+                {
+                    let decoded = TrieNode::decode(&mut &rlp_node[..])?;
+                    trace!(
+                        target: "trie::sparse",
+                        ?current,
+                        ?decoded,
+                        ?tree_mask,
+                        ?hash_mask,
+                        "Revealed blinded node during take_nodes_for_path"
+                    );
+                    let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
+                    self.reveal_node(current, decoded, masks)?;
+                    last_revealed_path = Some(current);
+                    // Continue the loop - the node is now revealed, re-read it
+                    continue;
+                } else {
+                    debug!(
+                        target: "trie::sparse",
+                        blinded_path = ?current,
+                        blinded_hash = ?hash,
+                        leaf_path = ?path,
+                        "BLINDED_NODE_ERROR: Could not reveal node from provider"
+                    );
+                    return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
+                }
+            }
+
+            // Now remove and process the node (it's not a Hash at this point)
+            let node = match self.nodes.remove(&current) {
+                Some(node) => node,
+                None => break,
+            };
+
             match &node {
                 SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
-                &SparseNode::Hash(hash) => {
-                    return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
+                SparseNode::Hash(_) => {
+                    unreachable!("Hash nodes are handled above without removing")
                 }
                 SparseNode::Leaf { key: _key, .. } => {
                     // Leaf node is always the one that we're deleting, and no other leaf nodes can

@@ -596,15 +596,26 @@ where
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             if succeeded {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    %block_hash,
+                    "TRIE_PRESERVE: Pruning and storing trie for reuse"
+                );
                 let trie = task.into_trie_for_reuse(
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
                 guard.store(PreservedSparseTrie::new(trie, block_hash));
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    %block_hash,
+                    "TRIE_PRESERVE: Trie stored successfully"
+                );
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
-                    "State root computation failed, clearing trie"
+                    %block_hash,
+                    "TRIE_PRESERVE: State root computation failed, clearing trie"
                 );
                 let trie = task.into_cleared_trie(
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,

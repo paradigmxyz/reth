@@ -109,7 +109,7 @@ where
                         ))
                     })?;
             self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
-            trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
+            debug!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
         }
 
         debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
@@ -179,7 +179,20 @@ where
     A: SparseTrie + Send + Sync + Default,
     S: SparseTrie + Send + Sync + Default + Clone,
 {
-    trace!(target: "engine::root::sparse", "Updating sparse trie");
+    let account_count = state.accounts.len();
+    let storage_count = state.storages.len();
+    let multiproof_accounts = multiproof.account_proofs_len();
+    let multiproof_storages = multiproof.storage_proofs_len();
+
+    debug!(
+        target: "engine::root::sparse",
+        account_count,
+        storage_count,
+        multiproof_accounts,
+        multiproof_storages,
+        "SPARSE_TRIE_UPDATE: Starting update"
+    );
+
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
@@ -192,10 +205,10 @@ where
         }
     }
     let reveal_multiproof_elapsed = started_at.elapsed();
-    trace!(
+    debug!(
         target: "engine::root::sparse",
         ?reveal_multiproof_elapsed,
-        "Done revealing multiproof"
+        "SPARSE_TRIE_UPDATE: Done revealing multiproof"
     );
 
     // Update storage slots with new values and calculate storage roots.
@@ -204,15 +217,34 @@ where
         .storages
         .into_iter()
         .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
-        .par_bridge()
+        // .par_bridge()
         .map(|(address, storage, storage_trie)| {
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie", ?address)
                     .entered();
 
-            trace!(target: "engine::tree::payload_processor::sparse_trie", "Updating storage");
+            let storage_trie_present = storage_trie.is_some();
+            let storage_slot_count = storage.storage.len();
+            let storage_wiped = storage.wiped;
+
+            trace!(
+                target: "engine::tree::payload_processor::sparse_trie",
+                %address,
+                storage_trie_present,
+                storage_slot_count,
+                storage_wiped,
+                "SPARSE_TRIE_UPDATE: Processing storage trie"
+            );
+
             let storage_provider = blinded_provider_factory.storage_node_provider(address);
-            let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
+            let mut storage_trie = storage_trie.ok_or_else(|| {
+                debug!(
+                    target: "engine::tree::payload_processor::sparse_trie",
+                    %address,
+                    "SPARSE_TRIE_UPDATE: ERROR - Storage trie not found (Blind)"
+                );
+                SparseTrieErrorKind::Blind
+            })?;
 
             if storage.wiped {
                 trace!(target: "engine::tree::payload_processor::sparse_trie", "Wiping storage");
@@ -234,16 +266,40 @@ where
                 }
 
                 trace!(target: "engine::tree::payload_processor::sparse_trie", ?slot_nibbles, "Updating storage slot");
-                storage_trie.update_leaf(
-                    slot_nibbles,
-                    alloy_rlp::encode_fixed_size(&value).to_vec(),
-                    &storage_provider,
-                )?;
+                storage_trie
+                    .update_leaf(
+                        slot_nibbles,
+                        alloy_rlp::encode_fixed_size(&value).to_vec(),
+                        &storage_provider,
+                    )
+                    .inspect_err(|e| {
+                        debug!(
+                            target: "engine::tree::payload_processor::sparse_trie",
+                            %address,
+                            ?slot_nibbles,
+                            error = ?e,
+                            "SPARSE_TRIE_UPDATE: ERROR updating storage slot"
+                        );
+                    })?;
             }
+
+            debug!(
+        target: "engine::root::sparse",
+        ?reveal_multiproof_elapsed,
+        "SPARSE_TRIE_UPDATE: Done results"
+    );
 
             for slot_nibbles in removed_slots {
                 trace!(target: "engine::root::sparse", ?slot_nibbles, "Removing storage slot");
-                storage_trie.remove_leaf(&slot_nibbles, &storage_provider)?;
+                storage_trie.remove_leaf(&slot_nibbles, &storage_provider).inspect_err(|e| {
+                    debug!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        %address,
+                        ?slot_nibbles,
+                        error = ?e,
+                        "SPARSE_TRIE_UPDATE: ERROR removing storage slot"
+                    );
+                })?;
             }
 
             storage_trie.root();
@@ -251,6 +307,12 @@ where
             SparseStateTrieResult::Ok((address, storage_trie))
         })
         .collect();
+
+    debug!(
+        target: "engine::root::sparse",
+        ?reveal_multiproof_elapsed,
+        "SPARSE_TRIE_UPDATE: Done remove leaf"
+    );
 
     // Defer leaf removals until after updates/additions, so that we don't delete an intermediate
     // branch node during a removal and then re-add that branch back during a later leaf addition.
@@ -269,7 +331,7 @@ where
         if let Some(account) = state.accounts.remove(&address) {
             // If the account itself has an update, remove it from the state update and update in
             // one go instead of doing it down below.
-            trace!(target: "engine::root::sparse", ?address, "Updating account and its storage root");
+            debug!(target: "engine::root::sparse", ?address, "Updating account and its storage root");
             if !trie.update_account(
                 address,
                 account.unwrap_or_default(),
@@ -279,38 +341,77 @@ where
             }
         } else if trie.is_account_revealed(address) {
             // Otherwise, if the account is revealed, only update its storage root.
-            trace!(target: "engine::root::sparse", ?address, "Updating account storage root");
+            debug!(target: "engine::root::sparse", ?address, "Updating account storage root");
             if !trie.update_account_storage_root(address, blinded_provider_factory)? {
                 removed_accounts.push(address);
             }
         }
     }
 
+    debug!(
+        target: "engine::root::sparse",
+        ?reveal_multiproof_elapsed,
+        "SPARSE_TRIE_UPDATE: Done insert storage trie"
+    );
+
     // Update accounts
     for (address, account) in state.accounts {
         trace!(target: "engine::root::sparse", ?address, "Updating account");
-        if !trie.update_account(address, account.unwrap_or_default(), blinded_provider_factory)? {
+        let account_exists = trie
+            .update_account(address, account.unwrap_or_default(), blinded_provider_factory)
+            .inspect_err(|e| {
+                debug!(
+                    target: "engine::tree::payload_processor::sparse_trie",
+                    %address,
+                    error = ?e,
+                    "SPARSE_TRIE_UPDATE: ERROR updating account"
+                );
+            })?;
+        if !account_exists {
             removed_accounts.push(address);
         }
     }
+
+    debug!(
+        target: "engine::root::sparse",
+        ?reveal_multiproof_elapsed,
+        "SPARSE_TRIE_UPDATE: Done updating accounts"
+    );
 
     // Remove accounts
     for address in removed_accounts {
         trace!(target: "engine::root::sparse", ?address, "Removing account");
         let nibbles = Nibbles::unpack(address);
-        trie.remove_account_leaf(&nibbles, blinded_provider_factory)?;
+        trie.remove_account_leaf(&nibbles, blinded_provider_factory).inspect_err(|e| {
+            debug!(
+                target: "engine::tree::payload_processor::sparse_trie",
+                %address,
+                ?nibbles,
+                error = ?e,
+                "SPARSE_TRIE_UPDATE: ERROR removing account leaf"
+            );
+        })?;
     }
 
+
+    debug!(
+        target: "engine::root::sparse",
+        ?reveal_multiproof_elapsed,
+        "SPARSE_TRIE_UPDATE: Done removing accounts"
+    );
+
     let elapsed_before = started_at.elapsed();
-    trace!(
+    debug!(
         target: "engine::root::sparse",
         "Calculating subtries"
     );
     trie.calculate_subtries();
 
+
+
     let elapsed = started_at.elapsed();
     let below_level_elapsed = elapsed - elapsed_before;
-    trace!(
+    debug!(
         target: "engine::root::sparse",
         ?below_level_elapsed,
         "Intermediate nodes calculated"
