@@ -272,7 +272,7 @@ struct BuiltPayload {
 pub struct CollectionResult {
     /// Collected transactions with their gas info.
     pub transactions: Vec<RawTransaction>,
-    /// Total gas sent (sum of historical gas_used for all collected txs).
+    /// Total gas sent (sum of historical `gas_used` for all collected txs).
     pub gas_sent: u64,
     /// Next block number to continue collecting from.
     pub next_block: u64,
@@ -282,7 +282,7 @@ pub struct CollectionResult {
 const MAX_BUILD_RETRIES: u32 = 5;
 /// Maximum retries for fetching a transaction batch.
 const MAX_FETCH_RETRIES: u32 = 5;
-/// Tolerance: if gas_used is within 1M of target, don't retry.
+/// Tolerance: if `gas_used` is within 1M of target, don't retry.
 const MIN_TARGET_SLACK: u64 = 1_000_000;
 /// Maximum gas to request in retries (10x target as safety cap).
 const MAX_ADDITIONAL_GAS_MULTIPLIER: u64 = 10;
@@ -329,7 +329,7 @@ struct TxBuffer {
 }
 
 impl TxBuffer {
-    fn new(receiver: mpsc::Receiver<CollectionResult>) -> Self {
+    const fn new(receiver: mpsc::Receiver<CollectionResult>) -> Self {
         Self { receiver }
     }
 
@@ -459,9 +459,9 @@ impl Command {
         Ok(())
     }
 
-    /// Build a payload with retry logic when gas_used is below target.
+    /// Build a payload with retry logic when `gas_used` is below target.
     ///
-    /// Uses the ratio of gas_used/gas_sent to estimate how many more transactions
+    /// Uses the ratio of `gas_used/gas_sent` to estimate how many more transactions
     /// are needed to hit the target gas.
     async fn build_with_retry<S: TransactionSource>(
         &self,
