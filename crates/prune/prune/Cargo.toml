@@ -51,3 +51,7 @@ reth-testing-utils.workspace = true
 reth-tracing.workspace = true
 
 assert_matches.workspace = true
+
+[features]
+default = []
+rocksdb = ["reth-provider/rocksdb"]

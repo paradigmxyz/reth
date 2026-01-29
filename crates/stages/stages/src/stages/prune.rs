@@ -1,5 +1,7 @@
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::RocksDBProviderFactory;
 use reth_provider::{
     BlockReader, ChainStateBlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
     StageCheckpointReader, StaticFileProviderFactory, StorageSettingsCache,
@@ -37,6 +39,7 @@ impl PruneStage {
     }
 }
 
+#[cfg(all(unix, feature = "rocksdb"))]
 impl<Provider> Stage<Provider> for PruneStage
 where
     Provider: DBProvider<Tx: DbTxMut>
@@ -49,7 +52,8 @@ where
             Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
         > + StorageSettingsCache
         + ChangeSetReader
-        + StorageChangeSetReader,
+        + StorageChangeSetReader
+        + RocksDBProviderFactory,
 {
     fn id(&self) -> StageId {
         StageId::Prune
@@ -124,6 +128,89 @@ where
     }
 }
 
+#[cfg(not(all(unix, feature = "rocksdb")))]
+impl<Provider> Stage<Provider> for PruneStage
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + PruneCheckpointReader
+        + PruneCheckpointWriter
+        + BlockReader
+        + ChainStateBlockReader
+        + StageCheckpointReader
+        + StaticFileProviderFactory<
+            Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        > + StorageSettingsCache
+        + ChangeSetReader
+        + StorageChangeSetReader,
+{
+    fn id(&self) -> StageId {
+        StageId::Prune
+    }
+
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+        let mut pruner = PrunerBuilder::default()
+            .segments(self.prune_modes.clone())
+            .delete_limit(self.commit_threshold)
+            .build::<Provider>(provider.static_file_provider());
+
+        let result = pruner.run_with_provider(provider, input.target())?;
+        if result.progress.is_finished() {
+            Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
+        } else {
+            if let Some((last_segment, last_segment_output)) = result.segments.last() {
+                match last_segment_output {
+                    SegmentOutput {
+                        progress,
+                        pruned,
+                        checkpoint:
+                            checkpoint @ Some(SegmentOutputCheckpoint { block_number: Some(_), .. }),
+                    } => {
+                        info!(
+                            target: "sync::stages::prune::exec",
+                            ?last_segment,
+                            ?progress,
+                            ?pruned,
+                            ?checkpoint,
+                            "Last segment has more data to prune"
+                        )
+                    }
+                    SegmentOutput { progress, pruned, checkpoint: _ } => {
+                        info!(
+                            target: "sync::stages::prune::exec",
+                            ?last_segment,
+                            ?progress,
+                            ?pruned,
+                            "Last segment has more data to prune"
+                        )
+                    }
+                }
+            }
+            Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
+        }
+    }
+
+    fn unwind(
+        &mut self,
+        provider: &Provider,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, StageError> {
+        let prune_checkpoints = provider.get_prune_checkpoints()?;
+        let unwind_to_last_tx =
+            provider.block_body_indices(input.unwind_to)?.map(|i| i.last_tx_num());
+
+        for (segment, mut checkpoint) in prune_checkpoints {
+            if let Some(block) = checkpoint.block_number &&
+                input.unwind_to < block
+            {
+                checkpoint.block_number = Some(input.unwind_to);
+                checkpoint.tx_number = unwind_to_last_tx;
+                provider.save_prune_checkpoint(segment, checkpoint)?;
+            }
+        }
+        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+    }
+}
+
 /// The prune sender recovery stage that runs the pruner with the provided `PruneMode` for the
 /// `SenderRecovery` segment.
 ///
@@ -144,6 +231,50 @@ impl PruneSenderRecoveryStage {
     }
 }
 
+#[cfg(all(unix, feature = "rocksdb"))]
+impl<Provider> Stage<Provider> for PruneSenderRecoveryStage
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + PruneCheckpointReader
+        + PruneCheckpointWriter
+        + BlockReader
+        + ChainStateBlockReader
+        + StageCheckpointReader
+        + StaticFileProviderFactory<
+            Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        > + StorageSettingsCache
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + RocksDBProviderFactory,
+{
+    fn id(&self) -> StageId {
+        StageId::PruneSenderRecovery
+    }
+
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+        let mut result = self.0.execute(provider, input)?;
+
+        if !result.done {
+            let checkpoint = provider
+                .get_prune_checkpoint(PruneSegment::SenderRecovery)?
+                .ok_or(StageError::MissingPruneCheckpoint(PruneSegment::SenderRecovery))?;
+
+            result.checkpoint = StageCheckpoint::new(checkpoint.block_number.unwrap_or_default());
+        }
+
+        Ok(result)
+    }
+
+    fn unwind(
+        &mut self,
+        provider: &Provider,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, StageError> {
+        self.0.unwind(provider, input)
+    }
+}
+
+#[cfg(not(all(unix, feature = "rocksdb")))]
 impl<Provider> Stage<Provider> for PruneSenderRecoveryStage
 where
     Provider: DBProvider<Tx: DbTxMut>
@@ -165,14 +296,11 @@ where
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         let mut result = self.0.execute(provider, input)?;
 
-        // Adjust the checkpoint to the highest pruned block number of the Sender Recovery segment
         if !result.done {
             let checkpoint = provider
                 .get_prune_checkpoint(PruneSegment::SenderRecovery)?
                 .ok_or(StageError::MissingPruneCheckpoint(PruneSegment::SenderRecovery))?;
 
-            // `unwrap_or_default` is safe because we know that genesis block doesn't have any
-            // transactions and senders
             result.checkpoint = StageCheckpoint::new(checkpoint.block_number.unwrap_or_default());
         }
 

@@ -4,6 +4,8 @@ use reth_config::PruneConfig;
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_exex_types::FinishedExExHeight;
 use reth_primitives_traits::NodePrimitives;
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::RocksDBProviderFactory;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, ChainStateBlockReader, DBProvider,
     DatabaseProviderFactory, NodePrimitivesProvider, PruneCheckpointReader, PruneCheckpointWriter,
@@ -74,6 +76,41 @@ impl PrunerBuilder {
     }
 
     /// Builds a [Pruner] from the current configuration with the given provider factory.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pub fn build_with_provider_factory<PF>(self, provider_factory: PF) -> Pruner<PF::ProviderRW, PF>
+    where
+        PF: DatabaseProviderFactory<
+                ProviderRW: PruneCheckpointWriter
+                                + PruneCheckpointReader
+                                + BlockReader<Transaction: Encodable2718>
+                                + ChainStateBlockReader
+                                + StorageSettingsCache
+                                + StageCheckpointReader
+                                + ChangeSetReader
+                                + StorageChangeSetReader
+                                + RocksDBProviderFactory
+                                + StaticFileProviderFactory<
+                    Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+                >,
+            > + StaticFileProviderFactory<
+                Primitives = <PF::ProviderRW as NodePrimitivesProvider>::Primitives,
+            >,
+    {
+        let segments =
+            SegmentSet::from_components(provider_factory.static_file_provider(), self.segments);
+
+        Pruner::new_with_factory(
+            provider_factory,
+            segments.into_vec(),
+            self.block_interval,
+            self.delete_limit,
+            self.timeout,
+            self.finished_exex_height,
+        )
+    }
+
+    /// Builds a [Pruner] from the current configuration with the given provider factory.
+    #[cfg(not(all(unix, feature = "rocksdb")))]
     pub fn build_with_provider_factory<PF>(self, provider_factory: PF) -> Pruner<PF::ProviderRW, PF>
     where
         PF: DatabaseProviderFactory<
@@ -106,6 +143,38 @@ impl PrunerBuilder {
     }
 
     /// Builds a [Pruner] from the current configuration with the given static file provider.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pub fn build<Provider>(
+        self,
+        static_file_provider: StaticFileProvider<Provider::Primitives>,
+    ) -> Pruner<Provider, ()>
+    where
+        Provider: StaticFileProviderFactory<
+                Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+            > + DBProvider<Tx: DbTxMut>
+            + BlockReader<Transaction: Encodable2718>
+            + ChainStateBlockReader
+            + PruneCheckpointWriter
+            + PruneCheckpointReader
+            + StorageSettingsCache
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + RocksDBProviderFactory,
+    {
+        let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
+
+        Pruner::new(
+            segments.into_vec(),
+            self.block_interval,
+            self.delete_limit,
+            self.timeout,
+            self.finished_exex_height,
+        )
+    }
+
+    /// Builds a [Pruner] from the current configuration with the given static file provider.
+    #[cfg(not(all(unix, feature = "rocksdb")))]
     pub fn build<Provider>(
         self,
         static_file_provider: StaticFileProvider<Provider::Primitives>,
