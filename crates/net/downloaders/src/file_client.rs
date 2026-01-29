@@ -82,17 +82,26 @@ impl From<&'static str> for FileClientError {
     }
 }
 
-impl<B: Block> Default for FileClient<B> {
-    fn default() -> Self {
-        Self {
-            headers: HashMap::default(),
-            hash_to_number: HashMap::default(),
-            bodies: HashMap::default(),
-        }
-    }
-}
-
 impl<B: FullBlock> FileClient<B> {
+    /// Create a new file client from a slice of sealed blocks.
+    pub fn from_blocks(blocks: impl IntoIterator<Item = SealedBlock<B>>) -> Self {
+        let mut headers = HashMap::default();
+        let mut hash_to_number = HashMap::default();
+        let mut bodies = HashMap::default();
+
+        for block in blocks {
+            let number = block.number();
+            let hash = block.hash();
+            let (header, body) = block.split_sealed_header_body();
+
+            headers.insert(number, header.into_header());
+            hash_to_number.insert(hash, number);
+            bodies.insert(hash, body);
+        }
+
+        Self { headers, hash_to_number, bodies }
+    }
+
     /// Create a new file client from a file path.
     pub async fn new<P: AsRef<Path>>(
         path: P,

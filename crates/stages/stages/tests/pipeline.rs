@@ -37,7 +37,7 @@ use reth_static_file::StaticFileProducer;
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::watch;
 
 /// Counter contract deployed bytecode (runtime code after deployment)
@@ -53,10 +53,8 @@ const INCREMENT_SELECTOR: [u8; 4] = [0xd0, 0x9d, 0xe0, 0x8a];
 const CONTRACT_ADDRESS: Address = Address::new([0x42; 20]);
 
 /// Creates a `FileClient` populated with the given blocks.
-fn create_file_client_from_blocks(blocks: &[SealedBlock<Block>]) -> Arc<FileClient<Block>> {
-    let headers: HashMap<u64, _> = blocks.iter().map(|b| (b.number, b.header().clone())).collect();
-    let bodies: HashMap<B256, _> = blocks.iter().map(|b| (b.hash(), b.body().clone())).collect();
-    Arc::new(FileClient::default().with_headers(headers).with_bodies(bodies))
+fn create_file_client_from_blocks(blocks: Vec<SealedBlock<Block>>) -> Arc<FileClient<Block>> {
+    Arc::new(FileClient::from_blocks(blocks))
 }
 
 /// Builds downloaders from a `FileClient`.
@@ -319,7 +317,7 @@ async fn test_pipeline() -> eyre::Result<()> {
         pipeline_provider_factory.sealed_header(0)?.expect("genesis should exist");
     let pipeline_consensus = NoopConsensus::arc();
 
-    let file_client = create_file_client_from_blocks(&blocks);
+    let file_client = create_file_client_from_blocks(blocks);
     let max_block = file_client.max_block().unwrap();
     let tip = file_client.tip().expect("tip");
 
