@@ -7798,6 +7798,7 @@ dependencies = [
  "itertools 0.14.0",
  "lz4",
  "metrics",
+ "parking_lot",
  "proptest",
  "proptest-arbitrary-interop",
  "ratatui",
