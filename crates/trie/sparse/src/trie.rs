@@ -428,7 +428,7 @@ pub struct SerialSparseTrie {
     /// Arena-based storage for all trie nodes.
     arena: NodeArena,
     /// Handle to the root node in the arena.
-    root: Option<NodeId>,
+    root: NodeId,
     /// Branch node masks containing `tree_mask` and `hash_mask` for each path.
     /// - `tree_mask`: When a bit is set, the corresponding child subtree is stored in the
     ///   database.
@@ -470,10 +470,6 @@ fn encode_nibbles(nibbles: &Nibbles) -> String {
 impl fmt::Display for SerialSparseTrie {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // This prints the trie in preorder traversal, using a stack with NodeIds
-        let Some(root_id) = self.root else {
-            return writeln!(f, "(empty trie)");
-        };
-
         let mut stack = Vec::new();
         let mut visited = HashSet::new();
 
@@ -481,7 +477,7 @@ impl fmt::Display for SerialSparseTrie {
         const INDENT: &str = "    ";
 
         // Track path, NodeId, and depth
-        stack.push((Nibbles::default(), root_id, 0usize));
+        stack.push((Nibbles::default(), self.root, 0usize));
 
         while let Some((path, node_id, depth)) = stack.pop() {
             if !visited.insert(path) {
@@ -547,7 +543,7 @@ impl Default for SerialSparseTrie {
         let root_id = arena.alloc(SparseNode::Empty);
         Self {
             arena,
-            root: Some(root_id),
+            root: root_id,
             branch_node_masks: BranchNodeMasksMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
@@ -622,10 +618,7 @@ impl SparseTrieTrait for SerialSparseTrie {
         }
 
         // Get the root node to start pointer-based traversal
-        let Some(mut node_id) = self.root else {
-            return Ok(());
-        };
-
+        let mut node_id = self.root;
         let mut current = Nibbles::default();
         loop {
             // Read the node from arena via pointer
@@ -877,8 +870,7 @@ impl SparseTrieTrait for SerialSparseTrie {
             // The leaf was the only node in the trie (root was a leaf).
             // Reset to an empty trie.
             self.arena.clear();
-            let root_id = self.arena.alloc(SparseNode::Empty);
-            self.root = Some(root_id);
+            self.root = self.arena.alloc(SparseNode::Empty);
             return Ok(())
         }
 
@@ -1083,8 +1075,7 @@ impl SparseTrieTrait for SerialSparseTrie {
 
     fn wipe(&mut self) {
         self.arena.clear();
-        let root_id = self.arena.alloc(SparseNode::Empty);
-        self.root = Some(root_id);
+        self.root = self.arena.alloc(SparseNode::Empty);
         self.values = HashMap::default();
         self.prefix_set = PrefixSetMut::all();
         self.branch_node_masks.clear();
@@ -1093,8 +1084,7 @@ impl SparseTrieTrait for SerialSparseTrie {
 
     fn clear(&mut self) {
         self.arena.clear();
-        let root_id = self.arena.alloc(SparseNode::Empty);
-        self.root = Some(root_id);
+        self.root = self.arena.alloc(SparseNode::Empty);
         self.branch_node_masks.clear();
         self.values.clear();
         self.prefix_set.clear();
@@ -1138,12 +1128,8 @@ impl SparseTrieTrait for SerialSparseTrie {
         }
 
         // Get the root node to start pointer-based traversal
-        let Some(root_id) = self.root else {
-            return Ok(LeafLookup::NonExistent);
-        };
-
         let mut current = Nibbles::default();
-        let mut node_id = root_id;
+        let mut node_id = self.root;
 
         // If the value does not exist in the `values` map, then this means that the leaf either:
         // - Does not exist in the trie
@@ -1467,7 +1453,7 @@ impl SerialSparseTrie {
     fn insert_node(&mut self, path: Nibbles, node: SparseNode) -> NodeId {
         let node_id = self.arena.alloc(node);
         if path.is_empty() {
-            self.root = Some(node_id);
+            self.root = node_id;
         }
         node_id
     }
@@ -1504,11 +1490,11 @@ impl SerialSparseTrie {
     /// Returns `None` if the path doesn't exist or a node along the path doesn't have
     /// a child pointer set.
     fn traverse_to_node_id(&self, path: &Nibbles) -> Option<NodeId> {
-        let mut node_id = self.root?;
-
         if path.is_empty() {
-            return Some(node_id);
+            return Some(self.root);
         }
+
+        let mut node_id = self.root;
 
         let mut current_depth = 0;
         while current_depth < path.len() {
@@ -1566,11 +1552,7 @@ impl SerialSparseTrie {
     #[cfg(test)]
     fn collect_nodes_for_testing(&self) -> HashMap<Nibbles, SparseNode> {
         let mut result = HashMap::default();
-        let Some(root_id) = self.root else {
-            return result;
-        };
-
-        let mut stack = vec![(Nibbles::default(), root_id)];
+        let mut stack = vec![(Nibbles::default(), self.root)];
         while let Some((path, node_id)) = stack.pop() {
             let node = self.node(node_id);
             result.insert(path, node.clone());
@@ -1716,9 +1698,7 @@ impl SerialSparseTrie {
         let mut nodes = Vec::new(); // Collect traversed nodes
 
         // Use pointer-based traversal starting from root
-        let Some(mut node_id) = self.root else {
-            return Err(SparseTrieErrorKind::Blind.into());
-        };
+        let mut node_id = self.root;
 
         loop {
             match self.node(node_id) {
@@ -2895,7 +2875,7 @@ mod find_leaf_tests {
 
         let sparse = SerialSparseTrie {
             arena,
-            root: Some(root_id),
+            root: root_id,
             branch_node_masks: Default::default(),
             values: Default::default(),
             prefix_set: Default::default(),
@@ -2946,7 +2926,7 @@ mod find_leaf_tests {
 
         let sparse = SerialSparseTrie {
             arena,
-            root: Some(root_id),
+            root: root_id,
             branch_node_masks: Default::default(),
             values,
             prefix_set: Default::default(),
