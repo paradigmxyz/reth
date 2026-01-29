@@ -15,11 +15,18 @@ mod compression;
 mod event;
 mod segment;
 
+#[cfg(feature = "std")]
+mod changeset_offsets;
+#[cfg(feature = "std")]
+pub use changeset_offsets::{ChangesetOffsetReader, ChangesetOffsetWriter};
+
 use alloy_primitives::BlockNumber;
 pub use compression::Compression;
 use core::ops::RangeInclusive;
 pub use event::StaticFileProducerEvent;
-pub use segment::{SegmentConfig, SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
+pub use segment::{
+    ChangesetOffset, SegmentConfig, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
+};
 
 /// Map keyed by [`StaticFileSegment`].
 pub type StaticFileMap<T> = alloc::boxed::Box<fixed_map::Map<StaticFileSegment, T>>;

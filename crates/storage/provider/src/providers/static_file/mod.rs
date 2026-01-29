@@ -743,8 +743,9 @@ mod tests {
                 .unwrap();
 
             // Check that the segment header has changeset offsets
-            assert!(provider.user_header().changeset_offsets().is_some());
-            let offsets = provider.user_header().changeset_offsets().unwrap();
+            let offsets = provider.read_changeset_offsets().unwrap();
+            assert!(offsets.is_some());
+            let offsets = offsets.unwrap();
             assert_eq!(offsets.len(), 10); // Should have 10 blocks worth of offsets
 
             // Verify each block has the expected number of changes
@@ -854,7 +855,8 @@ mod tests {
         let (static_dir, _) = create_test_static_files_dir();
 
         let blocks_per_file = 10;
-        let files_per_range = 3;
+        // 3 main files (jar, dat, idx) + 1 csoff sidecar file for changeset segments
+        let files_per_range = 4;
         let file_set_count = 3;
         let initial_file_count = files_per_range * file_set_count;
         let tip = blocks_per_file * file_set_count - 1;
@@ -923,7 +925,7 @@ mod tests {
                 )?;
 
                 // Check offsets are valid
-                let offsets = provider.user_header().changeset_offsets();
+                let offsets = provider.read_changeset_offsets().unwrap();
                 assert!(offsets.is_some(), "Should have changeset offsets");
             }
 
@@ -1087,8 +1089,9 @@ mod tests {
                 .unwrap();
 
             // Check that the segment header has changeset offsets
-            assert!(provider.user_header().changeset_offsets().is_some());
-            let offsets = provider.user_header().changeset_offsets().unwrap();
+            let offsets = provider.read_changeset_offsets().unwrap();
+            assert!(offsets.is_some());
+            let offsets = offsets.unwrap();
             assert_eq!(offsets.len(), 10); // Should have 10 blocks worth of offsets
 
             // Verify each block has the expected number of changes
@@ -1189,7 +1192,8 @@ mod tests {
         let (static_dir, _) = create_test_static_files_dir();
 
         let blocks_per_file = 10;
-        let files_per_range = 3;
+        // 3 main files (jar, dat, idx) + 1 csoff sidecar file for changeset segments
+        let files_per_range = 4;
         let file_set_count = 3;
         let initial_file_count = files_per_range * file_set_count;
         let tip = blocks_per_file * file_set_count - 1;
@@ -1248,7 +1252,7 @@ mod tests {
                     tip,
                     None,
                 )?;
-                let offsets = provider.user_header().changeset_offsets();
+                let offsets = provider.read_changeset_offsets()?;
                 assert!(offsets.is_some(), "Should have changeset offsets");
             }
 

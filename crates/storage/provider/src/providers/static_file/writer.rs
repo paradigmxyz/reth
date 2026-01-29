@@ -10,7 +10,10 @@ use reth_db::models::{AccountBeforeTx, StorageBeforeTx};
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_node_types::NodePrimitives;
-use reth_static_file_types::{SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
+use reth_static_file_types::{
+    ChangesetOffset, ChangesetOffsetReader, ChangesetOffsetWriter, SegmentHeader,
+    SegmentRangeInclusive, StaticFileSegment,
+};
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
 use std::{
     borrow::Borrow,
@@ -219,6 +222,10 @@ pub struct StaticFileProviderRW<N> {
     prune_on_commit: Option<PruneStrategy>,
     /// Whether `sync_all()` has been called. Used by `finalize()` to avoid redundant syncs.
     synced: bool,
+    /// Changeset offsets sidecar writer (only for changeset segments).
+    changeset_offsets: Option<ChangesetOffsetWriter>,
+    /// Current block's changeset offset being written.
+    current_changeset_offset: Option<ChangesetOffset>,
 }
 
 impl<N: NodePrimitives> StaticFileProviderRW<N> {
@@ -233,6 +240,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<Self> {
         let (writer, data_path) = Self::open(segment, block, reader.clone(), metrics.clone())?;
+
+        let changeset_offsets = if segment.is_change_based() {
+            let csoff_path = data_path.with_extension("csoff");
+            Some(ChangesetOffsetWriter::new(&csoff_path).map_err(ProviderError::other)?)
+        } else {
+            None
+        };
+
         let mut writer = Self {
             writer,
             data_path,
@@ -241,6 +256,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             metrics,
             prune_on_commit: None,
             synced: false,
+            changeset_offsets,
+            current_changeset_offset: None,
         };
 
         writer.ensure_end_range_consistency()?;
@@ -405,6 +422,16 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             }
         }
 
+        // Write the final block's offset and sync sidecar for changeset segments
+        if let Some(offset) = self.current_changeset_offset.take() &&
+            let Some(writer) = &mut self.changeset_offsets
+        {
+            writer.append(&offset).map_err(ProviderError::other)?;
+        }
+        if let Some(writer) = &mut self.changeset_offsets {
+            writer.sync().map_err(ProviderError::other)?;
+        }
+
         if self.writer.is_dirty() {
             debug!(
                 target: "provider::static_file",
@@ -548,7 +575,15 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 let (writer, data_path) =
                     Self::open(segment, last_block + 1, self.reader.clone(), self.metrics.clone())?;
                 self.writer = writer;
-                self.data_path = data_path;
+                self.data_path = data_path.clone();
+
+                // Update changeset offsets writer for the new file
+                if segment.is_change_based() {
+                    let csoff_path = data_path.with_extension("csoff");
+                    self.changeset_offsets = Some(
+                        ChangesetOffsetWriter::new(&csoff_path).map_err(ProviderError::other)?,
+                    );
+                }
 
                 *self.writer.user_header_mut() = SegmentHeader::new(
                     self.reader().find_fixed_range(segment, last_block + 1),
@@ -560,6 +595,20 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
 
         self.writer.user_header_mut().increment_block();
+
+        // Handle changeset offset tracking for changeset segments
+        if segment.is_change_based() {
+            // Write previous block's offset if we have one
+            if let Some(offset) = self.current_changeset_offset.take() &&
+                let Some(writer) = &mut self.changeset_offsets
+            {
+                writer.append(&offset).map_err(ProviderError::other)?;
+            }
+            // Start tracking new block's offset
+            let new_offset = self.writer.rows() as u64;
+            self.current_changeset_offset = Some(ChangesetOffset::new(new_offset, 0));
+        }
+
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 segment,
@@ -631,13 +680,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             expected_block_start = self.writer.user_header().expected_block_start();
         }
 
-        // Now we're in the correct file, we need to find how many rows to prune
-        // We need to iterate through the changesets to find the correct position
-        // Since changesets are stored per block, we need to find the offset for the block
-        let changeset_offsets = self.writer.user_header().changeset_offsets().ok_or_else(|| {
-            ProviderError::other(StaticFileWriterError::new("Missing changeset offsets"))
-        })?;
-
         // Find the number of rows to keep (up to and including last_block)
         let blocks_to_keep = if last_block >= expected_block_start {
             last_block - expected_block_start + 1
@@ -645,18 +687,25 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             0
         };
 
+        // Read changeset offsets from sidecar file to find where to truncate
+        let csoff_path = self.data_path.with_extension("csoff");
+        let changeset_offsets_len = self.writer.user_header().changeset_offsets_len();
+
         let rows_to_keep = if blocks_to_keep == 0 {
             0
-        } else if blocks_to_keep as usize > changeset_offsets.len() {
-            // Keep all rows in this file (shouldn't happen if data is consistent)
-            self.writer.rows() as u64
-        } else if blocks_to_keep as usize == changeset_offsets.len() {
-            // Keep all rows
+        } else if blocks_to_keep >= changeset_offsets_len {
+            // Keep all rows in this file
             self.writer.rows() as u64
         } else {
-            // Find the offset for the block after last_block
-            // This gives us the number of rows to keep
-            changeset_offsets[blocks_to_keep as usize].offset()
+            // Read offset for the block after last_block from sidecar
+            let mut reader =
+                ChangesetOffsetReader::new(&csoff_path).map_err(ProviderError::other)?;
+            if let Some(next_offset) = reader.get(blocks_to_keep).map_err(ProviderError::other)? {
+                next_offset.offset()
+            } else {
+                // If we can't read the offset, keep all rows
+                self.writer.rows() as u64
+            }
         };
 
         let total_rows = self.writer.rows() as u64;
@@ -683,6 +732,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         // Sync changeset offsets to match the new block range
         self.writer.user_header_mut().sync_changeset_offsets();
+
+        // Truncate the sidecar file to match the new block count
+        if let Some(writer) = &mut self.changeset_offsets {
+            writer.truncate(blocks_to_keep).map_err(ProviderError::other)?;
+        }
+
+        // Clear current changeset offset tracking since we've pruned
+        self.current_changeset_offset = None;
 
         // Commits new changes to disk
         self.commit()?;
@@ -817,10 +874,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
     /// Appends change to changeset static file.
     fn append_change<V: Compact>(&mut self, change: &V) -> ProviderResult<()> {
-        if self.writer.user_header().changeset_offsets().is_some() {
-            self.writer.user_header_mut().increment_block_changes();
+        if let Some(ref mut offset) = self.current_changeset_offset {
+            offset.increment_num_changes();
         }
-
         self.append_column(change)?;
         Ok(())
     }

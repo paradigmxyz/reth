@@ -24,6 +24,7 @@ strum = { workspace = true, features = ["derive"] }
 reth-nippy-jar.workspace = true
 serde_json.workspace = true
 insta.workspace = true
+tempfile.workspace = true
 
 [features]
 default = ["std"]
