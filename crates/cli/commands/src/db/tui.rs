@@ -105,7 +105,7 @@ impl<'a, T: Table> Iterator for EntriesKeyIter<'a, T> {
 
 pub(crate) struct DbListTUI<F, T: Table>
 where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
+    F: FnMut(usize, usize) -> eyre::Result<Vec<TableRow<T>>>,
 {
     /// Fetcher for the next page of items.
     ///
@@ -126,11 +126,13 @@ where
     list_state: ListState,
     /// Entries to show in the TUI.
     entries: Entries<T>,
+    /// Last error returned by the fetcher (if any).
+    last_error: Option<String>,
 }
 
 impl<F, T: Table> DbListTUI<F, T>
 where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
+    F: FnMut(usize, usize) -> eyre::Result<Vec<TableRow<T>>>,
 {
     /// Create a new database list TUI
     pub(crate) fn new(
@@ -149,6 +151,7 @@ where
             input: String::new(),
             list_state: ListState::default(),
             entries: Entries::new_with_raw_values(raw),
+            last_error: None,
         }
     }
 
@@ -200,7 +203,16 @@ where
 
     /// Fetch the current page
     fn fetch_page(&mut self) {
-        self.entries.set((self.fetch)(self.skip, self.count));
+        match (self.fetch)(self.skip, self.count) {
+            Ok(entries) => {
+                self.last_error = None;
+                self.entries.set(entries);
+            }
+            Err(err) => {
+                self.last_error = Some(err.to_string());
+                self.entries.set(Vec::new());
+            }
+        }
         self.reset();
     }
 
@@ -240,7 +252,7 @@ fn event_loop<B: Backend, F, T: Table>(
     tick_rate: Duration,
 ) -> io::Result<()>
 where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
+    F: FnMut(usize, usize) -> eyre::Result<Vec<TableRow<T>>>,
 {
     let mut last_tick = Instant::now();
     let mut running = true;
@@ -268,7 +280,7 @@ where
 /// Handle incoming events
 fn handle_event<F, T: Table>(app: &mut DbListTUI<F, T>, event: Event) -> io::Result<bool>
 where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
+    F: FnMut(usize, usize) -> eyre::Result<Vec<TableRow<T>>>,
 {
     if app.mode == ViewMode::GoToPage {
         if let Event::Key(key) = event {
@@ -291,7 +303,7 @@ where
             }
         }
 
-        return Ok(false)
+        return Ok(false);
     }
 
     match event {
@@ -331,7 +343,7 @@ where
 /// Render the UI
 fn ui<F, T: Table>(f: &mut Frame<'_>, app: &mut DbListTUI<F, T>)
 where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
+    F: FnMut(usize, usize) -> eyre::Result<Vec<TableRow<T>>>,
 {
     let outer_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -393,10 +405,14 @@ where
     }
 
     // Footer
+    let mut footer_text =
+        CMDS.iter().map(|(k, v)| format!("[{k}] {v}")).collect::<Vec<_>>().join(" | ");
+    if let Some(err) = &app.last_error {
+        footer_text = format!("{footer_text} | Error: {err}");
+    }
+
     let footer = match app.mode {
-        ViewMode::Normal => Paragraph::new(
-            CMDS.iter().map(|(k, v)| format!("[{k}] {v}")).collect::<Vec<_>>().join(" | "),
-        ),
+        ViewMode::Normal => Paragraph::new(footer_text),
         ViewMode::GoToPage => Paragraph::new(format!(
             "Go to page (max {}): {}",
             app.total_entries / app.count,
