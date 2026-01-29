@@ -221,6 +221,8 @@ where
 
     /// Inserts storage trie for the provided address.
     pub fn insert_storage_trie(&mut self, address: B256, storage_trie: RevealableSparseTrie<S>) {
+        self.storage.generation += 1;
+        self.storage.trie_generation.insert(address, self.storage.generation);
         self.storage.tries.insert(address, storage_trie);
     }
 
@@ -1047,82 +1049,141 @@ where
     ///
     /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
+        // Prune state trie
         if let Some(trie) = self.state.as_revealed_mut() {
             trie.prune(max_depth);
         }
         self.revealed_account_paths.clear();
 
-        let mut storage_trie_counts: Vec<(B256, usize)> = self
+        // Remove non-revealed tries, saving allocations for reuse
+        let tries_to_remove: Vec<B256> = self
             .storage
             .tries
             .iter()
-            .map(|(hash, trie)| {
-                let count = match trie {
-                    RevealableSparseTrie::Revealed(t) => t.revealed_node_count(),
-                    RevealableSparseTrie::Blind(_) => 0,
-                };
-                (*hash, count)
-            })
+            .filter(|(_, trie)| !trie.is_revealed())
+            .map(|(hash, _)| *hash)
             .collect();
 
-        // Use O(n) selection instead of O(n log n) sort
-        let tries_to_keep: HashSet<B256> = if storage_trie_counts.len() <= max_storage_tries {
-            storage_trie_counts.iter().map(|(hash, _)| *hash).collect()
-        } else {
-            storage_trie_counts
-                .select_nth_unstable_by(max_storage_tries.saturating_sub(1), |a, b| b.1.cmp(&a.1));
-            storage_trie_counts[..max_storage_tries].iter().map(|(hash, _)| *hash).collect()
-        };
-
-        // Collect keys to avoid borrow conflict
-        let tries_to_clear: Vec<B256> = self
-            .storage
-            .tries
-            .keys()
-            .filter(|hash| !tries_to_keep.contains(*hash))
-            .copied()
-            .collect();
-
-        // Evict storage tries that exceeded limit, saving cleared allocations for reuse
-        for hash in tries_to_clear {
-            if let Some(trie) = self.storage.tries.remove(&hash) {
+        for hash in &tries_to_remove {
+            if let Some(trie) = self.storage.tries.remove(hash) {
                 self.storage.cleared_tries.push(trie.clear());
             }
-            if let Some(mut paths) = self.storage.revealed_paths.remove(&hash) {
+            if let Some(mut paths) = self.storage.revealed_paths.remove(hash) {
                 paths.clear();
                 self.storage.cleared_revealed_paths.push(paths);
             }
+            self.storage.trie_generation.remove(hash);
+            self.storage.last_pruned_gen.remove(hash);
         }
 
-        // Prune storage tries that are kept
-        if Self::is_prune_parallelism_enabled(tries_to_keep.len()) {
+        // Eviction: only evict if over max_storage_tries limit
+        // Prefer evicting non-dirty tries (not modified since last prune), then LRU evict dirty
+        let current_gen = self.storage.generation;
+
+        if self.storage.tries.len() > max_storage_tries {
+            let mut to_evict = self.storage.tries.len() - max_storage_tries;
+
+            // First, collect and evict non-dirty tries (oldest first by generation)
+            let mut non_dirty: Vec<(B256, u64)> = self
+                .storage
+                .tries
+                .keys()
+                .filter_map(|hash| {
+                    let modified = self.storage.trie_generation.get(hash).copied().unwrap_or(0);
+                    let pruned = self.storage.last_pruned_gen.get(hash).copied().unwrap_or(0);
+                    if modified <= pruned {
+                        Some((*hash, modified))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            non_dirty.sort_by_key(|(_, g)| *g);
+
+            // Evict non-dirty tries up to the amount needed
+            let non_dirty_to_evict = to_evict.min(non_dirty.len());
+            for (hash, _) in non_dirty.iter().take(non_dirty_to_evict) {
+                if let Some(trie) = self.storage.tries.remove(hash) {
+                    self.storage.cleared_tries.push(trie.clear());
+                }
+                if let Some(mut paths) = self.storage.revealed_paths.remove(hash) {
+                    paths.clear();
+                    self.storage.cleared_revealed_paths.push(paths);
+                }
+                self.storage.trie_generation.remove(hash);
+                self.storage.last_pruned_gen.remove(hash);
+            }
+            to_evict = to_evict.saturating_sub(non_dirty_to_evict);
+
+            // If still over limit, LRU evict from remaining (dirty) tries
+            if to_evict > 0 {
+                let mut entries: Vec<_> = self.storage.trie_generation.iter().collect();
+                if to_evict <= entries.len() {
+                    entries.select_nth_unstable_by_key(to_evict - 1, |(_, g)| *g);
+                }
+
+                let evict_keys: Vec<B256> =
+                    entries.iter().take(to_evict).map(|(hash, _)| **hash).collect();
+
+                for hash in evict_keys {
+                    if let Some(trie) = self.storage.tries.remove(&hash) {
+                        self.storage.cleared_tries.push(trie.clear());
+                    }
+                    if let Some(mut paths) = self.storage.revealed_paths.remove(&hash) {
+                        paths.clear();
+                        self.storage.cleared_revealed_paths.push(paths);
+                    }
+                    self.storage.trie_generation.remove(&hash);
+                    self.storage.last_pruned_gen.remove(&hash);
+                }
+            }
+        }
+
+        // Prune only dirty storage tries (modified since last prune)
+        let dirty_set: HashSet<B256> = self
+            .storage
+            .tries
+            .keys()
+            .filter(|hash| {
+                let modified = self.storage.trie_generation.get(*hash).copied().unwrap_or(0);
+                let pruned = self.storage.last_pruned_gen.get(*hash).copied().unwrap_or(0);
+                modified > pruned
+            })
+            .copied()
+            .collect();
+
+        if Self::is_prune_parallelism_enabled(dirty_set.len()) {
             #[cfg(feature = "std")]
             {
                 use rayon::prelude::*;
 
                 self.storage.tries.par_iter_mut().for_each(|(hash, trie)| {
-                    if tries_to_keep.contains(hash) &&
-                        let Some(t) = trie.as_revealed_mut()
-                    {
-                        t.prune(max_depth);
+                    if dirty_set.contains(hash) {
+                        if let Some(trie) = trie.as_revealed_mut() {
+                            trie.prune(max_depth);
+                        }
                     }
                 });
             }
         } else {
-            for hash in &tries_to_keep {
-                if let Some(trie) =
-                    self.storage.tries.get_mut(hash).and_then(|t| t.as_revealed_mut())
-                {
-                    trie.prune(max_depth);
+            for hash in &dirty_set {
+                if let Some(trie) = self.storage.tries.get_mut(hash) {
+                    if let Some(trie) = trie.as_revealed_mut() {
+                        trie.prune(max_depth);
+                    }
                 }
             }
         }
 
+        // Mark all dirty tries as pruned at current generation
+        for hash in &dirty_set {
+            self.storage.last_pruned_gen.insert(*hash, current_gen);
+        }
+
         // Clear revealed_paths for kept tries
-        for hash in &tries_to_keep {
-            if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
-                paths.clear();
-            }
+        for paths in self.storage.revealed_paths.values_mut() {
+            paths.clear();
         }
     }
 }
@@ -1142,6 +1203,12 @@ struct StorageTries<S = SerialSparseTrie> {
     cleared_revealed_paths: Vec<HashSet<Nibbles>>,
     /// A default cleared trie instance, which will be cloned when creating new tries.
     default_trie: RevealableSparseTrie<S>,
+    /// Monotonically increasing generation counter for LRU tracking.
+    generation: u64,
+    /// Last modified generation per storage trie (for LRU eviction).
+    trie_generation: B256Map<u64>,
+    /// Generation when each trie was last pruned (for dirty tracking).
+    last_pruned_gen: B256Map<u64>,
 }
 
 impl<S: SparseTrieTrait> StorageTries<S> {
@@ -1153,6 +1220,8 @@ impl<S: SparseTrieTrait> StorageTries<S> {
             set.clear();
             set
         }));
+        self.trie_generation.clear();
+        self.last_pruned_gen.clear();
     }
 
     /// Shrinks the capacity of all storage tries (active, cleared, and default) to the given sizes.
@@ -1167,16 +1236,40 @@ impl<S: SparseTrieTrait> StorageTries<S> {
         let node_size_per_trie = node_size / total_tries;
         let value_size_per_trie = value_size / total_tries;
 
-        // Shrink active storage tries
-        for trie in self.tries.values_mut() {
-            trie.shrink_nodes_to(node_size_per_trie);
-            trie.shrink_values_to(value_size_per_trie);
+        #[cfg(feature = "std")]
+        {
+            use rayon::prelude::*;
+
+            // Shrink active and cleared storage tries in parallel
+            rayon::join(
+                || {
+                    self.tries.par_iter_mut().for_each(|(_, trie)| {
+                        trie.shrink_nodes_to(node_size_per_trie);
+                        trie.shrink_values_to(value_size_per_trie);
+                    });
+                },
+                || {
+                    self.cleared_tries.par_iter_mut().for_each(|trie| {
+                        trie.shrink_nodes_to(node_size_per_trie);
+                        trie.shrink_values_to(value_size_per_trie);
+                    });
+                },
+            );
         }
 
-        // Shrink cleared storage tries
-        for trie in &mut self.cleared_tries {
-            trie.shrink_nodes_to(node_size_per_trie);
-            trie.shrink_values_to(value_size_per_trie);
+        #[cfg(not(feature = "std"))]
+        {
+            // Shrink active storage tries
+            for trie in self.tries.values_mut() {
+                trie.shrink_nodes_to(node_size_per_trie);
+                trie.shrink_values_to(value_size_per_trie);
+            }
+
+            // Shrink cleared storage tries
+            for trie in &mut self.cleared_tries {
+                trie.shrink_nodes_to(node_size_per_trie);
+                trie.shrink_values_to(value_size_per_trie);
+            }
         }
     }
 }
