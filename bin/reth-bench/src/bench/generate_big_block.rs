@@ -543,6 +543,11 @@ impl Command {
             let mut current_block = start_block;
 
             while let Some(batch) = fetch_batch_with_retry(&collector, current_block).await {
+                if batch.transactions.is_empty() {
+                    info!(block = current_block, "Reached chain tip, stopping fetcher");
+                    break;
+                }
+
                 info!(
                     tx_count = batch.transactions.len(),
                     gas_sent = batch.gas_sent,
