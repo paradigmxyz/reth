@@ -8,7 +8,8 @@ on:
     - cron: "0 */6 * * *"
   pull_request:
     branches:
-      - ["**"]
+    - "**"
+
 env:
   CARGO_TERM_COLOR: always
 
