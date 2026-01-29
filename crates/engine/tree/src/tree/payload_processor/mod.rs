@@ -550,15 +550,11 @@ where
             // Send state root computation result
             let _ = state_root_tx.send(result);
 
-            // Clear the SparseStateTrie, shrink, and replace it back into the mutex _after_
-            // sending results to the next step, so that time spent clearing
-            // doesn't block the step after this one.
+            // Clear the SparseStateTrie, shrink, and replace it back into the mutex _after_ sending
+            // results to the next step, so that time spent clearing doesn't block the step after
+            // this one.
             let _enter = debug_span!(target: "engine::tree::payload_processor", "clear").entered();
-            let mut cleared_trie = if disable_sparse_trie_as_cache {
-                ClearedSparseStateTrie::from_state_trie(trie)
-            } else {
-                ClearedSparseStateTrie::pruned(trie)
-            };
+            let mut cleared_trie = ClearedSparseStateTrie::from_state_trie(trie);
 
             // Shrink the sparse trie so that we don't have ever increasing memory.
             cleared_trie.shrink_to(

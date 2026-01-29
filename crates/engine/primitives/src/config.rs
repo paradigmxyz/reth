@@ -183,7 +183,7 @@ impl Default for TreeConfig {
             account_worker_count: default_account_worker_count(),
             disable_proof_v2: false,
             disable_cache_metrics: false,
-            enable_sparse_trie_as_cache: true,
+            enable_sparse_trie_as_cache: false,
         }
     }
 }
@@ -548,5 +548,11 @@ impl TreeConfig {
     /// Returns whether sparse trie as cache is enabled.
     pub const fn enable_sparse_trie_as_cache(&self) -> bool {
         self.enable_sparse_trie_as_cache
+    }
+
+    /// Setter for whether to enable sparse trie as cache.
+    pub const fn with_enable_sparse_trie_as_cache(mut self, value: bool) -> Self {
+        self.enable_sparse_trie_as_cache = value;
+        self
     }
 }

@@ -1,8 +1,7 @@
 use crate::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     traits::{SparseTrie as SparseTrieTrait, SparseTrieExt},
-    RevealableSparseTrie, SerialSparseTrie, DEFAULT_MAX_PRESERVED_STORAGE_TRIES,
-    DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
+    RevealableSparseTrie, SerialSparseTrie,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -74,18 +73,6 @@ where
     /// Returns the cleared [`SparseStateTrie`], consuming this instance.
     pub fn into_inner(self) -> SparseStateTrie<A, S> {
         self.0
-    }
-}
-
-impl<A, S> ClearedSparseStateTrie<A, S>
-where
-    A: SparseTrieExt + Default,
-    S: SparseTrieExt + Default + Clone,
-{
-    /// Creates a [`ClearedSparseStateTrie`] by pruning the given [`SparseStateTrie`].
-    pub fn pruned(mut trie: SparseStateTrie<A, S>) -> Self {
-        trie.prune(DEFAULT_SPARSE_TRIE_PRUNE_DEPTH, DEFAULT_MAX_PRESERVED_STORAGE_TRIES);
-        Self(trie)
     }
 }
 

@@ -979,15 +979,7 @@ impl SparseTrieTrait for SerialSparseTrie {
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
-        // Take the updates but re-initialize if updates were enabled,
-        // so we can continue tracking updates for the next block
-        match self.updates.take() {
-            Some(updates) => {
-                self.updates = Some(SparseTrieUpdates::default());
-                updates
-            }
-            None => SparseTrieUpdates::default(),
-        }
+        self.updates.take().unwrap_or_default()
     }
 
     fn wipe(&mut self) {
