@@ -62,6 +62,7 @@ pub mod __private {
 
 mod formatter;
 mod layers;
+mod non_blocking_drop_tracking;
 mod test_tracer;
 mod throttle;
 
