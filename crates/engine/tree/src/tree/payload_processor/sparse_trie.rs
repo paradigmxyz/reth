@@ -11,7 +11,9 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::ProviderError;
 use reth_primitives_traits::Account;
 use reth_revm::state::EvmState;
-use reth_trie::{updates::TrieUpdates, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH};
+use reth_trie::{
+    proof_v2::Target, updates::TrieUpdates, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH,
+};
 use reth_trie_parallel::{
     proof_task::{
         AccountMultiproofInput, ProofResult, ProofResultContext, ProofResultMessage,
@@ -24,6 +26,7 @@ use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, LeafUpdate, SerialSparseTrie, SparseStateTrie, SparseTrie,
+    SparseTrieExt,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use smallvec::SmallVec;
@@ -180,8 +183,8 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
 
 impl<A, S> SparseTrieCacheTask<A, S>
 where
-    A: SparseTrie + Default,
-    S: SparseTrie + Default + Clone,
+    A: SparseTrieExt + Default,
+    S: SparseTrieExt + Default + Clone,
 {
     /// Creates a new sparse trie, pre-populating with a [`ClearedSparseStateTrie`].
     pub(super) fn new_with_cleared_trie(
@@ -233,6 +236,7 @@ where
     fn run_inner(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
+        let mut finished_state_updates = false;
         loop {
             crossbeam_channel::select_biased! {
                 recv(self.proof_result_rx) -> message => {
@@ -249,6 +253,8 @@ where
                         }
                     };
 
+                    tracing::error!("received update: {:?}", update);
+
                     match update {
                         MultiProofMessage::PrefetchProofs(targets) => {
                             self.on_prewarm_targets(targets);
@@ -260,25 +266,34 @@ where
                             self.on_hashed_state_update(state);
                         }
                         MultiProofMessage::BlockAccessList(_) => todo!(),
-                        MultiProofMessage::FinishedStateUpdates => {}
+                        MultiProofMessage::FinishedStateUpdates => {
+                            finished_state_updates = true;
+                        }
                     }
                 }
             }
 
+            tracing::error!("account updates: {:?}", self.account_updates);
+            tracing::error!("storage updates: {:?}", self.storage_updates);
+            tracing::error!("pending account updates: {:?}", self.pending_account_updates);
+
             self.process_updates()?;
+
+            tracing::error!("account updates after: {:?}", self.account_updates);
+            tracing::error!("storage updates after: {:?}", self.storage_updates);
+            tracing::error!("pending account updates after: {:?}", self.pending_account_updates);
+
+            if finished_state_updates &&
+                self.account_updates.is_empty() &&
+                self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
+            {
+                break;
+            }
         }
 
-        loop {
+        // Process any remaining pending account updates.
+        if !self.pending_account_updates.is_empty() {
             self.process_updates()?;
-
-            if !self.account_updates.is_empty() || !self.storage_updates.is_empty() {
-                let Ok(result) = self.proof_result_rx.recv() else {
-                    unreachable!("we own the receiver half")
-                };
-                self.on_proof_result(result)?;
-            } else {
-                break
-            }
         }
 
         debug!(target: "engine::root", "All proofs processed, ending calculation");
@@ -391,9 +406,14 @@ where
         for (addr, updates) in &mut self.storage_updates {
             let trie = self.trie.get_or_create_storage_trie_mut(*addr);
 
-            // trie.update_leaves(slots, |target| {
-            //     targets.storage.entry(addr).or_default().push(target);
-            // });
+            trie.update_leaves(updates, |path, min_len| {
+                targets
+                    .storage_targets
+                    .entry(*addr)
+                    .or_default()
+                    .push(Target::from_nibbles(path).with_min_len(min_len));
+            })
+            .map_err(ProviderError::other)?;
 
             // If all storage updates were processed, we can now compute the new storage root.
             if updates.is_empty() {
@@ -431,7 +451,7 @@ where
             // Get the current account state either from the trie or from latest account update.
             let trie_account = if let Some(LeafUpdate::Changed(encoded)) = self.account_updates.get(addr) {
                 Some(encoded).filter(|encoded| !encoded.is_empty())
-            } else if self.trie.is_account_revealed(*addr) {
+            } else if !self.account_updates.contains_key(addr) {
                 self.trie.get_account_value(addr)
             } else {
                 // Needs to be revealed first
@@ -465,11 +485,16 @@ where
             false
         });
 
+        tracing::error!("applying account updates: {:?}", self.account_updates);
         // Process account trie updates and fill the account targets.
-        // self.trie.update_leaves(&mut self.account_updates, |target| {
-        //     targets.account.push(target);
-        // });
+        self.trie
+            .trie_mut()
+            .update_leaves(&mut self.account_updates, |target, min_len| {
+                targets.account_targets.push(Target::from_nibbles(target).with_min_len(min_len));
+            })
+            .map_err(ProviderError::other)?;
 
+        tracing::error!("dispatching account multiproof with targets: {:?}", targets);
         if !targets.is_empty() {
             self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput::V2 {
                 targets,

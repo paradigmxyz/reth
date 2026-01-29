@@ -183,7 +183,7 @@ impl Default for TreeConfig {
             account_worker_count: default_account_worker_count(),
             disable_proof_v2: false,
             disable_cache_metrics: false,
-            enable_sparse_trie_as_cache: false,
+            enable_sparse_trie_as_cache: true,
         }
     }
 }

@@ -167,6 +167,11 @@ where
         Self::default()
     }
 
+    /// Returns mutable reference to account trie.
+    pub const fn trie_mut(&mut self) -> &mut RevealableSparseTrie<A> {
+        &mut self.state
+    }
+
     /// Returns `true` if account was already revealed.
     pub fn is_account_revealed(&self, account: B256) -> bool {
         self.revealed_account_paths.contains(&Nibbles::unpack(account))
@@ -475,22 +480,25 @@ where
         let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values: _metric_values } =
             filter_revealed_v2_proof_nodes(nodes, &mut self.revealed_account_paths)?;
 
+        tracing::error!("revealed account paths: {:?}", self.revealed_account_paths);
+
         #[cfg(feature = "metrics")]
         {
             self.metrics.increment_total_account_nodes(_metric_values.total_nodes as u64);
             self.metrics.increment_skipped_account_nodes(_metric_values.skipped_nodes as u64);
         }
 
-        if let Some(root_node) = root_node {
+        let trie = if let Some(root_node) = root_node {
             trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
-            let trie =
-                self.state.reveal_root(root_node.node, root_node.masks, self.retain_updates)?;
+            self.state.reveal_root(root_node.node, root_node.masks, self.retain_updates)?
+        } else {
+            self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+        };
 
-            trie.reserve_nodes(new_nodes);
+        trie.reserve_nodes(new_nodes);
 
-            trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
-            trie.reveal_nodes(nodes)?;
-        }
+        trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
+        trie.reveal_nodes(nodes)?;
 
         Ok(())
     }
@@ -534,15 +542,17 @@ where
         let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values } =
             filter_revealed_v2_proof_nodes(nodes, revealed_nodes)?;
 
-        if let Some(root_node) = root_node {
+        let trie = if let Some(root_node) = root_node {
             trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
-            let trie = trie.reveal_root(root_node.node, root_node.masks, retain_updates)?;
+            trie.reveal_root(root_node.node, root_node.masks, retain_updates)?
+        } else {
+            trie.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+        };
 
-            trie.reserve_nodes(new_nodes);
+        trie.reserve_nodes(new_nodes);
 
-            trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof");
-            trie.reveal_nodes(nodes)?;
-        }
+        trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof");
+        trie.reveal_nodes(nodes)?;
 
         Ok(metric_values)
     }
