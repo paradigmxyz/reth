@@ -51,7 +51,7 @@ pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 ///
 /// Nodes at this depth and below are converted to hash stubs to reduce memory.
 /// Depth 4 means we keep roughly 16^4 = 65536 potential branch paths at most.
-pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
+pub use reth_trie_sparse::DEFAULT_SPARSE_TRIE_PRUNE_DEPTH;
 
 /// Default maximum number of storage tries to keep after pruning.
 ///
