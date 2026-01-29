@@ -466,9 +466,8 @@ mod tests {
         assert_eq!(node_record_update.fork_id, Some(MAINNET.latest_fork_id()));
         assert_eq!(node_record_update.enr, enr);
     }
-
-    #[tokio::test]
-    async fn test_start_root_sync() {
+        #[tokio::test]
+        async fn test_bootstrap_calls_sync_for_all_links() {
         reth_tracing::init_test_tracing();
 
         let secret_key = SecretKey::new(&mut thread_rng());
@@ -477,13 +476,21 @@ mod tests {
         let mut root: TreeRootEntry = s.parse().unwrap();
         root.sign(&secret_key).unwrap();
 
-        let link =
-            LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
-        resolver.insert(link.domain.clone(), root.to_string());
+        let link1 =
+            LinkEntry { domain: "nodes1.example.org".to_string(), pubkey: secret_key.public() };
+        let link2 =
+            LinkEntry { domain: "nodes2.example.org".to_string(), pubkey: secret_key.public() };
 
-        let mut service = DnsDiscoveryService::new(Arc::new(resolver), Default::default());
+        resolver.insert(link1.domain.clone(), root.to_string());
+        resolver.insert(link2.domain.clone(), root.to_string());
 
-        service.sync_tree_with_link(link.clone());
+        let config = DnsDiscoveryConfig {
+            bootstrap_dns_networks: Some([link1.clone(), link2.clone()].into_iter().collect()),
+            ..Default::default()
+        };
+
+        let mut service = DnsDiscoveryService::new(Arc::new(resolver), config);
+        service.bootstrap();
 
         poll_fn(|cx| {
             let _ = service.poll(cx);
@@ -491,10 +498,10 @@ mod tests {
         })
         .await;
 
-        let tree = service.trees.get(&link).unwrap();
-        assert_eq!(tree.root().clone(), root);
+        assert!(service.trees.contains_key(&link1), "bootstrap should sync link1");
+        assert!(service.trees.contains_key(&link2), "bootstrap should sync link2");
     }
-
+    
     #[tokio::test(flavor = "multi_thread")]
     async fn test_get_node() {
         reth_tracing::init_test_tracing();
