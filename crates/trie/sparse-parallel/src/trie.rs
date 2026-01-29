@@ -308,8 +308,8 @@ impl SparseTrie for ParallelSparseTrie {
             return Ok(());
         }
         // Also check lower subtries for existing value
-        if let Some(subtrie) = self.lower_subtrie_for_path(&full_path)
-            && subtrie.inner.values.contains_key(&full_path)
+        if let Some(subtrie) = self.lower_subtrie_for_path(&full_path) &&
+            subtrie.inner.values.contains_key(&full_path)
         {
             self.prefix_set.insert(full_path);
             self.lower_subtrie_for_path_mut(&full_path)
@@ -7996,6 +7996,7 @@ mod tests {
         updates.insert(b256_key, LeafUpdate::Changed(new_value));
 
         let proof_targets = RefCell::new(Vec::new());
+        let prefix_set_len_before = trie.prefix_set.len();
         trie.update_leaves(&mut updates, |path, min_len| {
             proof_targets.borrow_mut().push((path, min_len));
         })
@@ -8003,6 +8004,13 @@ mod tests {
 
         // Update should remain in map (blinded node)
         assert!(!updates.is_empty(), "Update should remain in map when hitting blinded node");
+
+        // prefix_set should be unchanged after failed update
+        assert_eq!(
+            trie.prefix_set.len(),
+            prefix_set_len_before,
+            "prefix_set should be unchanged after failed update on blinded node"
+        );
 
         // Callback should be invoked
         let targets = proof_targets.borrow();
@@ -8099,6 +8107,7 @@ mod tests {
         updates.insert(b256_key, LeafUpdate::Changed(vec![])); // empty = removal
 
         let proof_targets = RefCell::new(Vec::new());
+        let prefix_set_len_before = trie.prefix_set.len();
         trie.update_leaves(&mut updates, |path, min_len| {
             proof_targets.borrow_mut().push((path, min_len));
         })
@@ -8118,6 +8127,118 @@ mod tests {
             trie.upper_subtrie.inner.values.get(&full_path),
             Some(&old_value),
             "Original value should be preserved after failed removal"
+        );
+
+        // prefix_set should be unchanged after failed removal
+        assert_eq!(
+            trie.prefix_set.len(),
+            prefix_set_len_before,
+            "prefix_set should be unchanged after failed removal on blinded node"
+        );
+    }
+
+    #[test]
+    fn test_update_leaves_removal_branch_collapse_blinded() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        // Create a branch node at root with two children:
+        // - Child at nibble 0: a blinded Hash node
+        // - Child at nibble 1: a revealed Leaf node
+        let small_value = alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec();
+        let leaf = LeafNode::new(Nibbles::default(), small_value.clone());
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)), // blinded child at nibble 0
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), /* leaf at nibble 1 */
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut trie = ParallelSparseTrie::from_root(
+            branch.clone(),
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::new(0b01), // nibble 0 is hashed
+                tree_mask: TrieMask::default(),
+            }),
+            false,
+        )
+        .unwrap();
+
+        // Reveal the branch and the leaf at nibble 1, leaving nibble 0 as Hash node
+        trie.reveal_node(
+            Nibbles::default(),
+            branch,
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::default(),
+                tree_mask: TrieMask::new(0b01),
+            }),
+        )
+        .unwrap();
+        trie.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
+
+        // Insert the leaf's value into the values map for the revealed leaf
+        // Use B256 key that starts with nibble 1 (0x10 has first nibble = 1)
+        let b256_key = B256::with_last_byte(0x10);
+        let full_path = Nibbles::unpack(b256_key);
+        let leaf_value = encode_account_value(42);
+        trie.upper_subtrie.inner.values.insert(full_path, leaf_value.clone());
+
+        // Record state before update_leaves
+        let prefix_set_len_before = trie.prefix_set.len();
+        let node_count_before = trie.upper_subtrie.nodes.len() +
+            trie.lower_subtries
+                .iter()
+                .filter_map(|s| s.as_revealed_ref())
+                .map(|s| s.nodes.len())
+                .sum::<usize>();
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Changed(vec![])); // removal
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Assert: update remains in map (removal blocked by blinded sibling)
+        assert!(
+            !updates.is_empty(),
+            "Update should remain in map when removal would collapse branch with blinded sibling"
+        );
+
+        // Assert: callback was invoked for the blinded path
+        assert!(
+            !proof_targets.borrow().is_empty(),
+            "Callback should be invoked for blinded sibling path"
+        );
+
+        // Assert: prefix_set unchanged (atomic failure)
+        assert_eq!(
+            trie.prefix_set.len(),
+            prefix_set_len_before,
+            "prefix_set should be unchanged after atomic failure"
+        );
+
+        // Assert: node count unchanged
+        let node_count_after = trie.upper_subtrie.nodes.len() +
+            trie.lower_subtries
+                .iter()
+                .filter_map(|s| s.as_revealed_ref())
+                .map(|s| s.nodes.len())
+                .sum::<usize>();
+        assert_eq!(
+            node_count_before, node_count_after,
+            "Node count should be unchanged after atomic failure"
+        );
+
+        // Assert: the leaf value still exists (not removed)
+        assert_eq!(
+            trie.upper_subtrie.inner.values.get(&full_path),
+            Some(&leaf_value),
+            "Leaf value should still exist after failed removal"
         );
     }
 
@@ -8141,6 +8262,7 @@ mod tests {
         updates.insert(b256_key, LeafUpdate::Touched);
 
         let proof_targets = RefCell::new(Vec::new());
+        let prefix_set_len_before = trie.prefix_set.len();
 
         trie.update_leaves(&mut updates, |path, min_len| {
             proof_targets.borrow_mut().push((path, min_len));
@@ -8154,6 +8276,59 @@ mod tests {
         assert!(
             proof_targets.borrow().is_empty(),
             "Callback should not be invoked for accessible path"
+        );
+
+        // prefix_set should be unchanged since Touched is read-only
+        assert_eq!(
+            trie.prefix_set.len(),
+            prefix_set_len_before,
+            "prefix_set should be unchanged for Touched update (read-only)"
+        );
+    }
+
+    #[test]
+    fn test_update_leaves_touched_nonexistent() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create a Touched update for a key that doesn't exist
+        let b256_key = B256::with_last_byte(99);
+        let full_path = Nibbles::unpack(b256_key);
+
+        let prefix_set_len_before = trie.prefix_set.len();
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Touched);
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Update should be removed (path IS accessible - it's just empty)
+        assert!(updates.is_empty(), "Touched update should be removed for accessible (empty) path");
+
+        // No callback should be invoked (path is revealed, just empty)
+        assert!(
+            proof_targets.borrow().is_empty(),
+            "Callback should not be invoked for accessible path"
+        );
+
+        // prefix_set should NOT be modified (Touched is read-only)
+        assert_eq!(
+            trie.prefix_set.len(),
+            prefix_set_len_before,
+            "prefix_set should not be modified by Touched update"
+        );
+
+        // No value should be inserted
+        assert!(
+            trie.get_leaf_value(&full_path).is_none(),
+            "No value should exist for non-existent key after Touched update"
         );
     }
 
@@ -8206,6 +8381,7 @@ mod tests {
         updates.insert(b256_key, LeafUpdate::Touched);
 
         let proof_targets = RefCell::new(Vec::new());
+        let prefix_set_len_before = trie.prefix_set.len();
         trie.update_leaves(&mut updates, |path, min_len| {
             proof_targets.borrow_mut().push((path, min_len));
         })
@@ -8216,6 +8392,13 @@ mod tests {
 
         // Update should remain in map
         assert!(!updates.is_empty(), "Touched update should remain in map for blinded path");
+
+        // prefix_set should be unchanged since Touched is read-only
+        assert_eq!(
+            trie.prefix_set.len(),
+            prefix_set_len_before,
+            "prefix_set should be unchanged for Touched update on blinded path"
+        );
     }
 
     #[test]

@@ -19,9 +19,8 @@ pub enum LeafUpdate {
     /// The leaf value has been changed to the given RLP-encoded value.
     /// Empty Vec indicates the leaf has been removed.
     Changed(Vec<u8>),
-    /// The leaf value is likely changed, but the new value is not yet known.
-    /// Used in prewarming contexts where transactions run out-of-order
-    /// to optimistically reveal the trie.
+    /// The leaf value may have changed, but the new value is not yet known.
+    /// Used for optimistic prewarming when the actual value is unavailable.
     Touched,
 }
 
