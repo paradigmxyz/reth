@@ -74,9 +74,7 @@ pub mod added_removed_keys;
 mod utils;
 
 /// Cuckoo filter for tracking accounts with storage.
-#[cfg(feature = "std")]
 mod storage_filter;
-#[cfg(feature = "std")]
 pub use storage_filter::{StorageAccountFilter, StorageFilterUpdateStats};
 
 /// Bincode-compatible serde implementations for trie types.
