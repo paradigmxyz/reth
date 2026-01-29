@@ -523,10 +523,19 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        // if the block number is the same as the currently best block number on disk we can use the
-        // latest state provider here
-        if block_number == self.best_block_number().unwrap_or_default() {
-            return Ok(Box::new(LatestStateProvider::new(self)))
+        let best_block = self.best_block_number().unwrap_or_default();
+
+        // Reject requests for blocks beyond the best block
+        if block_number > best_block {
+            return Err(ProviderError::BlockNotExecuted {
+                requested: block_number,
+                executed: best_block,
+            });
+        }
+
+        // If requesting state at the best block, use the latest state provider
+        if block_number == best_block {
+            return Ok(Box::new(LatestStateProvider::new(self)));
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.

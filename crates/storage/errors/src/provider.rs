@@ -104,6 +104,14 @@ pub enum ProviderError {
     /// State is not available for the given block number because it is pruned.
     #[error("state at block #{_0} is pruned")]
     StateAtBlockPruned(BlockNumber),
+    /// State is not available because the block has not been executed yet.
+    #[error("state at block #{requested} is not available, block has not been executed yet (latest executed: #{executed})")]
+    BlockNotExecuted {
+        /// The block number that was requested.
+        requested: BlockNumber,
+        /// The latest executed block number.
+        executed: BlockNumber,
+    },
     /// Provider does not support this particular request.
     #[error("this provider does not support this request")]
     UnsupportedProvider,
