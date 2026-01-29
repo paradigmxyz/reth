@@ -270,7 +270,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
         if let Some(disc_config) = discovery_v4_config.as_mut() {
             // merge configured boot nodes
-            disc_config.bootstrap_nodes.extend(resolved_boot_nodes.clone());
+            disc_config.bootstrap_nodes.extend(resolved_boot_nodes.iter().copied());
             // add the forkid entry for EIP-868, but wrap it in an `EnrForkIdEntry` for proper
             // encoding
             disc_config.add_eip868_pair("eth", EnrForkIdEntry::from(status.forkid));
