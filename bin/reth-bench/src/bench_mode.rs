@@ -21,7 +21,11 @@ impl BenchMode {
     }
 
     /// Create a [`BenchMode`] from optional `from` and `to` fields.
-    pub(crate) fn new(from: Option<u64>, to: Option<u64>, latest_block: u64) -> Result<Self, eyre::Error> {
+    pub(crate) fn new(
+        from: Option<u64>,
+        to: Option<u64>,
+        latest_block: u64,
+    ) -> Result<Self, eyre::Error> {
         // If neither `--from` nor `--to` are provided, we will run the benchmark continuously,
         // starting at the latest block.
         match (from, to) {
