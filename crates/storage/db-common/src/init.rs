@@ -211,20 +211,21 @@ where
     // Behaviour reserved only for new nodes should be set in the storage settings.
     provider_rw.write_storage_settings(genesis_storage_settings)?;
 
-    // Initialize changeset static files BEFORE insert_genesis_state, since write_state
-    // writes changesets and needs the block range to be set for non-zero genesis blocks.
+    // For non-zero genesis blocks, ensure changeset static file writers are created with the
+    // correct expected_block_start BEFORE insert_genesis_state. This is needed because write_state
+    // writes changesets and increment_block checks against expected_block_start when block_range
+    // is None. Creating the writer via get_writer(genesis_block_number, ...) sets this correctly.
     let static_file_provider = provider_rw.static_file_provider();
-    if genesis_storage_settings.account_changesets_in_static_files {
-        static_file_provider
-            .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
-            .user_header_mut()
-            .set_block_range(genesis_block_number, genesis_block_number);
-    }
-    if genesis_storage_settings.storage_changesets_in_static_files {
-        static_file_provider
-            .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
-            .user_header_mut()
-            .set_block_range(genesis_block_number, genesis_block_number);
+    if genesis_block_number > 0 {
+        if genesis_storage_settings.account_changesets_in_static_files {
+            // Just get the writer to ensure it's initialized with the correct expected block range
+            let _ = static_file_provider
+                .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?;
+        }
+        if genesis_storage_settings.storage_changesets_in_static_files {
+            let _ = static_file_provider
+                .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?;
+        }
     }
 
     insert_genesis_hashes(&provider_rw, alloc.iter())?;
