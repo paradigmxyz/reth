@@ -2,14 +2,7 @@ use crate::{
     provider::{RevealedNode, TrieNodeProvider},
     LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
 };
-use alloc::{
-    borrow::Cow,
-    boxed::Box,
-    fmt,
-    string::{String, ToString},
-    vec,
-    vec::Vec,
-};
+use alloc::{borrow::Cow, boxed::Box, fmt, string::String, vec, vec::Vec};
 use alloy_primitives::{
     hex, keccak256,
     map::{Entry, HashMap, HashSet},
@@ -338,8 +331,9 @@ impl fmt::Debug for SerialSparseTrie {
 
 /// Turns a [`Nibbles`] into a [`String`] by concatenating each nibbles' hex character.
 fn encode_nibbles(nibbles: &Nibbles) -> String {
-    let encoded = hex::encode(nibbles.pack());
-    encoded[..nibbles.len()].to_string()
+    let mut encoded = hex::encode(nibbles.pack());
+    encoded.truncate(nibbles.len());
+    encoded
 }
 
 impl fmt::Display for SerialSparseTrie {
