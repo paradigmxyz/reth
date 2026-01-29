@@ -1127,19 +1127,16 @@ impl SparseTrieExt for ParallelSparseTrie {
             "prune roots must be prefix-free"
         );
 
-        let mut fully_pruned_subtries = [false; NUM_LOWER_SUBTRIES];
-
         // Upper prune roots that are prefixes of lower subtrie root paths cause the entire
-        // subtrie to be replaced with Blind(None).
+        // subtrie to be cleared (preserving allocations for reuse).
         if !roots_upper.is_empty() {
-            for (idx, subtrie) in self.lower_subtries.iter_mut().enumerate() {
+            for subtrie in &mut self.lower_subtries {
                 let should_clear = subtrie.as_revealed_ref().is_some_and(|s| {
                     let search_idx = roots_upper.partition_point(|(root, _)| root <= &s.path);
                     search_idx > 0 && s.path.starts_with(&roots_upper[search_idx - 1].0)
                 });
                 if should_clear {
-                    *subtrie = LowerSparseSubtrie::Blind(None);
-                    fully_pruned_subtries[idx] = true;
+                    subtrie.clear();
                 }
             }
         }
@@ -1156,23 +1153,14 @@ impl SparseTrieExt for ParallelSparseTrie {
         }) {
             let subtrie_idx = path_subtrie_index_unchecked(&roots_group[0].0);
 
-            // Skip if an upper trie extension already covers this subtrie (replaced with Blind)
-            if fully_pruned_subtries[subtrie_idx] {
-                continue;
-            }
-
-            // Skip unrevealed subtries - nothing to prune
+            // Skip unrevealed/blinded subtries - nothing to prune
             let Some(subtrie) = self.lower_subtries[subtrie_idx].as_revealed_mut() else {
                 continue;
             };
 
             // Retain only nodes/values not descended from any pruned root.
-            subtrie.nodes.retain(|p, _| {
-                !is_strict_descendant_in(roots_group, p) && !is_strict_descendant_in(roots_upper, p)
-            });
-            subtrie.inner.values.retain(|p, _| {
-                !starts_with_pruned_in(roots_group, p) && !starts_with_pruned_in(roots_upper, p)
-            });
+            subtrie.nodes.retain(|p, _| !is_strict_descendant_in(roots_group, p));
+            subtrie.inner.values.retain(|p, _| !starts_with_pruned_in(roots_group, p));
         }
 
         // Branch node masks pruning
@@ -1180,10 +1168,6 @@ impl SparseTrieExt for ParallelSparseTrie {
             if SparseSubtrieType::path_len_is_upper(p.len()) {
                 !starts_with_pruned_in(roots_upper, p)
             } else {
-                let idx = path_subtrie_index_unchecked(p);
-                if fully_pruned_subtries[idx] {
-                    return false;
-                }
                 !starts_with_pruned_in(roots_lower, p) && !starts_with_pruned_in(roots_upper, p)
             }
         });
