@@ -1,7 +1,7 @@
 use crate::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    traits::SparseTrieInterface,
-    SerialSparseTrie, SparseTrie,
+    traits::{SparseTrie as SparseTrieTrait, SparseTrieExt},
+    RevealableSparseTrie, SerialSparseTrie,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -31,8 +31,8 @@ pub struct ClearedSparseStateTrie<
 
 impl<A, S> ClearedSparseStateTrie<A, S>
 where
-    A: SparseTrieInterface,
-    S: SparseTrieInterface,
+    A: SparseTrieTrait,
+    S: SparseTrieTrait,
 {
     /// Creates a [`ClearedSparseStateTrie`] by clearing all the existing internal state of a
     /// [`SparseStateTrie`] and then storing that instance for later re-use.
@@ -83,7 +83,7 @@ pub struct SparseStateTrie<
     S = SerialSparseTrie, // Storage trie implementation
 > {
     /// Sparse account trie.
-    state: SparseTrie<A>,
+    state: RevealableSparseTrie<A>,
     /// Collection of revealed account trie paths.
     revealed_account_paths: HashSet<Nibbles>,
     /// State related to storage tries.
@@ -118,7 +118,7 @@ where
 #[cfg(test)]
 impl SparseStateTrie {
     /// Create state trie from state trie.
-    pub fn from_state(state: SparseTrie) -> Self {
+    pub fn from_state(state: RevealableSparseTrie) -> Self {
         Self { state, ..Default::default() }
     }
 }
@@ -130,14 +130,15 @@ impl<A, S> SparseStateTrie<A, S> {
         self
     }
 
-    /// Set the accounts trie to the given `SparseTrie`.
-    pub fn with_accounts_trie(mut self, trie: SparseTrie<A>) -> Self {
+    /// Set the accounts trie to the given `RevealableSparseTrie`.
+    pub fn with_accounts_trie(mut self, trie: RevealableSparseTrie<A>) -> Self {
         self.state = trie;
         self
     }
 
-    /// Set the default trie which will be cloned when creating new storage [`SparseTrie`]s.
-    pub fn with_default_storage_trie(mut self, trie: SparseTrie<S>) -> Self {
+    /// Set the default trie which will be cloned when creating new storage
+    /// [`RevealableSparseTrie`]s.
+    pub fn with_default_storage_trie(mut self, trie: RevealableSparseTrie<S>) -> Self {
         self.storage.default_trie = trie;
         self
     }
@@ -145,8 +146,8 @@ impl<A, S> SparseStateTrie<A, S> {
 
 impl<A, S> SparseStateTrie<A, S>
 where
-    A: SparseTrieInterface + Default,
-    S: SparseTrieInterface + Default + Clone,
+    A: SparseTrieTrait + Default,
+    S: SparseTrieTrait + Default + Clone,
 {
     /// Create new [`SparseStateTrie`]
     pub fn new() -> Self {
@@ -214,12 +215,12 @@ where
     }
 
     /// Takes the storage trie for the provided address.
-    pub fn take_storage_trie(&mut self, address: &B256) -> Option<SparseTrie<S>> {
+    pub fn take_storage_trie(&mut self, address: &B256) -> Option<RevealableSparseTrie<S>> {
         self.storage.tries.remove(address)
     }
 
     /// Inserts storage trie for the provided address.
-    pub fn insert_storage_trie(&mut self, address: B256, storage_trie: SparseTrie<S>) {
+    pub fn insert_storage_trie(&mut self, address: B256, storage_trie: RevealableSparseTrie<S>) {
         self.storage.tries.insert(address, storage_trie);
     }
 
@@ -270,8 +271,8 @@ where
             let retain_updates = self.retain_updates;
 
             // Process all storage trie revealings in parallel, having first removed the
-            // `reveal_nodes` tracking and `SparseTrie`s for each account from their HashMaps.
-            // These will be returned after processing.
+            // `reveal_nodes` tracking and `RevealableSparseTrie`s for each account from their
+            // HashMaps. These will be returned after processing.
             let results: Vec<_> = storages
                 .into_iter()
                 .map(|(account, storage_subtree)| {
@@ -293,8 +294,8 @@ where
                 })
                 .collect();
 
-            // Return `revealed_nodes` and `SparseTrie` for each account, incrementing metrics and
-            // returning the last error seen if any.
+            // Return `revealed_nodes` and `RevealableSparseTrie` for each account, incrementing
+            // metrics and returning the last error seen if any.
             let mut any_err = Ok(());
             for (account, revealed_nodes, trie, result) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
@@ -352,8 +353,8 @@ where
             let retain_updates = self.retain_updates;
 
             // Process all storage trie revealings in parallel, having first removed the
-            // `reveal_nodes` tracking and `SparseTrie`s for each account from their HashMaps.
-            // These will be returned after processing.
+            // `reveal_nodes` tracking and `RevealableSparseTrie`s for each account from their
+            // HashMaps. These will be returned after processing.
             let results: Vec<_> = multiproof
                 .storage_proofs
                 .into_iter()
@@ -506,7 +507,7 @@ where
         account: B256,
         nodes: Vec<ProofTrieNode>,
         revealed_nodes: &mut HashSet<Nibbles>,
-        trie: &mut SparseTrie<S>,
+        trie: &mut RevealableSparseTrie<S>,
         retain_updates: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
         let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values } =
@@ -566,7 +567,7 @@ where
         account: B256,
         storage_subtree: DecodedStorageMultiProof,
         revealed_nodes: &mut HashSet<Nibbles>,
-        trie: &mut SparseTrie<S>,
+        trie: &mut RevealableSparseTrie<S>,
         retain_updates: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
         let FilterMappedProofNodes { root_node, nodes, new_nodes, metric_values } =
@@ -707,7 +708,7 @@ where
     /// If the trie has not been revealed, this function does nothing.
     #[instrument(target = "trie::sparse", skip_all)]
     pub fn calculate_subtries(&mut self) {
-        if let SparseTrie::Revealed(trie) = &mut self.state {
+        if let RevealableSparseTrie::Revealed(trie) = &mut self.state {
             trie.update_subtrie_hashes();
         }
     }
@@ -725,7 +726,7 @@ where
         provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<&mut A> {
         match self.state {
-            SparseTrie::Blind(_) => {
+            RevealableSparseTrie::Blind(_) => {
                 let (root_node, hash_mask, tree_mask) = provider_factory
                     .account_node_provider()
                     .trie_node(&Nibbles::default())?
@@ -738,7 +739,7 @@ where
                 let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
                 self.state.reveal_root(root_node, masks, self.retain_updates).map_err(Into::into)
             }
-            SparseTrie::Revealed(ref mut trie) => Ok(trie),
+            RevealableSparseTrie::Revealed(ref mut trie) => Ok(trie),
         }
     }
 
@@ -971,24 +972,141 @@ where
     }
 }
 
+impl<A, S> SparseStateTrie<A, S>
+where
+    A: SparseTrieTrait + SparseTrieExt + Default,
+    S: SparseTrieTrait + SparseTrieExt + Default + Clone,
+{
+    /// Minimum number of storage tries before parallel pruning is enabled.
+    const PARALLEL_PRUNE_THRESHOLD: usize = 16;
+
+    /// Returns true if parallelism should be enabled for pruning the given number of tries.
+    /// Will always return false in `no_std` builds.
+    const fn is_prune_parallelism_enabled(num_tries: usize) -> bool {
+        #[cfg(not(feature = "std"))]
+        {
+            let _ = num_tries;
+            return false;
+        }
+
+        #[cfg(feature = "std")]
+        {
+            num_tries >= Self::PARALLEL_PRUNE_THRESHOLD
+        }
+    }
+
+    /// Prunes the account trie and selected storage tries to reduce memory usage.
+    ///
+    /// Storage tries not in the top `max_storage_tries` by revealed node count are cleared
+    /// entirely.
+    ///
+    /// # Preconditions
+    ///
+    /// Node hashes must be computed via `root()` before calling this method. Otherwise, nodes
+    /// cannot be converted to hash stubs and pruning will have no effect.
+    ///
+    /// # Effects
+    ///
+    /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
+    pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
+        if let Some(trie) = self.state.as_revealed_mut() {
+            trie.prune(max_depth);
+        }
+        self.revealed_account_paths.clear();
+
+        let mut storage_trie_counts: Vec<(B256, usize)> = self
+            .storage
+            .tries
+            .iter()
+            .map(|(hash, trie)| {
+                let count = match trie {
+                    RevealableSparseTrie::Revealed(t) => t.revealed_node_count(),
+                    RevealableSparseTrie::Blind(_) => 0,
+                };
+                (*hash, count)
+            })
+            .collect();
+
+        // Use O(n) selection instead of O(n log n) sort
+        let tries_to_keep: HashSet<B256> = if storage_trie_counts.len() <= max_storage_tries {
+            storage_trie_counts.iter().map(|(hash, _)| *hash).collect()
+        } else {
+            storage_trie_counts
+                .select_nth_unstable_by(max_storage_tries.saturating_sub(1), |a, b| b.1.cmp(&a.1));
+            storage_trie_counts[..max_storage_tries].iter().map(|(hash, _)| *hash).collect()
+        };
+
+        // Collect keys to avoid borrow conflict
+        let tries_to_clear: Vec<B256> = self
+            .storage
+            .tries
+            .keys()
+            .filter(|hash| !tries_to_keep.contains(*hash))
+            .copied()
+            .collect();
+
+        // Evict storage tries that exceeded limit, saving cleared allocations for reuse
+        for hash in tries_to_clear {
+            if let Some(trie) = self.storage.tries.remove(&hash) {
+                self.storage.cleared_tries.push(trie.clear());
+            }
+            if let Some(mut paths) = self.storage.revealed_paths.remove(&hash) {
+                paths.clear();
+                self.storage.cleared_revealed_paths.push(paths);
+            }
+        }
+
+        // Prune storage tries that are kept
+        if Self::is_prune_parallelism_enabled(tries_to_keep.len()) {
+            #[cfg(feature = "std")]
+            {
+                use rayon::prelude::*;
+
+                self.storage.tries.par_iter_mut().for_each(|(hash, trie)| {
+                    if tries_to_keep.contains(hash) &&
+                        let Some(t) = trie.as_revealed_mut()
+                    {
+                        t.prune(max_depth);
+                    }
+                });
+            }
+        } else {
+            for hash in &tries_to_keep {
+                if let Some(trie) =
+                    self.storage.tries.get_mut(hash).and_then(|t| t.as_revealed_mut())
+                {
+                    trie.prune(max_depth);
+                }
+            }
+        }
+
+        // Clear revealed_paths for kept tries
+        for hash in &tries_to_keep {
+            if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
+                paths.clear();
+            }
+        }
+    }
+}
+
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
 /// of [`SparseStateTrie`] both to help enforce allocation re-use and to allow us to implement
 /// methods like `get_trie_and_revealed_paths` which return multiple mutable borrows.
 #[derive(Debug, Default)]
 struct StorageTries<S = SerialSparseTrie> {
     /// Sparse storage tries.
-    tries: B256Map<SparseTrie<S>>,
+    tries: B256Map<RevealableSparseTrie<S>>,
     /// Cleared storage tries, kept for re-use.
-    cleared_tries: Vec<SparseTrie<S>>,
+    cleared_tries: Vec<RevealableSparseTrie<S>>,
     /// Collection of revealed storage trie paths, per account.
     revealed_paths: B256Map<HashSet<Nibbles>>,
     /// Cleared revealed storage trie path collections, kept for re-use.
     cleared_revealed_paths: Vec<HashSet<Nibbles>>,
     /// A default cleared trie instance, which will be cloned when creating new tries.
-    default_trie: SparseTrie<S>,
+    default_trie: RevealableSparseTrie<S>,
 }
 
-impl<S: SparseTrieInterface> StorageTries<S> {
+impl<S: SparseTrieTrait> StorageTries<S> {
     /// Returns all fields to a cleared state, equivalent to the default state, keeping cleared
     /// collections for re-use later when possible.
     fn clear(&mut self) {
@@ -1025,7 +1143,7 @@ impl<S: SparseTrieInterface> StorageTries<S> {
     }
 }
 
-impl<S: SparseTrieInterface + Clone> StorageTries<S> {
+impl<S: SparseTrieTrait + Clone> StorageTries<S> {
     /// Returns the set of already revealed trie node paths for an account's storage, creating the
     /// set if it didn't previously exist.
     fn get_revealed_paths_mut(&mut self, account: B256) -> &mut HashSet<Nibbles> {
@@ -1034,12 +1152,12 @@ impl<S: SparseTrieInterface + Clone> StorageTries<S> {
             .or_insert_with(|| self.cleared_revealed_paths.pop().unwrap_or_default())
     }
 
-    /// Returns the `SparseTrie` and the set of already revealed trie node paths for an account's
-    /// storage, creating them if they didn't previously exist.
+    /// Returns the `RevealableSparseTrie` and the set of already revealed trie node paths for an
+    /// account's storage, creating them if they didn't previously exist.
     fn get_trie_and_revealed_paths_mut(
         &mut self,
         account: B256,
-    ) -> (&mut SparseTrie<S>, &mut HashSet<Nibbles>) {
+    ) -> (&mut RevealableSparseTrie<S>, &mut HashSet<Nibbles>) {
         let trie = self.tries.entry(account).or_insert_with(|| {
             self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
         });
@@ -1055,7 +1173,7 @@ impl<S: SparseTrieInterface + Clone> StorageTries<S> {
     /// Takes the storage trie for the account from the internal `HashMap`, creating it if it
     /// doesn't already exist.
     #[cfg(feature = "std")]
-    fn take_or_create_trie(&mut self, account: &B256) -> SparseTrie<S> {
+    fn take_or_create_trie(&mut self, account: &B256) -> RevealableSparseTrie<S> {
         self.tries.remove(account).unwrap_or_else(|| {
             self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
         })
@@ -1259,7 +1377,7 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNode, BranchNodeMasks, LeafNode, StorageMultiProof, TrieMask,
+        BranchNode, BranchNodeMasks, BranchNodeMasksMap, LeafNode, StorageMultiProof, TrieMask,
     };
 
     #[test]

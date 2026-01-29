@@ -27,14 +27,14 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
-    SignerRecoverable,
+    SignerRecoverable, StorageEntry,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageRootProvider,
+    StorageChangeSetReader, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -187,6 +187,21 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             tx: self.tx,
             prune_modes: self.prune_modes,
         }
+    }
+
+    /// Adds the genesis block from the chain spec to the provider.
+    ///
+    /// This is useful for tests that require a valid latest block (e.g., transaction validation).
+    pub fn with_genesis_block(self) -> Self
+    where
+        ChainSpec: EthChainSpec<Header = <T::Block as Block>::Header>,
+        <T::Block as Block>::Body: Default,
+    {
+        let genesis_hash = self.chain_spec.genesis_hash();
+        let genesis_header = self.chain_spec.genesis_header().clone();
+        let genesis_block = T::Block::new(genesis_header, Default::default());
+        self.add_block(genesis_hash, genesis_block);
+        self
     }
 }
 
@@ -985,6 +1000,37 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
     }
 
     fn account_changeset_count(&self) -> ProviderResult<usize> {
+        Ok(0)
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
+    for MockEthProvider<T, ChainSpec>
+{
+    fn storage_changeset(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+        Ok(Vec::default())
+    }
+
+    fn get_storage_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+        _storage_key: B256,
+    ) -> ProviderResult<Option<StorageEntry>> {
+        Ok(None)
+    }
+
+    fn storage_changesets_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+        Ok(Vec::default())
+    }
+
+    fn storage_changeset_count(&self) -> ProviderResult<usize> {
         Ok(0)
     }
 }

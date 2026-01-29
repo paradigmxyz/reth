@@ -92,7 +92,7 @@ criterion.workspace = true
 
 [features]
 default = []
-edge = ["reth-storage-api/edge"]
+edge = ["reth-storage-api/edge", "rocksdb"]
 rocksdb = ["dep:rocksdb"]
 triedb = ["dep:triedb", "reth-storage-api/triedb", "reth-chain-state/triedb"]
 test-utils = [

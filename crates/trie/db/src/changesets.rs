@@ -10,7 +10,9 @@
 use crate::{DatabaseHashedPostState, DatabaseStateRoot, DatabaseTrieCursorFactory};
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
-use reth_storage_api::{BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader};
+use reth_storage_api::{
+    BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader, StorageChangeSetReader,
+};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     changesets::compute_trie_changesets,
@@ -65,7 +67,11 @@ pub fn compute_block_trie_changesets<Provider>(
     block_number: BlockNumber,
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
-    Provider: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+    Provider: DBProvider
+        + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader,
 {
     debug!(
         target: "trie::changeset_cache",
@@ -175,7 +181,11 @@ pub fn compute_block_trie_updates<Provider>(
     block_number: BlockNumber,
 ) -> ProviderResult<TrieUpdatesSorted>
 where
-    Provider: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+    Provider: DBProvider
+        + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader,
 {
     let tx = provider.tx_ref();
 
@@ -209,11 +219,12 @@ where
     let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
 
     // Step 5: Collect all account trie nodes that changed in the target block
-    let mut account_nodes = Vec::new();
+    let account_nodes_ref = changesets.account_nodes_ref();
+    let mut account_nodes = Vec::with_capacity(account_nodes_ref.len());
     let mut account_cursor = cursor_factory.account_trie_cursor()?;
 
     // Iterate over the account nodes from the changesets
-    for (nibbles, _old_node) in changesets.account_nodes_ref() {
+    for (nibbles, _old_node) in account_nodes_ref {
         // Look up the current value of this trie node using the overlay cursor
         let node_value = account_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
         account_nodes.push((*nibbles, node_value));
@@ -225,10 +236,11 @@ where
     // Iterate over the storage tries from the changesets
     for (hashed_address, storage_changeset) in changesets.storage_tries_ref() {
         let mut storage_cursor = cursor_factory.storage_trie_cursor(*hashed_address)?;
-        let mut storage_nodes = Vec::new();
+        let storage_nodes_ref = storage_changeset.storage_nodes_ref();
+        let mut storage_nodes = Vec::with_capacity(storage_nodes_ref.len());
 
         // Iterate over the storage nodes for this account
-        for (nibbles, _old_node) in storage_changeset.storage_nodes_ref() {
+        for (nibbles, _old_node) in storage_nodes_ref {
             // Look up the current value of this storage trie node
             let node_value = storage_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
             storage_nodes.push((*nibbles, node_value));
@@ -323,7 +335,11 @@ impl ChangesetCache {
         provider: &P,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
-        P: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+        P: DBProvider
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader,
     {
         // Try cache first (with read lock)
         {
@@ -408,7 +424,11 @@ impl ChangesetCache {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<TrieUpdatesSorted>
     where
-        P: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+        P: DBProvider
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader,
     {
         // Get the database tip block number
         let db_tip_block = provider

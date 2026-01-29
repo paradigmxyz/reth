@@ -1,6 +1,7 @@
 use crate::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, SparseTrieInterface, SparseTrieUpdates,
+    LeafLookup, LeafLookupError, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieExt,
+    SparseTrieUpdates,
 };
 use alloc::{
     borrow::Cow,
@@ -12,7 +13,7 @@ use alloc::{
 };
 use alloy_primitives::{
     hex, keccak256,
-    map::{Entry, HashMap, HashSet},
+    map::{B256Map, Entry, HashMap, HashSet},
     B256,
 };
 use alloy_rlp::Decodable;
@@ -43,14 +44,15 @@ const SPARSE_TRIE_SUBTRIE_HASHES_LEVEL: usize = 2;
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum SparseTrie<T = SerialSparseTrie> {
+pub enum RevealableSparseTrie<T = SerialSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
     /// This is the default state. In this state, the trie cannot be directly queried or modified
     /// until nodes are revealed.
     ///
-    /// In this state the `SparseTrie` can optionally carry with it a cleared `SerialSparseTrie`.
-    /// This allows for reusing the trie's allocations between payload executions.
+    /// In this state the `RevealableSparseTrie` can optionally carry with it a cleared
+    /// `SerialSparseTrie`. This allows for reusing the trie's allocations between payload
+    /// executions.
     Blind(Option<Box<T>>),
     /// Some nodes in the Trie have been revealed.
     ///
@@ -60,21 +62,23 @@ pub enum SparseTrie<T = SerialSparseTrie> {
     Revealed(Box<T>),
 }
 
-impl<T: Default> Default for SparseTrie<T> {
+impl<T: Default> Default for RevealableSparseTrie<T> {
     fn default() -> Self {
         Self::Blind(None)
     }
 }
 
-impl<T: SparseTrieInterface + Default> SparseTrie<T> {
+impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     /// Creates a new revealed but empty sparse trie with `SparseNode::Empty` as root node.
     ///
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
+    /// use reth_trie_sparse::{
+    ///     provider::DefaultTrieNodeProvider, RevealableSparseTrie, SerialSparseTrie,
+    /// };
     ///
-    /// let trie = SparseTrie::<SerialSparseTrie>::revealed_empty();
+    /// let trie = RevealableSparseTrie::<SerialSparseTrie>::revealed_empty();
     /// assert!(!trie.is_blind());
     /// ```
     pub fn revealed_empty() -> Self {
@@ -91,7 +95,7 @@ impl<T: SparseTrieInterface + Default> SparseTrie<T> {
     ///
     /// # Returns
     ///
-    /// A mutable reference to the underlying [`SparseTrieInterface`].
+    /// A mutable reference to the underlying [`RevealableSparseTrie`](SparseTrieTrait).
     pub fn reveal_root(
         &mut self,
         root: TrieNode,
@@ -115,17 +119,19 @@ impl<T: SparseTrieInterface + Default> SparseTrie<T> {
     }
 }
 
-impl<T: SparseTrieInterface> SparseTrie<T> {
+impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// Creates a new blind sparse trie.
     ///
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
+    /// use reth_trie_sparse::{
+    ///     provider::DefaultTrieNodeProvider, RevealableSparseTrie, SerialSparseTrie,
+    /// };
     ///
-    /// let trie = SparseTrie::<SerialSparseTrie>::blind();
+    /// let trie = RevealableSparseTrie::<SerialSparseTrie>::blind();
     /// assert!(trie.is_blind());
-    /// let trie = SparseTrie::<SerialSparseTrie>::default();
+    /// let trie = RevealableSparseTrie::<SerialSparseTrie>::default();
     /// assert!(trie.is_blind());
     /// ```
     pub const fn blind() -> Self {
@@ -133,7 +139,7 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     }
 
     /// Creates a new blind sparse trie, clearing and later reusing the given
-    /// [`SparseTrieInterface`].
+    /// [`RevealableSparseTrie`](SparseTrieTrait).
     pub fn blind_from(mut trie: T) -> Self {
         trie.clear();
         Self::Blind(Some(Box::new(trie)))
@@ -212,9 +218,10 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
         Some((revealed.root(), revealed.take_updates()))
     }
 
-    /// Returns a [`SparseTrie::Blind`] based on this one. If this instance was revealed, or was
-    /// itself a `Blind` with a pre-allocated [`SparseTrieInterface`], this will return
-    /// a `Blind` carrying a cleared pre-allocated [`SparseTrieInterface`].
+    /// Returns a [`RevealableSparseTrie::Blind`] based on this one. If this instance was revealed,
+    /// or was itself a `Blind` with a pre-allocated [`RevealableSparseTrie`](SparseTrieTrait),
+    /// this will return a `Blind` carrying a cleared pre-allocated
+    /// [`RevealableSparseTrie`](SparseTrieTrait).
     pub fn clear(self) -> Self {
         match self {
             Self::Blind(_) => self,
@@ -277,6 +284,36 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
                 trie.shrink_values_to(size);
             }
             _ => {}
+        }
+    }
+}
+
+impl<T: SparseTrieExt + Default> RevealableSparseTrie<T> {
+    /// Applies batch leaf updates to the sparse trie.
+    ///
+    /// For blind tries, all updates are kept in the map and proof targets are emitted
+    /// for every key (with `min_len = 0` since nothing is revealed).
+    ///
+    /// For revealed tries, delegates to the inner implementation which will:
+    /// - Apply updates where possible
+    /// - Keep blocked updates in the map
+    /// - Emit proof targets for blinded paths
+    pub fn update_leaves(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        mut proof_required_fn: impl FnMut(Nibbles, u8),
+    ) -> SparseTrieResult<()> {
+        match self {
+            Self::Blind(_) => {
+                // Nothing is revealed - emit proof targets for all keys with min_len = 0
+                for key in updates.keys() {
+                    let full_path = Nibbles::unpack(*key);
+                    proof_required_fn(full_path, 0);
+                }
+                // All updates remain in the map for retry after proofs are fetched
+                Ok(())
+            }
+            Self::Revealed(trie) => trie.update_leaves(updates, proof_required_fn),
         }
     }
 }
@@ -415,7 +452,7 @@ impl Default for SerialSparseTrie {
     }
 }
 
-impl SparseTrieInterface for SerialSparseTrie {
+impl SparseTrieTrait for SerialSparseTrie {
     fn with_root(
         mut self,
         root: TrieNode,
@@ -2486,8 +2523,8 @@ mod tests {
 
     #[test]
     fn sparse_trie_is_blind() {
-        assert!(SparseTrie::<SerialSparseTrie>::blind().is_blind());
-        assert!(!SparseTrie::<SerialSparseTrie>::revealed_empty().is_blind());
+        assert!(RevealableSparseTrie::<SerialSparseTrie>::blind().is_blind());
+        assert!(!RevealableSparseTrie::<SerialSparseTrie>::revealed_empty().is_blind());
     }
 
     #[test]

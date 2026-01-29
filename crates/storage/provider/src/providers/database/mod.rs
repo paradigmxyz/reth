@@ -44,7 +44,9 @@ use std::{
 use tracing::trace;
 
 mod provider;
-pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, SaveBlocksMode};
+pub use provider::{
+    CommitOrder, DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, SaveBlocksMode,
+};
 
 use super::ProviderNodeTypes;
 use reth_trie::KeccakKeyHasher;
@@ -175,6 +177,11 @@ impl<N: NodeTypesWithDB> RocksDBProviderFactory for ProviderFactory<N> {
     fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {
         unimplemented!("ProviderFactory is a factory, not a provider - use DatabaseProvider::set_pending_rocksdb_batch instead")
     }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
+        unimplemented!("ProviderFactory is a factory, not a provider - use DatabaseProvider::commit_pending_rocksdb_batches instead")
+    }
 }
 
 impl<N: NodeTypesWithDB> crate::TrieDBProviderFactory for ProviderFactory<N> {
@@ -244,6 +251,26 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.triedb_provider.clone(),
             self.changeset_cache.clone(),
         )))
+    }
+
+    /// Returns a provider with a created `DbTxMut` inside, configured for unwind operations.
+    /// Uses unwind commit order (MDBX first, then `RocksDB`, then static files) to allow
+    /// recovery by truncating static files on restart if interrupted.
+    #[track_caller]
+    pub fn unwind_provider_rw(
+        &self,
+    ) -> ProviderResult<DatabaseProvider<<N::DB as Database>::TXMut, N>> {
+        Ok(DatabaseProvider::new_unwind_rw(
+            self.db.tx_mut()?,
+            self.chain_spec.clone(),
+            self.static_file_provider.clone(),
+            self.prune_modes.clone(),
+            self.storage.clone(),
+            self.storage_settings.clone(),
+            self.rocksdb_provider.clone(),
+            self.triedb_provider.clone(),
+            self.changeset_cache.clone(),
+        ))
     }
 
     /// State provider for latest block

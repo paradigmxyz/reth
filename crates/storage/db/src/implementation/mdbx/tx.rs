@@ -6,7 +6,7 @@ use crate::{
     DatabaseError,
 };
 use reth_db_api::{
-    table::{Compress, DupSort, Encode, Table, TableImporter},
+    table::{Compress, DupSort, Encode, IntoVec, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
@@ -30,7 +30,7 @@ const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 #[derive(Debug)]
 pub struct Tx<K: TransactionKind> {
     /// Libmdbx-sys transaction.
-    pub inner: Transaction<K>,
+    inner: Transaction<K>,
 
     /// Cached MDBX DBIs for reuse.
     dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
@@ -60,6 +60,11 @@ impl<K: TransactionKind> Tx<K> {
             })
             .transpose()?;
         Ok(Self { inner, dbis, metrics_handler })
+    }
+
+    /// Returns a reference to the inner libmdbx transaction.
+    pub const fn inner(&self) -> &Transaction<K> {
+        &self.inner
     }
 
     /// Gets this transaction ID.
@@ -387,7 +392,7 @@ impl Tx<RW> {
                     info: e.into(),
                     operation: write_operation,
                     table_name: T::NAME,
-                    key: key.into(),
+                    key: key.into_vec(),
                 }
                 .into()
             })

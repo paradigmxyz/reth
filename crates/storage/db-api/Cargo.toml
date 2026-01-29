@@ -28,7 +28,7 @@ alloy-genesis.workspace = true
 alloy-consensus.workspace = true
 
 # optimism
-reth-optimism-primitives = { workspace = true, optional = true, features = ["serde", "reth-codec"] }
+op-alloy-consensus = { workspace = true, optional = true }
 
 # codecs
 modular-bitfield.workspace = true
@@ -40,6 +40,7 @@ serde = { workspace = true, default-features = false }
 metrics.workspace = true
 
 # misc
+arrayvec.workspace = true
 derive_more.workspace = true
 bytes.workspace = true
 
@@ -84,11 +85,11 @@ arbitrary = [
     "reth-prune-types/arbitrary",
     "reth-stages-types/arbitrary",
     "alloy-consensus/arbitrary",
-    "reth-optimism-primitives?/arbitrary",
+    "op-alloy-consensus?/arbitrary",
     "reth-ethereum-primitives/arbitrary",
 ]
 op = [
-    "dep:reth-optimism-primitives",
+    "dep:op-alloy-consensus",
     "reth-codecs/op",
     "reth-primitives-traits/op",
 ]
