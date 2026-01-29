@@ -2511,19 +2511,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         } else {
             self.take::<tables::StorageChangeSets>(storage_range)?
         };
-        let account_changeset = if let Some(_highest_block) = self
-            .static_file_provider
-            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets) &&
-            self.cached_storage_settings().account_changesets_in_static_files
-        {
-            let changesets = self.account_changesets_range(range)?;
-            let mut changeset_writer =
-                self.static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
-            changeset_writer.prune_account_changesets(block)?;
-            changesets
-        } else {
-            self.take::<tables::AccountChangeSets>(range)?
-        };
+        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
 
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
