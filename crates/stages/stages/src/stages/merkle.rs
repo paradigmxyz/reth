@@ -467,7 +467,7 @@ pub struct ParallelMerkleStage<F> {
 
 impl<F> ParallelMerkleStage<F> {
     /// Create a new parallel merkle stage with the given provider factory.
-    pub fn new(factory: F) -> Self {
+    pub const fn new(factory: F) -> Self {
         Self {
             factory,
             rebuild_threshold: MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
@@ -476,7 +476,11 @@ impl<F> ParallelMerkleStage<F> {
     }
 
     /// Create a new parallel merkle stage with custom thresholds.
-    pub fn with_thresholds(factory: F, rebuild_threshold: u64, incremental_threshold: u64) -> Self {
+    pub const fn with_thresholds(
+        factory: F,
+        rebuild_threshold: u64,
+        incremental_threshold: u64,
+    ) -> Self {
         Self { factory, rebuild_threshold, incremental_threshold }
     }
 
