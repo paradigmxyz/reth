@@ -249,7 +249,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
                 return Ok(())
             }
 
-            let (curr_path, curr_node) = self.curr.as_ref().expect("not None");
+            let (curr_path, _) = self.curr.as_ref().expect("not None");
             trace!(target: "trie::verify", account=?self.account, ?curr_path, ?path, "Current cursor node");
 
             // Use depth-first ordering for comparison
@@ -264,8 +264,9 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
                     // If the current path matches the given one (happy path) but the nodes
                     // aren't equal then we produce a wrong node. Either way we want to move the
                     // iterator forward.
-                    if *curr_node != node {
-                        outputs.push(self.output_wrong(path, node, curr_node.clone()))
+                    let (_, curr_node) = self.curr.take().expect("not None");
+                    if curr_node != node {
+                        outputs.push(self.output_wrong(path, node, curr_node))
                     }
                     self.curr = self.trie_iter.next().transpose()?;
                     return Ok(())
@@ -274,7 +275,8 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
                     // If the given path comes after the current path in depth-first order,
                     // it means the cursor's path was not found by the caller (otherwise it would
                     // have hit the equal case) and so is extraneous.
-                    outputs.push(self.output_extra(*curr_path, curr_node.clone()));
+                    let (curr_path, curr_node) = self.curr.take().expect("not None");
+                    outputs.push(self.output_extra(curr_path, curr_node));
                     self.curr = self.trie_iter.next().transpose()?;
                     // back to the top of the loop to check the latest `self.curr` value against the
                     // given path/node.
