@@ -96,6 +96,53 @@ pub trait Decode: Send + Sync + Sized + Debug {
     }
 }
 
+/// Trait for zero-copy encoding directly into a provided buffer.
+///
+/// This enables MDBX_RESERVE-style writes where we write directly into
+/// MDBX's memory-mapped pages, avoiding intermediate allocations.
+///
+/// For types where the in-memory representation equals the encoded bytes
+/// (e.g., `Address`, `B256`), implement this trait directly to avoid
+/// any intermediate copies. For other fixed-size types, use the blanket
+/// impl via [`EncodeIntoViaEncode`].
+pub trait EncodeInto: Send + Sync + Sized + Debug {
+    /// Returns the exact number of bytes needed to encode this value.
+    fn encoded_len(&self) -> usize;
+
+    /// Encodes `self` into the provided buffer.
+    ///
+    /// # Panics
+    /// May panic if `buf.len() < self.encoded_len()`.
+    fn encode_into(&self, buf: &mut [u8]);
+}
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+/// Marker trait for types that should use the `Encode` + copy fallback for `EncodeInto`.
+///
+/// Implement this for types where cloning is acceptable or unavoidable.
+/// For hot-path types with identity encoding (where in-memory bytes equal encoded bytes),
+/// implement `EncodeInto` directly instead.
+pub trait EncodeIntoViaEncode: sealed::Sealed + Send + Sync + Sized + Debug {}
+
+/// Blanket impl for types that opt into the `Encode` + copy fallback.
+impl<T, const N: usize> EncodeInto for T
+where
+    T: Encode<Encoded = [u8; N]> + EncodeIntoViaEncode + Copy,
+{
+    #[inline]
+    fn encoded_len(&self) -> usize {
+        N
+    }
+
+    #[inline]
+    fn encode_into(&self, buf: &mut [u8]) {
+        buf[..N].copy_from_slice((*self).encode().as_ref());
+    }
+}
+
 /// Generic trait that enforces the database key to implement [`Encode`] and [`Decode`].
 pub trait Key: Encode + Decode + Ord + Clone + Serialize + for<'a> Deserialize<'a> {}
 

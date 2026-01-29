@@ -447,6 +447,44 @@ impl Cursor<RW> {
         Ok(())
     }
 
+    /// Reserves space for a key/data pair in the database and returns a mutable slice
+    /// to the reserved space for the value. The caller must fill the entire buffer before
+    /// the next database operation.
+    ///
+    /// This enables zero-copy writes by allowing the caller to write directly into
+    /// MDBX's memory-mapped pages.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that:
+    /// - The returned buffer is completely filled before any other cursor/transaction operation
+    /// - The buffer is not used after the cursor is moved or the transaction ends
+    #[allow(clippy::mut_from_ref)]
+    pub unsafe fn reserve(&mut self, key: &[u8], len: usize, flags: WriteFlags) -> Result<&mut [u8]> {
+        let key_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let mut data_val: ffi::MDBX_val =
+            ffi::MDBX_val { iov_len: len, iov_base: ptr::null_mut::<c_void>() };
+        // SAFETY: We're calling mdbx_cursor_put with MDBX_RESERVE which returns a pointer
+        // to reserved space. The FFI calls are unsafe by nature.
+        unsafe {
+            mdbx_result(
+                self.txn.txn_execute(|_| {
+                    ffi::mdbx_cursor_put(
+                        self.cursor,
+                        &key_val,
+                        &mut data_val,
+                        flags.bits() | ffi::MDBX_RESERVE,
+                    )
+                })?,
+            )?;
+            Ok(std::slice::from_raw_parts_mut(
+                data_val.iov_base as *mut u8,
+                data_val.iov_len,
+            ))
+        }
+    }
+
     /// Deletes the current key/data pair.
     ///
     /// ### Flags

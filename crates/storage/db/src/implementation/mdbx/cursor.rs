@@ -74,19 +74,9 @@ where
     res.map_err(|e| DatabaseError::Read(e.into()))?.map(decoder::<T>).transpose()
 }
 
-/// Some types don't support compression (eg. B256), and we don't want to be copying them to the
-/// allocated buffer when we can just use their reference.
-macro_rules! compress_to_buf_or_ref {
-    ($self:expr, $value:expr) => {
-        if let Some(value) = $value.uncompressable_ref() {
-            Some(value)
-        } else {
-            $self.buf.clear();
-            $value.compress_to_buf(&mut $self.buf);
-            None
-        }
-    };
-}
+
+
+
 
 impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
     fn first(&mut self) -> PairResult<T> {
@@ -256,13 +246,46 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     /// found, before calling `upsert`.
     fn upsert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        let value = compress_to_buf_or_ref!(self, value);
+
+        // Check if we can use zero-copy reserve path
+        if let Some(value_ref) = value.uncompressable_ref() {
+            let value_len = value_ref.len();
+            return self.execute_with_operation_metric(
+                Operation::CursorUpsert,
+                Some(value_len),
+                |this| {
+                    // SAFETY: We fill the reserved buffer immediately and don't use it after
+                    unsafe {
+                        this.inner
+                            .reserve(key.as_ref(), value_len, WriteFlags::UPSERT)
+                            .map(|reserved| {
+                                reserved.copy_from_slice(value_ref);
+                            })
+                            .map_err(|e| {
+                                DatabaseWriteError {
+                                    info: e.into(),
+                                    operation: DatabaseWriteOperation::CursorUpsert,
+                                    table_name: T::NAME,
+                                    key: key.into_vec(),
+                                }
+                                .into()
+                            })
+                    }
+                },
+            );
+        }
+
+        // Fallback: compress to buffer then put
+        self.buf.clear();
+        value.compress_to_buf(&mut self.buf);
+        let value_len = self.buf.len();
+
         self.execute_with_operation_metric(
             Operation::CursorUpsert,
-            Some(value.unwrap_or(&self.buf).len()),
+            Some(value_len),
             |this| {
                 this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::UPSERT)
+                    .put(key.as_ref(), &this.buf, WriteFlags::UPSERT)
                     .map_err(|e| {
                         DatabaseWriteError {
                             info: e.into(),
@@ -278,13 +301,43 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
 
     fn insert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        let value = compress_to_buf_or_ref!(self, value);
+
+        if let Some(value_ref) = value.uncompressable_ref() {
+            let value_len = value_ref.len();
+            return self.execute_with_operation_metric(
+                Operation::CursorInsert,
+                Some(value_len),
+                |this| {
+                    unsafe {
+                        this.inner
+                            .reserve(key.as_ref(), value_len, WriteFlags::NO_OVERWRITE)
+                            .map(|reserved| {
+                                reserved.copy_from_slice(value_ref);
+                            })
+                            .map_err(|e| {
+                                DatabaseWriteError {
+                                    info: e.into(),
+                                    operation: DatabaseWriteOperation::CursorInsert,
+                                    table_name: T::NAME,
+                                    key: key.into_vec(),
+                                }
+                                .into()
+                            })
+                    }
+                },
+            );
+        }
+
+        self.buf.clear();
+        value.compress_to_buf(&mut self.buf);
+        let value_len = self.buf.len();
+
         self.execute_with_operation_metric(
             Operation::CursorInsert,
-            Some(value.unwrap_or(&self.buf).len()),
+            Some(value_len),
             |this| {
                 this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::NO_OVERWRITE)
+                    .put(key.as_ref(), &this.buf, WriteFlags::NO_OVERWRITE)
                     .map_err(|e| {
                         DatabaseWriteError {
                             info: e.into(),
@@ -302,13 +355,43 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     /// will fail if the inserted key is less than the last table key
     fn append(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        let value = compress_to_buf_or_ref!(self, value);
+
+        if let Some(value_ref) = value.uncompressable_ref() {
+            let value_len = value_ref.len();
+            return self.execute_with_operation_metric(
+                Operation::CursorAppend,
+                Some(value_len),
+                |this| {
+                    unsafe {
+                        this.inner
+                            .reserve(key.as_ref(), value_len, WriteFlags::APPEND)
+                            .map(|reserved| {
+                                reserved.copy_from_slice(value_ref);
+                            })
+                            .map_err(|e| {
+                                DatabaseWriteError {
+                                    info: e.into(),
+                                    operation: DatabaseWriteOperation::CursorAppend,
+                                    table_name: T::NAME,
+                                    key: key.into_vec(),
+                                }
+                                .into()
+                            })
+                    }
+                },
+            );
+        }
+
+        self.buf.clear();
+        value.compress_to_buf(&mut self.buf);
+        let value_len = self.buf.len();
+
         self.execute_with_operation_metric(
             Operation::CursorAppend,
-            Some(value.unwrap_or(&self.buf).len()),
+            Some(value_len),
             |this| {
                 this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND)
+                    .put(key.as_ref(), &this.buf, WriteFlags::APPEND)
                     .map_err(|e| {
                         DatabaseWriteError {
                             info: e.into(),
@@ -338,13 +421,43 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
 
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
-        let value = compress_to_buf_or_ref!(self, value);
+
+        if let Some(value_ref) = value.uncompressable_ref() {
+            let value_len = value_ref.len();
+            return self.execute_with_operation_metric(
+                Operation::CursorAppendDup,
+                Some(value_len),
+                |this| {
+                    unsafe {
+                        this.inner
+                            .reserve(key.as_ref(), value_len, WriteFlags::APPEND_DUP)
+                            .map(|reserved| {
+                                reserved.copy_from_slice(value_ref);
+                            })
+                            .map_err(|e| {
+                                DatabaseWriteError {
+                                    info: e.into(),
+                                    operation: DatabaseWriteOperation::CursorAppendDup,
+                                    table_name: T::NAME,
+                                    key: key.into_vec(),
+                                }
+                                .into()
+                            })
+                    }
+                },
+            );
+        }
+
+        self.buf.clear();
+        value.compress_to_buf(&mut self.buf);
+        let value_len = self.buf.len();
+
         self.execute_with_operation_metric(
             Operation::CursorAppendDup,
-            Some(value.unwrap_or(&self.buf).len()),
+            Some(value_len),
             |this| {
                 this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND_DUP)
+                    .put(key.as_ref(), &this.buf, WriteFlags::APPEND_DUP)
                     .map_err(|e| {
                         DatabaseWriteError {
                             info: e.into(),
@@ -368,7 +481,7 @@ mod tests {
     };
     use alloy_primitives::{address, Address, B256, U256};
     use reth_db_api::{
-        cursor::{DbCursorRO, DbDupCursorRW},
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
         models::{BlockNumberAddress, ClientVersion},
         table::TableImporter,
         transaction::{DbTx, DbTxMut},
@@ -462,6 +575,548 @@ mod tests {
         {
             assert_eq!(copied_key, expected_key);
             assert_eq!(copied_value, expected_value);
+        }
+    }
+
+    /// Tests that the zero-copy reserve path works correctly for B256 values.
+    /// B256 implements `uncompressable_ref()` returning Some, so it uses the reserve path.
+    #[test]
+    fn test_reserve_path_b256_roundtrip() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        // B256 values use the reserve path (uncompressable_ref returns Some)
+        let test_data: Vec<(u64, B256)> = vec![
+            (0, B256::ZERO),
+            (1, B256::with_last_byte(1)),
+            (100, B256::repeat_byte(0xab)),
+            (u64::MAX, B256::repeat_byte(0xff)),
+        ];
+
+        // Write using upsert (uses reserve path for B256)
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            for (key, value) in &test_data {
+                cursor.upsert(*key, value).unwrap();
+            }
+        }
+
+        // Read back and verify
+        {
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+            for (expected_key, expected_value) in &test_data {
+                let (key, value) = cursor.seek_exact(*expected_key).unwrap().unwrap();
+                assert_eq!(key, *expected_key);
+                assert_eq!(value, *expected_value);
+            }
+        }
+
+        tx.commit().unwrap();
+
+        // Verify again after commit
+        let tx = db.tx().unwrap();
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+        let all_entries: Vec<_> = cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(all_entries.len(), test_data.len());
+        for ((key, value), (expected_key, expected_value)) in all_entries.iter().zip(test_data.iter()) {
+            assert_eq!(key, expected_key);
+            assert_eq!(value, expected_value);
+        }
+    }
+
+    /// Tests insert operation with reserve path
+    #[test]
+    fn test_reserve_path_insert_roundtrip() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        let hash1 = B256::repeat_byte(0x11);
+        let hash2 = B256::repeat_byte(0x22);
+
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            cursor.insert(1, &hash1).unwrap();
+            cursor.insert(2, &hash2).unwrap();
+
+            // Insert with existing key should fail
+            assert!(cursor.insert(1, &hash2).is_err());
+        }
+
+        // Verify
+        {
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+            let (k1, v1) = cursor.seek_exact(1).unwrap().unwrap();
+            assert_eq!(k1, 1);
+            assert_eq!(v1, hash1);
+
+            let (k2, v2) = cursor.seek_exact(2).unwrap().unwrap();
+            assert_eq!(k2, 2);
+            assert_eq!(v2, hash2);
+        }
+    }
+
+    /// Tests append operation with reserve path
+    #[test]
+    fn test_reserve_path_append_roundtrip() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        let hashes: Vec<B256> = (0..10u8).map(|i| B256::repeat_byte(i)).collect();
+
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            for (i, hash) in hashes.iter().enumerate() {
+                cursor.append(i as u64, hash).unwrap();
+            }
+        }
+
+        // Verify all entries
+        {
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+            let entries: Vec<_> = cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+            assert_eq!(entries.len(), hashes.len());
+            for (i, (key, value)) in entries.iter().enumerate() {
+                assert_eq!(*key, i as u64);
+                assert_eq!(*value, hashes[i]);
+            }
+        }
+    }
+
+    /// Tests that DupSort append_dup works with reserve path
+    #[test]
+    fn test_reserve_path_append_dup_roundtrip() {
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        let addr = address!("0000000000000000000000000000000000000001");
+        let entries = vec![
+            StorageEntry { key: B256::with_last_byte(1), value: U256::from(100) },
+            StorageEntry { key: B256::with_last_byte(2), value: U256::from(200) },
+            StorageEntry { key: B256::with_last_byte(3), value: U256::from(300) },
+        ];
+
+        {
+            let mut cursor = tx.cursor_dup_write::<StorageChangeSets>().unwrap();
+            for entry in &entries {
+                cursor.append_dup(BlockNumberAddress((1, addr)), *entry).unwrap();
+            }
+        }
+
+        // Verify
+        {
+            let mut cursor = tx.cursor_dup_read::<StorageChangeSets>().unwrap();
+            let results: Vec<_> = cursor
+                .walk_dup(Some(BlockNumberAddress((1, addr))), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+
+            assert_eq!(results.len(), entries.len());
+            for ((_, value), expected) in results.iter().zip(entries.iter()) {
+                assert_eq!(value, expected);
+            }
+        }
+    }
+
+    /// Tests mixed operations to ensure reserve and non-reserve paths work together
+    #[test]
+    fn test_reserve_path_mixed_operations() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+
+        // First transaction: upsert
+        {
+            let tx = db.tx_mut().unwrap();
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            cursor.upsert(1, &B256::repeat_byte(0x11)).unwrap();
+            cursor.upsert(2, &B256::repeat_byte(0x22)).unwrap();
+            tx.commit().unwrap();
+        }
+
+        // Second transaction: upsert to update existing
+        {
+            let tx = db.tx_mut().unwrap();
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            cursor.upsert(1, &B256::repeat_byte(0xaa)).unwrap(); // Update
+            cursor.upsert(3, &B256::repeat_byte(0x33)).unwrap(); // New
+            tx.commit().unwrap();
+        }
+
+        // Verify final state
+        {
+            let tx = db.tx().unwrap();
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+            let (_, v1) = cursor.seek_exact(1).unwrap().unwrap();
+            assert_eq!(v1, B256::repeat_byte(0xaa)); // Updated
+
+            let (_, v2) = cursor.seek_exact(2).unwrap().unwrap();
+            assert_eq!(v2, B256::repeat_byte(0x22)); // Unchanged
+
+            let (_, v3) = cursor.seek_exact(3).unwrap().unwrap();
+            assert_eq!(v3, B256::repeat_byte(0x33)); // New
+        }
+    }
+
+    // ==================== ADVERSARIAL / EDGE CASE TESTS ====================
+
+    /// Test that transaction abort properly discards reserve-path writes
+    #[test]
+    fn test_reserve_path_transaction_abort() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+
+        // Write some initial data
+        {
+            let tx = db.tx_mut().unwrap();
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            cursor.upsert(1, &B256::repeat_byte(0x11)).unwrap();
+            tx.commit().unwrap();
+        }
+
+        // Start a transaction, write via reserve path, then DROP (abort)
+        {
+            let tx = db.tx_mut().unwrap();
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            cursor.upsert(1, &B256::repeat_byte(0xff)).unwrap(); // Overwrite
+            cursor.upsert(2, &B256::repeat_byte(0x22)).unwrap(); // New
+            // Drop tx without commit - should abort
+            drop(cursor);
+            drop(tx);
+        }
+
+        // Verify original data is unchanged
+        {
+            let tx = db.tx().unwrap();
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+            let (_, v1) = cursor.seek_exact(1).unwrap().unwrap();
+            assert_eq!(v1, B256::repeat_byte(0x11)); // Original, not 0xff
+
+            assert!(cursor.seek_exact(2).unwrap().is_none()); // Should not exist
+        }
+    }
+
+    /// Test rapid successive writes to same key via reserve path
+    #[test]
+    fn test_reserve_path_rapid_overwrites() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+
+            // Rapidly overwrite the same key many times
+            for i in 0..100u8 {
+                cursor.upsert(1, &B256::repeat_byte(i)).unwrap();
+            }
+        }
+
+        // Verify final value
+        {
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+            let (_, value) = cursor.seek_exact(1).unwrap().unwrap();
+            assert_eq!(value, B256::repeat_byte(99)); // Last write wins
+        }
+    }
+
+    /// Test interleaved reserve-path and fallback-path writes
+    #[test]
+    fn test_reserve_path_interleaved_with_compressable() {
+        use crate::tables::PlainAccountState;
+        use reth_primitives_traits::Account;
+
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        // Account uses Compact compression (fallback path)
+        // This tests that both paths work correctly when interleaved
+        let addr1 = Address::repeat_byte(0x11);
+        let addr2 = Address::repeat_byte(0x22);
+        let account1 = Account { nonce: 1, balance: U256::from(100), bytecode_hash: None };
+        let account2 = Account { nonce: 2, balance: U256::from(200), bytecode_hash: Some(B256::repeat_byte(0xab)) };
+
+        {
+            let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
+            cursor.upsert(addr1, &account1).unwrap();
+            cursor.upsert(addr2, &account2).unwrap();
+        }
+
+        // Verify
+        {
+            let mut cursor = tx.cursor_read::<PlainAccountState>().unwrap();
+            let (_, a1) = cursor.seek_exact(addr1).unwrap().unwrap();
+            assert_eq!(a1.nonce, 1);
+            assert_eq!(a1.balance, U256::from(100));
+
+            let (_, a2) = cursor.seek_exact(addr2).unwrap().unwrap();
+            assert_eq!(a2.nonce, 2);
+            assert_eq!(a2.bytecode_hash, Some(B256::repeat_byte(0xab)));
+        }
+    }
+
+    /// Test cursor reuse after multiple reserve-path operations
+    #[test]
+    fn test_reserve_path_cursor_reuse() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+
+        // Write, read, write, read pattern
+        cursor.upsert(1, &B256::repeat_byte(0x11)).unwrap();
+
+        // Read back using same cursor
+        let (k, v) = cursor.seek_exact(1).unwrap().unwrap();
+        assert_eq!(k, 1);
+        assert_eq!(v, B256::repeat_byte(0x11));
+
+        // Write again
+        cursor.upsert(2, &B256::repeat_byte(0x22)).unwrap();
+
+        // Overwrite first
+        cursor.upsert(1, &B256::repeat_byte(0xaa)).unwrap();
+
+        // Read all
+        let entries: Vec<_> = cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0], (1, B256::repeat_byte(0xaa)));
+        assert_eq!(entries[1], (2, B256::repeat_byte(0x22)));
+    }
+
+    /// Test boundary values for B256
+    #[test]
+    fn test_reserve_path_boundary_values() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        let boundary_values = vec![
+            B256::ZERO,
+            B256::repeat_byte(0xff), // All 1s
+            B256::with_last_byte(1),
+            B256::with_last_byte(0xff),
+            // Pattern that might cause issues if bytes are misaligned
+            B256::from_slice(&[
+                0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+                0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+                0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+            ]),
+        ];
+
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            for (i, value) in boundary_values.iter().enumerate() {
+                cursor.upsert(i as u64, value).unwrap();
+            }
+        }
+
+        // Verify each boundary value
+        {
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+            for (i, expected) in boundary_values.iter().enumerate() {
+                let (_, value) = cursor.seek_exact(i as u64).unwrap().unwrap();
+                assert_eq!(&value, expected, "Mismatch at index {i}");
+            }
+        }
+    }
+
+    /// Test that delete after reserve-path write works correctly
+    #[test]
+    fn test_reserve_path_write_then_delete() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+
+        // Write via reserve path
+        {
+            let tx = db.tx_mut().unwrap();
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            cursor.upsert(1, &B256::repeat_byte(0x11)).unwrap();
+            cursor.upsert(2, &B256::repeat_byte(0x22)).unwrap();
+            cursor.upsert(3, &B256::repeat_byte(0x33)).unwrap();
+            tx.commit().unwrap();
+        }
+
+        // Delete middle entry
+        {
+            let tx = db.tx_mut().unwrap();
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+            cursor.seek_exact(2).unwrap();
+            cursor.delete_current().unwrap();
+            tx.commit().unwrap();
+        }
+
+        // Verify
+        {
+            let tx = db.tx().unwrap();
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+            assert!(cursor.seek_exact(1).unwrap().is_some());
+            assert!(cursor.seek_exact(2).unwrap().is_none()); // Deleted
+            assert!(cursor.seek_exact(3).unwrap().is_some());
+        }
+    }
+
+    /// Test large number of entries to stress the reserve path
+    #[test]
+    fn test_reserve_path_stress_many_entries() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+        let num_entries = 1000u64;
+
+        // Write many entries
+        {
+            let tx = db.tx_mut().unwrap();
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+
+            for i in 0..num_entries {
+                let hash = B256::from(U256::from(i));
+                cursor.append(i, &hash).unwrap();
+            }
+            tx.commit().unwrap();
+        }
+
+        // Verify all entries
+        {
+            let tx = db.tx().unwrap();
+            let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+            let entries: Vec<_> = cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+            assert_eq!(entries.len(), num_entries as usize);
+
+            for (i, (key, value)) in entries.iter().enumerate() {
+                assert_eq!(*key, i as u64);
+                assert_eq!(*value, B256::from(U256::from(i as u64)));
+            }
+        }
+    }
+
+    /// Test concurrent-like access pattern (alternating read/write transactions)
+    #[test]
+    fn test_reserve_path_alternating_transactions() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+
+        for round in 0..10u8 {
+            // Write transaction
+            {
+                let tx = db.tx_mut().unwrap();
+                let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+                cursor.upsert(round as u64, &B256::repeat_byte(round)).unwrap();
+                tx.commit().unwrap();
+            }
+
+            // Read transaction - verify all entries up to this round
+            {
+                let tx = db.tx().unwrap();
+                let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+                for i in 0..=round {
+                    let (_, value) = cursor.seek_exact(i as u64).unwrap().unwrap();
+                    assert_eq!(value, B256::repeat_byte(i));
+                }
+            }
+        }
+    }
+
+    /// Test DupSort with many duplicates via reserve path
+    #[test]
+    fn test_reserve_path_dupsort_many_duplicates() {
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        let addr = address!("0000000000000000000000000000000000000001");
+        let num_dups = 100;
+
+        // Write many duplicates for same key
+        {
+            let mut cursor = tx.cursor_dup_write::<StorageChangeSets>().unwrap();
+            for i in 0..num_dups {
+                let entry = StorageEntry {
+                    key: B256::from(U256::from(i)),
+                    value: U256::from(i * 100),
+                };
+                cursor.append_dup(BlockNumberAddress((1, addr)), entry).unwrap();
+            }
+        }
+
+        // Verify all duplicates
+        {
+            let mut cursor = tx.cursor_dup_read::<StorageChangeSets>().unwrap();
+            let results: Vec<_> = cursor
+                .walk_dup(Some(BlockNumberAddress((1, addr))), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+
+            assert_eq!(results.len(), num_dups);
+            for (i, (_, entry)) in results.iter().enumerate() {
+                assert_eq!(entry.key, B256::from(U256::from(i as u64)));
+                assert_eq!(entry.value, U256::from(i as u64 * 100));
+            }
+        }
+    }
+
+    /// Test that insert fails correctly with reserve path when key exists
+    #[test]
+    fn test_reserve_path_insert_duplicate_key_fails() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+
+            // First insert succeeds
+            cursor.insert(1, &B256::repeat_byte(0x11)).unwrap();
+
+            // Second insert with same key should fail
+            let result = cursor.insert(1, &B256::repeat_byte(0x22));
+            assert!(result.is_err());
+
+            // Original value should be unchanged
+            let (_, value) = cursor.seek_exact(1).unwrap().unwrap();
+            assert_eq!(value, B256::repeat_byte(0x11));
+        }
+    }
+
+    /// Test append order enforcement with reserve path
+    #[test]
+    fn test_reserve_path_append_order_enforced() {
+        use crate::tables::CanonicalHeaders;
+
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+
+        {
+            let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+
+            // Append in order works
+            cursor.append(1, &B256::repeat_byte(0x11)).unwrap();
+            cursor.append(2, &B256::repeat_byte(0x22)).unwrap();
+            cursor.append(3, &B256::repeat_byte(0x33)).unwrap();
+
+            // Append out of order should fail (key 2 < last key 3)
+            let result = cursor.append(2, &B256::repeat_byte(0x44));
+            assert!(result.is_err());
         }
     }
 }

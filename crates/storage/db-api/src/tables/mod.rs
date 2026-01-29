@@ -24,7 +24,7 @@ use crate::{
         AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
         StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
-    table::{Decode, DupSort, Encode, Table, TableInfo},
+    table::{Decode, DupSort, Encode, EncodeInto, Table, TableInfo},
 };
 use alloy_consensus::Header;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
@@ -563,6 +563,21 @@ impl Decode for ChainStateKey {
             [1] => Ok(Self::LastSafeBlock),
             _ => Err(crate::DatabaseError::Decode),
         }
+    }
+}
+
+impl EncodeInto for ChainStateKey {
+    #[inline]
+    fn encoded_len(&self) -> usize {
+        1
+    }
+
+    #[inline]
+    fn encode_into(&self, buf: &mut [u8]) {
+        buf[0] = match self {
+            Self::LastFinalizedBlock => 0,
+            Self::LastSafeBlock => 1,
+        };
     }
 }
 

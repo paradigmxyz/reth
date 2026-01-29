@@ -8039,6 +8039,7 @@ dependencies = [
  "arbitrary",
  "arrayvec",
  "bytes",
+ "codspeed-criterion-compat",
  "derive_more",
  "metrics",
  "modular-bitfield",
