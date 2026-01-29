@@ -145,21 +145,45 @@ impl<P: FlashblockPayload> SequenceManager<P> {
     ) -> Option<SequenceBuildArgs<P>> {
         // Try to find a buildable sequence: (base, last_fb, transactions, cached_state,
         // source_name)
-        let (base, last_flashblock, transactions, cached_state, source_name) =
+        let (base, last_index, last_hash, last_state_root_zero, transactions, cached_state, source_name) =
             // Priority 1: Try current pending sequence
-            if let Some(base) = self.pending.payload_base().cloned().filter(|b| b.parent_hash() == local_tip_hash) {
+            if let Some(base) = self
+                .pending
+                .payload_base()
+                .cloned()
+                .filter(|b| b.parent_hash() == local_tip_hash)
+            {
                 let cached_state = self.pending.take_cached_reads().map(|r| (base.parent_hash(), r));
-                let last_fb = self.pending.last_flashblock()?.clone();
+                let last_fb = self.pending.last_flashblock()?;
                 let transactions = self.pending_transactions.clone();
-                (base, last_fb, transactions, cached_state, "pending")
+                (
+                    base,
+                    last_fb.index(),
+                    last_fb.diff().block_hash(),
+                    last_fb.diff().state_root().is_zero(),
+                    transactions,
+                    cached_state,
+                    "pending",
+                )
             }
             // Priority 2: Try cached sequence with exact parent match
-            else if let Some((cached, txs)) = self.completed_cache.iter().find(|(c, _)| c.payload_base().parent_hash() == local_tip_hash) {
+            else if let Some((cached, txs)) = self
+                .completed_cache
+                .iter()
+                .find(|(c, _)| c.payload_base().parent_hash() == local_tip_hash)
+            {
                 let base = cached.payload_base().clone();
-                let last_fb = cached.last().clone();
+                let last_fb = cached.last();
                 let transactions = txs.clone();
-                let cached_state = None;
-                (base, last_fb, transactions, cached_state, "cached")
+                (
+                    base,
+                    last_fb.index(),
+                    last_fb.diff().block_hash(),
+                    last_fb.diff().state_root().is_zero(),
+                    transactions,
+                    None,
+                    "cached",
+                )
             } else {
                 return None;
             };
@@ -195,17 +219,17 @@ impl<P: FlashblockPayload> SequenceManager<P> {
         let block_time_ms = (base.timestamp() - local_tip_timestamp) * 1000;
         let expected_final_flashblock = block_time_ms / FLASHBLOCK_BLOCK_TIME;
         let compute_state_root = self.compute_state_root &&
-            last_flashblock.diff().state_root().is_zero() &&
-            last_flashblock.index() >= expected_final_flashblock.saturating_sub(1);
+            last_state_root_zero &&
+            last_index >= expected_final_flashblock.saturating_sub(1);
 
         trace!(
             target: "flashblocks",
             block_number = base.block_number(),
             source = source_name,
-            flashblock_index = last_flashblock.index(),
+            flashblock_index = last_index,
             expected_final_flashblock,
             compute_state_root_enabled = self.compute_state_root,
-            state_root_is_zero = last_flashblock.diff().state_root().is_zero(),
+            state_root_is_zero = last_state_root_zero,
             will_compute_state_root = compute_state_root,
             "Building from flashblock sequence"
         );
@@ -214,8 +238,8 @@ impl<P: FlashblockPayload> SequenceManager<P> {
             base,
             transactions,
             cached_state,
-            last_flashblock_index: last_flashblock.index(),
-            last_flashblock_hash: last_flashblock.diff().block_hash(),
+            last_flashblock_index: last_index,
+            last_flashblock_hash: last_hash,
             compute_state_root,
         })
     }
