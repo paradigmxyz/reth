@@ -353,7 +353,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.prune_on_commit.is_some()
     }
 
-    /// Syncs all data (rows and offsets) to disk.
+    /// Syncs all data (rows, offsets, and changeset offsets sidecar) to disk.
     ///
     /// This does NOT commit the configuration. Call [`Self::finalize`] after to write the
     /// configuration and mark the writer as clean.
@@ -363,6 +363,17 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         if self.prune_on_commit.is_some() {
             return Err(StaticFileWriterError::FinalizeWithPruneQueued.into());
         }
+
+        // Write the final block's offset and sync the sidecar for changeset segments
+        if let Some(offset) = self.current_changeset_offset.take() &&
+            let Some(writer) = &mut self.changeset_offsets
+        {
+            writer.append(&offset).map_err(ProviderError::other)?;
+        }
+        if let Some(writer) = &mut self.changeset_offsets {
+            writer.sync().map_err(ProviderError::other)?;
+        }
+
         if self.writer.is_dirty() {
             self.writer.sync_all().map_err(ProviderError::other)?;
         }
@@ -422,15 +433,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             }
         }
 
-        // Write the final block's offset and sync sidecar for changeset segments
-        if let Some(offset) = self.current_changeset_offset.take() &&
-            let Some(writer) = &mut self.changeset_offsets
-        {
-            writer.append(&offset).map_err(ProviderError::other)?;
-        }
-        if let Some(writer) = &mut self.changeset_offsets {
-            writer.sync().map_err(ProviderError::other)?;
-        }
+        // Sync all data (rows, offsets, sidecar) before committing config
+        self.sync_all()?;
 
         if self.writer.is_dirty() {
             debug!(
