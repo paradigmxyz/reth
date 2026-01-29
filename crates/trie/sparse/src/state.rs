@@ -1007,12 +1007,13 @@ where
     ///
     /// # Effects
     ///
-    /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
+    /// NOTE: We do NOT clear `revealed_account_paths` or `revealed_paths` here.
+    /// Those track which paths have been revealed from the database, and clearing
+    /// them would cause cache misses and state root mismatches on subsequent blocks.
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
         if let Some(trie) = self.state.as_revealed_mut() {
             trie.prune(max_depth);
         }
-        self.revealed_account_paths.clear();
 
         let mut storage_trie_counts: Vec<(B256, usize)> = self
             .storage
@@ -1080,12 +1081,9 @@ where
             }
         }
 
-        // Clear revealed_paths for kept tries
-        for hash in &tries_to_keep {
-            if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
-                paths.clear();
-            }
-        }
+        // NOTE: We intentionally do NOT clear revealed_paths for kept tries.
+        // Those track which paths have been revealed from the database and must
+        // be preserved for correct cache behavior on subsequent blocks.
     }
 }
 
