@@ -36,7 +36,7 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Geth
-        run: .github/assets/install_geth.sh
+        run: .github/scripts/install_geth.sh
       - uses: taiki-e/install-action@nextest
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2

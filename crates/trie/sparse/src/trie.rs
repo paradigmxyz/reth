@@ -1,6 +1,7 @@
 use crate::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
+    LeafLookup, LeafLookupError, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieExt,
+    SparseTrieUpdates,
 };
 use alloc::{
     borrow::Cow,
@@ -12,7 +13,7 @@ use alloc::{
 };
 use alloy_primitives::{
     hex, keccak256,
-    map::{Entry, HashMap, HashSet},
+    map::{B256Map, Entry, HashMap, HashSet},
     B256,
 };
 use alloy_rlp::Decodable;
@@ -283,6 +284,35 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
                 trie.shrink_values_to(size);
             }
             _ => {}
+        }
+    }
+}
+
+impl<T: SparseTrieExt + Default> RevealableSparseTrie<T> {
+    /// Applies batch leaf updates to the sparse trie.
+    ///
+    /// For blind tries, all updates are kept in the map and proof targets are emitted
+    /// for every key (with `min_len = 0` since nothing is revealed).
+    ///
+    /// For revealed tries, delegates to the inner implementation which will:
+    /// - Apply updates where possible
+    /// - Keep blocked updates in the map
+    /// - Emit proof targets for blinded paths
+    pub fn update_leaves(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        mut proof_required_fn: impl FnMut(B256, u8),
+    ) -> SparseTrieResult<()> {
+        match self {
+            Self::Blind(_) => {
+                // Nothing is revealed - emit proof targets for all keys with min_len = 0
+                for key in updates.keys() {
+                    proof_required_fn(*key, 0);
+                }
+                // All updates remain in the map for retry after proofs are fetched
+                Ok(())
+            }
+            Self::Revealed(trie) => trie.update_leaves(updates, proof_required_fn),
         }
     }
 }

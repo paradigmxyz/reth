@@ -50,7 +50,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWri
 use std::{
     collections::BTreeMap,
     fmt::Debug,
-    ops::{Deref, Range, RangeBounds, RangeInclusive},
+    ops::{Bound, Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::{atomic::AtomicU64, mpsc, Arc},
     thread,
@@ -615,13 +615,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let block_number = block.recovered_block().number();
             let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
-            for account_block_reverts in reverts.accounts {
-                let changeset = account_block_reverts
-                    .into_iter()
-                    .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
-                    .collect::<Vec<_>>();
-                w.append_account_changeset(changeset, block_number)?;
-            }
+            let changeset: Vec<_> = reverts
+                .accounts
+                .into_iter()
+                .flatten()
+                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .collect();
+            w.append_account_changeset(changeset, block_number)?;
         }
         Ok(())
     }
@@ -636,21 +636,21 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let block_number = block.recovered_block().number();
             let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
-            for storage_block_reverts in reverts.storage {
-                let changeset = storage_block_reverts
-                    .into_iter()
-                    .flat_map(|revert| {
-                        revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
-                            StorageBeforeTx {
-                                address: revert.address,
-                                key: B256::new(key.to_be_bytes()),
-                                value: revert_to_slot.to_previous_value(),
-                            }
-                        })
+            let changeset: Vec<_> = reverts
+                .storage
+                .into_iter()
+                .flatten()
+                .flat_map(|revert| {
+                    revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
+                        StorageBeforeTx {
+                            address: revert.address,
+                            key: B256::new(key.to_be_bytes()),
+                            value: revert_to_slot.to_previous_value(),
+                        }
                     })
-                    .collect::<Vec<_>>();
-                w.append_storage_changeset(changeset, block_number)?;
-            }
+                })
+                .collect();
+            w.append_storage_changeset(changeset, block_number)?;
         }
         Ok(())
     }
@@ -1879,6 +1879,33 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.indexes.read().get(segment).map(|index| index.max_block)
     }
 
+    /// Converts a range to a bounded `RangeInclusive` capped to the highest static file block.
+    ///
+    /// This is necessary because static file iteration beyond the tip would loop forever:
+    /// blocks beyond the static file tip return `Ok(empty)` which is indistinguishable from
+    /// blocks with no changes. We cap the end to the highest available block regardless of
+    /// whether the input was unbounded or an explicit large value like `BlockNumber::MAX`.
+    fn bound_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        segment: StaticFileSegment,
+    ) -> RangeInclusive<BlockNumber> {
+        let highest_block = self.get_highest_static_file_block(segment).unwrap_or(0);
+
+        let start = match range.start_bound() {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) => n.saturating_add(1),
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&n) => n.min(highest_block),
+            Bound::Excluded(&n) => n.saturating_sub(1).min(highest_block),
+            Bound::Unbounded => highest_block,
+        };
+
+        start..=end
+    }
+
     /// Gets the highest static file transaction.
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
@@ -2354,6 +2381,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>> {
+        let range = self.bound_range(range, StaticFileSegment::AccountChangeSets);
         self.walk_account_changeset_range(range).collect()
     }
 
@@ -2471,8 +2499,9 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
 
     fn storage_changesets_range(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        let range = self.bound_range(range, StaticFileSegment::StorageChangeSets);
         self.walk_storage_changeset_range(range).collect()
     }
 
