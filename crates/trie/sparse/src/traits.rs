@@ -4,7 +4,7 @@ use core::fmt::Debug;
 
 use alloc::{borrow::Cow, vec, vec::Vec};
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256Map, HashMap, HashSet},
     B256,
 };
 use alloy_trie::BranchNodeCompact;
@@ -12,6 +12,17 @@ use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 
 use crate::provider::TrieNodeProvider;
+
+/// Describes an update to a leaf in the sparse trie.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeafUpdate {
+    /// The leaf value has been changed to the given RLP-encoded value.
+    /// Empty Vec indicates the leaf has been removed.
+    Changed(Vec<u8>),
+    /// The leaf value may have changed, but the new value is not yet known.
+    /// Used for optimistic prewarming when the actual value is unavailable.
+    Touched,
+}
 
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
@@ -230,6 +241,56 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Shrink the capacity of the sparse trie's value storage to the given size.
     /// This will reduce memory usage if the current capacity is higher than the given size.
     fn shrink_values_to(&mut self, size: usize);
+}
+
+/// Extension trait for sparse tries that support pruning.
+///
+/// This trait provides the `prune` method for sparse trie implementations that support
+/// converting nodes beyond a certain depth into hash stubs. This is useful for reducing
+/// memory usage when caching tries across payload validations.
+pub trait SparseTrieExt: SparseTrie {
+    /// Returns the number of revealed (non-Hash) nodes in the trie.
+    fn revealed_node_count(&self) -> usize;
+
+    /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
+    ///
+    /// Depth counts nodes traversed (not nibbles), so extension nodes count as 1 depth
+    /// regardless of key length. `max_depth == 0` prunes all children of the root node.
+    ///
+    /// # Preconditions
+    ///
+    /// Must be called after `root()` to ensure all nodes have computed hashes.
+    /// Calling on a trie without computed hashes will result in no pruning.
+    ///
+    /// # Behavior
+    ///
+    /// - Embedded nodes (RLP < 32 bytes) are preserved since they have no hash
+    /// - Returns 0 if `max_depth` exceeds trie depth or trie is empty
+    ///
+    /// # Returns
+    ///
+    /// The number of nodes converted to hash stubs.
+    fn prune(&mut self, max_depth: usize) -> usize;
+
+    /// Applies leaf updates to the sparse trie.
+    ///
+    /// When a [`LeafUpdate::Changed`] is successfully applied, it is removed from the
+    /// given [`B256Map`]. If it could not be applied due to blinded nodes, it remains
+    /// in the map and the callback is invoked with the required proof target.
+    ///
+    /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
+    /// `updates` map can be reused to retry the update.
+    ///
+    /// Proof targets are deduplicated by `(full_path, min_len)` across all calls to this method.
+    /// The callback will only be invoked once per unique target, even across retry loops.
+    /// A deeper blinded node (higher `min_len`) for the same path is considered a new target.
+    ///
+    /// [`LeafUpdate::Touched`] behaves identically except it does not modify the leaf value.
+    fn update_leaves(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        proof_required_fn: impl FnMut(Nibbles, u8),
+    ) -> SparseTrieResult<()>;
 }
 
 /// Tracks modifications to the sparse trie structure.
