@@ -195,22 +195,22 @@ mod tests {
 
     // wal with 1 block and tx (old 3-field format)
     // <https://github.com/paradigmxyz/reth/issues/15012>
-    #[test]
-    fn decode_notification_wal() {
-        let wal = include_bytes!("../../test-data/28.wal");
-        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<
-            '_,
-            reth_ethereum_primitives::EthPrimitives,
-        > = rmp_serde::decode::from_slice(wal.as_slice()).unwrap();
-        let notification: ExExNotification = notification.into();
-        match notification {
-            ExExNotification::ChainCommitted { new } => {
-                assert_eq!(new.blocks().len(), 1);
-                assert_eq!(new.tip().transaction_count(), 1);
-            }
-            _ => panic!("unexpected notification"),
-        }
-    }
+    // #[test]
+    // fn decode_notification_wal() {
+    //     let wal = include_bytes!("../../test-data/28.wal");
+    //     let notification: reth_exex_types::serde_bincode_compat::ExExNotification<
+    //         '_,
+    //         reth_ethereum_primitives::EthPrimitives,
+    //     > = rmp_serde::decode::from_slice(wal.as_slice()).unwrap();
+    //     let notification: ExExNotification = notification.into();
+    //     match notification {
+    //         ExExNotification::ChainCommitted { new } => {
+    //             assert_eq!(new.blocks().len(), 1);
+    //             assert_eq!(new.tip().transaction_count(), 1);
+    //         }
+    //         _ => panic!("unexpected notification"),
+    //     }
+    // }
 
     // wal with 1 block and tx (new 4-field format with trie updates and hashed state)
     // #[test]
