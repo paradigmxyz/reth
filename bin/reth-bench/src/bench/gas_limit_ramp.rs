@@ -1,24 +1,29 @@
 //! Benchmarks empty block processing by ramping the block gas limit.
+//!
+//! Uses `testing_buildBlockV1` to generate empty blocks, then modifies the gas limit
+//! in the header before submitting via `newPayload`.
 
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect,
-    bench::{
-        helpers::{build_payload, parse_gas_limit, prepare_payload_request, rpc_block_to_header},
-        output::GasRampPayloadFile,
-    },
+    bench::{helpers::parse_gas_limit, output::GasRampPayloadFile},
     valid_payload::{call_forkchoice_updated, call_new_payload, payload_to_new_payload},
 };
-use alloy_eips::BlockNumberOrTag;
+use alloy_eips::{eip4844::kzg_to_versioned_hash, BlockNumberOrTag};
+use alloy_primitives::{Address, B256};
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
-use alloy_rpc_types_engine::{ExecutionPayload, ForkchoiceState, JwtSecret};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionPayload, ExecutionPayloadEnvelopeV5, ExecutionPayloadSidecar,
+    ForkchoiceState, JwtSecret, PayloadAttributes, PraguePayloadFields,
+};
 
 use clap::Parser;
 use reqwest::Url;
-use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliContext;
 use reth_ethereum_primitives::TransactionSigned;
+use reth_node_api::EngineApiMessageVersion;
 use reth_primitives_traits::constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK};
+use reth_rpc_api::TestingBuildBlockRequestV1;
 use std::{path::PathBuf, time::Instant};
 use tracing::info;
 
@@ -90,7 +95,7 @@ impl Command {
             info!("Created output directory: {:?}", self.output);
         }
 
-        // Set up authenticated provider (used for both Engine API and eth_ methods)
+        // Set up authenticated provider (used for both Engine API and testing_buildBlockV1)
         let jwt = std::fs::read_to_string(&self.jwt_secret)?;
         let jwt = JwtSecret::from_hex(jwt)?;
         let auth_url = Url::parse(&self.engine_rpc_url)?;
@@ -100,11 +105,6 @@ impl Command {
         let client = ClientBuilder::default().connect_with(auth_transport).await?;
         let provider = RootProvider::<AnyNetwork>::new(client);
 
-        // Get chain spec - required for fork detection
-        let chain_id = provider.get_chain_id().await?;
-        let chain_spec = ChainSpec::from_chain_id(chain_id)
-            .ok_or_else(|| eyre::eyre!("Unsupported chain id: {chain_id}"))?;
-
         // Fetch the current head block as parent
         let parent_block = provider
             .get_block_by_number(BlockNumberOrTag::Latest)
@@ -112,9 +112,11 @@ impl Command {
             .await?
             .ok_or_else(|| eyre::eyre!("Failed to fetch latest block"))?;
 
-        let (mut parent_header, mut parent_hash) = rpc_block_to_header(parent_block);
+        let mut parent_hash = parent_block.header.hash;
+        let mut parent_timestamp = parent_block.header.inner.timestamp;
+        let mut parent_gas_limit = parent_block.header.inner.gas_limit;
 
-        let canonical_parent = parent_header.number;
+        let canonical_parent = parent_block.header.inner.number;
         let start_block = canonical_parent + 1;
 
         match mode {
@@ -130,7 +132,7 @@ impl Command {
                 info!(
                     canonical_parent,
                     start_block,
-                    current_gas_limit = parent_header.gas_limit,
+                    current_gas_limit = parent_gas_limit,
                     target_gas_limit = target,
                     "Starting gas limit ramp benchmark (target gas limit mode)"
                 );
@@ -140,33 +142,48 @@ impl Command {
         let mut blocks_processed = 0u64;
         let total_benchmark_duration = Instant::now();
 
-        while !should_stop(mode, blocks_processed, parent_header.gas_limit) {
-            let timestamp = parent_header.timestamp.saturating_add(1);
+        while !should_stop(mode, blocks_processed, parent_gas_limit) {
+            let timestamp = parent_timestamp.saturating_add(1);
 
-            let request = prepare_payload_request(&chain_spec, timestamp, parent_hash);
-            let new_payload_version = request.new_payload_version;
+            // Build empty block via testing_buildBlockV1
+            let request = TestingBuildBlockRequestV1 {
+                parent_block_hash: parent_hash,
+                payload_attributes: PayloadAttributes {
+                    timestamp,
+                    prev_randao: B256::ZERO,
+                    suggested_fee_recipient: Address::ZERO,
+                    withdrawals: Some(vec![]),
+                    parent_beacon_block_root: Some(B256::ZERO),
+                },
+                transactions: vec![],
+                extra_data: None,
+            };
 
-            let (payload, sidecar) = build_payload(&provider, request).await?;
+            let envelope: ExecutionPayloadEnvelopeV5 =
+                provider.client().request("testing_buildBlockV1", [request]).await?;
+
+            // Convert V5 envelope to payload + sidecar
+            let (payload, sidecar) = envelope_v5_to_payload_and_sidecar(envelope)?;
 
             let mut block =
                 payload.clone().try_into_block_with_sidecar::<TransactionSigned>(&sidecar)?;
 
-            let max_increase = max_gas_limit_increase(parent_header.gas_limit);
-            let gas_limit =
-                parent_header.gas_limit.saturating_add(max_increase).min(MAXIMUM_GAS_LIMIT_BLOCK);
+            // Calculate and apply maximum gas limit increase
+            let max_increase = max_gas_limit_increase(parent_gas_limit);
+            let new_gas_limit =
+                parent_gas_limit.saturating_add(max_increase).min(MAXIMUM_GAS_LIMIT_BLOCK);
 
-            block.header.gas_limit = gas_limit;
+            block.header.gas_limit = new_gas_limit;
 
+            // Recompute block hash with modified header
             let block_hash = block.header.hash_slow();
-            // Regenerate the payload from the modified block, but keep the original sidecar
-            // which contains the actual execution requests data (not just the hash)
             let (payload, _) = ExecutionPayload::from_block_unchecked(block_hash, &block);
             let (version, params) = payload_to_new_payload(
                 payload,
                 sidecar,
                 false,
                 block.header.withdrawals_root,
-                Some(new_payload_version),
+                Some(EngineApiMessageVersion::V4),
             )?;
 
             // Save payload to file with version info for replay
@@ -176,7 +193,7 @@ impl Command {
                 GasRampPayloadFile { version: version as u8, block_hash, params: params.clone() };
             let payload_json = serde_json::to_string_pretty(&file)?;
             std::fs::write(&payload_path, &payload_json)?;
-            info!(block_number = block.header.number, path = %payload_path.display(), "Saved payload");
+            info!(block_number = block.header.number, gas_limit = new_gas_limit, path = %payload_path.display(), "Saved payload");
 
             call_new_payload(&provider, version, params).await?;
 
@@ -187,16 +204,17 @@ impl Command {
             };
             call_forkchoice_updated(&provider, version, forkchoice_state, None).await?;
 
-            parent_header = block.header;
+            // Update parent state for next iteration
             parent_hash = block_hash;
+            parent_timestamp = timestamp;
+            parent_gas_limit = new_gas_limit;
             blocks_processed += 1;
         }
 
-        let final_gas_limit = parent_header.gas_limit;
         info!(
             total_duration=?total_benchmark_duration.elapsed(),
             blocks_processed,
-            final_gas_limit,
+            final_gas_limit = parent_gas_limit,
             "Benchmark complete"
         );
 
@@ -213,4 +231,25 @@ const fn should_stop(mode: RampMode, blocks_processed: u64, current_gas_limit: u
         RampMode::Blocks(target_blocks) => blocks_processed >= target_blocks,
         RampMode::TargetGasLimit(target) => current_gas_limit >= target,
     }
+}
+
+/// Convert a V5 execution payload envelope to payload and sidecar.
+fn envelope_v5_to_payload_and_sidecar(
+    envelope: ExecutionPayloadEnvelopeV5,
+) -> eyre::Result<(ExecutionPayload, ExecutionPayloadSidecar)> {
+    let versioned_hashes: Vec<B256> = envelope
+        .blobs_bundle
+        .commitments
+        .iter()
+        .map(|c| kzg_to_versioned_hash(c.as_ref()))
+        .collect();
+
+    let cancun_fields =
+        CancunPayloadFields { parent_beacon_block_root: B256::ZERO, versioned_hashes };
+    let prague_fields = PraguePayloadFields::new(envelope.execution_requests);
+
+    Ok((
+        ExecutionPayload::V3(envelope.execution_payload),
+        ExecutionPayloadSidecar::v4(cancun_fields, prague_fields),
+    ))
 }
