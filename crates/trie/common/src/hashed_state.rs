@@ -641,16 +641,29 @@ impl HashedPostStateSorted {
     /// For small batches, uses `extend_ref_and_sort` loop.
     /// For large batches, uses k-way merge for O(n log k) complexity.
     pub fn merge_batch<T: AsRef<Self> + From<Self>>(iter: impl IntoIterator<Item = T>) -> T {
+        let items: alloc::vec::Vec<_> = iter.into_iter().collect();
+        match items.len() {
+            0 => Self::default().into(),
+            1 => items.into_iter().next().expect("len == 1"),
+            _ => Self::merge_slice(&items).into(),
+        }
+    }
+
+    /// Batch-merge sorted hashed post states from a slice. Slice is **newest to oldest**.
+    ///
+    /// This variant takes a slice reference directly, avoiding iterator collection overhead.
+    /// For small batches, uses `extend_ref_and_sort` loop.
+    /// For large batches, uses k-way merge for O(n log k) complexity.
+    pub fn merge_slice<T: AsRef<Self>>(items: &[T]) -> Self {
         const THRESHOLD: usize = 30;
 
-        let items: alloc::vec::Vec<_> = iter.into_iter().collect();
         let k = items.len();
 
         if k == 0 {
-            return Self::default().into();
+            return Self::default();
         }
         if k == 1 {
-            return items.into_iter().next().expect("k == 1");
+            return items[0].as_ref().clone();
         }
 
         if k < THRESHOLD {
@@ -660,7 +673,7 @@ impl HashedPostStateSorted {
             for next in iter {
                 acc.extend_ref_and_sort(next.as_ref());
             }
-            return acc.into();
+            return acc;
         }
 
         // Large k: k-way merge.
@@ -674,7 +687,7 @@ impl HashedPostStateSorted {
 
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
 
-        for item in &items {
+        for item in items {
             for (addr, storage) in &item.as_ref().storages {
                 let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
                     wiped: false,
@@ -702,7 +715,7 @@ impl HashedPostStateSorted {
             })
             .collect();
 
-        Self { accounts, storages }.into()
+        Self { accounts, storages }
     }
 
     /// Clears all accounts and storage data.
