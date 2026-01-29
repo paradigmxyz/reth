@@ -1,6 +1,7 @@
 use crate::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
+    LeafLookup, LeafLookupError, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieExt,
+    SparseTrieUpdates,
 };
 use alloc::{
     borrow::Cow,
@@ -16,7 +17,7 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::Decodable;
-use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
+use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeCompact, BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef,
@@ -1098,6 +1099,104 @@ impl SparseTrieTrait for SerialSparseTrie {
     }
 }
 
+impl SparseTrieExt for SerialSparseTrie {
+    fn revealed_node_count(&self) -> usize {
+        self.nodes.iter().filter(|(_, n)| !n.is_hash()).count()
+    }
+
+    fn prune(&mut self, max_depth: usize) -> usize {
+        use alloc::collections::VecDeque;
+
+        let mut nodes_converted = 0;
+
+        let mut queue: VecDeque<(Nibbles, usize)> = VecDeque::new();
+        queue.push_back((Nibbles::default(), 0));
+
+        while let Some((path, depth)) = queue.pop_front() {
+            let Some(node) = self.nodes.get(&path).cloned() else {
+                continue;
+            };
+
+            match node {
+                SparseNode::Empty | SparseNode::Leaf { .. } | SparseNode::Hash(_) => {}
+                SparseNode::Extension { key, hash, .. } => {
+                    if depth >= max_depth {
+                        if let Some(h) = hash {
+                            self.nodes.insert(path, SparseNode::Hash(h));
+                            nodes_converted += 1;
+                            let mut child_path = path;
+                            child_path.extend(&key);
+                            self.remove_subtrie(&child_path);
+                        }
+                    } else {
+                        let mut child_path = path;
+                        child_path.extend(&key);
+                        queue.push_back((child_path, depth + 1));
+                    }
+                }
+                SparseNode::Branch { state_mask, hash, .. } => {
+                    if depth >= max_depth {
+                        if let Some(h) = hash {
+                            self.nodes.insert(path, SparseNode::Hash(h));
+                            nodes_converted += 1;
+                            for nibble in CHILD_INDEX_RANGE {
+                                if state_mask.is_bit_set(nibble) {
+                                    let mut child_path = path;
+                                    child_path.push_unchecked(nibble);
+                                    self.remove_subtrie(&child_path);
+                                }
+                            }
+                        }
+                    } else {
+                        for nibble in CHILD_INDEX_RANGE {
+                            if state_mask.is_bit_set(nibble) {
+                                let mut child_path = path;
+                                child_path.push_unchecked(nibble);
+                                queue.push_back((child_path, depth + 1));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        nodes_converted
+    }
+
+    fn update_leaves(
+        &mut self,
+        updates: &mut alloy_primitives::map::B256Map<LeafUpdate>,
+        mut proof_required_fn: impl FnMut(Nibbles, u8),
+    ) -> SparseTrieResult<()> {
+        use alloy_primitives::map::HashSet;
+
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        let mut requested: HashSet<(Nibbles, u8)> = HashSet::default();
+
+        let keys: Vec<_> = updates.keys().copied().collect();
+        for key in keys {
+            let full_path = Nibbles::unpack(key);
+            let update = updates.remove(&key).expect("key exists");
+
+            match self.apply_single_update(&full_path, update) {
+                Ok(()) => {}
+                Err((update, blinded_path)) => {
+                    let min_len = Self::compute_min_len(&blinded_path);
+                    if requested.insert((full_path, min_len)) {
+                        proof_required_fn(full_path, min_len);
+                    }
+                    updates.insert(key, update);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl SerialSparseTrie {
     /// Creates a new revealed sparse trie from the given root node.
     ///
@@ -1774,6 +1873,98 @@ impl SerialSparseTrie {
 
         debug_assert_eq!(buffers.rlp_node_stack.len(), 1);
         buffers.rlp_node_stack.pop().unwrap().rlp_node
+    }
+
+    /// Computes the `min_len` for a proof request from a blinded path.
+    fn compute_min_len(blinded_path: &Nibbles) -> u8 {
+        const MAX_NIBBLE_PATH_LEN: u8 = 64;
+        (blinded_path.len() as u8).min(MAX_NIBBLE_PATH_LEN)
+    }
+
+    /// Checks if an error is retriable (`BlindedNode`) and extracts the path if so.
+    const fn get_retriable_path(e: &SparseTrieError) -> Option<Nibbles> {
+        match e.kind() {
+            SparseTrieErrorKind::BlindedNode { path, .. } => Some(*path),
+            _ => None,
+        }
+    }
+
+    /// Applies a single leaf update.
+    ///
+    /// Returns `Ok(())` on success. On failure due to a blinded node, returns the original
+    /// update along with the blinded path so it can be re-inserted into the updates map.
+    fn apply_single_update(
+        &mut self,
+        full_path: &Nibbles,
+        update: LeafUpdate,
+    ) -> Result<(), (LeafUpdate, Nibbles)> {
+        use crate::provider::NoRevealProvider;
+
+        match update {
+            LeafUpdate::Changed(value) if value.is_empty() => {
+                let old_value = self.values.get(full_path).cloned();
+
+                match self.remove_leaf(full_path, NoRevealProvider) {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        if let Some(path) = Self::get_retriable_path(&e) {
+                            if let Some(old) = old_value {
+                                self.values.insert(*full_path, old);
+                            }
+                            Err((LeafUpdate::Changed(value), path))
+                        } else {
+                            Ok(())
+                        }
+                    }
+                }
+            }
+            LeafUpdate::Changed(value) => {
+                match self.update_leaf(*full_path, value.clone(), NoRevealProvider) {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        if let Some(path) = Self::get_retriable_path(&e) {
+                            Err((LeafUpdate::Changed(value), path))
+                        } else {
+                            Ok(())
+                        }
+                    }
+                }
+            }
+            LeafUpdate::Touched => match self.find_leaf(full_path, None) {
+                Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => Ok(()),
+                Err(LeafLookupError::BlindedNode { path, .. }) => Err((LeafUpdate::Touched, path)),
+            },
+        }
+    }
+
+    /// Recursively removes a subtrie rooted at the given path.
+    fn remove_subtrie(&mut self, path: &Nibbles) {
+        let Some(node) = self.nodes.remove(path) else {
+            return;
+        };
+
+        match node {
+            SparseNode::Empty | SparseNode::Hash(_) => {}
+            SparseNode::Leaf { key, .. } => {
+                let mut full = *path;
+                full.extend(&key);
+                self.values.remove(&full);
+            }
+            SparseNode::Extension { key, .. } => {
+                let mut child_path = *path;
+                child_path.extend(&key);
+                self.remove_subtrie(&child_path);
+            }
+            SparseNode::Branch { state_mask, .. } => {
+                for nibble in CHILD_INDEX_RANGE {
+                    if state_mask.is_bit_set(nibble) {
+                        let mut child_path = *path;
+                        child_path.push_unchecked(nibble);
+                        self.remove_subtrie(&child_path);
+                    }
+                }
+            }
+        }
     }
 }
 
