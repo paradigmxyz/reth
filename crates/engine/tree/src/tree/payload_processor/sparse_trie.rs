@@ -169,8 +169,8 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     /// Those are being moved into `account_updates` once storage roots
     /// are revealed and/or calculated.
     ///
-    /// Invariant: for each entry in `pending_account_updates` there is a corresponding
-    /// [`LeafUpdate::Touched`] entry in `account_updates`.
+    /// Invariant: for each entry in `pending_account_updates` account must either be already
+    /// revealed in the trie or have an entry in `account_updates`.
     ///
     /// Values can be either of:
     ///   - None: account had a storage update and is awaiting storage root calculation and/or
