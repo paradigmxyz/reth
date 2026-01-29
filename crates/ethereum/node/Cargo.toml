@@ -65,6 +65,7 @@ reth-stages-types.workspace = true
 tempfile.workspace = true
 jsonrpsee-core.workspace = true
 
+alloy-eip7928.workspace = true
 alloy-primitives.workspace = true
 alloy-provider.workspace = true
 alloy-genesis.workspace = true
