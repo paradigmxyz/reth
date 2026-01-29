@@ -154,3 +154,28 @@ Returns the storage at the given block height and transaction index. The result 
 | Client | Method invocation                                                                                 |
 | ------ | ------------------------------------------------------------------------------------------------- |
 | RPC    | `{"method": "debug_storageRangeAt", "params": [block_hash, tx_index, address, key_start, limit]}` |
+
+## `debug_chainConfig`
+
+Returns the current chain configuration.
+
+| Client | Method invocation                                |
+| ------ | ------------------------------------------------ |
+| RPC    | `{"method": "debug_chainConfig", "params": []}` |
+
+## `debug_codeByHash`
+
+Returns the code associated with a given code hash at the specified block ID. If no block ID is provided, it defaults to the latest block.
+
+| Client | Method invocation                                            |
+| ------ | ------------------------------------------------------------ |
+| RPC    | `{"method": "debug_codeByHash", "params": [hash, block_id]}` |
+
+## `debug_stateRootWithUpdates`
+
+Returns the state root of the `HashedPostState` on top of the state for the given block with trie updates.
+
+| Client | Method invocation                                                              |
+| ------ | ------------------------------------------------------------------------------ |
+| RPC    | `{"method": "debug_stateRootWithUpdates", "params": [hashed_state, block_id]}` |
+
