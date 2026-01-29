@@ -740,8 +740,20 @@ where
         if range.is_empty() {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
-            let (block_root, updates) = StateRoot::incremental_root_with_updates(provider, range)
+            // Load the hashed post state from the database for the unwind range
+            let hashed_state =
+                reth_trie::HashedPostStateSorted::from_reverts::<reth_trie::KeccakKeyHasher>(
+                    provider, range,
+                )
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
+
+            let prefix_sets = hashed_state.construct_prefix_sets().freeze();
+
+            // Use parallel state root computation for unwind
+            let (block_root, updates) =
+                ParallelStateRoot::new(self.overlay_factory.clone(), prefix_sets)
+                    .incremental_root_with_updates()
+                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             let target = provider
                 .header_by_number(input.unwind_to)?
