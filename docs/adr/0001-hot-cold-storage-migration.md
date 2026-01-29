@@ -79,7 +79,7 @@ We will deprecate legacy MDBX-only configurations and establish a clear timeline
 
 - [ ] Release hot/cold behind flag in v1.11.0 (due: w/c 2nd of Feb 2026)
 - [ ] Prepare snapshots infrastructure for external operators (due: w/c 26th of Jan 2026)
-- [ ] Draft deprecation announcement for external operators (due: w/c 26th of Jan 2026)
+- [x] Draft deprecation announcement for external operators (due: w/c 26th of Jan 2026)
 - [ ] Define Tempo internal cutover procedure (due: w/c 26th of Jan 2026)
 - [ ] Coordinate with pandaops on dashboard integration (due: w/c 9th of Feb 2026)
 - [ ] Finalize exact cutoff date (before Glamsterdam)
