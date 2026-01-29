@@ -253,7 +253,7 @@ where
                         }
                     };
 
-                    tracing::error!("received update: {:?}", update);
+                    tracing::debug!("received update: {:?}", update);
 
                     match update {
                         MultiProofMessage::PrefetchProofs(targets) => {
@@ -273,15 +273,15 @@ where
                 }
             }
 
-            tracing::error!("account updates: {:?}", self.account_updates);
-            tracing::error!("storage updates: {:?}", self.storage_updates);
-            tracing::error!("pending account updates: {:?}", self.pending_account_updates);
+            tracing::debug!("account updates: {:?}", self.account_updates);
+            tracing::debug!("storage updates: {:?}", self.storage_updates);
+            tracing::debug!("pending account updates: {:?}", self.pending_account_updates);
 
             self.process_updates()?;
 
-            tracing::error!("account updates after: {:?}", self.account_updates);
-            tracing::error!("storage updates after: {:?}", self.storage_updates);
-            tracing::error!("pending account updates after: {:?}", self.pending_account_updates);
+            tracing::debug!("account updates after: {:?}", self.account_updates);
+            tracing::debug!("storage updates after: {:?}", self.storage_updates);
+            tracing::debug!("pending account updates after: {:?}", self.pending_account_updates);
 
             if finished_state_updates &&
                 self.account_updates.is_empty() &&
@@ -485,7 +485,7 @@ where
             false
         });
 
-        tracing::error!("applying account updates: {:?}", self.account_updates);
+        tracing::debug!("applying account updates: {:?}", self.account_updates);
         // Process account trie updates and fill the account targets.
         self.trie
             .trie_mut()
@@ -494,7 +494,7 @@ where
             })
             .map_err(ProviderError::other)?;
 
-        tracing::error!("dispatching account multiproof with targets: {:?}", targets);
+        tracing::debug!("dispatching account multiproof with targets: {:?}", targets);
         if !targets.is_empty() {
             self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput::V2 {
                 targets,

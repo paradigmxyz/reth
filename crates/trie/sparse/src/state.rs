@@ -480,7 +480,7 @@ where
         let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values: _metric_values } =
             filter_revealed_v2_proof_nodes(nodes, &mut self.revealed_account_paths)?;
 
-        tracing::error!("revealed account paths: {:?}", self.revealed_account_paths);
+        tracing::debug!("revealed account paths: {:?}", self.revealed_account_paths);
 
         #[cfg(feature = "metrics")]
         {
