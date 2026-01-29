@@ -6,7 +6,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::Decodable;
 use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
-use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
+use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
@@ -301,14 +301,30 @@ impl SparseTrie for ParallelSparseTrie {
         value: Vec<u8>,
         provider: P,
     ) -> SparseTrieResult<()> {
-        self.prefix_set.insert(full_path);
-        let existing = self.upper_subtrie.inner.values.insert(full_path, value.clone());
-        if existing.is_some() {
-            // upper trie structure unchanged, return immediately
-            return Ok(())
+        // Check if the value already exists - if so, just update it (no structural changes needed)
+        if self.upper_subtrie.inner.values.contains_key(&full_path) {
+            self.prefix_set.insert(full_path);
+            self.upper_subtrie.inner.values.insert(full_path, value);
+            return Ok(());
+        }
+        // Also check lower subtries for existing value
+        if let Some(subtrie) = self.lower_subtrie_for_path(&full_path) &&
+            subtrie.inner.values.contains_key(&full_path)
+        {
+            self.prefix_set.insert(full_path);
+            self.lower_subtrie_for_path_mut(&full_path)
+                .expect("subtrie exists")
+                .inner
+                .values
+                .insert(full_path, value);
+            return Ok(());
         }
 
         let retain_updates = self.updates_enabled();
+
+        // Insert value into upper subtrie temporarily. We'll move it to the correct subtrie
+        // during traversal, or clean it up if we error.
+        self.upper_subtrie.inner.values.insert(full_path, value.clone());
 
         // Start at the root, traversing until we find either the node to update or a subtrie to
         // update.
@@ -330,7 +346,16 @@ impl SparseTrie for ParallelSparseTrie {
         {
             // Traverse the next node, keeping track of any changed nodes and the next step in the
             // trie
-            match self.upper_subtrie.update_next_node(current, &full_path, retain_updates)? {
+            let step_result =
+                self.upper_subtrie.update_next_node(current, &full_path, retain_updates);
+
+            // If traversal fails, clean up the value we inserted and propagate the error
+            if step_result.is_err() {
+                self.upper_subtrie.inner.values.remove(&full_path);
+                return step_result.map(|_| ());
+            }
+
+            match step_result? {
                 LeafUpdateStep::Continue { next_node } => {
                     next = Some(next_node);
                 }
@@ -351,10 +376,22 @@ impl SparseTrie for ParallelSparseTrie {
                                 leaf_full_path = ?full_path,
                                 "Extension node child not revealed in update_leaf, falling back to db",
                             );
-                            if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                provider.trie_node(&reveal_path)?
+                            let revealed_node = match provider.trie_node(&reveal_path) {
+                                Ok(node) => node,
+                                Err(e) => {
+                                    self.upper_subtrie.inner.values.remove(&full_path);
+                                    return Err(e);
+                                }
+                            };
+                            if let Some(RevealedNode { node, tree_mask, hash_mask }) = revealed_node
                             {
-                                let decoded = TrieNode::decode(&mut &node[..])?;
+                                let decoded = match TrieNode::decode(&mut &node[..]) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        self.upper_subtrie.inner.values.remove(&full_path);
+                                        return Err(e.into());
+                                    }
+                                };
                                 trace!(
                                     target: "trie::parallel_sparse",
                                     ?reveal_path,
@@ -364,9 +401,13 @@ impl SparseTrie for ParallelSparseTrie {
                                     "Revealing child (from upper)",
                                 );
                                 let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
-                                subtrie.reveal_node(reveal_path, &decoded, masks)?;
+                                if let Err(e) = subtrie.reveal_node(reveal_path, &decoded, masks) {
+                                    self.upper_subtrie.inner.values.remove(&full_path);
+                                    return Err(e);
+                                }
                                 masks
                             } else {
+                                self.upper_subtrie.inner.values.remove(&full_path);
                                 return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
                                     path: reveal_path,
                                 }
@@ -448,12 +489,23 @@ impl SparseTrie for ParallelSparseTrie {
 
             // If we didn't update the target leaf, we need to call update_leaf on the subtrie
             // to ensure that the leaf is updated correctly.
-            if let Some((revealed_path, revealed_masks)) =
-                subtrie.update_leaf(full_path, value, provider, retain_updates)?
-            {
-                self.branch_node_masks.insert(revealed_path, revealed_masks);
+            match subtrie.update_leaf(full_path, value, provider, retain_updates) {
+                Ok(Some((revealed_path, revealed_masks))) => {
+                    self.branch_node_masks.insert(revealed_path, revealed_masks);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    // Clean up: remove the value from lower subtrie if it was inserted
+                    if let Some(lower) = self.lower_subtrie_for_path_mut(&full_path) {
+                        lower.inner.values.remove(&full_path);
+                    }
+                    return Err(e);
+                }
             }
         }
+
+        // Insert into prefix_set only after all operations succeed
+        self.prefix_set.insert(full_path);
 
         Ok(())
     }
@@ -479,7 +531,7 @@ impl SparseTrie for ParallelSparseTrie {
         // and grandparent.
 
         let leaf_path;
-        let leaf_subtrie;
+        let leaf_subtrie_type;
 
         let mut branch_parent_path: Option<Nibbles> = None;
         let mut branch_parent_node: Option<SparseNode> = None;
@@ -488,13 +540,18 @@ impl SparseTrie for ParallelSparseTrie {
         let mut ext_grandparent_node: Option<SparseNode> = None;
 
         let mut curr_path = Nibbles::new(); // start traversal from root
-        let mut curr_subtrie = self.upper_subtrie.as_mut();
-        let mut curr_subtrie_is_upper = true;
+        let mut curr_subtrie_type = SparseSubtrieType::Upper;
 
         // List of node paths which need to have their hashes reset
         let mut paths_to_reset_hashes = Vec::new();
 
         loop {
+            let curr_subtrie = match curr_subtrie_type {
+                SparseSubtrieType::Upper => &mut self.upper_subtrie,
+                SparseSubtrieType::Lower(idx) => {
+                    self.lower_subtries[idx].as_revealed_mut().expect("lower subtrie is revealed")
+                }
+            };
             let curr_node = curr_subtrie.nodes.get_mut(&curr_path).unwrap();
 
             match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
@@ -505,7 +562,7 @@ impl SparseTrie for ParallelSparseTrie {
                 FindNextToLeafOutcome::Found => {
                     // this node is the target leaf
                     leaf_path = curr_path;
-                    leaf_subtrie = curr_subtrie;
+                    leaf_subtrie_type = curr_subtrie_type;
                     break;
                 }
                 FindNextToLeafOutcome::ContinueFrom(next_path) => {
@@ -551,24 +608,53 @@ impl SparseTrie for ParallelSparseTrie {
 
                     curr_path = next_path;
 
-                    // If we were previously looking at the upper trie, and the new path is in the
-                    // lower trie, we need to pull out a ref to the lower trie.
-                    if curr_subtrie_is_upper &&
-                        let SparseSubtrieType::Lower(idx) =
-                            SparseSubtrieType::from_path(&curr_path)
+                    // Update subtrie type if we're crossing into the lower trie.
+                    let next_subtrie_type = SparseSubtrieType::from_path(&curr_path);
+                    if matches!(curr_subtrie_type, SparseSubtrieType::Upper) &&
+                        matches!(next_subtrie_type, SparseSubtrieType::Lower(_))
                     {
-                        curr_subtrie = self.lower_subtries[idx]
-                            .as_revealed_mut()
-                            .expect("lower subtrie is revealed");
-                        curr_subtrie_is_upper = false;
+                        curr_subtrie_type = next_subtrie_type;
                     }
                 }
             };
         }
 
+        // Before mutating, check if branch collapse would require revealing a blinded node.
+        // This ensures remove_leaf is atomic: if it errors, the trie is unchanged.
+        if let (Some(branch_path), Some(SparseNode::Branch { state_mask, .. })) =
+            (&branch_parent_path, &branch_parent_node)
+        {
+            let mut check_mask = *state_mask;
+            let child_nibble = leaf_path.get_unchecked(branch_path.len());
+            check_mask.unset_bit(child_nibble);
+
+            if check_mask.count_bits() == 1 {
+                // Branch will collapse - check if remaining child needs revealing
+                let remaining_child_path = {
+                    let mut p = *branch_path;
+                    p.push_unchecked(
+                        check_mask.first_set_bit_index().expect("state mask is not empty"),
+                    );
+                    p
+                };
+
+                // Pre-validate the entire reveal chain (including extension grandchildren).
+                // This check mirrors the logic in `reveal_remaining_child_on_leaf_removal` with
+                // `recurse_into_extension: true` to ensure all nodes that would be revealed
+                // are accessible before any mutations occur.
+                self.pre_validate_reveal_chain(&remaining_child_path, &provider)?;
+            }
+        }
+
         // We've traversed to the leaf and collected its ancestors as necessary. Remove the leaf
         // from its SparseSubtrie and reset the hashes of the nodes along the path.
         self.prefix_set.insert(*full_path);
+        let leaf_subtrie = match leaf_subtrie_type {
+            SparseSubtrieType::Upper => &mut self.upper_subtrie,
+            SparseSubtrieType::Lower(idx) => {
+                self.lower_subtries[idx].as_revealed_mut().expect("lower subtrie is revealed")
+            }
+        };
         leaf_subtrie.inner.values.remove(full_path);
         for (subtrie_type, path) in paths_to_reset_hashes {
             let node = match subtrie_type {
@@ -1062,6 +1148,103 @@ impl SparseTrieExt for ParallelSparseTrie {
 
         nodes_converted
     }
+
+    fn update_leaves(
+        &mut self,
+        updates: &mut alloy_primitives::map::B256Map<reth_trie_sparse::LeafUpdate>,
+        mut proof_required_fn: impl FnMut(Nibbles, u8),
+    ) -> SparseTrieResult<()> {
+        use alloy_primitives::map::HashSet;
+        use reth_trie_sparse::LeafUpdate;
+
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        // Drain updates into a vec, converting B256 keys to Nibbles paths and determining which
+        // subtrie each belongs to. Sort by (subtrie_type, path) to group operations for efficient
+        // batch processing.
+        let mut ops: Vec<(B256, Nibbles, SparseSubtrieType, LeafUpdate)> = updates
+            .drain()
+            .map(|(key, update)| {
+                let full_path = Nibbles::unpack(key);
+                let subtrie = SparseSubtrieType::from_path(&full_path);
+                (key, full_path, subtrie, update)
+            })
+            .collect();
+
+        ops.sort_unstable_by(|(_, path_a, subtrie_a, _), (_, path_b, subtrie_b, _)| {
+            subtrie_a.cmp(subtrie_b).then(path_a.cmp(path_b))
+        });
+
+        // Split into upper (short paths) and lower (long paths) subtrie operations.
+        let num_upper = ops
+            .iter()
+            .position(|(_, path, _, _)| !SparseSubtrieType::path_len_is_upper(path.len()))
+            .unwrap_or(ops.len());
+
+        // Split off lower subtrie ops, consuming the vec to avoid clones.
+        let lower_ops = ops.split_off(num_upper);
+
+        // Track deduplicated proof requests.
+        let mut requested: HashSet<(Nibbles, u8)> = HashSet::default();
+
+        // Process upper subtrie operations sequentially.
+        for (key, full_path, _, update) in ops {
+            match self.apply_single_update(&full_path, update) {
+                Ok(()) => {}
+                Err((update, UpdateLeafOutcome::Blinded { blinded_path })) => {
+                    let min_len = Self::compute_min_len(&blinded_path);
+                    if requested.insert((full_path, min_len)) {
+                        proof_required_fn(full_path, min_len);
+                    }
+                    updates.insert(key, update);
+                }
+                Err((_, UpdateLeafOutcome::Fatal(e))) => return Err(e),
+            }
+        }
+
+        if lower_ops.is_empty() {
+            return Ok(());
+        }
+
+        // Partition: Touched (read-only, parallelizable) vs Changed (mutating, sequential).
+        let (touched_ops, changed_ops): (Vec<_>, Vec<_>) = lower_ops
+            .into_iter()
+            .partition(|(_, _, _, update)| matches!(update, LeafUpdate::Touched));
+
+        let touched_failures = self.process_touched_ops_parallel(&touched_ops);
+        for (key, full_path, min_len) in touched_failures {
+            if requested.insert((full_path, min_len)) {
+                proof_required_fn(full_path, min_len);
+            }
+            updates.insert(key, LeafUpdate::Touched);
+        }
+
+        for (key, full_path, _, update) in changed_ops {
+            match self.apply_single_update(&full_path, update) {
+                Ok(()) => {}
+                Err((update, UpdateLeafOutcome::Blinded { blinded_path })) => {
+                    let min_len = Self::compute_min_len(&blinded_path);
+                    if requested.insert((full_path, min_len)) {
+                        proof_required_fn(full_path, min_len);
+                    }
+                    updates.insert(key, update);
+                }
+                Err((_, UpdateLeafOutcome::Fatal(e))) => return Err(e),
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Outcome of attempting to apply a single leaf update
+enum UpdateLeafOutcome {
+    /// Operation hit a blinded node
+    Blinded { blinded_path: Nibbles },
+    /// Fatal error that should be propagated
+    Fatal(reth_execution_errors::SparseTrieError),
 }
 
 impl ParallelSparseTrie {
@@ -1092,6 +1275,116 @@ impl ParallelSparseTrie {
         return false;
 
         num_changed_keys >= self.parallelism_thresholds.min_updated_nodes
+    }
+
+    /// Computes the `min_len` for a proof request from a blinded path.
+    fn compute_min_len(blinded_path: &Nibbles) -> u8 {
+        const MAX_NIBBLE_PATH_LEN: u8 = 64;
+        (blinded_path.len() as u8).min(MAX_NIBBLE_PATH_LEN)
+    }
+
+    /// Checks if an error is retriable (`BlindedNode` or `NodeNotFoundInProvider`) and extracts
+    /// the path if so.
+    const fn get_retriable_path(e: &SparseTrieError) -> Option<Nibbles> {
+        match e.kind() {
+            SparseTrieErrorKind::BlindedNode { path, .. } |
+            SparseTrieErrorKind::NodeNotFoundInProvider { path } => Some(*path),
+            _ => None,
+        }
+    }
+
+    /// Applies a single leaf update, taking ownership of the update.
+    ///
+    /// Returns `Ok(())` on success. On failure, returns the original update along with
+    /// the outcome so it can be re-inserted into the updates map without cloning.
+    fn apply_single_update(
+        &mut self,
+        full_path: &Nibbles,
+        update: reth_trie_sparse::LeafUpdate,
+    ) -> Result<(), (reth_trie_sparse::LeafUpdate, UpdateLeafOutcome)> {
+        use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
+
+        match update {
+            LeafUpdate::Changed(value) if value.is_empty() => {
+                let (old_value, value_in_lower) = if let Some(subtrie) =
+                    self.lower_subtrie_for_path(full_path) &&
+                    !subtrie.is_empty()
+                {
+                    (subtrie.inner.values.get(full_path).cloned(), true)
+                } else {
+                    (self.upper_subtrie.inner.values.get(full_path).cloned(), false)
+                };
+
+                match self.remove_leaf(full_path, NoRevealProvider) {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        if let Some(path) = Self::get_retriable_path(&e) {
+                            if let Some(old) = old_value {
+                                if value_in_lower {
+                                    if let Some(subtrie) =
+                                        self.lower_subtrie_for_path_mut(full_path)
+                                    {
+                                        subtrie.inner.values.insert(*full_path, old);
+                                    }
+                                } else {
+                                    self.upper_subtrie.inner.values.insert(*full_path, old);
+                                }
+                            }
+                            Err((
+                                LeafUpdate::Changed(value),
+                                UpdateLeafOutcome::Blinded { blinded_path: path },
+                            ))
+                        } else {
+                            Err((LeafUpdate::Changed(value), UpdateLeafOutcome::Fatal(e)))
+                        }
+                    }
+                }
+            }
+            LeafUpdate::Changed(value) => {
+                match self.update_leaf(*full_path, value.clone(), NoRevealProvider) {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        if let Some(path) = Self::get_retriable_path(&e) {
+                            Err((
+                                LeafUpdate::Changed(value),
+                                UpdateLeafOutcome::Blinded { blinded_path: path },
+                            ))
+                        } else {
+                            Err((LeafUpdate::Changed(value), UpdateLeafOutcome::Fatal(e)))
+                        }
+                    }
+                }
+            }
+            LeafUpdate::Touched => match self.find_leaf(full_path, None) {
+                Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => Ok(()),
+                Err(LeafLookupError::BlindedNode { path, .. }) => {
+                    Err((LeafUpdate::Touched, UpdateLeafOutcome::Blinded { blinded_path: path }))
+                }
+            },
+        }
+    }
+
+    /// Process Touched operations, returning `(key, full_path, min_len)` for blinded failures.
+    fn process_touched_ops_parallel(
+        &self,
+        touched_ops: &[(B256, Nibbles, SparseSubtrieType, reth_trie_sparse::LeafUpdate)],
+    ) -> Vec<(B256, Nibbles, u8)> {
+        let check_leaf = |(key, full_path, _, _): &(B256, Nibbles, _, _)| match self
+            .find_leaf(full_path, None)
+        {
+            Err(LeafLookupError::BlindedNode { path, .. }) => {
+                Some((*key, *full_path, Self::compute_min_len(&path)))
+            }
+            Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => None,
+        };
+
+        #[cfg(feature = "std")]
+        if touched_ops.len() >= self.parallelism_thresholds.min_updated_nodes {
+            use rayon::iter::{IntoParallelIterator, ParallelIterator};
+            return touched_ops.into_par_iter().filter_map(check_leaf).collect();
+        }
+
+        touched_ops.iter().filter_map(check_leaf).collect()
     }
 
     /// Creates a new revealed sparse trie from the given root node.
@@ -1393,6 +1686,53 @@ impl ParallelSparseTrie {
             }
             // For a branch node, we just leave the extension node as-is.
             SparseNode::Branch { .. } => None,
+        }
+    }
+
+    /// Pre-validates that all nodes in a reveal chain are accessible before mutations.
+    ///
+    /// This mirrors the reveal logic in `reveal_remaining_child_on_leaf_removal` with
+    /// `recurse_into_extension: true`, checking that:
+    /// 1. The immediate child can be revealed (if blinded)
+    /// 2. If it reveals to an extension, the grandchild can also be revealed
+    ///
+    /// Returns an error if any node in the chain would fail to reveal.
+    fn pre_validate_reveal_chain<P: TrieNodeProvider>(
+        &self,
+        path: &Nibbles,
+        provider: &P,
+    ) -> SparseTrieResult<()> {
+        let subtrie = match self.subtrie_for_path(path) {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+
+        match subtrie.nodes.get(path) {
+            Some(SparseNode::Hash(hash)) => {
+                // Node is blinded - check if provider can reveal it
+                match provider.trie_node(path)? {
+                    Some(RevealedNode { node, .. }) => {
+                        // If it reveals to an extension, recursively check the grandchild
+                        let decoded = TrieNode::decode(&mut &node[..])?;
+                        if let TrieNode::Extension(ext) = decoded {
+                            let mut grandchild_path = *path;
+                            grandchild_path.extend(&ext.key);
+                            return self.pre_validate_reveal_chain(&grandchild_path, provider);
+                        }
+                        Ok(())
+                    }
+                    None => {
+                        Err(SparseTrieErrorKind::BlindedNode { path: *path, hash: *hash }.into())
+                    }
+                }
+            }
+            Some(SparseNode::Extension { key, .. }) => {
+                // Extension already revealed - check its child
+                let mut child_path = *path;
+                child_path.extend(key);
+                self.pre_validate_reveal_chain(&child_path, provider)
+            }
+            _ => Ok(()),
         }
     }
 
@@ -7679,5 +8019,616 @@ mod tests {
 
         // The trie should still be functional
         let _ = trie.root();
+    }
+
+    // ==================== update_leaves tests ====================
+
+    #[test]
+    fn test_update_leaves_successful_update() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create a leaf in the trie using a full-length key
+        let b256_key = B256::with_last_byte(42);
+        let key = Nibbles::unpack(b256_key);
+        let value = encode_account_value(1);
+        trie.update_leaf(key, value, &provider).unwrap();
+
+        // Create update map with a new value for the same key
+        let new_value = encode_account_value(2);
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Changed(new_value));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Update should succeed: map empty, callback not invoked
+        assert!(updates.is_empty(), "Update map should be empty after successful update");
+        assert!(
+            proof_targets.borrow().is_empty(),
+            "Callback should not be invoked for revealed paths"
+        );
+    }
+
+    #[test]
+    fn test_update_leaves_blinded_node() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        // Create a trie with a blinded node
+        // Use a small value that fits in RLP encoding
+        let small_value = alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec();
+        let leaf = LeafNode::new(
+            Nibbles::default(), // short key for RLP encoding
+            small_value,
+        );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)), // blinded child at 0
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut trie = ParallelSparseTrie::from_root(
+            branch.clone(),
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::new(0b01),
+                tree_mask: TrieMask::default(),
+            }),
+            false,
+        )
+        .unwrap();
+
+        // Reveal only the branch and one child, leaving child 0 as a Hash node
+        trie.reveal_node(
+            Nibbles::default(),
+            branch,
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::default(),
+                tree_mask: TrieMask::new(0b01),
+            }),
+        )
+        .unwrap();
+        trie.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
+
+        // The path 0x0... is blinded (Hash node)
+        // Create an update targeting the blinded path using a full B256 key
+        let b256_key = B256::ZERO; // starts with 0x0...
+
+        let new_value = encode_account_value(42);
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Changed(new_value));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Update should remain in map (blinded node)
+        assert!(!updates.is_empty(), "Update should remain in map when hitting blinded node");
+
+        // Callback should be invoked
+        let targets = proof_targets.borrow();
+        assert!(!targets.is_empty(), "Callback should be invoked for blinded path");
+
+        // min_len should equal the blinded node's path length (1 nibble)
+        assert_eq!(targets[0].1, 1, "min_len should equal blinded node path length");
+    }
+
+    #[test]
+    fn test_update_leaves_removal() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create two leaves so removal doesn't result in empty trie issues
+        // Use full-length keys
+        let b256_key1 = B256::with_last_byte(1);
+        let b256_key2 = B256::with_last_byte(2);
+        let key1 = Nibbles::unpack(b256_key1);
+        let key2 = Nibbles::unpack(b256_key2);
+        let value = encode_account_value(1);
+        trie.update_leaf(key1, value.clone(), &provider).unwrap();
+        trie.update_leaf(key2, value, &provider).unwrap();
+
+        // Create an update to remove key1 (empty value = removal)
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key1, LeafUpdate::Changed(vec![])); // empty = removal
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Removal should succeed: map empty
+        assert!(updates.is_empty(), "Update map should be empty after successful removal");
+    }
+
+    #[test]
+    fn test_update_leaves_removal_blinded() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        // Create a trie with a blinded node
+        // Use a small value that fits in RLP encoding
+        let small_value = alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec();
+        let leaf = LeafNode::new(
+            Nibbles::default(), // short key for RLP encoding
+            small_value,
+        );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)), // blinded child at 0
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut trie = ParallelSparseTrie::from_root(
+            branch.clone(),
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::new(0b01),
+                tree_mask: TrieMask::default(),
+            }),
+            false,
+        )
+        .unwrap();
+
+        trie.reveal_node(
+            Nibbles::default(),
+            branch,
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::default(),
+                tree_mask: TrieMask::new(0b01),
+            }),
+        )
+        .unwrap();
+        trie.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
+
+        // Simulate having a known value behind the blinded node
+        let b256_key = B256::ZERO; // starts with 0x0...
+        let full_path = Nibbles::unpack(b256_key);
+
+        // Insert the value into the trie's values map (simulating we know about it)
+        let old_value = encode_account_value(99);
+        trie.upper_subtrie.inner.values.insert(full_path, old_value.clone());
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Changed(vec![])); // empty = removal
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Callback should be invoked
+        assert!(
+            !proof_targets.borrow().is_empty(),
+            "Callback should be invoked when removal hits blinded node"
+        );
+
+        // Update should remain in map
+        assert!(!updates.is_empty(), "Update should remain in map when removal hits blinded node");
+
+        // Original value should be preserved (reverted)
+        assert_eq!(
+            trie.upper_subtrie.inner.values.get(&full_path),
+            Some(&old_value),
+            "Original value should be preserved after failed removal"
+        );
+    }
+
+    #[test]
+    fn test_update_leaves_touched() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create a leaf in the trie using a full-length key
+        let b256_key = B256::with_last_byte(42);
+        let key = Nibbles::unpack(b256_key);
+        let value = encode_account_value(1);
+        trie.update_leaf(key, value, &provider).unwrap();
+
+        // Create a Touched update for the existing key
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Touched);
+
+        let proof_targets = RefCell::new(Vec::new());
+
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Update should be removed (path is accessible)
+        assert!(updates.is_empty(), "Touched update should be removed for accessible path");
+
+        // No callback
+        assert!(
+            proof_targets.borrow().is_empty(),
+            "Callback should not be invoked for accessible path"
+        );
+    }
+
+    #[test]
+    fn test_update_leaves_touched_blinded() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        // Create a trie with a blinded node
+        // Use a small value that fits in RLP encoding
+        let small_value = alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec();
+        let leaf = LeafNode::new(
+            Nibbles::default(), // short key for RLP encoding
+            small_value,
+        );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)), // blinded child at 0
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut trie = ParallelSparseTrie::from_root(
+            branch.clone(),
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::new(0b01),
+                tree_mask: TrieMask::default(),
+            }),
+            false,
+        )
+        .unwrap();
+
+        trie.reveal_node(
+            Nibbles::default(),
+            branch,
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::default(),
+                tree_mask: TrieMask::new(0b01),
+            }),
+        )
+        .unwrap();
+        trie.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
+
+        // Create a Touched update targeting the blinded path using full B256 key
+        let b256_key = B256::ZERO; // starts with 0x0...
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Touched);
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Callback should be invoked
+        assert!(!proof_targets.borrow().is_empty(), "Callback should be invoked for blinded path");
+
+        // Update should remain in map
+        assert!(!updates.is_empty(), "Touched update should remain in map for blinded path");
+    }
+
+    #[test]
+    fn test_update_leaves_deduplication() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        // Create a trie with a blinded node
+        // Use a small value that fits in RLP encoding
+        let small_value = alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec();
+        let leaf = LeafNode::new(
+            Nibbles::default(), // short key for RLP encoding
+            small_value,
+        );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)), // blinded child at 0
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut trie = ParallelSparseTrie::from_root(
+            branch.clone(),
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::new(0b01),
+                tree_mask: TrieMask::default(),
+            }),
+            false,
+        )
+        .unwrap();
+
+        trie.reveal_node(
+            Nibbles::default(),
+            branch,
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::default(),
+                tree_mask: TrieMask::new(0b01),
+            }),
+        )
+        .unwrap();
+        trie.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
+
+        // Create multiple updates that would all hit the same blinded node at path 0x0
+        // Use full B256 keys that all start with 0x0
+        let b256_key1 = B256::ZERO;
+        let b256_key2 = B256::with_last_byte(1); // still starts with 0x0
+        let b256_key3 = B256::with_last_byte(2); // still starts with 0x0
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        let value = encode_account_value(42);
+
+        updates.insert(b256_key1, LeafUpdate::Changed(value.clone()));
+        updates.insert(b256_key2, LeafUpdate::Changed(value.clone()));
+        updates.insert(b256_key3, LeafUpdate::Changed(value));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // The callback should be invoked 3 times - once for each unique full_path
+        // The deduplication is by (full_path, min_len), not by blinded node
+        let targets = proof_targets.borrow();
+        assert_eq!(targets.len(), 3, "Callback should be invoked for each unique key");
+
+        // All should have the same min_len (1) since they all hit blinded node at path 0x0
+        for (_, min_len) in targets.iter() {
+            assert_eq!(*min_len, 1, "All should have min_len 1 from blinded node at 0x0");
+        }
+    }
+
+    #[test]
+    fn test_update_leaves_multiple_keys() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create multiple leaves with different prefixes
+        let keys: Vec<B256> =
+            vec![B256::repeat_byte(0xAB), B256::repeat_byte(0xCD), B256::repeat_byte(0xEF)];
+
+        for (i, &b256_key) in keys.iter().enumerate() {
+            let key = Nibbles::unpack(b256_key);
+            let value = encode_account_value(i as u64);
+            trie.update_leaf(key, value, &provider).unwrap();
+        }
+
+        // Update all values using update_leaves
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        for (i, &b256_key) in keys.iter().enumerate() {
+            updates.insert(b256_key, LeafUpdate::Changed(encode_account_value((i + 100) as u64)));
+        }
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        assert!(updates.is_empty(), "All updates should succeed");
+        assert!(proof_targets.borrow().is_empty(), "No proofs should be needed");
+
+        // Verify all values were updated
+        for (i, &b256_key) in keys.iter().enumerate() {
+            let key = Nibbles::unpack(b256_key);
+            let expected = encode_account_value((i + 100) as u64);
+            assert_eq!(trie.get_leaf_value(&key), Some(&expected), "Value should be updated");
+        }
+    }
+
+    #[test]
+    fn test_update_leaves_batch_removal() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create multiple leaves
+        let keys: Vec<B256> =
+            vec![B256::repeat_byte(0xAB), B256::repeat_byte(0xCD), B256::repeat_byte(0xEF)];
+
+        for (i, &b256_key) in keys.iter().enumerate() {
+            let key = Nibbles::unpack(b256_key);
+            let value = encode_account_value(i as u64);
+            trie.update_leaf(key, value, &provider).unwrap();
+        }
+
+        // Remove first key using update_leaves (empty value = removal)
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(keys[0], LeafUpdate::Changed(vec![]));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        let key1 = Nibbles::unpack(keys[0]);
+        let key2 = Nibbles::unpack(keys[1]);
+        let key3 = Nibbles::unpack(keys[2]);
+
+        assert!(updates.is_empty(), "Removal should succeed");
+        assert!(trie.get_leaf_value(&key1).is_none(), "Value should be removed");
+        assert!(trie.get_leaf_value(&key2).is_some(), "Other values should remain");
+        assert!(trie.get_leaf_value(&key3).is_some(), "Other values should remain");
+    }
+
+    #[test]
+    fn test_update_leaves_rollback_on_blinded_node() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        // Use the same blinded node setup as test_update_leaves_blinded_node
+        let small_value = alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec();
+        let leaf = LeafNode::new(Nibbles::default(), small_value);
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)), // blinded child at 0
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(), // revealed at 1
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut trie = ParallelSparseTrie::from_root(
+            branch.clone(),
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::new(0b01),
+                tree_mask: TrieMask::default(),
+            }),
+            false,
+        )
+        .unwrap();
+
+        trie.reveal_node(
+            Nibbles::default(),
+            branch,
+            Some(BranchNodeMasks {
+                hash_mask: TrieMask::default(),
+                tree_mask: TrieMask::new(0b01),
+            }),
+        )
+        .unwrap();
+        trie.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
+
+        // Attempt update targeting blinded path
+        let b256_key = B256::ZERO;
+        let full_path = Nibbles::unpack(b256_key);
+
+        // Check no value exists before
+        assert!(trie.get_leaf_value(&full_path).is_none(), "No value should exist before update");
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Changed(encode_account_value(42)));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // After failed update, trie should be unchanged
+        assert!(
+            trie.get_leaf_value(&full_path).is_none(),
+            "No value should exist after failed update (rollback)"
+        );
+        assert!(!updates.is_empty(), "Update should remain in map");
+        assert!(!proof_targets.borrow().is_empty(), "Proof should be requested");
+    }
+
+    #[test]
+    fn test_update_leaves_retry_after_reveal() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create two leaves: one at 0x1... (revealed) and prepare to add at 0x0... (initially
+        // empty)
+        let revealed_key = B256::with_last_byte(0x10);
+        let revealed_path = Nibbles::unpack(revealed_key);
+        trie.update_leaf(revealed_path, encode_account_value(1), &provider).unwrap();
+
+        // Compute root to establish state
+        let _ = trie.root();
+
+        // Now try to add a leaf at a new location
+        let new_key = B256::with_last_byte(0x20);
+        let new_value = encode_account_value(42);
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(new_key, LeafUpdate::Changed(new_value.clone()));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // In this case, the trie is fully revealed so update should succeed
+        assert!(updates.is_empty(), "Update should succeed on revealed trie");
+
+        // Verify the value was added
+        let new_path = Nibbles::unpack(new_key);
+        assert_eq!(trie.get_leaf_value(&new_path), Some(&new_value));
+    }
+
+    #[test]
+    fn test_update_leaves_batch_update_and_insert() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        let provider = DefaultTrieNodeProvider;
+        let mut trie = ParallelSparseTrie::default();
+
+        // Create an existing leaf
+        let existing_key = B256::repeat_byte(0xAA);
+        let existing_path = Nibbles::unpack(existing_key);
+        trie.update_leaf(existing_path, encode_account_value(1), &provider).unwrap();
+
+        // Now use update_leaves to both update existing and insert new
+        let new_key = B256::repeat_byte(0xBB);
+
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(existing_key, LeafUpdate::Changed(encode_account_value(100))); // update
+        updates.insert(new_key, LeafUpdate::Changed(encode_account_value(200))); // insert
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .unwrap();
+
+        // Both should succeed
+        assert!(updates.is_empty(), "All updates should succeed");
+        assert!(proof_targets.borrow().is_empty(), "No proofs should be needed");
+
+        // Verify values
+        let new_path = Nibbles::unpack(new_key);
+        assert_eq!(
+            trie.get_leaf_value(&existing_path),
+            Some(&encode_account_value(100)),
+            "Existing value should be updated"
+        );
+        assert_eq!(
+            trie.get_leaf_value(&new_path),
+            Some(&encode_account_value(200)),
+            "New value should be inserted"
+        );
     }
 }
