@@ -825,7 +825,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        let best_block = self.best_block_number()?;
+        let best_block = self.best_block_number().unwrap_or_default();
 
         // Reject requests for blocks beyond the best block
         if block_number > best_block {
