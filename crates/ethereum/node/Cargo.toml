@@ -71,6 +71,8 @@ reth-prune-types.workspace = true
 reth-stages.workspace = true
 reth-stages-api.workspace = true
 reth-static-file.workspace = true
+reth-trie.workspace = true
+reth-trie-db.workspace = true
 tempfile.workspace = true
 jsonrpsee-core.workspace = true
 
@@ -83,6 +85,7 @@ alloy-contract.workspace = true
 alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
 alloy-consensus.workspace = true
 alloy-trie.workspace = true
+alloy-rlp.workspace = true
 
 futures.workspace = true
 tokio.workspace = true
