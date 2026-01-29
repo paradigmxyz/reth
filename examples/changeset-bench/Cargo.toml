@@ -14,6 +14,7 @@ reth-ethereum = { workspace = true, features = ["node"] }
 reth-stages = { workspace = true, optional = true }
 reth-db-api.workspace = true
 reth-provider.workspace = true
+reth-storage-api.workspace = true
 alloy-primitives.workspace = true
 rand = "0.8"
 clap = { workspace = true, features = ["derive"] }

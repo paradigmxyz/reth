@@ -1,27 +1,29 @@
-//! Benchmark tool for comparing MDBX vs RocksDB/StaticFiles historical query performance.
+//! Benchmark tool for comparing MDBX vs RocksDB historical query performance.
 //!
-//! This tool:
-//! 1. Opens the first datadir to collect sample addresses/blocks with actual changesets
-//! 2. Closes the database
-//! 3. Runs benchmarks against both datadirs
+//! Supports two benchmark types:
+//! 1. `changeset` - Historical state queries (eth_getBalance, eth_getTransactionCount, eth_getStorageAt)
+//! 2. `txhash` - TxHashNumbers table lookups (TxHash -> TxNumber)
 //!
-//! By default (warm mode): clears OS cache once before each backend run
-//! With --cold flag: clears OS cache AND reopens database before EACH query
+//! Three cache modes:
+//! - AllCold: Clear OS cache + reopen DB before each query
+//! - JarCached: Keep DB open, clear OS cache before each query
+//! - AllWarm: Keep DB open, no cache clearing
 
-use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_primitives::{Address, BlockNumber, TxHash, TxNumber, B256};
 use clap::Parser;
 use eyre::Result;
 use rand::{seq::SliceRandom, Rng};
-use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
+use reth_db_api::{cursor::DbCursorRO, models::StorageSettings, tables, transaction::DbTx};
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
     node::EthereumNode,
     provider::{
-        providers::ReadOnlyConfig, AccountReader, BlockNumReader, StateProvider,
+        providers::ReadOnlyConfig, AccountReader, BlockNumReader, ChangeSetReader, StateProvider,
         StorageChangeSetReader,
     },
 };
 use reth_provider::providers::{HistoricalStateProviderRef, HistoryInfo};
+use reth_storage_api::{BlockBodyIndicesProvider, StorageSettingsCache, TransactionsProvider};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -34,32 +36,57 @@ use std::{
 
 #[derive(Parser, Debug)]
 #[command(name = "changeset-bench")]
-#[command(about = "Benchmark MDBX vs RocksDB/SF historical query performance")]
+#[command(about = "Benchmark MDBX vs RocksDB historical query performance")]
 struct Args {
-    /// Path to the normal (MDBX) datadir
+    /// Path to the datadir (used for both backends when bench-type is txhash)
     #[arg(long)]
-    normal: PathBuf,
+    datadir: Option<PathBuf>,
 
-    /// Path to the edge (RocksDB/SF) datadir
+    /// Path to the normal (MDBX) datadir (for changeset benchmarks)
     #[arg(long)]
-    edge: PathBuf,
+    normal: Option<PathBuf>,
+
+    /// Path to the edge (RocksDB/SF) datadir (for changeset benchmarks)
+    #[arg(long)]
+    edge: Option<PathBuf>,
 
     /// Number of queries to run per method
-    #[arg(long, default_value = "2000")]
+    #[arg(long, default_value = "500")]
     queries: usize,
 
-    /// Number of addresses/storage slots to sample
-    #[arg(long, default_value = "50")]
+    /// Number of samples (should be >= queries for accurate results)
+    #[arg(long, default_value = "500")]
     samples: usize,
 
-    /// Cold cache mode: clear OS cache AND reopen database before EACH query
-    /// Without this flag (warm mode): clear OS cache once before each backend run
-    #[arg(long)]
-    cold: bool,
+    /// Benchmark mode
+    #[arg(long, value_enum, default_value = "all")]
+    mode: BenchMode,
 
-    /// Path to save/load sampled data (skip sampling if exists)
+    /// Benchmark type
+    #[arg(long, value_enum, default_value = "changeset")]
+    bench_type: BenchType,
+
+    /// Path to save/load sampled data
     #[arg(long)]
     sample_file: Option<PathBuf>,
+
+    /// Profile mode: run detailed timing breakdown
+    #[arg(long)]
+    profile: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum BenchMode {
+    All,
+    AllCold,
+    JarCached,
+    AllWarm,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum BenchType {
+    Changeset,
+    Txhash,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,12 +105,16 @@ struct StorageSample {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct TxHashSample {
+    hash: TxHash,
+    tx_number: TxNumber,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SampledData {
-    /// Addresses with account changesets (first and last change blocks)
     accounts: Vec<AccountSample>,
-    /// Storage slots with changesets (first and last change blocks)
     storage: Vec<StorageSample>,
-    /// Block range
+    tx_hashes: Vec<TxHashSample>,
     oldest_block: BlockNumber,
     latest_block: BlockNumber,
 }
@@ -96,6 +127,12 @@ struct BenchmarkQuery {
     block: BlockNumber,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TxHashQuery {
+    hash: TxHash,
+    expected_tx_number: TxNumber,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 enum QueryType {
     Balance,
@@ -106,6 +143,17 @@ enum QueryType {
 #[derive(Debug, Default)]
 struct BenchmarkResults {
     timings: Vec<Duration>,
+}
+
+struct ModeResults {
+    balance: (BenchmarkResults, BenchmarkResults),
+    nonce: (BenchmarkResults, BenchmarkResults),
+    storage: (BenchmarkResults, BenchmarkResults),
+}
+
+struct TxHashModeResults {
+    mdbx: BenchmarkResults,
+    rocksdb: BenchmarkResults,
 }
 
 #[derive(Debug, Default)]
@@ -195,8 +243,24 @@ impl BenchmarkResults {
     }
 }
 
+struct GeneratedQueries {
+    balance: Vec<BenchmarkQuery>,
+    nonce: Vec<BenchmarkQuery>,
+    storage: Vec<BenchmarkQuery>,
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    match args.bench_type {
+        BenchType::Changeset => run_changeset_benchmark(&args),
+        BenchType::Txhash => run_txhash_benchmark(&args),
+    }
+}
+
+fn run_changeset_benchmark(args: &Args) -> Result<()> {
+    let normal = args.normal.as_ref().expect("--normal required for changeset benchmark");
+    let edge = args.edge.as_ref().expect("--edge required for changeset benchmark");
 
     let sampled = if let Some(ref path) = args.sample_file {
         if path.exists() {
@@ -204,14 +268,14 @@ fn main() -> Result<()> {
             let file = File::open(path)?;
             serde_json::from_reader(BufReader::new(file))?
         } else {
-            let data = sample_changesets(&args)?;
+            let data = sample_changesets(args, normal)?;
             let file = File::create(path)?;
             serde_json::to_writer_pretty(BufWriter::new(file), &data)?;
             println!("Saved sampled data to {:?}", path);
             data
         }
     } else {
-        sample_changesets(&args)?
+        sample_changesets(args, normal)?
     };
 
     println!("\n=== Sampled Data Summary ===");
@@ -219,42 +283,303 @@ fn main() -> Result<()> {
     println!("Storage slots with changesets: {}", sampled.storage.len());
     println!("Block range: {} - {}", sampled.oldest_block, sampled.latest_block);
 
-    let queries = generate_queries(&args, &sampled);
+    let queries = generate_queries(args, &sampled);
     println!("\nGenerated {} queries per method", queries.balance.len());
-    println!(
-        "  Query strategy: all queries at blocks with a changeset AFTER (forcing InChangeset)"
-    );
 
-    println!("\n=== Running Benchmarks ===");
-    if args.cold {
-        println!("Mode: COLD (clearing OS cache + reopening DB before each query)");
-    } else {
-        println!("Mode: WARM (clearing OS cache once before each backend run)");
+    let modes_to_run: Vec<BenchMode> = match args.mode {
+        BenchMode::All => vec![BenchMode::AllCold, BenchMode::JarCached, BenchMode::AllWarm],
+        mode => vec![mode],
+    };
+
+    let mut all_results: Vec<(BenchMode, ModeResults)> = Vec::new();
+
+    for mode in modes_to_run {
+        println!("\n{}", "=".repeat(60));
+        println!("=== Mode: {:?} ===", mode);
+        print_mode_description(mode);
+
+        let (normal_balance, _) = run_benchmark(normal, &queries.balance, "MDBX", mode)?;
+        let (edge_balance, _) = run_benchmark(edge, &queries.balance, "RocksDB/SF", mode)?;
+
+        let (normal_nonce, _) = run_benchmark(normal, &queries.nonce, "MDBX", mode)?;
+        let (edge_nonce, _) = run_benchmark(edge, &queries.nonce, "RocksDB/SF", mode)?;
+
+        let (normal_storage, _) = run_benchmark(normal, &queries.storage, "MDBX", mode)?;
+        let (edge_storage, _) = run_benchmark(edge, &queries.storage, "RocksDB/SF", mode)?;
+
+        all_results.push((
+            mode,
+            ModeResults {
+                balance: (normal_balance, edge_balance),
+                nonce: (normal_nonce, edge_nonce),
+                storage: (normal_storage, edge_storage),
+            },
+        ));
     }
 
-    let (normal_balance, _) = run_benchmark(&args.normal, &queries.balance, "MDBX", args.cold)?;
-    let (edge_balance, _) = run_benchmark(&args.edge, &queries.balance, "RocksDB/SF", args.cold)?;
+    println!("\n{}", "=".repeat(60));
+    println!("=== FINAL RESULTS ===");
 
-    let (normal_nonce, _) = run_benchmark(&args.normal, &queries.nonce, "MDBX", args.cold)?;
-    let (edge_nonce, _) = run_benchmark(&args.edge, &queries.nonce, "RocksDB/SF", args.cold)?;
+    for (mode, results) in &all_results {
+        println!("\n--- {:?} ---", mode);
+        print_comparison("eth_getBalance", &results.balance.0, &results.balance.1);
+        print_comparison("eth_getTransactionCount", &results.nonce.0, &results.nonce.1);
+        print_comparison("eth_getStorageAt", &results.storage.0, &results.storage.1);
+    }
 
-    let (normal_storage, _) = run_benchmark(&args.normal, &queries.storage, "MDBX", args.cold)?;
-    let (edge_storage, _) = run_benchmark(&args.edge, &queries.storage, "RocksDB/SF", args.cold)?;
-
-    println!("\n=== Results ===");
-    print_comparison("eth_getBalance", &normal_balance, &edge_balance);
-    print_comparison("eth_getTransactionCount (nonce)", &normal_nonce, &edge_nonce);
-    print_comparison("eth_getStorageAt", &normal_storage, &edge_storage);
+    if all_results.len() > 1 {
+        print_cross_mode_comparison(&all_results);
+    }
 
     Ok(())
 }
 
-fn sample_changesets(args: &Args) -> Result<SampledData> {
-    println!("Opening {:?} to sample changesets...", args.normal);
+fn run_txhash_benchmark(args: &Args) -> Result<()> {
+    let datadir = args.datadir.as_ref().expect("--datadir required for txhash benchmark");
+
+    let sampled = if let Some(ref path) = args.sample_file {
+        if path.exists() {
+            println!("Loading sampled data from {:?}", path);
+            let file = File::open(path)?;
+            serde_json::from_reader(BufReader::new(file))?
+        } else {
+            let data = sample_tx_hashes(args, datadir)?;
+            let file = File::create(path)?;
+            serde_json::to_writer_pretty(BufWriter::new(file), &data)?;
+            println!("Saved sampled data to {:?}", path);
+            data
+        }
+    } else {
+        sample_tx_hashes(args, datadir)?
+    };
+
+    println!("\n=== Sampled Data Summary ===");
+    println!("Transaction hashes: {}", sampled.tx_hashes.len());
+    println!("Block range: {} - {}", sampled.oldest_block, sampled.latest_block);
+
+    let queries = generate_txhash_queries(args, &sampled);
+    println!("\nGenerated {} TxHash queries", queries.len());
+
+    let modes_to_run: Vec<BenchMode> = match args.mode {
+        BenchMode::All => vec![BenchMode::AllCold, BenchMode::JarCached, BenchMode::AllWarm],
+        mode => vec![mode],
+    };
+
+    let mut all_results: Vec<(BenchMode, TxHashModeResults)> = Vec::new();
+
+    for mode in modes_to_run {
+        println!("\n{}", "=".repeat(60));
+        println!("=== Mode: {:?} ===", mode);
+        print_mode_description(mode);
+
+        let mdbx_results = run_txhash_benchmark_backend(datadir, &queries, "MDBX", mode, false)?;
+        let rocksdb_results =
+            run_txhash_benchmark_backend(datadir, &queries, "RocksDB", mode, true)?;
+
+        all_results.push((mode, TxHashModeResults { mdbx: mdbx_results, rocksdb: rocksdb_results }));
+    }
+
+    println!("\n{}", "=".repeat(60));
+    println!("=== FINAL RESULTS (TxHashNumbers) ===");
+
+    for (mode, results) in &all_results {
+        println!("\n--- {:?} ---", mode);
+        print_comparison("TxHash -> TxNumber", &results.mdbx, &results.rocksdb);
+    }
+
+    if all_results.len() > 1 {
+        print_txhash_cross_mode_comparison(&all_results);
+    }
+
+    Ok(())
+}
+
+fn sample_tx_hashes(args: &Args, datadir: &PathBuf) -> Result<SampledData> {
+    println!("Opening {:?} to sample transaction hashes...", datadir);
 
     let spec = ChainSpecBuilder::mainnet().build();
     let factory = EthereumNode::provider_factory_builder()
-        .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(&args.normal))?;
+        .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
+
+    let provider = factory.provider()?;
+
+    let latest_block = provider.last_block_number()?;
+    let oldest_block = 1u64;
+
+    println!("Block range: {} - {} ({} blocks)", oldest_block, latest_block, latest_block);
+
+    println!("Sampling transaction hashes across full chain...");
+    let mut tx_hashes = Vec::with_capacity(args.samples);
+    let mut rng = rand::thread_rng();
+
+    let total_txs: Option<u64> =
+        provider.block_body_indices(latest_block)?.map(|i| i.first_tx_num + i.tx_count);
+
+    if let Some(max_tx) = total_txs {
+        println!("  Total transactions: ~{}", max_tx);
+
+        let step: u64 = max_tx / args.samples as u64;
+        for i in 0..args.samples {
+            let tx_num = i as u64 * step + rng.gen_range(0..step.max(1));
+            if tx_num >= max_tx {
+                continue;
+            }
+
+            if let Some(tx) = provider.transaction_by_id(tx_num)? {
+                let hash = *tx.tx_hash();
+                tx_hashes.push(TxHashSample { hash, tx_number: tx_num });
+            }
+
+            if (i + 1) % 100 == 0 {
+                print!("\r  Sampled {} transaction hashes", tx_hashes.len());
+                std::io::stdout().flush()?;
+            }
+        }
+        println!("\r  Sampled {} transaction hashes", tx_hashes.len());
+    }
+
+    drop(provider);
+    println!("Database closed.");
+
+    Ok(SampledData {
+        accounts: Vec::new(),
+        storage: Vec::new(),
+        tx_hashes,
+        oldest_block,
+        latest_block,
+    })
+}
+
+fn generate_txhash_queries(args: &Args, sampled: &SampledData) -> Vec<TxHashQuery> {
+    let mut rng = rand::thread_rng();
+    let mut queries = Vec::with_capacity(args.queries);
+
+    // Shuffle samples and take first N to ensure unique queries
+    let mut shuffled: Vec<_> = sampled.tx_hashes.iter().collect();
+    shuffled.shuffle(&mut rng);
+
+    for sample in shuffled.into_iter().take(args.queries) {
+        queries.push(TxHashQuery {
+            hash: sample.hash,
+            expected_tx_number: sample.tx_number,
+        });
+    }
+
+    queries
+}
+
+fn run_txhash_benchmark_backend(
+    datadir: &PathBuf,
+    queries: &[TxHashQuery],
+    backend_name: &str,
+    mode: BenchMode,
+    use_rocksdb: bool,
+) -> Result<BenchmarkResults> {
+    println!(
+        "\nRunning TxHash lookup on {} ({} queries, mode={:?})...",
+        backend_name,
+        queries.len(),
+        mode
+    );
+
+    let spec = ChainSpecBuilder::mainnet().build();
+    let mut results = BenchmarkResults::new();
+    let benchmark_start = Instant::now();
+
+    match mode {
+        BenchMode::AllCold => {
+            for (i, query) in queries.iter().enumerate() {
+                clear_os_cache_silent()?;
+
+                let t1 = Instant::now();
+                let factory = EthereumNode::provider_factory_builder()
+                    .open_read_only(spec.clone().into(), ReadOnlyConfig::from_datadir(datadir))?;
+
+                let mut settings = factory.cached_storage_settings();
+                settings.transaction_hash_numbers_in_rocksdb = use_rocksdb;
+                factory.set_storage_settings_cache(settings);
+
+                let db_open_time = t1.elapsed();
+
+                let start = Instant::now();
+                let db_provider = factory.provider()?;
+                let _tx_num = db_provider.transaction_id(query.hash)?;
+                let query_time = start.elapsed();
+
+                results.add(query_time);
+
+                if i < 3 {
+                    println!("\n  Query {}: db_open={:?}, query={:?}", i, db_open_time, query_time);
+                }
+
+                drop(db_provider);
+                drop(factory);
+
+                print_progress(i, queries.len(), &results, benchmark_start)?;
+            }
+        }
+        BenchMode::JarCached => {
+            clear_os_cache()?;
+
+            let factory = EthereumNode::provider_factory_builder()
+                .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
+
+            let mut settings = factory.cached_storage_settings();
+            settings.transaction_hash_numbers_in_rocksdb = use_rocksdb;
+            factory.set_storage_settings_cache(settings);
+
+            println!("  Warming up with first query...");
+            {
+                let db_provider = factory.provider()?;
+                let _ = db_provider.transaction_id(queries[0].hash)?;
+            }
+
+            for (i, query) in queries.iter().enumerate() {
+                clear_os_cache_silent()?;
+
+                let start = Instant::now();
+                let db_provider = factory.provider()?;
+                let _tx_num = db_provider.transaction_id(query.hash)?;
+                results.add(start.elapsed());
+
+                if i < 3 {
+                    println!("\n  Query {}: {:?}", i, results.timings.last().unwrap());
+                }
+
+                print_progress(i, queries.len(), &results, benchmark_start)?;
+            }
+        }
+        BenchMode::AllWarm => {
+            let factory = EthereumNode::provider_factory_builder()
+                .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
+
+            let mut settings = factory.cached_storage_settings();
+            settings.transaction_hash_numbers_in_rocksdb = use_rocksdb;
+            factory.set_storage_settings_cache(settings);
+
+            println!("  No cache clearing, no warmup - measuring first access with DB open...");
+            for (i, query) in queries.iter().enumerate() {
+                let start = Instant::now();
+                let db_provider = factory.provider()?;
+                let _tx_num = db_provider.transaction_id(query.hash)?;
+                results.add(start.elapsed());
+
+                print_progress(i, queries.len(), &results, benchmark_start)?;
+            }
+        }
+        BenchMode::All => unreachable!(),
+    }
+    println!();
+
+    Ok(results)
+}
+
+fn sample_changesets(args: &Args, datadir: &PathBuf) -> Result<SampledData> {
+    println!("Opening {:?} to sample changesets...", datadir);
+
+    let spec = ChainSpecBuilder::mainnet().build();
+    let factory = EthereumNode::provider_factory_builder()
+        .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
 
     let provider = factory.provider()?;
 
@@ -268,8 +593,8 @@ fn sample_changesets(args: &Args) -> Result<SampledData> {
         latest_block - oldest_block + 1
     );
 
-    let mut accounts: Vec<AccountSample> = Vec::new();
-    let mut storage: Vec<StorageSample> = Vec::new();
+    let mut accounts = Vec::new();
+    let mut storage = Vec::new();
 
     println!("Scanning AccountChangeSets across full range...");
     {
@@ -352,7 +677,7 @@ fn sample_changesets(args: &Args) -> Result<SampledData> {
             storage_ranges.len()
         );
 
-        let mut all_storage: Vec<StorageSample> = storage_ranges
+        let mut all_entries: Vec<StorageSample> = storage_ranges
             .into_iter()
             .map(|((address, key), (first_change, last_change))| StorageSample {
                 address,
@@ -361,31 +686,29 @@ fn sample_changesets(args: &Args) -> Result<SampledData> {
                 last_change,
             })
             .collect();
-        all_storage.sort_by_key(|s| s.first_change);
+        all_entries.sort_by_key(|s| s.first_change);
 
-        if all_storage.len() <= args.samples {
-            storage = all_storage;
+        if all_entries.len() <= args.samples {
+            storage = all_entries;
         } else {
-            let step = all_storage.len() / args.samples;
+            let step = all_entries.len() / args.samples;
             for i in 0..args.samples {
-                storage.push(all_storage[i * step].clone());
+                storage.push(all_entries[i * step].clone());
             }
         }
         println!("  Sampled {} storage slots across block range", storage.len());
     }
 
     drop(provider);
-    drop(factory);
-
     println!("Database closed.");
 
-    Ok(SampledData { accounts, storage, oldest_block, latest_block })
-}
-
-struct GeneratedQueries {
-    balance: Vec<BenchmarkQuery>,
-    nonce: Vec<BenchmarkQuery>,
-    storage: Vec<BenchmarkQuery>,
+    Ok(SampledData {
+        accounts,
+        storage,
+        tx_hashes: Vec::new(),
+        oldest_block,
+        latest_block,
+    })
 }
 
 fn generate_queries(args: &Args, sampled: &SampledData) -> GeneratedQueries {
@@ -395,82 +718,12 @@ fn generate_queries(args: &Args, sampled: &SampledData) -> GeneratedQueries {
     let mut nonce = Vec::with_capacity(args.queries);
     let mut storage = Vec::with_capacity(args.queries);
 
-    // Print debug info about sampled data distribution
-    println!("\n=== Sample Distribution Debug ===");
-    let single_change_accounts =
-        sampled.accounts.iter().filter(|s| s.first_change == s.last_change).count();
-    let multi_change_accounts = sampled.accounts.len() - single_change_accounts;
-    println!(
-        "Accounts: {} single-change, {} multi-change",
-        single_change_accounts, multi_change_accounts
-    );
-
-    let single_change_storage =
-        sampled.storage.iter().filter(|s| s.first_change == s.last_change).count();
-    let multi_change_storage = sampled.storage.len() - single_change_storage;
-    println!(
-        "Storage: {} single-change, {} multi-change",
-        single_change_storage, multi_change_storage
-    );
-
-    if !sampled.accounts.is_empty() {
-        let min_first = sampled.accounts.iter().map(|s| s.first_change).min().unwrap();
-        let max_first = sampled.accounts.iter().map(|s| s.first_change).max().unwrap();
-        let min_last = sampled.accounts.iter().map(|s| s.last_change).min().unwrap();
-        let max_last = sampled.accounts.iter().map(|s| s.last_change).max().unwrap();
-        println!(
-            "Account first_change range: {} - {} (span: {})",
-            min_first,
-            max_first,
-            max_first - min_first
-        );
-        println!(
-            "Account last_change range: {} - {} (span: {})",
-            min_last,
-            max_last,
-            max_last - min_last
-        );
-        println!(
-            "Window: oldest_block={}, latest_block={}",
-            sampled.oldest_block, sampled.latest_block
-        );
-    }
-
-    // To force InChangeset, we must query at a block where there's a changeset AFTER that block.
-    // HistoryInfo::InChangeset(block_number) means "look in changeset at block_number".
-    //
-    // Strategy: For each sample with changes at [first_change, last_change]:
-    // - Query at first_change - 1: Returns InChangeset(first_change) if first_change > oldest_block
-    // - Query at any block in [first_change, last_change - 1]: Returns InChangeset for the next
-    //   change
-    // - Query at last_change or after: Returns InPlainState (no more changesets after)
-    //
-    // To guarantee InChangeset:
-    // 1. Only use samples where first_change > oldest_block (so first_change - 1 is valid)
-    // 2. Query at first_change - 1 (guaranteed to have changeset at first_change after it)
-    // 3. For multi-change samples, can also query in the middle
-
-    // Filter to samples that guarantee InChangeset (first_change > oldest_block)
     let valid_accounts: Vec<_> =
         sampled.accounts.iter().filter(|s| s.first_change > sampled.oldest_block).collect();
     let valid_storage: Vec<_> =
         sampled.storage.iter().filter(|s| s.first_change > sampled.oldest_block).collect();
 
-    println!(
-        "Valid samples (first_change > oldest_block): {} accounts, {} storage",
-        valid_accounts.len(),
-        valid_storage.len()
-    );
-
-    if valid_accounts.is_empty() {
-        eprintln!("WARNING: No valid account samples! All first_change <= oldest_block.");
-        eprintln!(
-            "This means all accounts in the sample window existed before the window started."
-        );
-    }
-
     for _ in 0..args.queries {
-        // Prefer valid samples, fall back to any sample if none valid
         let sample = if !valid_accounts.is_empty() {
             valid_accounts.choose(&mut rng).copied()
         } else {
@@ -478,19 +731,13 @@ fn generate_queries(args: &Args, sampled: &SampledData) -> GeneratedQueries {
         };
 
         if let Some(sample) = sample {
-            // Query at first_change - 1 to guarantee InChangeset(first_change)
-            // For multi-change samples, sometimes query in the middle too
             let block = if sample.first_change > sampled.oldest_block {
                 if sample.first_change < sample.last_change && rng.gen_bool(0.5) {
-                    // Multi-change: query somewhere in the middle
-                    // Any block in [first_change, last_change - 1] should hit InChangeset
                     rng.gen_range(sample.first_change..sample.last_change)
                 } else {
-                    // Query just before first_change
                     sample.first_change - 1
                 }
             } else {
-                // Fallback: query at first_change (may hit InPlainState)
                 sample.first_change
             };
 
@@ -564,7 +811,7 @@ fn run_benchmark(
     datadir: &PathBuf,
     queries: &[BenchmarkQuery],
     backend_name: &str,
-    cold_mode: bool,
+    mode: BenchMode,
 ) -> Result<(BenchmarkResults, HistoryStats)> {
     let method_name = queries
         .first()
@@ -576,87 +823,143 @@ fn run_benchmark(
         .unwrap_or("unknown");
 
     println!(
-        "\nRunning {} on {} ({} queries, cold={})...",
+        "\nRunning {} on {} ({} queries, mode={:?})...",
         method_name,
         backend_name,
         queries.len(),
-        cold_mode
+        mode
     );
 
     let spec = ChainSpecBuilder::mainnet().build();
-
-    if !cold_mode {
-        clear_os_cache()?;
-    }
-
     let mut results = BenchmarkResults::new();
     let mut history_stats = HistoryStats::default();
     let benchmark_start = Instant::now();
 
-    if cold_mode {
-        for (i, query) in queries.iter().enumerate() {
-            clear_os_cache_silent()?;
+    match mode {
+        BenchMode::AllCold => {
+            for (i, query) in queries.iter().enumerate() {
+                clear_os_cache_silent()?;
 
-            let start = Instant::now();
+                let t1 = Instant::now();
+                let factory = EthereumNode::provider_factory_builder()
+                    .open_read_only(spec.clone().into(), ReadOnlyConfig::from_datadir(datadir))?;
+                let db_open_time = t1.elapsed();
+
+                let start = Instant::now();
+                let db_provider = factory.provider()?;
+                let historical_provider =
+                    HistoricalStateProviderRef::new(&db_provider, query.block + 1);
+
+                match query.query_type {
+                    QueryType::Balance | QueryType::Nonce => {
+                        let history_info =
+                            historical_provider.account_history_lookup(query.address)?;
+                        history_stats.record(&history_info);
+                        let _account = historical_provider.basic_account(&query.address)?;
+                    }
+                    QueryType::Storage => {
+                        let key = query.storage_key.unwrap_or(B256::ZERO);
+                        let history_info =
+                            historical_provider.storage_history_lookup(query.address, key)?;
+                        history_stats.record(&history_info);
+                        let _value = historical_provider.storage(query.address, key)?;
+                    }
+                }
+
+                let query_time = start.elapsed();
+                results.add(query_time);
+
+                if i < 3 {
+                    println!("\n  Query {}: db_open={:?}, query={:?}", i, db_open_time, query_time);
+                }
+
+                drop(db_provider);
+                drop(factory);
+
+                print_progress(i, queries.len(), &results, benchmark_start)?;
+            }
+        }
+        BenchMode::JarCached => {
+            clear_os_cache()?;
 
             let factory = EthereumNode::provider_factory_builder()
-                .open_read_only(spec.clone().into(), ReadOnlyConfig::from_datadir(datadir))?;
+                .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
 
-            let db_provider = factory.provider()?;
-            let historical_provider =
-                HistoricalStateProviderRef::new(&db_provider, query.block + 1);
-
-            match query.query_type {
-                QueryType::Balance | QueryType::Nonce => {
-                    let history_info = historical_provider.account_history_lookup(query.address)?;
-                    history_stats.record(&history_info);
-                    let _account = historical_provider.basic_account(&query.address)?;
-                }
-                QueryType::Storage => {
-                    let key = query.storage_key.unwrap_or(B256::ZERO);
-                    let history_info =
-                        historical_provider.storage_history_lookup(query.address, key)?;
-                    history_stats.record(&history_info);
-                    let _value = historical_provider.storage(query.address, key)?;
-                }
+            println!("  Warming up jar cache with first query...");
+            {
+                let q = &queries[0];
+                let db_provider = factory.provider()?;
+                let historical = HistoricalStateProviderRef::new(&db_provider, q.block + 1);
+                let _ = historical.basic_account(&q.address)?;
             }
 
-            results.add(start.elapsed());
-            drop(db_provider);
-            drop(factory);
+            for (i, query) in queries.iter().enumerate() {
+                clear_os_cache_silent()?;
 
-            print_progress(i, queries.len(), &results, benchmark_start)?;
-        }
-    } else {
-        let factory = EthereumNode::provider_factory_builder()
-            .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
+                let start = Instant::now();
+                let db_provider = factory.provider()?;
+                let historical_provider =
+                    HistoricalStateProviderRef::new(&db_provider, query.block + 1);
 
-        for (i, query) in queries.iter().enumerate() {
-            let start = Instant::now();
-
-            let db_provider = factory.provider()?;
-            let historical_provider =
-                HistoricalStateProviderRef::new(&db_provider, query.block + 1);
-
-            match query.query_type {
-                QueryType::Balance | QueryType::Nonce => {
-                    let history_info = historical_provider.account_history_lookup(query.address)?;
-                    history_stats.record(&history_info);
-                    let _account = historical_provider.basic_account(&query.address)?;
+                match query.query_type {
+                    QueryType::Balance | QueryType::Nonce => {
+                        let history_info =
+                            historical_provider.account_history_lookup(query.address)?;
+                        history_stats.record(&history_info);
+                        let _account = historical_provider.basic_account(&query.address)?;
+                    }
+                    QueryType::Storage => {
+                        let key = query.storage_key.unwrap_or(B256::ZERO);
+                        let history_info =
+                            historical_provider.storage_history_lookup(query.address, key)?;
+                        history_stats.record(&history_info);
+                        let _value = historical_provider.storage(query.address, key)?;
+                    }
                 }
-                QueryType::Storage => {
-                    let key = query.storage_key.unwrap_or(B256::ZERO);
-                    let history_info =
-                        historical_provider.storage_history_lookup(query.address, key)?;
-                    history_stats.record(&history_info);
-                    let _value = historical_provider.storage(query.address, key)?;
+
+                results.add(start.elapsed());
+
+                if i < 3 {
+                    println!("\n  Query {}: {:?}", i, results.timings.last().unwrap());
                 }
+
+                print_progress(i, queries.len(), &results, benchmark_start)?;
             }
-
-            results.add(start.elapsed());
-
-            print_progress(i, queries.len(), &results, benchmark_start)?;
         }
+        BenchMode::AllWarm => {
+            let factory = EthereumNode::provider_factory_builder()
+                .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
+
+            println!("  No cache clearing, no warmup - measuring first access with DB open...");
+            for (i, query) in queries.iter().enumerate() {
+                let start = Instant::now();
+
+                let db_provider = factory.provider()?;
+                let historical_provider =
+                    HistoricalStateProviderRef::new(&db_provider, query.block + 1);
+
+                match query.query_type {
+                    QueryType::Balance | QueryType::Nonce => {
+                        let history_info =
+                            historical_provider.account_history_lookup(query.address)?;
+                        history_stats.record(&history_info);
+                        let _account = historical_provider.basic_account(&query.address)?;
+                    }
+                    QueryType::Storage => {
+                        let key = query.storage_key.unwrap_or(B256::ZERO);
+                        let history_info =
+                            historical_provider.storage_history_lookup(query.address, key)?;
+                        history_stats.record(&history_info);
+                        let _value = historical_provider.storage(query.address, key)?;
+                    }
+                }
+
+                results.add(start.elapsed());
+
+                print_progress(i, queries.len(), &results, benchmark_start)?;
+            }
+        }
+        BenchMode::All => unreachable!(),
     }
     println!();
 
@@ -690,6 +993,24 @@ fn print_progress(
     Ok(())
 }
 
+fn print_mode_description(mode: BenchMode) {
+    match mode {
+        BenchMode::AllCold => {
+            println!("  Clear OS cache + reopen DB before each query");
+            println!("  Measures: jar loading + page faults + query");
+        }
+        BenchMode::JarCached => {
+            println!("  Keep DB open, clear OS cache before each query");
+            println!("  Measures: page faults + query (jar already loaded)");
+        }
+        BenchMode::AllWarm => {
+            println!("  Keep DB open, no cache clearing");
+            println!("  Measures: first access performance with warm DB");
+        }
+        BenchMode::All => unreachable!(),
+    }
+}
+
 fn print_comparison(method: &str, mdbx: &BenchmarkResults, rocksdb: &BenchmarkResults) {
     println!("\n{}", method);
     println!("  {:12} {:>10} {:>10} {:>10} {:>12}", "Backend", "P50", "P99", "Mean", "Total");
@@ -703,7 +1024,7 @@ fn print_comparison(method: &str, mdbx: &BenchmarkResults, rocksdb: &BenchmarkRe
     );
     println!(
         "  {:12} {:>10.2?} {:>10.2?} {:>10.2?} {:>12.2?}",
-        "RocksDB/SF",
+        "RocksDB",
         rocksdb.p50(),
         rocksdb.p99(),
         rocksdb.mean(),
@@ -722,9 +1043,77 @@ fn print_comparison(method: &str, mdbx: &BenchmarkResults, rocksdb: &BenchmarkRe
         println!(
             "  Difference (P50): {:+.1}% ({})",
             diff_pct,
-            if diff_pct > 0.0 { "RocksDB/SF slower" } else { "MDBX slower" }
+            if diff_pct > 0.0 { "RocksDB slower" } else { "MDBX slower" }
         );
     } else {
         println!("  Difference (P50): ~0% (within noise)");
     }
+}
+
+fn print_cross_mode_comparison(results: &[(BenchMode, ModeResults)]) {
+    println!("\n=== Cross-Mode Summary (P50 latencies) ===");
+
+    let methods: &[(&str, fn(&ModeResults) -> (&BenchmarkResults, &BenchmarkResults))] = &[
+        ("eth_getBalance", |r| (&r.balance.0, &r.balance.1)),
+        ("eth_getTransactionCount", |r| (&r.nonce.0, &r.nonce.1)),
+        ("eth_getStorageAt", |r| (&r.storage.0, &r.storage.1)),
+    ];
+
+    for (method_name, get_results) in methods {
+        println!("\n{}", method_name);
+        println!(
+            "  {:15} {:>12} {:>12} {:>12}",
+            "Mode", "MDBX P50", "RocksDB P50", "Ratio"
+        );
+
+        for (mode, mode_results) in results {
+            let (mdbx, rocksdb) = get_results(mode_results);
+            let ratio = if mdbx.p50() > Duration::ZERO {
+                rocksdb.p50().as_secs_f64() / mdbx.p50().as_secs_f64()
+            } else {
+                0.0
+            };
+            println!(
+                "  {:15} {:>12.2?} {:>12.2?} {:>11.1}x",
+                format!("{:?}", mode),
+                mdbx.p50(),
+                rocksdb.p50(),
+                ratio
+            );
+        }
+    }
+
+    println!("\n=== Interpretation ===");
+    println!("  AllCold:   Full cold start (jar load + page faults + query)");
+    println!("  JarCached: Page fault cost with jar already loaded");
+    println!("  AllWarm:   First access performance with warm DB");
+}
+
+fn print_txhash_cross_mode_comparison(results: &[(BenchMode, TxHashModeResults)]) {
+    println!("\n=== Cross-Mode Summary (TxHashNumbers P50 latencies) ===");
+
+    println!(
+        "\n  {:15} {:>12} {:>12} {:>12}",
+        "Mode", "MDBX P50", "RocksDB P50", "Ratio"
+    );
+
+    for (mode, mode_results) in results {
+        let ratio = if mode_results.mdbx.p50() > Duration::ZERO {
+            mode_results.rocksdb.p50().as_secs_f64() / mode_results.mdbx.p50().as_secs_f64()
+        } else {
+            0.0
+        };
+        println!(
+            "  {:15} {:>12.2?} {:>12.2?} {:>11.1}x",
+            format!("{:?}", mode),
+            mode_results.mdbx.p50(),
+            mode_results.rocksdb.p50(),
+            ratio
+        );
+    }
+
+    println!("\n=== Interpretation ===");
+    println!("  AllCold:   Full cold start (DB open + page faults + query)");
+    println!("  JarCached: Page fault cost with DB already open");
+    println!("  AllWarm:   First access performance with warm DB");
 }
