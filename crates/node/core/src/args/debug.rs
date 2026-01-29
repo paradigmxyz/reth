@@ -267,7 +267,7 @@ impl TypedValueParser for InvalidBlockSelectionValueParser {
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
         val.parse::<InvalidBlockSelection>().map_err(|err| {
             let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
-            let possible_values = InvalidBlockHookType::all_variant_names().to_vec().join(",");
+            let possible_values = InvalidBlockHookType::all_variant_names().join(",");
             let msg = format!(
                 "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
             );
