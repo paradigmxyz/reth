@@ -281,7 +281,9 @@ pub trait SparseTrieExt: SparseTrie {
     /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
     /// `updates` map can be reused to retry the update.
     ///
-    /// Proof targets are not passed to the callback twice for the same path.
+    /// Proof targets are deduplicated by `(full_path, min_len)` within a single call.
+    /// The callback may be invoked again for the same path in subsequent calls if a
+    /// deeper blinded node is discovered (higher `min_len`).
     ///
     /// [`LeafUpdate::Touched`] behaves identically except it does not modify the leaf value.
     fn update_leaves(

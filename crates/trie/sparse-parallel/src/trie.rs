@@ -336,6 +336,8 @@ impl SparseTrie for ParallelSparseTrie {
         // `new_nodes` to keep track of any nodes that were created during the traversal.
         let mut new_nodes = Vec::new();
         let mut next = Some(Nibbles::default());
+        // Track the original node that was modified (path, original_node) for rollback
+        let mut modified_original: Option<(Nibbles, SparseNode)> = None;
 
         // Traverse the upper subtrie to find the node to update or the subtrie to update.
         //
@@ -344,6 +346,13 @@ impl SparseTrie for ParallelSparseTrie {
         while let Some(current) =
             next.filter(|next| SparseSubtrieType::path_len_is_upper(next.len()))
         {
+            // Save original node for potential rollback (only if not already saved)
+            if modified_original.is_none()
+                && let Some(node) = self.upper_subtrie.nodes.get(&current)
+            {
+                modified_original = Some((current, node.clone()));
+            }
+
             // Traverse the next node, keeping track of any changed nodes and the next step in the
             // trie. If traversal fails, clean up the value we inserted and propagate the error.
             let step_result =
@@ -357,6 +366,8 @@ impl SparseTrie for ParallelSparseTrie {
             match step_result? {
                 LeafUpdateStep::Continue { next_node } => {
                     next = Some(next_node);
+                    // Clear modified_original since we haven't actually modified anything yet
+                    modified_original = None;
                 }
                 LeafUpdateStep::Complete { inserted_nodes, reveal_path } => {
                     new_nodes.extend(inserted_nodes);
@@ -378,7 +389,11 @@ impl SparseTrie for ParallelSparseTrie {
                             let revealed_node = match provider.trie_node(&reveal_path) {
                                 Ok(node) => node,
                                 Err(e) => {
-                                    self.upper_subtrie.inner.values.remove(&full_path);
+                                    self.rollback_update(
+                                        &full_path,
+                                        &new_nodes,
+                                        modified_original.take(),
+                                    );
                                     return Err(e);
                                 }
                             };
@@ -387,7 +402,11 @@ impl SparseTrie for ParallelSparseTrie {
                                 let decoded = match TrieNode::decode(&mut &node[..]) {
                                     Ok(d) => d,
                                     Err(e) => {
-                                        self.upper_subtrie.inner.values.remove(&full_path);
+                                        self.rollback_update(
+                                            &full_path,
+                                            &new_nodes,
+                                            modified_original.take(),
+                                        );
                                         return Err(e.into());
                                     }
                                 };
@@ -401,12 +420,20 @@ impl SparseTrie for ParallelSparseTrie {
                                 );
                                 let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
                                 if let Err(e) = subtrie.reveal_node(reveal_path, &decoded, masks) {
-                                    self.upper_subtrie.inner.values.remove(&full_path);
+                                    self.rollback_update(
+                                        &full_path,
+                                        &new_nodes,
+                                        modified_original.take(),
+                                    );
                                     return Err(e);
                                 }
                                 masks
                             } else {
-                                self.upper_subtrie.inner.values.remove(&full_path);
+                                self.rollback_update(
+                                    &full_path,
+                                    &new_nodes,
+                                    modified_original.take(),
+                                );
                                 return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
                                     path: reveal_path,
                                 }
@@ -1212,20 +1239,17 @@ impl SparseTrieExt for ParallelSparseTrie {
                         }
                     } else {
                         // === UPDATE/INSERT PATH ===
-                        // update_leaf handles its own cleanup on error, so we don't need to track
-                        // whether the leaf existed or clean up values here.
-                        match self.update_leaf(full_path, value.clone(), NoRevealProvider) {
-                            Ok(()) => {}
-                            Err(e) => {
-                                if let Some(path) = Self::get_retriable_path(&e) {
-                                    let min_len = (path.len() as u8).min(64);
-                                    if requested.insert((full_path, min_len)) {
-                                        proof_required_fn(full_path, min_len);
-                                    }
-                                    updates.insert(key, LeafUpdate::Changed(value));
-                                } else {
-                                    return Err(e);
+                        // update_leaf is atomic - cleans up on error.
+                        if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider)
+                        {
+                            if let Some(path) = Self::get_retriable_path(&e) {
+                                let min_len = (path.len() as u8).min(64);
+                                if requested.insert((full_path, min_len)) {
+                                    proof_required_fn(full_path, min_len);
                                 }
+                                updates.insert(key, LeafUpdate::Changed(value));
+                            } else {
+                                return Err(e);
                             }
                         }
                     }
@@ -1294,6 +1318,32 @@ impl ParallelSparseTrie {
             SparseTrieErrorKind::BlindedNode { path, .. } |
             SparseTrieErrorKind::NodeNotFoundInProvider { path } => Some(*path),
             _ => None,
+        }
+    }
+
+    /// Rolls back a partial update by removing the value, removing any inserted nodes,
+    /// and restoring any modified original node.
+    /// This ensures `update_leaf` is atomic - either it succeeds completely or leaves the trie
+    /// unchanged.
+    fn rollback_update(
+        &mut self,
+        full_path: &Nibbles,
+        inserted_nodes: &[Nibbles],
+        modified_original: Option<(Nibbles, SparseNode)>,
+    ) {
+        self.upper_subtrie.inner.values.remove(full_path);
+        for node_path in inserted_nodes {
+            // Try upper subtrie first - nodes may be there even if path length suggests lower
+            if self.upper_subtrie.nodes.remove(node_path).is_none() {
+                // Not in upper, try lower subtrie
+                if let Some(subtrie) = self.lower_subtrie_for_path_mut(node_path) {
+                    subtrie.nodes.remove(node_path);
+                }
+            }
+        }
+        // Restore the original node that was modified
+        if let Some((path, original_node)) = modified_original {
+            self.upper_subtrie.nodes.insert(path, original_node);
         }
     }
 
@@ -8471,5 +8521,108 @@ mod tests {
         for (_, min_len) in targets.iter() {
             assert_eq!(*min_len, 1, "All should have min_len 1 from blinded node at 0x0");
         }
+    }
+
+    #[test]
+    fn test_update_leaves_node_not_found_in_provider_atomicity() {
+        use alloy_primitives::map::B256Map;
+        use reth_trie_sparse::LeafUpdate;
+        use std::cell::RefCell;
+
+        // Create a trie with retain_updates enabled (this triggers the code path that
+        // can return NodeNotFoundInProvider when an extension node's child needs revealing).
+        //
+        // Structure: Extension at root -> Hash node (blinded child)
+        // When we try to insert a new leaf that would split the extension, with retain_updates
+        // enabled, it tries to reveal the hash child via the provider. With NoRevealProvider,
+        // this returns NodeNotFoundInProvider.
+
+        let child_hash = B256::repeat_byte(0xAB);
+        let extension = TrieNode::Extension(ExtensionNode::new(
+            Nibbles::from_nibbles([0x1, 0x2, 0x3]),
+            RlpNode::word_rlp(&child_hash),
+        ));
+
+        // Create trie with retain_updates = true
+        let mut trie =
+            ParallelSparseTrie::from_root(extension.clone(), None, true).expect("from_root failed");
+
+        // Record state before update_leaves
+        let prefix_set_len_before = trie.prefix_set.len();
+        let node_count_before = trie.upper_subtrie.nodes.len() +
+            trie.lower_subtries
+                .iter()
+                .filter_map(|s| s.as_revealed_ref())
+                .map(|s| s.nodes.len())
+                .sum::<usize>();
+        let value_count_before = trie.upper_subtrie.inner.values.len() +
+            trie.lower_subtries
+                .iter()
+                .filter_map(|s| s.as_revealed_ref())
+                .map(|s| s.inner.values.len())
+                .sum::<usize>();
+
+        // Create an update that would cause an extension split.
+        // The key starts with 0x1 but diverges from 0x123... at the second nibble.
+        let b256_key = {
+            let mut k = B256::ZERO;
+            k.0[0] = 0x14; // nibbles: 1, 4 - matches first nibble, diverges at second
+            k
+        };
+
+        let new_value = encode_account_value(42);
+        let mut updates: B256Map<LeafUpdate> = B256Map::default();
+        updates.insert(b256_key, LeafUpdate::Changed(new_value.clone()));
+
+        let proof_targets = RefCell::new(Vec::new());
+        trie.update_leaves(&mut updates, |path, min_len| {
+            proof_targets.borrow_mut().push((path, min_len));
+        })
+        .expect("update_leaves should succeed");
+
+        // Assert: update remains in map (NodeNotFoundInProvider is retriable)
+        assert!(
+            !updates.is_empty(),
+            "Update should remain in map when NodeNotFoundInProvider occurs"
+        );
+        assert!(
+            updates.contains_key(&b256_key),
+            "The specific key should be re-inserted for retry"
+        );
+
+        // Assert: callback was invoked
+        let targets = proof_targets.borrow();
+        assert!(!targets.is_empty(), "Callback should be invoked for NodeNotFoundInProvider");
+
+        // Assert: prefix_set unchanged (atomic - no partial state)
+        assert_eq!(
+            trie.prefix_set.len(),
+            prefix_set_len_before,
+            "prefix_set should be unchanged after atomic failure"
+        );
+
+        // Assert: node count unchanged (no structural changes persisted)
+        let node_count_after = trie.upper_subtrie.nodes.len() +
+            trie.lower_subtries
+                .iter()
+                .filter_map(|s| s.as_revealed_ref())
+                .map(|s| s.nodes.len())
+                .sum::<usize>();
+        assert_eq!(
+            node_count_before, node_count_after,
+            "Node count should be unchanged after atomic failure"
+        );
+
+        // Assert: value count unchanged (no values left dangling)
+        let value_count_after = trie.upper_subtrie.inner.values.len() +
+            trie.lower_subtries
+                .iter()
+                .filter_map(|s| s.as_revealed_ref())
+                .map(|s| s.inner.values.len())
+                .sum::<usize>();
+        assert_eq!(
+            value_count_before, value_count_after,
+            "Value count should be unchanged after atomic failure (no dangling values)"
+        );
     }
 }
