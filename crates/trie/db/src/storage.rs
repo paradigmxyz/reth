@@ -43,8 +43,10 @@ where
         return Ok(storage)
     }
 
-    for (block_num_addr, storage_change) in provider.storage_changesets_range(from..=tip)? {
-        if block_num_addr.address() == address {
+    for (BlockNumberAddress((_, storage_address)), storage_change) in
+        provider.storage_changesets_range(from..=tip)?
+    {
+        if storage_address == address {
             let hashed_slot = keccak256(storage_change.key);
             if let hash_map::Entry::Vacant(entry) = storage.storage.entry(hashed_slot) {
                 entry.insert(storage_change.value);
