@@ -804,9 +804,8 @@ where
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
             // Load prefix sets from changesets for the unwind range
-            let prefix_sets =
-                load_prefix_sets_with_provider::<_, KeccakKeyHasher>(provider, range)
-                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            let prefix_sets = load_prefix_sets_with_provider::<_, KeccakKeyHasher>(provider, range)
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             // Create a fresh overlay factory for unwind to ensure we have the latest
             // database state.
