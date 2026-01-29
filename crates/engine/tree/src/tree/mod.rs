@@ -280,7 +280,7 @@ where
     use_hashed_state: bool,
     /// Cuckoo filter for tracking accounts with storage.
     /// Used to skip storage proof calculations for accounts without storage.
-    storage_filter: Arc<StorageAccountFilter>,
+    storage_filter: std::sync::Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -348,7 +348,7 @@ where
         evm_config: C,
         changeset_cache: ChangesetCache,
         use_hashed_state: bool,
-        storage_filter: Arc<StorageAccountFilter>,
+        storage_filter: std::sync::Arc<parking_lot::RwLock<reth_trie_common::StorageAccountFilter>>,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -416,7 +416,7 @@ where
         let filter = provider
             .build_storage_filter_parallel(num_threads)
             .expect("failed to build storage filter");
-        let storage_filter = Arc::new(StorageAccountFilter::from(filter));
+        let storage_filter = std::sync::Arc::new(parking_lot::RwLock::new(filter));
 
         // Set the storage filter on the payload validator for use in proof calculation
         let mut payload_validator = payload_validator;
