@@ -4204,4 +4204,42 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_try_into_history_rejects_unexecuted_blocks() {
+        use reth_storage_api::TryIntoHistoricalStateProvider;
+
+        let factory = create_test_provider_factory();
+
+        // Insert genesis block to have some data
+        let data = BlockchainTestData::default();
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                crate::OriginalValuesKnown::No,
+                StateWriteConfig::default(),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        // Get a fresh provider - Execution checkpoint is 0, no receipts written beyond genesis
+        let provider = factory.provider().unwrap();
+
+        // Requesting historical state for block 0 (executed) should succeed
+        let result = provider.try_into_history_at_block(0);
+        assert!(result.is_ok(), "Block 0 should be available");
+
+        // Get another provider and request state for block 100 (not executed)
+        let provider = factory.provider().unwrap();
+        let result = provider.try_into_history_at_block(100);
+
+        // Should fail with BlockNotExecuted error
+        match result {
+            Err(ProviderError::BlockNotExecuted { requested: 100, .. }) => {}
+            Err(e) => panic!("Expected BlockNotExecuted error, got: {e:?}"),
+            Ok(_) => panic!("Expected error, got Ok"),
+        }
+    }
 }
