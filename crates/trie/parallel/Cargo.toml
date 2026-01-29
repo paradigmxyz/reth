@@ -35,6 +35,7 @@ derive_more.workspace = true
 rayon.workspace = true
 itertools.workspace = true
 crossbeam-channel.workspace = true
+parking_lot.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }

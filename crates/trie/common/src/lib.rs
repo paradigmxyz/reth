@@ -77,7 +77,7 @@ mod utils;
 #[cfg(feature = "std")]
 mod storage_filter;
 #[cfg(feature = "std")]
-pub use storage_filter::{SharedStorageFilter, StorageAccountFilter, StorageFilterUpdateStats};
+pub use storage_filter::{StorageAccountFilter, StorageFilterUpdateStats};
 
 /// Bincode-compatible serde implementations for trie types.
 ///
