@@ -307,6 +307,17 @@ pub struct SparseTrieUpdates {
     pub wiped: bool,
 }
 
+impl SparseTrieUpdates {
+    /// Initialize a [`Self`] with given capacities.
+    pub fn with_capacity(num_updated_nodes: usize, num_removed_nodes: usize) -> Self {
+        Self {
+            updated_nodes: HashMap::with_capacity_and_hasher(num_updated_nodes, Default::default()),
+            removed_nodes: HashSet::with_capacity_and_hasher(num_removed_nodes, Default::default()),
+            wiped: false,
+        }
+    }
+}
+
 /// Error type for a leaf lookup operation
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafLookupError {
