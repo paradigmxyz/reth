@@ -228,16 +228,11 @@ where
         provider_rw.save_stage_checkpoint(stage, checkpoint)?;
     }
 
-    // Static file segments start empty, so we need to initialize the genesis block.
-    //
-    // We do not do this for changesets because they get initialized in `insert_state` /
-    // `write_state` / `write_state_reverts`. If the node is configured for writing changesets to
-    // static files they will be written there, otherwise they will be written to the DB.
+    // Static file segments start empty, so we need to initialize the block range.
+    // For genesis blocks with non-zero block numbers, we use get_writer() instead of
+    // latest_writer() and set_block_range() to ensure static files start at the correct block.
     let static_file_provider = provider_rw.static_file_provider();
 
-    // Static file segments start empty, so we need to initialize the genesis block.
-    // For genesis blocks with non-zero block numbers, we need to use get_writer() instead of
-    // latest_writer() to ensure the genesis block is stored in the correct static file range.
     static_file_provider
         .get_writer(genesis_block_number, StaticFileSegment::Receipts)?
         .user_header_mut()
@@ -250,6 +245,22 @@ where
     if genesis_storage_settings.transaction_senders_in_static_files {
         static_file_provider
             .get_writer(genesis_block_number, StaticFileSegment::TransactionSenders)?
+            .user_header_mut()
+            .set_block_range(genesis_block_number, genesis_block_number);
+    }
+
+    // Changesets are written by `write_state_reverts`, but for non-zero genesis blocks we must
+    // initialize the static file block range here so the writer expects the correct starting block.
+    if genesis_storage_settings.account_changesets_in_static_files {
+        static_file_provider
+            .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
+            .user_header_mut()
+            .set_block_range(genesis_block_number, genesis_block_number);
+    }
+
+    if genesis_storage_settings.storage_changesets_in_static_files {
+        static_file_provider
+            .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
             .user_header_mut()
             .set_block_range(genesis_block_number, genesis_block_number);
     }
