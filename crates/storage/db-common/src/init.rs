@@ -211,6 +211,22 @@ where
     // Behaviour reserved only for new nodes should be set in the storage settings.
     provider_rw.write_storage_settings(genesis_storage_settings)?;
 
+    // Initialize changeset static files BEFORE insert_genesis_state, since write_state
+    // writes changesets and needs the block range to be set for non-zero genesis blocks.
+    let static_file_provider = provider_rw.static_file_provider();
+    if genesis_storage_settings.account_changesets_in_static_files {
+        static_file_provider
+            .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
+            .user_header_mut()
+            .set_block_range(genesis_block_number, genesis_block_number);
+    }
+    if genesis_storage_settings.storage_changesets_in_static_files {
+        static_file_provider
+            .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
+            .user_header_mut()
+            .set_block_range(genesis_block_number, genesis_block_number);
+    }
+
     insert_genesis_hashes(&provider_rw, alloc.iter())?;
     insert_genesis_history(&provider_rw, alloc.iter())?;
 
@@ -245,20 +261,6 @@ where
     if genesis_storage_settings.transaction_senders_in_static_files {
         static_file_provider
             .get_writer(genesis_block_number, StaticFileSegment::TransactionSenders)?
-            .user_header_mut()
-            .set_block_range(genesis_block_number, genesis_block_number);
-    }
-
-    if genesis_storage_settings.account_changesets_in_static_files {
-        static_file_provider
-            .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
-            .user_header_mut()
-            .set_block_range(genesis_block_number, genesis_block_number);
-    }
-
-    if genesis_storage_settings.storage_changesets_in_static_files {
-        static_file_provider
-            .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
             .user_header_mut()
             .set_block_range(genesis_block_number, genesis_block_number);
     }
