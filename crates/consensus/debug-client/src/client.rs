@@ -99,7 +99,7 @@ where
             let block_hash = payload.block_hash();
             let block_number = payload.block_number();
 
-            previous_block_hashes.push(block_hash);
+            previous_block_hashes.enqueue(block_hash);
 
             // Send new events to execution client
             let _ = self.engine_handle.new_payload(payload).await;
