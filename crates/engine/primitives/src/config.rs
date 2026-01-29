@@ -51,12 +51,12 @@ pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 ///
 /// Nodes at this depth and below are converted to hash stubs to reduce memory.
 /// Depth 4 means we keep roughly 16^4 = 65536 potential branch paths at most.
-pub use reth_trie_sparse::DEFAULT_SPARSE_TRIE_PRUNE_DEPTH;
+pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 
 /// Default maximum number of storage tries to keep after pruning.
 ///
 /// Storage tries beyond this limit are cleared (but allocations preserved).
-pub use reth_trie_sparse::DEFAULT_MAX_PRESERVED_STORAGE_TRIES as DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES;
+pub const DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES: usize = 100;
 
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
