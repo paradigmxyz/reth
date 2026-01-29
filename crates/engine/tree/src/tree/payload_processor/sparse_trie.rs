@@ -406,12 +406,12 @@ where
         for (addr, updates) in &mut self.storage_updates {
             let trie = self.trie.get_or_create_storage_trie_mut(*addr);
 
-            trie.update_leaves(updates, |path, min_len| {
+            trie.update_leaves(updates, |key, min_len| {
                 targets
                     .storage_targets
                     .entry(*addr)
                     .or_default()
-                    .push(Target::from_nibbles(path).with_min_len(min_len));
+                    .push(Target::new(key).with_min_len(min_len));
             })
             .map_err(ProviderError::other)?;
 
@@ -489,8 +489,8 @@ where
         // Process account trie updates and fill the account targets.
         self.trie
             .trie_mut()
-            .update_leaves(&mut self.account_updates, |target, min_len| {
-                targets.account_targets.push(Target::from_nibbles(target).with_min_len(min_len));
+            .update_leaves(&mut self.account_updates, |key, min_len| {
+                targets.account_targets.push(Target::new(key).with_min_len(min_len));
             })
             .map_err(ProviderError::other)?;
 
