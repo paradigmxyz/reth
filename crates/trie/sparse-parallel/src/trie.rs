@@ -6,7 +6,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::Decodable;
 use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
-use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
+use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
@@ -1099,9 +1099,8 @@ impl SparseTrieExt for ParallelSparseTrie {
 
         let (upper_ops, lower_ops) = ops.split_at(num_upper);
 
-        // Track deduplicated proof requests and failed updates to restore later.
+        // Track deduplicated proof requests.
         let mut requested: HashSet<(Nibbles, u8)> = HashSet::default();
-        let mut failures: Vec<(B256, LeafUpdate)> = Vec::new();
 
         // Process upper subtrie operations sequentially since they modify shared trie structure.
         for (key, full_path, _, update) in upper_ops {
@@ -1112,22 +1111,14 @@ impl SparseTrieExt for ParallelSparseTrie {
                     if requested.insert((*full_path, min_len)) {
                         proof_required_fn(*full_path, min_len);
                     }
-                    failures.push((*key, update.clone()));
+                    updates.insert(*key, update.clone());
                 }
-                Err(UpdateLeafOutcome::Fatal(e)) => {
-                    for (k, u) in failures {
-                        updates.insert(k, u);
-                    }
-                    return Err(e);
-                }
+                Err(UpdateLeafOutcome::Fatal(e)) => return Err(e),
             }
         }
 
         // Process lower subtrie operations.
         if lower_ops.is_empty() {
-            for (k, u) in failures {
-                updates.insert(k, u);
-            }
             return Ok(());
         }
 
@@ -1142,7 +1133,7 @@ impl SparseTrieExt for ParallelSparseTrie {
             if requested.insert((full_path, min_len)) {
                 proof_required_fn(full_path, min_len);
             }
-            failures.push((key, LeafUpdate::Touched));
+            updates.insert(key, LeafUpdate::Touched);
         }
 
         // Process Changed operations sequentially since they mutate the trie structure.
@@ -1154,20 +1145,10 @@ impl SparseTrieExt for ParallelSparseTrie {
                     if requested.insert((*full_path, min_len)) {
                         proof_required_fn(*full_path, min_len);
                     }
-                    failures.push((*key, update.clone()));
+                    updates.insert(*key, update.clone());
                 }
-                Err(UpdateLeafOutcome::Fatal(e)) => {
-                    for (k, u) in failures {
-                        updates.insert(k, u);
-                    }
-                    return Err(e);
-                }
+                Err(UpdateLeafOutcome::Fatal(e)) => return Err(e),
             }
-        }
-
-        // Put failed updates back into the map for caller to retry after revealing proofs.
-        for (k, u) in failures {
-            updates.insert(k, u);
         }
 
         Ok(())
@@ -1218,6 +1199,16 @@ impl ParallelSparseTrie {
         (blinded_path.len() as u8).min(MAX_NIBBLE_PATH_LEN)
     }
 
+    /// Checks if an error is retriable (`BlindedNode` or `NodeNotFoundInProvider`) and extracts
+    /// the path if so.
+    const fn get_retriable_path(e: &SparseTrieError) -> Option<Nibbles> {
+        match e.kind() {
+            SparseTrieErrorKind::BlindedNode { path, .. } |
+            SparseTrieErrorKind::NodeNotFoundInProvider { path } => Some(*path),
+            _ => None,
+        }
+    }
+
     /// Applies a single leaf update, returning Ok(()) on success or the outcome on failure.
     ///
     /// Handles three update variants:
@@ -1233,25 +1224,27 @@ impl ParallelSparseTrie {
 
         match update {
             // Removal: empty value triggers leaf deletion. Snapshot the value first so we can
-            // restore it if removal fails due to a blinded node.
+            // restore it if removal fails due to a retriable error.
             LeafUpdate::Changed(value) if value.is_empty() => {
                 let old_value = self.get_leaf_value(full_path).cloned();
                 match self.remove_leaf(full_path, NoRevealProvider) {
                     Ok(()) => Ok(()),
                     Err(e) => {
-                        if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
+                        if let Some(path) = Self::get_retriable_path(&e) {
                             if let Some(old) = old_value {
                                 // Mirror get_leaf_value logic: check if lower subtrie exists and
                                 // is non-empty before inserting there
-                                if let Some(subtrie) = self.lower_subtrie_for_path_mut(full_path) &&
-                                    !subtrie.is_empty()
-                                {
-                                    subtrie.inner.values.insert(*full_path, old);
+                                if let Some(subtrie) = self.lower_subtrie_for_path_mut(full_path) {
+                                    if subtrie.is_empty() {
+                                        self.upper_subtrie.inner.values.insert(*full_path, old);
+                                    } else {
+                                        subtrie.inner.values.insert(*full_path, old);
+                                    }
                                 } else {
                                     self.upper_subtrie.inner.values.insert(*full_path, old);
                                 }
                             }
-                            Err(UpdateLeafOutcome::Blinded { blinded_path: *path })
+                            Err(UpdateLeafOutcome::Blinded { blinded_path: path })
                         } else {
                             Err(UpdateLeafOutcome::Fatal(e))
                         }
@@ -1259,20 +1252,20 @@ impl ParallelSparseTrie {
                 }
             }
             // Insert/update: non-empty value creates or updates the leaf. Track whether the leaf
-            // existed so we can clean up if update fails due to a blinded node.
+            // existed so we can clean up if update fails due to a retriable error.
             LeafUpdate::Changed(value) => {
                 let existed = self.get_leaf_value(full_path).is_some();
                 match self.update_leaf(*full_path, value, NoRevealProvider) {
                     Ok(()) => Ok(()),
                     Err(e) => {
-                        if let SparseTrieErrorKind::BlindedNode { path, .. } = e.kind() {
+                        if let Some(path) = Self::get_retriable_path(&e) {
                             if !existed {
                                 self.upper_subtrie.inner.values.remove(full_path);
                                 if let Some(subtrie) = self.lower_subtrie_for_path_mut(full_path) {
                                     subtrie.inner.values.remove(full_path);
                                 }
                             }
-                            Err(UpdateLeafOutcome::Blinded { blinded_path: *path })
+                            Err(UpdateLeafOutcome::Blinded { blinded_path: path })
                         } else {
                             Err(UpdateLeafOutcome::Fatal(e))
                         }
