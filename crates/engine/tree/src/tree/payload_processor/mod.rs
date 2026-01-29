@@ -559,7 +559,7 @@ where
             let mut task = SparseTrieTask::<_, ParallelSparseTrie, ParallelSparseTrie>::new(
                 sparse_trie_rx,
                 proof_worker_handle,
-                trie_metrics,
+                trie_metrics.clone(),
                 sparse_state_trie,
                 prune_depth,
                 max_storage_tries,
@@ -596,10 +596,14 @@ where
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             if succeeded {
+                let start = std::time::Instant::now();
                 let trie = task.into_trie_for_reuse(
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
+                trie_metrics
+                    .into_trie_for_reuse_duration_histogram
+                    .record(start.elapsed().as_secs_f64());
                 guard.store(PreservedSparseTrie::new(trie, block_hash));
             } else {
                 debug!(
