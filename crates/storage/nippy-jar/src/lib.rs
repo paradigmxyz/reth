@@ -59,6 +59,9 @@ const INDEX_FILE_EXTENSION: &str = "idx";
 const OFFSETS_FILE_EXTENSION: &str = "off";
 /// The file extension used for configuration files.
 pub const CONFIG_FILE_EXTENSION: &str = "conf";
+/// The file extension used for changeset offset sidecar files.
+#[allow(dead_code)] // Used in upcoming integration
+pub const CHANGESET_OFFSETS_FILE_EXTENSION: &str = "csoff";
 
 /// A [`RefRow`] is a list of column value slices pointing to either an internal buffer or a
 /// memory-mapped file.

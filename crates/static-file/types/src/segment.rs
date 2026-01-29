@@ -211,6 +211,11 @@ pub struct ChangesetOffset {
 }
 
 impl ChangesetOffset {
+    /// Creates a new changeset offset.
+    pub const fn new(offset: u64, num_changes: u64) -> Self {
+        Self { offset, num_changes }
+    }
+
     /// Returns the start offset for the row for this block
     pub const fn offset(&self) -> u64 {
         self.offset
@@ -224,6 +229,53 @@ impl ChangesetOffset {
     /// Returns a range corresponding to the changes.
     pub const fn changeset_range(&self) -> Range<u64> {
         self.offset..(self.offset + self.num_changes)
+    }
+}
+
+/// Metadata for changeset offsets stored in a separate sidecar file.
+/// This replaces the inline `Vec<ChangesetOffset>` to enable incremental writes.
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Default)]
+#[allow(dead_code)] // Used in upcoming commits
+pub struct ChangesetOffsetsMeta {
+    /// Number of valid entries (blocks) in the sidecar file.
+    /// This is the authoritative count - any bytes beyond `len * 16` in the file are ignored.
+    len: u64,
+    /// Format version for future compatibility.
+    version: u8,
+}
+
+impl ChangesetOffsetsMeta {
+    /// Size in bytes of each offset record in the sidecar file.
+    pub const RECORD_SIZE: usize = 16;
+
+    /// Creates new metadata with the given length.
+    pub const fn new(len: u64) -> Self {
+        Self { len, version: 1 }
+    }
+
+    /// Returns the number of valid changeset offset entries.
+    pub const fn len(&self) -> u64 {
+        self.len
+    }
+
+    /// Returns true if there are no entries.
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Increment the length by the given amount.
+    pub fn increment(&mut self, count: u64) {
+        self.len += count;
+    }
+
+    /// Set the length to a new value (for prune operations).
+    pub fn set_len(&mut self, new_len: u64) {
+        self.len = new_len;
+    }
+
+    /// Returns the expected file size in bytes.
+    pub const fn expected_file_size(&self) -> u64 {
+        self.len * Self::RECORD_SIZE as u64
     }
 }
 
