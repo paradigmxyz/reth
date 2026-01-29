@@ -4,7 +4,7 @@ use crate::{
         database::{chain::ChainStorage, metrics},
         rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
         static_file::{StaticFileWriteCtx, StaticFileWriter},
-        NodeTypesForProvider, StaticFileProvider,
+        NodeTypesForProvider, StaticFileProvider, TrieDBProvider,
     },
     to_range,
     traits::{
@@ -82,6 +82,18 @@ use std::{
     time::Instant,
 };
 use tracing::{debug, instrument, trace};
+
+#[cfg(feature = "triedb")]
+use {
+    alloy_consensus::constants::KECCAK_EMPTY,
+    alloy_primitives::{StorageKey, StorageValue, U256},
+    alloy_trie::EMPTY_ROOT_HASH,
+    reth_storage_api::PlainPostState,
+    triedb::{
+        account::Account as TrieDBAccount,
+        path::{AddressPath, StoragePath},
+    },
+};
 
 /// Determines the commit order for database operations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -198,6 +210,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
+    /// `TrieDB` provider
+    triedb_provider: TrieDBProvider,
     /// Changeset cache for trie unwinding
     changeset_cache: ChangesetCache,
     /// Pending `RocksDB` batches to be committed at provider commit time.
@@ -221,6 +235,8 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("storage", &self.storage)
             .field("storage_settings", &self.storage_settings)
             .field("rocksdb_provider", &self.rocksdb_provider)
+            .field("triedb_provider", &self.triedb_provider)
+            .field("rocksdb_provider", &self.rocksdb_provider)
             .field("changeset_cache", &self.changeset_cache)
             .field("pending_rocksdb_batches", &"<pending batches>")
             .field("commit_order", &self.commit_order)
@@ -234,13 +250,25 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
     }
+
+    /// Returns reference to TrieDB provider.
+    pub const fn triedb_provider(&self) -> &TrieDBProvider {
+        &self.triedb_provider
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// State provider for latest state
     pub fn latest<'a>(&'a self) -> Box<dyn StateProvider + 'a> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Box::new(LatestStateProviderRef::new(self))
+        #[cfg(feature = "triedb")]
+        {
+            Box::new(LatestStateProviderRef::new_with_triedb(self, &self.triedb_provider))
+        }
+        #[cfg(not(feature = "triedb"))]
+        {
+            Box::new(LatestStateProviderRef::new(self))
+        }
     }
 
     /// Storage provider for state at that given block hash
@@ -253,7 +281,13 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProviderRef::new(self)))
+            #[cfg(feature = "triedb")]
+            return Ok(Box::new(LatestStateProviderRef::new_with_triedb(
+                self,
+                &self.triedb_provider,
+            )));
+            #[cfg(not(feature = "triedb"))]
+            return Ok(Box::new(LatestStateProviderRef::new(self)));
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -354,6 +388,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
+        triedb_provider: TrieDBProvider,
         changeset_cache: ChangesetCache,
         commit_order: CommitOrder,
     ) -> Self {
@@ -365,6 +400,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            triedb_provider,
             changeset_cache,
             pending_rocksdb_batches: Default::default(),
             commit_order,
@@ -383,6 +419,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
+        triedb_provider: TrieDBProvider,
         changeset_cache: ChangesetCache,
     ) -> Self {
         Self::new_rw_inner(
@@ -393,6 +430,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            triedb_provider,
             changeset_cache,
             CommitOrder::Normal,
         )
@@ -408,6 +446,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
+        triedb_provider: TrieDBProvider,
         changeset_cache: ChangesetCache,
     ) -> Self {
         Self::new_rw_inner(
@@ -418,6 +457,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            triedb_provider,
             changeset_cache,
             CommitOrder::Unwind,
         )
@@ -605,8 +645,48 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
+            // TODO: Do performant / batched writes for each type of object
+            // instead of a loop over all blocks,
+            // meaning:
+            //  * blocks
+            //  * state
+            //  * hashed state
+            //  * trie updates (cannot naively extend, need helper)
+            //  * indices (already done basically)
+            // Insert the blocks and merge state changes for triedb
+            #[cfg(feature = "triedb")]
+            let mut merged_plain_state = PlainPostState::default();
+
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
+
+                #[cfg(feature = "triedb")]
+                {
+                    // Collect state changes for TrieDB batch write
+                    let bundle_state = &block.execution_outcome().state;
+                    for (address, bundle_account) in bundle_state.state() {
+                        let account =
+                            if bundle_account.was_destroyed() || bundle_account.info.is_none() {
+                                None
+                            } else {
+                                bundle_account
+                                    .info
+                                    .as_ref()
+                                    .map(|info| reth_primitives_traits::Account::from(info))
+                            };
+
+                        merged_plain_state.accounts.insert(*address, account);
+
+                        let storage_map = merged_plain_state
+                            .storages
+                            .entry(*address)
+                            .or_insert_with(HashMap::default);
+                        for (slot, storage_slot) in &bundle_account.storage {
+                            let slot_b256 = B256::from_slice(&slot.to_be_bytes::<32>());
+                            storage_map.insert(slot_b256, storage_slot.present_value);
+                        }
+                    }
+                }
 
                 let start = Instant::now();
                 self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
@@ -685,6 +765,97 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             timings.total = total_start.elapsed();
 
             self.metrics.record_save_blocks(&timings);
+
+            // Write merged state to triedb
+            // Only write when state is being persisted to ensure changesets and TrieDB stay in sync
+            #[cfg(feature = "triedb")]
+            if save_mode.with_state() {
+                let start = Instant::now();
+                let mut tx = self.triedb_provider.inner_db().begin_rw().map_err(|e| {
+                    ProviderError::TrieWitnessError(format!(
+                        "Failed to begin triedb transaction: {e:?}"
+                    ))
+                })?;
+
+                // First, write all storage slots for each address
+                for (address, storage) in &merged_plain_state.storages {
+                    let address_path = AddressPath::for_address(*address);
+
+                    for (storage_key, storage_value) in storage {
+                        let raw_slot = U256::from_be_slice(storage_key.as_slice());
+                        let storage_path = StoragePath::for_address_path_and_slot(
+                            address_path.clone(),
+                            StorageKey::from(raw_slot),
+                        );
+
+                        if storage_value.is_zero() {
+                            // Delete storage slot
+                            tx.set_storage_slot(storage_path, None).map_err(|e| {
+                                ProviderError::TrieWitnessError(format!(
+                                    "Failed to set triedb storage slot: {e:?}"
+                                ))
+                            })?;
+                        } else {
+                            // Set storage slot
+                            let storage_value_triedb = StorageValue::from_be_slice(
+                                storage_value.to_be_bytes::<32>().as_slice(),
+                            );
+                            tx.set_storage_slot(storage_path, Some(storage_value_triedb)).map_err(
+                                |e| {
+                                    ProviderError::TrieWitnessError(format!(
+                                        "Failed to set triedb storage slot: {e:?}"
+                                    ))
+                                },
+                            )?;
+                        }
+                    }
+                }
+
+                // Then, write accounts (storage roots will be computed automatically by triedb)
+                for (address, account_opt) in &merged_plain_state.accounts {
+                    let address_path = AddressPath::for_address(*address);
+
+                    if let Some(account) = account_opt {
+                        // Account exists or is being updated
+                        // Storage root will be computed from the storage we just wrote
+                        let trie_account = TrieDBAccount::new(
+                            account.nonce,
+                            account.balance,
+                            EMPTY_ROOT_HASH, // Will be computed from storage
+                            account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+                        );
+                        tx.set_account(address_path, Some(trie_account)).map_err(|e| {
+                            ProviderError::TrieWitnessError(format!(
+                                "Failed to set triedb account: {e:?}"
+                            ))
+                        })?;
+                    } else {
+                        // Account is being destroyed
+                        tx.set_account(address_path, None).map_err(|e| {
+                            ProviderError::TrieWitnessError(format!(
+                                "Failed to delete triedb account: {e:?}"
+                            ))
+                        })?;
+                    }
+                }
+
+                // Commit the triedb transaction
+                tx.commit().map_err(|e| {
+                    ProviderError::TrieWitnessError(format!(
+                        "Failed to commit triedb transaction: {e:?}"
+                    ))
+                })?;
+
+                let elapsed = start.elapsed().as_millis();
+                tracing::info!(
+                    target: "providers::db",
+                    elapsed_ms = elapsed,
+                    num_accounts = merged_plain_state.accounts.len(),
+                    num_storage_changes = merged_plain_state.storages.len(),
+                    "Saved merged state to TrieDB"
+                );
+            }
+
             debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
 
             Ok(())
@@ -763,33 +934,190 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
         let changed_accounts = self.account_changesets_range(from..)?;
 
-        // Unwind account hashes.
-        self.unwind_account_hashing(changed_accounts.iter())?;
+        // When using triedb, we skip unwinding hashed state as it's not used
+        #[cfg(not(feature = "triedb"))]
+        {
+            // Unwind account hashes.
+            self.unwind_account_hashing(changed_accounts.iter())?;
+        }
 
         // Unwind account history indices.
         self.unwind_account_history_indices(changed_accounts.iter())?;
 
         let changed_storages = self.storage_changesets_range(from..)?;
 
-        // Unwind storage hashes.
-        self.unwind_storage_hashing(changed_storages.iter().copied())?;
+        // When using triedb, we skip unwinding hashed state as it's not used
+        #[cfg(not(feature = "triedb"))]
+        {
+            // Unwind storage hashes.
+            self.unwind_storage_hashing(changed_storages.iter().copied())?;
+        }
 
         // Unwind storage history indices.
         self.unwind_storage_history_indices(changed_storages.iter().copied())?;
 
-        // Unwind accounts/storages trie tables using the revert.
-        // Get the database tip block number
-        let db_tip_block = self
-            .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
-            .as_ref()
-            .map(|chk| chk.block_number)
-            .ok_or_else(|| ProviderError::InsufficientChangesets {
-                requested: from,
-                available: 0..=0,
-            })?;
+        // When using triedb, unwind the triedb state instead of traditional trie tables
+        #[cfg(feature = "triedb")]
+        {
+            self.unwind_triedb_state(changed_accounts, changed_storages)?;
+        }
 
-        let trie_revert = self.changeset_cache.get_or_compute_range(self, from..=db_tip_block)?;
-        self.write_trie_updates_sorted(&trie_revert)?;
+        // When not using triedb, unwind accounts/storages trie tables using the revert
+        #[cfg(not(feature = "triedb"))]
+        {
+            // Get the database tip block number
+            let db_tip_block = self
+                .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
+                .as_ref()
+                .map(|chk| chk.block_number)
+                .ok_or_else(|| ProviderError::InsufficientChangesets {
+                    requested: from,
+                    available: 0..=0,
+                })?;
+
+            let trie_revert =
+                self.changeset_cache.get_or_compute_range(self, from..=db_tip_block)?;
+            self.write_trie_updates_sorted(&trie_revert)?;
+        }
+
+        Ok(())
+    }
+
+    /// Unwinds TrieDB state by restoring accounts and storage to their previous values.
+    ///
+    /// This method reads changesets and reverts the TrieDB to the state before the unwound
+    /// blocks. For each account/storage change:
+    /// - If the previous value was Some, restore it
+    /// - If the previous value was None, delete the entry (it didn't exist before)
+    ///
+    /// # Arguments
+    /// * `changed_accounts` - Account changesets from the unwound blocks
+    /// * `changed_storages` - Storage changesets from the unwound blocks
+    #[cfg(feature = "triedb")]
+    fn unwind_triedb_state(
+        &self,
+        changed_accounts: Vec<(BlockNumber, reth_db_api::models::AccountBeforeTx)>,
+        changed_storages: Vec<(BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
+    ) -> ProviderResult<()> {
+        use alloy_consensus::constants::KECCAK_EMPTY;
+        use alloy_primitives::U256;
+        use alloy_trie::EMPTY_ROOT_HASH;
+        use std::collections::BTreeMap;
+        use triedb::{
+            account::Account as TrieDBAccount,
+            path::{AddressPath, StoragePath},
+        };
+
+        let start = std::time::Instant::now();
+
+        let mut tx = self.triedb_provider.inner_db().begin_rw().map_err(|e| {
+            ProviderError::TrieWitnessError(format!("Failed to begin triedb transaction: {e:?}"))
+        })?;
+
+        // Process storage changes (iterate forward to take the first/oldest changeset for each key)
+        // Group by (address, storage_key) and take the oldest (earliest) changeset for each
+        let mut storage_reverts: BTreeMap<(Address, alloy_primitives::StorageKey), U256> =
+            BTreeMap::new();
+
+        for (BlockNumberAddress((_, address)), storage_entry) in changed_storages.iter() {
+            let storage_key = alloy_primitives::StorageKey::from(U256::from_be_slice(
+                storage_entry.key.as_slice(),
+            ));
+            // Insert only if not already present (we want the oldest/first state)
+            storage_reverts.entry((*address, storage_key)).or_insert(storage_entry.value);
+        }
+
+        tracing::debug!(
+            target: "providers::db",
+            num_storage_reverts = storage_reverts.len(),
+            "Reverting storage in TrieDB"
+        );
+
+        let num_storage_reverts = storage_reverts.len();
+
+        // Apply storage reverts to triedb
+        for ((address, storage_key), value) in storage_reverts {
+            let address_path = AddressPath::for_address(address);
+            let storage_path = StoragePath::for_address_path_and_slot(address_path, storage_key);
+
+            if value.is_zero() {
+                // Storage slot didn't exist before, delete it
+                tx.set_storage_slot(storage_path, None).map_err(|e| {
+                    ProviderError::TrieWitnessError(format!(
+                        "Failed to delete triedb storage slot: {e:?}"
+                    ))
+                })?;
+            } else {
+                // Restore previous storage value
+                let storage_value_triedb = alloy_primitives::StorageValue::from_be_slice(
+                    value.to_be_bytes::<32>().as_slice(),
+                );
+                tx.set_storage_slot(storage_path, Some(storage_value_triedb)).map_err(|e| {
+                    ProviderError::TrieWitnessError(format!(
+                        "Failed to set triedb storage slot: {e:?}"
+                    ))
+                })?;
+            }
+        }
+
+        // Process account changes (iterate forward to take the first/oldest changeset for each
+        // address) Group by address and take the oldest (earliest) changeset for each
+        let mut account_reverts: BTreeMap<Address, Option<reth_primitives_traits::Account>> =
+            BTreeMap::new();
+
+        for (_, account_before_tx) in changed_accounts.iter() {
+            // Insert only if not already present (we want the oldest/first state)
+            account_reverts.entry(account_before_tx.address).or_insert(account_before_tx.info);
+        }
+
+        tracing::debug!(
+            target: "providers::db",
+            num_account_reverts = account_reverts.len(),
+            "Reverting accounts in TrieDB"
+        );
+
+        let num_account_reverts = account_reverts.len();
+
+        // Apply account reverts to triedb
+        for (address, account_opt) in account_reverts {
+            let address_path = AddressPath::for_address(address);
+
+            if let Some(account) = account_opt {
+                // Account existed before, restore it
+                let trie_account = TrieDBAccount::new(
+                    account.nonce,
+                    account.balance,
+                    EMPTY_ROOT_HASH, // Storage root will be computed from storage
+                    account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+                );
+                tx.set_account(address_path, Some(trie_account)).map_err(|e| {
+                    ProviderError::TrieWitnessError(format!("Failed to set triedb account: {e:?}"))
+                })?;
+            } else {
+                // Account didn't exist before, delete it
+                tx.set_account(address_path, None).map_err(|e| {
+                    ProviderError::TrieWitnessError(format!(
+                        "Failed to delete triedb account: {e:?}"
+                    ))
+                })?;
+            }
+        }
+
+        // Commit the triedb transaction
+        tx.commit().map_err(|e| {
+            ProviderError::TrieWitnessError(format!(
+                "Failed to commit triedb unwind transaction: {e:?}"
+            ))
+        })?;
+
+        let elapsed = start.elapsed().as_millis();
+        tracing::info!(
+            target: "providers::db",
+            elapsed_ms = elapsed,
+            num_accounts = num_account_reverts,
+            num_storage_changes = num_storage_reverts,
+            "Unwound TrieDB state"
+        );
 
         Ok(())
     }
@@ -828,7 +1156,15 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         // if the block number is the same as the currently best block number on disk we can use the
         // latest state provider here
         if block_number == self.best_block_number().unwrap_or_default() {
-            return Ok(Box::new(LatestStateProvider::new(self)))
+            #[cfg(feature = "triedb")]
+            {
+                let triedb_provider = self.triedb_provider.clone();
+                return Ok(Box::new(LatestStateProvider::new_with_triedb(self, triedb_provider)))
+            }
+            #[cfg(not(feature = "triedb"))]
+            {
+                return Ok(Box::new(LatestStateProvider::new(self)))
+            }
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -839,6 +1175,12 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
+        #[cfg(feature = "triedb")]
+        let mut state_provider = {
+            let triedb = self.triedb_provider.clone();
+            HistoricalStateProvider::new_with_triedb(self, block_number, &triedb)
+        };
+        #[cfg(not(feature = "triedb"))]
         let mut state_provider = HistoricalStateProvider::new(self, block_number);
 
         // If we pruned account or storage history, we can't return state on every historical block.
@@ -936,6 +1278,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
+        triedb_provider: TrieDBProvider,
         changeset_cache: ChangesetCache,
     ) -> Self {
         Self {
@@ -946,6 +1289,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            triedb_provider,
             changeset_cache,
             pending_rocksdb_batches: Default::default(),
             commit_order: CommitOrder::Normal,
@@ -4176,6 +4520,190 @@ mod tests {
                     assert!(receipt.is_none());
                 }
             }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "triedb")]
+    fn test_triedb_unwinding() {
+        use crate::test_utils::create_test_provider_factory_with_triedb;
+        use alloy_primitives::U256;
+        use reth_db::tables::{AccountChangeSets, PlainAccountState, StorageChangeSets};
+        use reth_db_api::{
+            models::{AccountBeforeTx, BlockNumberAddress},
+            transaction::DbTxMut,
+        };
+        use reth_primitives_traits::{Account, StorageEntry};
+
+        let (factory, _triedb_tempdir) = create_test_provider_factory_with_triedb();
+
+        // Setup initial state at block 0
+        let addr1 = Address::with_last_byte(1);
+        let addr2 = Address::with_last_byte(2);
+        let initial_account1 = Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None };
+        let initial_account2 = Account { nonce: 2, balance: U256::from(2000), bytecode_hash: None };
+
+        let storage_key1 = alloy_primitives::StorageKey::from(U256::from(100));
+        let initial_storage_value1 = U256::from(500);
+
+        // Write initial state at block 0
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+
+            // Write accounts to plain state
+            provider_rw.tx_ref().put::<PlainAccountState>(addr1, initial_account1).unwrap();
+            provider_rw.tx_ref().put::<PlainAccountState>(addr2, initial_account2).unwrap();
+
+            // Write to triedb
+            provider_rw.triedb_provider().set_account(addr1, initial_account1, None).unwrap();
+            provider_rw.triedb_provider().set_account(addr2, initial_account2, None).unwrap();
+
+            // Write initial storage to triedb
+            let mut tx = provider_rw.triedb_provider().tx().unwrap();
+            tx.set_storage(addr1, storage_key1, initial_storage_value1).unwrap();
+            tx.commit().unwrap();
+
+            provider_rw.commit().unwrap();
+        }
+
+        // Apply changes at block 1 and 2
+        let updated_account1_block1 =
+            Account { nonce: 2, balance: U256::from(1500), bytecode_hash: None };
+        let updated_account2_block1 =
+            Account { nonce: 3, balance: U256::from(2500), bytecode_hash: None };
+        let updated_storage_value1_block1 = U256::from(600);
+
+        let updated_account1_block2 =
+            Account { nonce: 3, balance: U256::from(2000), bytecode_hash: None };
+        let updated_storage_value1_block2 = U256::from(700);
+
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+
+            // Write changesets for block 1
+            let changeset1_account1 =
+                AccountBeforeTx { address: addr1, info: Some(initial_account1) };
+            let changeset1_account2 =
+                AccountBeforeTx { address: addr2, info: Some(initial_account2) };
+
+            provider_rw.tx_ref().put::<AccountChangeSets>(1, changeset1_account1).unwrap();
+            provider_rw.tx_ref().put::<AccountChangeSets>(1, changeset1_account2).unwrap();
+
+            let storage_changeset1 =
+                StorageEntry { key: storage_key1.into(), value: initial_storage_value1 };
+            provider_rw
+                .tx_ref()
+                .put::<StorageChangeSets>(BlockNumberAddress((1, addr1)), storage_changeset1)
+                .unwrap();
+
+            // Apply block 1 changes to plain state and triedb
+            provider_rw.tx_ref().put::<PlainAccountState>(addr1, updated_account1_block1).unwrap();
+            provider_rw.tx_ref().put::<PlainAccountState>(addr2, updated_account2_block1).unwrap();
+
+            provider_rw
+                .triedb_provider()
+                .set_account(addr1, updated_account1_block1, None)
+                .unwrap();
+            provider_rw
+                .triedb_provider()
+                .set_account(addr2, updated_account2_block1, None)
+                .unwrap();
+
+            let mut tx = provider_rw.triedb_provider().tx().unwrap();
+            tx.set_storage(addr1, storage_key1, updated_storage_value1_block1).unwrap();
+            tx.commit().unwrap();
+
+            // Write changesets for block 2
+            let changeset2_account1 =
+                AccountBeforeTx { address: addr1, info: Some(updated_account1_block1) };
+
+            provider_rw.tx_ref().put::<AccountChangeSets>(2, changeset2_account1).unwrap();
+
+            let storage_changeset2 =
+                StorageEntry { key: storage_key1.into(), value: updated_storage_value1_block1 };
+            provider_rw
+                .tx_ref()
+                .put::<StorageChangeSets>(BlockNumberAddress((2, addr1)), storage_changeset2)
+                .unwrap();
+
+            // Apply block 2 changes to plain state and triedb
+            provider_rw.tx_ref().put::<PlainAccountState>(addr1, updated_account1_block2).unwrap();
+
+            provider_rw
+                .triedb_provider()
+                .set_account(addr1, updated_account1_block2, None)
+                .unwrap();
+
+            let mut tx = provider_rw.triedb_provider().tx().unwrap();
+            tx.set_storage(addr1, storage_key1, updated_storage_value1_block2).unwrap();
+            tx.commit().unwrap();
+
+            provider_rw.commit().unwrap();
+        }
+
+        // Verify state after block 2
+        {
+            let provider = factory.provider_rw().unwrap();
+
+            let account1 = provider.triedb_provider().get_account(addr1).unwrap();
+            assert_eq!(account1, Some(updated_account1_block2));
+
+            let account2 = provider.triedb_provider().get_account(addr2).unwrap();
+            assert_eq!(account2, Some(updated_account2_block1));
+        }
+
+        // Unwind to block 1 (revert block 2)
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw.unwind_trie_state_from(2).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        // Verify state after unwinding to block 1
+        {
+            let provider = factory.provider_rw().unwrap();
+
+            let account1 = provider.triedb_provider().get_account(addr1).unwrap();
+            assert_eq!(
+                account1,
+                Some(updated_account1_block1),
+                "Account1 should be reverted to block 1 state"
+            );
+
+            let account2 = provider.triedb_provider().get_account(addr2).unwrap();
+            assert_eq!(
+                account2,
+                Some(updated_account2_block1),
+                "Account2 should remain at block 1 state"
+            );
+
+            // TODO: Add storage verification once we have a get_storage method
+        }
+
+        // Unwind to block 0 (revert block 1)
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw.unwind_trie_state_from(1).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        // Verify state after unwinding to block 0
+        {
+            let provider = factory.provider_rw().unwrap();
+
+            let account1 = provider.triedb_provider().get_account(addr1).unwrap();
+            assert_eq!(
+                account1,
+                Some(initial_account1),
+                "Account1 should be reverted to initial state"
+            );
+
+            let account2 = provider.triedb_provider().get_account(addr2).unwrap();
+            assert_eq!(
+                account2,
+                Some(initial_account2),
+                "Account2 should be reverted to initial state"
+            );
         }
     }
 }

@@ -107,6 +107,9 @@ pub struct HistoricalStateProviderRef<'b, Provider> {
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
+    /// Optional TrieDB provider for state root computation
+    #[cfg(feature = "triedb")]
+    triedb_provider: Option<&'b crate::providers::TrieDBProvider>,
 }
 
 impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumReader>
@@ -114,7 +117,28 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
 {
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: &'b Provider, block_number: BlockNumber) -> Self {
-        Self { provider, block_number, lowest_available_blocks: Default::default() }
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks: Default::default(),
+            #[cfg(feature = "triedb")]
+            triedb_provider: None,
+        }
+    }
+
+    /// Create new `StateProvider` for historical block number with TrieDB support
+    #[cfg(feature = "triedb")]
+    pub fn new_with_triedb(
+        provider: &'b Provider,
+        block_number: BlockNumber,
+        triedb_provider: &'b crate::providers::TrieDBProvider,
+    ) -> Self {
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks: Default::default(),
+            triedb_provider: Some(triedb_provider),
+        }
     }
 
     /// Create new `StateProvider` for historical block number and lowest block numbers at which
@@ -124,7 +148,13 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
     ) -> Self {
-        Self { provider, block_number, lowest_available_blocks }
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks,
+            #[cfg(feature = "triedb")]
+            triedb_provider: None,
+        }
     }
 
     /// Lookup an account in the `AccountsHistory` table using `EitherReader`.
@@ -321,6 +351,20 @@ impl<Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumR
             TrieInputSorted::from_unsorted(input),
         )?)
     }
+
+    #[cfg(feature = "triedb")]
+    fn state_root_with_updates_plain(
+        &self,
+        plain_state: reth_storage_api::PlainPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        if let Some(triedb_provider) = self.triedb_provider {
+            tracing::debug!(target: "reth_provider", "HistoricalStateProviderRef using TrieDB for state root computation");
+            crate::providers::state_root_with_updates_triedb(triedb_provider, plain_state)
+        } else {
+            tracing::error!(target: "reth_provider", "HistoricalStateProviderRef: TrieDB provider not available");
+            Err(ProviderError::UnsupportedProvider)
+        }
+    }
 }
 
 impl<Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumReader>
@@ -460,6 +504,9 @@ pub struct HistoricalStateProvider<Provider> {
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
+    /// Optional TrieDB provider for state root computation
+    #[cfg(feature = "triedb")]
+    triedb_provider: Option<crate::providers::TrieDBProvider>,
 }
 
 impl<Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumReader>
@@ -467,11 +514,32 @@ impl<Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumR
 {
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: Provider, block_number: BlockNumber) -> Self {
-        Self { provider, block_number, lowest_available_blocks: Default::default() }
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks: Default::default(),
+            #[cfg(feature = "triedb")]
+            triedb_provider: None,
+        }
+    }
+
+    /// Create new `StateProvider` for historical block number with TrieDB support
+    #[cfg(feature = "triedb")]
+    pub fn new_with_triedb(
+        provider: Provider,
+        block_number: BlockNumber,
+        triedb_provider: &crate::providers::TrieDBProvider,
+    ) -> Self {
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks: Default::default(),
+            triedb_provider: Some(triedb_provider.clone()),
+        }
     }
 
     /// Set the lowest block number at which the account history is available.
-    pub const fn with_lowest_available_account_history_block_number(
+    pub fn with_lowest_available_account_history_block_number(
         mut self,
         block_number: BlockNumber,
     ) -> Self {
@@ -480,7 +548,7 @@ impl<Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumR
     }
 
     /// Set the lowest block number at which the storage history is available.
-    pub const fn with_lowest_available_storage_history_block_number(
+    pub fn with_lowest_available_storage_history_block_number(
         mut self,
         block_number: BlockNumber,
     ) -> Self {
@@ -490,12 +558,24 @@ impl<Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + BlockNumR
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
-    const fn as_ref(&self) -> HistoricalStateProviderRef<'_, Provider> {
-        HistoricalStateProviderRef::new_with_lowest_available_blocks(
-            &self.provider,
-            self.block_number,
-            self.lowest_available_blocks,
-        )
+    fn as_ref(&self) -> HistoricalStateProviderRef<'_, Provider> {
+        #[cfg(feature = "triedb")]
+        {
+            HistoricalStateProviderRef {
+                provider: &self.provider,
+                block_number: self.block_number,
+                lowest_available_blocks: self.lowest_available_blocks,
+                triedb_provider: self.triedb_provider.as_ref(),
+            }
+        }
+        #[cfg(not(feature = "triedb"))]
+        {
+            HistoricalStateProviderRef::new_with_lowest_available_blocks(
+                &self.provider,
+                self.block_number,
+                self.lowest_available_blocks,
+            )
+        }
     }
 }
 

@@ -24,7 +24,7 @@ use reth_ethereum::{
     pool::noop::NoopTransactionPool,
     provider::{
         db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv},
-        providers::{BlockchainProvider, RocksDBProvider, StaticFileProvider},
+        providers::{BlockchainProvider, RocksDBProvider, StaticFileProvider, TrieDBProvider},
         ProviderFactory,
     },
     rpc::{
@@ -54,6 +54,7 @@ async fn main() -> eyre::Result<()> {
         spec.clone(),
         StaticFileProvider::read_only(db_path.join("static_files"), true)?,
         RocksDBProvider::builder(db_path.join("rocksdb")).build().unwrap(),
+        TrieDBProvider::builder(db_path.join("triedb")).build().unwrap(),
     )?;
 
     // 2. Set up the blockchain provider using only the database provider and a noop for the tree to

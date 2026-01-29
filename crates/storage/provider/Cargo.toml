@@ -26,6 +26,7 @@ reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
+reth-trie-common.workspace = true
 reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-chain-state.workspace = true
@@ -36,6 +37,7 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
+alloy-trie.workspace = true
 revm-database.workspace = true
 revm-state = { workspace = true, optional = true }
 
@@ -61,6 +63,9 @@ tokio = { workspace = true, features = ["sync"], optional = true }
 # parallel utils
 rayon.workspace = true
 
+# triedb
+triedb = { workspace = true, optional = true }
+
 [target.'cfg(unix)'.dependencies]
 # rocksdb: jemalloc is recommended production workload
 rocksdb = { workspace = true, features = ["jemalloc"], optional = true }
@@ -83,10 +88,13 @@ assert_matches.workspace = true
 rand.workspace = true
 
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
+criterion.workspace = true
 
 [features]
+default = []
 edge = ["reth-storage-api/edge", "rocksdb"]
 rocksdb = ["dep:rocksdb"]
+triedb = ["dep:triedb", "reth-storage-api/triedb", "reth-chain-state/triedb"]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
@@ -104,3 +112,7 @@ test-utils = [
     "revm-state",
     "tokio",
 ]
+
+[[bench]]
+name = "bench_state_root_overlay"
+harness = false

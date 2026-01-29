@@ -111,6 +111,7 @@ pub async fn setup_engine_with_chain_import(
         let db_path = datadir.join("db");
         let static_files_path = datadir.join("static_files");
         let rocksdb_dir_path = datadir.join("rocksdb");
+        let triedb_dir_path = datadir.join("triedb");
 
         // Initialize the database using init_db (same as CLI import command)
         let db_args = reth_node_core::args::DatabaseArgs::default().database_args();
@@ -129,6 +130,7 @@ pub async fn setup_engine_with_chain_import(
                 .with_default_tables()
                 .build()
                 .unwrap(),
+            reth_provider::providers::TrieDBProvider::builder(&triedb_dir_path).build().unwrap(),
         )?;
 
         // Initialize genesis if needed
@@ -316,6 +318,7 @@ mod tests {
         let db_path = datadir.join("db");
         let static_files_path = datadir.join("static_files");
         let rocksdb_dir_path = datadir.join("rocksdb");
+        let triedb_dir_path = datadir.join("triedb");
 
         // Import the chain
         {
@@ -332,6 +335,9 @@ mod tests {
                     .unwrap(),
                 reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path.clone())
                     .with_default_tables()
+                    .build()
+                    .unwrap(),
+                reth_provider::providers::TrieDBProvider::builder(triedb_dir_path.clone())
                     .build()
                     .unwrap(),
             )
@@ -399,6 +405,7 @@ mod tests {
                     .with_default_tables()
                     .build()
                     .unwrap(),
+                reth_provider::providers::TrieDBProvider::builder(triedb_dir_path).build().unwrap(),
             )
             .expect("failed to create provider factory");
 
@@ -489,6 +496,7 @@ mod tests {
 
         // Create rocksdb path
         let rocksdb_dir_path = datadir.join("rocksdb");
+        let triedb_dir_path = datadir.join("triedb");
 
         // Create a provider factory
         let provider_factory: ProviderFactory<MockNodeTypesWithDB> = ProviderFactory::new(
@@ -499,6 +507,7 @@ mod tests {
                 .with_default_tables()
                 .build()
                 .unwrap(),
+            reth_provider::providers::TrieDBProvider::builder(&triedb_dir_path).build().unwrap(),
         )
         .expect("failed to create provider factory");
 

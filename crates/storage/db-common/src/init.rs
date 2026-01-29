@@ -23,7 +23,8 @@ use reth_provider::{
     ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter, MetadataProvider,
     MetadataWriter, NodePrimitivesProvider, OriginalValuesKnown, ProviderError, RevertsInit,
     RocksDBProviderFactory, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
-    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
+    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache,
+    TrieDBProviderFactory, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -98,7 +99,8 @@ where
         + StageCheckpointReader
         + BlockNumReader
         + MetadataProvider
-        + StorageSettingsCache,
+        + StorageSettingsCache
+        + TrieDBProviderFactory,
     PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
         + StageCheckpointWriter
         + HistoryWriter
@@ -136,7 +138,8 @@ where
         + StageCheckpointReader
         + BlockNumReader
         + MetadataProvider
-        + StorageSettingsCache,
+        + StorageSettingsCache
+        + TrieDBProviderFactory,
     PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
         + StageCheckpointWriter
         + HistoryWriter
@@ -211,7 +214,11 @@ where
     // Behaviour reserved only for new nodes should be set in the storage settings.
     provider_rw.write_storage_settings(genesis_storage_settings)?;
 
-    insert_genesis_hashes(&provider_rw, alloc.iter())?;
+    // When triedb is enabled, skip hashed state insertion (not needed)
+    #[cfg(not(feature = "triedb"))]
+    {
+        insert_genesis_hashes(&provider_rw, alloc.iter())?;
+    }
     insert_genesis_history(&provider_rw, alloc.iter())?;
 
     // Insert header
@@ -219,8 +226,24 @@ where
 
     insert_genesis_state(&provider_rw, alloc.iter())?;
 
-    // compute state root to populate trie tables
-    compute_state_root(&provider_rw, None)?;
+    // Compute state root - use TrieDB if enabled, otherwise use MDBX
+    // The state root computation has side effects (writes to TrieDB/MDBX), so we need to call it
+    #[cfg(feature = "triedb")]
+    let _genesis_state_root = {
+        info!(target: "reth::cli", "Computing TrieDB state root");
+        let triedb_provider = factory.triedb_provider();
+        let state_root = compute_state_root_triedb(&triedb_provider, alloc.iter())?;
+        info!(target: "reth::cli", ?state_root, "TrieDB state root computed");
+        state_root
+    };
+
+    #[cfg(not(feature = "triedb"))]
+    let _genesis_state_root = {
+        info!(target: "reth::cli", "Computing MDBX state root from hashed tables");
+        let state_root = compute_state_root(&provider_rw, None)?;
+        info!(target: "reth::cli", ?state_root, "MDBX state root computed");
+        state_root
+    };
 
     // set stage checkpoint to genesis block number for all stages
     let checkpoint = StageCheckpoint::new(genesis_block_number);
@@ -797,6 +820,107 @@ where
     }
 }
 
+/// Computes the state root using TrieDB by inserting all genesis accounts and storage.
+///
+/// This function takes an iterator of genesis accounts and their addresses, inserts them
+/// into TrieDB along with their storage, and returns the computed state root.
+///
+/// # Performance Note
+/// As noted in https://github.com/base/triedb/issues/179, TrieDB performance for genesis
+/// initialization with async batch writes is currently not optimal. This is expected to
+/// be used primarily for initialization and testing.
+#[cfg(feature = "triedb")]
+pub fn compute_state_root_triedb<'a>(
+    triedb_provider: &reth_provider::providers::TrieDBProvider,
+    alloc: impl Iterator<Item = (&'a Address, &'a GenesisAccount)>,
+) -> Result<B256, InitStorageError> {
+    use alloy_consensus::EMPTY_ROOT_HASH;
+    use alloy_primitives::StorageKey;
+
+    info!(target: "reth::cli", "Computing state root using TrieDB");
+    let start = std::time::Instant::now();
+
+    // Begin a TrieDB transaction - use inner transaction directly for lower-level control
+    use alloy_consensus::constants::KECCAK_EMPTY;
+    use triedb::{
+        account::Account as TrieDBAccount,
+        path::{AddressPath, StoragePath},
+    };
+
+    let mut tx = triedb_provider.inner_db().begin_rw().map_err(|e| {
+        InitStorageError::Provider(ProviderError::TrieWitnessError(format!(
+            "Failed to begin TrieDB transaction: {e:?}"
+        )))
+    })?;
+
+    // Insert all genesis accounts and storage into TrieDB
+    for (address, genesis_account) in alloc {
+        let address_path = AddressPath::for_address(*address);
+
+        // Convert GenesisAccount to Account
+        let account = Account {
+            nonce: genesis_account.nonce.unwrap_or(0),
+            balance: genesis_account.balance,
+            bytecode_hash: genesis_account.code.as_ref().map(|code| keccak256(code)),
+        };
+
+        // Insert storage first (if exists), so storage root can be computed
+        if let Some(ref storage) = genesis_account.storage {
+            for (storage_key, storage_value) in storage {
+                let raw_slot = U256::from_be_slice(storage_key.as_slice());
+                let storage_path = StoragePath::for_address_path_and_slot(
+                    address_path.clone(),
+                    StorageKey::from(raw_slot),
+                );
+
+                let storage_value_u256 = U256::from_be_slice(storage_value.as_slice());
+                if !storage_value_u256.is_zero() {
+                    let storage_value_triedb = alloy_primitives::StorageValue::from_be_slice(
+                        storage_value_u256.to_be_bytes::<32>().as_slice(),
+                    );
+                    tx.set_storage_slot(storage_path, Some(storage_value_triedb)).map_err(|e| {
+                        InitStorageError::Provider(ProviderError::TrieWitnessError(format!(
+                            "Failed to set storage in TrieDB: {e:?}"
+                        )))
+                    })?;
+                }
+            }
+        }
+
+        // Insert account (storage root will be computed by TrieDB when we commit)
+        let trie_account = TrieDBAccount::new(
+            account.nonce,
+            account.balance,
+            EMPTY_ROOT_HASH, // Will be computed by TrieDB
+            account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+        );
+
+        tx.set_account(address_path, Some(trie_account)).map_err(|e| {
+            InitStorageError::Provider(ProviderError::TrieWitnessError(format!(
+                "Failed to set account in TrieDB: {e:?}"
+            )))
+        })?;
+    }
+
+    // Commit - this computes the state root
+    tx.commit().map_err(|e| {
+        InitStorageError::Provider(ProviderError::TrieWitnessError(format!(
+            "Failed to commit TrieDB transaction: {e:?}"
+        )))
+    })?;
+
+    // Get the computed state root
+    let triedb_state_root = triedb_provider.inner_db().state_root();
+
+    info!(target: "reth::cli",
+        ?triedb_state_root,
+        elapsed_ms = ?start.elapsed().as_millis(),
+        "TrieDB state root computed"
+    );
+
+    Ok(triedb_state_root)
+}
+
 /// Type to deserialize state root from state dump file.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct StateRoot {
@@ -876,8 +1000,9 @@ mod tests {
     #[test]
     fn fail_init_inconsistent_db() {
         let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
-        let static_file_provider = factory.static_file_provider();
-        let rocksdb_provider = factory.rocksdb_provider();
+        let static_file_provider = factory.static_file_provider().clone();
+        let rocksdb_provider = factory.rocksdb_provider().clone();
+        let triedb_provider = factory.triedb_provider().clone();
         init_genesis(&factory).unwrap();
 
         // Try to init db with a different genesis block
@@ -887,6 +1012,7 @@ mod tests {
                 MAINNET.clone(),
                 static_file_provider,
                 rocksdb_provider,
+                triedb_provider,
             )
             .unwrap(),
         );
@@ -1011,5 +1137,107 @@ mod tests {
         let result = init_genesis_with_settings(&factory, settings);
 
         assert!(result.is_ok());
+    }
+
+    /// Test that TrieDB and MDBX compute the same state root for the same genesis data.
+    ///
+    /// This test verifies that both state root computation methods produce identical results
+    /// when given the same set of genesis accounts with varied balances, nonces, and storage.
+    #[test]
+    #[cfg(feature = "triedb")]
+    fn test_compute_state_root_triedb_matches_mdbx() {
+        // Create varied test accounts with different properties
+        let mut alloc = BTreeMap::new();
+
+        // Account 1: Only balance, no nonce or storage
+        alloc.insert(
+            Address::with_last_byte(1),
+            GenesisAccount {
+                balance: U256::from(1000000000000000000u64), // 1 ETH
+                ..Default::default()
+            },
+        );
+
+        // Account 2: Balance and nonce, no storage
+        alloc.insert(
+            Address::with_last_byte(2),
+            GenesisAccount {
+                nonce: Some(42),
+                balance: U256::from(5000000000000000000u64), // 5 ETH
+                ..Default::default()
+            },
+        );
+
+        // Account 3: Balance with storage, no nonce
+        alloc.insert(
+            Address::with_last_byte(3),
+            GenesisAccount {
+                balance: U256::from(2500000000000000000u64), // 2.5 ETH
+                storage: Some(BTreeMap::from([
+                    (B256::with_last_byte(1), B256::from(U256::from(100))),
+                    (B256::with_last_byte(2), B256::from(U256::from(200))),
+                ])),
+                ..Default::default()
+            },
+        );
+
+        // Account 4: Complex account with nonce and multiple storage slots
+        alloc.insert(
+            Address::with_last_byte(4),
+            GenesisAccount {
+                nonce: Some(7),
+                balance: U256::from(10000000000000000000u64), // 10 ETH
+                storage: Some(BTreeMap::from([
+                    (B256::with_last_byte(10), B256::from(U256::from(1000))),
+                    (B256::with_last_byte(20), B256::from(U256::from(2000))),
+                    (B256::with_last_byte(30), B256::from(U256::from(3000))),
+                ])),
+                ..Default::default()
+            },
+        );
+
+        // Account 5: Zero balance with storage (edge case)
+        alloc.insert(
+            Address::with_last_byte(5),
+            GenesisAccount {
+                balance: U256::ZERO,
+                storage: Some(BTreeMap::from([(
+                    B256::with_last_byte(99),
+                    B256::from(U256::from(9999)),
+                )])),
+                ..Default::default()
+            },
+        );
+
+        // Create a test chain spec with this allocation
+        let chain_spec = Arc::new(ChainSpec {
+            chain: Chain::from_id(1),
+            genesis: Genesis { alloc: alloc.clone(), ..Default::default() },
+            hardforks: Default::default(),
+            paris_block_and_final_difficulty: None,
+            deposit_contract: None,
+            ..Default::default()
+        });
+
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let provider_rw = factory.database_provider_rw().unwrap();
+
+        // Insert genesis data into MDBX (required for compute_state_root to read from database)
+        insert_genesis_hashes(&provider_rw, alloc.iter()).unwrap();
+        insert_genesis_state(&provider_rw, alloc.iter()).unwrap();
+
+        // Compute state root using the MDBX method
+        let mdbx_state_root = compute_state_root(&provider_rw, None).unwrap();
+
+        // Compute state root using the TrieDB method
+        let triedb_provider = factory.triedb_provider();
+        let triedb_state_root = compute_state_root_triedb(&triedb_provider, alloc.iter()).unwrap();
+
+        // Both methods must produce the same state root
+        assert_eq!(
+            mdbx_state_root, triedb_state_root,
+            "State root mismatch: MDBX computed {}, TrieDB computed {}",
+            mdbx_state_root, triedb_state_root
+        );
     }
 }

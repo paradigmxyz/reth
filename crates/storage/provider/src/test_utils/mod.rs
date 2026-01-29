@@ -1,12 +1,15 @@
 use crate::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider},
+    providers::{
+        NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider, TrieDBProvider,
+    },
     HashingWriter, ProviderFactory, TrieWriter,
 };
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_db::{
     test_utils::{
-        create_test_rocksdb_dir, create_test_rw_db, create_test_static_files_dir, TempDatabase,
+        create_test_rocksdb_dir, create_test_rw_db, create_test_static_files_dir,
+        create_test_triedb_dir, TempDatabase,
     },
     DatabaseEnv,
 };
@@ -57,6 +60,7 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
 ) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
     let (static_dir, _) = create_test_static_files_dir();
     let (rocksdb_dir, _) = create_test_rocksdb_dir();
+    let (triedb_dir, _) = create_test_triedb_dir();
     let db = create_test_rw_db();
     ProviderFactory::new(
         db,
@@ -66,8 +70,41 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
+        TrieDBProvider::builder(&triedb_dir)
+            .build()
+            .expect("failed to create test TrieDB provider"),
     )
     .expect("failed to create test provider factory")
+}
+
+/// Creates test provider factory with triedb and returns both the factory and the triedb
+/// temporary directory handle. The directory handle must be kept alive for the duration
+/// of the test to prevent cleanup.
+#[cfg(feature = "triedb")]
+pub fn create_test_provider_factory_with_triedb(
+) -> (ProviderFactory<MockNodeTypesWithDB>, tempfile::TempDir) {
+    use reth_chainspec::MAINNET;
+
+    let (static_dir, _) = create_test_static_files_dir();
+    let (rocksdb_dir, _) = create_test_rocksdb_dir();
+    let (triedb_tempdir, triedb_dir) = create_test_triedb_dir();
+    let db = create_test_rw_db();
+
+    let factory = ProviderFactory::new(
+        db,
+        MAINNET.clone(),
+        StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
+        RocksDBBuilder::new(&rocksdb_dir)
+            .with_default_tables()
+            .build()
+            .expect("failed to create test RocksDB provider"),
+        TrieDBProvider::builder(&triedb_dir)
+            .build()
+            .expect("failed to create test TrieDB provider"),
+    )
+    .expect("failed to create test provider factory");
+
+    (factory, triedb_tempdir)
 }
 
 /// Inserts the genesis alloc from the provided chain spec into the trie.

@@ -25,6 +25,13 @@ fn main() {
     if let Err(err) =
         Cli::<OpChainSpecParser, RollupArgs>::parse().run(async move |builder, rollup_args| {
             info!(target: "reth::cli", "Launching node");
+
+            #[cfg(feature = "triedb")]
+            info!(target: "reth::cli", "TrieDB feature: ENABLED - Using TrieDB for state storage");
+
+            #[cfg(not(feature = "triedb"))]
+            info!(target: "reth::cli", "TrieDB feature: DISABLED - Using MDBX for state storage");
+
             let handle =
                 builder.node(OpNode::new(rollup_args)).launch_with_debug_capabilities().await?;
             handle.node_exit_future.await

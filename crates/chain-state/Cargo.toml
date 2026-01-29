@@ -59,6 +59,7 @@ revm-state.workspace = true
 criterion.workspace = true
 
 [features]
+triedb = ["reth-storage-api/triedb"]
 serde = [
     "dep:serde",
     "alloy-consensus/serde",

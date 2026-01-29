@@ -1,7 +1,7 @@
 use crate::{
     providers::{
         ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
-        StaticFileProviderRWRefMut,
+        StaticFileProviderRWRefMut, TrieDBProvider,
     },
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
@@ -190,6 +190,12 @@ impl<N: ProviderNodeTypes> RocksDBProviderFactory for BlockchainProvider<N> {
     #[cfg(all(unix, feature = "rocksdb"))]
     fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
         unimplemented!("BlockchainProvider wraps ProviderFactory - use DatabaseProvider::commit_pending_rocksdb_batches instead")
+    }
+}
+
+impl<N: ProviderNodeTypes> crate::TrieDBProviderFactory for BlockchainProvider<N> {
+    fn triedb_provider(&self) -> &TrieDBProvider {
+        self.database.triedb_provider()
     }
 }
 

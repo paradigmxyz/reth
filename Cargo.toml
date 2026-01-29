@@ -660,6 +660,9 @@ toml = "0.8"
 # rocksdb
 rocksdb = { version = "0.24" }
 
+# triedb
+triedb ={git="https://github.com/base/triedb.git"}
+
 # otlp obs
 opentelemetry_sdk = "0.31"
 opentelemetry = "0.31"

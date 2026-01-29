@@ -26,6 +26,33 @@ use revm::{
     database::{states::bundle_state::BundleRetention, BundleState, State},
 };
 
+#[cfg(feature = "triedb")]
+use alloy_primitives::map::HashMap;
+#[cfg(feature = "triedb")]
+use reth_storage_api::PlainPostState;
+
+#[cfg(feature = "metrics")]
+use std::time::Instant;
+
+#[cfg(feature = "metrics")]
+use metrics::Histogram;
+#[cfg(feature = "metrics")]
+use reth_metrics::Metrics;
+#[cfg(feature = "metrics")]
+use std::sync::LazyLock;
+
+/// Metrics for state root computation timing during block building.
+#[cfg(feature = "metrics")]
+#[derive(Metrics)]
+#[metrics(scope = "payloads.execution.state_root")]
+struct StateRootMetrics {
+    /// Time taken to compute state root (milliseconds).
+    duration_ms: Histogram,
+}
+
+#[cfg(feature = "metrics")]
+static STATE_ROOT_METRICS: LazyLock<StateRootMetrics> = LazyLock::new(StateRootMetrics::default);
+
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
 pub trait Executor<DB: Database>: Sized {
@@ -484,11 +511,62 @@ where
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
 
-        // calculate the state root
-        let hashed_state = state.hashed_post_state(&db.bundle_state);
-        let (state_root, trie_updates) = state
-            .state_root_with_updates(hashed_state.clone())
-            .map_err(BlockExecutionError::other)?;
+        // Calculate state root using TrieDB (unhashed) or MDBX (hashed)
+        let (state_root, trie_updates, hashed_state);
+
+        #[cfg(feature = "triedb")]
+        {
+            // Convert BundleState to PlainPostState for TrieDB computation
+            let mut plain_state = PlainPostState::default();
+
+            for (address, bundle_account) in db.bundle_state.state() {
+                let account = if bundle_account.was_destroyed() || bundle_account.info.is_none() {
+                    None
+                } else {
+                    bundle_account
+                        .info
+                        .as_ref()
+                        .map(|info| reth_primitives_traits::Account::from(info))
+                };
+                plain_state.accounts.insert(*address, account);
+
+                let mut storage_map = HashMap::default();
+                for (slot, storage_slot) in &bundle_account.storage {
+                    // Convert U256 slot to B256 (32-byte representation)
+                    let slot_b256 = B256::from_slice(&slot.to_be_bytes::<32>());
+                    storage_map.insert(slot_b256, storage_slot.present_value);
+                }
+                if !storage_map.is_empty() {
+                    plain_state.storages.insert(*address, storage_map);
+                }
+            }
+            #[cfg(feature = "metrics")]
+            let start = Instant::now();
+
+            (state_root, trie_updates) = state
+                .state_root_with_updates_plain(plain_state)
+                .map_err(BlockExecutionError::other)?;
+
+            #[cfg(feature = "metrics")]
+            STATE_ROOT_METRICS.duration_ms.record(start.elapsed().as_millis() as f64);
+
+            hashed_state = HashedPostState::default();
+        }
+
+        #[cfg(not(feature = "triedb"))]
+        {
+            #[cfg(feature = "metrics")]
+            let start = Instant::now();
+
+            hashed_state = state.hashed_post_state(&db.bundle_state);
+
+            (state_root, trie_updates) = state
+                .state_root_with_updates(hashed_state.clone())
+                .map_err(BlockExecutionError::other)?;
+
+            #[cfg(feature = "metrics")]
+            STATE_ROOT_METRICS.duration_ms.record(start.elapsed().as_millis() as f64);
+        }
 
         let (transactions, senders) =
             self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();

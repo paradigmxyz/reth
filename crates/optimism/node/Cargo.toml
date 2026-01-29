@@ -73,6 +73,7 @@ serde_json = { workspace = true, optional = true }
 [dev-dependencies]
 reth-optimism-node = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["op", "test-utils"] }
+reth-db-common.workspace = true
 reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tasks.workspace = true
@@ -80,16 +81,22 @@ reth-payload-util.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 reth-rpc.workspace = true
 reth-rpc-eth-types.workspace = true
+reth-payload-primitives.workspace = true
 reth-stages-types.workspace = true
 reth-trie-db.workspace = true
 
 alloy-network.workspace = true
+alloy-eips.workspace = true
+alloy-sol-types.workspace = true
 alloy-op-hardforks.workspace = true
+op-alloy-rpc-types.workspace = true
 futures.workspace = true
 op-alloy-network.workspace = true
+tracing.workspace = true
 
 [features]
 default = ["reth-codec"]
+triedb = ["reth-provider/triedb", "reth-evm/triedb", "reth-db-common/triedb", "reth-optimism-storage/triedb"]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-optimism-node/asm-keccak",
@@ -130,6 +137,7 @@ test-utils = [
     "reth-stages-types/test-utils",
 ]
 reth-codec = ["reth-optimism-primitives/reth-codec"]
+metrics = ["reth-optimism-evm/metrics"]
 
 [[test]]
 name = "e2e_testsuite"
