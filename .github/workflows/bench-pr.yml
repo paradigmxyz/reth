@@ -7,7 +7,6 @@
 #   - ARGO_SERVER: Internal Argo Workflows server URL
 #   - ARGO_WORKFLOWS_TOKEN: Bearer token for Argo API
 #   - ARGO_NAMESPACE: Kubernetes namespace (e.g., ethereum-devnet)
-#   - BENCH_RETH_NODE: Which reth node to benchmark on
 
 name: bench-pr
 
@@ -97,7 +96,6 @@ jobs:
           ARGO_TOKEN: ${{ secrets.ARGO_WORKFLOWS_TOKEN }}
           ARGO_SERVER: ${{ secrets.ARGO_SERVER }}
           ARGO_NAMESPACE: ${{ secrets.ARGO_NAMESPACE }}
-          RETH_NODE: ${{ secrets.BENCH_RETH_NODE }}
         run: |
           curl -sSf -X POST \
             -H "Authorization: Bearer $ARGO_TOKEN" \
@@ -106,14 +104,15 @@ jobs:
             -d @- <<EOF
           {
             "resourceKind": "WorkflowTemplate",
-            "resourceName": "reth-bench-compare-$RETH_NODE",
+            "resourceName": "reth-workflows-reth-bench",
             "submitOptions": {
               "parameters": [
                 "baseline-ref=${{ steps.options.outputs.baseline }}",
                 "feature-ref=${{ steps.pr.outputs.head_sha }}",
                 "blocks=${{ steps.options.outputs.blocks }}",
                 "note=PR #${{ steps.pr.outputs.pr_number }}: ${{ steps.pr.outputs.pr_title }}",
-                "pr-number=${{ steps.pr.outputs.pr_number }}"
+                "pr-number=${{ steps.pr.outputs.pr_number }}",
+                "manual-trigger=true"
               ]
             }
           }
