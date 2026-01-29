@@ -17,7 +17,8 @@ use reth_provider::{
     BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
     HashingWriter, HeaderProvider, HistoryWriter, MetadataWriter, OriginalValuesKnown,
     ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
-    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,TrieDBProviderFactory
+    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache,
+    TrieDBProviderFactory, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;

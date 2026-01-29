@@ -400,9 +400,7 @@ mod tests {
                 reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path)
                     .build()
                     .unwrap(),
-                reth_provider::providers::TrieDBProvider::builder(triedb_dir_path)
-                    .build()
-                    .unwrap(),
+                reth_provider::providers::TrieDBProvider::builder(triedb_dir_path).build().unwrap(),
             )
             .expect("failed to create provider factory");
 

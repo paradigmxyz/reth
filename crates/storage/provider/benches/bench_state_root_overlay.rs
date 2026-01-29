@@ -7,13 +7,12 @@
 
 use alloy_primitives::{keccak256, Address, B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use rand::{Rng, SeedableRng};
-use rand::rngs::StdRng;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::MAINNET;
 use reth_primitives_traits::Account;
 use reth_provider::{
-    test_utils::create_test_provider_factory_with_chain_spec,
-    DatabaseProviderFactory, HashingWriter, StateRootProvider,
+    test_utils::create_test_provider_factory_with_chain_spec, DatabaseProviderFactory,
+    HashingWriter, StateRootProvider,
 };
 use reth_storage_api::PlainPostState;
 use reth_trie::{HashedPostState, HashedStorage};
@@ -26,10 +25,7 @@ fn generate_test_data(
     num_accounts: usize,
     storage_per_account: usize,
     seed: u64,
-) -> (
-    Vec<(Address, Account)>,
-    HashMap<Address, Vec<(B256, U256)>>,
-) {
+) -> (Vec<(Address, Account)>, HashMap<Address, Vec<(B256, U256)>>) {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut accounts = Vec::with_capacity(num_accounts);
     let mut storage = HashMap::new();
@@ -152,10 +148,8 @@ fn to_hashed_post_state(
     accounts: &[(Address, Account)],
     storage: &HashMap<Address, Vec<(B256, U256)>>,
 ) -> HashedPostState {
-    let hashed_accounts: Vec<_> = accounts
-        .iter()
-        .map(|(addr, acc)| (keccak256(addr), Some(*acc)))
-        .collect();
+    let hashed_accounts: Vec<_> =
+        accounts.iter().map(|(addr, acc)| (keccak256(addr), Some(*acc))).collect();
 
     let mut hashed_storages = alloy_primitives::map::HashMap::default();
     for (addr, slots) in storage {
@@ -167,10 +161,7 @@ fn to_hashed_post_state(
         hashed_storages.insert(hashed_addr, hashed_storage);
     }
 
-    HashedPostState {
-        accounts: hashed_accounts.into_iter().collect(),
-        storages: hashed_storages,
-    }
+    HashedPostState { accounts: hashed_accounts.into_iter().collect(), storages: hashed_storages }
 }
 
 /// Convert overlay to PlainPostState for TrieDB

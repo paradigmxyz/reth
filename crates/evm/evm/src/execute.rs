@@ -51,8 +51,7 @@ struct StateRootMetrics {
 }
 
 #[cfg(feature = "metrics")]
-static STATE_ROOT_METRICS: LazyLock<StateRootMetrics> =
-    LazyLock::new(StateRootMetrics::default);
+static STATE_ROOT_METRICS: LazyLock<StateRootMetrics> = LazyLock::new(StateRootMetrics::default);
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
