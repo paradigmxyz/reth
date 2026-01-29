@@ -8193,7 +8193,7 @@ mod tests {
         // - Child at nibble 0: a blinded Hash node
         // - Child at nibble 1: a revealed Leaf node
         let small_value = alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec();
-        let leaf = LeafNode::new(Nibbles::default(), small_value.clone());
+        let leaf = LeafNode::new(Nibbles::default(), small_value);
         let branch = TrieNode::Branch(BranchNode::new(
             vec![
                 RlpNode::word_rlp(&B256::repeat_byte(1)), // blinded child at nibble 0
@@ -8541,7 +8541,7 @@ mod tests {
 
         // Create trie with retain_updates = true
         let mut trie =
-            ParallelSparseTrie::from_root(extension.clone(), None, true).expect("from_root failed");
+            ParallelSparseTrie::from_root(extension, None, true).expect("from_root failed");
 
         // Record state before update_leaves
         let prefix_set_len_before = trie.prefix_set.len();
@@ -8568,7 +8568,7 @@ mod tests {
 
         let new_value = encode_account_value(42);
         let mut updates: B256Map<LeafUpdate> = B256Map::default();
-        updates.insert(b256_key, LeafUpdate::Changed(new_value.clone()));
+        updates.insert(b256_key, LeafUpdate::Changed(new_value));
 
         let proof_targets = RefCell::new(Vec::new());
         trie.update_leaves(&mut updates, |path, min_len| {
