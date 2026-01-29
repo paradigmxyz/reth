@@ -88,7 +88,7 @@ impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N>
         let mut earliest_block_number = None;
         let mut in_memory_hashes = Vec::with_capacity(range.size_hint().0);
 
-        // iterate in ascending order (oldest to newest = low to high)
+        // iterate in descending order (newest to oldest = high to low)
         for block in self.in_memory.iter() {
             let block_num = block.recovered_block().number();
             if range.contains(&block_num) {
@@ -97,9 +97,8 @@ impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N>
             }
         }
 
-        // `self.in_memory` stores executed blocks in ascending order (oldest to newest).
-        // However, `in_memory_hashes` should be constructed in descending order (newest to oldest),
-        // so we reverse the vector after collecting the hashes.
+        // `self.in_memory` stores executed blocks in descending order (newest to oldest).
+        // We reverse the vector to get ascending order (oldest to newest) as required by the API.
         in_memory_hashes.reverse();
 
         let mut hashes =
