@@ -1112,16 +1112,30 @@ where
     /// while the trie input computation is deferred until the overlay is actually needed.
     ///
     /// If parent is on disk (no in-memory blocks), returns `None` for the lazy overlay.
+    ///
+    /// Uses a cached overlay if available for the canonical head (the common case).
     fn get_parent_lazy_overlay(
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> (Option<LazyOverlay>, B256) {
+        // Get blocks leading to the parent to determine the anchor
         let (anchor_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
         if blocks.is_empty() {
             debug!(target: "engine::tree::payload_validator", "Parent found on disk, no lazy overlay needed");
             return (None, anchor_hash);
+        }
+
+        // Try to use the cached overlay if it matches both parent hash and anchor
+        if let Some(cached) = state.tree_state.get_cached_overlay(parent_hash, anchor_hash) {
+            debug!(
+                target: "engine::tree::payload_validator",
+                %parent_hash,
+                %anchor_hash,
+                "Using cached canonical overlay"
+            );
+            return (Some(cached.overlay.clone()), cached.anchor_hash);
         }
 
         debug!(

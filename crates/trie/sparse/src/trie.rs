@@ -285,6 +285,32 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
             _ => {}
         }
     }
+
+    /// Applies batch leaf updates, collecting proof targets for blinded paths.
+    ///
+    /// See [`SparseTrieExt::update_leaves`] for detailed documentation.
+    ///
+    /// If the trie is blind, all keys in `updates` are treated as needing proofs
+    /// (with `min_len = 0`), and the updates remain in the map for retry after
+    /// proofs are revealed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a non-blinded-node error occurs during update.
+    pub fn update_leaves(
+        &mut self,
+        updates: &mut alloy_primitives::map::B256Map<crate::LeafUpdate>,
+        mut proof_required_fn: impl FnMut(Nibbles, u8),
+    ) -> SparseTrieResult<()>
+    where
+        T: crate::SparseTrieExt,
+    {
+        if let Some(revealed) = self.as_revealed_mut() {
+            revealed.update_leaves(updates, proof_required_fn)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// The representation of revealed sparse trie.

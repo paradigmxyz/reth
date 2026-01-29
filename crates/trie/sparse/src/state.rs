@@ -1,7 +1,8 @@
 use crate::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     traits::{SparseTrie as SparseTrieTrait, SparseTrieExt},
-    RevealableSparseTrie, SerialSparseTrie,
+    RevealableSparseTrie, SerialSparseTrie, DEFAULT_MAX_PRESERVED_STORAGE_TRIES,
+    DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -73,6 +74,18 @@ where
     /// Returns the cleared [`SparseStateTrie`], consuming this instance.
     pub fn into_inner(self) -> SparseStateTrie<A, S> {
         self.0
+    }
+}
+
+impl<A, S> ClearedSparseStateTrie<A, S>
+where
+    A: SparseTrieExt + Default,
+    S: SparseTrieExt + Default + Clone,
+{
+    /// Creates a [`ClearedSparseStateTrie`] by pruning the given [`SparseStateTrie`].
+    pub fn pruned(mut trie: SparseStateTrie<A, S>) -> Self {
+        trie.prune(DEFAULT_SPARSE_TRIE_PRUNE_DEPTH, DEFAULT_MAX_PRESERVED_STORAGE_TRIES);
+        Self(trie)
     }
 }
 
@@ -222,6 +235,14 @@ where
     /// Inserts storage trie for the provided address.
     pub fn insert_storage_trie(&mut self, address: B256, storage_trie: RevealableSparseTrie<S>) {
         self.storage.tries.insert(address, storage_trie);
+    }
+
+    /// Returns mutable reference to storage sparse trie, creating a blind one if it doesn't exist.
+    pub fn get_or_create_storage_trie_mut(
+        &mut self,
+        address: B256,
+    ) -> &mut RevealableSparseTrie<S> {
+        self.storage.get_or_create_trie_mut(address)
     }
 
     /// Reveal unknown trie paths from multiproof.
@@ -714,8 +735,8 @@ where
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.
-    pub fn storage_root(&mut self, account: B256) -> Option<B256> {
-        self.storage.tries.get_mut(&account).and_then(|trie| trie.root())
+    pub fn storage_root(&mut self, account: &B256) -> Option<B256> {
+        self.storage.tries.get_mut(account).and_then(|trie| trie.root())
     }
 
     /// Returns mutable reference to the revealed account sparse trie.
@@ -828,6 +849,28 @@ where
 
         let provider = provider_factory.account_node_provider();
         self.state.update_leaf(path, value, provider)?;
+        Ok(())
+    }
+
+    /// Applies batch leaf updates to the account trie, collecting proof targets for blinded paths.
+    ///
+    /// See [`SparseTrieExt::update_leaves`] for detailed documentation.
+    ///
+    /// If the account trie is blind, all keys in `updates` are treated as needing proofs
+    /// (with `min_len = 0`), and the updates remain in the map for retry after proofs are revealed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a non-blinded-node error occurs during update.
+    pub fn update_leaves(
+        &mut self,
+        updates: &mut B256Map<crate::LeafUpdate>,
+        proof_required_fn: impl FnMut(Nibbles, u8),
+    ) -> SparseStateTrieResult<()>
+    where
+        A: SparseTrieExt,
+    {
+        self.state.update_leaves(updates, proof_required_fn)?;
         Ok(())
     }
 
@@ -1162,6 +1205,13 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
             .or_insert_with(|| self.cleared_revealed_paths.pop().unwrap_or_default());
 
         (trie, revealed_paths)
+    }
+
+    // Returns mutable reference to storage sparse trie, creating a blind one if it doesn't exist.
+    fn get_or_create_trie_mut(&mut self, address: B256) -> &mut RevealableSparseTrie<S> {
+        self.tries.entry(address).or_insert_with(|| {
+            self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
+        })
     }
 
     /// Takes the storage trie for the account from the internal `HashMap`, creating it if it
@@ -1766,7 +1816,7 @@ mod tests {
                 &provider_factory,
             )
             .unwrap();
-        trie_account_1.storage_root = sparse.storage_root(address_1).unwrap();
+        trie_account_1.storage_root = sparse.storage_root(&address_1).unwrap();
         sparse
             .update_account_leaf(
                 address_path_1,
@@ -1776,7 +1826,7 @@ mod tests {
             .unwrap();
 
         sparse.wipe_storage(address_2).unwrap();
-        trie_account_2.storage_root = sparse.storage_root(address_2).unwrap();
+        trie_account_2.storage_root = sparse.storage_root(&address_2).unwrap();
         sparse
             .update_account_leaf(
                 address_path_2,
