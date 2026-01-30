@@ -289,7 +289,7 @@ where
                 },
             }
 
-            if self.updates.is_empty() || self.pending_updates > 10 {
+            if self.updates.is_empty() || self.pending_updates > 100 {
                 self.process_leaf_updates()?;
             }
             
