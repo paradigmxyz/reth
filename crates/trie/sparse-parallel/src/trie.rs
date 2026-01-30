@@ -904,7 +904,7 @@ impl SparseTrie for ParallelSparseTrie {
     fn take_updates(&mut self) -> SparseTrieUpdates {
         match self.updates.take() {
             Some(updates) => {
-                // NOTE: we need to perserve Some case
+                // NOTE: we need to preserve Some case
                 self.updates = Some(SparseTrieUpdates::with_capacity(
                     updates.updated_nodes.len(),
                     updates.removed_nodes.len(),
@@ -8092,7 +8092,7 @@ mod tests {
 
         assert_eq!(
             nodes_before,
-            trie.revealed_node_count(),
+            trie.size_hint(),
             "prune(300) should have no effect on a shallow trie"
         );
     }
