@@ -400,6 +400,7 @@ where
     }
 
     /// Applies updates to the sparse trie and dispatches requested multiproof targets.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor::sparse_trie", skip_all)]
     fn process_updates(&mut self) -> Result<(), ProviderError> {
         let mut targets = MultiProofTargetsV2::default();
 
