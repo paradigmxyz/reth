@@ -30,7 +30,7 @@ use tracing::{debug, instrument, trace};
 
 /// Index into a [`NodeArena`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct NodeId(NonZeroU32);
+struct NodeId(NonZeroU32);
 
 impl NodeId {
     /// Creates a new `NodeId` from a raw index.
@@ -39,13 +39,13 @@ impl NodeId {
     ///
     /// Panics if `index` is `u32::MAX` (reserved for `None` representation).
     #[inline]
-    pub const fn new(index: u32) -> Self {
+    const fn new(index: u32) -> Self {
         Self(NonZeroU32::new(index.wrapping_add(1)).expect("NodeId index overflow"))
     }
 
     /// Returns the underlying index.
     #[inline]
-    pub const fn index(self) -> usize {
+    const fn index(self) -> usize {
         // SAFETY: `NonZero` - 1 can't overflow.
         (unsafe { self.0.get().unchecked_sub(1) }) as usize
     }
@@ -56,19 +56,19 @@ impl NodeId {
 /// Nodes are stored in a dense `Vec` and addressed by [`NodeId`] handles.
 /// This provides cache-friendly traversal and avoids `HashMap` lookup overhead.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
-pub struct NodeArena {
+struct NodeArena {
     nodes: Vec<SparseNode>,
 }
 
 impl NodeArena {
     /// Creates a new empty arena.
-    pub const fn new() -> Self {
+    const fn new() -> Self {
         Self { nodes: Vec::new() }
     }
 
     /// Allocates a new node in the arena and returns its [`NodeId`].
     #[inline]
-    pub fn alloc(&mut self, node: SparseNode) -> NodeId {
+    fn alloc(&mut self, node: SparseNode) -> NodeId {
         let index = self.nodes.len() as u32;
         self.nodes.push(node);
         NodeId::new(index)
@@ -76,28 +76,28 @@ impl NodeArena {
 
     /// Returns a reference to the node at the given [`NodeId`].
     #[inline]
-    pub fn get(&self, id: NodeId) -> &SparseNode {
+    fn get(&self, id: NodeId) -> &SparseNode {
         &self.nodes[id.index()]
     }
 
     /// Returns a mutable reference to the node at the given [`NodeId`].
     #[inline]
-    pub fn get_mut(&mut self, id: NodeId) -> &mut SparseNode {
+    fn get_mut(&mut self, id: NodeId) -> &mut SparseNode {
         &mut self.nodes[id.index()]
     }
 
     /// Clears the arena, removing all nodes but keeping allocated capacity.
-    pub fn clear(&mut self) {
+    fn clear(&mut self) {
         self.nodes.clear();
     }
 
     /// Reserves capacity for at least `additional` more nodes.
-    pub fn reserve(&mut self, additional: usize) {
+    fn reserve(&mut self, additional: usize) {
         self.nodes.reserve(additional);
     }
 
     /// Shrinks the capacity of the arena to the specified size.
-    pub fn shrink_to(&mut self, min_capacity: usize) {
+    fn shrink_to(&mut self, min_capacity: usize) {
         self.nodes.shrink_to(min_capacity);
     }
 }
@@ -2429,7 +2429,8 @@ impl SparseNode {
     }
 
     /// Returns the state mask for a branch node.
-    pub const fn state_mask(&self) -> Option<TrieMask> {
+    #[cfg(test)]
+    const fn state_mask(&self) -> Option<TrieMask> {
         match self {
             Self::Branch { state_mask, .. } => Some(*state_mask),
             _ => None,
@@ -2448,7 +2449,7 @@ impl SparseNode {
     }
 
     /// Sets the child pointer for an extension node.
-    pub const fn set_ext_child(&mut self, new_child: Option<NodeId>) {
+    const fn set_ext_child(&mut self, new_child: Option<NodeId>) {
         if let Self::Extension { child, hash, store_in_db_trie, .. } = self {
             *child = new_child;
             *hash = None;
@@ -2457,7 +2458,7 @@ impl SparseNode {
     }
 
     /// Sets a child pointer for a branch node at the given nibble index.
-    pub const fn set_branch_child(&mut self, nibble: u8, child_id: Option<NodeId>) {
+    const fn set_branch_child(&mut self, nibble: u8, child_id: Option<NodeId>) {
         if let Self::Branch { children, hash, store_in_db_trie, .. } = self {
             children[nibble as usize] = child_id;
             *hash = None;
@@ -2466,7 +2467,7 @@ impl SparseNode {
     }
 
     /// Sets a bit in the state mask for a branch node, preserving existing children.
-    pub const fn set_state_mask_bit(&mut self, nibble: u8) {
+    const fn set_state_mask_bit(&mut self, nibble: u8) {
         if let Self::Branch { state_mask, hash, store_in_db_trie, .. } = self {
             state_mask.set_bit(nibble);
             *hash = None;
@@ -2493,7 +2494,7 @@ impl SparseNode {
     ///
     /// This is useful for comparing nodes while ignoring pointer values,
     /// which can differ based on allocation order.
-    pub const fn without_child_pointers(&self) -> Self {
+    const fn without_child_pointers(&self) -> Self {
         match self {
             Self::Empty => Self::Empty,
             Self::Hash(hash) => Self::Hash(*hash),
