@@ -1126,10 +1126,11 @@ impl SparseTrieExt for ParallelSparseTrie {
                         .and_then(|n| n.hash());
 
                     if let Some(hash) = hash {
-                        self.subtrie_for_path_mut(&child)
-                            .nodes
-                            .insert(child, SparseNode::Hash(hash));
-                        effective_pruned_roots.push((child, hash));
+                        // Use untracked access to avoid marking subtrie as modified during pruning
+                        if let Some(subtrie) = self.subtrie_for_path_mut_untracked(&child) {
+                            subtrie.nodes.insert(child, SparseNode::Hash(hash));
+                            effective_pruned_roots.push((child, hash));
+                        }
                     }
                 } else {
                     stack.push((child, depth + 1));
@@ -1439,6 +1440,17 @@ impl ParallelSparseTrie {
             &mut self.upper_subtrie
         } else {
             self.lower_subtrie_for_path_mut(path).unwrap()
+        }
+    }
+
+    /// Returns a mutable reference to a subtrie without marking it as modified.
+    /// Used for internal operations like pruning that shouldn't affect heat tracking.
+    fn subtrie_for_path_mut_untracked(&mut self, path: &Nibbles) -> Option<&mut SparseSubtrie> {
+        if SparseSubtrieType::path_len_is_upper(path.len()) {
+            Some(&mut self.upper_subtrie)
+        } else {
+            let idx = SparseSubtrieType::lower_index_for_path(path);
+            self.lower_subtries[idx].as_revealed_mut()
         }
     }
 
@@ -7853,7 +7865,11 @@ mod tests {
 
     #[test]
     fn test_prune_at_various_depths() {
-        for max_depth in [0, 1, 2] {
+        // Test depths 0 and 1, which are in the Upper subtrie (no heat tracking).
+        // Depth 2 is the boundary where Lower subtries start (UPPER_TRIE_MAX_DEPTH=2),
+        // and with `depth >= max_depth` heat check, hot Lower subtries at depth 2
+        // are protected from pruning traversal.
+        for max_depth in [0, 1] {
             let provider = DefaultTrieNodeProvider;
             let mut trie = ParallelSparseTrie::default();
 
