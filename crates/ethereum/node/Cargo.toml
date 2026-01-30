@@ -99,6 +99,7 @@ js-tracer = [
     "reth-rpc-eth-api/js-tracer",
     "reth-rpc-eth-types/js-tracer",
 ]
+gmp = ["reth-evm-ethereum/gmp"]
 test-utils = [
     "reth-node-builder/test-utils",
     "reth-chainspec/test-utils",

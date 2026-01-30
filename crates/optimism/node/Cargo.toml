@@ -130,6 +130,7 @@ test-utils = [
     "reth-stages-types/test-utils",
 ]
 reth-codec = ["reth-optimism-primitives/reth-codec"]
+gmp = ["reth-optimism-evm/gmp"]
 
 [[test]]
 name = "e2e_testsuite"

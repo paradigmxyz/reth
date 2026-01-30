@@ -67,3 +67,4 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-primitives-traits/test-utils",
 ]
+gmp = ["revm/gmp"]

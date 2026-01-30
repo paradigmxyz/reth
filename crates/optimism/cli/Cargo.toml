@@ -125,3 +125,4 @@ serde = [
 ]
 
 edge = ["reth-cli-commands/edge", "reth-node-core/edge"]
+gmp = ["reth-optimism-node/gmp"]

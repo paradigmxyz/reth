@@ -90,3 +90,4 @@ min-trace-logs = [
 ]
 
 edge = ["reth-cli-commands/edge"]
+gmp = ["reth-node-ethereum/gmp"]
