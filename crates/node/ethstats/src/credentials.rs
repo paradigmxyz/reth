@@ -20,7 +20,8 @@ pub(crate) struct EthstatsCredentials {
 impl FromStr for EthstatsCredentials {
     type Err = EthStatsError;
 
-    /// Parse credentials from a string in the format "`node_id:secret@host`" or "`node_id:secret@wss://host`"
+    /// Parse credentials from a string in the format "`node_id:secret@host`" or
+    /// "`node_id:secret@wss://host`"
     ///
     /// Supports the following formats:
     /// - `node_id:secret@host` - Uses plain WebSocket (ws://)
