@@ -284,8 +284,6 @@ where
 
             if self.updates.is_empty() && self.proof_result_rx.is_empty() {
                 self.process_updates()?;
-            } else {
-                self.process_leaf_updates()?;
             }
 
             if self.finished_state_updates &&
