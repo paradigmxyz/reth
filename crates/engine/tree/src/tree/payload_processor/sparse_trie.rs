@@ -191,6 +191,8 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     finished_state_updates: bool,
     /// Pending targets to be dispatched to the proof workers.
     pending_targets: MultiProofTargetsV2,
+    /// Number of pending updates that were received but not yet processed.
+    pending_updates: usize,
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
 }
@@ -266,6 +268,7 @@ where
                     };
 
                     self.on_multiproof_message(update);
+                    self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
                     let Ok(result) = message else {
@@ -285,8 +288,11 @@ where
                 },
             }
 
-            self.process_leaf_updates()?;
-
+            if self.updates.is_empty() || self.pending_updates > 10 {
+                self.process_leaf_updates()?;
+            }
+            
+            // Dispatch targets if we have accumulated enough or don't have any pending updates.
             if self.pending_targets.chunking_length() > 100 || self.updates.is_empty() {
                 self.dispatch_pending_targets();
             }
