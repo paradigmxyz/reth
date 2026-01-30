@@ -904,6 +904,7 @@ impl SparseTrie for ParallelSparseTrie {
     fn take_updates(&mut self) -> SparseTrieUpdates {
         match self.updates.take() {
             Some(updates) => {
+                // NOTE: we need to perserve Some case
                 self.updates = Some(SparseTrieUpdates::with_capacity(
                     updates.updated_nodes.len(),
                     updates.removed_nodes.len(),
@@ -2077,6 +2078,7 @@ impl ParallelSparseTrie {
             }
 
             self.lower_subtries[index] = LowerSparseSubtrie::Revealed(subtrie);
+            self.subtrie_heat.mark_modified(index);
         }
     }
 }

@@ -213,8 +213,6 @@ where
 
     /// Inserts storage trie for the provided address.
     pub fn insert_storage_trie(&mut self, address: B256, storage_trie: RevealableSparseTrie<S>) {
-        self.storage.generation += 1;
-        self.storage.trie_generation.insert(address, self.storage.generation);
         self.storage.tries.insert(address, storage_trie);
     }
 
@@ -851,6 +849,8 @@ where
             .ok_or(SparseTrieErrorKind::Blind)?
             .update_leaf(slot, value, provider)?;
         self.storage.get_revealed_paths_mut(address).insert(slot);
+        // Mark this storage trie as hot for pruning decisions
+        self.storage.heat.mark_modified(address);
         Ok(())
     }
 
@@ -1060,38 +1060,93 @@ struct StorageTries<S = SerialSparseTrie> {
     cleared_revealed_paths: Vec<HashSet<Nibbles>>,
     /// A default cleared trie instance, which will be cloned when creating new tries.
     default_trie: RevealableSparseTrie<S>,
-    /// Monotonically increasing generation counter for recency tracking.
-    generation: u64,
-    /// Last modified generation per storage trie.
-    trie_generation: B256Map<u64>,
+    /// Heat tracking for storage tries - used for smart pruning decisions.
+    heat: StorageTrieHeat,
+}
+
+/// Tracks "heat" of storage tries to make smart pruning decisions.
+///
+/// Heat-based tracking is more accurate than simple generation counting because it tracks
+/// actual leaf access patterns rather than administrative operations (take/insert).
+///
+/// - Heat is incremented by 2 when a storage trie has a leaf updated
+/// - Heat decays by 1 each prune cycle for tries not modified that cycle
+/// - Tries with heat > 0 are considered "hot" and prioritized for preservation
+#[derive(Debug, Default)]
+struct StorageTrieHeat {
+    /// Heat level per storage trie address. Higher = more recently/frequently accessed.
+    heat: B256Map<u8>,
+    /// Tracks which tries were modified in the current cycle (between prune calls).
+    modified_this_cycle: HashSet<B256>,
+}
+
+impl StorageTrieHeat {
+    /// Marks a storage trie as modified, incrementing its heat by 2.
+    #[inline]
+    fn mark_modified(&mut self, address: B256) {
+        self.modified_this_cycle.insert(address);
+        *self.heat.entry(address).or_insert(0) = self.heat.get(&address).unwrap_or(&0).saturating_add(2);
+    }
+
+    /// Returns the heat level for a storage trie (0 if not tracked).
+    #[inline]
+    fn get(&self, address: &B256) -> u8 {
+        self.heat.get(address).copied().unwrap_or(0)
+    }
+
+    /// Decays heat for tries not modified this cycle and resets modification tracking.
+    /// Called at the start of each prune cycle.
+    fn decay_and_reset(&mut self) {
+        self.heat.retain(|address, heat| {
+            if !self.modified_this_cycle.contains(address) {
+                *heat = heat.saturating_sub(1);
+            }
+            *heat > 0 // Remove entries with 0 heat
+        });
+        self.modified_this_cycle.clear();
+    }
+
+    /// Removes tracking for a specific address (when trie is evicted).
+    fn remove(&mut self, address: &B256) {
+        self.heat.remove(address);
+        self.modified_this_cycle.remove(address);
+    }
+
+    /// Clears all heat tracking state.
+    fn clear(&mut self) {
+        self.heat.clear();
+        self.modified_this_cycle.clear();
+    }
 }
 
 impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
     /// Prunes and evicts storage tries.
     ///
-    /// Keeps the top `max_storage_tries` by a score combining size and recency.
+    /// Keeps the top `max_storage_tries` by a score combining size and heat.
     /// Evicts lower-scored tries entirely, prunes kept tries to `max_depth`.
     fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
         let fn_start = std::time::Instant::now();
         let total_tries = self.tries.len();
-        let current_gen = self.generation;
 
-        // Collect (hash, size, score) for all tries
-        // Score = size * recency_multiplier
-        // Recently modified tries (within last 2 generations) get 2x weight
+        // Decay heat for tries not modified this cycle
+        self.heat.decay_and_reset();
+
+        // Collect (address, size, score) for all tries
+        // Score = size * heat_multiplier
+        // Hot tries (heat > 0) get boosted weight based on heat level
         let now = std::time::Instant::now();
         let mut trie_info: Vec<(B256, usize, usize)> = self
             .tries
             .iter()
-            .map(|(hash, trie)| {
+            .map(|(address, trie)| {
                 let size = match trie {
                     RevealableSparseTrie::Revealed(t) => t.size_hint(),
                     RevealableSparseTrie::Blind(_) => 0,
                 };
-                let last_modified = self.trie_generation.get(hash).copied().unwrap_or(0);
-                let age = current_gen.saturating_sub(last_modified);
-                let recency_multiplier = if age <= 2 { 2 } else { 1 };
-                (*hash, size, size * recency_multiplier)
+                let heat = self.heat.get(address);
+                // Heat multiplier: 1 (cold) to 3 (very hot, heat >= 4)
+                let heat_multiplier = 1 + (heat.min(4) / 2) as usize;
+                (*address, size, size * heat_multiplier)
             })
             .collect();
         println!("  collect trie_info ({} tries): {:?}", trie_info.len(), now.elapsed());
@@ -1104,48 +1159,47 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             trie_info.truncate(max_storage_tries);
         }
         let tries_to_keep: B256Map<usize> =
-            trie_info.iter().map(|(hash, size, _)| (*hash, *size)).collect();
+            trie_info.iter().map(|(address, size, _)| (*address, *size)).collect();
         println!("  select top {} tries: {:?}", tries_to_keep.len(), now.elapsed());
 
         // Collect keys to evict
         let tries_to_clear: Vec<B256> =
-            self.tries.keys().filter(|hash| !tries_to_keep.contains_key(*hash)).copied().collect();
+            self.tries.keys().filter(|addr| !tries_to_keep.contains_key(*addr)).copied().collect();
         println!("  tries to evict: {}, tries to keep: {}", tries_to_clear.len(), tries_to_keep.len());
 
         // Evict storage tries that exceeded limit, saving cleared allocations for reuse
         let now = std::time::Instant::now();
-        for hash in &tries_to_clear {
-            if let Some(trie) = self.tries.remove(hash) {
+        for address in &tries_to_clear {
+            if let Some(trie) = self.tries.remove(address) {
                 self.cleared_tries.push(trie.clear());
             }
-            if let Some(mut paths) = self.revealed_paths.remove(hash) {
+            if let Some(mut paths) = self.revealed_paths.remove(address) {
                 paths.clear();
                 self.cleared_revealed_paths.push(paths);
             }
-            self.trie_generation.remove(hash);
+            self.heat.remove(address);
         }
         println!("  evict {} tries: {:?}", tries_to_clear.len(), now.elapsed());
 
         // Prune storage tries that are kept, but only if:
-        // - They were modified since last prune (age <= 2)
+        // - They are hot (heat > 0) - cold tries were already pruned in previous cycles
         // - They're large enough to be worth pruning
         const MIN_SIZE_TO_PRUNE: usize = 1000;
         let now = std::time::Instant::now();
         let mut pruned_count = 0;
         let mut skipped_small = 0;
         let mut skipped_cold = 0;
-        for (hash, size) in &tries_to_keep {
+        for (address, size) in &tries_to_keep {
             if *size < MIN_SIZE_TO_PRUNE {
                 skipped_small += 1;
                 continue; // Small tries aren't worth the DFS cost
             }
-            let last_modified = self.trie_generation.get(hash).copied().unwrap_or(0);
-            let age = current_gen.saturating_sub(last_modified);
-            if age > 2 {
+            let heat = self.heat.get(address);
+            if heat == 0 {
                 skipped_cold += 1;
                 continue; // Skip cold tries - already pruned in previous cycles
             }
-            if let Some(trie) = self.tries.get_mut(hash).and_then(|t| t.as_revealed_mut()) {
+            if let Some(trie) = self.tries.get_mut(address).and_then(|t| t.as_revealed_mut()) {
                 trie.prune(max_depth);
                 pruned_count += 1;
             }
@@ -1174,7 +1228,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
             set.clear();
             set
         }));
-        self.trie_generation.clear();
+        self.heat.clear();
     }
 
     /// Shrinks the capacity of active storage tries to the given total sizes.
