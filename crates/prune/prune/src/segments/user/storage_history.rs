@@ -110,8 +110,6 @@ impl StorageHistory {
             ))
         }
 
-        const BATCH_SIZE: usize = MAX_STORAGE_HISTORY_ENTRIES_PER_RUN;
-
         let mut total_pruned = 0;
         let mut actual_last_pruned_block: Option<BlockNumber> = None;
         let mut overall_done = false;
@@ -120,12 +118,14 @@ impl StorageHistory {
             provider.static_file_provider().walk_storage_changeset_range(range).peekable();
 
         loop {
-            let mut highest_deleted_storages =
-                FxHashMap::with_capacity_and_hasher(BATCH_SIZE, Default::default());
+            let mut highest_deleted_storages = FxHashMap::with_capacity_and_hasher(
+                MAX_STORAGE_HISTORY_ENTRIES_PER_RUN,
+                Default::default(),
+            );
             let mut batch_last_block: Option<BlockNumber> = None;
             let mut batch_count = 0;
 
-            while batch_count < BATCH_SIZE {
+            while batch_count < MAX_STORAGE_HISTORY_ENTRIES_PER_RUN {
                 // Check limit before consuming next item
                 if limiter.is_limit_reached() {
                     break;
