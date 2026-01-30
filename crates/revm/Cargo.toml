@@ -56,6 +56,7 @@ serde = [
     "reth-storage-api/serde",
 ]
 portable = ["revm/portable"]
+gmp = ["revm/gmp"]
 optional-balance-check = ["revm/optional_balance_check"]
 optional-block-gas-limit = ["revm/optional_block_gas_limit"]
 optional-eip3541 = ["revm/optional_eip3541"]

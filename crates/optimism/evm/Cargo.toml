@@ -80,4 +80,5 @@ portable = [
     "op-revm/portable",
     "revm/portable",
 ]
+gmp = ["revm/gmp"]
 rpc = ["reth-rpc-eth-api", "reth-optimism-primitives/serde", "reth-optimism-primitives/reth-codec", "alloy-evm/rpc"]

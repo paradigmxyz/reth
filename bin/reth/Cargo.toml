@@ -181,6 +181,7 @@ min-trace-logs = [
 ]
 
 edge = ["reth-ethereum-cli/edge", "reth-node-core/edge"]
+gmp = ["reth-revm/gmp"]
 
 [[bin]]
 name = "reth"
