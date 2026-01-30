@@ -465,7 +465,14 @@ impl DecodedMultiProofV2 {
     pub fn extend(&mut self, other: Self) {
         self.account_proofs.extend(other.account_proofs);
         for (hashed_address, other_storage_proofs) in other.storage_proofs {
-            self.storage_proofs.entry(hashed_address).or_default().extend(other_storage_proofs);
+            match self.storage_proofs.entry(hashed_address) {
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(other_storage_proofs);
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().extend(other_storage_proofs);
+                }
+            }
         }
     }
 }
