@@ -37,14 +37,15 @@ use reth_primitives_traits::{
     AlloyBlockHeader as _, BlockBody as _, RecoveredBlock, SealedHeader, SignedTransaction,
     StorageEntry,
 };
+use reth_prune_types::PruneSegment;
 use reth_stages_types::PipelineTarget;
 use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileMap,
     StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
 use reth_storage_api::{
-    BlockBodyIndicesProvider, ChangeSetReader, DBProvider, StorageChangeSetReader,
-    StorageSettingsCache,
+    BlockBodyIndicesProvider, ChangeSetReader, DBProvider, PruneCheckpointReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
 use std::{
@@ -1323,6 +1324,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Provider: DBProvider
             + BlockReader
             + StageCheckpointReader
+            + PruneCheckpointReader
             + ChainSpecProvider
             + StorageSettingsCache,
         N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
@@ -1482,7 +1484,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// database checkpoints or prune against them.
     pub fn check_file_consistency<Provider>(&self, provider: &Provider) -> ProviderResult<()>
     where
-        Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
+        Provider: DBProvider + ChainSpecProvider + StorageSettingsCache + PruneCheckpointReader,
     {
         info!(target: "reth::cli", "Healing static file inconsistencies.");
 
@@ -1499,7 +1501,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         provider: &'a Provider,
     ) -> impl Iterator<Item = StaticFileSegment> + 'a
     where
-        Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
+        Provider: DBProvider + ChainSpecProvider + StorageSettingsCache + PruneCheckpointReader,
     {
         StaticFileSegment::iter()
             .filter(move |segment| self.should_check_segment(provider, *segment))
@@ -1511,7 +1513,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
     ) -> bool
     where
-        Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
+        Provider: DBProvider + ChainSpecProvider + StorageSettingsCache + PruneCheckpointReader,
     {
         match segment {
             StaticFileSegment::Headers | StaticFileSegment::Transactions => true,
@@ -1533,10 +1535,25 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     return false;
                 }
 
+                if Self::is_segment_fully_pruned(provider, PruneSegment::Receipts) {
+                    debug!(target: "reth::providers::static_file", ?segment, "Skipping receipts segment: fully pruned");
+                    return false;
+                }
+
                 true
             }
             StaticFileSegment::TransactionSenders => {
-                !EitherWriterDestination::senders(provider).is_database()
+                if EitherWriterDestination::senders(provider).is_database() {
+                    debug!(target: "reth::providers::static_file", ?segment, "Skipping senders segment: senders stored in database");
+                    return false;
+                }
+
+                if Self::is_segment_fully_pruned(provider, PruneSegment::SenderRecovery) {
+                    debug!(target: "reth::providers::static_file", ?segment, "Skipping senders segment: fully pruned");
+                    return false;
+                }
+
+                true
             }
             StaticFileSegment::AccountChangeSets => {
                 if EitherWriter::account_changesets_destination(provider).is_database() {
@@ -1553,6 +1570,19 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 true
             }
         }
+    }
+
+    /// Returns `true` if the given prune segment has a checkpoint with [`PruneMode::Full`],
+    /// indicating all data for this segment has been intentionally deleted.
+    fn is_segment_fully_pruned<Provider>(provider: &Provider, segment: PruneSegment) -> bool
+    where
+        Provider: PruneCheckpointReader,
+    {
+        provider
+            .get_prune_checkpoint(segment)
+            .ok()
+            .flatten()
+            .is_some_and(|checkpoint| checkpoint.prune_mode.is_full())
     }
 
     /// Checks consistency of the latest static file segment and throws an error if at fault.
