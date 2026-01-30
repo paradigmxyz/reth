@@ -64,13 +64,10 @@ where
 
     // Sort highest deleted block numbers and turn them into sharded keys.
     // We use `sorted_unstable` because no equal keys exist in the map.
-    let highest_sharded_keys: Vec<_> = highest_deleted
-        .into_iter()
-        .sorted_unstable()
-        .map(|(key, block_number)| {
+    let highest_sharded_keys =
+        highest_deleted.into_iter().sorted_unstable().map(|(key, block_number)| {
             to_sharded_key(key, block_number.min(last_changeset_pruned_block))
-        })
-        .collect();
+        });
 
     let outcomes =
         prune_history_indices::<Provider, T, _>(provider, highest_sharded_keys, key_matches)?;
