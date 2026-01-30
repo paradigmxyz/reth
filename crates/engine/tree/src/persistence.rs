@@ -13,6 +13,7 @@ use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use std::{
     sync::mpsc::{Receiver, SendError, Sender},
+    thread::JoinHandle,
     time::Instant,
 };
 use thiserror::Error;
@@ -213,11 +214,14 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
+    ///
+    /// Returns a tuple of the handle and the join handle for the spawned thread. The join handle
+    /// can be used to wait for the service to exit gracefully after the handle is dropped.
     pub fn spawn_service<N>(
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
-    ) -> PersistenceHandle<N::Primitives>
+    ) -> (PersistenceHandle<N::Primitives>, JoinHandle<()>)
     where
         N: ProviderNodeTypes,
     {
@@ -230,7 +234,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         // spawn the persistence service
         let db_service =
             PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
-        std::thread::Builder::new()
+        let join_handle = std::thread::Builder::new()
             .name("Persistence Service".to_string())
             .spawn(|| {
                 if let Err(err) = db_service.run() {
@@ -239,7 +243,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
             })
             .unwrap();
 
-        persistence_handle
+        (persistence_handle, join_handle)
     }
 
     /// Sends a specific [`PersistenceAction`] in the contained channel. The caller is responsible
@@ -307,7 +311,7 @@ mod tests {
     use reth_prune::Pruner;
     use tokio::sync::mpsc::unbounded_channel;
 
-    fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
+    fn default_persistence_handle() -> (PersistenceHandle<EthPrimitives>, JoinHandle<()>) {
         let provider = create_test_provider_factory();
 
         let (_finished_exex_height_tx, finished_exex_height_rx) =
@@ -323,7 +327,7 @@ mod tests {
     #[test]
     fn test_save_blocks_empty() {
         reth_tracing::init_test_tracing();
-        let persistence_handle = default_persistence_handle();
+        let (persistence_handle, join_handle) = default_persistence_handle();
 
         let blocks = vec![];
         let (tx, rx) = crossbeam_channel::bounded(1);
@@ -332,12 +336,15 @@ mod tests {
 
         let hash = rx.recv().unwrap();
         assert_eq!(hash, None);
+
+        drop(persistence_handle);
+        join_handle.join().unwrap();
     }
 
     #[test]
     fn test_save_blocks_single_block() {
         reth_tracing::init_test_tracing();
-        let persistence_handle = default_persistence_handle();
+        let (persistence_handle, join_handle) = default_persistence_handle();
         let block_number = 0;
         let mut test_block_builder = TestBlockBuilder::eth();
         let executed =
@@ -355,12 +362,15 @@ mod tests {
             .expect("no hash returned");
 
         assert_eq!(block_hash, actual_hash);
+
+        drop(persistence_handle);
+        join_handle.join().unwrap();
     }
 
     #[test]
     fn test_save_blocks_multiple_blocks() {
         reth_tracing::init_test_tracing();
-        let persistence_handle = default_persistence_handle();
+        let (persistence_handle, join_handle) = default_persistence_handle();
 
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks = test_block_builder.get_executed_blocks(0..5).collect::<Vec<_>>();
@@ -370,12 +380,15 @@ mod tests {
         persistence_handle.save_blocks(blocks, tx).unwrap();
         let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
         assert_eq!(last_hash, actual_hash);
+
+        drop(persistence_handle);
+        join_handle.join().unwrap();
     }
 
     #[test]
     fn test_save_blocks_multiple_calls() {
         reth_tracing::init_test_tracing();
-        let persistence_handle = default_persistence_handle();
+        let (persistence_handle, join_handle) = default_persistence_handle();
 
         let ranges = [0..1, 1..2, 2..4, 4..5];
         let mut test_block_builder = TestBlockBuilder::eth();
@@ -389,5 +402,8 @@ mod tests {
             let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
             assert_eq!(last_hash, actual_hash);
         }
+
+        drop(persistence_handle);
+        join_handle.join().unwrap();
     }
 }
