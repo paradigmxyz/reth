@@ -624,10 +624,14 @@ impl SparseTrieTrait for SerialSparseTrie {
         Ok(())
     }
 
-    fn reveal_nodes(&mut self, mut nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()> {
+    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) -> SparseTrieResult<()> {
         nodes.sort_unstable_by_key(|node| node.path);
-        for node in nodes {
-            self.reveal_node(node.path, node.node, node.masks)?;
+        for node in nodes.iter_mut() {
+            self.reveal_node(
+                node.path,
+                core::mem::replace(&mut node.node, TrieNode::EmptyRoot),
+                node.masks.take(),
+            )?;
         }
         Ok(())
     }
