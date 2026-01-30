@@ -34,7 +34,7 @@ pub(crate) async fn dump_merkle_stage<N>(
     consensus: impl FullConsensus<N::Primitives> + 'static,
 ) -> Result<()>
 where
-    N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
+    N: ProviderNodeTypes<DB = DatabaseEnv>,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 

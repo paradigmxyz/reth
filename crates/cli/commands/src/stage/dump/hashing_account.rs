@@ -13,7 +13,7 @@ use reth_stages::{stages::AccountHashingStage, Stage, StageCheckpoint, UnwindInp
 use std::sync::Arc;
 use tracing::info;
 
-pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
+pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = DatabaseEnv>>(
     db_tool: &DbTool<N>,
     from: BlockNumber,
     to: BlockNumber,

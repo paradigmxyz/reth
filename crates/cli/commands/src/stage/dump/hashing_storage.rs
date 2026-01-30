@@ -12,7 +12,7 @@ use reth_stages::{stages::StorageHashingStage, Stage, StageCheckpoint, UnwindInp
 use std::sync::Arc;
 use tracing::info;
 
-pub(crate) async fn dump_hashing_storage_stage<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
+pub(crate) async fn dump_hashing_storage_stage<N: ProviderNodeTypes<DB = DatabaseEnv>>(
     db_tool: &DbTool<N>,
     from: u64,
     to: u64,

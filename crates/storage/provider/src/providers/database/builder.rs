@@ -100,7 +100,7 @@ impl<N> ProviderFactoryBuilder<N> {
         self,
         chainspec: Arc<N::ChainSpec>,
         config: impl Into<ReadOnlyConfig>,
-    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
+    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>>>
     where
         N: NodeTypesForProvider,
     {

@@ -36,7 +36,7 @@ impl RocksDbTable {
 
 /// Computes a checksum for a RocksDB table.
 pub fn checksum_rocksdb<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
-    tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+    tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     table: RocksDbTable,
     limit: Option<usize>,
 ) -> eyre::Result<()> {

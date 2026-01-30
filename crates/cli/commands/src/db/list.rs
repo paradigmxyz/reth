@@ -55,7 +55,7 @@ impl Command {
     /// Execute `db list` command
     pub fn execute<N: NodeTypes<ChainSpec: EthereumHardforks>>(
         self,
-        tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+        tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     ) -> eyre::Result<()> {
         self.table.view(&ListTableViewer { tool, args: &self })
     }
@@ -89,7 +89,7 @@ impl Command {
 }
 
 struct ListTableViewer<'a, N: NodeTypes> {
-    tool: &'a DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+    tool: &'a DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     args: &'a Command,
 }
 

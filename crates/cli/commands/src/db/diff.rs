@@ -56,7 +56,7 @@ impl Command {
     /// then written to a file in the output directory.
     pub fn execute<T: NodeTypes>(
         self,
-        tool: &DbTool<NodeTypesWithDBAdapter<T, Arc<DatabaseEnv>>>,
+        tool: &DbTool<NodeTypesWithDBAdapter<T, DatabaseEnv>>,
     ) -> eyre::Result<()> {
         warn!("Make sure the node is not running when running `reth db diff`!");
         // open second db

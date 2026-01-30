@@ -377,7 +377,7 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    fn create_test_db() -> Arc<DatabaseEnv> {
+    fn create_test_db() -> DatabaseEnv {
         let path = TempDir::new().unwrap();
         let mut db = DatabaseEnv::open(
             path.path(),

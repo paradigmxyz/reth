@@ -48,7 +48,7 @@ impl Command {
     pub fn execute<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         self,
         data_dir: ChainPath<DataDirPath>,
-        tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+        tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     ) -> eyre::Result<()> {
         if self.checksum {
             let checksum_report = self.checksum_report(tool)?;
@@ -72,7 +72,7 @@ impl Command {
         Ok(())
     }
 
-    fn db_stats_table<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>>(
+    fn db_stats_table<N: NodeTypesWithDB<DB = DatabaseEnv>>(
         &self,
         tool: &DbTool<N>,
     ) -> eyre::Result<ComfyTable> {

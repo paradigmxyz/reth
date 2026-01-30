@@ -119,17 +119,18 @@ pub async fn setup_engine_with_chain_import(
 
         // Create a provider factory with the initialized database (use regular DB, not
         // TempDatabase) We need to specify the node types properly for the adapter
-        let provider_factory = ProviderFactory::<
-            NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
-        >::new(
-            db.clone(),
-            chain_spec.clone(),
-            reth_provider::providers::StaticFileProvider::read_write(static_files_path.clone())?,
-            reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path)
-                .with_default_tables()
-                .build()
-                .unwrap(),
-        )?;
+        let provider_factory =
+            ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, DatabaseEnv>>::new(
+                db.clone(),
+                chain_spec.clone(),
+                reth_provider::providers::StaticFileProvider::read_write(
+                    static_files_path.clone(),
+                )?,
+                reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path)
+                    .with_default_tables()
+                    .build()
+                    .unwrap(),
+            )?;
 
         // Initialize genesis if needed
         reth_db_common::init::init_genesis(&provider_factory)?;
@@ -324,7 +325,7 @@ mod tests {
             let db = Arc::new(db_env);
 
             let provider_factory: ProviderFactory<
-                NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, Arc<DatabaseEnv>>,
+                NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, DatabaseEnv>,
             > = ProviderFactory::new(
                 db.clone(),
                 chain_spec.clone(),
@@ -389,7 +390,7 @@ mod tests {
             let db = Arc::new(db_env);
 
             let provider_factory: ProviderFactory<
-                NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, Arc<DatabaseEnv>>,
+                NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, DatabaseEnv>,
             > = ProviderFactory::new(
                 db,
                 chain_spec.clone(),

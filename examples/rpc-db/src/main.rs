@@ -49,7 +49,7 @@ async fn main() -> eyre::Result<()> {
         DatabaseArguments::new(ClientVersion::default()),
     )?);
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
-    let factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>::new(
+    let factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, DatabaseEnv>>::new(
         db.clone(),
         spec.clone(),
         StaticFileProvider::read_only(db_path.join("static_files"), true)?,

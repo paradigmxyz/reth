@@ -26,7 +26,7 @@ pub(crate) async fn dump_execution_stage<N, E, C>(
     consensus: C,
 ) -> eyre::Result<()>
 where
-    N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
+    N: ProviderNodeTypes<DB = DatabaseEnv>,
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
     C: FullConsensus<E::Primitives> + 'static,
 {
