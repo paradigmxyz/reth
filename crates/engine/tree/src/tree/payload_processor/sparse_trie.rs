@@ -160,12 +160,20 @@ where
         max_nodes_capacity: usize,
         max_values_capacity: usize,
     ) -> SparseStateTrie<A, S> {
-        let now = std::time::Instant::now();
+        let prune_start = Instant::now();
         self.trie.prune(self.prune_depth, self.max_storage_tries);
-        println!("prune elapsed: {:?}", now.elapsed());
-        let now = std::time::Instant::now();
+        let prune_elapsed = prune_start.elapsed();
+
+        let shrink_start = Instant::now();
         self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        println!("prune elapsed: {:?}", now.elapsed());
+        let shrink_elapsed = shrink_start.elapsed();
+
+        debug!(
+            target: "engine::tree::payload_processor::sparse_trie",
+            ?prune_elapsed,
+            ?shrink_elapsed,
+            "SparseTrieTask::into_trie_for_reuse completed"
+        );
         self.trie
     }
 
