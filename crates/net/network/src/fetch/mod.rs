@@ -51,8 +51,13 @@ pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     peers_handle: PeersHandle,
     /// Number of active peer sessions the node's currently handling.
     num_active_peers: Arc<AtomicUsize>,
-    /// Requests queued for processing
-    queued_requests: VecDeque<DownloadRequest<N>>,
+    /// High-priority requests queued for processing.
+    ///
+    /// This is kept separate from normal priority requests to avoid `O(n)` insertion into the
+    /// middle of a single queue under load.
+    queued_high_priority_requests: VecDeque<DownloadRequest<N>>,
+    /// Normal-priority requests queued for processing.
+    queued_normal_requests: VecDeque<DownloadRequest<N>>,
     /// Receiver for new incoming download requests
     download_requests_rx: UnboundedReceiverStream<DownloadRequest<N>>,
     /// Sender for download requests, used to detach a [`FetchClient`]
@@ -70,9 +75,38 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             peers: Default::default(),
             peers_handle,
             num_active_peers,
-            queued_requests: Default::default(),
+            queued_high_priority_requests: Default::default(),
+            queued_normal_requests: Default::default(),
             download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
             download_requests_tx,
+        }
+    }
+
+    #[inline]
+    fn queued_requests_is_empty(&self) -> bool {
+        self.queued_high_priority_requests.is_empty() && self.queued_normal_requests.is_empty()
+    }
+
+    #[inline]
+    fn pop_next_queued_request(&mut self) -> Option<DownloadRequest<N>> {
+        self.queued_high_priority_requests
+            .pop_front()
+            .or_else(|| self.queued_normal_requests.pop_front())
+    }
+
+    #[inline]
+    fn push_queued_request_back(&mut self, request: DownloadRequest<N>) {
+        match request.get_priority() {
+            Priority::High => self.queued_high_priority_requests.push_back(request),
+            Priority::Normal => self.queued_normal_requests.push_back(request),
+        }
+    }
+
+    #[inline]
+    fn push_queued_request_front(&mut self, request: DownloadRequest<N>) {
+        match request.get_priority() {
+            Priority::High => self.queued_high_priority_requests.push_front(request),
+            Priority::Normal => self.queued_normal_requests.push_front(request),
         }
     }
 
@@ -173,14 +207,14 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     /// Returns the next action to return
     fn poll_action(&mut self) -> PollAction {
         // we only check and not pop here since we don't know yet whether a peer is available.
-        if self.queued_requests.is_empty() {
+        if self.queued_requests_is_empty() {
             return PollAction::NoRequests
         }
 
-        let request = self.queued_requests.pop_front().expect("not empty");
+        let request = self.pop_next_queued_request().expect("not empty");
         let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
             // need to put back the request
-            self.queued_requests.push_front(request);
+            self.push_queued_request_front(request);
             return PollAction::NoPeersAvailable
         };
 
@@ -202,21 +236,11 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             loop {
                 // poll incoming requests
                 match self.download_requests_rx.poll_next_unpin(cx) {
-                    Poll::Ready(Some(request)) => match request.get_priority() {
-                        Priority::High => {
-                            // find the first normal request and queue before, add this request to
-                            // the back of the high-priority queue
-                            let pos = self
-                                .queued_requests
-                                .iter()
-                                .position(|req| req.is_normal_priority())
-                                .unwrap_or(0);
-                            self.queued_requests.insert(pos, request);
-                        }
-                        Priority::Normal => {
-                            self.queued_requests.push_back(request);
-                        }
-                    },
+                    Poll::Ready(Some(request)) => {
+                        // Keep high and normal priority requests in separate queues, to avoid
+                        // `O(n)` insertion into a single queue when many requests are buffered.
+                        self.push_queued_request_back(request);
+                    }
                     Poll::Ready(None) => {
                         unreachable!("channel can't close")
                     }
@@ -224,7 +248,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 }
             }
 
-            if self.queued_requests.is_empty() || no_peers_available {
+            if self.queued_requests_is_empty() || no_peers_available {
                 return Poll::Pending
             }
         }
@@ -263,7 +287,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     ///
     /// Caution: this expects that the peer is _not_ closed.
     fn followup_request(&mut self, peer_id: PeerId) -> Option<BlockResponseOutcome> {
-        let req = self.queued_requests.pop_front()?;
+        let req = self.pop_next_queued_request()?;
         let req = self.prepare_block_request(peer_id, req);
         Some(BlockResponseOutcome::Request(peer_id, req))
     }
@@ -527,11 +551,6 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
         }
     }
 
-    /// Returns `true` if this request is normal priority.
-    const fn is_normal_priority(&self) -> bool {
-        self.get_priority().is_normal()
-    }
-
     /// Returns the best peer requirements for this request.
     fn best_peer_requirements(&self) -> BestPeerRequirements {
         match self {
@@ -596,7 +615,7 @@ mod tests {
         poll_fn(move |cx| {
             assert!(fetcher.poll(cx).is_pending());
             let (tx, _rx) = oneshot::channel();
-            fetcher.queued_requests.push_back(DownloadRequest::GetBlockBodies {
+            fetcher.queued_normal_requests.push_back(DownloadRequest::GetBlockBodies {
                 request: vec![],
                 response: tx,
                 priority: Priority::default(),
