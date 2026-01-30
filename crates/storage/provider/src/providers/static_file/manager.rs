@@ -996,11 +996,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn delete_segment(&self, segment: StaticFileSegment) -> ProviderResult<Vec<SegmentHeader>> {
         let mut deleted_headers = Vec::new();
 
-        loop {
-            let Some(block_height) = self.get_highest_static_file_block(segment) else {
-                return Ok(deleted_headers);
-            };
-
+        while let Some(block_height) = self.get_highest_static_file_block(segment) {
             debug!(
                 target: "provider::static_file",
                 ?segment,
@@ -1014,6 +1010,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
             deleted_headers.push(header);
         }
+
+        Ok(deleted_headers)
     }
 
     /// Given a segment and block range it returns a cached
@@ -1572,8 +1570,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         }
     }
 
-    /// Returns `true` if the given prune segment has a checkpoint with [`PruneMode::Full`],
-    /// indicating all data for this segment has been intentionally deleted.
+    /// Returns `true` if the given prune segment has a checkpoint with
+    /// [`reth_prune_types::PruneMode::Full`], indicating all data for this segment has been
+    /// intentionally deleted.
     fn is_segment_fully_pruned<Provider>(provider: &Provider, segment: PruneSegment) -> bool
     where
         Provider: PruneCheckpointReader,

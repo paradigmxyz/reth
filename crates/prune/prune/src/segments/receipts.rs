@@ -201,7 +201,7 @@ mod tests {
                 .sub(1);
 
             let provider = db.factory.database_provider_rw().unwrap();
-            let result = super::prune(&provider, input).unwrap();
+            let result = super::prune(&provider, input, prune_mode).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 
             assert_matches!(
