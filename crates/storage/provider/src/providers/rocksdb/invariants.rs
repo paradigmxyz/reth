@@ -1214,7 +1214,7 @@ mod tests {
     /// Scenario:
     /// 1. Generate 15,000 blocks worth of storage changeset data (to exceed the 10k batch size)
     /// 2. Each block has 1 storage change (address + slot + value)
-    /// 3. Write storage changesets to RocksDB for all 15k blocks
+    /// 3. Write storage changesets to `RocksDB` for all 15k blocks
     /// 4. Set `IndexStorageHistory` checkpoint to block 5000
     /// 5. Insert stale `StoragesHistory` entries in `RocksDB` for (address, slot) pairs that
     ///    changed in blocks 5001-15000
@@ -1435,7 +1435,7 @@ mod tests {
     /// Scenario:
     /// 1. Generate 15,000 blocks worth of account changeset data (to exceed the 10k batch size)
     /// 2. Each block has 1 account change (simple - just random addresses)
-    /// 3. Write account changesets to RocksDB for all 15k blocks
+    /// 3. Write account changesets to `RocksDB` for all 15k blocks
     /// 4. Set `IndexAccountHistory` checkpoint to block 5000
     /// 5. Insert stale `AccountsHistory` entries in `RocksDB` for addresses that changed in blocks
     ///    5001-15000

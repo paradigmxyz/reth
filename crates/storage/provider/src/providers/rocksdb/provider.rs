@@ -807,7 +807,7 @@ impl RocksDBProvider {
     /// Writes raw key-value bytes to the specified table's column family.
     ///
     /// This is a low-level method primarily used for testing where the key encoding
-    /// differs from the MDBX table definition (e.g., RocksDB composite keys for DUPSORT
+    /// differs from the MDBX table definition (e.g., `RocksDB` composite keys for DUPSORT
     /// emulation).
     #[cfg(test)]
     pub fn put_raw<T: Table>(&self, key: &[u8], value: &T::Value) -> ProviderResult<()> {
