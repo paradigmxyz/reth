@@ -122,10 +122,24 @@ impl<C: ChainSpecParser> Command<C> {
                 reset_stage_checkpoint(tx, StageId::SenderRecovery)?;
             }
             StageEnum::Execution => {
+                let settings = provider_rw.cached_storage_settings();
+                let rocksdb = tool.provider_factory.rocksdb_provider();
+
                 tx.clear::<tables::PlainAccountState>()?;
                 tx.clear::<tables::PlainStorageState>()?;
-                tx.clear::<tables::AccountChangeSets>()?;
-                tx.clear::<tables::StorageChangeSets>()?;
+
+                if settings.account_changesets_in_rocksdb {
+                    rocksdb.clear::<tables::AccountChangeSets>()?;
+                } else {
+                    tx.clear::<tables::AccountChangeSets>()?;
+                }
+
+                if settings.storage_changesets_in_rocksdb {
+                    rocksdb.clear::<tables::StorageChangeSets>()?;
+                } else {
+                    tx.clear::<tables::StorageChangeSets>()?;
+                }
+
                 tx.clear::<tables::Bytecodes>()?;
                 tx.clear::<tables::Receipts<ReceiptTy<N>>>()?;
 
