@@ -23,10 +23,36 @@ impl ChangesetOffsetWriter {
     const RECORD_SIZE: usize = 16;
 
     /// Opens or creates the changeset offset file for appending.
+    ///
+    /// If the file contains a partial record (from a crash mid-write), it is
+    /// truncated to the last complete record boundary.
     pub fn new(path: impl AsRef<Path>) -> io::Result<Self> {
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path.as_ref())?;
+
+        let file_len = file.metadata()?.len();
+        let remainder = file_len % Self::RECORD_SIZE as u64;
+
+        if remainder != 0 {
+            let truncated_len = file_len - remainder;
+            #[cfg(feature = "std")]
+            tracing::warn!(
+                target: "reth::static_file",
+                path = %path.as_ref().display(),
+                original_len = file_len,
+                truncated_len,
+                "Truncating partial changeset offset record"
+            );
+            file.set_len(truncated_len)?;
+        }
 
         let records_written = file.metadata()?.len() / Self::RECORD_SIZE as u64;
+
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
 
         Ok(Self { file, records_written })
     }
@@ -211,5 +237,75 @@ mod tests {
         let mut reader = ChangesetOffsetReader::new(&path).unwrap();
         assert_eq!(reader.len(), 2);
         assert!(reader.get(2).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_partial_record_recovery() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.csoff");
+
+        // Write 1 full record (16 bytes) + 8 trailing bytes (partial record)
+        {
+            let mut file = std::fs::File::create(&path).unwrap();
+            // Full record: offset=100, num_changes=5
+            file.write_all(&100u64.to_le_bytes()).unwrap();
+            file.write_all(&5u64.to_le_bytes()).unwrap();
+            // Partial record: only 8 bytes (incomplete)
+            file.write_all(&200u64.to_le_bytes()).unwrap();
+            file.sync_all().unwrap();
+        }
+
+        // Verify file has 24 bytes before opening with writer
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 24);
+
+        // Open with writer - should truncate to 1 complete record
+        let writer = ChangesetOffsetWriter::new(&path).unwrap();
+        assert_eq!(writer.len(), 1);
+
+        // Verify file was truncated to 16 bytes
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 16);
+
+        // Verify the complete record is readable
+        let mut reader = ChangesetOffsetReader::new(&path).unwrap();
+        assert_eq!(reader.len(), 1);
+        let entry = reader.get(0).unwrap().unwrap();
+        assert_eq!(entry.offset(), 100);
+        assert_eq!(entry.num_changes(), 5);
+    }
+
+    #[test]
+    fn test_with_len_bounds_reads() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.csoff");
+
+        // Write 3 records
+        {
+            let mut writer = ChangesetOffsetWriter::new(&path).unwrap();
+            writer.append(&ChangesetOffset::new(0, 10)).unwrap();
+            writer.append(&ChangesetOffset::new(10, 20)).unwrap();
+            writer.append(&ChangesetOffset::new(30, 30)).unwrap();
+            writer.sync().unwrap();
+            assert_eq!(writer.len(), 3);
+        }
+
+        // Open with explicit len=2, ignoring the 3rd record
+        let mut reader = ChangesetOffsetReader::with_len(&path, 2).unwrap();
+        assert_eq!(reader.len(), 2);
+
+        // First two records should be readable
+        let entry0 = reader.get(0).unwrap().unwrap();
+        assert_eq!(entry0.offset(), 0);
+        assert_eq!(entry0.num_changes(), 10);
+
+        let entry1 = reader.get(1).unwrap().unwrap();
+        assert_eq!(entry1.offset(), 10);
+        assert_eq!(entry1.num_changes(), 20);
+
+        // Third record should be out of bounds (due to len=2)
+        assert!(reader.get(2).unwrap().is_none());
+
+        // get_range should also respect the len bound
+        let range = reader.get_range(0, 5).unwrap();
+        assert_eq!(range.len(), 2);
     }
 }

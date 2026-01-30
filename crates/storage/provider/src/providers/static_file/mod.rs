@@ -1355,4 +1355,42 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_last_block_flushed_on_commit() {
+        let (static_dir, _) = create_test_static_files_dir();
+
+        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
+            .expect("Failed to create static file provider");
+
+        let address = Address::from([5u8; 20]);
+        let key = B256::with_last_byte(1);
+
+        // Write changes for a single block without calling increment_block explicitly
+        // (append_storage_changeset calls it internally), then commit
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+
+            // Append a single block's changeset (block 0)
+            writer
+                .append_storage_changeset(
+                    vec![StorageBeforeTx { address, key, value: U256::from(42) }],
+                    0,
+                )
+                .unwrap();
+
+            // Commit without any subsequent block - the current block's offset should be flushed
+            writer.commit().unwrap();
+        }
+
+        // Verify highest block is 0
+        let highest = sf_rw.get_highest_static_file_block(StaticFileSegment::StorageChangeSets);
+        assert_eq!(highest, Some(0), "Should have block 0 after commit");
+
+        // Verify the data is actually readable via the high-level API
+        let result = sf_rw.get_storage_before_block(0, address, key).unwrap();
+        assert!(result.is_some(), "Should be able to read the changeset entry");
+        let entry = result.unwrap();
+        assert_eq!(entry.value, U256::from(42));
+    }
 }

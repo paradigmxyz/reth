@@ -353,6 +353,26 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.prune_on_commit.is_some()
     }
 
+    /// Flushes the current changeset offset (if any) to the `.csoff` sidecar file.
+    ///
+    /// This is idempotent - safe to call multiple times. After flushing, the current offset
+    /// is cleared to prevent duplicate writes.
+    ///
+    /// This must be called before committing or syncing to ensure the last block's offset
+    /// is persisted, since `increment_block()` only writes the *previous* block's offset.
+    fn flush_current_changeset_offset(&mut self) -> ProviderResult<()> {
+        if !self.writer.user_header().segment().is_change_based() {
+            return Ok(());
+        }
+
+        if let Some(offset) = self.current_changeset_offset.take() &&
+            let Some(writer) = &mut self.changeset_offsets
+        {
+            writer.append(&offset).map_err(ProviderError::other)?;
+        }
+        Ok(())
+    }
+
     /// Syncs all data (rows, offsets, and changeset offsets sidecar) to disk.
     ///
     /// This does NOT commit the configuration. Call [`Self::finalize`] after to write the
@@ -365,13 +385,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
 
         // Write the final block's offset and sync the sidecar for changeset segments
-        if let Some(offset) = self.current_changeset_offset.take() &&
-            let Some(writer) = &mut self.changeset_offsets
-        {
-            writer.append(&offset).map_err(ProviderError::other)?;
-        }
+        self.flush_current_changeset_offset()?;
         if let Some(writer) = &mut self.changeset_offsets {
             writer.sync().map_err(ProviderError::other)?;
+            // Update the header with the actual number of offsets written
+            self.writer.user_header_mut().set_changeset_offsets_len(writer.len());
         }
 
         if self.writer.is_dirty() {
@@ -433,18 +451,13 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             }
         }
 
-        // For changeset segments, sync the sidecar file before committing the main file.
+        // For changeset segments, flush and sync the sidecar file before committing the main file.
         // This ensures crash consistency: the sidecar is durable before the header references it.
-        // NOTE: We only sync the sidecar here, NOT the main writer. The main writer is synced
-        // by self.writer.commit() below to avoid calling commit_offsets() twice which can
-        // corrupt the offset file due to BufWriter position issues.
-        if let Some(offset) = self.current_changeset_offset.take()
-            && let Some(writer) = &mut self.changeset_offsets
-        {
-            writer.append(&offset).map_err(ProviderError::other)?;
-        }
+        self.flush_current_changeset_offset()?;
         if let Some(writer) = &mut self.changeset_offsets {
             writer.sync().map_err(ProviderError::other)?;
+            // Update the header with the actual number of offsets written
+            self.writer.user_header_mut().set_changeset_offsets_len(writer.len());
         }
 
         if self.writer.is_dirty() {
@@ -836,16 +849,33 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Delete the current static file, and replace this provider writer with the previous static
     /// file.
     fn delete_current_and_open_previous(&mut self) -> Result<(), ProviderError> {
+        let segment = self.user_header().segment();
         let current_path = self.data_path.clone();
         let (previous_writer, data_path) = Self::open(
-            self.user_header().segment(),
+            segment,
             self.writer.user_header().expected_block_start() - 1,
             self.reader.clone(),
             self.metrics.clone(),
         )?;
         self.writer = previous_writer;
         self.writer.set_dirty();
-        self.data_path = data_path;
+        self.data_path = data_path.clone();
+
+        // Delete the sidecar file for changeset segments before deleting the main jar
+        if segment.is_change_based() {
+            let csoff_path = current_path.with_extension("csoff");
+            if csoff_path.exists() {
+                std::fs::remove_file(&csoff_path).map_err(ProviderError::other)?;
+            }
+            // Re-initialize the changeset offsets writer for the previous file
+            let new_csoff_path = data_path.with_extension("csoff");
+            self.changeset_offsets =
+                Some(ChangesetOffsetWriter::new(&new_csoff_path).map_err(ProviderError::other)?);
+        }
+
+        // Clear current changeset offset tracking since we're switching files
+        self.current_changeset_offset = None;
+
         NippyJar::<SegmentHeader>::load(&current_path)
             .map_err(ProviderError::other)?
             .delete()

@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 alloy-primitives.workspace = true
+tracing.workspace = true
 
 clap = { workspace = true, features = ["derive"], optional = true }
 fixed-map.workspace = true

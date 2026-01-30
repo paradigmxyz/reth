@@ -961,10 +961,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<SegmentHeader> {
         let fixed_block_range = self.find_fixed_range(segment, block);
         let key = (fixed_block_range.end(), segment);
+        let file = self.path.join(segment.filename(&fixed_block_range));
         let jar = if let Some((_, jar)) = self.map.remove(&key) {
             jar.jar
         } else {
-            let file = self.path.join(segment.filename(&fixed_block_range));
             debug!(
                 target: "provider::static_file",
                 ?file,
@@ -976,6 +976,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         let header = jar.user_header().clone();
+
+        // Delete the sidecar file for changeset segments before deleting the main jar
+        if segment.is_change_based() {
+            let csoff_path = file.with_extension("csoff");
+            if csoff_path.exists() {
+                std::fs::remove_file(&csoff_path).map_err(ProviderError::other)?;
+            }
+        }
+
         jar.delete().map_err(ProviderError::other)?;
 
         // SAFETY: this is currently necessary to ensure that certain indexes like
