@@ -78,6 +78,7 @@ lz4.workspace = true
 zstd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+parking_lot.workspace = true
 tar.workspace = true
 tracing.workspace = true
 backon.workspace = true
