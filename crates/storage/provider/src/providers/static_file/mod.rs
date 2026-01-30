@@ -50,6 +50,15 @@ impl LoadedJar {
     fn size(&self) -> usize {
         self.mmap_handle.size() + self.mmap_handle.offsets_size()
     }
+
+    /// Advise the kernel that all mmap pages are no longer needed.
+    ///
+    /// This releases memory pages back to the OS, useful during sequential
+    /// access patterns like pruning to prevent memory pressure.
+    #[cfg(unix)]
+    pub fn advise_dontneed(&self) {
+        self.mmap_handle.advise_dontneed_all();
+    }
 }
 
 impl Deref for LoadedJar {

@@ -891,6 +891,28 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.map.remove(&(fixed_block_range_end, segment));
     }
 
+    /// Advise the kernel that mmap pages for all cached segments are no longer needed.
+    ///
+    /// This is useful during sequential access patterns like pruning operations where
+    /// we want to release memory pages after processing to prevent memory pressure.
+    /// The pages can be re-faulted in if needed later.
+    #[cfg(unix)]
+    pub fn advise_dontneed_all(&self) {
+        for entry in self.map.iter() {
+            entry.value().advise_dontneed();
+        }
+    }
+
+    /// Advise the kernel that mmap pages for a specific segment type are no longer needed.
+    #[cfg(unix)]
+    pub fn advise_dontneed_segment(&self, segment: StaticFileSegment) {
+        for entry in self.map.iter() {
+            if entry.value().segment() == segment {
+                entry.value().advise_dontneed();
+            }
+        }
+    }
+
     /// This handles history expiry by deleting all static files for the given segment below the
     /// given block.
     ///

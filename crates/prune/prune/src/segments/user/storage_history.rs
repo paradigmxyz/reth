@@ -126,6 +126,13 @@ impl StorageHistory {
             limiter.increment_deleted_entries_count();
         }
 
+        // Release mmap pages to prevent memory pressure during long prune operations.
+        // This is especially important when iterating through large changeset ranges.
+        #[cfg(unix)]
+        provider
+            .static_file_provider()
+            .advise_dontneed_all();
+
         // Delete static file jars below the pruned block
         if let Some(last_block) = last_changeset_pruned_block {
             provider

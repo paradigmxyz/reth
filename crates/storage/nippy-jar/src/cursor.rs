@@ -197,6 +197,21 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
 
         Ok(())
     }
+
+    /// Advise the kernel that all data pages are no longer needed.
+    ///
+    /// Call this after you are done reading from this cursor to release memory
+    /// pages back to the OS. This is particularly useful during sequential access
+    /// patterns like pruning operations.
+    #[cfg(unix)]
+    pub fn advise_dontneed_data(&self) {
+        self.reader.advise_dontneed_all();
+    }
+
+    /// Returns a reference to the underlying data reader.
+    pub const fn reader(&self) -> &Arc<DataReader> {
+        &self.reader
+    }
 }
 
 /// Helper type that stores the range of the decompressed column value either on a `mmap` slice or

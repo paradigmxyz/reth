@@ -122,7 +122,23 @@ impl AccountHistory {
             last_changeset_pruned_block = Some(block_number);
             pruned_changesets += 1;
             limiter.increment_deleted_entries_count();
+
+            // Periodically release mmap pages to prevent memory pressure during long iterations.
+            // Release every 100k changesets to balance memory usage vs syscall overhead.
+            #[cfg(unix)]
+            if pruned_changesets % 10_000 == 0 {
+                provider
+                    .static_file_provider()
+                    .advise_dontneed_all();
+            }
         }
+
+        // Release mmap pages to prevent memory pressure during long prune operations.
+        // This is especially important when iterating through large changeset ranges.
+        #[cfg(unix)]
+        provider
+            .static_file_provider()
+            .advise_dontneed_all();
 
         // Delete static file jars below the pruned block
         if let Some(last_block) = last_changeset_pruned_block {

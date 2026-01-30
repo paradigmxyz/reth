@@ -12,7 +12,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use memmap2::Mmap;
+use memmap2::{Advice, Mmap, UncheckedAdvice};
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
@@ -350,6 +350,14 @@ impl DataReader {
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let data_mmap = unsafe { Mmap::map(&data_file)? };
 
+        // Advise the kernel that we expect sequential access. This allows the kernel to
+        // aggressively free pages after they are accessed, preventing memory pressure during
+        // sequential reads like pruning operations.
+        #[cfg(unix)]
+        if let Err(err) = data_mmap.advise(Advice::Sequential) {
+            tracing::warn!(target: "nippy-jar", ?err, "Failed to set MADV_SEQUENTIAL on data mmap");
+        }
+
         let offset_file = File::open(path.as_ref().with_extension(OFFSETS_FILE_EXTENSION))?;
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let offset_mmap = unsafe { Mmap::map(&offset_file)? };
@@ -427,8 +435,37 @@ impl DataReader {
     pub fn offsets_size(&self) -> usize {
         self.offset_mmap.len()
     }
-}
 
+    /// Advise the kernel that the specified range of data is no longer needed.
+    ///
+    /// This is useful for sequential access patterns like pruning where we want to
+    /// release memory pages after processing them. Using `MADV_DONTNEED` tells the
+    /// kernel it can immediately free the pages, which prevents memory pressure
+    /// during long sequential reads.
+    ///
+    /// # Safety
+    /// This is safe for read-only mmaps because:
+    /// - The data can always be re-read from the underlying file if accessed again
+    /// - We are not modifying the mapping, just hinting to the kernel about page usage
+    #[cfg(unix)]
+    pub fn advise_dontneed_range(&self, offset: usize, len: usize) {
+        // SAFETY: MADV_DONTNEED on a read-only file-backed mmap is safe - accessing
+        // the pages again will simply re-read them from the file.
+        if let Err(err) =
+            unsafe { self.data_mmap.unchecked_advise_range(UncheckedAdvice::DontNeed, offset, len) }
+        {
+            tracing::trace!(target: "nippy-jar", ?err, offset, len, "Failed to advise DONTNEED");
+        }
+    }
+
+    /// Advise the kernel that all data pages are no longer needed.
+    ///
+    /// Convenience method to release all pages at once.
+    #[cfg(unix)]
+    pub fn advise_dontneed_all(&self) {
+        self.advise_dontneed_range(0, self.data_mmap.len());
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
