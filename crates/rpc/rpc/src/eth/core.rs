@@ -333,6 +333,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Maximum memory the EVM can allocate per RPC request.
     evm_memory_limit: u64,
+
+    /// Whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
+    force_blob_sidecar_upcasting: bool,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -361,6 +364,7 @@ where
         raw_tx_forwarder: Option<RpcClient>,
         send_raw_transaction_sync_timeout: Duration,
         evm_memory_limit: u64,
+        force_blob_sidecar_upcasting: bool,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -405,6 +409,7 @@ where
             send_raw_transaction_sync_timeout,
             blob_sidecar_converter: BlobSidecarConverter::new(),
             evm_memory_limit,
+            force_blob_sidecar_upcasting,
         }
     }
 }
@@ -595,6 +600,12 @@ where
     #[inline]
     pub const fn blocking_io_request_semaphore(&self) -> &Arc<Semaphore> {
         &self.blocking_io_request_semaphore
+    }
+
+    /// Returns whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format.
+    #[inline]
+    pub const fn force_blob_sidecar_upcasting(&self) -> bool {
+        self.force_blob_sidecar_upcasting
     }
 }
 

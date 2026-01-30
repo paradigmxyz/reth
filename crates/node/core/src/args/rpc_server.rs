@@ -647,6 +647,14 @@ pub struct RpcServerArgs {
     /// transactions from the same sender will also be skipped.
     #[arg(long = "testing.skip-invalid-transactions", default_value_t = true)]
     pub testing_skip_invalid_transactions: bool,
+
+    /// Force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
+    ///
+    /// When enabled, blob transactions submitted via `eth_sendRawTransaction` with EIP-4844
+    /// sidecars will be automatically converted to EIP-7594 format if the next block is Osaka.
+    /// By default this is disabled, meaning transactions are submitted as-is.
+    #[arg(long = "rpc.force-blob-sidecar-upcasting", default_value_t = false)]
+    pub rpc_force_blob_sidecar_upcasting: bool,
 }
 
 impl RpcServerArgs {
