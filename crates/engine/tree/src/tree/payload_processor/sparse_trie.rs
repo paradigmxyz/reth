@@ -422,34 +422,28 @@ where
 
     fn process_leaf_updates(&mut self) -> SparseTrieResult<()> {
         for (address, updates) in &mut self.storage_updates {
+            let fetched = self.fetched_storage_targets.entry(*address).or_default();
+            let mut targets = Vec::new();
+
             self.trie.get_or_create_storage_trie_mut(*address).update_leaves(
                 updates,
-                |path, min_len| match self
-                    .fetched_storage_targets
-                    .entry(*address)
-                    .or_default()
-                    .entry(path)
-                {
+                |path, min_len| match fetched.entry(path) {
                     Entry::Occupied(mut entry) => {
                         if min_len < *entry.get() {
                             entry.insert(min_len);
-                            self.pending_targets
-                                .storage_targets
-                                .entry(*address)
-                                .or_default()
-                                .push(Target::new(path).with_min_len(min_len));
+                            targets.push(Target::new(path).with_min_len(min_len));
                         }
                     }
                     Entry::Vacant(entry) => {
                         entry.insert(min_len);
-                        self.pending_targets
-                            .storage_targets
-                            .entry(*address)
-                            .or_default()
-                            .push(Target::new(path).with_min_len(min_len));
+                        targets.push(Target::new(path).with_min_len(min_len));
                     }
                 },
             )?;
+
+            if !targets.is_empty() {
+                self.pending_targets.storage_targets.entry(*address).or_default().extend(targets);
+            }
         }
 
         // Process account trie updates and fill the account targets.
