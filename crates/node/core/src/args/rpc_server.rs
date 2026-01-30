@@ -868,6 +868,7 @@ impl Default for RpcServerArgs {
             gas_price_oracle,
             rpc_send_raw_transaction_sync_timeout,
             testing_skip_invalid_transactions: true,
+            rpc_force_blob_sidecar_upcasting: false,
         }
     }
 }
