@@ -1,4 +1,4 @@
-//! Command that runs pruning without any limits.
+//! Command that runs pruning with a configurable delete limit.
 use crate::common::{AccessRights, CliNodeTypes, EnvironmentArgs};
 use clap::Parser;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -14,9 +14,18 @@ use reth_node_metrics::{
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
-/// Prunes according to the configuration without any limits
+/// Default delete limit per prune run to prevent OOM when static files are involved.
+const DEFAULT_DELETE_LIMIT: usize = 100_000;
+
+/// Prunes according to the configuration with a configurable delete limit.
+///
+/// For edge builds (compiled with `--features edge`), this command defaults to limiting
+/// deletions to 100,000 entries per pruner run to prevent OOM with static file operations.
+/// For legacy builds, no limit is applied by default.
+///
+/// Use `--delete-limit <N>` to override the default, or `--delete-limit 0` for unlimited.
 #[derive(Debug, Parser)]
 pub struct PruneCommand<C: ChainSpecParser> {
     #[command(flatten)]
@@ -25,6 +34,14 @@ pub struct PruneCommand<C: ChainSpecParser> {
     /// Prometheus metrics configuration.
     #[command(flatten)]
     metrics: MetricArgs,
+
+    /// Maximum number of entries to delete per pruner run (across all segments).
+    ///
+    /// For edge builds, defaults to 100,000 to prevent OOM.
+    /// For legacy builds, defaults to unlimited.
+    /// Set to 0 for unlimited deletions per run.
+    #[arg(long)]
+    delete_limit: Option<usize>,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneCommand<C> {
@@ -58,6 +75,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
             MetricServer::new(config).serve().await?;
         }
 
+        // Resolve delete limit based on build configuration:
+        // - If user specified a limit, use it (0 means unlimited)
+        // - Edge builds default to batched deletions to prevent OOM with static files
+        // - Legacy builds default to unlimited (no OOM risk with MDBX-only)
+        let delete_limit = match self.delete_limit {
+            Some(0) => usize::MAX,
+            Some(limit) => limit,
+            #[cfg(feature = "edge")]
+            None => DEFAULT_DELETE_LIMIT,
+            #[cfg(not(feature = "edge"))]
+            None => usize::MAX,
+        };
+
         // Copy data from database to static files
         info!(target: "reth::cli", "Copying data from database to static files...");
         let static_file_producer =
@@ -68,14 +98,45 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
 
         // Delete data which has been copied to static files.
         if let Some(prune_tip) = lowest_static_file_height {
-            info!(target: "reth::cli", ?prune_tip, ?config, "Pruning data from database...");
-            // Run the pruner according to the configuration, and don't enforce any limits on it
+            info!(target: "reth::cli", ?prune_tip, ?config, ?delete_limit, "Pruning data from database...");
             let mut pruner = PrunerBuilder::new(config)
-                .delete_limit(usize::MAX)
+                .delete_limit(delete_limit)
                 .build_with_provider_factory(provider_factory);
 
-            pruner.run(prune_tip)?;
-            info!(target: "reth::cli", "Pruned data from database");
+            // Loop until pruning is complete, respecting delete_limit per iteration
+            let mut total_pruned = 0usize;
+            let mut runs = 0usize;
+            let mut consecutive_zero_runs = 0usize;
+            loop {
+                runs += 1;
+                let output = pruner.run(prune_tip)?;
+
+                let pruned_this_run: usize =
+                    output.segments.iter().map(|(_, seg)| seg.pruned).sum();
+                total_pruned += pruned_this_run;
+
+                if output.progress.is_finished() {
+                    info!(target: "reth::cli", runs, total_pruned, "Pruned data from database");
+                    break;
+                }
+
+                // Stuck-loop guard: bail after consecutive runs with no progress
+                if pruned_this_run == 0 {
+                    consecutive_zero_runs += 1;
+                    if consecutive_zero_runs >= 2 {
+                        warn!(target: "reth::cli", runs, total_pruned, consecutive_zero_runs, "Pruner returned HasMoreData but made no progress");
+                        eyre::bail!(
+                            "Pruner returned HasMoreData but made no progress after \
+                             {consecutive_zero_runs} consecutive runs. \
+                             Try increasing --delete-limit or use --delete-limit 0 (unlimited)."
+                        );
+                    }
+                } else {
+                    consecutive_zero_runs = 0;
+                }
+
+                info!(target: "reth::cli", runs, pruned_this_run, total_pruned, "Pruner has more data, continuing...");
+            }
         }
 
         Ok(())
