@@ -14,9 +14,9 @@ CARGO_TARGET_DIR ?= target
 # List of features to use when building. Can be overridden via the environment.
 # No jemalloc on Windows
 ifeq ($(OS),Windows_NT)
-    FEATURES ?= asm-keccak min-debug-logs
+    FEATURES ?= asm-keccak min-debug-logs gmp
 else
-    FEATURES ?= jemalloc asm-keccak min-debug-logs
+    FEATURES ?= jemalloc asm-keccak min-debug-logs gmp
 endif
 
 # Cargo profile for builds. Default is for local builds, CI uses an override.
