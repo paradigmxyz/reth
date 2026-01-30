@@ -871,6 +871,18 @@ impl SparseTrie for ParallelSparseTrie {
         {
             use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
+            // Debug: log subtries being processed
+            for changed_subtrie in &changed_subtries {
+                debug!(
+                    target: "trie::parallel_sparse",
+                    subtrie_path = ?changed_subtrie.subtrie.path,
+                    num_nodes = changed_subtrie.subtrie.nodes.len(),
+                    has_root_node = changed_subtrie.subtrie.nodes.contains_key(&changed_subtrie.subtrie.path),
+                    prefix_set_len = changed_subtrie.prefix_set.len(),
+                    "Subtrie queued for parallel hash update"
+                );
+            }
+
             let branch_node_masks = &self.branch_node_masks;
             let updated_subtries: Vec<_> = changed_subtries
                 .into_par_iter()
@@ -2010,6 +2022,17 @@ impl ParallelSparseTrie {
                 let update_actions_buf =
                     updates_enabled.then(|| self.update_actions_buffers.pop().unwrap_or_default());
 
+                // Debug: log subtrie being taken for update
+                debug!(
+                    target: "trie::parallel_sparse",
+                    subtrie_index = index,
+                    subtrie_path = ?subtrie.path,
+                    num_nodes = subtrie.nodes.len(),
+                    has_root_node = subtrie.nodes.contains_key(&subtrie.path),
+                    root_node_type = ?subtrie.nodes.get(&subtrie.path).map(|n| core::mem::discriminant(n)),
+                    "Taking lower subtrie for hash update"
+                );
+
                 changed_subtries.push(ChangedSubtrie {
                     index,
                     subtrie,
@@ -2768,6 +2791,16 @@ impl SparseSubtrie {
     ) -> RlpNode {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 
+        // Debug: log subtrie state at start
+        debug!(
+            target: "trie::parallel_sparse",
+            subtrie_path = ?self.path,
+            num_nodes = self.nodes.len(),
+            node_paths = ?self.nodes.keys().collect::<Vec<_>>(),
+            has_root_node = self.nodes.contains_key(&self.path),
+            "Starting update_hashes for subtrie"
+        );
+
         debug_assert!(prefix_set.iter().all(|path| path.starts_with(&self.path)));
 
         debug_assert!(self.inner.buffers.path_stack.is_empty());
@@ -2778,10 +2811,19 @@ impl SparseSubtrie {
 
         while let Some(stack_item) = self.inner.buffers.path_stack.pop() {
             let path = stack_item.path;
-            let node = self
-                .nodes
-                .get_mut(&path)
-                .unwrap_or_else(|| panic!("node at path {path:?} does not exist"));
+            let node = match self.nodes.get_mut(&path) {
+                Some(node) => node,
+                None => {
+                    // Debug: log all available paths when node not found
+                    let available_paths: Vec<_> = self.nodes.keys().collect();
+                    panic!(
+                        "node at path {path:?} does not exist in subtrie rooted at {:?}. \
+                         Available paths ({} nodes): {available_paths:?}",
+                        self.path,
+                        self.nodes.len()
+                    )
+                }
+            };
 
             self.inner.rlp_node(prefix_set, update_actions, stack_item, node, branch_node_masks);
         }
