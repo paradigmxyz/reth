@@ -1006,6 +1006,7 @@ where
     S: SparseTrieTrait + SparseTrieExt + Default + Clone,
 {
     /// Minimum number of storage tries before parallel pruning is enabled.
+    #[cfg(feature = "std")]
     const PARALLEL_PRUNE_THRESHOLD: usize = 16;
 
     /// Returns true if parallelism should be enabled for pruning the given number of tries.
