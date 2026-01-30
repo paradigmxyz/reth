@@ -224,7 +224,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// pre-allocated [`RevealableSparseTrie`](SparseTrieTrait).
     #[inline]
     pub fn clear(&mut self) {
-        *self = match std::mem::replace(self, Self::blind()) {
+        *self = match core::mem::replace(self, Self::blind()) {
             s @ Self::Blind(_) => s,
             Self::Revealed(mut trie) => {
                 trie.clear();
