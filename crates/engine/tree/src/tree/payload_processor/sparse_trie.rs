@@ -530,21 +530,18 @@ where
         }
 
         // Now handle pending account updates that can be upgraded to a proper update.
-        let storage_updates = &self.storage_updates;
-        let account_updates = &mut self.account_updates;
-        let trie = &mut self.trie;
         let account_rlp_buf = &mut self.account_rlp_buf;
         self.pending_account_updates.retain(|addr, account| {
             // If account has pending storage updates, it is still pending.
-            if storage_updates.get(addr).is_some_and(|updates| !updates.is_empty()) {
+            if self.storage_updates.get(addr).is_some_and(|updates| !updates.is_empty()) {
                 return true;
             }
 
             // Get the current account state either from the trie or from latest account update.
-            let trie_account = if let Some(LeafUpdate::Changed(encoded)) = account_updates.get(addr) {
+            let trie_account = if let Some(LeafUpdate::Changed(encoded)) = self.account_updates.get(addr) {
                 Some(encoded).filter(|encoded| !encoded.is_empty())
-            } else if !account_updates.contains_key(addr) {
-                trie.get_account_value(addr)
+            } else if !self.account_updates.contains_key(addr) {
+                self.trie.get_account_value(addr)
             } else {
                 // Needs to be revealed first
                 return true;
@@ -561,7 +558,7 @@ where
 
                 (account, storage_root)
             } else {
-                (trie_account.map(Into::into), trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
+                (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
             };
 
             let encoded = if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
@@ -571,7 +568,7 @@ where
                 account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
                 account_rlp_buf.clone()
             };
-            account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+            self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
 
             false
         });
