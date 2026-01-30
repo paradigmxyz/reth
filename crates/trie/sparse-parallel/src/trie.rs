@@ -1659,21 +1659,6 @@ impl ParallelSparseTrie {
                         "Blinding empty lower subtrie after leaf removal"
                     );
                     self.lower_subtries[idx].clear();
-                } else if &subtrie.path == path {
-                    // The removed leaf was the subtrie root, but there are still remaining nodes
-                    // (this can happen when a Hash node was revealed during branch collapse).
-                    // Update the subtrie path to the remaining node.
-                    if let Some(new_path) = subtrie.nodes.keys().next().cloned() {
-                        debug!(
-                            target: "trie::parallel_sparse",
-                            subtrie_index = idx,
-                            old_subtrie_path = ?old_subtrie_path,
-                            new_subtrie_path = ?new_path,
-                            remaining_nodes = subtrie.nodes.len(),
-                            "Updating subtrie path after leaf removal with remaining nodes"
-                        );
-                        subtrie.path = new_path;
-                    }
                 }
             }
             Some(SparseNode::Extension { key, .. }) => {
