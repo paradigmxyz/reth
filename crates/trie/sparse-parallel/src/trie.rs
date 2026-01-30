@@ -17,7 +17,6 @@ use reth_trie_sparse::{
     LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrie,
     SparseTrieExt, SparseTrieUpdates,
 };
-
 use smallvec::SmallVec;
 use std::cmp::{Ord, Ordering, PartialOrd};
 use tracing::{debug, instrument, trace};
