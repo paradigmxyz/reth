@@ -72,12 +72,7 @@ where
         max_values_capacity: usize,
     ) -> SparseStateTrie<A, S> {
         match self {
-            Self::Cleared(task) => task.into_trie_for_reuse(
-                prune_depth,
-                max_storage_tries,
-                max_nodes_capacity,
-                max_values_capacity,
-            ),
+            Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
             Self::Cached(task) => task.into_trie_for_reuse(
                 prune_depth,
                 max_storage_tries,
@@ -201,21 +196,6 @@ where
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
-    }
-
-    /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
-    ///
-    /// Should be called after the state root result has been sent.
-    pub(super) fn into_trie_for_reuse(
-        mut self,
-        prune_depth: usize,
-        max_storage_tries: usize,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
-    ) -> SparseStateTrie<A, S> {
-        self.trie.prune(prune_depth, max_storage_tries);
-        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        self.trie
     }
 
     /// Clears and shrinks the trie, discarding all state.
