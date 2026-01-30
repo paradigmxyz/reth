@@ -7,14 +7,14 @@ use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
-    persistence::PersistenceHandle,
+    persistence::{PersistenceHandle, PersistenceServiceHandle},
     tree::{EngineApiTreeHandler, EngineValidator, TreeConfig},
 };
 pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
     engine::EngineApiEvent,
 };
-use reth_ethereum_primitives::EthPrimitives;
+
 use reth_evm::ConfigureEvm;
 use reth_network_p2p::BlockClient;
 use reth_node_types::{BlockTy, NodeTypes};
@@ -61,6 +61,8 @@ where
     Client: BlockClient<Block = BlockTy<N>> + 'static,
 {
     orchestrator: EngineServiceType<N, Client>,
+    /// Handle to the persistence service - kept to ensure graceful shutdown
+    _persistence_service: PersistenceServiceHandle<N::Primitives>,
 }
 
 impl<N, Client> EngineService<N, Client>
@@ -96,8 +98,8 @@ where
 
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-        let (persistence_handle, _) =
-            PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx);
+        let persistence_service =
+            PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
@@ -105,7 +107,7 @@ where
             blockchain_db,
             consensus,
             payload_validator,
-            persistence_handle,
+            persistence_service.handle(),
             payload_builder,
             canonical_in_memory_state,
             tree_config,
@@ -119,7 +121,10 @@ where
 
         let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);
 
-        Self { orchestrator: ChainOrchestrator::new(handler, backfill_sync) }
+        Self {
+            orchestrator: ChainOrchestrator::new(handler, backfill_sync),
+            _persistence_service: persistence_service,
+        }
     }
 
     /// Returns a mutable reference to the orchestrator.
