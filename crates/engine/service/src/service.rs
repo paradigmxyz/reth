@@ -7,7 +7,7 @@ use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
-    persistence::{PersistenceHandle, PersistenceServiceHandle},
+    persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, EngineValidator, TreeConfig},
 };
 pub use reth_engine_tree::{
@@ -61,8 +61,9 @@ where
     Client: BlockClient<Block = BlockTy<N>> + 'static,
 {
     orchestrator: EngineServiceType<N, Client>,
-    /// Handle to the persistence service - kept to ensure graceful shutdown
-    _persistence_service: PersistenceServiceHandle<N::Primitives>,
+    /// Handle to the persistence service - kept to ensure graceful shutdown.
+    /// The handle joins the service thread when dropped.
+    _persistence_handle: PersistenceHandle<N::Primitives>,
 }
 
 impl<N, Client> EngineService<N, Client>
@@ -98,7 +99,7 @@ where
 
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-        let persistence_service =
+        let persistence_handle =
             PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
@@ -107,7 +108,7 @@ where
             blockchain_db,
             consensus,
             payload_validator,
-            persistence_service.handle(),
+            persistence_handle.clone(),
             payload_builder,
             canonical_in_memory_state,
             tree_config,
@@ -123,7 +124,7 @@ where
 
         Self {
             orchestrator: ChainOrchestrator::new(handler, backfill_sync),
-            _persistence_service: persistence_service,
+            _persistence_handle: persistence_handle,
         }
     }
 
