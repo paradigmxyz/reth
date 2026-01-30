@@ -122,7 +122,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -149,7 +149,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -261,7 +261,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -287,7 +287,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.27.0"
-source = "git+https://github.com/alloy-rs/evm?branch=bal-devnet2#97194a141d887c9a7b0487723daaa5e68ff773c7"
+source = "git+https://github.com/alloy-rs/evm?branch=bal-devnet2#3f286b62860bb012d3193da6c0f1513a32dbea6c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -308,7 +308,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -363,7 +363,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -377,7 +377,7 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -402,7 +402,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -414,7 +414,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.27.0"
-source = "git+https://github.com/alloy-rs/evm?branch=bal-devnet2#97194a141d887c9a7b0487723daaa5e68ff773c7"
+source = "git+https://github.com/alloy-rs/evm?branch=bal-devnet2#3f286b62860bb012d3193da6c0f1513a32dbea6c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -627,7 +627,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-any"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -637,7 +637,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-beacon"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -668,7 +668,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -688,7 +688,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -750,7 +750,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -761,7 +761,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -775,7 +775,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer-local"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -958,7 +958,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "1.5.2"
-source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#2ff2a80400e284c044c8ef43a6123a7b73d58c89"
+source = "git+https://github.com/alloy-rs/alloy?branch=bal-devnet2#43755e19200bfb159fb231134ee415bc5164c814"
 dependencies = [
  "darling 0.21.3",
  "proc-macro2",
@@ -2399,7 +2399,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -3127,7 +3127,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3457,7 +3457,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4808,7 +4808,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -5172,7 +5172,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6114,7 +6114,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7155,7 +7155,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -7192,7 +7192,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -11717,7 +11717,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -12588,7 +12588,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -13295,7 +13295,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5f7c95348f20c1c913d72157b3c6dee6ea3e30b3d19502c5a7f6d3f160dacbf"
 dependencies = [
  "cc",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -13830,7 +13830,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
