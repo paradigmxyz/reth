@@ -19,7 +19,7 @@ use crate::{
             TotalGasOutput, TotalGasRow,
         },
         persistence_waiter::{
-            engine_url_to_ws_url, setup_persistence_subscription, PersistenceWaiter,
+            derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
             PERSISTENCE_CHECKPOINT_TIMEOUT,
         },
     },
@@ -152,7 +152,7 @@ impl Command {
         let mut waiter = match (self.wait_time, self.wait_for_persistence) {
             (Some(duration), _) => Some(PersistenceWaiter::with_duration(duration)),
             (None, true) => {
-                let ws_url = self.derive_ws_rpc_url()?;
+                let ws_url = derive_ws_rpc_url(self.ws_rpc_url.as_deref(), &self.engine_rpc_url)?;
                 let sub = setup_persistence_subscription(ws_url).await?;
                 Some(PersistenceWaiter::with_subscription(
                     sub,
@@ -463,34 +463,5 @@ impl Command {
         }
 
         Ok(payloads)
-    }
-
-    /// Returns the websocket RPC URL used for the persistence subscription.
-    ///
-    /// Preference:
-    /// - If `--ws-rpc-url` is provided, use it directly.
-    /// - Otherwise, derive a WS RPC URL from `--engine-rpc-url`.
-    ///
-    /// The persistence subscription endpoint (`reth_subscribePersistedBlock`) is exposed on
-    /// the regular RPC server (WS port, usually 8546), not on the engine API port (usually 8551).
-    /// Since we only have the engine URL by default, we convert the scheme
-    /// (http→ws, https→wss) and force the port to 8546.
-    fn derive_ws_rpc_url(&self) -> eyre::Result<Url> {
-        if let Some(ref ws_url) = self.ws_rpc_url {
-            let parsed: Url = ws_url
-                .parse()
-                .wrap_err_with(|| format!("Failed to parse WebSocket RPC URL: {ws_url}"))?;
-            info!(target: "reth-bench", ws_url = %parsed, "Using provided WebSocket RPC URL");
-            Ok(parsed)
-        } else {
-            let derived = engine_url_to_ws_url(&self.engine_rpc_url)?;
-            debug!(
-                target: "reth-bench",
-                engine_url = %self.engine_rpc_url,
-                %derived,
-                "Derived WebSocket RPC URL from engine RPC URL"
-            );
-            Ok(derived)
-        }
     }
 }

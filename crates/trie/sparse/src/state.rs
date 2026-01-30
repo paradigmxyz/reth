@@ -154,6 +154,11 @@ where
         Self::default()
     }
 
+    /// Returns mutable reference to account trie.
+    pub const fn trie_mut(&mut self) -> &mut RevealableSparseTrie<A> {
+        &mut self.state
+    }
+
     /// Returns `true` if account was already revealed.
     pub fn is_account_revealed(&self, account: B256) -> bool {
         self.revealed_account_paths.contains(&Nibbles::unpack(account))
@@ -222,6 +227,14 @@ where
     /// Inserts storage trie for the provided address.
     pub fn insert_storage_trie(&mut self, address: B256, storage_trie: RevealableSparseTrie<S>) {
         self.storage.tries.insert(address, storage_trie);
+    }
+
+    /// Returns mutable reference to storage sparse trie, creating a blind one if it doesn't exist.
+    pub fn get_or_create_storage_trie_mut(
+        &mut self,
+        address: B256,
+    ) -> &mut RevealableSparseTrie<S> {
+        self.storage.get_or_create_trie_mut(address)
     }
 
     /// Reveal unknown trie paths from multiproof.
@@ -460,16 +473,17 @@ where
             self.metrics.increment_skipped_account_nodes(_metric_values.skipped_nodes as u64);
         }
 
-        if let Some(root_node) = root_node {
+        let trie = if let Some(root_node) = root_node {
             trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
-            let trie =
-                self.state.reveal_root(root_node.node, root_node.masks, self.retain_updates)?;
+            self.state.reveal_root(root_node.node, root_node.masks, self.retain_updates)?
+        } else {
+            self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+        };
 
-            trie.reserve_nodes(new_nodes);
+        trie.reserve_nodes(new_nodes);
 
-            trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
-            trie.reveal_nodes(nodes)?;
-        }
+        trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
+        trie.reveal_nodes(nodes)?;
 
         Ok(())
     }
@@ -513,15 +527,17 @@ where
         let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values } =
             filter_revealed_v2_proof_nodes(nodes, revealed_nodes)?;
 
-        if let Some(root_node) = root_node {
+        let trie = if let Some(root_node) = root_node {
             trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
-            let trie = trie.reveal_root(root_node.node, root_node.masks, retain_updates)?;
+            trie.reveal_root(root_node.node, root_node.masks, retain_updates)?
+        } else {
+            trie.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+        };
 
-            trie.reserve_nodes(new_nodes);
+        trie.reserve_nodes(new_nodes);
 
-            trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof");
-            trie.reveal_nodes(nodes)?;
-        }
+        trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof");
+        trie.reveal_nodes(nodes)?;
 
         Ok(metric_values)
     }
@@ -714,8 +730,8 @@ where
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.
-    pub fn storage_root(&mut self, account: B256) -> Option<B256> {
-        self.storage.tries.get_mut(&account).and_then(|trie| trie.root())
+    pub fn storage_root(&mut self, account: &B256) -> Option<B256> {
+        self.storage.tries.get_mut(account).and_then(|trie| trie.root())
     }
 
     /// Returns mutable reference to the revealed account sparse trie.
@@ -978,6 +994,7 @@ where
     S: SparseTrieTrait + SparseTrieExt + Default + Clone,
 {
     /// Minimum number of storage tries before parallel pruning is enabled.
+    #[cfg(feature = "std")]
     const PARALLEL_PRUNE_THRESHOLD: usize = 16;
 
     /// Returns true if parallelism should be enabled for pruning the given number of tries.
@@ -1168,6 +1185,13 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
             .or_insert_with(|| self.cleared_revealed_paths.pop().unwrap_or_default());
 
         (trie, revealed_paths)
+    }
+
+    // Returns mutable reference to storage sparse trie, creating a blind one if it doesn't exist.
+    fn get_or_create_trie_mut(&mut self, address: B256) -> &mut RevealableSparseTrie<S> {
+        self.tries.entry(address).or_insert_with(|| {
+            self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
+        })
     }
 
     /// Takes the storage trie for the account from the internal `HashMap`, creating it if it
@@ -1772,7 +1796,7 @@ mod tests {
                 &provider_factory,
             )
             .unwrap();
-        trie_account_1.storage_root = sparse.storage_root(address_1).unwrap();
+        trie_account_1.storage_root = sparse.storage_root(&address_1).unwrap();
         sparse
             .update_account_leaf(
                 address_path_1,
@@ -1782,7 +1806,7 @@ mod tests {
             .unwrap();
 
         sparse.wipe_storage(address_2).unwrap();
-        trie_account_2.storage_root = sparse.storage_root(address_2).unwrap();
+        trie_account_2.storage_root = sparse.storage_root(&address_2).unwrap();
         sparse
             .update_account_leaf(
                 address_path_2,

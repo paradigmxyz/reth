@@ -7,14 +7,14 @@ use crate::tree::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
         sparse_trie::StateRootComputeOutcome,
     },
-    sparse_trie::SparseTrieTask,
+    sparse_trie::{SparseTrieCacheTask, SparseTrieTask},
     StateProviderBuilder, TreeConfig,
 };
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
-use crossbeam_channel::Sender as CrossbeamSender;
+use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use executor::WorkloadExecutor;
 use metrics::Counter;
 use multiproof::{SparseTrieUpdate, *};
@@ -39,10 +39,7 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{
-    provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    ClearedSparseStateTrie, RevealableSparseTrie, SparseStateTrie,
-};
+use reth_trie_sparse::{ClearedSparseStateTrie, RevealableSparseTrie, SparseStateTrie};
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
     collections::BTreeMap,
@@ -283,37 +280,45 @@ where
             v2_proofs_enabled,
         );
 
-        let multi_proof_task = MultiProofTask::new(
-            proof_handle.clone(),
-            to_sparse_trie,
-            config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
-            to_multi_proof.clone(),
-            from_multi_proof,
-        )
-        .with_v2_proofs_enabled(v2_proofs_enabled);
+        if !config.enable_sparse_trie_as_cache() {
+            let multi_proof_task = MultiProofTask::new(
+                proof_handle.clone(),
+                to_sparse_trie,
+                config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
+                to_multi_proof.clone(),
+                from_multi_proof.clone(),
+            )
+            .with_v2_proofs_enabled(v2_proofs_enabled);
 
-        // spawn multi-proof task
-        let parent_span = span.clone();
-        let saved_cache = prewarm_handle.saved_cache.clone();
-        self.executor.spawn_blocking(move || {
-            let _enter = parent_span.entered();
-            // Build a state provider for the multiproof task
-            let provider = provider_builder.build().expect("failed to build provider");
-            let provider = if let Some(saved_cache) = saved_cache {
-                let (cache, metrics, _disable_metrics) = saved_cache.split();
-                Box::new(CachedStateProvider::new(provider, cache, metrics))
-                    as Box<dyn StateProvider>
-            } else {
-                Box::new(provider)
-            };
-            multi_proof_task.run(provider);
-        });
+            // spawn multi-proof task
+            let parent_span = span.clone();
+            let saved_cache = prewarm_handle.saved_cache.clone();
+            self.executor.spawn_blocking(move || {
+                let _enter = parent_span.entered();
+                // Build a state provider for the multiproof task
+                let provider = provider_builder.build().expect("failed to build provider");
+                let provider = if let Some(saved_cache) = saved_cache {
+                    let (cache, metrics, _disable_metrics) = saved_cache.split();
+                    Box::new(CachedStateProvider::new(provider, cache, metrics))
+                        as Box<dyn StateProvider>
+                } else {
+                    Box::new(provider)
+                };
+                multi_proof_task.run(provider);
+            });
+        }
 
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
 
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
-        self.spawn_sparse_trie_task(sparse_trie_rx, proof_handle, state_root_tx);
+        self.spawn_sparse_trie_task(
+            sparse_trie_rx,
+            proof_handle,
+            state_root_tx,
+            from_multi_proof,
+            config,
+        );
 
         PayloadHandle {
             to_multi_proof: Some(to_multi_proof),
@@ -493,19 +498,18 @@ where
 
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
-    fn spawn_sparse_trie_task<BPF>(
+    fn spawn_sparse_trie_task(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
-        proof_worker_handle: BPF,
+        proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
-    ) where
-        BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
-        BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
-        BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-    {
+        from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
+        config: &TreeConfig,
+    ) {
         let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
         let trie_metrics = self.trie_metrics.clone();
         let span = Span::current();
+        let disable_sparse_trie_as_cache = !config.enable_sparse_trie_as_cache();
 
         self.executor.spawn_blocking(move || {
             let _enter = span.entered();
@@ -525,15 +529,24 @@ where
                 )
             });
 
-            let task =
-                SparseTrieTask::<_, ParallelSparseTrie, ParallelSparseTrie>::new_with_cleared_trie(
+            let (result, trie) = if disable_sparse_trie_as_cache {
+                SparseTrieTask::new_with_cleared_trie(
                     sparse_trie_rx,
                     proof_worker_handle,
                     trie_metrics,
                     sparse_state_trie,
-                );
+                )
+                .run()
+            } else {
+                SparseTrieCacheTask::new_with_cleared_trie(
+                    from_multi_proof,
+                    proof_worker_handle,
+                    trie_metrics,
+                    sparse_state_trie,
+                )
+                .run()
+            };
 
-            let (result, trie) = task.run();
             // Send state root computation result
             let _ = state_root_tx.send(result);
 
