@@ -335,6 +335,29 @@ panic = "abort"
 codegen-units = 1
 incremental = false
 
+# Optimize bloaty dependencies for size over speed. These are either startup-only
+# (CLI parsing, config), rarely-used (JS tracing, DNS), or not in hot execution paths.
+# See: https://github.com/paradigmxyz/reth/pull/XXXX for analysis.
+[profile.release.package]
+# boa (JavaScript engine) - used only for debug_traceCall JS tracer, cold path
+boa_ast = { opt-level = "s" }
+boa_engine = { opt-level = "s" }
+boa_gc = { opt-level = "s" }
+boa_interner = { opt-level = "s" }
+boa_parser = { opt-level = "s" }
+# CLI/config parsing - startup only
+clap_builder = { opt-level = "s" }
+toml_edit = { opt-level = "s" }
+# Serialization - not in block execution hot path
+rmp-serde = { opt-level = "s" }
+# DNS/networking - cold paths
+hickory-proto = { opt-level = "s" }
+hickory-resolver = { opt-level = "s" }
+discv5 = { opt-level = "s" }
+# HTTP - RPC layer, not execution
+h2 = { opt-level = "s" }
+reqwest = { opt-level = "s" }
+
 [workspace.dependencies]
 # reth
 op-reth = { path = "crates/optimism/bin" }
