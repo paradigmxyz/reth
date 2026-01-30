@@ -114,21 +114,37 @@ impl SparseStateTrie {
 
 impl<A, S> SparseStateTrie<A, S> {
     /// Set the retention of branch node updates and deletions.
-    pub const fn with_updates(mut self, retain_updates: bool) -> Self {
+    pub const fn set_updates(&mut self, retain_updates: bool) {
         self.retain_updates = retain_updates;
+    }
+
+    /// Set the retention of branch node updates and deletions.
+    pub const fn with_updates(mut self, retain_updates: bool) -> Self {
+        self.set_updates(retain_updates);
         self
     }
 
     /// Set the accounts trie to the given `RevealableSparseTrie`.
-    pub fn with_accounts_trie(mut self, trie: RevealableSparseTrie<A>) -> Self {
+    pub fn set_accounts_trie(&mut self, trie: RevealableSparseTrie<A>) {
         self.state = trie;
+    }
+
+    /// Set the accounts trie to the given `RevealableSparseTrie`.
+    pub fn with_accounts_trie(mut self, trie: RevealableSparseTrie<A>) -> Self {
+        self.set_accounts_trie(trie);
         self
     }
 
     /// Set the default trie which will be cloned when creating new storage
     /// [`RevealableSparseTrie`]s.
-    pub fn with_default_storage_trie(mut self, trie: RevealableSparseTrie<S>) -> Self {
+    pub fn set_default_storage_trie(&mut self, trie: RevealableSparseTrie<S>) {
         self.storage.default_trie = trie;
+    }
+
+    /// Set the default trie which will be cloned when creating new storage
+    /// [`RevealableSparseTrie`]s.
+    pub fn with_default_storage_trie(mut self, trie: RevealableSparseTrie<S>) -> Self {
+        self.set_default_storage_trie(trie);
         self
     }
 }

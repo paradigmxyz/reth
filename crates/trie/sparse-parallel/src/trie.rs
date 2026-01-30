@@ -152,27 +152,25 @@ impl Default for ParallelSparseTrie {
 }
 
 impl SparseTrie for ParallelSparseTrie {
-    fn with_root(
-        mut self,
+    fn set_root(
+        &mut self,
         root: TrieNode,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
-    ) -> SparseTrieResult<Self> {
+    ) -> SparseTrieResult<()> {
         // A fresh/cleared `ParallelSparseTrie` has a `SparseNode::Empty` at its root in the upper
         // subtrie. Delete that so we can reveal the new root node.
         let path = Nibbles::default();
         let _removed_root = self.upper_subtrie.nodes.remove(&path).expect("root node should exist");
         debug_assert_eq!(_removed_root, SparseNode::Empty);
 
-        self = self.with_updates(retain_updates);
+        self.set_updates(retain_updates);
 
-        self.reveal_upper_node(Nibbles::default(), &root, masks)?;
-        Ok(self)
+        self.reveal_upper_node(Nibbles::default(), &root, masks)
     }
 
-    fn with_updates(mut self, retain_updates: bool) -> Self {
+    fn set_updates(&mut self, retain_updates: bool) {
         self.updates = retain_updates.then(Default::default);
-        self
     }
 
     fn reveal_nodes(&mut self, mut nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()> {

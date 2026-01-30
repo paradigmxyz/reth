@@ -110,7 +110,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
                 Box::default()
             };
 
-            *revealed_trie = revealed_trie.with_root(root, masks, retain_updates)?;
+            revealed_trie.set_root(root, masks, retain_updates)?;
             *self = Self::Revealed(revealed_trie);
         }
 
@@ -451,13 +451,13 @@ impl Default for SerialSparseTrie {
 }
 
 impl SparseTrieTrait for SerialSparseTrie {
-    fn with_root(
-        mut self,
+    fn set_root(
+        &mut self,
         root: TrieNode,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
-    ) -> SparseTrieResult<Self> {
-        self = self.with_updates(retain_updates);
+    ) -> SparseTrieResult<()> {
+        self.set_updates(retain_updates);
 
         // A fresh/cleared `SerialSparseTrie` has a `SparseNode::Empty` at its root. Delete that
         // so we can reveal the new root node.
@@ -465,15 +465,13 @@ impl SparseTrieTrait for SerialSparseTrie {
         let _removed_root = self.nodes.remove(&path).expect("root node should exist");
         debug_assert_eq!(_removed_root, SparseNode::Empty);
 
-        self.reveal_node(path, root, masks)?;
-        Ok(self)
+        self.reveal_node(path, root, masks)
     }
 
-    fn with_updates(mut self, retain_updates: bool) -> Self {
+    fn set_updates(&mut self, retain_updates: bool) {
         if retain_updates {
             self.updates = Some(SparseTrieUpdates::default());
         }
-        self
     }
 
     fn reserve_nodes(&mut self, additional: usize) {
