@@ -39,7 +39,7 @@ where
     /// Creates a [`ClearedSparseStateTrie`] by clearing all the existing internal state of a
     /// [`SparseStateTrie`] and then storing that instance for later re-use.
     pub fn from_state_trie(mut trie: SparseStateTrie<A, S>) -> Self {
-        trie.state = trie.state.clear();
+        trie.state.clear();
         trie.revealed_account_paths.clear();
         trie.storage.clear();
         trie.account_rlp_buf.clear();
@@ -995,7 +995,7 @@ where
     /// This resets the trie to an empty state but keeps the underlying memory allocations,
     /// which can significantly reduce allocation overhead when the trie is reused.
     pub fn clear(&mut self) {
-        self.state = core::mem::take(&mut self.state).clear();
+        self.state.clear();
         self.revealed_account_paths.clear();
         self.storage.clear();
         self.account_rlp_buf.clear();
@@ -1127,8 +1127,9 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
 
         // Evict storage tries that exceeded limit, saving cleared allocations for reuse
         for address in &tries_to_clear {
-            if let Some(trie) = self.tries.remove(address) {
-                self.cleared_tries.push(trie.clear());
+            if let Some(mut trie) = self.tries.remove(address) {
+                trie.clear();
+                self.cleared_tries.push(trie);
             }
             if let Some(mut paths) = self.revealed_paths.remove(address) {
                 paths.clear();
@@ -1193,7 +1194,10 @@ impl<S: SparseTrieTrait> StorageTries<S> {
     /// Returns all fields to a cleared state, equivalent to the default state, keeping cleared
     /// collections for re-use later when possible.
     fn clear(&mut self) {
-        self.cleared_tries.extend(self.tries.drain().map(|(_, trie)| trie.clear()));
+        self.cleared_tries.extend(self.tries.drain().map(|(_, mut trie)| {
+            trie.clear();
+            trie
+        }));
         self.cleared_revealed_paths.extend(self.revealed_paths.drain().map(|(_, mut set)| {
             set.clear();
             set

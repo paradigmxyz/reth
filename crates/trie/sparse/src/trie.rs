@@ -217,18 +217,20 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         Some((revealed.root(), revealed.take_updates()))
     }
 
-    /// Returns a [`RevealableSparseTrie::Blind`] based on this one. If this instance was revealed,
-    /// or was itself a `Blind` with a pre-allocated [`RevealableSparseTrie`](SparseTrieTrait),
-    /// this will return a `Blind` carrying a cleared pre-allocated
-    /// [`RevealableSparseTrie`](SparseTrieTrait).
-    pub fn clear(self) -> Self {
-        match self {
-            Self::Blind(_) => self,
+    /// Clears this trie, setting it to a blind state.
+    ///
+    /// If this instance was revealed, or was itself a `Blind` with a pre-allocated
+    /// [`RevealableSparseTrie`](SparseTrieTrait), this will set to `Blind` carrying a cleared
+    /// pre-allocated [`RevealableSparseTrie`](SparseTrieTrait).
+    #[inline]
+    pub fn clear(&mut self) {
+        *self = match core::mem::replace(self, Self::blind()) {
+            s @ Self::Blind(_) => s,
             Self::Revealed(mut trie) => {
                 trie.clear();
                 Self::Blind(Some(trie))
             }
-        }
+        };
     }
 
     /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
