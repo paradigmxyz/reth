@@ -1,5 +1,6 @@
 use crate::SparseSubtrie;
 use reth_trie_common::Nibbles;
+use tracing::debug;
 
 /// Tracks the state of the lower subtries.
 ///
@@ -50,6 +51,12 @@ impl LowerSparseSubtrie {
         match self {
             Self::Blind(allocated) => {
                 debug_assert!(allocated.as_ref().is_none_or(|subtrie| subtrie.is_empty()));
+                debug!(
+                    target: "trie::parallel_sparse",
+                    reveal_path = ?path,
+                    was_blind = true,
+                    "LowerSparseSubtrie::reveal - transitioning from Blind to Revealed"
+                );
                 *self = if let Some(mut subtrie) = allocated.take() {
                     subtrie.path = *path;
                     Self::Revealed(subtrie)
@@ -59,7 +66,16 @@ impl LowerSparseSubtrie {
             }
             Self::Revealed(subtrie) => {
                 if path.len() < subtrie.path.len() {
+                    let old_path = subtrie.path;
                     subtrie.path = *path;
+                    debug!(
+                        target: "trie::parallel_sparse",
+                        reveal_path = ?path,
+                        old_subtrie_path = ?old_path,
+                        new_subtrie_path = ?subtrie.path,
+                        was_blind = false,
+                        "LowerSparseSubtrie::reveal - updating path to shorter path"
+                    );
                 }
             }
         };

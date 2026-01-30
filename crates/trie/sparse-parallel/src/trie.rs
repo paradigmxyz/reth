@@ -715,6 +715,15 @@ impl SparseTrie for ParallelSparseTrie {
                 }
             }
         }
+
+        debug!(
+            target: "trie::parallel_sparse",
+            leaf_path = ?leaf_path,
+            leaf_full_path = ?full_path,
+            branch_parent_path = ?branch_parent_path,
+            ext_grandparent_path = ?ext_grandparent_path,
+            "Removing leaf node"
+        );
         self.remove_node(&leaf_path);
 
         // If the leaf was at the root replace its node with the empty value. We can stop execution
@@ -766,6 +775,16 @@ impl SparseTrie for ParallelSparseTrie {
                     &remaining_child_node,
                 );
 
+                debug!(
+                    target: "trie::parallel_sparse",
+                    ?branch_path,
+                    ?remaining_child_path,
+                    remaining_child_node_type = ?core::mem::discriminant(&remaining_child_node),
+                    new_branch_node_type = ?core::mem::discriminant(&new_branch_node),
+                    remove_child,
+                    "Branch collapsed after leaf removal"
+                );
+
                 if remove_child {
                     self.move_value_on_leaf_removal(
                         branch_path,
@@ -789,6 +808,15 @@ impl SparseTrie for ParallelSparseTrie {
 
             let branch_subtrie = self.subtrie_for_path_mut(branch_path);
             branch_subtrie.nodes.insert(*branch_path, new_branch_node.clone());
+            debug!(
+                target: "trie::parallel_sparse",
+                ?branch_path,
+                subtrie_path = ?branch_subtrie.path,
+                subtrie_nodes = branch_subtrie.nodes.len(),
+                subtrie_node_paths = ?branch_subtrie.nodes.keys().collect::<Vec<_>>(),
+                has_root_node = branch_subtrie.nodes.contains_key(&branch_subtrie.path),
+                "After inserting new branch node"
+            );
             branch_parent_node = Some(new_branch_node);
         };
 
@@ -807,6 +835,13 @@ impl SparseTrie for ParallelSparseTrie {
                 branch_path,
                 branch_parent_node.as_ref().unwrap(),
             ) {
+                debug!(
+                    target: "trie::parallel_sparse",
+                    ?ext_path,
+                    ?branch_path,
+                    new_ext_node_type = ?core::mem::discriminant(&new_ext_node),
+                    "Extension grandparent changes on leaf removal, will remove branch"
+                );
                 ext_subtrie.nodes.insert(ext_path, new_ext_node.clone());
                 self.move_value_on_leaf_removal(&ext_path, &new_ext_node, branch_path);
                 self.remove_node(branch_path);
@@ -1593,7 +1628,18 @@ impl ParallelSparseTrie {
     /// - If the removed node was not a leaf or extension.
     fn remove_node(&mut self, path: &Nibbles) {
         let subtrie = self.subtrie_for_path_mut(path);
+        let old_subtrie_path = subtrie.path;
         let node = subtrie.nodes.remove(path);
+
+        debug!(
+            target: "trie::parallel_sparse",
+            removed_path = ?path,
+            removed_node_type = ?node.as_ref().map(|n| core::mem::discriminant(n)),
+            subtrie_path = ?old_subtrie_path,
+            remaining_nodes = subtrie.nodes.len(),
+            remaining_node_paths = ?subtrie.nodes.keys().collect::<Vec<_>>(),
+            "Removing node from subtrie"
+        );
 
         let Some(idx) = SparseSubtrieType::from_path(path).lower_index() else {
             // When removing a node from the upper trie there's nothing special we need to do to fix
@@ -1606,6 +1652,12 @@ impl ParallelSparseTrie {
                 // If the leaf was the final node in its lower subtrie then we can blind the
                 // subtrie, effectively marking it as empty.
                 if subtrie.nodes.is_empty() {
+                    debug!(
+                        target: "trie::parallel_sparse",
+                        subtrie_index = idx,
+                        subtrie_path = ?old_subtrie_path,
+                        "Blinding empty lower subtrie after leaf removal"
+                    );
                     self.lower_subtries[idx].clear();
                 }
             }
@@ -1614,7 +1666,17 @@ impl ParallelSparseTrie {
                 // subtrie's `path` needs to be updated to be whatever node the extension used to
                 // point to.
                 if &subtrie.path == path {
+                    let old_path = subtrie.path;
                     subtrie.path.extend(&key);
+                    debug!(
+                        target: "trie::parallel_sparse",
+                        subtrie_index = idx,
+                        old_subtrie_path = ?old_path,
+                        new_subtrie_path = ?subtrie.path,
+                        extension_key = ?key,
+                        has_node_at_new_path = subtrie.nodes.contains_key(&subtrie.path),
+                        "Updating subtrie path after extension removal"
+                    );
                 }
             }
             _ => panic!("Expected to remove a leaf or extension, but removed {node:?}"),
@@ -1802,7 +1864,19 @@ impl ParallelSparseTrie {
                         "Revealing remaining blinded branch child"
                     );
                     let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
+                    let subtrie_path_before = remaining_child_subtrie.path;
                     remaining_child_subtrie.reveal_node(*remaining_child_path, &decoded, masks)?;
+                    debug!(
+                        target: "trie::parallel_sparse",
+                        ?remaining_child_path,
+                        decoded_node_type = ?core::mem::discriminant(&decoded),
+                        subtrie_path_before = ?subtrie_path_before,
+                        subtrie_path_after = ?remaining_child_subtrie.path,
+                        subtrie_nodes_after = remaining_child_subtrie.nodes.len(),
+                        subtrie_node_paths_after = ?remaining_child_subtrie.nodes.keys().collect::<Vec<_>>(),
+                        has_root_node_after = remaining_child_subtrie.nodes.contains_key(&remaining_child_subtrie.path),
+                        "Revealed remaining child from DB during leaf removal"
+                    );
                     (
                         remaining_child_subtrie.nodes.get(remaining_child_path).unwrap().clone(),
                         masks,
@@ -2584,6 +2658,18 @@ impl SparseSubtrie {
         // If the node is already revealed and it's not a hash node, do nothing.
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
             return Ok(())
+        }
+
+        // Log when revealing a node that is at or near the subtrie root
+        if path.len() <= self.path.len() + 1 {
+            debug!(
+                target: "trie::parallel_sparse",
+                reveal_path = ?path,
+                node_type = ?core::mem::discriminant(node),
+                subtrie_path = ?self.path,
+                is_subtrie_root = path == self.path,
+                "Revealing node near subtrie root"
+            );
         }
 
         match node {
