@@ -645,10 +645,18 @@ where
         }
     }
     let reveal_multiproof_elapsed = started_at.elapsed();
-    trace!(
+    debug!(
         target: "engine::root::sparse",
         ?reveal_multiproof_elapsed,
         "Done revealing multiproof"
+    );
+
+    // DEBUG: Calculate root after every proof reveal to detect issues early
+    let debug_root = trie.root(blinded_provider_factory);
+    debug!(
+        target: "engine::root::sparse",
+        ?debug_root,
+        "Sparse trie root after reveal"
     );
 
     // Update storage slots with new values and calculate storage roots.
