@@ -471,7 +471,7 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
 }
 
 /// Reorg with `RocksDB`: verifies that unwind correctly reads changesets from
-/// storage-aware locations (RocksDB or MDBX) rather than directly from MDBX.
+/// storage-aware locations (`RocksDB` or MDBX) rather than directly from MDBX.
 ///
 /// This test exercises `unwind_trie_state_from` which previously failed with
 /// `UnsortedInput` errors because it read changesets directly from MDBX tables
