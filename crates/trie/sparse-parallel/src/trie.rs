@@ -338,6 +338,8 @@ impl SparseTrie for ParallelSparseTrie {
         let mut next = Some(Nibbles::default());
         // Track the original node that was modified (path, original_node) for rollback
         let mut modified_original: Option<(Nibbles, SparseNode)> = None;
+        // Track inserted branch masks for rollback
+        let mut inserted_masks: Vec<Nibbles> = Vec::new();
 
         // Traverse the upper subtrie to find the node to update or the subtrie to update.
         //
@@ -392,6 +394,7 @@ impl SparseTrie for ParallelSparseTrie {
                                     self.rollback_insert(
                                         &full_path,
                                         &new_nodes,
+                                        &inserted_masks,
                                         modified_original.take(),
                                     );
                                     return Err(e);
@@ -405,6 +408,7 @@ impl SparseTrie for ParallelSparseTrie {
                                         self.rollback_insert(
                                             &full_path,
                                             &new_nodes,
+                                            &inserted_masks,
                                             modified_original.take(),
                                         );
                                         return Err(e.into());
@@ -423,6 +427,7 @@ impl SparseTrie for ParallelSparseTrie {
                                     self.rollback_insert(
                                         &full_path,
                                         &new_nodes,
+                                        &inserted_masks,
                                         modified_original.take(),
                                     );
                                     return Err(e);
@@ -432,6 +437,7 @@ impl SparseTrie for ParallelSparseTrie {
                                 self.rollback_insert(
                                     &full_path,
                                     &new_nodes,
+                                    &inserted_masks,
                                     modified_original.take(),
                                 );
                                 return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
@@ -443,8 +449,9 @@ impl SparseTrie for ParallelSparseTrie {
                             None
                         };
 
-                        if let Some(masks) = reveal_masks {
-                            self.branch_node_masks.insert(reveal_path, masks);
+                        if let Some(_masks) = reveal_masks {
+                            self.branch_node_masks.insert(reveal_path, _masks);
+                            inserted_masks.push(reveal_path);
                         }
                     }
 
@@ -524,6 +531,10 @@ impl SparseTrie for ParallelSparseTrie {
                     // Clean up: remove the value from lower subtrie if it was inserted
                     if let Some(lower) = self.lower_subtrie_for_path_mut(&full_path) {
                         lower.inner.values.remove(&full_path);
+                    }
+                    // Clean up any branch masks that were inserted during upper subtrie traversal
+                    for mask_path in &inserted_masks {
+                        self.branch_node_masks.remove(mask_path);
                     }
                     return Err(e);
                 }
@@ -1297,13 +1308,14 @@ impl ParallelSparseTrie {
     }
 
     /// Rolls back a partial update by removing the value, removing any inserted nodes,
-    /// and restoring any modified original node.
+    /// removing any inserted branch masks, and restoring any modified original node.
     /// This ensures `update_leaf` is atomic - either it succeeds completely or leaves the trie
     /// unchanged.
     fn rollback_insert(
         &mut self,
         full_path: &Nibbles,
         inserted_nodes: &[Nibbles],
+        inserted_masks: &[Nibbles],
         modified_original: Option<(Nibbles, SparseNode)>,
     ) {
         self.upper_subtrie.inner.values.remove(full_path);
@@ -1315,6 +1327,10 @@ impl ParallelSparseTrie {
                     subtrie.nodes.remove(node_path);
                 }
             }
+        }
+        // Remove any branch masks that were inserted
+        for mask_path in inserted_masks {
+            self.branch_node_masks.remove(mask_path);
         }
         // Restore the original node that was modified
         if let Some((path, original_node)) = modified_original {
