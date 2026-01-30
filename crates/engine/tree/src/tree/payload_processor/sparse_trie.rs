@@ -291,6 +291,7 @@ where
 
             if self.updates.is_empty() || self.pending_updates > 100 {
                 self.process_leaf_updates()?;
+                self.dispatch_pending_targets();
             }
 
             // Dispatch targets if we have accumulated enough or don't have any pending updates.
