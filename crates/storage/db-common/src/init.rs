@@ -183,6 +183,10 @@ where
                     );
                 }
 
+                // Set storage settings cache even for existing nodes so that
+                // components like the pruner know where data is stored.
+                factory.set_storage_settings_cache(stored);
+
                 debug!("Genesis already written, skipping.");
                 return Ok(hash)
             }
