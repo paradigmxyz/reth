@@ -123,9 +123,6 @@ pub struct ParallelSparseTrie {
     update_actions_buffers: Vec<Vec<SparseTrieUpdatesAction>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ParallelismThresholds,
-    /// Tracks proof targets already requested via `update_leaves` to avoid duplicate callbacks
-    /// across retry calls. Key is (`leaf_path`, `min_depth`).
-    requested_proof_targets: alloy_primitives::map::HashSet<(Nibbles, u8)>,
     /// Tracks heat of lower subtries for smart pruning decisions.
     /// Hot subtries are skipped during pruning to keep frequently-used data revealed.
     subtrie_heat: SubtrieHeat,
@@ -147,7 +144,6 @@ impl Default for ParallelSparseTrie {
             branch_node_masks: BranchNodeMasksMap::default(),
             update_actions_buffers: Vec::default(),
             parallelism_thresholds: Default::default(),
-            requested_proof_targets: Default::default(),
             subtrie_heat: SubtrieHeat::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
@@ -906,16 +902,7 @@ impl SparseTrie for ParallelSparseTrie {
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
-        match self.updates.take() {
-            Some(updates) => {
-                self.updates = Some(SparseTrieUpdates::with_capacity(
-                    updates.updated_nodes.len(),
-                    updates.removed_nodes.len(),
-                ));
-                updates
-            }
-            None => SparseTrieUpdates::default(),
-        }
+        self.updates.take().unwrap_or_default()
     }
 
     fn wipe(&mut self) {

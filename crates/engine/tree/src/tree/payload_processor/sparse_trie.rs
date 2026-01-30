@@ -160,8 +160,12 @@ where
         max_nodes_capacity: usize,
         max_values_capacity: usize,
     ) -> SparseStateTrie<A, S> {
+        let now = std::time::Instant::now();
         self.trie.prune(self.prune_depth, self.max_storage_tries);
+        println!("prune elapsed: {:?}", now.elapsed());
+        let now = std::time::Instant::now();
         self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        println!("prune elapsed: {:?}", now.elapsed());
         self.trie
     }
 
