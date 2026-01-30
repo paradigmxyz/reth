@@ -135,7 +135,7 @@ impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
                 let list_filter = RefCell::new(list_filter);
                 DbListTUI::<_, T>::new(|skip, len| {
                     list_filter.borrow_mut().update_page(skip, len);
-                    self.tool.list::<T>(&list_filter.borrow()).unwrap().0
+                    self.tool.list::<T>(&list_filter.borrow()).map(|(rows, _)| rows)
                 }, self.args.skip, self.args.len, total_entries, self.args.raw).run()
             }
         })??;
