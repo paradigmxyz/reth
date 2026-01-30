@@ -289,10 +289,7 @@ where
                 },
             }
 
-            if (self.updates.is_empty() &&
-                (self.pending_updates > 10 || self.finished_state_updates)) ||
-                self.pending_updates > 100
-            {
+            if self.updates.is_empty() || self.pending_updates > 100 {
                 self.process_leaf_updates()?;
             }
 
