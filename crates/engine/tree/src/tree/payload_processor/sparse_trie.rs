@@ -269,8 +269,6 @@ where
                         result.extend(res);
                     }
                     self.on_proof_result(result)?;
-
-                    self.process_leaf_updates()?;
                 },
                 recv(self.updates) -> message => {
                     let update = match message {
@@ -281,16 +279,14 @@ where
                     };
 
                     self.on_multiproof_message(update);
-                    self.process_leaf_updates()?;
-
-                    while let Ok(update) = self.updates.try_recv() {
-                        self.on_multiproof_message(update);
-                        self.process_leaf_updates()?;
-                    }
                 }
             }
 
-            self.process_updates()?;
+            if self.updates.is_empty() && self.proof_result_rx.is_empty() {
+                self.process_updates()?;
+            } else {
+                self.process_leaf_updates()?;
+            }
 
             if self.finished_state_updates &&
                 self.account_updates.is_empty() &&
