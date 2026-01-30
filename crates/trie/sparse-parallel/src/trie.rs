@@ -17,6 +17,7 @@ use reth_trie_sparse::{
     LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrie,
     SparseTrieExt, SparseTrieUpdates,
 };
+
 use smallvec::SmallVec;
 use std::cmp::{Ord, Ordering, PartialOrd};
 use tracing::{debug, instrument, trace};
@@ -3123,9 +3124,9 @@ pub struct SparseSubtrieBuffers {
     /// Stack of RLP nodes
     rlp_node_stack: Vec<RlpNodeStackItem>,
     /// Reusable branch child path
-    branch_child_buf: SmallVec<[Nibbles; 16]>,
+    branch_child_buf: Vec<Nibbles>,
     /// Reusable branch value stack
-    branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
+    branch_value_stack_buf: Vec<RlpNode>,
     /// Reusable RLP buffer
     rlp_buf: Vec<u8>,
 }
