@@ -61,9 +61,6 @@ where
     Client: BlockClient<Block = BlockTy<N>> + 'static,
 {
     orchestrator: EngineServiceType<N, Client>,
-    /// Handle to the persistence service - kept to ensure graceful shutdown.
-    /// The handle joins the service thread when dropped.
-    _persistence_handle: PersistenceHandle<N::Primitives>,
 }
 
 impl<N, Client> EngineService<N, Client>
@@ -108,7 +105,7 @@ where
             blockchain_db,
             consensus,
             payload_validator,
-            persistence_handle.clone(),
+            persistence_handle,
             payload_builder,
             canonical_in_memory_state,
             tree_config,
@@ -122,10 +119,7 @@ where
 
         let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);
 
-        Self {
-            orchestrator: ChainOrchestrator::new(handler, backfill_sync),
-            _persistence_handle: persistence_handle,
-        }
+        Self { orchestrator: ChainOrchestrator::new(handler, backfill_sync) }
     }
 
     /// Returns a mutable reference to the orchestrator.
