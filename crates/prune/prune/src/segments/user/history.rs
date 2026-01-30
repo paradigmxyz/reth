@@ -11,7 +11,6 @@ use reth_db_api::{
 use reth_provider::DBProvider;
 use reth_prune_types::{SegmentOutput, SegmentOutputCheckpoint};
 use rustc_hash::FxHashMap;
-use tracing::info;
 
 enum PruneShardOutcome {
     Deleted,
@@ -56,15 +55,6 @@ where
     K: Ord,
 {
     let HistoryPruneResult { highest_deleted, last_pruned_block, pruned_count, done } = result;
-    let num_keys = highest_deleted.len();
-
-    info!(
-        target: "pruner",
-        table = %std::any::type_name::<T>(),
-        num_keys,
-        pruned_count,
-        "finalize_history_prune: starting sort"
-    );
 
     // If there's more changesets to prune, set the checkpoint block number to previous,
     // so we could finish pruning its changesets on the next run.
@@ -82,24 +72,8 @@ where
         })
         .collect();
 
-    info!(
-        target: "pruner",
-        table = %std::any::type_name::<T>(),
-        sorted_keys = highest_sharded_keys.len(),
-        "finalize_history_prune: sort complete, starting index prune"
-    );
-
     let outcomes =
         prune_history_indices::<Provider, T, _>(provider, highest_sharded_keys, key_matches)?;
-
-    info!(
-        target: "pruner",
-        table = %std::any::type_name::<T>(),
-        deleted = outcomes.deleted,
-        updated = outcomes.updated,
-        unchanged = outcomes.unchanged,
-        "finalize_history_prune: complete"
-    );
 
     let progress = limiter.progress(done);
 

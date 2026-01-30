@@ -19,7 +19,7 @@ use reth_prune_types::{
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
 use rustc_hash::FxHashMap;
-use tracing::{info, instrument, trace};
+use tracing::{instrument, trace};
 
 /// Number of storage history tables to prune in one step.
 ///
@@ -115,21 +115,11 @@ impl StorageHistory {
         let mut total_pruned = 0;
         let mut actual_last_pruned_block: Option<BlockNumber> = None;
         let mut overall_done = false;
-        let mut batch_number = 0usize;
-
-        info!(
-            target: "pruner",
-            batch_size = BATCH_SIZE,
-            range_start = *range.start(),
-            range_end = range_end,
-            "StorageHistory prune_static_files starting"
-        );
 
         let mut walker =
             provider.static_file_provider().walk_storage_changeset_range(range).peekable();
 
         loop {
-            batch_number += 1;
             let mut highest_deleted_storages =
                 FxHashMap::with_capacity_and_hasher(BATCH_SIZE, Default::default());
             let mut batch_last_block: Option<BlockNumber> = None;
@@ -168,24 +158,6 @@ impl StorageHistory {
             // Track whether we're done for the final output
             // We're done only if there's no more data AND we didn't hit the limit
             overall_done = !has_more_data;
-
-            // HashMap size instrumentation
-            let unique_slots = highest_deleted_storages.len();
-            // Each entry: (Address(20) + B256(32)) key + BlockNumber(8) value + FxHashMap overhead
-            // (~24 bytes)
-            let hashmap_mem_bytes = unique_slots * 84;
-
-            info!(
-                target: "pruner",
-                batch = batch_number,
-                batch_entries = batch_count,
-                unique_storage_slots = unique_slots,
-                hashmap_mem_mb = hashmap_mem_bytes / (1024 * 1024),
-                last_block = ?batch_last_block,
-                total_pruned_so_far = total_pruned + batch_count,
-                has_more_data,
-                "StorageHistory batch collected - calling finalize"
-            );
 
             trace!(target: "pruner", pruned = %batch_count, done = %overall_done, "Pruned storage history batch (changesets from static files)");
 

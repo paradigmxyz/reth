@@ -18,7 +18,7 @@ use reth_prune_types::{
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::ChangeSetReader;
 use rustc_hash::FxHashMap;
-use tracing::{info, instrument, trace};
+use tracing::{instrument, trace};
 
 /// Number of account history tables to prune in one step.
 ///
@@ -114,20 +114,10 @@ impl AccountHistory {
         let mut total_pruned = 0;
         let mut actual_last_pruned_block: Option<BlockNumber> = None;
         let mut overall_done = false;
-        let mut batch_number = 0usize;
-
-        info!(
-            target: "pruner",
-            batch_size = BATCH_SIZE,
-            range_start = *range.start(),
-            range_end = range_end,
-            "AccountHistory prune_static_files starting"
-        );
 
         let mut walker = StaticFileAccountChangesetWalker::new(provider, range).peekable();
 
         loop {
-            batch_number += 1;
             let mut highest_deleted_accounts =
                 FxHashMap::with_capacity_and_hasher(BATCH_SIZE, Default::default());
             let mut batch_last_block: Option<BlockNumber> = None;
@@ -163,23 +153,6 @@ impl AccountHistory {
 
             // Track whether we're done for the final output
             overall_done = !has_more_data;
-
-            // HashMap size instrumentation
-            let unique_addresses = highest_deleted_accounts.len();
-            // Each entry: Address(20 bytes) + BlockNumber(8 bytes) + FxHashMap overhead (~24 bytes)
-            let hashmap_mem_bytes = unique_addresses * 52;
-
-            info!(
-                target: "pruner",
-                batch = batch_number,
-                batch_entries = batch_count,
-                unique_addresses,
-                hashmap_mem_mb = hashmap_mem_bytes / (1024 * 1024),
-                last_block = ?batch_last_block,
-                total_pruned_so_far = total_pruned + batch_count,
-                has_more_data,
-                "AccountHistory batch collected - calling finalize"
-            );
 
             trace!(target: "pruner", pruned = %batch_count, done = %overall_done, "Pruned account history batch (changesets from static files)");
 
