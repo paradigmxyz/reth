@@ -7,7 +7,7 @@ use crate::tree::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
         sparse_trie::StateRootComputeOutcome,
     },
-    sparse_trie::{SparseTrieCacheTask, SparseTrieTask},
+    sparse_trie::{SparseTrieCacheTask, SparseTrieTask, SpawnedSparseTrieTask},
     StateProviderBuilder, TreeConfig,
 };
 use alloy_eip7928::BlockAccessList;
@@ -39,10 +39,7 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{
-    provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    ClearedSparseStateTrie, RevealableSparseTrie, SparseStateTrie,
-};
+use reth_trie_sparse::{ClearedSparseStateTrie, RevealableSparseTrie, SparseStateTrie};
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
     collections::BTreeMap,
@@ -331,6 +328,8 @@ where
             sparse_trie_rx,
             proof_handle,
             state_root_tx,
+            from_multi_proof,
+            config,
             parent_hash,
             block_hash,
         );
@@ -514,18 +513,22 @@ where
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
+    #[expect(clippy::too_many_arguments)]
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
         proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+        from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
+        config: &TreeConfig,
         parent_hash: B256,
         block_hash: B256,
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
         let span = Span::current();
+        let disable_sparse_trie_as_cache = !config.enable_sparse_trie_as_cache();
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
 
@@ -554,14 +557,21 @@ where
                         .with_updates(true)
                 });
 
-            let mut task = SparseTrieTask::<_, ParallelSparseTrie, ParallelSparseTrie>::new(
-                sparse_trie_rx,
-                proof_worker_handle,
-                trie_metrics.clone(),
-                sparse_state_trie,
-                prune_depth,
-                max_storage_tries,
-            );
+            let mut task = if disable_sparse_trie_as_cache {
+                SpawnedSparseTrieTask::Cleared(SparseTrieTask::new(
+                    sparse_trie_rx,
+                    proof_worker_handle,
+                    trie_metrics.clone(),
+                    sparse_state_trie,
+                ))
+            } else {
+                SpawnedSparseTrieTask::Cached(SparseTrieCacheTask::new_with_cleared_trie(
+                    from_multi_proof,
+                    proof_worker_handle,
+                    trie_metrics.clone(),
+                    ClearedSparseStateTrie::from_state_trie(sparse_state_trie),
+                ))
+            };
 
             let result = task.run();
             let succeeded = result.is_ok();
@@ -596,6 +606,8 @@ where
             if succeeded {
                 let start = std::time::Instant::now();
                 let trie = task.into_trie_for_reuse(
+                    prune_depth,
+                    max_storage_tries,
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );

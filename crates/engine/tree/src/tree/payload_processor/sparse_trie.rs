@@ -36,6 +36,69 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument, trace};
 
+#[expect(clippy::large_enum_variant)]
+pub(super) enum SpawnedSparseTrieTask<BPF, A, S>
+where
+    BPF: TrieNodeProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+    BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
+    A: SparseTrie + SparseTrieExt + Send + Sync + Default,
+    S: SparseTrie + SparseTrieExt + Send + Sync + Default + Clone,
+{
+    Cleared(SparseTrieTask<BPF, A, S>),
+    Cached(SparseTrieCacheTask<A, S>),
+}
+
+impl<BPF, A, S> SpawnedSparseTrieTask<BPF, A, S>
+where
+    BPF: TrieNodeProviderFactory + Send + Sync + Clone,
+    BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+    BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
+    A: SparseTrie + SparseTrieExt + Send + Sync + Default,
+    S: SparseTrie + SparseTrieExt + Send + Sync + Default + Clone,
+{
+    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+        match self {
+            Self::Cleared(task) => task.run(),
+            Self::Cached(task) => task.run(),
+        }
+    }
+
+    pub(super) fn into_trie_for_reuse(
+        self,
+        prune_depth: usize,
+        max_storage_tries: usize,
+        max_nodes_capacity: usize,
+        max_values_capacity: usize,
+    ) -> SparseStateTrie<A, S> {
+        match self {
+            Self::Cleared(task) => task.into_trie_for_reuse(
+                prune_depth,
+                max_storage_tries,
+                max_nodes_capacity,
+                max_values_capacity,
+            ),
+            Self::Cached(task) => task.into_trie_for_reuse(
+                prune_depth,
+                max_storage_tries,
+                max_nodes_capacity,
+                max_values_capacity,
+            ),
+        }
+    }
+
+    pub(super) fn into_cleared_trie(
+        self,
+        max_nodes_capacity: usize,
+        max_values_capacity: usize,
+    ) -> SparseStateTrie<A, S> {
+        match self {
+            Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
+            Self::Cached(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
+        }
+    }
+}
+
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
 where
@@ -50,10 +113,6 @@ where
     pub(super) metrics: MultiProofTaskMetrics,
     /// Trie node provider factory.
     blinded_provider_factory: BPF,
-    /// Depth for sparse trie pruning after state root computation.
-    prune_depth: usize,
-    /// Maximum number of storage tries to retain after pruning.
-    max_storage_tries: usize,
 }
 
 impl<BPF, A, S> SparseTrieTask<BPF, A, S>
@@ -70,10 +129,8 @@ where
         blinded_provider_factory: BPF,
         metrics: MultiProofTaskMetrics,
         trie: SparseStateTrie<A, S>,
-        prune_depth: usize,
-        max_storage_tries: usize,
     ) -> Self {
-        Self { updates, metrics, trie, blinded_provider_factory, prune_depth, max_storage_tries }
+        Self { updates, metrics, trie, blinded_provider_factory }
     }
 
     /// Runs the sparse trie task to completion, computing the state root.
@@ -149,31 +206,15 @@ where
     /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
     ///
     /// Should be called after the state root result has been sent.
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor::sparse_trie",
-        skip_all,
-        fields(prune_depth = self.prune_depth, max_storage_tries = self.max_storage_tries)
-    )]
     pub(super) fn into_trie_for_reuse(
         mut self,
+        prune_depth: usize,
+        max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
     ) -> SparseStateTrie<A, S> {
-        let prune_start = Instant::now();
-        self.trie.prune(self.prune_depth, self.max_storage_tries);
-        let prune_elapsed = prune_start.elapsed();
-
-        let shrink_start = Instant::now();
+        self.trie.prune(prune_depth, max_storage_tries);
         self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        let shrink_elapsed = shrink_start.elapsed();
-
-        debug!(
-            target: "engine::tree::payload_processor::sparse_trie",
-            ?prune_elapsed,
-            ?shrink_elapsed,
-            "SparseTrieTask::into_trie_for_reuse completed"
-        );
         self.trie
     }
 
@@ -259,21 +300,44 @@ where
     ///
     /// This concludes once the last state update has been received and processed.
     ///
-    /// # Returns
-    ///
-    /// - State root computation outcome.
-    /// - `SparseStateTrie` that needs to be cleared and reused to avoid reallocations.
+    /// After this returns, call [`into_trie_for_reuse`](Self::into_trie_for_reuse) to
+    /// prepare the trie for storage and potential reuse in subsequent payload validations.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    pub(super) fn run(
+    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+        self.run_inner()
+    }
+
+    /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
+    ///
+    /// Should be called after the state root result has been sent.
+    pub(super) fn into_trie_for_reuse(
         mut self,
-    ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, SparseStateTrie<A, S>) {
-        // run the main loop to completion
-        let result = self.run_inner();
-        (result, self.trie)
+        prune_depth: usize,
+        max_storage_tries: usize,
+        max_nodes_capacity: usize,
+        max_values_capacity: usize,
+    ) -> SparseStateTrie<A, S> {
+        self.trie.prune(prune_depth, max_storage_tries);
+        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        self.trie
+    }
+
+    /// Clears and shrinks the trie, discarding all state.
+    ///
+    /// Use this when the payload was invalid or cancelled - we don't want to preserve
+    /// potentially invalid trie state, but we keep the allocations for reuse.
+    pub(super) fn into_cleared_trie(
+        mut self,
+        max_nodes_capacity: usize,
+        max_values_capacity: usize,
+    ) -> SparseStateTrie<A, S> {
+        self.trie.clear();
+        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        self.trie
     }
 
     /// Inner function to run the sparse trie task to completion.
@@ -497,7 +561,7 @@ where
             let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
 
             let (account, storage_root) = if let Some(account) = account.take() {
-                // If account is Some(_) here it means it didn't have any storage updates 
+                // If account is Some(_) here it means it didn't have any storage updates
                 // and we can fetch the storage root directly from the account trie.
                 //
                 // If it did have storage updates, we would've had processed it above when iterating over storage tries.
