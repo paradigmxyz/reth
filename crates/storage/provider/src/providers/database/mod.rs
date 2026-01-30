@@ -189,7 +189,7 @@ impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
         rocksdb_provider: RocksDBProvider,
     ) -> RethResult<Self> {
         Self::new(
-            Arc::new(init_db(path, args).map_err(RethError::msg)?),
+            init_db(path, args).map_err(RethError::msg)?,
             chain_spec,
             static_file_provider,
             rocksdb_provider,
