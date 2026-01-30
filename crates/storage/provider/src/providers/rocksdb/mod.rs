@@ -4,8 +4,8 @@ mod invariants;
 mod metrics;
 mod provider;
 
-pub(crate) use provider::{PendingRocksDBBatches, RocksDBWriteCtx};
 pub use provider::{
-    RocksDBBatch, RocksDBBuilder, RocksDBIter, RocksDBProvider, RocksDBRawIter, RocksDBStats,
-    RocksDBTableStats, RocksTx,
+    AccountHistoryAddressIter, PruneShardOutcome, RocksDBBatch, RocksDBBuilder, RocksDBProvider,
+    RocksDBRawIter, RocksDBStats, RocksDBTableStats, RocksTx, StorageHistoryKeyIter,
 };
+pub(crate) use provider::{PendingRocksDBBatches, RocksDBWriteCtx};
