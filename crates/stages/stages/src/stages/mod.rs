@@ -67,10 +67,10 @@ mod tests {
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::MockNodeTypesWithDB,
         AccountExtReader, BlockBodyIndicesProvider, BlockWriter, DatabaseProviderFactory,
-        ProviderFactory, ProviderResult, ReceiptProvider, StageCheckpointWriter,
-        StaticFileProviderFactory, StorageReader,
+        ProviderFactory, ProviderResult, PruneCheckpointWriter, ReceiptProvider,
+        StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
     };
-    use reth_prune_types::{PruneMode, PruneModes};
+    use reth_prune_types::{PruneCheckpoint, PruneMode, PruneModes, PruneSegment};
     use reth_stages_api::{
         ExecInput, ExecutionStageThresholds, PipelineTarget, Stage, StageCheckpoint, StageId,
     };
@@ -533,5 +533,102 @@ mod tests {
 
         // Fill the gap, and ensure no unwind is necessary.
         update_db_and_check::<tables::Receipts>(&db, current + 1, None);
+    }
+
+    /// Tests that when static files are intentionally pruned (not corrupted), the consistency
+    /// check respects the prune checkpoint and doesn't trigger an unnecessary unwind.
+    ///
+    /// This tests the fix for the issue where an archive node with `TxSenders` in static files
+    /// would unwind after being restarted with --full (which prunes senders).
+    #[test]
+    fn test_consistency_respects_prune_checkpoint() {
+        use reth_provider::StorageSettingsCache;
+        use reth_storage_api::StorageSettings;
+
+        // Create a test database with receipts stored in static files (archive node behavior)
+        let db = seed_data(90).unwrap();
+        let tip = 89;
+
+        // Configure the factory to store receipts in static files (not database)
+        // This simulates an archive node where receipts go to static files
+        db.factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_receipts_in_static_files(true),
+        );
+
+        // Verify initial consistency is ok
+        assert!(matches!(
+            db.factory
+                .static_file_provider()
+                .check_consistency(&db.factory.database_provider_ro().unwrap()),
+            Ok(None)
+        ));
+
+        // Simulate the scenario by deleting all receipts static files
+        // (simulating that all static file data was deleted during pruning)
+        // but the Execution stage checkpoint hasn't been touched.
+        {
+            let static_file_provider = db.factory.static_file_provider();
+
+            // Delete all receipt static file jars by iterating from the highest down
+            while let Some(highest_block) =
+                static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts)
+            {
+                static_file_provider
+                    .delete_jar(StaticFileSegment::Receipts, highest_block)
+                    .unwrap();
+            }
+
+            // Verify deletion worked
+            let highest =
+                static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts);
+            assert!(highest.is_none(), "Expected no receipts after deletion, got {highest:?}");
+        }
+
+        // Without the prune checkpoint, this would trigger an unwind because:
+        // - Stage checkpoint (Execution) is at tip (89)
+        // - Static file highest block is now None/0
+        // - 89 > 0 would trigger unwind to block 0
+
+        // First verify it WOULD fail without the prune checkpoint
+        let result = db
+            .factory
+            .static_file_provider()
+            .check_consistency(&db.factory.database_provider_ro().unwrap());
+        // This should want to unwind because no prune checkpoint exists
+        assert!(
+            matches!(result, Ok(Some(PipelineTarget::Unwind(_)))),
+            "Expected unwind without prune checkpoint, got {result:?}"
+        );
+
+        // Now set a prune checkpoint indicating receipts were intentionally pruned up to tip
+        {
+            let provider_rw = db.factory.provider_rw().unwrap();
+            provider_rw
+                .save_prune_checkpoint(
+                    PruneSegment::Receipts,
+                    PruneCheckpoint {
+                        block_number: Some(tip),
+                        tx_number: None,
+                        prune_mode: PruneMode::Full,
+                    },
+                )
+                .unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        // Now check_consistency should NOT trigger an unwind because:
+        // - Stage checkpoint (Execution) is at tip (89)
+        // - Static file highest block is 0
+        // - Prune checkpoint is at tip (89)
+        // - effective_available_block = max(0, 89) = 89
+        // - 89 > 89 is false, so no unwind
+        let result = db
+            .factory
+            .static_file_provider()
+            .check_consistency(&db.factory.database_provider_ro().unwrap());
+        assert!(
+            matches!(result, Ok(None)),
+            "Expected no unwind with prune checkpoint, got {result:?}"
+        );
     }
 }
