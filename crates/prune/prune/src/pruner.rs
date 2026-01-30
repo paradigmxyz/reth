@@ -177,6 +177,7 @@ where
 
         for segment in &self.segments {
             if limiter.is_limit_reached() {
+                output.progress = limiter.progress(false);
                 break
             }
 
