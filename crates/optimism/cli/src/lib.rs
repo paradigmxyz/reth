@@ -37,7 +37,7 @@ pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCom
 use reth_optimism_chainspec::OpChainSpec;
 use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
 
-use std::{ffi::OsString, fmt, marker::PhantomData, sync::Arc};
+use std::{ffi::OsString, fmt, marker::PhantomData};
 
 use chainspec::OpChainSpecParser;
 use clap::Parser;
