@@ -1,0 +1,23 @@
+[package]
+name = "example-changeset-bench"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+edge = ["reth-provider/edge", "reth-stages/rocksdb"]
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["node"] }
+reth-stages = { workspace = true, optional = true }
+reth-db-api.workspace = true
+reth-provider.workspace = true
+reth-storage-api.workspace = true
+alloy-primitives.workspace = true
+rand = "0.8"
+clap = { workspace = true, features = ["derive"] }
+eyre.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
