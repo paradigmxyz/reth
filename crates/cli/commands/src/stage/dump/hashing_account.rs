@@ -10,7 +10,6 @@ use reth_provider::{
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{stages::AccountHashingStage, Stage, StageCheckpoint, UnwindInput};
-use std::sync::Arc;
 use tracing::info;
 
 pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = DatabaseEnv>>(

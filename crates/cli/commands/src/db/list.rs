@@ -7,7 +7,7 @@ use reth_db::{transaction::DbTx, DatabaseEnv};
 use reth_db_api::{database::Database, table::Table, RawValue, TableViewer, Tables};
 use reth_db_common::{DbTool, ListFilter};
 use reth_node_builder::{NodeTypes, NodeTypesWithDBAdapter};
-use std::{cell::RefCell, sync::Arc};
+use std::cell::RefCell;
 use tracing::error;
 
 #[derive(Parser, Debug)]

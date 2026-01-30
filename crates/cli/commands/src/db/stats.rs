@@ -16,7 +16,7 @@ use reth_provider::{
     RocksDBProviderFactory,
 };
 use reth_static_file_types::SegmentRangeInclusive;
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db stats` command

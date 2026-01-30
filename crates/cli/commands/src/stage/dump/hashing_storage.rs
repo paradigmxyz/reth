@@ -9,7 +9,6 @@ use reth_provider::{
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{stages::StorageHashingStage, Stage, StageCheckpoint, UnwindInput};
-use std::sync::Arc;
 use tracing::info;
 
 pub(crate) async fn dump_hashing_storage_stage<N: ProviderNodeTypes<DB = DatabaseEnv>>(
