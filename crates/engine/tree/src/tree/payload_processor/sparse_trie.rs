@@ -10,7 +10,9 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelBridge, ParallelIterator};
+use rayon::iter::{
+    IntoParallelRefMutIterator, ParallelBridge, ParallelIterator,
+};
 use reth_primitives_traits::Account;
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -292,7 +294,7 @@ where
             if self.updates.is_empty() || self.pending_updates > 100 {
                 self.process_leaf_updates()?;
             }
-            
+
             // Dispatch targets if we have accumulated enough or don't have any pending updates.
             if self.pending_targets.chunking_length() > 100 || self.updates.is_empty() {
                 self.dispatch_pending_targets();
@@ -448,8 +450,7 @@ where
 
                 Some((address, updates, fetched, trie))
             })
-            .collect::<Vec<_>>()
-            .into_par_iter()
+            .par_bridge()
             .map(|(address, mut updates, mut fetched, trie)| {
                 let mut targets = Vec::new();
 
