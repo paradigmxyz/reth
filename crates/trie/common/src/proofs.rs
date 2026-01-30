@@ -466,10 +466,10 @@ impl DecodedMultiProofV2 {
         self.account_proofs.extend(other.account_proofs);
         for (hashed_address, other_storage_proofs) in other.storage_proofs {
             match self.storage_proofs.entry(hashed_address) {
-                std::collections::hash_map::Entry::Vacant(entry) => {
+                hash_map::Entry::Vacant(entry) => {
                     entry.insert(other_storage_proofs);
                 }
-                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                hash_map::Entry::Occupied(mut entry) => {
                     entry.get_mut().extend(other_storage_proofs);
                 }
             }
