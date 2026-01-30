@@ -26,6 +26,10 @@ use tracing::{instrument, trace};
 /// [`tables::AccountsHistory`]. We want to prune them to the same block number.
 const ACCOUNT_HISTORY_TABLES_TO_PRUNE: usize = 2;
 
+/// Maximum entries to process per internal batch for account history.
+/// This bounds memory usage of the `highest_deleted_accounts` `HashMap`.
+const MAX_ACCOUNT_HISTORY_ENTRIES_PER_RUN: usize = 200_000;
+
 #[derive(Debug)]
 pub struct AccountHistory {
     mode: PruneMode,
@@ -78,6 +82,10 @@ where
 
 impl AccountHistory {
     /// Prunes account history when changesets are stored in static files.
+    ///
+    /// When no limit is provided, uses internal batching to process ALL changesets in chunks,
+    /// preventing OOM by limiting the size of the `highest_deleted_accounts` `HashMap` per batch.
+    /// When a limit is provided, respects that limit and may return `HasMoreData`.
     fn prune_static_files<Provider>(
         &self,
         provider: &Provider,
@@ -88,7 +96,9 @@ impl AccountHistory {
     where
         Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + ChangeSetReader,
     {
-        let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
+        // When user provides a limit, respect it. When unbounded, we'll use internal batching.
+        let user_limit = input.limiter.deleted_entries_limit();
+        let mut limiter = if let Some(limit) = user_limit {
             input.limiter.set_deleted_entries_limit(limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE)
         } else {
             input.limiter
@@ -101,52 +111,101 @@ impl AccountHistory {
             ))
         }
 
-        // The size of this map it's limited by `prune_delete_limit * blocks_since_last_run /
-        // ACCOUNT_HISTORY_TABLES_TO_PRUNE`, and with the current defaults it's usually `3500 * 5 /
-        // 2`, so 8750 entries. Each entry is `160 bit + 64 bit`, so the total size should be up to
-        // ~0.25MB + some hashmap overhead. `blocks_since_last_run` is additionally limited by the
-        // `max_reorg_depth`, so no OOM is expected here.
-        let mut highest_deleted_accounts = FxHashMap::default();
-        let mut last_changeset_pruned_block = None;
-        let mut pruned_changesets = 0;
-        let mut done = true;
+        // Internal batch size to bound HashMap memory usage
+        const BATCH_SIZE: usize = MAX_ACCOUNT_HISTORY_ENTRIES_PER_RUN;
 
-        let walker = StaticFileAccountChangesetWalker::new(provider, range);
-        for result in walker {
-            if limiter.is_limit_reached() {
-                done = false;
+        let mut total_pruned = 0;
+        let mut actual_last_pruned_block: Option<BlockNumber> = None;
+        let mut overall_done = true;
+
+        let mut walker = StaticFileAccountChangesetWalker::new(provider, range).peekable();
+
+        loop {
+            // Collect a batch of changesets, bounded by BATCH_SIZE
+            let mut highest_deleted_accounts = FxHashMap::default();
+            let mut batch_last_block: Option<BlockNumber> = None;
+            let mut batch_count = 0;
+
+            while batch_count < BATCH_SIZE {
+                // Check limit before consuming next item
+                if limiter.is_limit_reached() {
+                    break;
+                }
+
+                match walker.next() {
+                    Some(Ok((block_number, changeset))) => {
+                        highest_deleted_accounts.insert(changeset.address, block_number);
+                        batch_last_block = Some(block_number);
+                        batch_count += 1;
+                        limiter.increment_deleted_entries_count();
+                    }
+                    Some(Err(e)) => return Err(e.into()),
+                    None => break, // Iterator exhausted
+                }
+            }
+
+            // No more data in this batch
+            if batch_count == 0 {
                 break;
             }
-            let (block_number, changeset) = result?;
-            highest_deleted_accounts.insert(changeset.address, block_number);
-            last_changeset_pruned_block = Some(block_number);
-            pruned_changesets += 1;
-            limiter.increment_deleted_entries_count();
+
+            actual_last_pruned_block = batch_last_block;
+
+            // Check if there's more data after this batch
+            let has_more_data = walker.peek().is_some();
+
+            // Track whether we're done for the final output
+            overall_done = !has_more_data;
+
+            trace!(target: "pruner", pruned = %batch_count, done = %overall_done, "Pruned account history batch (changesets from static files)");
+
+            let result = HistoryPruneResult {
+                highest_deleted: highest_deleted_accounts,
+                last_pruned_block: batch_last_block,
+                pruned_count: batch_count,
+                done: overall_done,
+            };
+
+            let output = finalize_history_prune::<_, tables::AccountsHistory, _, _>(
+                provider,
+                result,
+                range_end,
+                &limiter,
+                ShardedKey::new,
+                |a, b| a.key == b.key,
+            )?;
+
+            total_pruned += output.pruned;
+
+            // If external limit reached and there's more data, stop
+            // Otherwise continue to next batch (or exit if no more data)
+            if limiter.is_limit_reached() && has_more_data {
+                break;
+            }
         }
 
-        // Delete static file jars below the pruned block
-        if let Some(last_block) = last_changeset_pruned_block {
+        // Delete static files once at end
+        if let Some(last_block) = actual_last_pruned_block {
             provider
                 .static_file_provider()
                 .delete_segment_below_block(StaticFileSegment::AccountChangeSets, last_block + 1)?;
         }
-        trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets from static files)");
 
-        let result = HistoryPruneResult {
-            highest_deleted: highest_deleted_accounts,
-            last_pruned_block: last_changeset_pruned_block,
-            pruned_count: pruned_changesets,
-            done,
-        };
-        finalize_history_prune::<_, tables::AccountsHistory, _, _>(
-            provider,
-            result,
-            range_end,
-            &limiter,
-            ShardedKey::new,
-            |a, b| a.key == b.key,
-        )
-        .map_err(Into::into)
+        trace!(target: "pruner", pruned = %total_pruned, %overall_done, "Pruned account history (changesets from static files)");
+
+        let progress = limiter.progress(overall_done);
+        let last_checkpoint_block = actual_last_pruned_block
+            .map(|block| if overall_done { block } else { block.saturating_sub(1) })
+            .unwrap_or(range_end);
+
+        Ok(SegmentOutput {
+            progress,
+            pruned: total_pruned,
+            checkpoint: Some(SegmentOutputCheckpoint {
+                block_number: Some(last_checkpoint_block),
+                tx_number: None,
+            }),
+        })
     }
 
     fn prune_database<Provider>(

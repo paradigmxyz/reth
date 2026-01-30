@@ -27,6 +27,10 @@ use tracing::{instrument, trace};
 /// [`tables::StoragesHistory`]. We want to prune them to the same block number.
 const STORAGE_HISTORY_TABLES_TO_PRUNE: usize = 2;
 
+/// Maximum entries to process per prune run for storage history.
+/// This bounds memory usage of the `highest_deleted_storages` `HashMap`.
+const MAX_STORAGE_HISTORY_ENTRIES_PER_RUN: usize = 200_000;
+
 #[derive(Debug)]
 pub struct StorageHistory {
     mode: PruneMode,
@@ -78,6 +82,11 @@ where
 
 impl StorageHistory {
     /// Prunes storage history when changesets are stored in static files.
+    ///
+    /// Uses internal batching to bound memory usage of the `highest_deleted_storages` `HashMap`.
+    /// Each batch processes up to `MAX_STORAGE_HISTORY_ENTRIES_PER_RUN / 2` entries, then
+    /// flushes to the history index before continuing. This prevents OOM when pruning large
+    /// ranges with many unique (address, `storage_key`) pairs.
     fn prune_static_files<Provider>(
         &self,
         provider: &Provider,
@@ -88,6 +97,7 @@ impl StorageHistory {
     where
         Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
     {
+        // Respect user-provided limit if any, divided by 2 for the two tables
         let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
             input.limiter.set_deleted_entries_limit(limit / STORAGE_HISTORY_TABLES_TO_PRUNE)
         } else {
@@ -101,56 +111,109 @@ impl StorageHistory {
             ))
         }
 
-        // The size of this map is limited by `prune_delete_limit * blocks_since_last_run /
-        // STORAGE_HISTORY_TABLES_TO_PRUNE`, and with current defaults it's usually `3500 * 5
-        // / 2`, so 8750 entries. Each entry is `160 bit + 256 bit + 64 bit`, so the total
-        // size should be up to ~0.5MB + some hashmap overhead. `blocks_since_last_run` is
-        // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
-        let mut highest_deleted_storages = FxHashMap::default();
-        let mut last_changeset_pruned_block = None;
-        let mut pruned_changesets = 0;
-        let mut done = true;
+        // Internal batch size to bound HashMap memory usage
+        const BATCH_SIZE: usize =
+            MAX_STORAGE_HISTORY_ENTRIES_PER_RUN / STORAGE_HISTORY_TABLES_TO_PRUNE;
 
-        let walker = provider.static_file_provider().walk_storage_changeset_range(range);
-        for result in walker {
-            if limiter.is_limit_reached() {
-                done = false;
+        let mut total_pruned = 0;
+        let mut actual_last_pruned_block: Option<BlockNumber> = None;
+        let mut overall_done = true;
+
+        let mut walker =
+            provider.static_file_provider().walk_storage_changeset_range(range).peekable();
+
+        loop {
+            // Collect a batch of changesets, bounded by BATCH_SIZE
+            let mut highest_deleted_storages = FxHashMap::default();
+            let mut batch_last_block: Option<BlockNumber> = None;
+            let mut batch_count = 0;
+
+            while batch_count < BATCH_SIZE {
+                // Check limit before consuming next item
+                if limiter.is_limit_reached() {
+                    break;
+                }
+
+                match walker.next() {
+                    Some(Ok((block_address, entry))) => {
+                        let block_number = block_address.block_number();
+                        let address = block_address.address();
+                        highest_deleted_storages.insert((address, entry.key), block_number);
+                        batch_last_block = Some(block_number);
+                        batch_count += 1;
+                        limiter.increment_deleted_entries_count();
+                    }
+                    Some(Err(e)) => return Err(e.into()),
+                    None => break, // Iterator exhausted
+                }
+            }
+
+            // No more data in this batch
+            if batch_count == 0 {
                 break;
             }
-            let (block_address, entry) = result?;
-            let block_number = block_address.block_number();
-            let address = block_address.address();
-            highest_deleted_storages.insert((address, entry.key), block_number);
-            last_changeset_pruned_block = Some(block_number);
-            pruned_changesets += 1;
-            limiter.increment_deleted_entries_count();
+
+            actual_last_pruned_block = batch_last_block;
+
+            // Check if there's more data after this batch
+            let has_more_data = walker.peek().is_some();
+
+            // Track whether we're done for the final output
+            // We're done only if there's no more data AND we didn't hit the limit
+            overall_done = !has_more_data;
+
+            trace!(target: "pruner", pruned = %batch_count, done = %overall_done, "Pruned storage history batch (changesets from static files)");
+
+            let result = HistoryPruneResult {
+                highest_deleted: highest_deleted_storages,
+                last_pruned_block: batch_last_block,
+                pruned_count: batch_count,
+                done: overall_done,
+            };
+
+            let output = finalize_history_prune::<_, tables::StoragesHistory, (Address, B256), _>(
+                provider,
+                result,
+                range_end,
+                &limiter,
+                |(address, storage_key), block_number| {
+                    StorageShardedKey::new(address, storage_key, block_number)
+                },
+                |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
+            )?;
+
+            // output.pruned already includes changesets + deleted history indices
+            total_pruned += output.pruned;
+
+            // If external limit reached and there's more data, stop
+            // Otherwise continue to next batch (or exit if no more data)
+            if limiter.is_limit_reached() && has_more_data {
+                break;
+            }
         }
 
-        // Delete static file jars below the pruned block
-        if let Some(last_block) = last_changeset_pruned_block {
+        // Delete static file jars below the pruned block (once at end)
+        if let Some(last_block) = actual_last_pruned_block {
             provider
                 .static_file_provider()
                 .delete_segment_below_block(StaticFileSegment::StorageChangeSets, last_block + 1)?;
         }
-        trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned storage history (changesets from static files)");
 
-        let result = HistoryPruneResult {
-            highest_deleted: highest_deleted_storages,
-            last_pruned_block: last_changeset_pruned_block,
-            pruned_count: pruned_changesets,
-            done,
-        };
-        finalize_history_prune::<_, tables::StoragesHistory, (Address, B256), _>(
-            provider,
-            result,
-            range_end,
-            &limiter,
-            |(address, storage_key), block_number| {
-                StorageShardedKey::new(address, storage_key, block_number)
-            },
-            |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
-        )
-        .map_err(Into::into)
+        trace!(target: "pruner", pruned = %total_pruned, %overall_done, "Pruned storage history (changesets from static files)");
+
+        let progress = limiter.progress(overall_done);
+        let last_checkpoint_block = actual_last_pruned_block
+            .map(|block| if overall_done { block } else { block.saturating_sub(1) })
+            .unwrap_or(range_end);
+
+        Ok(SegmentOutput {
+            progress,
+            pruned: total_pruned,
+            checkpoint: Some(SegmentOutputCheckpoint {
+                block_number: Some(last_checkpoint_block),
+                tx_number: None,
+            }),
+        })
     }
 
     fn prune_database<Provider>(
@@ -552,5 +615,126 @@ mod tests {
         );
         test_prune(998, 2, (PruneProgress::Finished, 500));
         test_prune(1200, 3, (PruneProgress::Finished, 202));
+    }
+
+    /// Test that verifies the pruner uses internal batching to prevent OOM.
+    ///
+    /// This test replicates RETH-291: when running `reth prune` CLI with edge flag,
+    /// the prune command sets `delete_limit(usize::MAX)`. Without internal batching, the pruner
+    /// would accumulate all unique (address, `storage_key`) pairs into the `HashMap`, causing OOM
+    /// on mainnet (~500M unique pairs = ~45GB).
+    ///
+    /// The fix uses internal batching: each batch processes up to 100k entries, flushes to the
+    /// history index, then continues. This bounds `HashMap` memory while still completing all work.
+    #[test]
+    fn prune_static_file_uses_internal_batching_for_unbounded_limit() {
+        use alloy_primitives::{Address, U256};
+        use reth_primitives_traits::{Account, StorageEntry};
+        use reth_testing_utils::generators::ChangeSet;
+
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+
+        // Create blocks
+        let blocks = random_block_range(
+            &mut rng,
+            0..=500,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        // Manually construct changesets with many unique storage slots
+        // We need > 100k unique (address, slot) pairs to properly test batching
+        // Create 200 addresses × 600 unique slots = 120k unique keys
+        let mut changesets: Vec<ChangeSet> = Vec::new();
+
+        for block_num in 0..=500u64 {
+            let mut block_changesets = Vec::new();
+            // Each block: 200 addresses, each with some storage entries
+            for addr_idx in 0..200u64 {
+                let address = Address::with_last_byte((addr_idx % 256) as u8);
+                let account = Account::default();
+
+                // Create unique storage slots based on block and address
+                let entries: Vec<StorageEntry> = (0..3)
+                    .map(|slot_idx| {
+                        // Make slots unique across blocks to maximize unique keys
+                        let slot = U256::from(block_num * 1000 + addr_idx * 10 + slot_idx);
+                        StorageEntry { key: B256::from(slot), value: U256::from(1) }
+                    })
+                    .collect();
+
+                block_changesets.push((address, account, entries));
+            }
+            changesets.push(block_changesets);
+        }
+
+        let total_changesets: usize = changesets
+            .iter()
+            .flat_map(|cs| cs.iter().flat_map(|(_, _, entries)| entries.iter()))
+            .count();
+
+        // Count unique (address, storage_key) pairs - this is what grows the HashMap
+        use std::collections::HashSet;
+        let unique_pairs: HashSet<(Address, B256)> = changesets
+            .iter()
+            .flat_map(|cs| {
+                cs.iter().flat_map(|(addr, _, entries)| entries.iter().map(move |e| (*addr, e.key)))
+            })
+            .collect();
+
+        // Ensure we have enough unique keys to test HashMap growth (the OOM root cause)
+        // The internal batch size is MAX_STORAGE_HISTORY_ENTRIES_PER_RUN / 2 = 100k
+        assert!(
+            unique_pairs.len() > 200_000,
+            "Need > 200k unique (address, slot) pairs to test internal batching, got {}",
+            unique_pairs.len()
+        );
+
+        // Ensure we have enough data to require multiple batches
+        assert!(
+            total_changesets > 100_000,
+            "Need at least 100k changesets to test batching, got {total_changesets}"
+        );
+
+        db.insert_changesets_to_static_files(changesets.clone(), None)
+            .expect("insert changesets to static files");
+        db.insert_history(changesets.clone(), None).expect("insert history");
+
+        // Simulate `reth prune` CLI behavior: no limit set (unbounded)
+        // With internal batching, this should complete without OOM
+        let prune_mode = PruneMode::Before(499);
+        let limiter = PruneLimiter::default(); // No limit - simulates CLI behavior
+
+        let input = PruneInput { previous_checkpoint: None, to_block: 499, limiter };
+        let segment = StorageHistory::new(prune_mode);
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        provider.set_storage_settings_cache(
+            StorageSettings::default().with_storage_changesets_in_static_files(true),
+        );
+
+        let result = segment.prune(&provider, input).unwrap();
+
+        // With internal batching, unbounded runs should complete (Finished)
+        // The batching bounds memory per-batch while still processing all data
+        assert_matches!(
+            result.progress,
+            PruneProgress::Finished,
+            "Expected Finished since internal batching allows completing all work. \
+             Got {:?}. Pruned {} entries (total changesets: {}, unique pairs: {}).",
+            result.progress,
+            result.pruned,
+            total_changesets,
+            unique_pairs.len()
+        );
+
+        // Verify we pruned all changesets (plus some history indices)
+        assert!(
+            result.pruned >= total_changesets,
+            "Expected to prune at least {} changesets, got {}",
+            total_changesets,
+            result.pruned
+        );
     }
 }
