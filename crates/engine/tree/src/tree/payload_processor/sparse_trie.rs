@@ -10,7 +10,7 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::{IntoParallelRefMutIterator, ParallelBridge, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelBridge, ParallelIterator};
 use reth_primitives_traits::Account;
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -433,13 +433,27 @@ where
         skip_all
     )]
     fn process_leaf_updates(&mut self) -> SparseTrieResult<()> {
-        for (address, updates) in &mut self.storage_updates {
-            let fetched = self.fetched_storage_targets.entry(*address).or_default();
-            let mut targets = Vec::new();
+        // Make sure that tries exist for all addresses that have updates.
+        for address in self.storage_updates.keys() {
+            self.trie.get_or_create_storage_trie_mut(*address);
+        }
 
-            self.trie.get_or_create_storage_trie_mut(*address).update_leaves(
-                updates,
-                |path, min_len| match fetched.entry(path) {
+        let storage_results: Vec<_> = self
+            .trie
+            .storage_tries()
+            .iter_mut()
+            .filter_map(|(address, trie)| {
+                let updates = self.storage_updates.remove(address)?;
+                let fetched = self.fetched_storage_targets.remove(address).unwrap_or_default();
+
+                Some((address, updates, fetched, trie))
+            })
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .map(|(address, mut updates, mut fetched, trie)| {
+                let mut targets = Vec::new();
+
+                trie.update_leaves(&mut updates, |path, min_len| match fetched.entry(path) {
                     Entry::Occupied(mut entry) => {
                         if min_len < *entry.get() {
                             entry.insert(min_len);
@@ -450,8 +464,15 @@ where
                         entry.insert(min_len);
                         targets.push(Target::new(path).with_min_len(min_len));
                     }
-                },
-            )?;
+                })?;
+
+                SparseTrieResult::Ok((address, targets, fetched, updates))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for (address, targets, fetched, updates) in storage_results {
+            self.fetched_storage_targets.insert(*address, fetched);
+            self.storage_updates.insert(*address, updates);
 
             if !targets.is_empty() {
                 self.pending_targets.storage_targets.entry(*address).or_default().extend(targets);
