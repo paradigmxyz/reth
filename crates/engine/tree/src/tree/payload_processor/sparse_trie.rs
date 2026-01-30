@@ -178,6 +178,12 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     ///   - Some(_): account was changed/destroyed and is awaiting storage root calculation/reveal
     ///     to complete.
     pending_account_updates: B256Map<Option<Option<Account>>>,
+    /// Cache of account proof targets that were already fetched/requested from the proof workers.
+    /// account -> lowest `min_len` requested.
+    fetched_account_targets: B256Map<u8>,
+    /// Cache of storage proof targets that have already been fetched/requested from the proof
+    /// workers. account -> slot -> lowest `min_len` requested.
+    fetched_storage_targets: B256Map<B256Map<u8>>,
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
 }
@@ -204,6 +210,8 @@ where
             account_updates: Default::default(),
             storage_updates: Default::default(),
             pending_account_updates: Default::default(),
+            fetched_account_targets: Default::default(),
+            fetched_storage_targets: Default::default(),
             metrics,
         }
     }
@@ -397,13 +405,27 @@ where
 
         for (addr, updates) in &mut self.storage_updates {
             let trie = self.trie.get_or_create_storage_trie_mut(*addr);
+            let fetched_storage = self.fetched_storage_targets.entry(*addr).or_default();
 
-            trie.update_leaves(updates, |path, min_len| {
-                targets
-                    .storage_targets
-                    .entry(*addr)
-                    .or_default()
-                    .push(Target::new(path).with_min_len(min_len));
+            trie.update_leaves(updates, |path, min_len| match fetched_storage.entry(path) {
+                Entry::Occupied(mut entry) => {
+                    if min_len < *entry.get() {
+                        entry.insert(min_len);
+                        targets
+                            .storage_targets
+                            .entry(*addr)
+                            .or_default()
+                            .push(Target::new(path).with_min_len(min_len));
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(min_len);
+                    targets
+                        .storage_targets
+                        .entry(*addr)
+                        .or_default()
+                        .push(Target::new(path).with_min_len(min_len));
+                }
             })
             .map_err(ProviderError::other)?;
 
@@ -481,7 +503,18 @@ where
         self.trie
             .trie_mut()
             .update_leaves(&mut self.account_updates, |target, min_len| {
-                targets.account_targets.push(Target::new(target).with_min_len(min_len));
+                match self.fetched_account_targets.entry(target) {
+                    Entry::Occupied(mut entry) => {
+                        if min_len < *entry.get() {
+                            entry.insert(min_len);
+                            targets.account_targets.push(Target::new(target).with_min_len(min_len));
+                        }
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(min_len);
+                        targets.account_targets.push(Target::new(target).with_min_len(min_len));
+                    }
+                }
             })
             .map_err(ProviderError::other)?;
 

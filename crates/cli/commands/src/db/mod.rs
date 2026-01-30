@@ -17,6 +17,7 @@ mod get;
 mod list;
 mod repair_trie;
 mod settings;
+mod state;
 mod static_file_header;
 mod stats;
 /// DB List TUI
@@ -65,6 +66,8 @@ pub enum Subcommands {
     Settings(settings::Command),
     /// Gets storage size information for an account
     AccountStorage(account_storage::Command),
+    /// Gets account state and storage at a specific block
+    State(state::Command),
 }
 
 /// Initializes a provider factory with specified access rights, and then execute with the provided
@@ -194,6 +197,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 });
             }
             Subcommands::AccountStorage(command) => {
+                db_exec!(self.env, tool, N, AccessRights::RO, {
+                    command.execute(&tool)?;
+                });
+            }
+            Subcommands::State(command) => {
                 db_exec!(self.env, tool, N, AccessRights::RO, {
                     command.execute(&tool)?;
                 });
