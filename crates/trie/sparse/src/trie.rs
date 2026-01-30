@@ -24,7 +24,6 @@ use reth_trie_common::{
     LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, TrieMask, TrieNode, CHILD_INDEX_RANGE,
     EMPTY_ROOT_HASH,
 };
-use smallvec::SmallVec;
 use tracing::{debug, instrument, trace};
 
 /// The level below which the sparse trie hashes are calculated in
@@ -2003,9 +2002,9 @@ pub struct RlpNodeBuffers {
     /// Stack of RLP nodes
     rlp_node_stack: Vec<RlpNodeStackItem>,
     /// Reusable branch child path
-    branch_child_buf: SmallVec<[Nibbles; 16]>,
+    branch_child_buf: Vec<Nibbles>,
     /// Reusable branch value stack
-    branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
+    branch_value_stack_buf: Vec<RlpNode>,
 }
 
 impl RlpNodeBuffers {
@@ -2018,8 +2017,8 @@ impl RlpNodeBuffers {
                 is_in_prefix_set: None,
             }],
             rlp_node_stack: Vec::new(),
-            branch_child_buf: SmallVec::<[Nibbles; 16]>::new_const(),
-            branch_value_stack_buf: SmallVec::<[RlpNode; 16]>::new_const(),
+            branch_child_buf: Vec::new(),
+            branch_value_stack_buf: Vec::new(),
         }
     }
 }
