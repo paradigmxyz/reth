@@ -36,8 +36,8 @@ pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
 >;
 
 /// Mock [`reth_node_types::NodeTypesWithDB`] for testing.
-pub type MockNodeTypesWithDB<DB = TempDatabase<DatabaseEnv>> =
-    NodeTypesWithDBAdapter<MockNodeTypes, Arc<DB>>;
+pub type MockNodeTypesWithDB<DB = Arc<TempDatabase<DatabaseEnv>>> =
+    NodeTypesWithDBAdapter<MockNodeTypes, DB>;
 
 /// Creates test provider factory with mainnet chain spec.
 pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
