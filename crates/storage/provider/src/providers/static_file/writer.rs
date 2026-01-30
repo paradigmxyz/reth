@@ -410,7 +410,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
         if self.writer.is_dirty() {
             if !self.synced {
-                self.writer.sync_all().map_err(ProviderError::other)?;
+                // Must call self.sync_all() to flush changeset offsets and update
+                // the header's changeset_offsets_len, not just the inner writer
+                self.sync_all()?;
             }
 
             self.writer.finalize().map_err(ProviderError::other)?;
