@@ -1063,9 +1063,9 @@ impl SparseTrieExt for ParallelSparseTrie {
         // DFS traversal: pop path and depth, skip if subtrie or node not found.
         while let Some((path, depth)) = stack.pop() {
             // Skip traversal into hot lower subtries beyond max_depth.
-            // At exactly max_depth, we still process the node to prune its children.
+            // At max_depth, we still need to process the node to convert children to hashes.
             // This keeps frequently-modified subtries revealed to avoid expensive re-reveals.
-            if depth >= max_depth &&
+            if depth > max_depth &&
                 let SparseSubtrieType::Lower(idx) = SparseSubtrieType::from_path(&path) &&
                 self.subtrie_heat.is_hot(idx)
             {
@@ -2132,12 +2132,12 @@ impl Default for SubtrieModifications {
 }
 
 impl SubtrieModifications {
-    /// Marks a subtrie as modified, incrementing its heat by 2.
+    /// Marks a subtrie as modified, incrementing its heat by 1.
     #[inline]
     fn mark_modified(&mut self, idx: usize) {
         debug_assert!(idx < NUM_LOWER_SUBTRIES);
         self.modified.set(idx);
-        self.heat[idx] = self.heat[idx].saturating_add(2);
+        self.heat[idx] = self.heat[idx].saturating_add(1);
     }
 
     /// Returns whether a subtrie is currently hot (heat > 0).
@@ -7880,9 +7880,9 @@ mod tests {
             let nodes_before = trie.size_hint();
 
             // Prune multiple times to allow heat to fully decay.
-            // Heat starts at 2 and decays by 1 each cycle for unmodified subtries,
-            // so we need 3 prune cycles: 2→1, 1→0, then actual prune.
-            for _ in 0..3 {
+            // Heat starts at 1 and decays by 1 each cycle for unmodified subtries,
+            // so we need 2 prune cycles: 1→0, then actual prune.
+            for _ in 0..2 {
                 trie.prune(max_depth);
             }
 
@@ -7896,7 +7896,8 @@ mod tests {
             );
 
             if max_depth == 0 {
-                assert_eq!(nodes_after, 1, "only root should be revealed after prune(0)");
+                // Root + 4 hash stubs for children at [0], [1], [2], [3]
+                assert_eq!(nodes_after, 5, "root + 4 hash stubs after prune(0)");
             }
         }
     }
@@ -7985,14 +7986,15 @@ mod tests {
 
         let root_before = trie.root();
         // Prune multiple times to allow heat to fully decay.
-        // Heat starts at 2 and decays by 1 each cycle for unmodified subtries,
-        // so we need 3 prune cycles: 2→1, 1→0, then actual prune.
-        for _ in 0..3 {
+        // Heat starts at 1 and decays by 1 each cycle for unmodified subtries,
+        // so we need 2 prune cycles: 1→0, then actual prune.
+        for _ in 0..2 {
             trie.prune(1);
         }
 
         assert_eq!(root_before, trie.root(), "root hash should be preserved");
-        assert_eq!(trie.size_hint(), 2, "should have root + extension after prune(1)");
+        // Root + extension + 2 hash stubs (for the two leaves' parent branches)
+        assert_eq!(trie.size_hint(), 4, "root + extension + hash stubs after prune(1)");
     }
 
     #[test]
@@ -8057,9 +8059,9 @@ mod tests {
         let root_before = trie.root();
 
         // Prune multiple times to allow heat to fully decay.
-        // Heat starts at 2 and decays by 1 each cycle for unmodified subtries.
+        // Heat starts at 1 and decays by 1 each cycle for unmodified subtries.
         let mut total_pruned = 0;
-        for _ in 0..3 {
+        for _ in 0..2 {
             total_pruned += trie.prune(1);
         }
 
