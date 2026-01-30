@@ -294,6 +294,7 @@ where
             if self.updates.is_empty() && self.proof_result_rx.is_empty() {
                 self.dispatch_pending_targets();
                 self.process_updates()?;
+                self.dispatch_pending_targets();
             }
 
             if self.finished_state_updates &&
