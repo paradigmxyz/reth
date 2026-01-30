@@ -420,6 +420,11 @@ where
         })
     }
 
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
     fn process_leaf_updates(&mut self) -> SparseTrieResult<()> {
         for (address, updates) in &mut self.storage_updates {
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
@@ -563,6 +568,11 @@ where
         Ok(())
     }
 
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
     fn dispatch_pending_targets(&mut self) {
         if !self.pending_targets.is_empty() {
             let chunking_length = self.pending_targets.chunking_length();
