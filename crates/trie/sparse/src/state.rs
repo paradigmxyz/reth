@@ -236,6 +236,11 @@ where
         self.storage.tries.insert(address, storage_trie);
     }
 
+    /// Returns mutable reference to storage tries.
+    pub const fn storage_tries(&mut self) -> &mut B256Map<RevealableSparseTrie<S>> {
+        &mut self.storage.tries
+    }
+
     /// Returns mutable reference to storage sparse trie, creating a blind one if it doesn't exist.
     pub fn get_or_create_storage_trie_mut(
         &mut self,

@@ -4,7 +4,7 @@ use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets
 use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
-use reth_execution_errors::{StateProofError, StorageRootError};
+use reth_execution_errors::{SparseTrieError, StateProofError, StorageRootError};
 use reth_provider::{DatabaseProviderROFactory, ProviderError};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -235,6 +235,9 @@ pub enum ParallelStateRootError {
     /// Other unspecified error.
     #[error("{_0}")]
     Other(String),
+    /// Sparse trie error.
+    #[error(transparent)]
+    SparseTrie(#[from] SparseTrieError),
 }
 
 impl From<ParallelStateRootError> for ProviderError {
@@ -245,6 +248,7 @@ impl From<ParallelStateRootError> for ProviderError {
                 Self::Database(error)
             }
             ParallelStateRootError::Other(other) => Self::Database(DatabaseError::Other(other)),
+            ParallelStateRootError::SparseTrie(error) => Self::other(error),
         }
     }
 }

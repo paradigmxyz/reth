@@ -10,8 +10,7 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
-use reth_errors::ProviderError;
+use rayon::iter::{IntoParallelRefMutIterator, ParallelBridge, ParallelIterator};
 use reth_primitives_traits::Account;
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -27,7 +26,7 @@ use reth_trie_parallel::{
     targets_v2::MultiProofTargetsV2,
 };
 use reth_trie_sparse::{
-    errors::{SparseStateTrieResult, SparseTrieErrorKind},
+    errors::{SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, LeafUpdate, SerialSparseTrie, SparseStateTrie, SparseTrie,
     SparseTrieExt,
@@ -270,6 +269,8 @@ where
                         result.extend(res);
                     }
                     self.on_proof_result(result)?;
+
+                    self.process_leaf_updates()?;
                 },
                 recv(self.updates) -> message => {
                     let update = match message {
@@ -280,9 +281,11 @@ where
                     };
 
                     self.on_multiproof_message(update);
+                    self.process_leaf_updates()?;
 
                     while let Ok(update) = self.updates.try_recv() {
                         self.on_multiproof_message(update);
+                        self.process_leaf_updates()?;
                     }
                 }
             }
@@ -412,68 +415,116 @@ where
         })
     }
 
+    fn process_leaf_updates(&mut self) -> SparseTrieResult<()> {
+        let mut targets = MultiProofTargetsV2::default();
+
+        for (address, updates) in &mut self.storage_updates {
+            self.trie.get_or_create_storage_trie_mut(*address).update_leaves(
+                updates,
+                |path, min_len| match self
+                    .fetched_storage_targets
+                    .entry(*address)
+                    .or_default()
+                    .entry(path)
+                {
+                    Entry::Occupied(mut entry) => {
+                        if min_len < *entry.get() {
+                            entry.insert(min_len);
+                            targets
+                                .storage_targets
+                                .entry(*address)
+                                .or_default()
+                                .push(Target::new(path).with_min_len(min_len));
+                        }
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(min_len);
+                        targets
+                            .storage_targets
+                            .entry(*address)
+                            .or_default()
+                            .push(Target::new(path).with_min_len(min_len));
+                    }
+                },
+            )?;
+        }
+
+        // Process account trie updates and fill the account targets.
+        self.trie.trie_mut().update_leaves(
+            &mut self.account_updates,
+            |target, min_len| match self.fetched_account_targets.entry(target) {
+                Entry::Occupied(mut entry) => {
+                    if min_len < *entry.get() {
+                        entry.insert(min_len);
+                        targets.account_targets.push(Target::new(target).with_min_len(min_len));
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(min_len);
+                    targets.account_targets.push(Target::new(target).with_min_len(min_len));
+                }
+            },
+        )?;
+
+        if !targets.is_empty() {
+            let chunking_length = targets.chunking_length();
+            dispatch_with_chunking(
+                targets,
+                chunking_length,
+                Some(60),
+                300,
+                self.proof_worker_handle.available_account_workers(),
+                self.proof_worker_handle.available_storage_workers(),
+                MultiProofTargetsV2::chunks,
+                |proof_targets| {
+                    if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(
+                        AccountMultiproofInput::V2 {
+                            targets: proof_targets,
+                            proof_result_sender: ProofResultContext::new(
+                                self.proof_result_tx.clone(),
+                                0,
+                                HashedPostState::default(),
+                                Instant::now(),
+                            ),
+                        },
+                    ) {
+                        error!("failed to dispatch account multiproof: {e:?}");
+                    }
+                },
+            );
+        }
+
+        Ok(())
+    }
+
     /// Applies updates to the sparse trie and dispatches requested multiproof targets.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    fn process_updates(&mut self) -> Result<(), ProviderError> {
-        let mut targets = MultiProofTargetsV2::default();
+    fn process_updates(&mut self) -> SparseTrieResult<()> {
+        self.process_leaf_updates()?;
 
-        // Take ownership of storage updates and tries for parallel processing
-        let results = std::mem::take(&mut self.storage_updates)
-            .into_iter()
-            .map(|(addr, updates)| {
-                let trie = self.trie.take_or_create_storage_trie(&addr);
-                let fetched = self.fetched_storage_targets.remove(&addr).unwrap_or_default();
-                (addr, updates, trie, fetched)
+        let roots = self
+            .trie
+            .storage_tries()
+            .par_iter_mut()
+            .filter(|(address, _)| {
+                self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty())
             })
-            .collect::<Vec<_>>()
-            .into_par_iter()
-            .map(|(addr, mut updates, mut trie, mut fetched)| {
-                let mut targets = Vec::new();
-                trie.update_leaves(&mut updates, |path, min_len| match fetched.entry(path) {
-                    Entry::Occupied(mut entry) => {
-                        if min_len < *entry.get() {
-                            entry.insert(min_len);
-                            targets.push(Target::new(path).with_min_len(min_len));
-                        }
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(min_len);
-                        targets.push(Target::new(path).with_min_len(min_len));
-                    }
-                })
-                .map_err(ProviderError::other)?;
+            .map(|(address, trie)| {
+                let root =
+                    trie.root().expect("updates are drained, trie should be revealed by now");
 
-                // Compute the storage root if we've processed all updates.
-                let root = updates.is_empty().then(|| {
-                    trie.root().expect("updates are drained, trie should be revealed by now")
-                });
-
-                Ok::<_, ProviderError>((addr, targets, trie, root, updates, fetched))
+                (address, root)
             })
             .collect::<Vec<_>>();
 
-        // Restore storage updates, tries, and fetched targets
-        for result in results {
-            let (addr, storage_targets, trie, root, updates, fetched) = result?;
-
-            // Restore storage updates, tries, and fetched targets
-            self.storage_updates.insert(addr, updates);
-            self.trie.insert_storage_trie(addr, trie);
-            self.fetched_storage_targets.insert(addr, fetched);
-
-            // Record the storage targets, if any.
-            if !storage_targets.is_empty() {
-                targets.storage_targets.insert(addr, storage_targets);
-            }
-
+        for (address, storage_root) in roots {
             // If the storage root is known and we have a pending update for this account, encode it
             // into a proper update.
-            if let Some(storage_root) = root &&
-                let Entry::Occupied(entry) = self.pending_account_updates.entry(addr) &&
+            if let Entry::Occupied(entry) = self.pending_account_updates.entry(*address) &&
                 entry.get().is_some()
             {
                 let account = entry.remove().expect("just checked, should be Some");
@@ -485,11 +536,11 @@ where
                     // TODO: optimize allocation
                     alloy_rlp::encode(account.unwrap_or_default().into_trie_account(storage_root))
                 };
-                self.account_updates.insert(addr, LeafUpdate::Changed(encoded));
+                self.account_updates.insert(*address, LeafUpdate::Changed(encoded));
             }
         }
 
-        // Now handle pending account updates that can be upgraded to a proper update.
+        // Now promote pending account updates if possible.
         self.pending_account_updates.retain(|addr, account| {
             // If account has pending storage updates, it is still pending.
             if self.storage_updates.get(addr).is_some_and(|updates| !updates.is_empty()) {
@@ -533,52 +584,8 @@ where
             false
         });
 
-        // Process account trie updates and fill the account targets.
-        self.trie
-            .trie_mut()
-            .update_leaves(&mut self.account_updates, |target, min_len| {
-                match self.fetched_account_targets.entry(target) {
-                    Entry::Occupied(mut entry) => {
-                        if min_len < *entry.get() {
-                            entry.insert(min_len);
-                            targets.account_targets.push(Target::new(target).with_min_len(min_len));
-                        }
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(min_len);
-                        targets.account_targets.push(Target::new(target).with_min_len(min_len));
-                    }
-                }
-            })
-            .map_err(ProviderError::other)?;
-
-        if !targets.is_empty() {
-            let chunking_length = targets.chunking_length();
-            dispatch_with_chunking(
-                targets,
-                chunking_length,
-                Some(60),
-                300,
-                self.proof_worker_handle.available_account_workers(),
-                self.proof_worker_handle.available_storage_workers(),
-                MultiProofTargetsV2::chunks,
-                |proof_targets| {
-                    if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(
-                        AccountMultiproofInput::V2 {
-                            targets: proof_targets,
-                            proof_result_sender: ProofResultContext::new(
-                                self.proof_result_tx.clone(),
-                                0,
-                                HashedPostState::default(),
-                                Instant::now(),
-                            ),
-                        },
-                    ) {
-                        error!("failed to dispatch account multiproof: {e:?}");
-                    }
-                },
-            );
-        }
+        // Now process any new leaf updates from promotions above.
+        self.process_leaf_updates()?;
 
         Ok(())
     }
