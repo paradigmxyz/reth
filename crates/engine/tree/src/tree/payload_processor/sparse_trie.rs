@@ -436,6 +436,8 @@ where
         skip_all
     )]
     fn process_leaf_updates(&mut self) -> SparseTrieResult<()> {
+        self.pending_updates = 0;
+
         // Make sure that tries exist for all addresses that have updates.
         for address in self.storage_updates.keys() {
             self.trie.get_or_create_storage_trie_mut(*address);
