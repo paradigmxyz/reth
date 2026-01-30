@@ -18,7 +18,7 @@ use crossbeam_channel::Sender as CrossbeamSender;
 use executor::WorkloadExecutor;
 use metrics::Counter;
 use multiproof::{SparseTrieUpdate, *};
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
@@ -41,7 +41,7 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    ClearedSparseStateTrie, RevealableSparseTrie, SparseStateTrie,
+    ClearedSparseStateTrie, RevealableSparseTrie, SerialSparseTrie, SparseStateTrie,
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
@@ -101,6 +101,8 @@ type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     <N as NodePrimitives>::Receipt,
 >;
 
+type SparseTrieImpl = SerialSparseTrie;
+
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
 pub struct PayloadProcessor<Evm>
@@ -127,9 +129,7 @@ where
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// A cleared `SparseStateTrie`, kept around to be reused for the state root computation so
     /// that allocations can be minimized.
-    sparse_state_trie: Arc<
-        parking_lot::Mutex<Option<ClearedSparseStateTrie<ParallelSparseTrie, ParallelSparseTrie>>>,
-    >,
+    sparse_state_trie: Arc<Mutex<Option<ClearedSparseStateTrie<SparseTrieImpl, SparseTrieImpl>>>>,
     /// Maximum concurrency for prewarm task.
     prewarm_max_concurrency: usize,
     /// Whether to disable cache metrics recording.
@@ -514,8 +514,9 @@ where
             // if there's none to reuse.
             let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
                 let default_trie = RevealableSparseTrie::blind_from(
-                    ParallelSparseTrie::default()
-                        .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
+                    // SparseTrieImpl::default()
+                    //     .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
+                    SparseTrieImpl::default(),
                 );
                 ClearedSparseStateTrie::from_state_trie(
                     SparseStateTrie::new()
@@ -525,13 +526,12 @@ where
                 )
             });
 
-            let task =
-                SparseTrieTask::<_, ParallelSparseTrie, ParallelSparseTrie>::new_with_cleared_trie(
-                    sparse_trie_rx,
-                    proof_worker_handle,
-                    trie_metrics,
-                    sparse_state_trie,
-                );
+            let task = SparseTrieTask::<_, SparseTrieImpl, SparseTrieImpl>::new_with_cleared_trie(
+                sparse_trie_rx,
+                proof_worker_handle,
+                trie_metrics,
+                sparse_state_trie,
+            );
 
             let (result, trie) = task.run();
             // Send state root computation result

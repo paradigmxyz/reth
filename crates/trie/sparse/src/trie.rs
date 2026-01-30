@@ -30,7 +30,7 @@ use tracing::{debug, instrument, trace};
 
 /// Index into a [`NodeArena`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-struct NodeId(NonZeroU32);
+pub struct NodeId(NonZeroU32);
 
 impl NodeId {
     /// Creates a new `NodeId` from a raw index.
