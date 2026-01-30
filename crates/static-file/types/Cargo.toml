@@ -36,5 +36,6 @@ std = [
     "strum/std",
     "serde_json/std",
     "fixed-map/std",
+    "tracing/std",
 ]
 clap = ["dep:clap"]
