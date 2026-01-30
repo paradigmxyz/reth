@@ -15,7 +15,7 @@ use reth_db_api::{
 };
 use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
-use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds};
+use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds, sync::Arc};
 
 /// Read only Cursor.
 pub type CursorRO<T> = Cursor<RO, T>;
