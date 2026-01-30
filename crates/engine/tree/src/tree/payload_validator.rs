@@ -402,7 +402,12 @@ where
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
-        let env = ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash() };
+        let env = ExecutionEnv {
+            evm_env,
+            hash: input.hash(),
+            parent_hash: input.parent_hash(),
+            parent_state_root: parent_block.state_root(),
+        };
 
         // Plan the strategy used for state root computation.
         let strategy = self.plan_state_root_computation();
