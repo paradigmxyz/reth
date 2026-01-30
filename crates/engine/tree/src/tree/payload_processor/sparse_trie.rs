@@ -185,6 +185,8 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     /// Cache of storage proof targets that have already been fetched/requested from the proof
     /// workers. account -> slot -> lowest `min_len` requested.
     fetched_storage_targets: B256Map<B256Map<u8>>,
+    /// Whether the last state update has been received.
+    finished_state_updates: bool,
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
 }
@@ -213,6 +215,7 @@ where
             pending_account_updates: Default::default(),
             fetched_account_targets: Default::default(),
             fetched_storage_targets: Default::default(),
+            finished_state_updates: Default::default(),
             metrics,
         }
     }
@@ -247,7 +250,6 @@ where
     fn run_inner(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
-        let mut finished_state_updates = false;
         loop {
             crossbeam_channel::select_biased! {
                 recv(self.proof_result_rx) -> message => {
@@ -274,27 +276,17 @@ where
                         }
                     };
 
-                    match update {
-                        MultiProofMessage::PrefetchProofs(targets) => {
-                            self.on_prewarm_targets(targets);
-                        }
-                        MultiProofMessage::StateUpdate(_, state) => {
-                            self.on_state_update(state);
-                        }
-                        MultiProofMessage::EmptyProof { sequence_number: _, state } => {
-                            self.on_hashed_state_update(state);
-                        }
-                        MultiProofMessage::BlockAccessList(_) => todo!(),
-                        MultiProofMessage::FinishedStateUpdates => {
-                            finished_state_updates = true;
-                        }
+                    self.on_multiproof_message(update);
+
+                    while let Ok(update) = self.updates.try_recv() {
+                        self.on_multiproof_message(update);
                     }
                 }
             }
 
             self.process_updates()?;
 
-            if finished_state_updates &&
+            if self.finished_state_updates &&
                 self.account_updates.is_empty() &&
                 self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
             {
@@ -320,6 +312,16 @@ where
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
+    }
+
+    fn on_multiproof_message(&mut self, message: MultiProofMessage) {
+        match message {
+            MultiProofMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
+            MultiProofMessage::StateUpdate(_, state) => self.on_state_update(state),
+            MultiProofMessage::EmptyProof { .. } => unreachable!(),
+            MultiProofMessage::BlockAccessList(_) => todo!(),
+            MultiProofMessage::FinishedStateUpdates => self.finished_state_updates = true,
+        }
     }
 
     #[instrument(
@@ -362,11 +364,7 @@ where
     )]
     fn on_state_update(&mut self, update: EvmState) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
-        self.on_hashed_state_update(hashed_state_update)
-    }
 
-    /// Processes a hashed state update and encodes all state changes as trie updates.
-    fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (address, storage) in hashed_state_update.storages {
             for (slot, value) in storage.storage {
                 let encoded = if value.is_zero() {
