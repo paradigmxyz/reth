@@ -99,6 +99,10 @@ pub struct EthTransactionValidator<Client, T, Evm> {
     validation_metrics: TxPoolValidationMetrics,
     /// Bitmap of custom transaction types that are allowed.
     other_tx_types: U256,
+    /// Whether EIP-7594 blob sidecars are accepted.
+    /// When false, EIP-7594 (v1) sidecars are always rejected and EIP-4844 (v0) sidecars
+    /// are always accepted, regardless of Osaka fork activation.
+    eip7594: bool,
 }
 
 impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
@@ -690,16 +694,27 @@ where
                 EthBlobTransactionSidecar::Present(sidecar) => {
                     let now = Instant::now();
 
-                    if self.fork_tracker.is_osaka_activated() {
-                        if sidecar.is_eip4844() {
+                    // EIP-7594 sidecar version handling
+                    if self.eip7594 {
+                        // Standard Ethereum behavior
+                        if self.fork_tracker.is_osaka_activated() {
+                            if sidecar.is_eip4844() {
+                                return Err(InvalidPoolTransactionError::Eip4844(
+                                    Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
+                                ))
+                            }
+                        } else if sidecar.is_eip7594() && !self.allow_7594_sidecars() {
                             return Err(InvalidPoolTransactionError::Eip4844(
-                                Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
+                                Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
                             ))
                         }
-                    } else if sidecar.is_eip7594() && !self.allow_7594_sidecars() {
-                        return Err(InvalidPoolTransactionError::Eip4844(
-                            Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
-                        ))
+                    } else {
+                        // EIP-7594 disabled: always reject v1 sidecars, accept v0
+                        if sidecar.is_eip7594() {
+                            return Err(InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::Eip7594SidecarDisallowed,
+                            ))
+                        }
                     }
 
                     // validate the blob
@@ -909,6 +924,10 @@ pub struct EthTransactionValidatorBuilder<Client, Evm> {
     max_initcode_size: usize,
     /// Cached transaction gas limit cap from EVM config (0 = no cap)
     tx_gas_limit_cap: u64,
+    /// Whether EIP-7594 blob sidecars are accepted.
+    /// When false, EIP-7594 (v1) sidecars are always rejected and EIP-4844 (v0) sidecars
+    /// are always accepted, regardless of Osaka fork activation.
+    eip7594: bool,
 }
 
 impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
@@ -972,6 +991,9 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
 
             tx_gas_limit_cap: evm_env.cfg_env.tx_gas_limit_cap(),
             max_initcode_size: evm_env.cfg_env.max_initcode_size(),
+
+            // EIP-7594 sidecars are accepted by default (standard Ethereum behavior)
+            eip7594: true,
         }
     }
 
@@ -1058,6 +1080,25 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
     /// Set the support for EIP-4844 transactions.
     pub const fn set_eip4844(mut self, eip4844: bool) -> Self {
         self.eip4844 = eip4844;
+        self
+    }
+
+    /// Disables EIP-7594 blob sidecar support.
+    ///
+    /// When disabled, EIP-7594 (v1) blob sidecars are always rejected and EIP-4844 (v0)
+    /// sidecars are always accepted, regardless of Osaka fork activation.
+    ///
+    /// Use this for chains that do not adopt EIP-7594 (`PeerDAS`).
+    pub const fn no_eip7594(self) -> Self {
+        self.set_eip7594(false)
+    }
+
+    /// Set EIP-7594 blob sidecar support.
+    ///
+    /// When true (default), standard Ethereum behavior applies: v0 sidecars before Osaka,
+    /// v1 sidecars after Osaka. When false, v1 sidecars are always rejected.
+    pub const fn set_eip7594(mut self, eip7594: bool) -> Self {
+        self.eip7594 = eip7594;
         self
     }
 
@@ -1149,6 +1190,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             other_tx_types,
             max_initcode_size,
             tx_gas_limit_cap,
+            eip7594,
         } = self;
 
         let fork_tracker = ForkTracker {
@@ -1182,6 +1224,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             _marker: Default::default(),
             validation_metrics: TxPoolValidationMetrics::default(),
             other_tx_types,
+            eip7594,
         }
     }
 
