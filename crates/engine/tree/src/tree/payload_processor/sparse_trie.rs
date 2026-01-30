@@ -311,6 +311,7 @@ where
         Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
 
+    #[instrument(level = "debug", target = "engine::tree::payload_processor::sparse_trie", skip_all)]
     fn on_prewarm_targets(&mut self, targets: VersionedMultiProofTargets) {
         let VersionedMultiProofTargets::V2(targets) = targets else {
             unreachable!("sparse trie as cache must only be used with V2 multiproof targets");
