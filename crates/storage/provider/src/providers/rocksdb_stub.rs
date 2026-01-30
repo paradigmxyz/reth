@@ -119,6 +119,26 @@ impl RocksDBProvider {
     pub const fn flush(&self, _tables: &[&'static str]) -> ProviderResult<()> {
         Ok(())
     }
+
+    /// Prunes account changesets for blocks in the given range (stub implementation).
+    ///
+    /// Returns 0 since there is no `RocksDB` when the feature is disabled.
+    pub const fn prune_account_changesets(
+        &self,
+        _range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<usize> {
+        Ok(0)
+    }
+
+    /// Prunes storage changesets for blocks in the given range (stub implementation).
+    ///
+    /// Returns 0 since there is no `RocksDB` when the feature is disabled.
+    pub const fn prune_storage_changesets(
+        &self,
+        _range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<usize> {
+        Ok(0)
+    }
 }
 
 impl DatabaseMetrics for RocksDBProvider {

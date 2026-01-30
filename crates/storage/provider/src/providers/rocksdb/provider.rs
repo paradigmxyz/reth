@@ -9,8 +9,8 @@ use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
     database_metrics::DatabaseMetrics,
     models::{
-        sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
-        StorageSettings,
+        sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey,
+        BlockNumberAddress, ShardedKey, StorageSettings,
     },
     table::{Compress, Decode, Decompress, Encode, Table},
     tables, BlockNumberList, DatabaseError,
@@ -804,6 +804,26 @@ impl RocksDBProvider {
         })
     }
 
+    /// Writes raw key-value bytes to the specified table's column family.
+    ///
+    /// This is a low-level method primarily used for testing where the key encoding
+    /// differs from the MDBX table definition (e.g., RocksDB composite keys for DUPSORT
+    /// emulation).
+    #[cfg(test)]
+    pub fn put_raw<T: Table>(&self, key: &[u8], value: &T::Value) -> ProviderResult<()> {
+        let mut buf = Vec::new();
+        let value_bytes = compress_to_buf_or_ref!(buf, value).unwrap_or(&buf);
+
+        self.0.put_cf(self.get_cf_handle::<T>()?, key, value_bytes).map_err(|e| {
+            ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
+                info: DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
+                operation: DatabaseWriteOperation::PutUpsert,
+                table_name: T::NAME,
+                key: key.to_vec(),
+            })))
+        })
+    }
+
     /// Clears all entries from the specified table.
     ///
     /// Uses `delete_range_cf` from empty key to a max key (256 bytes of 0xFF).
@@ -820,6 +840,255 @@ impl RocksDBProvider {
         })?;
 
         Ok(())
+    }
+
+    /// Prunes account changesets for blocks in the given range.
+    ///
+    /// Uses composite key `(BlockNumber, Address)` ordering. Deletes all entries
+    /// where the block number falls within the range.
+    ///
+    /// Returns the number of entries deleted.
+    pub fn prune_account_changesets(
+        &self,
+        range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<usize> {
+        use reth_db_api::models::BlockNumberAddress;
+
+        let cf = self.get_cf_handle::<tables::AccountChangeSets>()?;
+
+        let start_key = BlockNumberAddress((*range.start(), Address::ZERO));
+        let end_key = BlockNumberAddress((*range.end() + 1, Address::ZERO));
+
+        let start_bytes = start_key.encode();
+        let end_bytes = end_key.encode();
+
+        let iter = self
+            .0
+            .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
+
+        let mut count = 0;
+        let mut keys_to_delete = Vec::new();
+        for item in iter {
+            match item {
+                Ok((key_bytes, _)) => {
+                    if key_bytes.as_ref() >= end_bytes.as_ref() {
+                        break;
+                    }
+                    keys_to_delete.push(key_bytes.to_vec());
+                    count += 1;
+                }
+                Err(e) => {
+                    return Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })));
+                }
+            }
+        }
+
+        for key in keys_to_delete {
+            self.0.delete_cf(cf, &key).map_err(|e| {
+                ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+        }
+
+        Ok(count)
+    }
+
+    /// Prunes storage changesets for blocks in the given range.
+    ///
+    /// Storage changesets in `RocksDB` use composite key `(Address, StorageKey, BlockNumber)`.
+    /// Since block number is the last component, we must iterate all entries and filter by
+    /// block number.
+    ///
+    /// Returns the number of entries deleted.
+    pub fn prune_storage_changesets(
+        &self,
+        range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<usize> {
+        let cf = self.get_cf_handle::<tables::StorageChangeSets>()?;
+
+        let iter = self.0.iterator_cf(cf, IteratorMode::Start);
+
+        let mut count = 0;
+        let mut keys_to_delete = Vec::new();
+        for item in iter {
+            match item {
+                Ok((key_bytes, _)) => {
+                    // RocksDB uses StorageShardedKey encoding: (Address, StorageKey, BlockNumber)
+                    let key = StorageShardedKey::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    let block_number = key.sharded_key.highest_block_number;
+                    if range.contains(&block_number) {
+                        keys_to_delete.push(key_bytes.to_vec());
+                        count += 1;
+                    }
+                }
+                Err(e) => {
+                    return Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })));
+                }
+            }
+        }
+
+        for key in keys_to_delete {
+            self.0.delete_cf(cf, &key).map_err(|e| {
+                ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+        }
+
+        Ok(count)
+    }
+
+    /// Gets the highest block number present in the `AccountChangeSets` table.
+    ///
+    /// Account changesets use `(BlockNumber, Address)` as key, with block number
+    /// as the first component. The last key in the table has the highest block number.
+    ///
+    /// Returns `None` if the table is empty.
+    pub fn highest_account_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        let cf = self.get_cf_handle::<tables::AccountChangeSets>()?;
+        let mut iter = self.0.iterator_cf(cf, IteratorMode::End);
+
+        match iter.next() {
+            Some(Ok((key_bytes, _))) => {
+                use reth_db_api::models::BlockNumberAddress;
+                let key = BlockNumberAddress::decode(&key_bytes)
+                    .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                Ok(Some(key.block_number()))
+            }
+            Some(Err(e)) => Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))),
+            None => Ok(None),
+        }
+    }
+
+    /// Gets the highest block number present in the `StorageChangeSets` table.
+    ///
+    /// Storage changesets use `(Address, StorageKey, BlockNumber)` as key, with block number
+    /// as the last component. We must scan all entries to find the maximum block number.
+    ///
+    /// Returns `None` if the table is empty.
+    pub fn highest_storage_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        let cf = self.get_cf_handle::<tables::StorageChangeSets>()?;
+        let iter = self.0.iterator_cf(cf, IteratorMode::Start);
+
+        let mut max_block: Option<BlockNumber> = None;
+
+        for item in iter {
+            match item {
+                Ok((key_bytes, _)) => {
+                    let key = StorageShardedKey::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    let block_number = key.sharded_key.highest_block_number;
+                    max_block = Some(max_block.map_or(block_number, |m| m.max(block_number)));
+                }
+                Err(e) => {
+                    return Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })));
+                }
+            }
+        }
+
+        Ok(max_block)
+    }
+
+    /// Returns account changesets for blocks in the given range from `RocksDB`.
+    ///
+    /// Account changesets use `(BlockNumber, Address)` as composite key.
+    /// Returns pairs of `(BlockNumberAddress, AccountBeforeTx)`.
+    pub fn account_changesets_in_range(
+        &self,
+        range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumberAddress, reth_db_api::models::AccountBeforeTx)>> {
+        use reth_db_api::table::Decompress;
+
+        let cf = self.get_cf_handle::<tables::AccountChangeSets>()?;
+
+        let start_key = BlockNumberAddress((*range.start(), Address::ZERO));
+        let end_key = BlockNumberAddress((*range.end() + 1, Address::ZERO));
+
+        let start_bytes = start_key.encode();
+        let end_bytes = end_key.encode();
+
+        let iter = self
+            .0
+            .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
+
+        let mut results = Vec::new();
+        for item in iter {
+            match item {
+                Ok((key_bytes, value_bytes)) => {
+                    if key_bytes.as_ref() >= end_bytes.as_ref() {
+                        break;
+                    }
+                    let key = BlockNumberAddress::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    let value = reth_db_api::models::AccountBeforeTx::decompress(&value_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    results.push((key, value));
+                }
+                Err(e) => {
+                    return Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })));
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Returns storage changesets for blocks in the given range from `RocksDB`.
+    ///
+    /// Storage changesets use `(Address, StorageKey, BlockNumber)` as composite key.
+    /// Since block number is the last component, we must iterate all entries and filter.
+    /// Returns tuples of `(Address, StorageEntry, BlockNumber)`.
+    pub fn storage_changesets_in_range(
+        &self,
+        range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<(Address, reth_primitives_traits::StorageEntry, BlockNumber)>> {
+        use reth_db_api::table::Decompress;
+
+        let cf = self.get_cf_handle::<tables::StorageChangeSets>()?;
+        let iter = self.0.iterator_cf(cf, IteratorMode::Start);
+
+        let mut results = Vec::new();
+        for item in iter {
+            match item {
+                Ok((key_bytes, value_bytes)) => {
+                    let key = StorageShardedKey::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    let block_number = key.sharded_key.highest_block_number;
+                    if range.contains(&block_number) {
+                        let entry = reth_primitives_traits::StorageEntry::decompress(&value_bytes)
+                            .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                        results.push((key.address, entry, block_number));
+                    }
+                }
+                Err(e) => {
+                    return Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })));
+                }
+            }
+        }
+
+        Ok(results)
     }
 
     /// Gets the first (smallest key) entry from the specified table.

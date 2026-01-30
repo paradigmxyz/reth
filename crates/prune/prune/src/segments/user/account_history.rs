@@ -8,7 +8,7 @@ use crate::{
 };
 use alloy_primitives::BlockNumber;
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
-use reth_provider::DBProvider;
+use reth_provider::{DBProvider, RocksDBProviderFactory, StorageSettingsCache};
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
@@ -34,7 +34,7 @@ impl AccountHistory {
 
 impl<Provider> Segment<Provider> for AccountHistory
 where
-    Provider: DBProvider<Tx: DbTxMut>,
+    Provider: DBProvider<Tx: DbTxMut> + StorageSettingsCache + RocksDBProviderFactory,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::AccountHistory
@@ -72,7 +72,7 @@ impl AccountHistory {
         range_end: BlockNumber,
     ) -> Result<SegmentOutput, PrunerError>
     where
-        Provider: DBProvider<Tx: DbTxMut>,
+        Provider: DBProvider<Tx: DbTxMut> + StorageSettingsCache + RocksDBProviderFactory,
     {
         let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
             input.limiter.set_deleted_entries_limit(limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE)
@@ -97,17 +97,31 @@ impl AccountHistory {
         // `max_reorg_depth`, so no OOM is expected here.
         let mut last_changeset_pruned_block = None;
         let mut highest_deleted_accounts = FxHashMap::default();
-        let (pruned_changesets, done) =
-            provider.tx_ref().prune_table_with_range::<tables::AccountChangeSets>(
-                range,
-                &mut limiter,
-                |_| false,
-                |(block_number, account)| {
-                    highest_deleted_accounts.insert(account.address, block_number);
-                    last_changeset_pruned_block = Some(block_number);
-                },
-            )?;
-        trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets from database)");
+
+        // Prune from RocksDB if changesets are stored there, otherwise from MDBX
+        let (pruned_changesets, done) = if provider
+            .cached_storage_settings()
+            .account_changesets_in_rocksdb
+        {
+            let rocksdb = provider.rocksdb_provider();
+            let pruned = rocksdb.prune_account_changesets(range)?;
+            last_changeset_pruned_block = Some(range_end);
+            trace!(target: "pruner", pruned = %pruned, "Pruned account history (changesets from RocksDB)");
+            (pruned, true)
+        } else {
+            let (pruned, done) =
+                provider.tx_ref().prune_table_with_range::<tables::AccountChangeSets>(
+                    range,
+                    &mut limiter,
+                    |_| false,
+                    |(block_number, account)| {
+                        highest_deleted_accounts.insert(account.address, block_number);
+                        last_changeset_pruned_block = Some(block_number);
+                    },
+                )?;
+            trace!(target: "pruner", pruned = %pruned, %done, "Pruned account history (changesets from database)");
+            (pruned, done)
+        };
 
         let result = HistoryPruneResult {
             highest_deleted: highest_deleted_accounts,
@@ -134,7 +148,7 @@ mod tests {
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::{tables, BlockNumberList};
-    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };

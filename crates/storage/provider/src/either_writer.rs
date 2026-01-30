@@ -224,8 +224,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     pub fn account_changesets_destination<P: DBProvider + StorageSettingsCache>(
         provider: &P,
     ) -> EitherWriterDestination {
-        let settings = provider.cached_storage_settings();
-        if settings.account_changesets_in_rocksdb {
+        if provider.cached_storage_settings().account_changesets_in_rocksdb {
             EitherWriterDestination::RocksDB
         } else {
             EitherWriterDestination::Database
@@ -239,8 +238,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     pub fn storage_changesets_destination<P: DBProvider + StorageSettingsCache>(
         provider: &P,
     ) -> EitherWriterDestination {
-        let settings = provider.cached_storage_settings();
-        if settings.storage_changesets_in_rocksdb {
+        if provider.cached_storage_settings().storage_changesets_in_rocksdb {
             EitherWriterDestination::RocksDB
         } else {
             EitherWriterDestination::Database
@@ -1079,8 +1077,7 @@ impl EitherWriterDestination {
     where
         P: StorageSettingsCache,
     {
-        let settings = provider.cached_storage_settings();
-        if settings.account_changesets_in_rocksdb {
+        if provider.cached_storage_settings().account_changesets_in_rocksdb {
             Self::RocksDB
         } else {
             Self::Database
@@ -1093,8 +1090,7 @@ impl EitherWriterDestination {
     where
         P: StorageSettingsCache,
     {
-        let settings = provider.cached_storage_settings();
-        if settings.storage_changesets_in_rocksdb {
+        if provider.cached_storage_settings().storage_changesets_in_rocksdb {
             Self::RocksDB
         } else {
             Self::Database

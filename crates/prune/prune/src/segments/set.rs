@@ -7,7 +7,8 @@ use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, ChainStateBlockReader, DBProvider,
-    PruneCheckpointReader, PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache,
+    PruneCheckpointReader, PruneCheckpointWriter, RocksDBProviderFactory,
+    StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune_types::PruneModes;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
@@ -55,7 +56,8 @@ where
         + ChainStateBlockReader
         + StorageSettingsCache
         + ChangeSetReader
-        + StorageChangeSetReader,
+        + StorageChangeSetReader
+        + RocksDBProviderFactory,
 {
     /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
     /// [`PruneModes`].

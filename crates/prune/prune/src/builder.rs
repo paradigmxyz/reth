@@ -7,7 +7,7 @@ use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, ChainStateBlockReader, DBProvider,
     DatabaseProviderFactory, NodePrimitivesProvider, PruneCheckpointReader, PruneCheckpointWriter,
-    StageCheckpointReader, StaticFileProviderFactory, StorageSettingsCache,
+    RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune_types::PruneModes;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
@@ -85,6 +85,7 @@ impl PrunerBuilder {
                                 + StageCheckpointReader
                                 + ChangeSetReader
                                 + StorageChangeSetReader
+                                + RocksDBProviderFactory
                                 + StaticFileProviderFactory<
                     Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
                 >,
@@ -121,7 +122,8 @@ impl PrunerBuilder {
             + StorageSettingsCache
             + StageCheckpointReader
             + ChangeSetReader
-            + StorageChangeSetReader,
+            + StorageChangeSetReader
+            + RocksDBProviderFactory,
     {
         let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
 

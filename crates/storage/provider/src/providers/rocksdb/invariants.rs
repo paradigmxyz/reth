@@ -13,8 +13,8 @@ use reth_db_api::tables;
 use reth_stages_types::StageId;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, ChangeSetReader, DBProvider, StageCheckpointReader,
-    StorageChangeSetReader, StorageSettingsCache, TransactionsProvider,
+    BlockBodyIndicesProvider, DBProvider, StageCheckpointReader, StorageSettingsCache,
+    TransactionsProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::collections::HashSet;
@@ -55,8 +55,6 @@ impl RocksDBProvider {
             + StorageSettingsCache
             + StaticFileProviderFactory
             + BlockBodyIndicesProvider
-            + StorageChangeSetReader
-            + ChangeSetReader
             + TransactionsProvider<Transaction: Encodable2718>,
     {
         let mut unwind_target: Option<BlockNumber> = None;
@@ -249,15 +247,14 @@ impl RocksDBProvider {
 
     /// Heals the `StoragesHistory` table by removing stale entries.
     ///
-    /// Returns an unwind target if static file tip is behind checkpoint (cannot heal).
+    /// Returns an unwind target if the highest changeset block is behind checkpoint (cannot heal).
     /// Otherwise iterates changesets in batches to identify and unwind affected keys.
     fn heal_storages_history<Provider>(
         &self,
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider:
-            DBProvider + StageCheckpointReader + StaticFileProviderFactory + StorageChangeSetReader,
+        Provider: StageCheckpointReader,
     {
         let checkpoint = provider
             .get_stage_checkpoint(StageId::IndexStorageHistory)?
@@ -274,19 +271,28 @@ impl RocksDBProvider {
             return Ok(None);
         }
 
-        // Get the highest block with storage changesets from the database/RocksDB
-        let changeset_tip = provider.storage_changeset_count()?.saturating_sub(1) as u64;
-        let changeset_tip = if changeset_tip == 0 {
-            // If no changesets, use checkpoint
-            return Ok(None);
-        } else {
-            // Use last block from headers as approximation for changeset tip
-            provider
-                .static_file_provider()
-                .get_highest_static_file_block(StaticFileSegment::Headers)
-                .unwrap_or(checkpoint)
+        // Get the highest block number from storage changesets.
+        // This is the authoritative source for how far changesets extend.
+        let changeset_tip = match self.highest_storage_changeset_block()? {
+            Some(tip) => tip,
+            None => {
+                // No changesets in RocksDB - nothing to heal against
+                return Ok(None);
+            }
         };
 
+        // If changeset tip is behind checkpoint, we need to unwind
+        if changeset_tip < checkpoint {
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                changeset_tip,
+                checkpoint,
+                "StoragesHistory: changeset tip behind checkpoint, unwind needed"
+            );
+            return Ok(Some(changeset_tip));
+        }
+
+        // Nothing to heal if tips match
         if changeset_tip == checkpoint {
             return Ok(None);
         }
@@ -308,11 +314,12 @@ impl RocksDBProvider {
             let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(changeset_tip);
             batch_num += 1;
 
-            let changesets = provider.storage_changesets_range(batch_start..=batch_end)?;
+            // Read changesets from RocksDB, not MDBX
+            let changesets = self.storage_changesets_in_range(batch_start..=batch_end)?;
 
             let unique_keys: HashSet<_> = changesets
                 .into_iter()
-                .map(|(block_addr, entry)| (block_addr.address(), entry.key, checkpoint + 1))
+                .map(|(address, entry, _block)| (address, entry.key, checkpoint + 1))
                 .collect();
             let indices: Vec<_> = unique_keys.into_iter().collect();
 
@@ -339,14 +346,14 @@ impl RocksDBProvider {
 
     /// Heals the `AccountsHistory` table by removing stale entries.
     ///
-    /// Returns an unwind target if static file tip is behind checkpoint (cannot heal).
+    /// Returns an unwind target if the highest changeset block is behind checkpoint (cannot heal).
     /// Otherwise iterates changesets in batches to identify and unwind affected keys.
     fn heal_accounts_history<Provider>(
         &self,
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + StageCheckpointReader + StaticFileProviderFactory + ChangeSetReader,
+        Provider: StageCheckpointReader,
     {
         let checkpoint = provider
             .get_stage_checkpoint(StageId::IndexAccountHistory)?
@@ -363,19 +370,28 @@ impl RocksDBProvider {
             return Ok(None);
         }
 
-        // Get the highest block with account changesets from the database/RocksDB
-        let changeset_tip = provider.account_changeset_count()?.saturating_sub(1) as u64;
-        let changeset_tip = if changeset_tip == 0 {
-            // If no changesets, use checkpoint
-            return Ok(None);
-        } else {
-            // Use last block from headers as approximation for changeset tip
-            provider
-                .static_file_provider()
-                .get_highest_static_file_block(StaticFileSegment::Headers)
-                .unwrap_or(checkpoint)
+        // Get the highest block number from account changesets.
+        // This is the authoritative source for how far changesets extend.
+        let changeset_tip = match self.highest_account_changeset_block()? {
+            Some(tip) => tip,
+            None => {
+                // No changesets in RocksDB - nothing to heal against
+                return Ok(None);
+            }
         };
 
+        // If changeset tip is behind checkpoint, we need to unwind
+        if changeset_tip < checkpoint {
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                changeset_tip,
+                checkpoint,
+                "AccountsHistory: changeset tip behind checkpoint, unwind needed"
+            );
+            return Ok(Some(changeset_tip));
+        }
+
+        // Nothing to heal if tips match
         if changeset_tip == checkpoint {
             return Ok(None);
         }
@@ -397,7 +413,8 @@ impl RocksDBProvider {
             let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(changeset_tip);
             batch_num += 1;
 
-            let changesets = provider.account_changesets_range(batch_start..=batch_end)?;
+            // Read changesets from RocksDB, not MDBX
+            let changesets = self.account_changesets_in_range(batch_start..=batch_end)?;
 
             let mut addresses = HashSet::with_capacity(changesets.len());
             addresses.extend(changesets.iter().map(|(_, cs)| cs.address));
@@ -430,14 +447,14 @@ impl RocksDBProvider {
 mod tests {
     use super::*;
     use crate::{
-        providers::{rocksdb::RocksDBBuilder, static_file::StaticFileWriter},
-        test_utils::create_test_provider_factory,
-        BlockWriter, DatabaseProviderFactory, StageCheckpointWriter, TransactionsProvider,
+        providers::rocksdb::RocksDBBuilder, test_utils::create_test_provider_factory, BlockWriter,
+        DatabaseProviderFactory, StageCheckpointWriter, TransactionsProvider,
     };
     use alloy_primitives::{Address, B256};
     use reth_db::cursor::{DbCursorRO, DbCursorRW};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, StorageSettings},
+        table::Encode as _,
         tables::{self, BlockNumberList},
         transaction::DbTxMut,
     };
@@ -487,6 +504,7 @@ mod tests {
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::StorageChangeSets>()
             .build()
             .unwrap();
 
@@ -501,6 +519,7 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
 
         // Empty RocksDB and no checkpoints - should be consistent (None = no unwind needed)
+        // With no changesets in RocksDB, there's nothing to heal against.
         let result = rocksdb.check_consistency(&provider).unwrap();
         assert_eq!(result, None);
     }
@@ -610,6 +629,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::StorageChangeSets>()
             .build()
             .unwrap();
 
@@ -630,11 +650,11 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB is empty but checkpoint says block 100 was processed.
-        // Since sf_tip=0 < checkpoint=100, we return unwind target of 0.
-        // This should never happen in normal operation.
+        // RocksDB is empty (no changesets) but checkpoint says block 100 was processed.
+        // With no changesets in RocksDB, there's nothing to determine a tip from,
+        // so we return None (no healing needed).
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, Some(0), "sf_tip=0 < checkpoint=100 returns unwind target");
+        assert_eq!(result, None, "No changesets means nothing to heal against");
     }
 
     #[test]
@@ -833,6 +853,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::StorageChangeSets>()
             .build()
             .unwrap();
 
@@ -865,10 +886,10 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
 
         // RocksDB has only sentinel entries but checkpoint is set.
-        // Since sf_tip=0 < checkpoint=100, we return unwind target of 0.
-        // This should never happen in normal operation.
+        // With no changesets in RocksDB, there's nothing to determine a tip from,
+        // so we return None (no healing needed).
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, Some(0), "sf_tip=0 < checkpoint=100 returns unwind target");
+        assert_eq!(result, None, "No changesets means nothing to heal against");
     }
 
     #[test]
@@ -878,6 +899,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::AccountChangeSets>()
             .build()
             .unwrap();
 
@@ -909,10 +931,10 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
 
         // RocksDB has only sentinel entries but checkpoint is set.
-        // Since sf_tip=0 < checkpoint=100, we return unwind target of 0.
-        // This should never happen in normal operation.
+        // With no changesets in RocksDB, there's nothing to determine a tip from,
+        // so we return None (no healing needed).
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, Some(0), "sf_tip=0 < checkpoint=100 returns unwind target");
+        assert_eq!(result, None, "No changesets means nothing to heal against");
     }
 
     /// Test that pruning works by fetching transactions and computing their hashes,
@@ -1036,6 +1058,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::AccountChangeSets>()
             .build()
             .unwrap();
 
@@ -1056,11 +1079,11 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB is empty but checkpoint says block 100 was processed.
-        // Since sf_tip=0 < checkpoint=100, we return unwind target of 0.
-        // This should never happen in normal operation.
+        // RocksDB is empty (no changesets) but checkpoint says block 100 was processed.
+        // With no changesets in RocksDB, there's nothing to determine a tip from,
+        // so we return None (no healing needed).
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, Some(0), "sf_tip=0 < checkpoint=100 returns unwind target");
+        assert_eq!(result, None, "No changesets means nothing to heal against");
     }
 
     #[test]
@@ -1103,11 +1126,12 @@ mod tests {
 
     #[test]
     fn test_check_consistency_accounts_history_changeset_tip_equals_checkpoint_no_action() {
-        use reth_db_api::models::ShardedKey;
+        use reth_db_api::models::{BlockNumberAddress, ShardedKey};
 
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::AccountChangeSets>()
             .build()
             .unwrap();
 
@@ -1122,6 +1146,18 @@ mod tests {
         rocksdb.put::<tables::AccountsHistory>(key2, &block_list2).unwrap();
         rocksdb.put::<tables::AccountsHistory>(key3, &block_list3).unwrap();
 
+        // Write account changesets to RocksDB for blocks 0-100
+        // This establishes the changeset tip at 100
+        // Use put_raw with BlockNumberAddress composite key (RocksDB encoding)
+        for block_num in 0..=100u64 {
+            let addr = Address::random();
+            let composite_key = BlockNumberAddress((block_num, addr));
+            let value = AccountBeforeTx { address: addr, info: None };
+            rocksdb
+                .put_raw::<tables::AccountChangeSets>(composite_key.encode().as_ref(), &value)
+                .unwrap();
+        }
+
         // Capture RocksDB state before consistency check
         let entries_before: Vec<_> =
             rocksdb.iter::<tables::AccountsHistory>().unwrap().map(|r| r.unwrap()).collect();
@@ -1133,33 +1169,7 @@ mod tests {
             StorageSettings::legacy().with_account_history_in_rocksdb(true),
         );
 
-        // Write account changesets to MDBX for blocks 0-100
-        {
-            let provider = factory.database_provider_rw().unwrap();
-            for block_num in 0..=100 {
-                provider
-                    .tx_ref()
-                    .put::<tables::AccountChangeSets>(
-                        block_num,
-                        AccountBeforeTx { address: Address::random(), info: None },
-                    )
-                    .unwrap();
-            }
-            provider.commit().unwrap();
-        }
-
-        // Write headers to static files to establish the tip at block 100
-        {
-            let sf_provider = factory.static_file_provider();
-            let mut writer = sf_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-            for block_num in 0..=100 {
-                let header = alloy_consensus::Header { number: block_num, ..Default::default() };
-                writer.append_header(&header, &B256::random()).unwrap();
-            }
-            writer.commit().unwrap();
-        }
-
-        // Set IndexAccountHistory checkpoint to block 100 (same as headers tip)
+        // Set IndexAccountHistory checkpoint to block 100 (same as changeset tip)
         {
             let provider = factory.database_provider_rw().unwrap();
             provider
@@ -1170,16 +1180,13 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // Verify headers tip equals checkpoint (both at 100)
-        let headers_tip = provider
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::Headers)
-            .unwrap();
-        assert_eq!(headers_tip, 100, "Headers static file tip should be 100");
+        // Verify changeset tip equals checkpoint (both at 100)
+        let changeset_tip = rocksdb.highest_account_changeset_block().unwrap().unwrap();
+        assert_eq!(changeset_tip, 100, "Changeset tip should be 100");
 
         // Run check_consistency - should return None (no unwind needed)
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, None, "headers_tip == checkpoint should not require unwind");
+        assert_eq!(result, None, "changeset_tip == checkpoint should not require unwind");
 
         // Verify NO entries are deleted - RocksDB state unchanged
         let entries_after: Vec<_> =
@@ -1188,7 +1195,7 @@ mod tests {
         assert_eq!(
             entries_after.len(),
             entries_before.len(),
-            "RocksDB entry count should be unchanged when headers_tip == checkpoint"
+            "RocksDB entry count should be unchanged when changeset_tip == checkpoint"
         );
 
         // Verify exact entries are preserved
@@ -1207,7 +1214,7 @@ mod tests {
     /// Scenario:
     /// 1. Generate 15,000 blocks worth of storage changeset data (to exceed the 10k batch size)
     /// 2. Each block has 1 storage change (address + slot + value)
-    /// 3. Write storage changesets to MDBX for all 15k blocks
+    /// 3. Write storage changesets to RocksDB for all 15k blocks
     /// 4. Set `IndexStorageHistory` checkpoint to block 5000
     /// 5. Insert stale `StoragesHistory` entries in `RocksDB` for (address, slot) pairs that
     ///    changed in blocks 5001-15000
@@ -1223,6 +1230,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::StorageChangeSets>()
             .build()
             .unwrap();
 
@@ -1247,42 +1255,33 @@ mod tests {
             B256::from(slot_bytes)
         }
 
-        // Write storage changesets to MDBX for 15k blocks.
+        // Write storage changesets to BOTH RocksDB and MDBX for 15k blocks.
+        // RocksDB: for determining changeset tip via highest_storage_changeset_block()
+        // MDBX: for reading changesets during healing via provider.storage_changesets_range()
         // Each block has 1 storage change with a unique (address, slot) pair.
         {
             let provider = factory.database_provider_rw().unwrap();
             for block_num in 0..TOTAL_BLOCKS {
-                let entry =
-                    StorageEntry { key: make_slot(block_num), value: U256::from(block_num) };
+                let addr = make_address(block_num);
+                let slot = make_slot(block_num);
+                // Write to RocksDB with composite key (Address, StorageKey, BlockNumber)
+                let composite_key = StorageShardedKey::new(addr, slot, block_num);
+                let entry = StorageEntry { key: slot, value: U256::from(block_num) };
+                rocksdb
+                    .put_raw::<tables::StorageChangeSets>(composite_key.encode().as_ref(), &entry)
+                    .unwrap();
+                // Write to MDBX with DUPSORT key (BlockNumber, Address)
                 provider
                     .tx_ref()
-                    .put::<tables::StorageChangeSets>(
-                        (block_num, make_address(block_num)).into(),
-                        entry,
-                    )
+                    .put::<tables::StorageChangeSets>((block_num, addr).into(), entry)
                     .unwrap();
             }
             provider.commit().unwrap();
         }
 
-        // Write headers to static files to establish the tip
-        {
-            let sf_provider = factory.static_file_provider();
-            let mut writer = sf_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-            for block_num in 0..TOTAL_BLOCKS {
-                let header = alloy_consensus::Header { number: block_num, ..Default::default() };
-                writer.append_header(&header, &B256::random()).unwrap();
-            }
-            writer.commit().unwrap();
-        }
-
-        // Verify headers have data up to block 14999
-        {
-            let sf_provider = factory.static_file_provider();
-            let highest =
-                sf_provider.get_highest_static_file_block(StaticFileSegment::Headers).unwrap();
-            assert_eq!(highest, TOTAL_BLOCKS - 1, "Headers should have blocks 0..14999");
-        }
+        // Verify changeset tip is correct
+        let changeset_tip = rocksdb.highest_storage_changeset_block().unwrap().unwrap();
+        assert_eq!(changeset_tip, TOTAL_BLOCKS - 1, "Changeset tip should be 14999");
 
         // Set IndexStorageHistory checkpoint to block 5000
         {
@@ -1343,11 +1342,12 @@ mod tests {
         use alloy_primitives::U256;
 
         const CHECKPOINT_BLOCK: u64 = 100;
-        const HEADERS_TIP: u64 = 200;
+        const CHANGESET_TIP: u64 = 200;
 
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::StorageChangeSets>()
             .build()
             .unwrap();
 
@@ -1361,18 +1361,26 @@ mod tests {
         let stale_addr = Address::repeat_byte(0xCC);
         let stale_slot = B256::repeat_byte(0xDD);
 
-        // Write storage changesets to MDBX
+        // Write storage changesets to BOTH RocksDB and MDBX
+        // RocksDB: for determining changeset tip via highest_storage_changeset_block()
+        // MDBX: for reading changesets during healing via provider.storage_changesets_range()
         {
             let provider = factory.database_provider_rw().unwrap();
-            for block_num in 0..=HEADERS_TIP {
-                let (addr, key, value) = if block_num == CHECKPOINT_BLOCK {
+            for block_num in 0..=CHANGESET_TIP {
+                let (addr, slot, value) = if block_num == CHECKPOINT_BLOCK {
                     (checkpoint_addr, checkpoint_slot, U256::from(block_num))
                 } else if block_num > CHECKPOINT_BLOCK {
                     (stale_addr, stale_slot, U256::from(block_num))
                 } else {
                     (Address::ZERO, B256::ZERO, U256::ZERO)
                 };
-                let entry = StorageEntry { key, value };
+                // Write to RocksDB with composite key (Address, StorageKey, BlockNumber)
+                let composite_key = StorageShardedKey::new(addr, slot, block_num);
+                let entry = StorageEntry { key: slot, value };
+                rocksdb
+                    .put_raw::<tables::StorageChangeSets>(composite_key.encode().as_ref(), &entry)
+                    .unwrap();
+                // Write to MDBX with DUPSORT key (BlockNumber, Address)
                 provider
                     .tx_ref()
                     .put::<tables::StorageChangeSets>((block_num, addr).into(), entry)
@@ -1381,16 +1389,9 @@ mod tests {
             provider.commit().unwrap();
         }
 
-        // Write headers to static files to establish the tip
-        {
-            let sf_provider = factory.static_file_provider();
-            let mut writer = sf_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-            for block_num in 0..=HEADERS_TIP {
-                let header = alloy_consensus::Header { number: block_num, ..Default::default() };
-                writer.append_header(&header, &B256::random()).unwrap();
-            }
-            writer.commit().unwrap();
-        }
+        // Verify changeset tip is correct
+        let changeset_tip = rocksdb.highest_storage_changeset_block().unwrap().unwrap();
+        assert_eq!(changeset_tip, CHANGESET_TIP, "Changeset tip should be 200");
 
         // Set checkpoint
         {
@@ -1411,8 +1412,8 @@ mod tests {
         rocksdb.put::<tables::StoragesHistory>(checkpoint_key.clone(), &checkpoint_list).unwrap();
 
         // Insert stale entry AFTER the checkpoint (should be removed)
-        let stale_key = StorageShardedKey::new(stale_addr, stale_slot, HEADERS_TIP);
-        let stale_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK + 1, HEADERS_TIP]);
+        let stale_key = StorageShardedKey::new(stale_addr, stale_slot, CHANGESET_TIP);
+        let stale_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK + 1, CHANGESET_TIP]);
         rocksdb.put::<tables::StoragesHistory>(stale_key.clone(), &stale_list).unwrap();
 
         // Run healing
@@ -1434,7 +1435,7 @@ mod tests {
     /// Scenario:
     /// 1. Generate 15,000 blocks worth of account changeset data (to exceed the 10k batch size)
     /// 2. Each block has 1 account change (simple - just random addresses)
-    /// 3. Write account changesets to MDBX for all 15k blocks
+    /// 3. Write account changesets to RocksDB for all 15k blocks
     /// 4. Set `IndexAccountHistory` checkpoint to block 5000
     /// 5. Insert stale `AccountsHistory` entries in `RocksDB` for addresses that changed in blocks
     ///    5001-15000
@@ -1444,11 +1445,12 @@ mod tests {
     ///    - The batching worked (no OOM, completed successfully)
     #[test]
     fn test_check_consistency_accounts_history_heals_via_changesets_large_range() {
-        use reth_db_api::models::ShardedKey;
+        use reth_db_api::models::{BlockNumberAddress, ShardedKey};
 
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::AccountChangeSets>()
             .build()
             .unwrap();
 
@@ -1469,31 +1471,28 @@ mod tests {
             addr
         }
 
-        // Write account changesets to MDBX for all 15k blocks
+        // Write account changesets to BOTH RocksDB and MDBX for all 15k blocks
+        // RocksDB: for determining changeset tip via highest_account_changeset_block()
+        // MDBX: for reading changesets during healing via provider.account_changesets_range()
         {
             let provider = factory.database_provider_rw().unwrap();
             for block_num in 0..TOTAL_BLOCKS {
-                provider
-                    .tx_ref()
-                    .put::<tables::AccountChangeSets>(
-                        block_num,
-                        AccountBeforeTx { address: make_address(block_num), info: None },
-                    )
+                let addr = make_address(block_num);
+                // Write to RocksDB with composite key (BlockNumber, Address)
+                let composite_key = BlockNumberAddress((block_num, addr));
+                let value = AccountBeforeTx { address: addr, info: None };
+                rocksdb
+                    .put_raw::<tables::AccountChangeSets>(composite_key.encode().as_ref(), &value)
                     .unwrap();
+                // Write to MDBX with DUPSORT key (BlockNumber)
+                provider.tx_ref().put::<tables::AccountChangeSets>(block_num, value).unwrap();
             }
             provider.commit().unwrap();
         }
 
-        // Write headers to static files to establish the tip
-        {
-            let sf_provider = factory.static_file_provider();
-            let mut writer = sf_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-            for block_num in 0..TOTAL_BLOCKS {
-                let header = alloy_consensus::Header { number: block_num, ..Default::default() };
-                writer.append_header(&header, &B256::random()).unwrap();
-            }
-            writer.commit().unwrap();
-        }
+        // Verify changeset tip is correct
+        let changeset_tip = rocksdb.highest_account_changeset_block().unwrap().unwrap();
+        assert_eq!(changeset_tip, TOTAL_BLOCKS - 1, "Changeset tip should be 14999");
 
         // Insert stale AccountsHistory entries in RocksDB for addresses that changed
         // in blocks 5001-15000 (i.e., blocks after the checkpoint)
@@ -1537,15 +1536,10 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // Verify headers tip > checkpoint
-        let headers_tip = provider
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::Headers)
-            .unwrap();
-        assert_eq!(headers_tip, TOTAL_BLOCKS - 1, "Headers tip should be 14999");
+        // Verify changeset tip > checkpoint
         assert!(
-            headers_tip > CHECKPOINT_BLOCK,
-            "headers_tip should be > checkpoint to trigger healing"
+            changeset_tip > CHECKPOINT_BLOCK,
+            "changeset_tip should be > checkpoint to trigger healing"
         );
 
         // Run check_consistency - this should trigger batched changeset-based healing
@@ -1571,14 +1565,15 @@ mod tests {
     /// Tests that accounts history healing preserves entries at exactly the checkpoint block.
     #[test]
     fn test_check_consistency_accounts_history_preserves_checkpoint_block() {
-        use reth_db_api::models::ShardedKey;
+        use reth_db_api::models::{BlockNumberAddress, ShardedKey};
 
         const CHECKPOINT_BLOCK: u64 = 100;
-        const HEADERS_TIP: u64 = 200;
+        const CHANGESET_TIP: u64 = 200;
 
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::AccountChangeSets>()
             .build()
             .unwrap();
 
@@ -1590,32 +1585,34 @@ mod tests {
         let checkpoint_addr = Address::repeat_byte(0xAA);
         let stale_addr = Address::repeat_byte(0xCC);
 
-        // Write account changesets to MDBX
+        // Write account changesets to BOTH RocksDB and MDBX
+        // RocksDB: for determining changeset tip via highest_account_changeset_block()
+        // MDBX: for reading changesets during healing via provider.account_changesets_range()
         {
             let provider = factory.database_provider_rw().unwrap();
-            for block_num in 0..=HEADERS_TIP {
-                let changeset = if block_num == CHECKPOINT_BLOCK {
-                    AccountBeforeTx { address: checkpoint_addr, info: None }
+            for block_num in 0..=CHANGESET_TIP {
+                let addr = if block_num == CHECKPOINT_BLOCK {
+                    checkpoint_addr
                 } else if block_num > CHECKPOINT_BLOCK {
-                    AccountBeforeTx { address: stale_addr, info: None }
+                    stale_addr
                 } else {
-                    AccountBeforeTx { address: Address::ZERO, info: None }
+                    Address::ZERO
                 };
-                provider.tx_ref().put::<tables::AccountChangeSets>(block_num, changeset).unwrap();
+                // Write to RocksDB with composite key (BlockNumber, Address)
+                let composite_key = BlockNumberAddress((block_num, addr));
+                let value = AccountBeforeTx { address: addr, info: None };
+                rocksdb
+                    .put_raw::<tables::AccountChangeSets>(composite_key.encode().as_ref(), &value)
+                    .unwrap();
+                // Write to MDBX with DUPSORT key (BlockNumber)
+                provider.tx_ref().put::<tables::AccountChangeSets>(block_num, value).unwrap();
             }
             provider.commit().unwrap();
         }
 
-        // Write headers to static files to establish the tip
-        {
-            let sf_provider = factory.static_file_provider();
-            let mut writer = sf_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-            for block_num in 0..=HEADERS_TIP {
-                let header = alloy_consensus::Header { number: block_num, ..Default::default() };
-                writer.append_header(&header, &B256::random()).unwrap();
-            }
-            writer.commit().unwrap();
-        }
+        // Verify changeset tip is correct
+        let changeset_tip = rocksdb.highest_account_changeset_block().unwrap().unwrap();
+        assert_eq!(changeset_tip, CHANGESET_TIP, "Changeset tip should be 200");
 
         // Set checkpoint
         {
@@ -1635,8 +1632,8 @@ mod tests {
         rocksdb.put::<tables::AccountsHistory>(checkpoint_key.clone(), &checkpoint_list).unwrap();
 
         // Insert stale entry AFTER the checkpoint (should be removed)
-        let stale_key = ShardedKey::new(stale_addr, HEADERS_TIP);
-        let stale_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK + 1, HEADERS_TIP]);
+        let stale_key = ShardedKey::new(stale_addr, CHANGESET_TIP);
+        let stale_list = BlockNumberList::new_pre_sorted([CHECKPOINT_BLOCK + 1, CHANGESET_TIP]);
         rocksdb.put::<tables::AccountsHistory>(stale_key.clone(), &stale_list).unwrap();
 
         // Run healing
@@ -1660,6 +1657,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::StorageChangeSets>()
             .build()
             .unwrap();
 
@@ -1671,6 +1669,25 @@ mod tests {
         rocksdb.put::<tables::StoragesHistory>(key1, &block_list1).unwrap();
         rocksdb.put::<tables::StoragesHistory>(key2, &block_list2).unwrap();
 
+        // Write storage changesets to RocksDB for blocks 0-100
+        // This establishes the changeset tip at 100
+        // StorageChangeSets use (Address, StorageKey, BlockNumber) composite key.
+        // Use put_raw with StorageShardedKey composite key (RocksDB encoding)
+        for block_num in 0..=100u64 {
+            let composite_key = StorageShardedKey::new(
+                Address::ZERO,
+                B256::with_last_byte(block_num as u8),
+                block_num,
+            );
+            let entry = StorageEntry {
+                key: B256::with_last_byte(block_num as u8),
+                value: U256::from(block_num),
+            };
+            rocksdb
+                .put_raw::<tables::StorageChangeSets>(composite_key.encode().as_ref(), &entry)
+                .unwrap();
+        }
+
         // Capture entries before consistency check
         let entries_before: Vec<_> =
             rocksdb.iter::<tables::StoragesHistory>().unwrap().map(|r| r.unwrap()).collect();
@@ -1681,34 +1698,7 @@ mod tests {
             StorageSettings::legacy().with_storages_history_in_rocksdb(true),
         );
 
-        // Write storage changesets to MDBX for blocks 0-100
-        {
-            let provider = factory.database_provider_rw().unwrap();
-            for block_num in 0..=100u64 {
-                let entry = StorageEntry {
-                    key: B256::with_last_byte(block_num as u8),
-                    value: U256::from(block_num),
-                };
-                provider
-                    .tx_ref()
-                    .put::<tables::StorageChangeSets>((block_num, Address::ZERO).into(), entry)
-                    .unwrap();
-            }
-            provider.commit().unwrap();
-        }
-
-        // Write headers to static files to establish the tip at block 100
-        {
-            let sf_provider = factory.static_file_provider();
-            let mut writer = sf_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-            for block_num in 0..=100u64 {
-                let header = alloy_consensus::Header { number: block_num, ..Default::default() };
-                writer.append_header(&header, &B256::random()).unwrap();
-            }
-            writer.commit().unwrap();
-        }
-
-        // Set IndexStorageHistory checkpoint to block 100 (same as headers tip)
+        // Set IndexStorageHistory checkpoint to block 100 (same as changeset tip)
         {
             let provider = factory.database_provider_rw().unwrap();
             provider
@@ -1719,16 +1709,13 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // Verify headers tip equals checkpoint (both at 100)
-        let headers_tip = provider
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::Headers)
-            .unwrap();
-        assert_eq!(headers_tip, 100, "Headers static file tip should be 100");
+        // Verify changeset tip equals checkpoint (both at 100)
+        let changeset_tip = rocksdb.highest_storage_changeset_block().unwrap().unwrap();
+        assert_eq!(changeset_tip, 100, "Changeset tip should be 100");
 
         // Run check_consistency - should return None (no unwind needed)
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, None, "headers_tip == checkpoint should not require unwind");
+        assert_eq!(result, None, "changeset_tip == checkpoint should not require unwind");
 
         // Verify NO entries are deleted - RocksDB state unchanged
         let entries_after: Vec<_> =
@@ -1737,7 +1724,7 @@ mod tests {
         assert_eq!(
             entries_after.len(),
             entries_before.len(),
-            "RocksDB entry count should be unchanged when headers_tip == checkpoint"
+            "RocksDB entry count should be unchanged when changeset_tip == checkpoint"
         );
 
         // Verify exact entries are preserved

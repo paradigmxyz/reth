@@ -463,7 +463,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return tip_header;
+                    return tip_header
                 }
                 Err(error) => {
                     fetch_failures += 1;
