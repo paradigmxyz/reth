@@ -36,6 +36,64 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument, trace};
 
+#[expect(clippy::large_enum_variant)]
+pub(super) enum SpawnedSparseTrieTask<BPF, A, S>
+where
+    BPF: TrieNodeProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+    BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
+    A: SparseTrie + SparseTrieExt + Send + Sync + Default,
+    S: SparseTrie + SparseTrieExt + Send + Sync + Default + Clone,
+{
+    Cleared(SparseTrieTask<BPF, A, S>),
+    Cached(SparseTrieCacheTask<A, S>),
+}
+
+impl<BPF, A, S> SpawnedSparseTrieTask<BPF, A, S>
+where
+    BPF: TrieNodeProviderFactory + Send + Sync + Clone,
+    BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+    BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
+    A: SparseTrie + SparseTrieExt + Send + Sync + Default,
+    S: SparseTrie + SparseTrieExt + Send + Sync + Default + Clone,
+{
+    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+        match self {
+            Self::Cleared(task) => task.run(),
+            Self::Cached(task) => task.run(),
+        }
+    }
+
+    pub(super) fn into_trie_for_reuse(
+        self,
+        prune_depth: usize,
+        max_storage_tries: usize,
+        max_nodes_capacity: usize,
+        max_values_capacity: usize,
+    ) -> SparseStateTrie<A, S> {
+        match self {
+            Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
+            Self::Cached(task) => task.into_trie_for_reuse(
+                prune_depth,
+                max_storage_tries,
+                max_nodes_capacity,
+                max_values_capacity,
+            ),
+        }
+    }
+
+    pub(super) fn into_cleared_trie(
+        self,
+        max_nodes_capacity: usize,
+        max_values_capacity: usize,
+    ) -> SparseStateTrie<A, S> {
+        match self {
+            Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
+            Self::Cached(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
+        }
+    }
+}
+
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
 where
@@ -57,46 +115,29 @@ where
     BPF: TrieNodeProviderFactory + Send + Sync + Clone,
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-    A: SparseTrie + Send + Sync + Default,
-    S: SparseTrie + Send + Sync + Default + Clone,
+    A: SparseTrie + SparseTrieExt + Send + Sync + Default,
+    S: SparseTrie + SparseTrieExt + Send + Sync + Default + Clone,
 {
-    /// Creates a new sparse trie, pre-populating with a [`ClearedSparseStateTrie`].
-    pub(super) fn new_with_cleared_trie(
+    /// Creates a new sparse trie task with the given trie.
+    pub(super) const fn new(
         updates: mpsc::Receiver<SparseTrieUpdate>,
         blinded_provider_factory: BPF,
         metrics: MultiProofTaskMetrics,
-        sparse_state_trie: ClearedSparseStateTrie<A, S>,
+        trie: SparseStateTrie<A, S>,
     ) -> Self {
-        Self { updates, metrics, trie: sparse_state_trie.into_inner(), blinded_provider_factory }
+        Self { updates, metrics, trie, blinded_provider_factory }
     }
 
-    /// Runs the sparse trie task to completion.
+    /// Runs the sparse trie task to completion, computing the state root.
     ///
-    /// This waits for new incoming [`SparseTrieUpdate`].
-    ///
-    /// This concludes once the last trie update has been received.
-    ///
-    /// # Returns
-    ///
-    /// - State root computation outcome.
-    /// - `SparseStateTrie` that needs to be cleared and reused to avoid reallocations.
+    /// Receives [`SparseTrieUpdate`]s until the channel is closed, applying each update
+    /// to the trie. Once all updates are processed, computes and returns the final state root.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    pub(super) fn run(
-        mut self,
-    ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, SparseStateTrie<A, S>) {
-        // run the main loop to completion
-        let result = self.run_inner();
-        (result, self.trie)
-    }
-
-    /// Inner function to run the sparse trie task to completion.
-    ///
-    /// See [`Self::run`] for more information.
-    fn run_inner(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
         let mut num_iterations = 0;
@@ -145,6 +186,20 @@ where
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
+    }
+
+    /// Clears and shrinks the trie, discarding all state.
+    ///
+    /// Use this when the payload was invalid or cancelled - we don't want to preserve
+    /// potentially invalid trie state, but we keep the allocations for reuse.
+    pub(super) fn into_cleared_trie(
+        mut self,
+        max_nodes_capacity: usize,
+        max_values_capacity: usize,
+    ) -> SparseStateTrie<A, S> {
+        self.trie.clear();
+        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        self.trie
     }
 }
 
@@ -216,34 +271,47 @@ where
         }
     }
 
+    /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
+    ///
+    /// Should be called after the state root result has been sent.
+    pub(super) fn into_trie_for_reuse(
+        mut self,
+        prune_depth: usize,
+        max_storage_tries: usize,
+        max_nodes_capacity: usize,
+        max_values_capacity: usize,
+    ) -> SparseStateTrie<A, S> {
+        self.trie.prune(prune_depth, max_storage_tries);
+        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        self.trie
+    }
+
+    /// Clears and shrinks the trie, discarding all state.
+    ///
+    /// Use this when the payload was invalid or cancelled - we don't want to preserve
+    /// potentially invalid trie state, but we keep the allocations for reuse.
+    pub(super) fn into_cleared_trie(
+        mut self,
+        max_nodes_capacity: usize,
+        max_values_capacity: usize,
+    ) -> SparseStateTrie<A, S> {
+        self.trie.clear();
+        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        self.trie
+    }
+
     /// Runs the sparse trie task to completion.
     ///
     /// This waits for new incoming [`MultiProofMessage`]s, applies updates to the trie and
     /// schedules proof fetching when needed.
     ///
     /// This concludes once the last state update has been received and processed.
-    ///
-    /// # Returns
-    ///
-    /// - State root computation outcome.
-    /// - `SparseStateTrie` that needs to be cleared and reused to avoid reallocations.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    pub(super) fn run(
-        mut self,
-    ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, SparseStateTrie<A, S>) {
-        // run the main loop to completion
-        let result = self.run_inner();
-        (result, self.trie)
-    }
-
-    /// Inner function to run the sparse trie task to completion.
-    ///
-    /// See [`Self::run`] for more information.
-    fn run_inner(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
         let mut finished_state_updates = false;
@@ -475,7 +543,7 @@ where
             let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
 
             let (account, storage_root) = if let Some(account) = account.take() {
-                // If account is Some(_) here it means it didn't have any storage updates 
+                // If account is Some(_) here it means it didn't have any storage updates
                 // and we can fetch the storage root directly from the account trie.
                 //
                 // If it did have storage updates, we would've had processed it above when iterating over storage tries.

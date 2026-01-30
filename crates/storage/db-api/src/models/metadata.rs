@@ -39,7 +39,7 @@ pub struct StorageSettings {
 impl StorageSettings {
     /// Returns the default base `StorageSettings` for this build.
     ///
-    /// When the `edge` feature is enabled, returns [`Self::edge()`].
+    /// When the `edge` feature is enabled, returns `Self::edge()`.
     /// Otherwise, returns [`Self::legacy()`].
     pub const fn base() -> Self {
         #[cfg(feature = "edge")]
