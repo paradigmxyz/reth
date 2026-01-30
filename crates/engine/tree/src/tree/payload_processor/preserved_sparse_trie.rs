@@ -7,6 +7,9 @@ use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::sync::Arc;
 use tracing::debug;
 
+/// Type alias for the sparse trie type used in preservation.
+pub(super) type SparseTrie = SparseStateTrie<ParallelSparseTrie, ParallelSparseTrie>;
+
 /// Shared handle to a preserved sparse trie that can be reused across payload validations.
 ///
 /// This is stored in [`PayloadProcessor`](super::PayloadProcessor) and cloned to pass to
@@ -39,61 +42,76 @@ impl PreservedTrieGuard<'_> {
     }
 }
 
-/// A preserved sparse trie with metadata about which block it was computed for.
+/// A preserved sparse trie that can be reused across payload validations.
 ///
-/// This enables trie reuse across sequential payload validations when the new payload
-/// is a direct child of the previous one.
+/// The trie exists in one of two states:
+/// - **Anchored**: Has a computed state root and can be reused for payloads whose parent state root
+///   matches the anchor.
+/// - **Cleared**: Trie data has been cleared but allocations are preserved for reuse.
 #[derive(Debug)]
-pub(super) struct PreservedSparseTrie {
-    /// The sparse state trie (pruned after root computation).
-    trie: SparseStateTrie<ParallelSparseTrie, ParallelSparseTrie>,
-    /// The block hash this trie was computed for.
-    block_hash: B256,
+pub(super) enum PreservedSparseTrie {
+    /// Trie with a computed state root that can be reused for continuation payloads.
+    Anchored {
+        /// The sparse state trie (pruned after root computation).
+        trie: SparseTrie,
+        /// The state root this trie represents (computed from the previous block).
+        /// Used to verify continuity: new payload's `parent_state_root` must match this.
+        state_root: B256,
+    },
+    /// Cleared trie with preserved allocations, ready for fresh use.
+    Cleared {
+        /// The sparse state trie with cleared data but preserved allocations.
+        trie: SparseTrie,
+    },
 }
 
 impl PreservedSparseTrie {
-    /// Creates a new preserved trie.
-    pub(super) const fn new(
-        trie: SparseStateTrie<ParallelSparseTrie, ParallelSparseTrie>,
-        block_hash: B256,
-    ) -> Self {
-        Self { trie, block_hash }
+    /// Creates a new anchored preserved trie.
+    ///
+    /// The `state_root` is the computed state root from the trie, which becomes the
+    /// anchor for determining if subsequent payloads can reuse this trie.
+    pub(super) const fn anchored(trie: SparseTrie, state_root: B256) -> Self {
+        Self::Anchored { trie, state_root }
     }
 
-    /// Returns true if this trie can be reused for a payload with the given parent hash.
-    ///
-    /// The trie is a continuation if the new payload's parent is the block we computed
-    /// this trie for.
-    fn is_continuation_of(&self, parent_hash: B256) -> bool {
-        self.block_hash == parent_hash
+    /// Creates a cleared preserved trie (allocations preserved, data cleared).
+    pub(super) const fn cleared(trie: SparseTrie) -> Self {
+        Self::Cleared { trie }
     }
 
     /// Consumes self and returns the trie for reuse.
     ///
-    /// If the new payload is a continuation (its parent is the block we computed this trie for),
-    /// the pruned trie structure is reused directly. Otherwise, the trie is cleared but
-    /// allocations are preserved to reduce memory overhead.
-    pub(super) fn into_trie_for(
-        self,
-        parent_hash: B256,
-    ) -> SparseStateTrie<ParallelSparseTrie, ParallelSparseTrie> {
-        if self.is_continuation_of(parent_hash) {
-            debug!(
-                target: "engine::tree::payload_processor",
-                block_hash = %self.block_hash,
-                "Reusing sparse trie for continuation payload"
-            );
-            self.trie
-        } else {
-            debug!(
-                target: "engine::tree::payload_processor",
-                previous_hash = %self.block_hash,
-                new_parent = %parent_hash,
-                "Clearing sparse trie - not a continuation"
-            );
-            let mut trie = self.trie;
-            trie.clear();
-            trie
+    /// If the preserved trie is anchored and the parent state root matches, the pruned
+    /// trie structure is reused directly. Otherwise, the trie is cleared but allocations
+    /// are preserved to reduce memory overhead.
+    pub(super) fn into_trie_for(self, parent_state_root: B256) -> SparseTrie {
+        match self {
+            Self::Anchored { trie, state_root } if state_root == parent_state_root => {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    %state_root,
+                    "Reusing anchored sparse trie for continuation payload"
+                );
+                trie
+            }
+            Self::Anchored { mut trie, state_root } => {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    anchor_root = %state_root,
+                    %parent_state_root,
+                    "Clearing anchored sparse trie - parent state root mismatch"
+                );
+                trie.clear();
+                trie
+            }
+            Self::Cleared { trie } => {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    %parent_state_root,
+                    "Using cleared sparse trie with preserved allocations"
+                );
+                trie
+            }
         }
     }
 }

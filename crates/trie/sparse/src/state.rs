@@ -19,7 +19,9 @@ use reth_trie_common::{
     Nibbles, ProofTrieNode, RlpNode, StorageMultiProof, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use tracing::{debug, instrument, trace};
+#[cfg(feature = "std")]
+use tracing::debug;
+use tracing::{instrument, trace};
 
 /// Provides type-safe re-use of cleared [`SparseStateTrie`]s, which helps to save allocations
 /// across payload runs.
@@ -1039,32 +1041,21 @@ where
     /// # Effects
     ///
     /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
+    #[cfg(feature = "std")]
     #[instrument(target = "trie::sparse", skip_all, fields(max_depth, max_storage_tries))]
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
-        #[cfg(feature = "std")]
-        {
-            // Prune state and storage tries in parallel
-            rayon::join(
-                || {
-                    if let Some(trie) = self.state.as_revealed_mut() {
-                        trie.prune(max_depth);
-                    }
-                    self.revealed_account_paths.clear();
-                },
-                || {
-                    self.storage.prune(max_depth, max_storage_tries);
-                },
-            );
-        }
-
-        #[cfg(not(feature = "std"))]
-        {
-            if let Some(trie) = self.state.as_revealed_mut() {
-                trie.prune(max_depth);
-            }
-            self.revealed_account_paths.clear();
-            self.storage.prune(max_depth, max_storage_tries);
-        }
+        // Prune state and storage tries in parallel
+        rayon::join(
+            || {
+                if let Some(trie) = self.state.as_revealed_mut() {
+                    trie.prune(max_depth);
+                }
+                self.revealed_account_paths.clear();
+            },
+            || {
+                self.storage.prune(max_depth, max_storage_tries);
+            },
+        );
     }
 }
 
@@ -1087,6 +1078,7 @@ struct StorageTries<S = SerialSparseTrie> {
     modifications: StorageTrieModifications,
 }
 
+#[cfg(feature = "std")]
 impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
     /// Prunes and evicts storage tries.
     ///
@@ -1291,6 +1283,7 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
 
 /// Statistics from a storage tries prune operation.
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 struct StorageTriesPruneStats {
     total_tries_before: usize,
     total_tries_after: usize,
@@ -1299,8 +1292,8 @@ struct StorageTriesPruneStats {
     pruned_count: usize,
     skipped_small: usize,
     skipped_recently_pruned: usize,
-    prune_elapsed: std::time::Duration,
-    total_elapsed: std::time::Duration,
+    prune_elapsed: core::time::Duration,
+    total_elapsed: core::time::Duration,
 }
 
 /// Per-trie access tracking and prune state.
@@ -1308,6 +1301,7 @@ struct StorageTriesPruneStats {
 /// Tracks how frequently a storage trie is accessed and when it was last pruned,
 /// enabling smart pruning decisions that preserve frequently-used tries.
 #[derive(Debug, Clone, Copy, Default)]
+#[allow(dead_code)]
 struct TrieModificationState {
     /// Access frequency level (0-255). Incremented each cycle the trie is accessed.
     /// Used for prioritizing which tries to keep during pruning.
@@ -1333,6 +1327,7 @@ struct StorageTrieModifications {
     accessed_this_cycle: HashSet<B256>,
 }
 
+#[allow(dead_code)]
 impl StorageTrieModifications {
     /// Marks a storage trie as accessed this cycle.
     /// Heat and `prune_backlog` are updated in [`Self::update_and_reset`].

@@ -245,9 +245,8 @@ where
         // Extract V2 proofs flag early so we can pass it to prewarm
         let v2_proofs_enabled = !config.disable_proof_v2();
 
-        // Capture hashes before env is moved into spawn_caching_with
-        let parent_hash = env.parent_hash;
-        let block_hash = env.hash;
+        // Capture parent_state_root before env is moved into spawn_caching_with
+        let parent_state_root = env.parent_state_root;
 
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {
@@ -330,8 +329,7 @@ where
             state_root_tx,
             from_multi_proof,
             config,
-            parent_hash,
-            block_hash,
+            parent_state_root,
         );
 
         PayloadHandle {
@@ -513,7 +511,6 @@ where
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
-    #[expect(clippy::too_many_arguments)]
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task(
         &self,
@@ -522,8 +519,7 @@ where
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
         from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
         config: &TreeConfig,
-        parent_hash: B256,
-        block_hash: B256,
+        parent_state_root: B256,
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
@@ -536,11 +532,12 @@ where
             let _enter = span.entered();
 
             // Reuse a stored SparseStateTrie if available, applying continuation logic.
-            // If this payload's parent matches the preserved trie's block, we can reuse
-            // the pruned trie structure. Otherwise, we clear the trie but keep allocations.
+            // If this payload's parent state root matches the preserved trie's anchor,
+            // we can reuse the pruned trie structure. Otherwise, we clear the trie but
+            // keep allocations.
             let sparse_state_trie = preserved_sparse_trie
                 .take()
-                .map(|preserved| preserved.into_trie_for(parent_hash))
+                .map(|preserved| preserved.into_trie_for(parent_state_root))
                 .unwrap_or_else(|| {
                     debug!(
                         target: "engine::tree::payload_processor",
@@ -574,7 +571,8 @@ where
             };
 
             let result = task.run();
-            let succeeded = result.is_ok();
+            // Capture the computed state_root before sending the result
+            let computed_state_root = result.as_ref().ok().map(|outcome| outcome.state_root);
 
             // Acquire the guard before sending the result to prevent a race condition:
             // Without this, the next block could start after send() but before store(),
@@ -595,15 +593,15 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                guard.store(PreservedSparseTrie::new(trie, block_hash));
+                guard.store(PreservedSparseTrie::cleared(trie));
                 return;
             }
 
-            // Only preserve the trie if computation succeeded - a failed computation
-            // may have left the trie in a partially updated/inconsistent state.
+            // Only preserve the trie as anchored if computation succeeded.
+            // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            if succeeded {
+            if let Some(state_root) = computed_state_root {
                 let start = std::time::Instant::now();
                 let trie = task.into_trie_for_reuse(
                     prune_depth,
@@ -614,7 +612,7 @@ where
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                guard.store(PreservedSparseTrie::new(trie, block_hash));
+                guard.store(PreservedSparseTrie::anchored(trie, state_root));
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
@@ -624,7 +622,7 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                guard.store(PreservedSparseTrie::new(trie, block_hash));
+                guard.store(PreservedSparseTrie::cleared(trie));
             }
         });
     }
@@ -959,6 +957,10 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub hash: B256,
     /// Hash of the parent block.
     pub parent_hash: B256,
+    /// State root of the parent block.
+    /// Used for sparse trie continuation: if the preserved trie's anchor matches this,
+    /// the trie can be reused directly.
+    pub parent_state_root: B256,
 }
 
 impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
@@ -970,6 +972,7 @@ where
             evm_env: Default::default(),
             hash: Default::default(),
             parent_hash: Default::default(),
+            parent_state_root: Default::default(),
         }
     }
 }
