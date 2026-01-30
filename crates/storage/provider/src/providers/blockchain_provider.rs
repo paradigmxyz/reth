@@ -186,6 +186,11 @@ impl<N: ProviderNodeTypes> RocksDBProviderFactory for BlockchainProvider<N> {
     fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {
         unimplemented!("BlockchainProvider wraps ProviderFactory - use DatabaseProvider::set_pending_rocksdb_batch instead")
     }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
+        unimplemented!("BlockchainProvider wraps ProviderFactory - use DatabaseProvider::commit_pending_rocksdb_batches instead")
+    }
 }
 
 impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
@@ -723,7 +728,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
 
     fn storage_changesets_range(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         self.consistent_provider()?.storage_changesets_range(range)
     }

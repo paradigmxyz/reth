@@ -3,8 +3,7 @@ use alloc::{
     vec::Vec,
 };
 use alloy_primitives::{Address, BlockNumber, B256};
-use core::ops::RangeInclusive;
-use reth_db_models::StorageBeforeTx;
+use core::ops::{RangeBounds, RangeInclusive};
 use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
 
@@ -54,11 +53,9 @@ pub trait StorageChangeSetReader: Send {
     ) -> ProviderResult<Option<StorageEntry>>;
 
     /// Get all storage changesets in a range of blocks.
-    ///
-    /// NOTE: Get inclusive range of blocks.
     fn storage_changesets_range(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>>;
 
     /// Get the total count of all storage changes.
@@ -70,11 +67,11 @@ pub trait StorageChangeSetReader: Send {
     fn storage_block_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<StorageBeforeTx>> {
+    ) -> ProviderResult<Vec<reth_db_models::StorageBeforeTx>> {
         self.storage_changeset(block_number).map(|changesets| {
             changesets
                 .into_iter()
-                .map(|(block_address, entry)| StorageBeforeTx {
+                .map(|(block_address, entry)| reth_db_models::StorageBeforeTx {
                     address: block_address.address(),
                     key: entry.key,
                     value: entry.value,

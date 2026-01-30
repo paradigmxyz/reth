@@ -136,10 +136,16 @@ pub struct StateWriteConfig {
     pub write_receipts: bool,
     /// Whether to write account changesets.
     pub write_account_changesets: bool,
+    /// Whether to write storage changesets.
+    pub write_storage_changesets: bool,
 }
 
 impl Default for StateWriteConfig {
     fn default() -> Self {
-        Self { write_receipts: true, write_account_changesets: true }
+        Self {
+            write_receipts: true,
+            write_account_changesets: true,
+            write_storage_changesets: true,
+        }
     }
 }

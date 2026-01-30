@@ -50,7 +50,17 @@ pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
-const DEFAULT_CROSS_BLOCK_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+const DEFAULT_CROSS_BLOCK_CACHE_SIZE: usize = default_cross_block_cache_size();
+
+const fn default_cross_block_cache_size() -> usize {
+    if cfg!(test) {
+        1024 * 1024 // 1 MB in tests
+    } else if cfg!(target_pointer_width = "32") {
+        usize::MAX // max possible on wasm32 / 32-bit
+    } else {
+        4 * 1024 * 1024 * 1024 // 4 GB on 64-bit
+    }
+}
 
 /// Determines if the host has enough parallelism to run the payload processor.
 ///
@@ -100,12 +110,10 @@ pub struct TreeConfig {
     disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
     disable_prewarming: bool,
-    /// Whether to disable the parallel sparse trie state root algorithm.
-    disable_parallel_sparse_trie: bool,
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
-    cross_block_cache_size: u64,
+    cross_block_cache_size: usize,
     /// Whether the host has enough parallelism to run state root task.
     has_enough_parallelism: bool,
     /// Whether multiproof task should chunk proof targets.
@@ -140,10 +148,12 @@ pub struct TreeConfig {
     storage_worker_count: usize,
     /// Number of account proof worker threads.
     account_worker_count: usize,
-    /// Whether to enable V2 storage proofs.
-    enable_proof_v2: bool,
+    /// Whether to disable V2 storage proofs.
+    disable_proof_v2: bool,
     /// Whether to disable cache metrics recording (can be expensive with large cached state).
     disable_cache_metrics: bool,
+    /// Whether to enable sparse trie as cache.
+    enable_sparse_trie_as_cache: bool,
 }
 
 impl Default for TreeConfig {
@@ -158,7 +168,6 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
-            disable_parallel_sparse_trie: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
@@ -172,8 +181,9 @@ impl Default for TreeConfig {
             allow_unwind_canonical_header: false,
             storage_worker_count: default_storage_worker_count(),
             account_worker_count: default_account_worker_count(),
-            enable_proof_v2: false,
+            disable_proof_v2: false,
             disable_cache_metrics: false,
+            enable_sparse_trie_as_cache: false,
         }
     }
 }
@@ -191,9 +201,8 @@ impl TreeConfig {
         always_compare_trie_updates: bool,
         disable_state_cache: bool,
         disable_prewarming: bool,
-        disable_parallel_sparse_trie: bool,
         state_provider_metrics: bool,
-        cross_block_cache_size: u64,
+        cross_block_cache_size: usize,
         has_enough_parallelism: bool,
         multiproof_chunking_enabled: bool,
         multiproof_chunk_size: usize,
@@ -205,7 +214,7 @@ impl TreeConfig {
         allow_unwind_canonical_header: bool,
         storage_worker_count: usize,
         account_worker_count: usize,
-        enable_proof_v2: bool,
+        disable_proof_v2: bool,
         disable_cache_metrics: bool,
     ) -> Self {
         Self {
@@ -218,7 +227,6 @@ impl TreeConfig {
             always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
-            disable_parallel_sparse_trie,
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
@@ -232,8 +240,9 @@ impl TreeConfig {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-            enable_proof_v2,
+            disable_proof_v2,
             disable_cache_metrics,
+            enable_sparse_trie_as_cache: false,
         }
     }
 
@@ -275,7 +284,8 @@ impl TreeConfig {
     /// Return the multiproof task chunk size, using the V2 default if V2 proofs are enabled
     /// and the chunk size is at the default value.
     pub const fn effective_multiproof_chunk_size(&self) -> usize {
-        if self.enable_proof_v2 && self.multiproof_chunk_size == DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE
+        if !self.disable_proof_v2 &&
+            self.multiproof_chunk_size == DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE
         {
             DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2
         } else {
@@ -299,11 +309,6 @@ impl TreeConfig {
         self.state_provider_metrics
     }
 
-    /// Returns whether or not the parallel sparse trie is disabled.
-    pub const fn disable_parallel_sparse_trie(&self) -> bool {
-        self.disable_parallel_sparse_trie
-    }
-
     /// Returns whether or not state cache is disabled.
     pub const fn disable_state_cache(&self) -> bool {
         self.disable_state_cache
@@ -321,7 +326,7 @@ impl TreeConfig {
     }
 
     /// Returns the cross-block cache size.
-    pub const fn cross_block_cache_size(&self) -> u64 {
+    pub const fn cross_block_cache_size(&self) -> usize {
         self.cross_block_cache_size
     }
 
@@ -424,7 +429,7 @@ impl TreeConfig {
     }
 
     /// Setter for cross block cache size.
-    pub const fn with_cross_block_cache_size(mut self, cross_block_cache_size: u64) -> Self {
+    pub const fn with_cross_block_cache_size(mut self, cross_block_cache_size: usize) -> Self {
         self.cross_block_cache_size = cross_block_cache_size;
         self
     }
@@ -438,15 +443,6 @@ impl TreeConfig {
     /// Setter for state provider metrics.
     pub const fn with_state_provider_metrics(mut self, state_provider_metrics: bool) -> Self {
         self.state_provider_metrics = state_provider_metrics;
-        self
-    }
-
-    /// Setter for whether to disable the parallel sparse trie
-    pub const fn with_disable_parallel_sparse_trie(
-        mut self,
-        disable_parallel_sparse_trie: bool,
-    ) -> Self {
-        self.disable_parallel_sparse_trie = disable_parallel_sparse_trie;
         self
     }
 
@@ -527,14 +523,14 @@ impl TreeConfig {
         self
     }
 
-    /// Return whether V2 storage proofs are enabled.
-    pub const fn enable_proof_v2(&self) -> bool {
-        self.enable_proof_v2
+    /// Return whether V2 storage proofs are disabled.
+    pub const fn disable_proof_v2(&self) -> bool {
+        self.disable_proof_v2
     }
 
-    /// Setter for whether to enable V2 storage proofs.
-    pub const fn with_enable_proof_v2(mut self, enable_proof_v2: bool) -> Self {
-        self.enable_proof_v2 = enable_proof_v2;
+    /// Setter for whether to disable V2 storage proofs.
+    pub const fn with_disable_proof_v2(mut self, disable_proof_v2: bool) -> Self {
+        self.disable_proof_v2 = disable_proof_v2;
         self
     }
 
@@ -546,6 +542,17 @@ impl TreeConfig {
     /// Setter for whether to disable cache metrics recording.
     pub const fn without_cache_metrics(mut self, disable_cache_metrics: bool) -> Self {
         self.disable_cache_metrics = disable_cache_metrics;
+        self
+    }
+
+    /// Returns whether sparse trie as cache is enabled.
+    pub const fn enable_sparse_trie_as_cache(&self) -> bool {
+        self.enable_sparse_trie_as_cache
+    }
+
+    /// Setter for whether to enable sparse trie as cache.
+    pub const fn with_enable_sparse_trie_as_cache(mut self, value: bool) -> Self {
+        self.enable_sparse_trie_as_cache = value;
         self
     }
 }

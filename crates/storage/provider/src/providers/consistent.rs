@@ -1397,7 +1397,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
 
     fn storage_changesets_range(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         let range = to_range(range);
         let mut changesets = Vec::new();
@@ -1985,14 +1985,11 @@ mod tests {
                     database_state.into_iter().map(|(address, (account, _))| {
                         (address, None, Some(account.into()), Default::default())
                     }),
-                    database_changesets
-                        .iter()
-                        .map(|block_changesets| {
-                            block_changesets.iter().map(|(address, account, _)| {
-                                (*address, Some(Some((*account).into())), [])
-                            })
+                    database_changesets.iter().map(|block_changesets| {
+                        block_changesets.iter().map(|(address, account, _)| {
+                            (*address, Some(Some((*account).into())), [])
                         })
-                        .collect::<Vec<_>>(),
+                    }),
                     Vec::new(),
                 ),
                 first_block: first_database_block,

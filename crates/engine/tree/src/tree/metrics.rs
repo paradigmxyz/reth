@@ -22,6 +22,9 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) block_validation: BlockValidationMetrics,
     /// Canonical chain and reorg related metrics
     pub tree: TreeMetrics,
+    /// Metrics for EIP-7928 Block-Level Access Lists (BAL).
+    #[allow(dead_code)]
+    pub(crate) bal: BalMetrics,
 }
 
 impl EngineApiMetrics {
@@ -239,6 +242,8 @@ pub(crate) struct NewPayloadStatusMetrics {
     pub(crate) new_payload_error: Counter,
     /// The total gas of valid new payload messages received.
     pub(crate) new_payload_total_gas: Histogram,
+    /// The gas used for the last valid new payload.
+    pub(crate) new_payload_total_gas_last: Gauge,
     /// The gas per second of valid new payload messages received.
     pub(crate) new_payload_gas_per_second: Histogram,
     /// The gas per second for the last new payload call.
@@ -251,6 +256,8 @@ pub(crate) struct NewPayloadStatusMetrics {
     pub(crate) time_between_new_payloads: Histogram,
     /// Time from previous payload start to current payload start (total interval).
     pub(crate) new_payload_interval: Histogram,
+    /// Time diff between forkchoice updated call response and the next new payload call request.
+    pub(crate) forkchoice_updated_new_payload_time_diff: Histogram,
 }
 
 impl NewPayloadStatusMetrics {
@@ -258,6 +265,7 @@ impl NewPayloadStatusMetrics {
     pub(crate) fn update_response_metrics(
         &mut self,
         start: Instant,
+        latest_forkchoice_updated_at: &mut Option<Instant>,
         result: &Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError>,
         gas_used: u64,
     ) {
@@ -277,6 +285,7 @@ impl NewPayloadStatusMetrics {
                 PayloadStatusEnum::Valid => {
                     self.new_payload_valid.increment(1);
                     self.new_payload_total_gas.record(gas_used as f64);
+                    self.new_payload_total_gas_last.set(gas_used as f64);
                     let gas_per_second = gas_used as f64 / elapsed.as_secs_f64();
                     self.new_payload_gas_per_second.record(gas_per_second);
                     self.new_payload_gas_per_second_last.set(gas_per_second);
@@ -290,7 +299,38 @@ impl NewPayloadStatusMetrics {
         self.new_payload_messages.increment(1);
         self.new_payload_latency.record(elapsed);
         self.new_payload_last.set(elapsed);
+        if let Some(latest_forkchoice_updated_at) = latest_forkchoice_updated_at.take() {
+            self.forkchoice_updated_new_payload_time_diff
+                .record(start - latest_forkchoice_updated_at);
+        }
     }
+}
+
+/// Metrics for EIP-7928 Block-Level Access Lists (BAL).
+///
+/// See also <https://github.com/ethereum/execution-metrics/issues/5>
+#[allow(dead_code)]
+#[derive(Metrics, Clone)]
+#[metrics(scope = "execution.block_access_list")]
+pub(crate) struct BalMetrics {
+    /// Size of the BAL in bytes for the current block.
+    pub(crate) size_bytes: Gauge,
+    /// Total number of blocks with valid BALs.
+    pub(crate) valid_total: Counter,
+    /// Total number of blocks with invalid BALs.
+    pub(crate) invalid_total: Counter,
+    /// Time taken to validate the BAL against actual execution.
+    pub(crate) validation_time_seconds: Histogram,
+    /// Number of account changes in the BAL.
+    pub(crate) account_changes: Gauge,
+    /// Number of storage changes in the BAL.
+    pub(crate) storage_changes: Gauge,
+    /// Number of balance changes in the BAL.
+    pub(crate) balance_changes: Gauge,
+    /// Number of nonce changes in the BAL.
+    pub(crate) nonce_changes: Gauge,
+    /// Number of code changes in the BAL.
+    pub(crate) code_changes: Gauge,
 }
 
 /// Metrics for non-execution related block validation.
@@ -301,6 +341,8 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_storage_tries_updated_total: Counter,
     /// Total number of times the parallel state root computation fell back to regular.
     pub(crate) state_root_parallel_fallback_total: Counter,
+    /// Total number of times the state root task failed but the fallback succeeded.
+    pub(crate) state_root_task_fallback_success_total: Counter,
     /// Latest state root duration, ie the time spent blocked waiting for the state root.
     pub(crate) state_root_duration: Gauge,
     /// Histogram for state root duration ie the time spent blocked waiting for the state root

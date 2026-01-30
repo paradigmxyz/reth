@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   test:
-    name: test / ${{ matrix.network }}
+    name: test / ${{ matrix.network }} / ${{ matrix.storage }}
     if: github.event_name != 'schedule'
     runs-on: depot-ubuntu-latest-4
     env:
@@ -30,13 +30,17 @@ jobs:
     strategy:
       matrix:
         network: ["ethereum", "optimism"]
+        storage: ["stable", "edge"]
+        exclude:
+          - network: optimism
+            storage: edge
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Geth
-        run: .github/assets/install_geth.sh
+        run: .github/scripts/install_geth.sh
       - uses: taiki-e/install-action@nextest
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
@@ -46,7 +50,7 @@ jobs:
         name: Run tests
         run: |
           cargo nextest run \
-            --locked --features "asm-keccak ${{ matrix.network }}" \
+            --locked --features "asm-keccak ${{ matrix.network }} ${{ matrix.storage == 'edge' && 'edge' || '' }}" \
             --workspace --exclude ef-tests \
             -E "kind(test) and not binary(e2e_testsuite)"
       - if: matrix.network == 'optimism'

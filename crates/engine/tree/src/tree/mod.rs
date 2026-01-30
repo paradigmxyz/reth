@@ -30,7 +30,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
-    BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader, ChangeSetReader,
+    BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
     StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
     TransactionVariant,
@@ -84,6 +84,12 @@ pub mod state;
 /// an epoch has slots), then this exceeds the threshold at which the pipeline should be used to
 /// backfill this gap.
 pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
+
+/// The minimum number of blocks to retain in the changeset cache after eviction.
+///
+/// This ensures that recent trie changesets are kept in memory for potential reorgs,
+/// even when the finalized block is not set (e.g., on L2s like Optimism).
+const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 
 /// A builder for creating state providers that can be used across threads.
 #[derive(Clone, Debug)]
@@ -315,11 +321,10 @@ where
         + HashedPostStateProvider
         + Clone
         + 'static,
-    <P as DatabaseProviderFactory>::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
+    P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StageCheckpointReader
         + ChangeSetReader
-        + StorageChangeSetReader
-        + BlockNumReader,
+        + StorageChangeSetReader,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
     V: EngineValidator<T>,
@@ -1378,21 +1383,42 @@ where
         debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
 
-        // Evict trie changesets for blocks below the finalized block, but keep at least 64 blocks
-        if let Some(finalized) = self.canonical_in_memory_state.get_finalized_num_hash() {
-            let min_threshold = last_persisted_block_number.saturating_sub(64);
-            let eviction_threshold = finalized.number.min(min_threshold);
-            debug!(
-                target: "engine::tree",
-                last_persisted = last_persisted_block_number,
-                finalized_number = finalized.number,
-                eviction_threshold,
-                "Evicting changesets below threshold"
-            );
-            self.changeset_cache.evict(eviction_threshold);
-        }
+        // Evict trie changesets for blocks below the eviction threshold.
+        // Keep at least CHANGESET_CACHE_RETENTION_BLOCKS from the persisted tip, and also respect
+        // the finalized block if set.
+        let min_threshold =
+            last_persisted_block_number.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS);
+        let eviction_threshold =
+            if let Some(finalized) = self.canonical_in_memory_state.get_finalized_num_hash() {
+                // Use the minimum of finalized block and retention threshold to be conservative
+                finalized.number.min(min_threshold)
+            } else {
+                // When finalized is not set (e.g., on L2s), use the retention threshold
+                min_threshold
+            };
+        debug!(
+            target: "engine::tree",
+            last_persisted = last_persisted_block_number,
+            finalized_number = ?self.canonical_in_memory_state.get_finalized_num_hash().map(|f| f.number),
+            eviction_threshold,
+            "Evicting changesets below threshold"
+        );
+        self.changeset_cache.evict(eviction_threshold);
+
+        // Invalidate cached overlay since the anchor has changed
+        self.state.tree_state.invalidate_cached_overlay();
 
         self.on_new_persisted_block()?;
+
+        // Re-prepare overlay for the current canonical head with the new anchor.
+        // Spawn a background task to trigger computation so it's ready when the next payload
+        // arrives.
+        if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
+            rayon::spawn(move || {
+                let _ = overlay.get();
+            });
+        }
+
         Ok(())
     }
 
@@ -1478,6 +1504,10 @@ where
                                     self.on_maybe_tree_event(res.event.take())?;
                                 }
 
+                                if let Err(ref err) = output {
+                                    error!(target: "engine::tree", %err, ?state, "Error processing forkchoice update");
+                                }
+
                                 self.metrics.engine.forkchoice_updated.update_response_metrics(
                                     start,
                                     &mut self.metrics.engine.new_payload.latest_finish_at,
@@ -1500,10 +1530,12 @@ where
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
                                 let mut output = self.on_new_payload(payload);
-                                self.metrics
-                                    .engine
-                                    .new_payload
-                                    .update_response_metrics(start, &output, gas_used);
+                                self.metrics.engine.new_payload.update_response_metrics(
+                                    start,
+                                    &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
+                                    &output,
+                                    gas_used,
+                                );
 
                                 let maybe_event =
                                     output.as_mut().ok().and_then(|out| out.event.take());

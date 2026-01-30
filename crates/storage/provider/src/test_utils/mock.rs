@@ -188,6 +188,21 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             prune_modes: self.prune_modes,
         }
     }
+
+    /// Adds the genesis block from the chain spec to the provider.
+    ///
+    /// This is useful for tests that require a valid latest block (e.g., transaction validation).
+    pub fn with_genesis_block(self) -> Self
+    where
+        ChainSpec: EthChainSpec<Header = <T::Block as Block>::Header>,
+        <T::Block as Block>::Body: Default,
+    {
+        let genesis_hash = self.chain_spec.genesis_hash();
+        let genesis_header = self.chain_spec.genesis_header().clone();
+        let genesis_block = T::Block::new(genesis_header, Default::default());
+        self.add_block(genesis_hash, genesis_block);
+        self
+    }
 }
 
 impl Default for MockEthProvider {
@@ -1010,7 +1025,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
 
     fn storage_changesets_range(
         &self,
-        _range: RangeInclusive<BlockNumber>,
+        _range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
         Ok(Vec::default())
     }

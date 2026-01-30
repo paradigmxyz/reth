@@ -645,7 +645,7 @@ pub struct RpcServerArgs {
     ///
     /// When enabled, transactions that fail execution will be skipped, and all subsequent
     /// transactions from the same sender will also be skipped.
-    #[arg(long = "testing.skip-invalid-transactions", default_value_t = false)]
+    #[arg(long = "testing.skip-invalid-transactions", default_value_t = true)]
     pub testing_skip_invalid_transactions: bool,
 }
 
@@ -859,7 +859,7 @@ impl Default for RpcServerArgs {
             rpc_state_cache,
             gas_price_oracle,
             rpc_send_raw_transaction_sync_timeout,
-            testing_skip_invalid_transactions: false,
+            testing_skip_invalid_transactions: true,
         }
     }
 }
@@ -1025,6 +1025,7 @@ mod tests {
                 max_receipts: 2000,
                 max_headers: 1000,
                 max_concurrent_db_requests: 512,
+                max_cached_tx_hashes: 30_000,
             },
             gas_price_oracle: GasPriceOracleArgs {
                 blocks: 20,
