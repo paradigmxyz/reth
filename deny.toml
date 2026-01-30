@@ -67,6 +67,8 @@ exceptions = [
     # These dependencies are grandfathered in https://github.com/paradigmxyz/reth/pull/6980
     { allow = ["MPL-2.0"], name = "option-ext" },
     { allow = ["MPL-2.0"], name = "webpki-root-certs" },
+    # GMP library for faster modexp precompile (optional feature, dynamically linked)
+    { allow = ["LGPL-3.0+"], name = "gmp-mpfr-sys" },
 ]
 
 [[licenses.clarify]]
