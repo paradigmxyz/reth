@@ -27,7 +27,10 @@ use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader, StorageEntry
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
+use reth_storage_api::{
+    BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader,
+    StorageRangeProviderBox,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{HashedPostState, KeccakKeyHasher};
 use revm_database::BundleState;
@@ -567,6 +570,18 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         self.consistent_provider()?.into_state_provider_at_block_hash(block_hash)
+    }
+
+    fn storage_range_by_block_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<StorageRangeProviderBox> {
+        trace!(
+            target: "providers::blockchain",
+            ?block_hash,
+            "Getting storage range provider by block hash"
+        );
+        self.consistent_provider()?.into_storage_range_provider_at_block_hash(block_hash)
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {

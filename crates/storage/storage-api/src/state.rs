@@ -2,14 +2,14 @@ use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
     StorageRootProvider,
 };
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::Bytecode;
-use reth_storage_errors::provider::ProviderResult;
+use reth_primitives_traits::{Bytecode, StorageEntry};
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::HashedPostState;
 use revm_database::BundleState;
 
@@ -28,6 +28,23 @@ pub trait StateReader: Send {
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
+/// Type alias of boxed [`StorageRangeProvider`].
+pub type StorageRangeProviderBox = Box<dyn StorageRangeProvider>;
+/// Result of a storage range query matching the semantics of `debug_storageRangeAt`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StorageRangeResult {
+    /// Collected storage entries.
+    pub slots: Vec<StorageEntry>,
+    /// Hash of the next key to resume iteration from, if more slots remain.
+    pub next_key: Option<StorageKey>,
+}
+
+impl StorageRangeResult {
+    /// Creates an empty range result.
+    pub const fn empty() -> Self {
+        Self { slots: Vec::new(), next_key: None }
+    }
+}
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Box)]
@@ -90,6 +107,20 @@ pub trait StateProvider:
     }
 }
 
+/// Optional trait for providers that can iterate storage slots in key order.
+#[auto_impl(&, Arc, Box)]
+pub trait StorageRangeProvider {
+    /// Returns storage slots for `account` starting at `start_key` (inclusive) and capped by
+    /// `max_slots`. When additional slots are available beyond `max_slots`, `next_key` in the
+    /// result indicates where the caller should resume.
+    fn storage_range(
+        &self,
+        account: Address,
+        start_key: StorageKey,
+        max_slots: usize,
+    ) -> ProviderResult<StorageRangeResult>;
+}
+
 /// Minimal requirements to read a full account, for example, to validate its new transactions
 pub trait AccountInfoReader: AccountReader + BytecodeReader {}
 impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
@@ -115,6 +146,12 @@ pub trait TryIntoHistoricalStateProvider {
         self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox>;
+
+    /// Returns a historical [`StorageRangeProvider`] indexed by the given historic block number.
+    fn try_into_storage_range_history_at_block(
+        self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<StorageRangeProviderBox>;
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
@@ -174,6 +211,16 @@ pub trait StateProviderFactory: BlockIdReader + Send {
     ///
     /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
+
+    /// Returns a [`StorageRangeProvider`] indexed by the given block hash.
+    ///
+    /// Default implementation returns [`ProviderError::UnsupportedProvider`].
+    fn storage_range_by_block_hash(
+        &self,
+        _block_hash: BlockHash,
+    ) -> ProviderResult<StorageRangeProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 
     /// Returns _any_ [StateProvider] with matching block hash.
     ///

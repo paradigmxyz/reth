@@ -6,15 +6,17 @@ use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
+    models::BlockNumberAddress,
     table::Table,
     tables,
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_primitives_traits::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, StateProofProvider,
-    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
+    StorageChangeSetReader, StorageRangeProvider, StorageRangeResult, StorageRootProvider,
+    StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -30,7 +32,7 @@ use reth_trie_db::{
     DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
 };
 
-use std::fmt::Debug;
+use std::{collections::BTreeMap, fmt::Debug};
 
 /// Result of a history lookup for an account or storage slot.
 ///
@@ -211,6 +213,48 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         }
 
         hashed_storage_from_reverts_with_provider(self.provider, address, self.block_number)
+    }
+
+    /// Collects all storage slots for `account` as of `self.block_number`.
+    fn storage_slots_at_block(
+        &self,
+        account: Address,
+    ) -> ProviderResult<BTreeMap<StorageKey, StorageValue>> {
+        if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+        }
+
+        let mut slots = BTreeMap::new();
+
+        let mut plain_cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+        let walker = plain_cursor.walk_dup(Some(account), None)?;
+        for entry in walker {
+            let (_, storage) = entry?;
+            slots.insert(storage.key, storage.value);
+        }
+
+        let tip = self.provider.last_block_number()?;
+        if self.block_number < tip {
+            let mut changes_cursor = self.tx().cursor_dup_read::<tables::StorageChangeSets>()?;
+            let range = BlockNumberAddress::range((self.block_number + 1)..=tip);
+            let mut entries = Vec::new();
+            for entry in changes_cursor.walk_range(range)? {
+                let (index, storage_entry) = entry?;
+                if index.address() == account {
+                    entries.push(storage_entry);
+                }
+            }
+
+            for storage_entry in entries.into_iter().rev() {
+                if storage_entry.value.is_zero() {
+                    slots.remove(&storage_entry.key);
+                } else {
+                    slots.insert(storage_entry.key, storage_entry.value);
+                }
+            }
+        }
+
+        Ok(slots)
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -447,6 +491,43 @@ impl<Provider: DBProvider + BlockNumReader> BytecodeReader
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         self.tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
+    }
+}
+
+impl<
+        Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageChangeSetReader,
+    > StorageRangeProvider for HistoricalStateProviderRef<'_, Provider>
+{
+    fn storage_range(
+        &self,
+        account: Address,
+        start_key: StorageKey,
+        max_slots: usize,
+    ) -> ProviderResult<StorageRangeResult> {
+        if max_slots == 0 {
+            return Ok(StorageRangeResult::empty())
+        }
+
+        let slots_map = self.storage_slots_at_block(account)?;
+        if slots_map.is_empty() {
+            return Ok(StorageRangeResult::empty())
+        }
+
+        let entries: Vec<_> = slots_map.into_iter().collect();
+        let start_index = entries.partition_point(|(key, _)| *key < start_key);
+        let iter = entries.into_iter().skip(start_index);
+
+        let mut slots = Vec::new();
+        let mut next_key = None;
+        for (key, value) in iter {
+            if slots.len() >= max_slots {
+                next_key = Some(key);
+                break;
+            }
+            slots.push(StorageEntry { key, value });
+        }
+
+        Ok(StorageRangeResult { slots, next_key })
     }
 }
 

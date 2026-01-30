@@ -4,7 +4,10 @@ use crate::{
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
-use reth_storage_api::{BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider};
+use reth_storage_api::{
+    BytecodeReader, DBProvider, StateProofProvider, StorageRangeProvider, StorageRangeResult,
+    StorageRootProvider,
+};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     proof::{Proof, StorageProof},
@@ -164,6 +167,46 @@ impl<Provider: DBProvider + BlockHashReader> StateProvider
             return Ok(Some(entry.value))
         }
         Ok(None)
+    }
+}
+
+fn plain_storage_range<T: DbTx>(
+    tx: &T,
+    account: Address,
+    start_key: StorageKey,
+    max_slots: usize,
+) -> ProviderResult<StorageRangeResult> {
+    if max_slots == 0 {
+        return Ok(StorageRangeResult { slots: Vec::new(), next_key: None });
+    }
+
+    let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+    let walker = cursor.walk_dup(Some(account), Some(start_key))?;
+    let mut slots = Vec::new();
+    let mut next_key = None;
+
+    for entry in walker {
+        let (_, slot) = entry?;
+        if slots.len() >= max_slots {
+            next_key = Some(slot.key);
+            break;
+        }
+        slots.push(slot);
+    }
+
+    Ok(StorageRangeResult { slots, next_key })
+}
+
+impl<Provider: DBProvider + BlockHashReader> StorageRangeProvider
+    for LatestStateProviderRef<'_, Provider>
+{
+    fn storage_range(
+        &self,
+        account: Address,
+        start_key: StorageKey,
+        max_slots: usize,
+    ) -> ProviderResult<StorageRangeResult> {
+        plain_storage_range(self.tx(), account, start_key, max_slots)
     }
 }
 

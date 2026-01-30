@@ -42,6 +42,7 @@ reth-ethereum-primitives.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-node-api.workspace = true
 reth-trie-common.workspace = true
+secp256k1.workspace = true
 
 # ethereum
 alloy-eip7928.workspace = true
