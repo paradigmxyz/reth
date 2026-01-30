@@ -189,6 +189,8 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     fetched_storage_targets: B256Map<B256Map<u8>>,
     /// Whether the last state update has been received.
     finished_state_updates: bool,
+    /// Pending targets to be dispatched to the proof workers.
+    pending_targets: MultiProofTargetsV2,
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
 }
@@ -218,6 +220,7 @@ where
             fetched_account_targets: Default::default(),
             fetched_storage_targets: Default::default(),
             finished_state_updates: Default::default(),
+            pending_targets: Default::default(),
             metrics,
         }
     }
@@ -282,8 +285,15 @@ where
                 }
             }
 
+            self.process_leaf_updates()?;
+
             if self.updates.is_empty() && self.proof_result_rx.is_empty() {
+                self.dispatch_pending_targets();
                 self.process_updates()?;
+            }
+
+            if self.pending_targets.chunking_length() > 100 {
+                self.dispatch_pending_targets();
             }
 
             if self.finished_state_updates &&
@@ -410,8 +420,6 @@ where
     }
 
     fn process_leaf_updates(&mut self) -> SparseTrieResult<()> {
-        let mut targets = MultiProofTargetsV2::default();
-
         for (address, updates) in &mut self.storage_updates {
             self.trie.get_or_create_storage_trie_mut(*address).update_leaves(
                 updates,
@@ -424,7 +432,7 @@ where
                     Entry::Occupied(mut entry) => {
                         if min_len < *entry.get() {
                             entry.insert(min_len);
-                            targets
+                            self.pending_targets
                                 .storage_targets
                                 .entry(*address)
                                 .or_default()
@@ -433,7 +441,7 @@ where
                     }
                     Entry::Vacant(entry) => {
                         entry.insert(min_len);
-                        targets
+                        self.pending_targets
                             .storage_targets
                             .entry(*address)
                             .or_default()
@@ -450,43 +458,19 @@ where
                 Entry::Occupied(mut entry) => {
                     if min_len < *entry.get() {
                         entry.insert(min_len);
-                        targets.account_targets.push(Target::new(target).with_min_len(min_len));
+                        self.pending_targets
+                            .account_targets
+                            .push(Target::new(target).with_min_len(min_len));
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
-                    targets.account_targets.push(Target::new(target).with_min_len(min_len));
+                    self.pending_targets
+                        .account_targets
+                        .push(Target::new(target).with_min_len(min_len));
                 }
             },
         )?;
-
-        if !targets.is_empty() {
-            let chunking_length = targets.chunking_length();
-            dispatch_with_chunking(
-                targets,
-                chunking_length,
-                Some(60),
-                300,
-                self.proof_worker_handle.available_account_workers(),
-                self.proof_worker_handle.available_storage_workers(),
-                MultiProofTargetsV2::chunks,
-                |proof_targets| {
-                    if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(
-                        AccountMultiproofInput::V2 {
-                            targets: proof_targets,
-                            proof_result_sender: ProofResultContext::new(
-                                self.proof_result_tx.clone(),
-                                0,
-                                HashedPostState::default(),
-                                Instant::now(),
-                            ),
-                        },
-                    ) {
-                        error!("failed to dispatch account multiproof: {e:?}");
-                    }
-                },
-            );
-        }
 
         Ok(())
     }
@@ -582,6 +566,36 @@ where
         self.process_leaf_updates()?;
 
         Ok(())
+    }
+
+    fn dispatch_pending_targets(&mut self) {
+        if !self.pending_targets.is_empty() {
+            let chunking_length = self.pending_targets.chunking_length();
+            dispatch_with_chunking(
+                std::mem::take(&mut self.pending_targets),
+                chunking_length,
+                Some(60),
+                300,
+                self.proof_worker_handle.available_account_workers(),
+                self.proof_worker_handle.available_storage_workers(),
+                MultiProofTargetsV2::chunks,
+                |proof_targets| {
+                    if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(
+                        AccountMultiproofInput::V2 {
+                            targets: proof_targets,
+                            proof_result_sender: ProofResultContext::new(
+                                self.proof_result_tx.clone(),
+                                0,
+                                HashedPostState::default(),
+                                Instant::now(),
+                            ),
+                        },
+                    ) {
+                        error!("failed to dispatch account multiproof: {e:?}");
+                    }
+                },
+            );
+        }
     }
 }
 
