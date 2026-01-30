@@ -239,6 +239,17 @@ install-reth-bench: ## Build and install the reth binary under `$(CARGO_HOME)/bi
 		--features "$(FEATURES)" \
 		--profile "$(PROFILE)"
 
+##@ reth-db-tune
+
+.PHONY: reth-db-tune
+reth-db-tune: ## Build the reth-db-tune binary into the `target` directory.
+	cargo build --manifest-path bin/reth-db-tune/Cargo.toml --profile "$(PROFILE)"
+
+.PHONY: install-reth-db-tune
+install-reth-db-tune: ## Build and install the reth-db-tune binary under `$(CARGO_HOME)/bin`.
+	cargo install --path bin/reth-db-tune --bin reth-db-tune --force --locked \
+		--profile "$(PROFILE)"
+
 ##@ Other
 
 .PHONY: clean
