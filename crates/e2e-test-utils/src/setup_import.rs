@@ -320,8 +320,7 @@ mod tests {
         // Import the chain
         {
             let db_args = reth_node_core::args::DatabaseArgs::default().database_args();
-            let db_env = reth_db::init_db(&db_path, db_args).unwrap();
-            let db = Arc::new(db_env);
+            let db = reth_db::init_db(&db_path, db_args).unwrap();
 
             let provider_factory: ProviderFactory<
                 NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, DatabaseEnv>,
@@ -385,8 +384,7 @@ mod tests {
 
         // Now reopen the database and verify checkpoints are still there
         {
-            let db_env = reth_db::init_db(&db_path, DatabaseArguments::default()).unwrap();
-            let db = Arc::new(db_env);
+            let db = reth_db::init_db(&db_path, DatabaseArguments::default()).unwrap();
 
             let provider_factory: ProviderFactory<
                 NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, DatabaseEnv>,
