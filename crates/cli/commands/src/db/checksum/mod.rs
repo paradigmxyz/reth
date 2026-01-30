@@ -17,7 +17,6 @@ use reth_provider::{providers::ProviderNodeTypes, DBProvider, StaticFileProvider
 use reth_static_file_types::StaticFileSegment;
 use std::{
     hash::{BuildHasher, Hasher},
-    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{info, warn};

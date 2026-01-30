@@ -16,7 +16,6 @@ use std::{
     hash::Hash,
     io::Write,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 use tracing::{info, warn};
 
