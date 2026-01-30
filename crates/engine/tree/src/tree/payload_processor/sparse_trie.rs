@@ -132,9 +132,6 @@ where
     ///
     /// Receives [`SparseTrieUpdate`]s until the channel is closed, applying each update
     /// to the trie. Once all updates are processed, computes and returns the final state root.
-    ///
-    /// After this returns, call [`into_trie_for_reuse`](Self::into_trie_for_reuse) to
-    /// prepare the trie for storage and potential reuse in subsequent payload validations.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
@@ -309,9 +306,6 @@ where
     /// schedules proof fetching when needed.
     ///
     /// This concludes once the last state update has been received and processed.
-    ///
-    /// After this returns, call [`into_trie_for_reuse`](Self::into_trie_for_reuse) to
-    /// prepare the trie for storage and potential reuse in subsequent payload validations.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
