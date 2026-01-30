@@ -357,18 +357,14 @@ where
                 },
             }
 
-            if self.updates.is_empty() || self.pending_updates > 100 {
-                self.process_leaf_updates()?;
-            }
-
-            // Dispatch targets if we have accumulated enough or don't have any pending updates.
-            if self.pending_targets.chunking_length() > 100 || self.updates.is_empty() {
-                self.dispatch_pending_targets();
-            }
-
             if self.updates.is_empty() && self.proof_result_rx.is_empty() {
                 self.dispatch_pending_targets();
                 self.process_updates()?;
+                self.dispatch_pending_targets();
+            } else if self.updates.is_empty() || self.pending_updates > 100 {
+                self.process_leaf_updates()?;
+                self.dispatch_pending_targets();
+            } else if self.updates.is_empty() || self.pending_targets.chunking_length() > 100 {
                 self.dispatch_pending_targets();
             }
 
@@ -378,11 +374,6 @@ where
             {
                 break;
             }
-        }
-
-        // Process any remaining pending account updates.
-        if !self.pending_account_updates.is_empty() {
-            self.process_updates()?;
         }
 
         debug!(target: "engine::root", "All proofs processed, ending calculation");
@@ -581,6 +572,10 @@ where
     fn process_updates(&mut self) -> SparseTrieResult<()> {
         self.process_leaf_updates()?;
 
+        if self.pending_account_updates.is_empty() {
+            return Ok(());
+        }
+
         let roots = self
             .trie
             .storage_tries()
@@ -659,8 +654,26 @@ where
             false
         });
 
-        // Now process any new leaf updates from promotions above.
-        self.process_leaf_updates()?;
+        // Process account trie updates and fill the account targets.
+        self.trie.trie_mut().update_leaves(
+            &mut self.account_updates,
+            |target, min_len| match self.fetched_account_targets.entry(target) {
+                Entry::Occupied(mut entry) => {
+                    if min_len < *entry.get() {
+                        entry.insert(min_len);
+                        self.pending_targets
+                            .account_targets
+                            .push(Target::new(target).with_min_len(min_len));
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(min_len);
+                    self.pending_targets
+                        .account_targets
+                        .push(Target::new(target).with_min_len(min_len));
+                }
+            },
+        )?;
 
         Ok(())
     }
