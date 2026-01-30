@@ -27,7 +27,7 @@ use tracing::{instrument, trace};
 /// [`tables::StoragesHistory`]. We want to prune them to the same block number.
 const STORAGE_HISTORY_TABLES_TO_PRUNE: usize = 2;
 
-/// Maximum entries to process per prune run for storage history.
+/// Maximum entries to process per internal batch for storage history.
 /// This bounds memory usage of the `highest_deleted_storages` `HashMap`.
 const MAX_STORAGE_HISTORY_ENTRIES_PER_RUN: usize = 200_000;
 
@@ -156,7 +156,6 @@ impl StorageHistory {
             let has_more_data = walker.peek().is_some();
 
             // Track whether we're done for the final output
-            // We're done only if there's no more data AND we didn't hit the limit
             overall_done = !has_more_data;
 
             trace!(target: "pruner", pruned = %batch_count, done = %overall_done, "Pruned storage history batch (changesets from static files)");
@@ -179,7 +178,6 @@ impl StorageHistory {
                 |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
             )?;
 
-            // output.pruned already includes changesets + deleted history indices
             total_pruned += output.pruned;
 
             // If external limit reached and there's more data, stop
