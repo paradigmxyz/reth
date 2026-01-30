@@ -1,0 +1,78 @@
+# reth-db-tune
+
+RocksDB tuning experimentation tool for reth.
+
+`reth-db-tune` is a standalone binary for migrating RocksDB databases with custom per-column-family tuning options. It enables experimenting with different RocksDB configurations to optimize performance for reth workloads.
+
+```bash
+$ reth-db-tune --help
+```
+```txt
+Usage: reth-db-tune <COMMAND>
+
+Commands:
+  migrate  Migrate a RocksDB database with custom tuning options
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+## Features
+
+- Migrates RocksDB databases with custom per-CF tuning options
+- Copies data CF-by-CF using batched WriteBatch operations (32MB chunks)
+- Optionally runs CompactRange on destination to rewrite SSTs with new options
+- Optionally verifies migration by comparing all keys/values
+- Outputs `migration_report.json` with detailed stats
+
+## Installation
+
+```bash
+# Build the binary
+make reth-db-tune
+
+# Or install to cargo bin
+make install-reth-db-tune
+```
+
+## Configuration
+
+Create a TOML configuration file specifying tuning options:
+
+```toml
+[default]
+write_buffer_size = "256MiB"
+max_write_buffer_number = 4
+compression = "lz4"
+block_size = "16KiB"
+bloom_filter_bits = 10
+max_background_jobs = 16
+
+# Per-CF overrides
+[cf.Headers]
+compression = "zstd"
+bloom_filter_bits = 12
+
+[cf.TransactionLookup]
+write_buffer_size = "512MiB"
+```
+
+### Available Options
+
+| Option | Description | Example Values |
+|--------|-------------|----------------|
+| `write_buffer_size` | Memtable size before flush | `"256MiB"`, `"1GiB"` |
+| `max_write_buffer_number` | Maximum memtables to keep | `4`, `6` |
+| `compression` | Compression algorithm | `"none"`, `"snappy"`, `"lz4"`, `"zstd"` |
+| `block_size` | SST block size | `"4KiB"`, `"16KiB"` |
+| `bloom_filter_bits` | Bloom filter bits per key | `10`, `12` |
+| `max_background_jobs` | Background compaction threads | `6`, `16` |
+
+## Workflow
+
+1. **Create config**: Define tuning options in a TOML file
+2. **Run migration**: Execute `reth-db-tune migrate` with source and destination paths
+3. **Analyze report**: Review `migration_report.json` for timing and size stats
+4. **Benchmark**: Run `reth-bench` against the tuned database to measure performance
+5. **Iterate**: Adjust config and repeat to find optimal settings
