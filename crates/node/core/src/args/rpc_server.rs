@@ -776,6 +776,12 @@ impl RpcServerArgs {
         self.rpc_send_raw_transaction_sync_timeout = timeout;
         self
     }
+
+    /// Enables forced blob sidecar upcasting from EIP-4844 to EIP-7594 format.
+    pub const fn with_force_blob_sidecar_upcasting(mut self) -> Self {
+        self.rpc_force_blob_sidecar_upcasting = true;
+        self
+    }
 }
 
 impl Default for RpcServerArgs {
