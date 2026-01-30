@@ -14,7 +14,7 @@ use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
-use crossbeam_channel::Sender as CrossbeamSender;
+use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use executor::WorkloadExecutor;
 use metrics::Counter;
 use multiproof::{SparseTrieUpdate, *};
@@ -40,10 +40,8 @@ use reth_trie_parallel::{
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
-    provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, RevealableSparseTrie, SerialSparseTrie, SparseStateTrie,
 };
-use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
     collections::BTreeMap,
     ops::Not,
@@ -62,14 +60,6 @@ pub mod multiproof;
 pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
-
-/// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
-///
-/// These values were determined by performing benchmarks using gradually increasing values to judge
-/// the affects. Below 100 throughput would generally be equal or slightly less, while above 150 it
-/// would deteriorate to the point where PST might as well not be used.
-pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
-    ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
 
 /// Default node capacity for shrinking the sparse trie. This is used to limit the number of trie
 /// nodes in allocated sparse tries.
@@ -283,37 +273,45 @@ where
             v2_proofs_enabled,
         );
 
-        let multi_proof_task = MultiProofTask::new(
-            proof_handle.clone(),
-            to_sparse_trie,
-            config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
-            to_multi_proof.clone(),
-            from_multi_proof,
-        )
-        .with_v2_proofs_enabled(v2_proofs_enabled);
+        if !config.enable_sparse_trie_as_cache() {
+            let multi_proof_task = MultiProofTask::new(
+                proof_handle.clone(),
+                to_sparse_trie,
+                config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
+                to_multi_proof.clone(),
+                from_multi_proof.clone(),
+            )
+            .with_v2_proofs_enabled(v2_proofs_enabled);
 
-        // spawn multi-proof task
-        let parent_span = span.clone();
-        let saved_cache = prewarm_handle.saved_cache.clone();
-        self.executor.spawn_blocking(move || {
-            let _enter = parent_span.entered();
-            // Build a state provider for the multiproof task
-            let provider = provider_builder.build().expect("failed to build provider");
-            let provider = if let Some(saved_cache) = saved_cache {
-                let (cache, metrics, _disable_metrics) = saved_cache.split();
-                Box::new(CachedStateProvider::new(provider, cache, metrics))
-                    as Box<dyn StateProvider>
-            } else {
-                Box::new(provider)
-            };
-            multi_proof_task.run(provider);
-        });
+            // spawn multi-proof task
+            let parent_span = span.clone();
+            let saved_cache = prewarm_handle.saved_cache.clone();
+            self.executor.spawn_blocking(move || {
+                let _enter = parent_span.entered();
+                // Build a state provider for the multiproof task
+                let provider = provider_builder.build().expect("failed to build provider");
+                let provider = if let Some(saved_cache) = saved_cache {
+                    let (cache, metrics, _disable_metrics) = saved_cache.split();
+                    Box::new(CachedStateProvider::new(provider, cache, metrics))
+                        as Box<dyn StateProvider>
+                } else {
+                    Box::new(provider)
+                };
+                multi_proof_task.run(provider);
+            });
+        }
 
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
 
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
-        self.spawn_sparse_trie_task(sparse_trie_rx, proof_handle, state_root_tx);
+        self.spawn_sparse_trie_task(
+            sparse_trie_rx,
+            proof_handle,
+            state_root_tx,
+            from_multi_proof,
+            config,
+        );
 
         PayloadHandle {
             to_multi_proof: Some(to_multi_proof),
@@ -493,19 +491,18 @@ where
 
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
-    fn spawn_sparse_trie_task<BPF>(
+    fn spawn_sparse_trie_task(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
-        proof_worker_handle: BPF,
+        proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
-    ) where
-        BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
-        BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
-        BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-    {
+        _from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
+        config: &TreeConfig,
+    ) {
         let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
         let trie_metrics = self.trie_metrics.clone();
         let span = Span::current();
+        let _disable_sparse_trie_as_cache = !config.enable_sparse_trie_as_cache();
 
         self.executor.spawn_blocking(move || {
             let _enter = span.entered();
@@ -513,11 +510,7 @@ where
             // Reuse a stored SparseStateTrie, or create a new one using the desired configuration
             // if there's none to reuse.
             let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
-                let default_trie = RevealableSparseTrie::blind_from(
-                    // SparseTrieImpl::default()
-                    //     .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
-                    SparseTrieImpl::default(),
-                );
+                let default_trie = RevealableSparseTrie::blind_from(SparseTrieImpl::default());
                 ClearedSparseStateTrie::from_state_trie(
                     SparseStateTrie::new()
                         .with_accounts_trie(default_trie.clone())
@@ -526,14 +519,16 @@ where
                 )
             });
 
-            let task = SparseTrieTask::<_, SparseTrieImpl, SparseTrieImpl>::new_with_cleared_trie(
-                sparse_trie_rx,
-                proof_worker_handle,
-                trie_metrics,
-                sparse_state_trie,
-            );
+            // TODO: re-enable SparseTrieCacheTask when SerialSparseTrie implements SparseTrieExt
+            let (result, trie) =
+                SparseTrieTask::<_, SparseTrieImpl, SparseTrieImpl>::new_with_cleared_trie(
+                    sparse_trie_rx,
+                    proof_worker_handle,
+                    trie_metrics,
+                    sparse_state_trie,
+                )
+                .run();
 
-            let (result, trie) = task.run();
             // Send state root computation result
             let _ = state_root_tx.send(result);
 
