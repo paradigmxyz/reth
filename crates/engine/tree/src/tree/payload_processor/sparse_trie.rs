@@ -311,7 +311,11 @@ where
         Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
 
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::sparse_trie", skip_all)]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
     fn on_prewarm_targets(&mut self, targets: VersionedMultiProofTargets) {
         let VersionedMultiProofTargets::V2(targets) = targets else {
             unreachable!("sparse trie as cache must only be used with V2 multiproof targets");
@@ -401,59 +405,78 @@ where
     }
 
     /// Applies updates to the sparse trie and dispatches requested multiproof targets.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::sparse_trie", skip_all)]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
     fn process_updates(&mut self) -> Result<(), ProviderError> {
         let mut targets = MultiProofTargetsV2::default();
 
-        for (addr, updates) in &mut self.storage_updates {
-            let trie = self.trie.get_or_create_storage_trie_mut(*addr);
-            let fetched_storage = self.fetched_storage_targets.entry(*addr).or_default();
-
-            trie.update_leaves(updates, |path, min_len| match fetched_storage.entry(path) {
-                Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
-                        targets
-                            .storage_targets
-                            .entry(*addr)
-                            .or_default()
-                            .push(Target::new(path).with_min_len(min_len));
-                    }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    targets
-                        .storage_targets
-                        .entry(*addr)
-                        .or_default()
-                        .push(Target::new(path).with_min_len(min_len));
-                }
+        // Take ownership of storage updates and tries for parallel processing
+        let results = std::mem::take(&mut self.storage_updates)
+            .into_iter()
+            .map(|(addr, updates)| {
+                let trie = self.trie.take_or_create_storage_trie(&addr);
+                let fetched = self.fetched_storage_targets.remove(&addr).unwrap_or_default();
+                (addr, updates, trie, fetched)
             })
-            .map_err(ProviderError::other)?;
+            .par_bridge()
+            .map(|(addr, mut updates, mut trie, mut fetched)| {
+                let mut targets = Vec::new();
+                trie.update_leaves(&mut updates, |path, min_len| match fetched.entry(path) {
+                    Entry::Occupied(mut entry) => {
+                        if min_len < *entry.get() {
+                            entry.insert(min_len);
+                            targets.push(Target::new(path).with_min_len(min_len));
+                        }
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(min_len);
+                        targets.push(Target::new(path).with_min_len(min_len));
+                    }
+                })
+                .map_err(ProviderError::other)?;
 
-            // If all storage updates were processed, we can now compute the new storage root.
-            if updates.is_empty() {
-                let storage_root =
-                    trie.root().expect("updates are drained, trie should be revealed by now");
+                // Compute the storage root if we've processed all updates.
+                let root = updates.is_empty().then(|| {
+                    trie.root().expect("updates are drained, trie should be revealed by now")
+                });
 
-                // If there is a pending account update for this address with known info, we can
-                // encode it into proper update right away.
-                if let Entry::Occupied(entry) = self.pending_account_updates.entry(*addr) &&
-                    entry.get().is_some()
+                Ok::<_, ProviderError>((addr, targets, trie, root, updates, fetched))
+            })
+            .collect::<Vec<_>>();
+
+        // Restore storage updates, tries, and fetched targets
+        for result in results {
+            let (addr, storage_targets, trie, root, updates, fetched) = result?;
+
+            // Restore storage updates, tries, and fetched targets
+            self.storage_updates.insert(addr, updates);
+            self.trie.insert_storage_trie(addr, trie);
+            self.fetched_storage_targets.insert(addr, fetched);
+
+            // Record the storage targets, if any.
+            if !storage_targets.is_empty() {
+                targets.storage_targets.insert(addr, storage_targets);
+            }
+
+            // If the storage root is known and we have a pending update for this account, encode it
+            // into a proper update.
+            if let Some(storage_root) = root &&
+                let Entry::Occupied(entry) = self.pending_account_updates.entry(addr) &&
+                entry.get().is_some()
+            {
+                let account = entry.remove().expect("just checked, should be Some");
+                let encoded = if account.is_none_or(|account| account.is_empty()) &&
+                    storage_root == EMPTY_ROOT_HASH
                 {
-                    let account = entry.remove().expect("just checked, should be Some");
-                    let encoded = if account.is_none_or(|account| account.is_empty()) &&
-                        storage_root == EMPTY_ROOT_HASH
-                    {
-                        Vec::new()
-                    } else {
-                        // TODO: optimize allocation
-                        alloy_rlp::encode(
-                            account.unwrap_or_default().into_trie_account(storage_root),
-                        )
-                    };
-                    self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
-                }
+                    Vec::new()
+                } else {
+                    // TODO: optimize allocation
+                    alloy_rlp::encode(account.unwrap_or_default().into_trie_account(storage_root))
+                };
+                self.account_updates.insert(addr, LeafUpdate::Changed(encoded));
             }
         }
 
