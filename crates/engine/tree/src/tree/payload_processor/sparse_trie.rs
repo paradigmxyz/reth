@@ -223,6 +223,7 @@ where
             fetched_storage_targets: Default::default(),
             finished_state_updates: Default::default(),
             pending_targets: Default::default(),
+            pending_updates: Default::default(),
             metrics,
         }
     }
