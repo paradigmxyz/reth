@@ -141,13 +141,6 @@ where
         skip_all
     )]
     pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
-        self.run_inner()
-    }
-
-    /// Inner function to run the sparse trie task to completion.
-    ///
-    /// See [`Self::run`] for more information.
-    fn run_inner(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
         let mut num_iterations = 0;
@@ -281,24 +274,6 @@ where
         }
     }
 
-    /// Runs the sparse trie task to completion.
-    ///
-    /// This waits for new incoming [`MultiProofMessage`]s, applies updates to the trie and
-    /// schedules proof fetching when needed.
-    ///
-    /// This concludes once the last state update has been received and processed.
-    ///
-    /// After this returns, call [`into_trie_for_reuse`](Self::into_trie_for_reuse) to
-    /// prepare the trie for storage and potential reuse in subsequent payload validations.
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor::sparse_trie",
-        skip_all
-    )]
-    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
-        self.run_inner()
-    }
-
     /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
     ///
     /// Should be called after the state root result has been sent.
@@ -328,10 +303,21 @@ where
         self.trie
     }
 
-    /// Inner function to run the sparse trie task to completion.
+    /// Runs the sparse trie task to completion.
     ///
-    /// See [`Self::run`] for more information.
-    fn run_inner(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    /// This waits for new incoming [`MultiProofMessage`]s, applies updates to the trie and
+    /// schedules proof fetching when needed.
+    ///
+    /// This concludes once the last state update has been received and processed.
+    ///
+    /// After this returns, call [`into_trie_for_reuse`](Self::into_trie_for_reuse) to
+    /// prepare the trie for storage and potential reuse in subsequent payload validations.
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
+    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
         let mut finished_state_updates = false;

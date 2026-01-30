@@ -259,7 +259,7 @@ where
             for (account, storage_subtree) in storages {
                 self.reveal_decoded_storage_multiproof(account, storage_subtree)?;
                 // Mark this storage trie as hot (accessed this tick)
-                self.storage.heat.mark_accessed(account);
+                self.storage.modifications.mark_accessed(account);
             }
 
             Ok(())
@@ -303,7 +303,7 @@ where
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
                 // Mark this storage trie as hot (accessed this tick)
-                self.storage.heat.mark_accessed(account);
+                self.storage.modifications.mark_accessed(account);
                 if let Ok(_metric_values) = result {
                     #[cfg(feature = "metrics")]
                     {
@@ -345,7 +345,7 @@ where
             for (account, storage_proofs) in multiproof.storage_proofs {
                 self.reveal_storage_v2_proof_nodes(account, storage_proofs)?;
                 // Mark this storage trie as hot (accessed this tick)
-                self.storage.heat.mark_accessed(account);
+                self.storage.modifications.mark_accessed(account);
             }
 
             Ok(())
@@ -387,7 +387,7 @@ where
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
                 // Mark this storage trie as hot (accessed this tick)
-                self.storage.heat.mark_accessed(account);
+                self.storage.modifications.mark_accessed(account);
                 if let Ok(_metric_values) = result {
                     #[cfg(feature = "metrics")]
                     {
@@ -1041,18 +1041,30 @@ where
     /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
     #[instrument(target = "trie::sparse", skip_all, fields(max_depth, max_storage_tries))]
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
-        // Prune state and storage tries in parallel
-        rayon::join(
-            || {
-                if let Some(trie) = self.state.as_revealed_mut() {
-                    trie.prune(max_depth);
-                }
-                self.revealed_account_paths.clear();
-            },
-            || {
-                self.storage.prune(max_depth, max_storage_tries);
-            },
-        );
+        #[cfg(feature = "std")]
+        {
+            // Prune state and storage tries in parallel
+            rayon::join(
+                || {
+                    if let Some(trie) = self.state.as_revealed_mut() {
+                        trie.prune(max_depth);
+                    }
+                    self.revealed_account_paths.clear();
+                },
+                || {
+                    self.storage.prune(max_depth, max_storage_tries);
+                },
+            );
+        }
+
+        #[cfg(not(feature = "std"))]
+        {
+            if let Some(trie) = self.state.as_revealed_mut() {
+                trie.prune(max_depth);
+            }
+            self.revealed_account_paths.clear();
+            self.storage.prune(max_depth, max_storage_tries);
+        }
     }
 }
 
@@ -1071,22 +1083,8 @@ struct StorageTries<S = SerialSparseTrie> {
     cleared_revealed_paths: Vec<HashSet<Nibbles>>,
     /// A default cleared trie instance, which will be cloned when creating new tries.
     default_trie: RevealableSparseTrie<S>,
-    /// Heat tracking for storage tries - used for smart pruning decisions.
-    heat: StorageTrieHeat,
-}
-
-/// Statistics from a storage tries prune operation.
-#[derive(Debug, Default)]
-struct StorageTriesPruneStats {
-    total_tries_before: usize,
-    total_tries_after: usize,
-    tries_to_keep: usize,
-    tries_to_evict: usize,
-    pruned_count: usize,
-    skipped_small: usize,
-    skipped_recently_pruned: usize,
-    prune_elapsed: std::time::Duration,
-    total_elapsed: std::time::Duration,
+    /// Tracks access patterns and modification state of storage tries for smart pruning decisions.
+    modifications: StorageTrieModifications,
 }
 
 impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
@@ -1100,7 +1098,7 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             StorageTriesPruneStats { total_tries_before: self.tries.len(), ..Default::default() };
 
         // Update heat for accessed tries
-        self.heat.update_and_reset();
+        self.modifications.update_and_reset();
 
         // Collect (address, size, score) for all tries
         // Score = size * heat_multiplier
@@ -1113,7 +1111,7 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
                     RevealableSparseTrie::Blind(_) => return (*address, 0, 0),
                     RevealableSparseTrie::Revealed(t) => t.size_hint(),
                 };
-                let heat = self.heat.heat(address);
+                let heat = self.modifications.heat(address);
                 // Heat multiplier: 1 (cold) to 3 (very hot, heat >= 4)
                 let heat_multiplier = 1 + (heat.min(4) / 2) as usize;
                 (*address, size, size * heat_multiplier)
@@ -1144,7 +1142,7 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
                 paths.clear();
                 self.cleared_revealed_paths.push(paths);
             }
-            self.heat.remove(address);
+            self.modifications.remove(address);
         }
 
         // Prune storage tries that are kept, but only if:
@@ -1157,7 +1155,7 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
                 stats.skipped_small += 1;
                 continue; // Small tries aren't worth the DFS cost
             }
-            let Some(heat_state) = self.heat.get_mut(address) else {
+            let Some(heat_state) = self.modifications.get_mut(address) else {
                 continue; // No heat state = not tracked
             };
             // Only prune if backlog >= 2 (skip every other cycle)
@@ -1208,7 +1206,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
             set.clear();
             set
         }));
-        self.heat.clear();
+        self.modifications.clear();
     }
 
     /// Shrinks the capacity of all storage tries to the given total sizes.
@@ -1291,35 +1289,51 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
     }
 }
 
-/// Per-trie heat and prune tracking state.
+/// Statistics from a storage tries prune operation.
+#[derive(Debug, Default)]
+struct StorageTriesPruneStats {
+    total_tries_before: usize,
+    total_tries_after: usize,
+    tries_to_keep: usize,
+    tries_to_evict: usize,
+    pruned_count: usize,
+    skipped_small: usize,
+    skipped_recently_pruned: usize,
+    prune_elapsed: std::time::Duration,
+    total_elapsed: std::time::Duration,
+}
+
+/// Per-trie access tracking and prune state.
+///
+/// Tracks how frequently a storage trie is accessed and when it was last pruned,
+/// enabling smart pruning decisions that preserve frequently-used tries.
 #[derive(Debug, Clone, Copy, Default)]
-struct TrieHeatState {
-    /// Heat level (0-255). Incremented each cycle the trie is accessed.
-    /// Used for prioritizing which tries to keep.
+struct TrieModificationState {
+    /// Access frequency level (0-255). Incremented each cycle the trie is accessed.
+    /// Used for prioritizing which tries to keep during pruning.
     heat: u8,
     /// Prune backlog - cycles since last prune. Incremented each cycle,
     /// reset to 0 when pruned. Used to decide when pruning is needed.
     prune_backlog: u8,
 }
 
-/// Tracks "heat" and dirty state of storage tries to make smart pruning decisions.
+/// Tracks access patterns and modification state of storage tries for smart pruning decisions.
 ///
-/// Heat-based tracking is more accurate than simple generation counting because it tracks
+/// Access-based tracking is more accurate than simple generation counting because it tracks
 /// actual access patterns rather than administrative operations (take/insert).
 ///
-/// - Heat is incremented by 2 when a storage proof is revealed (accessed)
-/// - Heat decays by 1 each prune cycle for tries not accessed that cycle
-/// - Tries with heat > 0 are considered "hot" and prioritized for preservation
-/// - Dirty flag tracks whether a trie has had leaves modified (not just accessed)
+/// - Access frequency is incremented when a storage proof is revealed (accessed)
+/// - Access frequency decays each prune cycle for tries not accessed that cycle
+/// - Tries with higher access frequency are prioritized for preservation during pruning
 #[derive(Debug, Default)]
-struct StorageTrieHeat {
-    /// Heat level and dirty state per storage trie address.
-    state: B256Map<TrieHeatState>,
+struct StorageTrieModifications {
+    /// Access frequency and prune state per storage trie address.
+    state: B256Map<TrieModificationState>,
     /// Tracks which tries were accessed in the current cycle (between prune calls).
     accessed_this_cycle: HashSet<B256>,
 }
 
-impl StorageTrieHeat {
+impl StorageTrieModifications {
     /// Marks a storage trie as accessed this cycle.
     /// Heat and `prune_backlog` are updated in [`Self::update_and_reset`].
     #[inline]
@@ -1329,7 +1343,7 @@ impl StorageTrieHeat {
 
     /// Returns mutable reference to the heat state for a storage trie.
     #[inline]
-    fn get_mut(&mut self, address: &B256) -> Option<&mut TrieHeatState> {
+    fn get_mut(&mut self, address: &B256) -> Option<&mut TrieModificationState> {
         self.state.get_mut(address)
     }
 

@@ -125,7 +125,7 @@ pub struct ParallelSparseTrie {
     parallelism_thresholds: ParallelismThresholds,
     /// Tracks heat of lower subtries for smart pruning decisions.
     /// Hot subtries are skipped during pruning to keep frequently-used data revealed.
-    subtrie_heat: SubtrieHeat,
+    subtrie_heat: SubtrieModifications,
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ParallelSparseTrieMetrics,
@@ -144,7 +144,7 @@ impl Default for ParallelSparseTrie {
             branch_node_masks: BranchNodeMasksMap::default(),
             update_actions_buffers: Vec::default(),
             parallelism_thresholds: Default::default(),
-            subtrie_heat: SubtrieHeat::default(),
+            subtrie_heat: SubtrieModifications::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -1037,20 +1037,6 @@ impl SparseTrie for ParallelSparseTrie {
 }
 
 impl SparseTrieExt for ParallelSparseTrie {
-    /// Returns the count of revealed (non-hash) nodes across all subtries.
-    fn revealed_node_count(&self) -> usize {
-        let upper_count = self.upper_subtrie.nodes.values().filter(|n| !n.is_hash()).count();
-
-        let lower_count: usize = self
-            .lower_subtries
-            .iter()
-            .filter_map(|s| s.as_revealed_ref())
-            .map(|s| s.nodes.values().filter(|n| !n.is_hash()).count())
-            .sum();
-
-        upper_count + lower_count
-    }
-
     /// O(1) size hint based on total node count (including hash stubs).
     fn size_hint(&self) -> usize {
         let upper_count = self.upper_subtrie.nodes.len();
@@ -2099,9 +2085,9 @@ impl ParallelSparseTrie {
 
 /// Bitset tracking which of the 256 lower subtries were modified in the current cycle.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
-struct HotSubtries([u64; 4]);
+struct ModifiedSubtries([u64; 4]);
 
-impl HotSubtries {
+impl ModifiedSubtries {
     /// Marks a subtrie index as modified.
     #[inline]
     fn set(&mut self, idx: usize) {
@@ -2132,25 +2118,25 @@ impl HotSubtries {
 /// - Heat decays by 1 each prune cycle for subtries not modified that cycle
 /// - Subtries with heat > 0 are considered "hot" and skipped during pruning
 #[derive(Clone, PartialEq, Eq, Debug)]
-struct SubtrieHeat {
+struct SubtrieModifications {
     /// Heat level (0-255) for each of the 256 lower subtries.
     heat: [u8; NUM_LOWER_SUBTRIES],
     /// Tracks which subtries were modified in the current cycle.
-    hot: HotSubtries,
+    modified: ModifiedSubtries,
 }
 
-impl Default for SubtrieHeat {
+impl Default for SubtrieModifications {
     fn default() -> Self {
-        Self { heat: [0; NUM_LOWER_SUBTRIES], hot: HotSubtries::default() }
+        Self { heat: [0; NUM_LOWER_SUBTRIES], modified: ModifiedSubtries::default() }
     }
 }
 
-impl SubtrieHeat {
+impl SubtrieModifications {
     /// Marks a subtrie as modified, incrementing its heat by 2.
     #[inline]
     fn mark_modified(&mut self, idx: usize) {
         debug_assert!(idx < NUM_LOWER_SUBTRIES);
-        self.hot.set(idx);
+        self.modified.set(idx);
         self.heat[idx] = self.heat[idx].saturating_add(2);
     }
 
@@ -2165,17 +2151,17 @@ impl SubtrieHeat {
     /// Called at the start of each prune cycle.
     fn decay_and_reset(&mut self) {
         for (idx, heat) in self.heat.iter_mut().enumerate() {
-            if !self.hot.get(idx) {
+            if !self.modified.get(idx) {
                 *heat = heat.saturating_sub(1);
             }
         }
-        self.hot.clear();
+        self.modified.clear();
     }
 
     /// Clears all heat tracking state.
     const fn clear(&mut self) {
         self.heat = [0; NUM_LOWER_SUBTRIES];
-        self.hot.clear();
+        self.modified.clear();
     }
 }
 
@@ -7891,7 +7877,7 @@ mod tests {
             }
 
             let root_before = trie.root();
-            let nodes_before = trie.revealed_node_count();
+            let nodes_before = trie.size_hint();
 
             // Prune multiple times to allow heat to fully decay.
             // Heat starts at 2 and decays by 1 each cycle for unmodified subtries,
@@ -7903,7 +7889,7 @@ mod tests {
             let root_after = trie.root();
             assert_eq!(root_before, root_after, "root hash should be preserved after prune");
 
-            let nodes_after = trie.revealed_node_count();
+            let nodes_after = trie.size_hint();
             assert!(
                 nodes_after < nodes_before,
                 "node count should decrease after prune at depth {max_depth}"
@@ -7956,13 +7942,13 @@ mod tests {
         trie.update_leaf(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), value, &provider).unwrap();
 
         let root_before = trie.root();
-        let nodes_before = trie.revealed_node_count();
+        let nodes_before = trie.size_hint();
 
         trie.prune(0);
 
         let root_after = trie.root();
         assert_eq!(root_before, root_after, "root hash should be preserved");
-        assert_eq!(trie.revealed_node_count(), nodes_before, "single leaf trie should not change");
+        assert_eq!(trie.size_hint(), nodes_before, "single leaf trie should not change");
     }
 
     #[test]
@@ -7978,11 +7964,11 @@ mod tests {
         }
 
         trie.root();
-        let nodes_before = trie.revealed_node_count();
+        let nodes_before = trie.size_hint();
 
         trie.prune(100);
 
-        assert_eq!(nodes_before, trie.revealed_node_count(), "deep prune should have no effect");
+        assert_eq!(nodes_before, trie.size_hint(), "deep prune should have no effect");
     }
 
     #[test]
@@ -8006,7 +7992,7 @@ mod tests {
         }
 
         assert_eq!(root_before, trie.root(), "root hash should be preserved");
-        assert_eq!(trie.revealed_node_count(), 2, "should have root + extension after prune(1)");
+        assert_eq!(trie.size_hint(), 2, "should have root + extension after prune(1)");
     }
 
     #[test]
@@ -8019,13 +8005,13 @@ mod tests {
         trie.update_leaf(Nibbles::from_nibbles([0x1]), small_value, &provider).unwrap();
 
         let root_before = trie.root();
-        let nodes_before = trie.revealed_node_count();
+        let nodes_before = trie.size_hint();
 
         trie.prune(0);
 
         assert_eq!(root_before, trie.root(), "root hash must be preserved");
 
-        if trie.revealed_node_count() == nodes_before {
+        if trie.size_hint() == nodes_before {
             assert!(trie.get_leaf_value(&Nibbles::from_nibbles([0x0])).is_some());
             assert!(trie.get_leaf_value(&Nibbles::from_nibbles([0x1])).is_some());
         }
@@ -8099,7 +8085,7 @@ mod tests {
         }
 
         trie.root();
-        let nodes_before = trie.revealed_node_count();
+        let nodes_before = trie.size_hint();
 
         // If depth were truncated to u8, 300 would become 44 and might prune something
         trie.prune(300);
