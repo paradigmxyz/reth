@@ -66,11 +66,6 @@ impl NodeArena {
         Self { nodes: Vec::new() }
     }
 
-    /// Creates a new arena with the specified capacity.
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self { nodes: Vec::with_capacity(capacity) }
-    }
-
     /// Allocates a new node in the arena and returns its [`NodeId`].
     #[inline]
     pub fn alloc(&mut self, node: SparseNode) -> NodeId {
@@ -89,18 +84,6 @@ impl NodeArena {
     #[inline]
     pub fn get_mut(&mut self, id: NodeId) -> &mut SparseNode {
         &mut self.nodes[id.index()]
-    }
-
-    /// Returns the number of nodes in the arena.
-    #[inline]
-    pub const fn len(&self) -> usize {
-        self.nodes.len()
-    }
-
-    /// Returns `true` if the arena contains no nodes.
-    #[inline]
-    pub const fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
     }
 
     /// Clears the arena, removing all nodes but keeping allocated capacity.
@@ -2430,28 +2413,9 @@ impl SparseNode {
         Self::Branch { state_mask, children: EMPTY_CHILDREN, hash: None, store_in_db_trie: None }
     }
 
-    /// Create new [`SparseNode::Branch`] with two bits set and corresponding child pointers.
-    pub const fn new_split_branch_with_children(
-        bit_a: u8,
-        child_a: NodeId,
-        bit_b: u8,
-        child_b: NodeId,
-    ) -> Self {
-        let state_mask = TrieMask::new((1u16 << bit_a) | (1u16 << bit_b));
-        let mut children = EMPTY_CHILDREN;
-        children[bit_a as usize] = Some(child_a);
-        children[bit_b as usize] = Some(child_b);
-        Self::Branch { state_mask, children, hash: None, store_in_db_trie: None }
-    }
-
     /// Create new [`SparseNode::Extension`] from the key slice.
     pub const fn new_ext(key: Nibbles) -> Self {
         Self::Extension { key, child: None, hash: None, store_in_db_trie: None }
-    }
-
-    /// Create new [`SparseNode::Extension`] from the key slice with a child pointer.
-    pub const fn new_ext_with_child(key: Nibbles, child: NodeId) -> Self {
-        Self::Extension { key, child: Some(child), hash: None, store_in_db_trie: None }
     }
 
     /// Create new [`SparseNode::Leaf`] from leaf key and value.
@@ -2480,22 +2444,6 @@ impl SparseNode {
             Self::Leaf { hash, .. } | Self::Extension { hash, .. } | Self::Branch { hash, .. } => {
                 *hash
             }
-        }
-    }
-
-    /// Returns the child pointer for an extension node.
-    pub const fn ext_child(&self) -> Option<NodeId> {
-        match self {
-            Self::Extension { child, .. } => *child,
-            _ => None,
-        }
-    }
-
-    /// Returns a reference to the children array for a branch node.
-    pub const fn branch_children(&self) -> Option<&[Option<NodeId>; 16]> {
-        match self {
-            Self::Branch { children, .. } => Some(children),
-            _ => None,
         }
     }
 
