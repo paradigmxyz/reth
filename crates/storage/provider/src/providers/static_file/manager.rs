@@ -985,6 +985,36 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(header)
     }
 
+    /// Deletes ALL static file jars for the given segment, including the highest one.
+    ///
+    /// CAUTION: destructive. Deletes all files on disk for this segment.
+    ///
+    /// This is used for `PruneMode::Full` where all data should be removed.
+    ///
+    /// Returns a list of `SegmentHeader`s from the deleted jars.
+    pub fn delete_segment(&self, segment: StaticFileSegment) -> ProviderResult<Vec<SegmentHeader>> {
+        let mut deleted_headers = Vec::new();
+
+        loop {
+            let Some(block_height) = self.get_highest_static_file_block(segment) else {
+                return Ok(deleted_headers);
+            };
+
+            debug!(
+                target: "provider::static_file",
+                ?segment,
+                ?block_height,
+                "Deleting static file jar"
+            );
+
+            let header = self.delete_jar(segment, block_height).inspect_err(|err| {
+                warn!(target: "provider::static_file", ?segment, %block_height, ?err, "Failed to delete static file jar")
+            })?;
+
+            deleted_headers.push(header);
+        }
+    }
+
     /// Given a segment and block range it returns a cached
     /// [`StaticFileJarProvider`]. TODO(joshie): we should check the size and pop N if there's too
     /// many.
