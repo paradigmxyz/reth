@@ -7,7 +7,7 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
 use reth_errors::ProviderError;
 use reth_primitives_traits::Account;
 use reth_revm::state::EvmState;
@@ -421,7 +421,8 @@ where
                 let fetched = self.fetched_storage_targets.remove(&addr).unwrap_or_default();
                 (addr, updates, trie, fetched)
             })
-            .par_bridge()
+            .collect::<Vec<_>>()
+            .par_iter()
             .map(|(addr, mut updates, mut trie, mut fetched)| {
                 let mut targets = Vec::new();
                 trie.update_leaves(&mut updates, |path, min_len| match fetched.entry(path) {
