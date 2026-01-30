@@ -258,6 +258,8 @@ where
         {
             for (account, storage_subtree) in storages {
                 self.reveal_decoded_storage_multiproof(account, storage_subtree)?;
+                // Mark this storage trie as hot (accessed this tick)
+                self.storage.heat.mark_modified(account);
             }
 
             Ok(())
@@ -300,6 +302,8 @@ where
             for (account, revealed_nodes, trie, result) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
+                // Mark this storage trie as hot (accessed this tick)
+                self.storage.heat.mark_modified(account);
                 if let Ok(_metric_values) = result {
                     #[cfg(feature = "metrics")]
                     {
@@ -340,6 +344,8 @@ where
         {
             for (account, storage_proofs) in multiproof.storage_proofs {
                 self.reveal_storage_v2_proof_nodes(account, storage_proofs)?;
+                // Mark this storage trie as hot (accessed this tick)
+                self.storage.heat.mark_modified(account);
             }
 
             Ok(())
@@ -380,6 +386,8 @@ where
             for (account, result, revealed_nodes, trie) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
+                // Mark this storage trie as hot (accessed this tick)
+                self.storage.heat.mark_modified(account);
                 if let Ok(_metric_values) = result {
                     #[cfg(feature = "metrics")]
                     {
@@ -849,8 +857,6 @@ where
             .ok_or(SparseTrieErrorKind::Blind)?
             .update_leaf(slot, value, provider)?;
         self.storage.get_revealed_paths_mut(address).insert(slot);
-        // Mark this storage trie as hot for pruning decisions
-        self.storage.heat.mark_modified(address);
         Ok(())
     }
 
