@@ -31,6 +31,7 @@ use reth_optimism_flashblocks::{
     FlashBlockConsensusClient, FlashBlockRx, FlashBlockService, FlashblocksListeners,
     PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
 };
+use reth_primitives_traits::NodePrimitives;
 use reth_rpc::eth::core::EthApiInner;
 use reth_rpc_eth_api::{
     helpers::{
@@ -547,6 +548,8 @@ where
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
     OpEthApi<N, OpRpcConvert<N, NetworkT>>:
         FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+    <<<N as FullNodeTypes>::Types as NodeTypes>::Primitives as NodePrimitives>::BlockHeader:
+        reth_primitives_traits::header::HeaderMut,
 {
     type EthApi = OpEthApi<N, OpRpcConvert<N, NetworkT>>;
 
@@ -583,8 +586,7 @@ where
                 ctx.components.evm_config().clone(),
                 ctx.components.provider().clone(),
                 ctx.components.task_executor().clone(),
-                // enable state root calculation if flashblock_consensus is enabled.
-                flashblock_consensus,
+                ctx.engine_handle.clone(),
             );
 
             let flashblocks_sequence = service.block_sequence_broadcaster().clone();

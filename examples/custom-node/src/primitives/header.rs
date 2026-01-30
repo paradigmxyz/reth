@@ -2,7 +2,9 @@ use alloy_consensus::Header;
 use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, Sealable, B256, B64, U256};
 use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs::Compact;
-use reth_ethereum::primitives::{serde_bincode_compat::RlpBincode, BlockHeader, InMemorySize};
+use reth_ethereum::primitives::{
+    header::HeaderMut, serde_bincode_compat::RlpBincode, BlockHeader, InMemorySize,
+};
 use revm_primitives::keccak256;
 use serde::{Deserialize, Serialize};
 
@@ -180,5 +182,27 @@ impl reth_db_api::table::Decompress for CustomHeader {
 }
 
 impl BlockHeader for CustomHeader {}
+
+impl HeaderMut for CustomHeader {
+    fn set_parent_hash(&mut self, hash: B256) {
+        self.inner.parent_hash = hash;
+    }
+
+    fn set_block_number(&mut self, number: BlockNumber) {
+        self.inner.number = number;
+    }
+
+    fn set_timestamp(&mut self, timestamp: u64) {
+        self.inner.timestamp = timestamp;
+    }
+
+    fn set_state_root(&mut self, state_root: B256) {
+        self.inner.state_root = state_root;
+    }
+
+    fn set_difficulty(&mut self, difficulty: U256) {
+        self.inner.difficulty = difficulty;
+    }
+}
 
 impl RlpBincode for CustomHeader {}

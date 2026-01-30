@@ -26,12 +26,12 @@ reth-payload-primitives.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
 reth-metrics.workspace = true
+reth-trie.workspace = true
 
 # alloy
 alloy-eips = { workspace = true, features = ["serde"] }
 alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
-alloy-consensus.workspace = true
 
 # op-alloy
 op-alloy-rpc-types-engine = { workspace = true, features = ["k256"] }
