@@ -181,6 +181,11 @@ RocksDB:
           [default: false]
           [possible values: true, false]
 
+      --delete-limit <DELETE_LIMIT>
+          Maximum number of entries to delete per pruner run (across all segments).
+
+          For edge builds, defaults to 100,000 to prevent OOM. For legacy builds, defaults to unlimited. Set to 0 for unlimited deletions per run.
+
 Metrics:
       --metrics <PROMETHEUS>
           Enable Prometheus metrics.

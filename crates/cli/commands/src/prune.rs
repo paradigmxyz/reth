@@ -17,6 +17,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 /// Default delete limit per prune run to prevent OOM when static files are involved.
+#[cfg(feature = "edge")]
 const DEFAULT_DELETE_LIMIT: usize = 100_000;
 
 /// Prunes according to the configuration with a configurable delete limit.
