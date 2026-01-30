@@ -1002,18 +1002,27 @@ where
     /// Shrinks the capacity of the sparse trie to the given node and value sizes.
     ///
     /// This helps reduce memory usage when the trie has excess capacity.
-    /// Only shrinks if current capacity exceeds the target by 2x to avoid
-    /// expensive repeated shrinking.
+    /// Distributes capacity equally among all tries (account + storage).
     pub fn shrink_to(&mut self, max_nodes: usize, max_values: usize) {
-        // Give account trie half the budget, storage tries split the other half
-        let account_nodes = max_nodes / 2;
-        let account_values = max_values / 2;
-        self.state.shrink_nodes_to(account_nodes);
-        self.state.shrink_values_to(account_values);
+        // Count total number of storage tries (active + cleared)
+        let storage_tries_count = self.storage.tries.len() + self.storage.cleared_tries.len();
 
-        // Storage tries get the remaining budget
-        let storage_nodes = max_nodes.saturating_sub(account_nodes);
-        let storage_values = max_values.saturating_sub(account_values);
+        // Total tries = 1 account trie + all storage tries
+        let total_tries = 1 + storage_tries_count;
+
+        // Distribute capacity equally among all tries
+        let nodes_per_trie = max_nodes / total_tries;
+        let values_per_trie = max_values / total_tries;
+
+        // Shrink the account trie
+        self.state.shrink_nodes_to(nodes_per_trie);
+        self.state.shrink_values_to(values_per_trie);
+
+        // Give storage tries the remaining capacity after account trie allocation
+        let storage_nodes = max_nodes.saturating_sub(nodes_per_trie);
+        let storage_values = max_values.saturating_sub(values_per_trie);
+
+        // Shrink all storage tries (they will redistribute internally)
         self.storage.shrink_to(storage_nodes, storage_values);
     }
 
@@ -1202,21 +1211,27 @@ impl<S: SparseTrieTrait> StorageTries<S> {
         self.heat.clear();
     }
 
-    /// Shrinks the capacity of active storage tries to the given total sizes.
+    /// Shrinks the capacity of all storage tries to the given total sizes.
     ///
-    /// Only shrinks active tries - cleared tries are kept as-is for reuse.
-    /// Distributes capacity equally among active tries.
+    /// Distributes capacity equally among all tries (active + cleared).
     fn shrink_to(&mut self, max_nodes: usize, max_values: usize) {
-        let active_count = self.tries.len();
-        if active_count == 0 {
+        let total_tries = self.tries.len() + self.cleared_tries.len();
+        if total_tries == 0 {
             return;
         }
 
-        // Distribute capacity equally among active tries
-        let nodes_per_trie = max_nodes / active_count;
-        let values_per_trie = max_values / active_count;
+        // Distribute capacity equally among all tries
+        let nodes_per_trie = max_nodes / total_tries;
+        let values_per_trie = max_values / total_tries;
 
+        // Shrink active storage tries
         for trie in self.tries.values_mut() {
+            trie.shrink_nodes_to(nodes_per_trie);
+            trie.shrink_values_to(values_per_trie);
+        }
+
+        // Shrink cleared storage tries
+        for trie in &mut self.cleared_tries {
             trie.shrink_nodes_to(nodes_per_trie);
             trie.shrink_values_to(values_per_trie);
         }
