@@ -386,7 +386,7 @@ mod tests {
         )
         .unwrap();
         db.create_tables().unwrap();
-        Arc::new(db)
+        db
     }
 
     #[test]

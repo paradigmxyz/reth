@@ -645,10 +645,7 @@ mod tests {
 
     /// Create database for testing
     fn create_test_db(kind: DatabaseEnvKind) -> DatabaseEnv {
-        Arc::new(create_test_db_with_path(
-            kind,
-            &tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep(),
-        ))
+        create_test_db_with_path(kind, &tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep())
     }
 
     /// Create database for testing with specified path
