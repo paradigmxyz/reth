@@ -9,6 +9,7 @@ use op_alloy_consensus::{
     OpTransaction,
 };
 use reth_chain_state::CanonStateSubscriptions;
+use reth_optimism_flashblocks::FlashblockPayload;
 use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{Recovered, SignedTransaction, SignerRecoverable, WithEncoded};
 use reth_rpc_eth_api::{
@@ -28,11 +29,12 @@ use std::{
 };
 use tokio_stream::wrappers::WatchStream;
 
-impl<N, Rpc> EthTransactions for OpEthApi<N, Rpc>
+impl<N, Rpc, F> EthTransactions for OpEthApi<N, Rpc, F>
 where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
+    F: FlashblockPayload,
 {
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.eth_api.signers()
@@ -183,11 +185,12 @@ where
     }
 }
 
-impl<N, Rpc> LoadTransaction for OpEthApi<N, Rpc>
+impl<N, Rpc, F> LoadTransaction for OpEthApi<N, Rpc, F>
 where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
+    F: FlashblockPayload,
 {
     async fn transaction_by_hash(
         &self,
@@ -238,10 +241,11 @@ where
     }
 }
 
-impl<N, Rpc> OpEthApi<N, Rpc>
+impl<N, Rpc, F> OpEthApi<N, Rpc, F>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
+    F: FlashblockPayload,
 {
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {

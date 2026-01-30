@@ -1,24 +1,28 @@
-use crate::FlashBlock;
 use alloy_primitives::bytes::Bytes;
 use std::io;
 
-/// A trait for decoding flashblocks from bytes.
-pub trait FlashBlockDecoder: Send + 'static {
-    /// Decodes `bytes` into a [`FlashBlock`].
-    fn decode(&self, bytes: Bytes) -> eyre::Result<FlashBlock>;
+/// A trait for decoding flashblocks from bytes into payload type `F`.
+pub trait FlashBlockDecoder<F>: Send + 'static {
+    /// Decodes `bytes` into a flashblock payload of type `F`.
+    fn decode(&self, bytes: Bytes) -> eyre::Result<F>;
 }
 
-/// Default implementation of the decoder.
-impl FlashBlockDecoder for () {
-    fn decode(&self, bytes: Bytes) -> eyre::Result<FlashBlock> {
+impl<F> FlashBlockDecoder<F> for ()
+where
+    F: serde::de::DeserializeOwned,
+{
+    fn decode(&self, bytes: Bytes) -> eyre::Result<F> {
         decode_flashblock(bytes)
     }
 }
 
-pub(crate) fn decode_flashblock(bytes: Bytes) -> eyre::Result<FlashBlock> {
-    let bytes = crate::ws::decoding::try_parse_message(bytes)?;
+fn decode_flashblock<F>(bytes: Bytes) -> eyre::Result<F>
+where
+    F: serde::de::DeserializeOwned,
+{
+    let bytes = try_decompress(bytes)?;
 
-    let payload: FlashBlock =
+    let payload: F =
         serde_json::from_slice(&bytes).map_err(|e| eyre::eyre!("failed to parse message: {e}"))?;
 
     Ok(payload)
@@ -30,7 +34,7 @@ pub(crate) fn decode_flashblock(bytes: Bytes) -> eyre::Result<FlashBlock> {
 /// then it assumes that it is JSON-encoded and returns it as-is.
 ///
 /// Otherwise, the `bytes` are passed through a brotli decompressor and returned.
-fn try_parse_message(bytes: Bytes) -> eyre::Result<Bytes> {
+fn try_decompress(bytes: Bytes) -> eyre::Result<Bytes> {
     if bytes.trim_ascii_start().starts_with(b"{") {
         return Ok(bytes);
     }
