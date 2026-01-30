@@ -15,10 +15,45 @@ use eyre::Context;
 use futures::StreamExt;
 use std::time::Duration;
 use tracing::{debug, info};
+
+/// Default `WebSocket` RPC port for reth.
+const DEFAULT_WS_RPC_PORT: u16 = 8546;
 use url::Url;
 
 /// Default timeout for waiting on persistence.
 pub(crate) const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Returns the websocket RPC URL used for the persistence subscription.
+///
+/// Preference:
+/// - If `ws_rpc_url` is provided, use it directly.
+/// - Otherwise, derive a WS RPC URL from `engine_rpc_url`.
+///
+/// The persistence subscription endpoint (`reth_subscribePersistedBlock`) is exposed on
+/// the regular RPC server (WS port, usually 8546), not on the engine API port (usually 8551).
+/// Since we may only have the engine URL by default, we convert the scheme
+/// (http→ws, https→wss) and force the port to 8546.
+pub(crate) fn derive_ws_rpc_url(
+    ws_rpc_url: Option<&str>,
+    engine_rpc_url: &str,
+) -> eyre::Result<Url> {
+    if let Some(ws_url) = ws_rpc_url {
+        let parsed: Url = ws_url
+            .parse()
+            .wrap_err_with(|| format!("Failed to parse WebSocket RPC URL: {ws_url}"))?;
+        info!(target: "reth-bench", ws_url = %parsed, "Using provided WebSocket RPC URL");
+        Ok(parsed)
+    } else {
+        let derived = engine_url_to_ws_url(engine_rpc_url)?;
+        debug!(
+            target: "reth-bench",
+            engine_url = %engine_rpc_url,
+            %derived,
+            "Derived WebSocket RPC URL from engine RPC URL"
+        );
+        Ok(derived)
+    }
+}
 
 /// Converts an engine API URL to the default RPC websocket URL.
 ///
@@ -30,7 +65,7 @@ pub(crate) const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(
 ///
 /// This is used when we only know the engine API URL (typically `:8551`) but
 /// need to connect to the node's WS RPC endpoint for persistence events.
-pub(crate) fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
+fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
     let url: Url = engine_url
         .parse()
         .wrap_err_with(|| format!("Failed to parse engine RPC URL: {engine_url}"))?;
@@ -52,7 +87,9 @@ pub(crate) fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
         }
     }
 
-    ws_url.set_port(Some(8546)).map_err(|_| eyre::eyre!("Failed to set port for URL: {url}"))?;
+    ws_url
+        .set_port(Some(DEFAULT_WS_RPC_PORT))
+        .map_err(|_| eyre::eyre!("Failed to set port for URL: {url}"))?;
 
     Ok(ws_url)
 }
