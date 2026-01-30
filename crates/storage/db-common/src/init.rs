@@ -170,7 +170,7 @@ where
                 // make sure that our database has been written to, and throw error if it's empty.
                 if factory.get_stage_checkpoint(StageId::Headers)?.is_none() {
                     error!(target: "reth::storage", "Genesis header found on static files, but database is uninitialized.");
-                    return Err(InitStorageError::UninitializedDatabase)
+                    return Err(InitStorageError::UninitializedDatabase);
                 }
 
                 let stored = factory.storage_settings()?.unwrap_or_else(StorageSettings::legacy);
@@ -184,13 +184,13 @@ where
                 }
 
                 debug!("Genesis already written, skipping.");
-                return Ok(hash)
+                return Ok(hash);
             }
 
             return Err(InitStorageError::GenesisHashMismatch {
                 chainspec_hash: hash,
                 storage_hash: block_hash,
-            })
+            });
         }
         Err(e) => {
             debug!(?e);
@@ -210,26 +210,6 @@ where
 
     // Behaviour reserved only for new nodes should be set in the storage settings.
     provider_rw.write_storage_settings(genesis_storage_settings)?;
-
-    // For non-zero genesis blocks, set expected_block_start BEFORE insert_genesis_state.
-    // When block_range is None, next_block_number() uses expected_block_start. By default,
-    // expected_block_start comes from find_fixed_range which returns the file range start (0),
-    // not the genesis block number. This would cause increment_block(N) to fail.
-    let static_file_provider = provider_rw.static_file_provider();
-    if genesis_block_number > 0 {
-        if genesis_storage_settings.account_changesets_in_static_files {
-            static_file_provider
-                .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
-                .user_header_mut()
-                .set_expected_block_start(genesis_block_number);
-        }
-        if genesis_storage_settings.storage_changesets_in_static_files {
-            static_file_provider
-                .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
-                .user_header_mut()
-                .set_expected_block_start(genesis_block_number);
-        }
-    }
 
     insert_genesis_hashes(&provider_rw, alloc.iter())?;
     insert_genesis_history(&provider_rw, alloc.iter())?;
@@ -551,7 +531,7 @@ where
         + AsRef<Provider>,
 {
     if etl_config.file_size == 0 {
-        return Err(eyre::eyre!("ETL file size cannot be zero"))
+        return Err(eyre::eyre!("ETL file size cannot be zero"));
     }
 
     let block = provider_rw.last_block_number()?;
@@ -579,7 +559,7 @@ where
             got: dump_state_root,
             expected: expected_state_root,
         })
-        .into())
+        .into());
     }
 
     debug!(target: "reth::cli",
@@ -615,7 +595,7 @@ where
             got: computed_state_root,
             expected: expected_state_root,
         })
-        .into())
+        .into());
     }
 
     // insert sync stages for stages that require state
@@ -650,7 +630,7 @@ fn parse_accounts(
     loop {
         let n = reader.read_line(&mut line)?;
         if n == 0 {
-            break
+            break;
         }
 
         let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
@@ -806,7 +786,7 @@ where
                     "State root has been computed"
                 );
 
-                return Ok(root)
+                return Ok(root);
             }
         }
     }

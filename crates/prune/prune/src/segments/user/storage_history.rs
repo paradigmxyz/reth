@@ -12,12 +12,10 @@ use reth_db_api::{
     tables,
     transaction::DbTxMut,
 };
-use reth_provider::{DBProvider, EitherWriter, StaticFileProviderFactory};
+use reth_provider::DBProvider;
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
-use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
 use rustc_hash::FxHashMap;
 use tracing::{instrument, trace};
 
@@ -40,10 +38,7 @@ impl StorageHistory {
 
 impl<Provider> Segment<Provider> for StorageHistory
 where
-    Provider: DBProvider<Tx: DbTxMut>
-        + StaticFileProviderFactory
-        + StorageChangeSetReader
-        + StorageSettingsCache,
+    Provider: DBProvider<Tx: DbTxMut>,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::StorageHistory
@@ -63,96 +58,16 @@ where
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No storage history to prune");
-                return Ok(SegmentOutput::done())
+                return Ok(SegmentOutput::done());
             }
         };
         let range_end = *range.end();
 
-        if EitherWriter::storage_changesets_destination(provider).is_static_file() {
-            self.prune_static_files(provider, input, range, range_end)
-        } else {
-            self.prune_database(provider, input, range, range_end)
-        }
+        self.prune_database(provider, input, range, range_end)
     }
 }
 
 impl StorageHistory {
-    /// Prunes storage history when changesets are stored in static files.
-    fn prune_static_files<Provider>(
-        &self,
-        provider: &Provider,
-        input: PruneInput,
-        range: std::ops::RangeInclusive<BlockNumber>,
-        range_end: BlockNumber,
-    ) -> Result<SegmentOutput, PrunerError>
-    where
-        Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
-    {
-        let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
-            input.limiter.set_deleted_entries_limit(limit / STORAGE_HISTORY_TABLES_TO_PRUNE)
-        } else {
-            input.limiter
-        };
-
-        if limiter.is_limit_reached() {
-            return Ok(SegmentOutput::not_done(
-                limiter.interrupt_reason(),
-                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
-            ))
-        }
-
-        // The size of this map is limited by `prune_delete_limit * blocks_since_last_run /
-        // STORAGE_HISTORY_TABLES_TO_PRUNE`, and with current defaults it's usually `3500 * 5
-        // / 2`, so 8750 entries. Each entry is `160 bit + 256 bit + 64 bit`, so the total
-        // size should be up to ~0.5MB + some hashmap overhead. `blocks_since_last_run` is
-        // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
-        let mut highest_deleted_storages = FxHashMap::default();
-        let mut last_changeset_pruned_block = None;
-        let mut pruned_changesets = 0;
-        let mut done = true;
-
-        let walker = provider.static_file_provider().walk_storage_changeset_range(range);
-        for result in walker {
-            if limiter.is_limit_reached() {
-                done = false;
-                break;
-            }
-            let (block_address, entry) = result?;
-            let block_number = block_address.block_number();
-            let address = block_address.address();
-            highest_deleted_storages.insert((address, entry.key), block_number);
-            last_changeset_pruned_block = Some(block_number);
-            pruned_changesets += 1;
-            limiter.increment_deleted_entries_count();
-        }
-
-        // Delete static file jars below the pruned block
-        if let Some(last_block) = last_changeset_pruned_block {
-            provider
-                .static_file_provider()
-                .delete_segment_below_block(StaticFileSegment::StorageChangeSets, last_block + 1)?;
-        }
-        trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned storage history (changesets from static files)");
-
-        let result = HistoryPruneResult {
-            highest_deleted: highest_deleted_storages,
-            last_pruned_block: last_changeset_pruned_block,
-            pruned_count: pruned_changesets,
-            done,
-        };
-        finalize_history_prune::<_, tables::StoragesHistory, (Address, B256), _>(
-            provider,
-            result,
-            range_end,
-            &limiter,
-            |(address, storage_key), block_number| {
-                StorageShardedKey::new(address, storage_key, block_number)
-            },
-            |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
-        )
-        .map_err(Into::into)
-    }
-
     fn prune_database<Provider>(
         &self,
         provider: &Provider,
@@ -173,7 +88,7 @@ impl StorageHistory {
             return Ok(SegmentOutput::not_done(
                 limiter.interrupt_reason(),
                 input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
-            ))
+            ));
         }
 
         // Deleted storage changeset keys (account addresses and storage slots) with the highest
@@ -224,13 +139,12 @@ mod tests {
     use crate::segments::{PruneInput, PruneLimiter, Segment, SegmentOutput, StorageHistory};
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
-    use reth_db_api::{models::StorageSettings, tables, BlockNumberList};
-    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_db_api::{tables, BlockNumberList};
+    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use reth_storage_api::StorageSettingsCache;
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
     };
@@ -296,9 +210,6 @@ mod tests {
             let segment = StorageHistory::new(prune_mode);
 
             let provider = db.factory.database_provider_rw().unwrap();
-            provider.set_storage_settings_cache(
-                StorageSettings::default().with_storage_changesets_in_static_files(false),
-            );
             let result = segment.prune(&provider, input).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 
@@ -400,157 +311,6 @@ mod tests {
             (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 500),
         );
         test_prune(998, 2, (PruneProgress::Finished, 499));
-        test_prune(1200, 3, (PruneProgress::Finished, 202));
-    }
-
-    #[test]
-    fn prune_static_file() {
-        let db = TestStageDB::default();
-        let mut rng = generators::rng();
-
-        let blocks = random_block_range(
-            &mut rng,
-            0..=5000,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
-        );
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
-
-        let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
-
-        let (changesets, _) = random_changeset_range(
-            &mut rng,
-            blocks.iter(),
-            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
-            1..2,
-            1..2,
-        );
-
-        db.insert_changesets_to_static_files(changesets.clone(), None)
-            .expect("insert changesets to static files");
-        db.insert_history(changesets.clone(), None).expect("insert history");
-
-        let storage_occurrences = db.table::<tables::StoragesHistory>().unwrap().into_iter().fold(
-            BTreeMap::<_, usize>::new(),
-            |mut map, (key, _)| {
-                map.entry((key.address, key.sharded_key.key)).or_default().add_assign(1);
-                map
-            },
-        );
-        assert!(storage_occurrences.into_iter().any(|(_, occurrences)| occurrences > 1));
-
-        let original_shards = db.table::<tables::StoragesHistory>().unwrap();
-
-        let test_prune = |to_block: BlockNumber,
-                          run: usize,
-                          expected_result: (PruneProgress, usize)| {
-            let prune_mode = PruneMode::Before(to_block);
-            let deleted_entries_limit = 1000;
-            let mut limiter =
-                PruneLimiter::default().set_deleted_entries_limit(deleted_entries_limit);
-            let input = PruneInput {
-                previous_checkpoint: db
-                    .factory
-                    .provider()
-                    .unwrap()
-                    .get_prune_checkpoint(PruneSegment::StorageHistory)
-                    .unwrap(),
-                to_block,
-                limiter: limiter.clone(),
-            };
-            let segment = StorageHistory::new(prune_mode);
-
-            let provider = db.factory.database_provider_rw().unwrap();
-            provider.set_storage_settings_cache(
-                StorageSettings::default().with_storage_changesets_in_static_files(true),
-            );
-            let result = segment.prune(&provider, input).unwrap();
-            limiter.increment_deleted_entries_count_by(result.pruned);
-
-            assert_matches!(
-                result,
-                SegmentOutput {progress, pruned, checkpoint: Some(_)}
-                    if (progress, pruned) == expected_result
-            );
-
-            segment
-                .save_checkpoint(
-                    &provider,
-                    result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
-                )
-                .unwrap();
-            provider.commit().expect("commit");
-
-            let changesets = changesets
-                .iter()
-                .enumerate()
-                .flat_map(|(block_number, changeset)| {
-                    changeset.iter().flat_map(move |(address, _, entries)| {
-                        entries.iter().map(move |entry| (block_number, address, entry))
-                    })
-                })
-                .collect::<Vec<_>>();
-
-            #[expect(clippy::skip_while_next)]
-            let pruned = changesets
-                .iter()
-                .enumerate()
-                .skip_while(|(i, (block_number, _, _))| {
-                    *i < deleted_entries_limit / STORAGE_HISTORY_TABLES_TO_PRUNE * run &&
-                        *block_number <= to_block as usize
-                })
-                .next()
-                .map(|(i, _)| i)
-                .unwrap_or_default();
-
-            // Skip what we've pruned so far, subtracting one to get last pruned block number
-            // further down
-            let mut pruned_changesets = changesets.iter().skip(pruned.saturating_sub(1));
-
-            let last_pruned_block_number = pruned_changesets
-                .next()
-                .map(|(block_number, _, _)| {
-                    (if result.progress.is_finished() {
-                        *block_number
-                    } else {
-                        block_number.saturating_sub(1)
-                    }) as BlockNumber
-                })
-                .unwrap_or(to_block);
-
-            let actual_shards = db.table::<tables::StoragesHistory>().unwrap();
-
-            let expected_shards = original_shards
-                .iter()
-                .filter(|(key, _)| key.sharded_key.highest_block_number > last_pruned_block_number)
-                .map(|(key, blocks)| {
-                    let new_blocks =
-                        blocks.iter().skip_while(|block| *block <= last_pruned_block_number);
-                    (key.clone(), BlockNumberList::new_pre_sorted(new_blocks))
-                })
-                .collect::<Vec<_>>();
-
-            assert_eq!(actual_shards, expected_shards);
-
-            assert_eq!(
-                db.factory
-                    .provider()
-                    .unwrap()
-                    .get_prune_checkpoint(PruneSegment::StorageHistory)
-                    .unwrap(),
-                Some(PruneCheckpoint {
-                    block_number: Some(last_pruned_block_number),
-                    tx_number: None,
-                    prune_mode
-                })
-            );
-        };
-
-        test_prune(
-            998,
-            1,
-            (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 500),
-        );
-        test_prune(998, 2, (PruneProgress::Finished, 500));
         test_prune(1200, 3, (PruneProgress::Finished, 202));
     }
 }

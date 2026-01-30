@@ -24,6 +24,20 @@ const fn default_account_history_in_rocksdb() -> bool {
     StorageSettings::base().account_history_in_rocksdb
 }
 
+/// Default value for `account_changesets` routing flag.
+///
+/// Derived from [`StorageSettings::base()`] to ensure CLI defaults match storage defaults.
+const fn default_account_changesets_in_rocksdb() -> bool {
+    StorageSettings::base().account_changesets_in_rocksdb
+}
+
+/// Default value for `storage_changesets` routing flag.
+///
+/// Derived from [`StorageSettings::base()`] to ensure CLI defaults match storage defaults.
+const fn default_storage_changesets_in_rocksdb() -> bool {
+    StorageSettings::base().storage_changesets_in_rocksdb
+}
+
 /// Parameters for `RocksDB` table routing configuration.
 ///
 /// These flags control which database tables are stored in `RocksDB` instead of MDBX.
@@ -58,6 +72,20 @@ pub struct RocksDbArgs {
     /// Defaults to `false`.
     #[arg(long = "rocksdb.account-history", default_value_t = default_account_history_in_rocksdb(), action = ArgAction::Set)]
     pub account_history: bool,
+
+    /// Route account changesets to `RocksDB` instead of MDBX or static files.
+    ///
+    /// This is a genesis-initialization-only flag: changing it after genesis requires a re-sync.
+    /// Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+    #[arg(long = "rocksdb.account-changesets", default_value_t = default_account_changesets_in_rocksdb(), action = ArgAction::Set)]
+    pub account_changesets: bool,
+
+    /// Route storage changesets to `RocksDB` instead of MDBX or static files.
+    ///
+    /// This is a genesis-initialization-only flag: changing it after genesis requires a re-sync.
+    /// Defaults to `true` when the `edge` feature is enabled, `false` otherwise.
+    #[arg(long = "rocksdb.storage-changesets", default_value_t = default_storage_changesets_in_rocksdb(), action = ArgAction::Set)]
+    pub storage_changesets: bool,
 }
 
 impl Default for RocksDbArgs {
@@ -67,6 +95,8 @@ impl Default for RocksDbArgs {
             tx_hash: default_tx_hash_in_rocksdb(),
             storages_history: default_storages_history_in_rocksdb(),
             account_history: default_account_history_in_rocksdb(),
+            account_changesets: default_account_changesets_in_rocksdb(),
+            storage_changesets: default_storage_changesets_in_rocksdb(),
         }
     }
 }
@@ -85,6 +115,12 @@ impl RocksDbArgs {
             }
             if !self.account_history {
                 return Err(RocksDbArgsError::ConflictingFlags("account-history"));
+            }
+            if !self.account_changesets {
+                return Err(RocksDbArgsError::ConflictingFlags("account-changesets"));
+            }
+            if !self.storage_changesets {
+                return Err(RocksDbArgsError::ConflictingFlags("storage-changesets"));
             }
         }
         Ok(())
@@ -139,6 +175,14 @@ mod tests {
             args.account_history, settings.account_history_in_rocksdb,
             "account_history default should match StorageSettings::base()"
         );
+        assert_eq!(
+            args.account_changesets, settings.account_changesets_in_rocksdb,
+            "account_changesets default should match StorageSettings::base()"
+        );
+        assert_eq!(
+            args.storage_changesets, settings.storage_changesets_in_rocksdb,
+            "storage_changesets default should match StorageSettings::base()"
+        );
     }
 
     #[test]
@@ -158,35 +202,41 @@ mod tests {
 
     #[test]
     fn test_validate_all_with_true_ok() {
-        let args =
-            RocksDbArgs { all: true, tx_hash: true, storages_history: true, account_history: true };
+        let args = RocksDbArgs {
+            all: true,
+            tx_hash: true,
+            storages_history: true,
+            account_history: true,
+            account_changesets: true,
+            storage_changesets: true,
+        };
         assert!(args.validate().is_ok());
     }
 
     #[test]
     fn test_validate_all_with_false_errors() {
-        let args = RocksDbArgs {
+        let base = RocksDbArgs {
             all: true,
-            tx_hash: false,
+            tx_hash: true,
             storages_history: true,
             account_history: true,
+            account_changesets: true,
+            storage_changesets: true,
         };
+
+        let args = RocksDbArgs { tx_hash: false, ..base };
         assert_eq!(args.validate(), Err(RocksDbArgsError::ConflictingFlags("tx-hash")));
 
-        let args = RocksDbArgs {
-            all: true,
-            tx_hash: true,
-            storages_history: false,
-            account_history: true,
-        };
+        let args = RocksDbArgs { storages_history: false, ..base };
         assert_eq!(args.validate(), Err(RocksDbArgsError::ConflictingFlags("storages-history")));
 
-        let args = RocksDbArgs {
-            all: true,
-            tx_hash: true,
-            storages_history: true,
-            account_history: false,
-        };
+        let args = RocksDbArgs { account_history: false, ..base };
         assert_eq!(args.validate(), Err(RocksDbArgsError::ConflictingFlags("account-history")));
+
+        let args = RocksDbArgs { account_changesets: false, ..base };
+        assert_eq!(args.validate(), Err(RocksDbArgsError::ConflictingFlags("account-changesets")));
+
+        let args = RocksDbArgs { storage_changesets: false, ..base };
+        assert_eq!(args.validate(), Err(RocksDbArgsError::ConflictingFlags("storage-changesets")));
     }
 }

@@ -145,10 +145,6 @@ export const opRethCliSidebar: SidebarItem = {
                                     link: "/cli/op-reth/db/settings/set/transaction_senders"
                                 },
                                 {
-                                    text: "op-reth db settings set account_changesets",
-                                    link: "/cli/op-reth/db/settings/set/account_changesets"
-                                },
-                                {
                                     text: "op-reth db settings set storages_history",
                                     link: "/cli/op-reth/db/settings/set/storages_history"
                                 },
@@ -161,8 +157,12 @@ export const opRethCliSidebar: SidebarItem = {
                                     link: "/cli/op-reth/db/settings/set/account_history"
                                 },
                                 {
-                                    text: "op-reth db settings set storage_changesets",
-                                    link: "/cli/op-reth/db/settings/set/storage_changesets"
+                                    text: "op-reth db settings set account_changesets_rocksdb",
+                                    link: "/cli/op-reth/db/settings/set/account_changesets_rocksdb"
+                                },
+                                {
+                                    text: "op-reth db settings set storage_changesets_rocksdb",
+                                    link: "/cli/op-reth/db/settings/set/storage_changesets_rocksdb"
                                 }
                             ]
                         }

@@ -1,25 +1,16 @@
-# op-reth db static-file-header block
+# op-reth db settings set account_changesets_rocksdb
 
-Query by segment and block number
+Store account changesets in rocksdb instead of MDBX
 
 ```bash
-$ op-reth db static-file-header block --help
+$ op-reth db settings set account_changesets_rocksdb --help
 ```
 ```txt
-Usage: op-reth db static-file-header block [OPTIONS] <SEGMENT> <BLOCK>
+Usage: op-reth db settings set account_changesets_rocksdb [OPTIONS] <VALUE>
 
 Arguments:
-  <SEGMENT>
-          Static file segment
-
-          Possible values:
-          - headers:             Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
-          - transactions:        Static File segment responsible for the `Transactions` table
-          - receipts:            Static File segment responsible for the `Receipts` table
-          - transaction-senders: Static File segment responsible for the `TransactionSenders` table
-
-  <BLOCK>
-          Block number to query
+  <VALUE>
+          [possible values: true, false]
 
 Options:
   -h, --help

@@ -256,10 +256,14 @@ impl RocksDBBuilder {
     /// - [`tables::TransactionHashNumbers`] - Transaction hash to number mapping
     /// - [`tables::AccountsHistory`] - Account history index
     /// - [`tables::StoragesHistory`] - Storage history index
+    /// - [`tables::AccountChangeSets`] - Account state before transactions
+    /// - [`tables::StorageChangeSets`] - Storage state before transactions
     pub fn with_default_tables(self) -> Self {
         self.with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::AccountChangeSets>()
+            .with_table::<tables::StorageChangeSets>()
     }
 
     /// Enables metrics.
@@ -1698,6 +1702,44 @@ impl<'a> RocksDBBatch<'a> {
         Ok(())
     }
 
+    /// Appends an account changeset entry for the given block and address.
+    ///
+    /// The changeset records the account state before a transaction changed it.
+    /// `RocksDB` uses composite key: `(block_number || address)` to handle DUPSORT semantics.
+    pub fn append_account_changeset(
+        &mut self,
+        block_number: BlockNumber,
+        changeset: &reth_db::models::AccountBeforeTx,
+    ) -> ProviderResult<()> {
+        use reth_db_api::models::BlockNumberAddress;
+        let composite_key = BlockNumberAddress((block_number, changeset.address));
+        let cf = self.provider.get_cf_handle::<tables::AccountChangeSets>()?;
+        let value_bytes = compress_to_buf_or_ref!(self.buf, changeset).unwrap_or(&self.buf);
+        self.inner.put_cf(cf, composite_key.encode().as_ref(), value_bytes);
+        self.maybe_auto_commit()?;
+        Ok(())
+    }
+
+    /// Appends a storage changeset entry for the given block, address, and storage key.
+    ///
+    /// The changeset records the storage value before a transaction changed it.
+    /// `RocksDB` uses composite key: `(block_number || address || slot)` to handle DUPSORT
+    /// semantics.
+    pub fn append_storage_changeset(
+        &mut self,
+        block_number: BlockNumber,
+        address: Address,
+        entry: &reth_primitives_traits::StorageEntry,
+    ) -> ProviderResult<()> {
+        use reth_db_api::models::storage_sharded_key::StorageShardedKey;
+        let composite_key = StorageShardedKey::new(address, entry.key, block_number);
+        let cf = self.provider.get_cf_handle::<tables::StorageChangeSets>()?;
+        let value_bytes = compress_to_buf_or_ref!(self.buf, entry).unwrap_or(&self.buf);
+        self.inner.put_cf(cf, composite_key.encode().as_ref(), value_bytes);
+        self.maybe_auto_commit()?;
+        Ok(())
+    }
+
     /// Clears all account history shards for the given address.
     ///
     /// Used when unwinding from block 0 (i.e., removing all history).
@@ -1866,6 +1908,59 @@ impl<'db> RocksTx<'db> {
                     .unwrap_or(false)
             },
         )
+    }
+
+    /// Returns an iterator over account changesets for the given block number range.
+    ///
+    /// Uses composite key `(BlockNumber, Address)` to iterate all changesets in the range.
+    /// Yields `(BlockNumber, AccountBeforeTx)` pairs.
+    pub fn account_changesets_in_range(
+        &self,
+        range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<
+        impl Iterator<Item = ProviderResult<(BlockNumber, reth_db::models::AccountBeforeTx)>> + '_,
+    > {
+        use reth_db_api::models::BlockNumberAddress;
+        let start_key = BlockNumberAddress((*range.start(), Address::ZERO));
+        let end_block = *range.end();
+
+        let cf = self.provider.get_cf_handle::<tables::AccountChangeSets>()?;
+        let encoded_start = start_key.encode();
+        let iter = self.inner.iterator_cf(
+            cf,
+            IteratorMode::From(encoded_start.as_ref(), rocksdb::Direction::Forward),
+        );
+
+        Ok(iter.filter_map(move |result| match result {
+            Ok((key_bytes, value_bytes)) => {
+                let key = match BlockNumberAddress::decode(&key_bytes) {
+                    Ok(k) => k,
+                    Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+                };
+                let block_number = key.block_number();
+                if block_number > end_block {
+                    return None;
+                }
+                let changeset = match reth_db::models::AccountBeforeTx::decompress(&value_bytes) {
+                    Ok(v) => v,
+                    Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+                };
+                Some(Ok((block_number, changeset)))
+            }
+            Err(e) => Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            })))),
+        }))
+    }
+
+    /// Returns the set of changed account addresses within a block range.
+    pub fn changed_accounts_with_range(
+        &self,
+        range: std::ops::RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<std::collections::BTreeSet<Address>> {
+        let iter = self.account_changesets_in_range(range)?;
+        iter.map(|result| result.map(|(_, changeset)| changeset.address)).collect()
     }
 
     /// Lookup storage history and return [`HistoryInfo`] directly.

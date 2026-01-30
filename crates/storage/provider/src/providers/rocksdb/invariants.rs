@@ -274,33 +274,28 @@ impl RocksDBProvider {
             return Ok(None);
         }
 
-        let sf_tip = provider
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
-            .unwrap_or(0);
+        // Get the highest block with storage changesets from the database/RocksDB
+        let changeset_tip = provider.storage_changeset_count()?.saturating_sub(1) as u64;
+        let changeset_tip = if changeset_tip == 0 {
+            // If no changesets, use checkpoint
+            return Ok(None);
+        } else {
+            // Use last block from headers as approximation for changeset tip
+            provider
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Headers)
+                .unwrap_or(checkpoint)
+        };
 
-        if sf_tip < checkpoint {
-            // This should never happen in normal operation - static files are always
-            // committed before RocksDB. If we get here, something is seriously wrong.
-            // The unwind is a best-effort attempt but is probably futile.
-            tracing::warn!(
-                target: "reth::providers::rocksdb",
-                sf_tip,
-                checkpoint,
-                "StoragesHistory: static file tip behind checkpoint, unwind needed"
-            );
-            return Ok(Some(sf_tip));
-        }
-
-        if sf_tip == checkpoint {
+        if changeset_tip == checkpoint {
             return Ok(None);
         }
 
-        let total_blocks = sf_tip - checkpoint;
+        let total_blocks = changeset_tip.saturating_sub(checkpoint);
         tracing::info!(
             target: "reth::providers::rocksdb",
             checkpoint,
-            sf_tip,
+            changeset_tip,
             total_blocks,
             "StoragesHistory: healing via changesets"
         );
@@ -309,8 +304,8 @@ impl RocksDBProvider {
         let mut batch_num = 0u64;
         let total_batches = total_blocks.div_ceil(HEAL_HISTORY_BATCH_SIZE);
 
-        while batch_start <= sf_tip {
-            let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(sf_tip);
+        while batch_start <= changeset_tip {
+            let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(changeset_tip);
             batch_num += 1;
 
             let changesets = provider.storage_changesets_range(batch_start..=batch_end)?;
@@ -368,33 +363,28 @@ impl RocksDBProvider {
             return Ok(None);
         }
 
-        let sf_tip = provider
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
-            .unwrap_or(0);
+        // Get the highest block with account changesets from the database/RocksDB
+        let changeset_tip = provider.account_changeset_count()?.saturating_sub(1) as u64;
+        let changeset_tip = if changeset_tip == 0 {
+            // If no changesets, use checkpoint
+            return Ok(None);
+        } else {
+            // Use last block from headers as approximation for changeset tip
+            provider
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Headers)
+                .unwrap_or(checkpoint)
+        };
 
-        if sf_tip < checkpoint {
-            // This should never happen in normal operation - static files are always
-            // committed before RocksDB. If we get here, something is seriously wrong.
-            // The unwind is a best-effort attempt but is probably futile.
-            tracing::warn!(
-                target: "reth::providers::rocksdb",
-                sf_tip,
-                checkpoint,
-                "AccountsHistory: static file tip behind checkpoint, unwind needed"
-            );
-            return Ok(Some(sf_tip));
-        }
-
-        if sf_tip == checkpoint {
+        if changeset_tip == checkpoint {
             return Ok(None);
         }
 
-        let total_blocks = sf_tip - checkpoint;
+        let total_blocks = changeset_tip.saturating_sub(checkpoint);
         tracing::info!(
             target: "reth::providers::rocksdb",
             checkpoint,
-            sf_tip,
+            changeset_tip,
             total_blocks,
             "AccountsHistory: healing via changesets"
         );
@@ -403,8 +393,8 @@ impl RocksDBProvider {
         let mut batch_num = 0u64;
         let total_batches = total_blocks.div_ceil(HEAL_HISTORY_BATCH_SIZE);
 
-        while batch_start <= sf_tip {
-            let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(sf_tip);
+        while batch_start <= changeset_tip {
+            let batch_end = (batch_start + HEAL_HISTORY_BATCH_SIZE - 1).min(changeset_tip);
             batch_num += 1;
 
             let changesets = provider.account_changesets_range(batch_start..=batch_end)?;
@@ -1228,9 +1218,7 @@ mod tests {
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(
-            StorageSettings::legacy()
-                .with_storages_history_in_rocksdb(true)
-                .with_storage_changesets_in_static_files(true),
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
         );
 
         // Helper to generate address from block number (reuses stack arrays)
@@ -1352,9 +1340,7 @@ mod tests {
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(
-            StorageSettings::legacy()
-                .with_storages_history_in_rocksdb(true)
-                .with_storage_changesets_in_static_files(true),
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
         );
 
         let checkpoint_addr = Address::repeat_byte(0xAA);
@@ -1458,9 +1444,7 @@ mod tests {
         // Create test provider factory
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(
-            StorageSettings::legacy()
-                .with_account_history_in_rocksdb(true)
-                .with_account_changesets_in_static_files(true),
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
         );
 
         const TOTAL_BLOCKS: u64 = 15_000;
@@ -1579,9 +1563,7 @@ mod tests {
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(
-            StorageSettings::legacy()
-                .with_account_history_in_rocksdb(true)
-                .with_account_changesets_in_static_files(true),
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
         );
 
         let checkpoint_addr = Address::repeat_byte(0xAA);

@@ -149,10 +149,6 @@ export const rethCliSidebar: SidebarItem = {
                                     link: "/cli/reth/db/settings/set/transaction_senders"
                                 },
                                 {
-                                    text: "reth db settings set account_changesets",
-                                    link: "/cli/reth/db/settings/set/account_changesets"
-                                },
-                                {
                                     text: "reth db settings set storages_history",
                                     link: "/cli/reth/db/settings/set/storages_history"
                                 },
@@ -165,8 +161,12 @@ export const rethCliSidebar: SidebarItem = {
                                     link: "/cli/reth/db/settings/set/account_history"
                                 },
                                 {
-                                    text: "reth db settings set storage_changesets",
-                                    link: "/cli/reth/db/settings/set/storage_changesets"
+                                    text: "reth db settings set account_changesets_rocksdb",
+                                    link: "/cli/reth/db/settings/set/account_changesets_rocksdb"
+                                },
+                                {
+                                    text: "reth db settings set storage_changesets_rocksdb",
+                                    link: "/cli/reth/db/settings/set/storage_changesets_rocksdb"
                                 }
                             ]
                         }

@@ -7,7 +7,7 @@ use alloy_primitives::{bytes, Address, Bytes, TxKind, B256, U256};
 use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider, MAINNET};
 use reth_config::config::StageConfig;
 use reth_consensus::noop::NoopConsensus;
-use reth_db_api::{cursor::DbCursorRO, models::BlockNumberAddress, transaction::DbTx};
+
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
@@ -28,16 +28,14 @@ use reth_primitives_traits::{
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockNumReader, DBProvider,
     DatabaseProviderFactory, HeaderProvider, OriginalValuesKnown, StageCheckpointReader,
-    StateWriter, StaticFileProviderFactory,
+    StateWriter,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::sets::DefaultStages;
 use reth_stages_api::{Pipeline, StageId};
 use reth_static_file::StaticFileProducer;
-use reth_storage_api::{
-    ChangeSetReader, StateProvider, StorageChangeSetReader, StorageSettingsCache,
-};
+use reth_storage_api::{ChangeSetReader, StateProvider, StorageChangeSetReader};
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
@@ -76,55 +74,22 @@ fn assert_changesets_queryable(
     block_range: std::ops::RangeInclusive<u64>,
 ) -> eyre::Result<()> {
     let provider = provider_factory.provider()?;
-    let settings = provider.cached_storage_settings();
 
-    // Verify storage changesets
-    if settings.storage_changesets_in_static_files {
-        let static_file_provider = provider_factory.static_file_provider();
-        static_file_provider.initialize_index()?;
-        let storage_changesets =
-            static_file_provider.storage_changesets_range(block_range.clone())?;
-        assert!(
-            !storage_changesets.is_empty(),
-            "storage changesets should be queryable from static files for blocks {:?}",
-            block_range
-        );
-    } else {
-        let storage_changesets: Vec<_> = provider
-            .tx_ref()
-            .cursor_dup_read::<reth_db::tables::StorageChangeSets>()?
-            .walk_range(BlockNumberAddress::range(block_range.clone()))?
-            .collect::<Result<Vec<_>, _>>()?;
-        assert!(
-            !storage_changesets.is_empty(),
-            "storage changesets should be queryable from MDBX for blocks {:?}",
-            block_range
-        );
-    }
+    // Verify storage changesets - uses provider trait which routes to correct backend
+    let storage_changesets = provider.storage_changesets_range(block_range.clone())?;
+    assert!(
+        !storage_changesets.is_empty(),
+        "storage changesets should be queryable for blocks {:?}",
+        block_range,
+    );
 
-    // Verify account changesets
-    if settings.account_changesets_in_static_files {
-        let static_file_provider = provider_factory.static_file_provider();
-        static_file_provider.initialize_index()?;
-        let account_changesets =
-            static_file_provider.account_changesets_range(block_range.clone())?;
-        assert!(
-            !account_changesets.is_empty(),
-            "account changesets should be queryable from static files for blocks {:?}",
-            block_range
-        );
-    } else {
-        let account_changesets: Vec<_> = provider
-            .tx_ref()
-            .cursor_read::<reth_db::tables::AccountChangeSets>()?
-            .walk_range(block_range.clone())?
-            .collect::<Result<Vec<_>, _>>()?;
-        assert!(
-            !account_changesets.is_empty(),
-            "account changesets should be queryable from MDBX for blocks {:?}",
-            block_range
-        );
-    }
+    // Verify account changesets - uses provider trait which routes to correct backend
+    let account_changesets = provider.account_changesets_range(block_range.clone())?;
+    assert!(
+        !account_changesets.is_empty(),
+        "account changesets should be queryable for blocks {:?}",
+        block_range,
+    );
 
     Ok(())
 }

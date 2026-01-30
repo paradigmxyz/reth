@@ -28,12 +28,12 @@ pub struct StorageSettings {
     /// Whether `AccountsHistory` is stored in `RocksDB`.
     #[serde(default)]
     pub account_history_in_rocksdb: bool,
-    /// Whether this node should read and write account changesets from static files.
+    /// Whether `AccountChangeSets` is stored in `RocksDB`.
     #[serde(default)]
-    pub account_changesets_in_static_files: bool,
-    /// Whether this node should read and write storage changesets from static files.
+    pub account_changesets_in_rocksdb: bool,
+    /// Whether `StorageChangeSets` is stored in `RocksDB`.
     #[serde(default)]
-    pub storage_changesets_in_static_files: bool,
+    pub storage_changesets_in_rocksdb: bool,
 }
 
 impl StorageSettings {
@@ -55,17 +55,17 @@ impl StorageSettings {
     /// Creates `StorageSettings` for edge nodes with all storage features enabled:
     /// - Receipts and transaction senders in static files
     /// - History indices in `RocksDB` (storages, accounts, transaction hashes)
-    /// - Account changesets in static files
+    /// - Account and storage changesets in `RocksDB`
     #[cfg(feature = "edge")]
     pub const fn edge() -> Self {
         Self {
             receipts_in_static_files: true,
             transaction_senders_in_static_files: true,
-            account_changesets_in_static_files: true,
-            storage_changesets_in_static_files: true,
             storages_history_in_rocksdb: true,
             transaction_hash_numbers_in_rocksdb: true,
             account_history_in_rocksdb: true,
+            account_changesets_in_rocksdb: true,
+            storage_changesets_in_rocksdb: true,
         }
     }
 
@@ -81,8 +81,8 @@ impl StorageSettings {
             storages_history_in_rocksdb: false,
             transaction_hash_numbers_in_rocksdb: false,
             account_history_in_rocksdb: false,
-            account_changesets_in_static_files: false,
-            storage_changesets_in_static_files: false,
+            account_changesets_in_rocksdb: false,
+            storage_changesets_in_rocksdb: false,
         }
     }
 
@@ -116,15 +116,15 @@ impl StorageSettings {
         self
     }
 
-    /// Sets the `account_changesets_in_static_files` flag to the provided value.
-    pub const fn with_account_changesets_in_static_files(mut self, value: bool) -> Self {
-        self.account_changesets_in_static_files = value;
+    /// Sets the `account_changesets_in_rocksdb` flag to the provided value.
+    pub const fn with_account_changesets_in_rocksdb(mut self, value: bool) -> Self {
+        self.account_changesets_in_rocksdb = value;
         self
     }
 
-    /// Sets the `storage_changesets_in_static_files` flag to the provided value.
-    pub const fn with_storage_changesets_in_static_files(mut self, value: bool) -> Self {
-        self.storage_changesets_in_static_files = value;
+    /// Sets the `storage_changesets_in_rocksdb` flag to the provided value.
+    pub const fn with_storage_changesets_in_rocksdb(mut self, value: bool) -> Self {
+        self.storage_changesets_in_rocksdb = value;
         self
     }
 
@@ -132,6 +132,8 @@ impl StorageSettings {
     pub const fn any_in_rocksdb(&self) -> bool {
         self.transaction_hash_numbers_in_rocksdb ||
             self.account_history_in_rocksdb ||
-            self.storages_history_in_rocksdb
+            self.storages_history_in_rocksdb ||
+            self.account_changesets_in_rocksdb ||
+            self.storage_changesets_in_rocksdb
     }
 }

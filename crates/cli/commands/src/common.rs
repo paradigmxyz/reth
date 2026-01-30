@@ -74,14 +74,20 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser> EnvironmentArgs<C> {
     /// Returns the effective storage settings derived from static-file and `RocksDB` CLI args.
+    ///
+    /// Note: `RocksDB` changeset flags take precedence over static-file flags.
     pub fn storage_settings(&self) -> StorageSettings {
+        let account_changesets_in_rocksdb = self.rocksdb.all || self.rocksdb.account_changesets;
+        let storage_changesets_in_rocksdb = self.rocksdb.all || self.rocksdb.storage_changesets;
+
         StorageSettings::base()
             .with_receipts_in_static_files(self.static_files.receipts)
             .with_transaction_senders_in_static_files(self.static_files.transaction_senders)
-            .with_account_changesets_in_static_files(self.static_files.account_changesets)
             .with_transaction_hash_numbers_in_rocksdb(self.rocksdb.all || self.rocksdb.tx_hash)
             .with_storages_history_in_rocksdb(self.rocksdb.all || self.rocksdb.storages_history)
             .with_account_history_in_rocksdb(self.rocksdb.all || self.rocksdb.account_history)
+            .with_account_changesets_in_rocksdb(account_changesets_in_rocksdb)
+            .with_storage_changesets_in_rocksdb(storage_changesets_in_rocksdb)
     }
 
     /// Initializes environment according to [`AccessRights`] and returns an instance of
@@ -184,7 +190,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         {
             if factory.db_ref().is_read_only()? {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
-                return Ok(factory)
+                return Ok(factory);
             }
 
             // Highly unlikely to happen, and given its destructive nature, it's better to panic

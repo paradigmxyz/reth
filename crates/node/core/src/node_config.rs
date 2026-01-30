@@ -362,11 +362,11 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         StorageSettings::base()
             .with_receipts_in_static_files(self.static_files.receipts)
             .with_transaction_senders_in_static_files(self.static_files.transaction_senders)
-            .with_account_changesets_in_static_files(self.static_files.account_changesets)
-            .with_storage_changesets_in_static_files(self.static_files.storage_changesets)
             .with_transaction_hash_numbers_in_rocksdb(self.rocksdb.all || self.rocksdb.tx_hash)
             .with_storages_history_in_rocksdb(self.rocksdb.all || self.rocksdb.storages_history)
             .with_account_history_in_rocksdb(self.rocksdb.all || self.rocksdb.account_history)
+            .with_account_changesets_in_rocksdb(self.rocksdb.all || self.rocksdb.account_changesets)
+            .with_storage_changesets_in_rocksdb(self.rocksdb.all || self.rocksdb.storage_changesets)
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if
@@ -440,7 +440,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.number())
+            return Ok(header.number());
         }
 
         Ok(self.fetch_tip_from_network(client, tip.into()).await.number())
@@ -463,7 +463,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return tip_header
+                    return tip_header;
                 }
                 Err(error) => {
                     fetch_failures += 1;

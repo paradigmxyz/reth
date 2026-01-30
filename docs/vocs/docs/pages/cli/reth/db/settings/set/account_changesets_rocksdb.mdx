@@ -1,25 +1,16 @@
-# op-reth db static-file-header block
+# reth db settings set account_changesets_rocksdb
 
-Query by segment and block number
+Store account changesets in rocksdb instead of MDBX
 
 ```bash
-$ op-reth db static-file-header block --help
+$ reth db settings set account_changesets_rocksdb --help
 ```
 ```txt
-Usage: op-reth db static-file-header block [OPTIONS] <SEGMENT> <BLOCK>
+Usage: reth db settings set account_changesets_rocksdb [OPTIONS] <VALUE>
 
 Arguments:
-  <SEGMENT>
-          Static file segment
-
-          Possible values:
-          - headers:             Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
-          - transactions:        Static File segment responsible for the `Transactions` table
-          - receipts:            Static File segment responsible for the `Receipts` table
-          - transaction-senders: Static File segment responsible for the `TransactionSenders` table
-
-  <BLOCK>
-          Block number to query
+  <VALUE>
+          [possible values: true, false]
 
 Options:
   -h, --help
@@ -31,9 +22,9 @@ Datadir:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              optimism, optimism_sepolia, optimism-sepolia, base, base_sepolia, base-sepolia, arena-z, arena-z-sepolia, automata, base-devnet-0-sepolia-dev-0, bob, boba-sepolia, boba, camp-sepolia, celo, creator-chain-testnet-sepolia, cyber, cyber-sepolia, ethernity, ethernity-sepolia, fraxtal, funki, funki-sepolia, hashkeychain, ink, ink-sepolia, lisk, lisk-sepolia, lyra, metal, metal-sepolia, mint, mode, mode-sepolia, oplabs-devnet-0-sepolia-dev-0, orderly, ozean-sepolia, pivotal-sepolia, polynomial, race, race-sepolia, radius_testnet-sepolia, redstone, rehearsal-0-bn-0-rehearsal-0-bn, rehearsal-0-bn-1-rehearsal-0-bn, settlus-mainnet, settlus-sepolia-sepolia, shape, shape-sepolia, silent-data-mainnet, snax, soneium, soneium-minato-sepolia, sseed, swan, swell, tbn, tbn-sepolia, unichain, unichain-sepolia, worldchain, worldchain-sepolia, xterio-eth, zora, zora-sepolia, dev
+              mainnet, sepolia, holesky, hoodi, dev
 
-          [default: optimism]
+          [default: mainnet]
 
 Logging:
       --log.stdout.format <FORMAT>

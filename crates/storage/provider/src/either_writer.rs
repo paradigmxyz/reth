@@ -32,7 +32,7 @@ use reth_errors::ProviderError;
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{ReceiptTy, StorageEntry};
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, StorageSettingsCache};
+use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
@@ -156,43 +156,41 @@ impl<'a> EitherWriter<'a, (), ()> {
     /// modes.
     pub fn new_account_changesets<P>(
         provider: &'a P,
-        block_number: BlockNumber,
+        _block_number: BlockNumber,
+        _rocksdb_batch: RocksBatchArg<'a>,
     ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::AccountChangeSets>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
     {
-        if provider.cached_storage_settings().account_changesets_in_static_files {
-            Ok(EitherWriter::StaticFile(
-                provider
-                    .get_static_file_writer(block_number, StaticFileSegment::AccountChangeSets)?,
-            ))
-        } else {
-            Ok(EitherWriter::Database(
-                provider.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?,
-            ))
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().account_changesets_in_rocksdb {
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
+
+        Ok(EitherWriter::Database(
+            provider.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?,
+        ))
     }
 
     /// Creates a new [`EitherWriter`] for storage changesets based on storage settings.
     pub fn new_storage_changesets<P>(
         provider: &'a P,
-        block_number: BlockNumber,
+        _block_number: BlockNumber,
+        _rocksdb_batch: RocksBatchArg<'a>,
     ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::StorageChangeSets>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
     {
-        if provider.cached_storage_settings().storage_changesets_in_static_files {
-            Ok(EitherWriter::StaticFile(
-                provider
-                    .get_static_file_writer(block_number, StaticFileSegment::StorageChangeSets)?,
-            ))
-        } else {
-            Ok(EitherWriter::Database(
-                provider.tx_ref().cursor_dup_write::<tables::StorageChangeSets>()?,
-            ))
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().storage_changesets_in_rocksdb {
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
+
+        Ok(EitherWriter::Database(
+            provider.tx_ref().cursor_dup_write::<tables::StorageChangeSets>()?,
+        ))
     }
 
     /// Returns the destination for writing receipts.
@@ -221,12 +219,14 @@ impl<'a> EitherWriter<'a, (), ()> {
 
     /// Returns the destination for writing account changesets.
     ///
-    /// This determines the destination based solely on storage settings.
+    /// This determines the destination based on storage settings.
+    /// Priority: `RocksDB` > Database (MDBX).
     pub fn account_changesets_destination<P: DBProvider + StorageSettingsCache>(
         provider: &P,
     ) -> EitherWriterDestination {
-        if provider.cached_storage_settings().account_changesets_in_static_files {
-            EitherWriterDestination::StaticFile
+        let settings = provider.cached_storage_settings();
+        if settings.account_changesets_in_rocksdb {
+            EitherWriterDestination::RocksDB
         } else {
             EitherWriterDestination::Database
         }
@@ -234,12 +234,14 @@ impl<'a> EitherWriter<'a, (), ()> {
 
     /// Returns the destination for writing storage changesets.
     ///
-    /// This determines the destination based solely on storage settings.
+    /// This determines the destination based on storage settings.
+    /// Priority: `RocksDB` > Database (MDBX).
     pub fn storage_changesets_destination<P: DBProvider + StorageSettingsCache>(
         provider: &P,
     ) -> EitherWriterDestination {
-        if provider.cached_storage_settings().storage_changesets_in_static_files {
-            EitherWriterDestination::StaticFile
+        let settings = provider.cached_storage_settings();
+        if settings.storage_changesets_in_rocksdb {
+            EitherWriterDestination::RocksDB
         } else {
             EitherWriterDestination::Database
         }
@@ -669,7 +671,6 @@ where
         block_number: BlockNumber,
         mut changeset: Vec<AccountBeforeTx>,
     ) -> ProviderResult<()> {
-        // First sort the changesets
         changeset.par_sort_by_key(|a| a.address);
         match self {
             Self::Database(cursor) => {
@@ -677,11 +678,15 @@ where
                     cursor.append_dup(block_number, change)?;
                 }
             }
-            Self::StaticFile(writer) => {
-                writer.append_account_changeset(changeset, block_number)?;
+            Self::StaticFile(_) => {
+                return Err(ProviderError::UnsupportedProvider);
             }
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => {
+                for change in changeset {
+                    batch.append_account_changeset(block_number, &change)?;
+                }
+            }
         }
 
         Ok(())
@@ -712,11 +717,16 @@ where
                     )?;
                 }
             }
-            Self::StaticFile(writer) => {
-                writer.append_storage_changeset(changeset, block_number)?;
+            Self::StaticFile(_) => {
+                return Err(ProviderError::UnsupportedProvider);
             }
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(batch) => {
+                for change in changeset {
+                    let entry = StorageEntry { key: change.key, value: change.value };
+                    batch.append_storage_changeset(block_number, change.address, &entry)?;
+                }
+            }
         }
 
         Ok(())
@@ -823,16 +833,50 @@ impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for account changesets based on storage settings.
     pub fn new_account_changesets<P>(
         provider: &P,
+        _rocksdb_tx: RocksTxRefArg<'a>,
     ) -> ProviderResult<DupEitherReaderTy<'a, P, tables::AccountChangeSets>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTx,
     {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().account_changesets_in_rocksdb {
+            return Ok(EitherReader::RocksDB(
+                _rocksdb_tx.expect("account_changesets_in_rocksdb requires rocksdb tx"),
+            ));
+        }
+
         if EitherWriterDestination::account_changesets(provider).is_static_file() {
             Ok(EitherReader::StaticFile(provider.static_file_provider(), PhantomData))
         } else {
             Ok(EitherReader::Database(
                 provider.tx_ref().cursor_dup_read::<tables::AccountChangeSets>()?,
+                PhantomData,
+            ))
+        }
+    }
+
+    /// Creates a new [`EitherReader`] for storage changesets based on storage settings.
+    pub fn new_storage_changesets<P>(
+        provider: &P,
+        _rocksdb_tx: RocksTxRefArg<'a>,
+    ) -> ProviderResult<DupEitherReaderTy<'a, P, tables::StorageChangeSets>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTx,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().storage_changesets_in_rocksdb {
+            return Ok(EitherReader::RocksDB(
+                _rocksdb_tx.expect("storage_changesets_in_rocksdb requires rocksdb tx"),
+            ));
+        }
+
+        if EitherWriterDestination::storage_changesets(provider).is_static_file() {
+            Ok(EitherReader::StaticFile(provider.static_file_provider(), PhantomData))
+        } else {
+            Ok(EitherReader::Database(
+                provider.tx_ref().cursor_dup_read::<tables::StorageChangeSets>()?,
                 PhantomData,
             ))
         }
@@ -991,31 +1035,7 @@ where
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeSet<Address>> {
         match self {
-            Self::StaticFile(provider, _) => {
-                let highest_static_block =
-                    provider.get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
-
-                let Some(highest) = highest_static_block else {
-                    return Err(ProviderError::MissingHighestStaticFileBlock(
-                        StaticFileSegment::AccountChangeSets,
-                    ))
-                };
-
-                let start = *range.start();
-                let static_end = (*range.end()).min(highest + 1);
-
-                let mut changed_accounts = BTreeSet::default();
-                if start <= static_end {
-                    for block in start..=static_end {
-                        let block_changesets = provider.account_block_changeset(block)?;
-                        for changeset in block_changesets {
-                            changed_accounts.insert(changeset.address);
-                        }
-                    }
-                }
-
-                Ok(changed_accounts)
-            }
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
             Self::Database(provider, _) => provider
                 .walk_range(range)?
                 .map(|entry| {
@@ -1023,7 +1043,7 @@ where
                 })
                 .collect(),
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
+            Self::RocksDB(tx) => tx.changed_accounts_with_range(range),
         }
     }
 }
@@ -1054,26 +1074,28 @@ impl EitherWriterDestination {
     }
 
     /// Returns the destination for writing account changesets based on storage settings.
+    /// Priority: `RocksDB` > Database (MDBX).
     pub fn account_changesets<P>(provider: &P) -> Self
     where
         P: StorageSettingsCache,
     {
-        // Write account changesets to static files only if they're explicitly enabled
-        if provider.cached_storage_settings().account_changesets_in_static_files {
-            Self::StaticFile
+        let settings = provider.cached_storage_settings();
+        if settings.account_changesets_in_rocksdb {
+            Self::RocksDB
         } else {
             Self::Database
         }
     }
 
     /// Returns the destination for writing storage changesets based on storage settings.
+    /// Priority: `RocksDB` > Database (MDBX).
     pub fn storage_changesets<P>(provider: &P) -> Self
     where
         P: StorageSettingsCache,
     {
-        // Write storage changesets to static files only if they're explicitly enabled
-        if provider.cached_storage_settings().storage_changesets_in_static_files {
-            Self::StaticFile
+        let settings = provider.cached_storage_settings();
+        if settings.storage_changesets_in_rocksdb {
+            Self::RocksDB
         } else {
             Self::Database
         }

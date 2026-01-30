@@ -1,4 +1,3 @@
-use super::collect_account_history_indices;
 use crate::stages::utils::{collect_history_indices, load_account_history};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 #[cfg(all(unix, feature = "rocksdb"))]
@@ -98,7 +97,7 @@ where
         }
 
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let mut range = input.next_block_range();
@@ -122,18 +121,14 @@ where
 
         info!(target: "sync::stages::index_account_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
 
-        let collector = if provider.cached_storage_settings().account_changesets_in_static_files {
-            // Use the provider-based collection that can read from static files.
-            collect_account_history_indices(provider, range.clone(), &self.etl_config)?
-        } else {
+        let collector =
             collect_history_indices::<_, tables::AccountChangeSets, tables::AccountsHistory, _>(
                 provider,
                 range.clone(),
                 ShardedKey::new,
                 |(index, value)| (index, value.address),
                 &self.etl_config,
-            )?
-        };
+            )?;
 
         info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
 
@@ -597,7 +592,7 @@ mod tests {
                 let start_block = input.next_block();
                 let end_block = output.checkpoint.block_number;
                 if start_block > end_block {
-                    return Ok(())
+                    return Ok(());
                 }
 
                 assert_eq!(

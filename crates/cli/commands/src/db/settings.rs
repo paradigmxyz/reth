@@ -49,11 +49,6 @@ pub enum SetCommand {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
-    /// Store account changesets in static files instead of the database
-    AccountChangesets {
-        #[clap(action(ArgAction::Set))]
-        value: bool,
-    },
     /// Store storage history in rocksdb instead of MDBX
     StoragesHistory {
         #[clap(action(ArgAction::Set))]
@@ -69,8 +64,13 @@ pub enum SetCommand {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
-    /// Store storage changesets in static files instead of the database
-    StorageChangesets {
+    /// Store account changesets in rocksdb instead of MDBX
+    AccountChangesetsRocksdb {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
+    /// Store storage changesets in rocksdb instead of MDBX
+    StorageChangesetsRocksdb {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
@@ -119,8 +119,8 @@ impl Command {
             storages_history_in_rocksdb: _,
             transaction_hash_numbers_in_rocksdb: _,
             account_history_in_rocksdb: _,
-            account_changesets_in_static_files: _,
-            storage_changesets_in_static_files: _,
+            account_changesets_in_rocksdb: _,
+            storage_changesets_in_rocksdb: _,
         } = settings.unwrap_or_else(StorageSettings::legacy);
 
         // Update the setting based on the key
@@ -140,14 +140,6 @@ impl Command {
                 }
                 settings.transaction_senders_in_static_files = value;
                 println!("Set transaction_senders_in_static_files = {}", value);
-            }
-            SetCommand::AccountChangesets { value } => {
-                if settings.account_changesets_in_static_files == value {
-                    println!("account_changesets_in_static_files is already set to {}", value);
-                    return Ok(());
-                }
-                settings.account_changesets_in_static_files = value;
-                println!("Set account_changesets_in_static_files = {}", value);
             }
             SetCommand::StoragesHistory { value } => {
                 if settings.storages_history_in_rocksdb == value {
@@ -173,13 +165,21 @@ impl Command {
                 settings.account_history_in_rocksdb = value;
                 println!("Set account_history_in_rocksdb = {}", value);
             }
-            SetCommand::StorageChangesets { value } => {
-                if settings.storage_changesets_in_static_files == value {
-                    println!("storage_changesets_in_static_files is already set to {}", value);
+            SetCommand::AccountChangesetsRocksdb { value } => {
+                if settings.account_changesets_in_rocksdb == value {
+                    println!("account_changesets_in_rocksdb is already set to {}", value);
                     return Ok(());
                 }
-                settings.storage_changesets_in_static_files = value;
-                println!("Set storage_changesets_in_static_files = {}", value);
+                settings.account_changesets_in_rocksdb = value;
+                println!("Set account_changesets_in_rocksdb = {}", value);
+            }
+            SetCommand::StorageChangesetsRocksdb { value } => {
+                if settings.storage_changesets_in_rocksdb == value {
+                    println!("storage_changesets_in_rocksdb is already set to {}", value);
+                    return Ok(());
+                }
+                settings.storage_changesets_in_rocksdb = value;
+                println!("Set storage_changesets_in_rocksdb = {}", value);
             }
         }
 

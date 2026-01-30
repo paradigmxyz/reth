@@ -471,11 +471,11 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
 }
 
 /// Reorg with `RocksDB`: verifies that unwind correctly reads changesets from
-/// storage-aware locations (static files vs MDBX) rather than directly from MDBX.
+/// storage-aware locations (RocksDB or MDBX) rather than directly from MDBX.
 ///
 /// This test exercises `unwind_trie_state_from` which previously failed with
 /// `UnsortedInput` errors because it read changesets directly from MDBX tables
-/// instead of using storage-aware methods that check `storage_changesets_in_static_files`.
+/// instead of using storage-aware methods that check the storage settings.
 #[tokio::test]
 async fn test_rocksdb_reorg_unwind() -> Result<()> {
     reth_tracing::init_test_tracing();
