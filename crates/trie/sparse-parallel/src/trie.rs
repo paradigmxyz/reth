@@ -1449,8 +1449,10 @@ impl ParallelSparseTrie {
         if SparseSubtrieType::path_len_is_upper(path.len()) {
             Some(&mut self.upper_subtrie)
         } else {
-            let idx = SparseSubtrieType::lower_index_for_path(path);
-            self.lower_subtries[idx].as_revealed_mut()
+            match SparseSubtrieType::from_path(path) {
+                SparseSubtrieType::Upper => None,
+                SparseSubtrieType::Lower(idx) => self.lower_subtries[idx].as_revealed_mut(),
+            }
         }
     }
 
