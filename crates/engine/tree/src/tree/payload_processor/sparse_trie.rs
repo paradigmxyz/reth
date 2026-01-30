@@ -314,9 +314,7 @@ where
         }
 
         // Process any remaining pending account updates.
-        if !self.pending_account_updates.is_empty() {
-            self.process_updates()?;
-        }
+        self.process_updates()?;
 
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
@@ -513,6 +511,10 @@ where
     )]
     fn process_updates(&mut self) -> SparseTrieResult<()> {
         self.process_leaf_updates()?;
+
+        if self.pending_account_updates.is_empty() {
+            return Ok(());
+        }
 
         let roots = self
             .trie
