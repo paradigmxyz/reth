@@ -1029,12 +1029,18 @@ where
         // Prune state and storage tries in parallel
         rayon::join(
             || {
+                let now = std::time::Instant::now();
                 if let Some(trie) = self.state.as_revealed_mut() {
                     trie.prune(max_depth);
                 }
                 self.revealed_account_paths.clear();
+                println!("state prune elapsed: {:?}", now.elapsed());
             },
-            || self.storage.prune(max_depth, max_storage_tries),
+            || {
+                let now = std::time::Instant::now();
+                self.storage.prune(max_depth, max_storage_tries);
+                println!("storage prune elapsed: {:?}", now.elapsed());
+            },
         );
     }
 }
