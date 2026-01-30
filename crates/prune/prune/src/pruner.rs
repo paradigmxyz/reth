@@ -15,7 +15,7 @@ use reth_stages_types::StageId;
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
-use tracing::debug;
+use tracing::{debug, info};
 
 /// Result of [`Pruner::run`] execution.
 pub type PrunerResult = Result<PrunerOutput, PrunerError>;
@@ -133,6 +133,13 @@ where
 
         self.event_sender.notify(PrunerEvent::Started { tip_block_number });
 
+        info!(
+            target: "pruner",
+            %tip_block_number,
+            delete_limit = self.delete_limit,
+            num_segments = self.segments.len(),
+            "Pruner run starting"
+        );
         debug!(target: "pruner", %tip_block_number, "Pruner started");
         let start = Instant::now();
 
@@ -143,6 +150,14 @@ where
 
         let (stats, deleted_entries, output) =
             self.prune_segments(provider, tip_block_number, &mut limiter)?;
+
+        info!(
+            target: "pruner",
+            %tip_block_number,
+            deleted_entries,
+            elapsed_secs = start.elapsed().as_secs_f64(),
+            "Pruner run complete"
+        );
 
         self.previous_tip_block_number = Some(tip_block_number);
 
@@ -201,7 +216,7 @@ where
                     continue
                 }
 
-                debug!(
+                info!(
                     target: "pruner",
                     segment = ?segment.segment(),
                     purpose = ?segment.purpose(),
@@ -216,6 +231,14 @@ where
                     provider,
                     PruneInput { previous_checkpoint, to_block, limiter: limiter.clone() },
                 )?;
+
+                info!(
+                    target: "pruner",
+                    segment = ?segment.segment(),
+                    pruned = segment_output.pruned,
+                    elapsed_secs = segment_start.elapsed().as_secs_f64(),
+                    "Segment pruning finished"
+                );
                 if let Some(checkpoint) = segment_output.checkpoint {
                     segment
                         .save_checkpoint(provider, checkpoint.as_prune_checkpoint(prune_mode))?;

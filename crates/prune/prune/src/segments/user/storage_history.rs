@@ -19,7 +19,7 @@ use reth_prune_types::{
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
 use rustc_hash::FxHashMap;
-use tracing::{instrument, trace};
+use tracing::{info, instrument, trace};
 
 /// Number of storage history tables to prune in one step.
 ///
@@ -84,9 +84,9 @@ impl StorageHistory {
     /// Prunes storage history when changesets are stored in static files.
     ///
     /// Uses internal batching to bound memory usage of the `highest_deleted_storages` `HashMap`.
-    /// Each batch processes up to `MAX_STORAGE_HISTORY_ENTRIES_PER_RUN / 2` entries, then
-    /// flushes to the history index before continuing. This prevents OOM when pruning large
-    /// ranges with many unique (address, `storage_key`) pairs.
+    /// Each batch processes up to [`MAX_STORAGE_HISTORY_ENTRIES_PER_RUN`] entries, then flushes
+    /// to the history index before continuing. This prevents OOM when pruning large ranges with
+    /// many unique (address, `storage_key`) pairs.
     fn prune_static_files<Provider>(
         &self,
         provider: &Provider,
@@ -97,7 +97,6 @@ impl StorageHistory {
     where
         Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
     {
-        // Respect user-provided limit if any, divided by 2 for the two tables
         let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
             input.limiter.set_deleted_entries_limit(limit / STORAGE_HISTORY_TABLES_TO_PRUNE)
         } else {
@@ -111,20 +110,28 @@ impl StorageHistory {
             ))
         }
 
-        // Internal batch size to bound HashMap memory usage
-        const BATCH_SIZE: usize =
-            MAX_STORAGE_HISTORY_ENTRIES_PER_RUN / STORAGE_HISTORY_TABLES_TO_PRUNE;
+        const BATCH_SIZE: usize = MAX_STORAGE_HISTORY_ENTRIES_PER_RUN;
 
         let mut total_pruned = 0;
         let mut actual_last_pruned_block: Option<BlockNumber> = None;
-        let mut overall_done = true;
+        let mut overall_done = false;
+        let mut batch_number = 0usize;
+
+        info!(
+            target: "pruner",
+            batch_size = BATCH_SIZE,
+            range_start = *range.start(),
+            range_end = range_end,
+            "StorageHistory prune_static_files starting"
+        );
 
         let mut walker =
             provider.static_file_provider().walk_storage_changeset_range(range).peekable();
 
         loop {
-            // Collect a batch of changesets, bounded by BATCH_SIZE
-            let mut highest_deleted_storages = FxHashMap::default();
+            batch_number += 1;
+            let mut highest_deleted_storages =
+                FxHashMap::with_capacity_and_hasher(BATCH_SIZE, Default::default());
             let mut batch_last_block: Option<BlockNumber> = None;
             let mut batch_count = 0;
 
@@ -161,6 +168,24 @@ impl StorageHistory {
             // Track whether we're done for the final output
             // We're done only if there's no more data AND we didn't hit the limit
             overall_done = !has_more_data;
+
+            // HashMap size instrumentation
+            let unique_slots = highest_deleted_storages.len();
+            // Each entry: (Address(20) + B256(32)) key + BlockNumber(8) value + FxHashMap overhead
+            // (~24 bytes)
+            let hashmap_mem_bytes = unique_slots * 84;
+
+            info!(
+                target: "pruner",
+                batch = batch_number,
+                batch_entries = batch_count,
+                unique_storage_slots = unique_slots,
+                hashmap_mem_mb = hashmap_mem_bytes / (1024 * 1024),
+                last_block = ?batch_last_block,
+                total_pruned_so_far = total_pruned + batch_count,
+                has_more_data,
+                "StorageHistory batch collected - calling finalize"
+            );
 
             trace!(target: "pruner", pruned = %batch_count, done = %overall_done, "Pruned storage history batch (changesets from static files)");
 
