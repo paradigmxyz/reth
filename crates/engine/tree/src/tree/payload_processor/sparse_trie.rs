@@ -557,7 +557,7 @@ where
             dispatch_with_chunking(
                 targets,
                 chunking_length,
-                Some(240),
+                Some(60),
                 300,
                 self.proof_worker_handle.available_account_workers(),
                 self.proof_worker_handle.available_storage_workers(),
