@@ -1,7 +1,10 @@
 //! Sparse Trie task related functionality.
 
 use crate::tree::{
-    multiproof::{evm_state_to_hashed_post_state, MultiProofMessage, VersionedMultiProofTargets},
+    multiproof::{
+        dispatch_with_chunking, evm_state_to_hashed_post_state, MultiProofMessage,
+        VersionedMultiProofTargets,
+    },
     payload_processor::multiproof::{MultiProofTaskMetrics, SparseTrieUpdate},
 };
 use alloy_primitives::B256;
@@ -35,7 +38,7 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-use tracing::{debug, debug_span, instrument, trace};
+use tracing::{debug, debug_span, error, instrument, trace};
 
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
@@ -550,15 +553,31 @@ where
             .map_err(ProviderError::other)?;
 
         if !targets.is_empty() {
-            self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput::V2 {
+            let chunking_length = targets.chunking_length();
+            dispatch_with_chunking(
                 targets,
-                proof_result_sender: ProofResultContext::new(
-                    self.proof_result_tx.clone(),
-                    0,
-                    HashedPostState::default(),
-                    Instant::now(),
-                ),
-            })?;
+                chunking_length,
+                Some(240),
+                300,
+                self.proof_worker_handle.available_account_workers(),
+                self.proof_worker_handle.available_storage_workers(),
+                MultiProofTargetsV2::chunks,
+                |proof_targets| {
+                    if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(
+                        AccountMultiproofInput::V2 {
+                            targets: proof_targets,
+                            proof_result_sender: ProofResultContext::new(
+                                self.proof_result_tx.clone(),
+                                0,
+                                HashedPostState::default(),
+                                Instant::now(),
+                            ),
+                        },
+                    ) {
+                        error!("failed to dispatch account multiproof: {e:?}");
+                    }
+                },
+            );
         }
 
         Ok(())

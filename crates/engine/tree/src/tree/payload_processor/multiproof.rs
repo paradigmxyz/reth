@@ -311,11 +311,7 @@ impl VersionedMultiProofTargets {
     fn chunking_length(&self) -> usize {
         match self {
             Self::Legacy(targets) => targets.chunking_length(),
-            Self::V2(targets) => {
-                // For V2, count accounts + storage slots
-                targets.account_targets.len() +
-                    targets.storage_targets.values().map(|slots| slots.len()).sum::<usize>()
-            }
+            Self::V2(targets) => targets.chunking_length(),
         }
     }
 
@@ -1492,7 +1488,7 @@ fn get_proof_targets(
 /// Dispatches work items as a single unit or in chunks based on target size and worker
 /// availability.
 #[allow(clippy::too_many_arguments)]
-fn dispatch_with_chunking<T, I>(
+pub(crate) fn dispatch_with_chunking<T, I>(
     items: T,
     chunking_len: usize,
     chunk_size: Option<usize>,
