@@ -15,20 +15,22 @@ workspace = true
 # reth
 reth-codecs.workspace = true
 reth-db-api.workspace = true
+reth-metrics.workspace = true
+reth-primitives-traits.workspace = true
 reth-provider.workspace = true
+reth-prune-types.workspace = true
+reth-stages-types.workspace = true
+reth-static-file-types.workspace = true
 reth-storage-errors.workspace = true
 reth-tokio-util.workspace = true
-reth-prune-types.workspace = true
-reth-primitives-traits.workspace = true
-reth-static-file-types.workspace = true
-reth-stages-types.workspace = true
 
 alloy-primitives.workspace = true
 
 # misc
-tracing.workspace = true
-rayon.workspace = true
+metrics.workspace = true
 parking_lot = { workspace = true, features = ["send_guard", "arc_lock"] }
+rayon.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 reth-stages = { workspace = true, features = ["test-utils"] }
