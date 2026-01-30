@@ -1,7 +1,6 @@
 import { SidebarItem } from "vocs";
 import { rethCliSidebar } from "./sidebar-cli-reth";
 import { opRethCliSidebar } from "./sidebar-cli-op-reth";
-import { rethDbTuneCliSidebar } from "./sidebar-cli-reth-db-tune";
 
 export const sidebar: SidebarItem[] = [
     {
@@ -292,8 +291,7 @@ export const sidebar: SidebarItem[] = [
         collapsed: false,
         items: [
             rethCliSidebar,
-            opRethCliSidebar,
-            rethDbTuneCliSidebar
+            opRethCliSidebar
         ]
     },
 ]
