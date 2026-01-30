@@ -257,6 +257,16 @@ where
 
         loop {
             crossbeam_channel::select_biased! {
+                recv(self.updates) -> message => {
+                    let update = match message {
+                        Ok(m) => m,
+                        Err(_) => {
+                            break
+                        }
+                    };
+
+                    self.on_multiproof_message(update);
+                }
                 recv(self.proof_result_rx) -> message => {
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
@@ -273,27 +283,17 @@ where
                     }
                     self.on_proof_result(result)?;
                 },
-                recv(self.updates) -> message => {
-                    let update = match message {
-                        Ok(m) => m,
-                        Err(_) => {
-                            break
-                        }
-                    };
-
-                    self.on_multiproof_message(update);
-                }
             }
 
             self.process_leaf_updates()?;
 
+            if self.pending_targets.chunking_length() > 100 || self.updates.is_empty() {
+                self.dispatch_pending_targets();
+            }
+
             if self.updates.is_empty() && self.proof_result_rx.is_empty() {
                 self.dispatch_pending_targets();
                 self.process_updates()?;
-            }
-
-            if self.pending_targets.chunking_length() > 100 {
-                self.dispatch_pending_targets();
             }
 
             if self.finished_state_updates &&
