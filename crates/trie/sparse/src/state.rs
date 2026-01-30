@@ -23,6 +23,59 @@ use reth_trie_common::{
 use tracing::debug;
 use tracing::{instrument, trace};
 
+/// Provides type-safe re-use of cleared [`SparseStateTrie`]s, which helps to save allocations
+/// across payload runs.
+#[derive(Debug)]
+pub struct ClearedSparseStateTrie<
+    A = SerialSparseTrie, // Account trie implementation
+    S = SerialSparseTrie, // Storage trie implementation
+>(SparseStateTrie<A, S>);
+
+impl<A, S> ClearedSparseStateTrie<A, S>
+where
+    A: SparseTrieTrait,
+    S: SparseTrieTrait,
+{
+    /// Creates a [`ClearedSparseStateTrie`] by clearing all the existing internal state of a
+    /// [`SparseStateTrie`] and then storing that instance for later re-use.
+    pub fn from_state_trie(mut trie: SparseStateTrie<A, S>) -> Self {
+        trie.state.clear();
+        trie.revealed_account_paths.clear();
+        trie.storage.clear();
+        trie.account_rlp_buf.clear();
+        trie.proof_nodes_buf.clear();
+        Self(trie)
+    }
+
+    /// Returns the cleared [`SparseStateTrie`], consuming this instance.
+    pub fn into_inner(self) -> SparseStateTrie<A, S> {
+        self.0
+    }
+}
+
+impl<A, S> ClearedSparseStateTrie<A, S>
+where
+    A: SparseTrieTrait + SparseTrieExt + Default,
+    S: SparseTrieTrait + SparseTrieExt + Default + Clone,
+{
+    /// Shrink the cleared sparse trie's capacity to the given node and value size.
+    ///
+    /// Delegates to the inner `SparseStateTrie::shrink_to`.
+    pub fn shrink_to(&mut self, max_nodes: usize, max_values: usize) {
+        self.0.shrink_to(max_nodes, max_values);
+    }
+}
+
+/// Holds data that should be dropped after any locks are released.
+///
+/// This is used to defer expensive deallocations (like proof node buffers)
+/// until after the `preserved_sparse_trie` lock is released.
+#[derive(Debug, Default)]
+pub struct DeferredDrops {
+    /// Proof nodes buffer that can be dropped after lock release.
+    pub proof_nodes_buf: Vec<ProofTrieNode>,
+}
+
 #[derive(Debug)]
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<
@@ -39,6 +92,8 @@ pub struct SparseStateTrie<
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
     account_rlp_buf: Vec<u8>,
+    /// Reusable buffer for proof nodes, to avoid allocations across payload runs.
+    proof_nodes_buf: Vec<ProofTrieNode>,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -56,6 +111,7 @@ where
             storage: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            proof_nodes_buf: Vec::new(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -104,6 +160,14 @@ impl<A, S> SparseStateTrie<A, S> {
     pub fn with_default_storage_trie(mut self, trie: RevealableSparseTrie<S>) -> Self {
         self.set_default_storage_trie(trie);
         self
+    }
+
+    /// Takes the proof nodes buffer for deferred dropping.
+    ///
+    /// This allows the caller to drop the buffer after releasing any locks,
+    /// avoiding expensive deallocations while holding locks.
+    pub fn take_deferred_drops(&mut self) -> DeferredDrops {
+        DeferredDrops { proof_nodes_buf: core::mem::take(&mut self.proof_nodes_buf) }
     }
 }
 
@@ -420,12 +484,16 @@ where
         account_subtree: DecodedProofNodes,
         branch_node_masks: BranchNodeMasksMap,
     ) -> SparseStateTrieResult<()> {
-        let FilterMappedProofNodes { root_node, nodes, new_nodes, metric_values: _metric_values } =
-            filter_map_revealed_nodes(
-                account_subtree,
-                &mut self.revealed_account_paths,
-                &branch_node_masks,
-            )?;
+        let FilterMappedProofNodes {
+            root_node,
+            mut nodes,
+            new_nodes,
+            metric_values: _metric_values,
+        } = filter_map_revealed_nodes(
+            account_subtree,
+            &mut self.revealed_account_paths,
+            &branch_node_masks,
+        )?;
         #[cfg(feature = "metrics")]
         {
             self.metrics.increment_total_account_nodes(_metric_values.total_nodes as u64);
@@ -443,7 +511,7 @@ where
             trie.reserve_nodes(new_nodes);
 
             trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes");
-            trie.reveal_nodes(nodes)?;
+            trie.reveal_nodes(&mut nodes)?;
         }
 
         Ok(())
@@ -457,7 +525,7 @@ where
         &mut self,
         nodes: Vec<ProofTrieNode>,
     ) -> SparseStateTrieResult<()> {
-        let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values: _metric_values } =
+        let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values: _metric_values } =
             filter_revealed_v2_proof_nodes(nodes, &mut self.revealed_account_paths)?;
 
         #[cfg(feature = "metrics")]
@@ -476,7 +544,7 @@ where
         trie.reserve_nodes(new_nodes);
 
         trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
-        trie.reveal_nodes(nodes)?;
+        trie.reveal_nodes(&mut nodes)?;
 
         Ok(())
     }
@@ -517,7 +585,7 @@ where
         trie: &mut RevealableSparseTrie<S>,
         retain_updates: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
-        let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values } =
+        let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values } =
             filter_revealed_v2_proof_nodes(nodes, revealed_nodes)?;
 
         let trie = if let Some(root_node) = root_node {
@@ -530,7 +598,7 @@ where
         trie.reserve_nodes(new_nodes);
 
         trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof");
-        trie.reveal_nodes(nodes)?;
+        trie.reveal_nodes(&mut nodes)?;
 
         Ok(metric_values)
     }
@@ -579,7 +647,7 @@ where
         trie: &mut RevealableSparseTrie<S>,
         retain_updates: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
-        let FilterMappedProofNodes { root_node, nodes, new_nodes, metric_values } =
+        let FilterMappedProofNodes { root_node, mut nodes, new_nodes, metric_values } =
             filter_map_revealed_nodes(
                 storage_subtree.subtree,
                 revealed_nodes,
@@ -596,7 +664,7 @@ where
             trie.reserve_nodes(new_nodes);
 
             trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes");
-            trie.reveal_nodes(nodes)?;
+            trie.reveal_nodes(&mut nodes)?;
         }
 
         Ok(metric_values)
