@@ -1064,61 +1064,6 @@ struct StorageTries<S = SerialSparseTrie> {
     heat: StorageTrieHeat,
 }
 
-/// Tracks "heat" of storage tries to make smart pruning decisions.
-///
-/// Heat-based tracking is more accurate than simple generation counting because it tracks
-/// actual leaf access patterns rather than administrative operations (take/insert).
-///
-/// - Heat is incremented by 2 when a storage trie has a leaf updated
-/// - Heat decays by 1 each prune cycle for tries not modified that cycle
-/// - Tries with heat > 0 are considered "hot" and prioritized for preservation
-#[derive(Debug, Default)]
-struct StorageTrieHeat {
-    /// Heat level per storage trie address. Higher = more recently/frequently accessed.
-    heat: B256Map<u8>,
-    /// Tracks which tries were modified in the current cycle (between prune calls).
-    modified_this_cycle: HashSet<B256>,
-}
-
-impl StorageTrieHeat {
-    /// Marks a storage trie as modified, incrementing its heat by 2.
-    #[inline]
-    fn mark_modified(&mut self, address: B256) {
-        self.modified_this_cycle.insert(address);
-        *self.heat.entry(address).or_insert(0) = self.heat.get(&address).unwrap_or(&0).saturating_add(2);
-    }
-
-    /// Returns the heat level for a storage trie (0 if not tracked).
-    #[inline]
-    fn get(&self, address: &B256) -> u8 {
-        self.heat.get(address).copied().unwrap_or(0)
-    }
-
-    /// Decays heat for tries not modified this cycle and resets modification tracking.
-    /// Called at the start of each prune cycle.
-    fn decay_and_reset(&mut self) {
-        self.heat.retain(|address, heat| {
-            if !self.modified_this_cycle.contains(address) {
-                *heat = heat.saturating_sub(1);
-            }
-            *heat > 0 // Remove entries with 0 heat
-        });
-        self.modified_this_cycle.clear();
-    }
-
-    /// Removes tracking for a specific address (when trie is evicted).
-    fn remove(&mut self, address: &B256) {
-        self.heat.remove(address);
-        self.modified_this_cycle.remove(address);
-    }
-
-    /// Clears all heat tracking state.
-    fn clear(&mut self) {
-        self.heat.clear();
-        self.modified_this_cycle.clear();
-    }
-}
-
 impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
     /// Prunes and evicts storage tries.
     ///
@@ -1302,6 +1247,61 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
         self.revealed_paths
             .remove(account)
             .unwrap_or_else(|| self.cleared_revealed_paths.pop().unwrap_or_default())
+    }
+}
+
+/// Tracks "heat" of storage tries to make smart pruning decisions.
+///
+/// Heat-based tracking is more accurate than simple generation counting because it tracks
+/// actual leaf access patterns rather than administrative operations (take/insert).
+///
+/// - Heat is incremented by 2 when a storage trie has a leaf updated
+/// - Heat decays by 1 each prune cycle for tries not modified that cycle
+/// - Tries with heat > 0 are considered "hot" and prioritized for preservation
+#[derive(Debug, Default)]
+struct StorageTrieHeat {
+    /// Heat level per storage trie address. Higher = more recently/frequently accessed.
+    heat: B256Map<u8>,
+    /// Tracks which tries were modified in the current cycle (between prune calls).
+    modified_this_cycle: HashSet<B256>,
+}
+
+impl StorageTrieHeat {
+    /// Marks a storage trie as modified, incrementing its heat by 2.
+    #[inline]
+    fn mark_modified(&mut self, address: B256) {
+        self.modified_this_cycle.insert(address);
+        *self.heat.entry(address).or_insert(0) = self.heat.get(&address).unwrap_or(&0).saturating_add(2);
+    }
+
+    /// Returns the heat level for a storage trie (0 if not tracked).
+    #[inline]
+    fn get(&self, address: &B256) -> u8 {
+        self.heat.get(address).copied().unwrap_or(0)
+    }
+
+    /// Decays heat for tries not modified this cycle and resets modification tracking.
+    /// Called at the start of each prune cycle.
+    fn decay_and_reset(&mut self) {
+        self.heat.retain(|address, heat| {
+            if !self.modified_this_cycle.contains(address) {
+                *heat = heat.saturating_sub(1);
+            }
+            *heat > 0 // Remove entries with 0 heat
+        });
+        self.modified_this_cycle.clear();
+    }
+
+    /// Removes tracking for a specific address (when trie is evicted).
+    fn remove(&mut self, address: &B256) {
+        self.heat.remove(address);
+        self.modified_this_cycle.remove(address);
+    }
+
+    /// Clears all heat tracking state.
+    fn clear(&mut self) {
+        self.heat.clear();
+        self.modified_this_cycle.clear();
     }
 }
 
