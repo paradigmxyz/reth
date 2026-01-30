@@ -25,25 +25,25 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// __All__ unique executed blocks by block hash that are connected to the canonical chain.
     ///
     /// This includes blocks of all forks.
-    pub blocks_by_hash: HashMap<B256, ExecutedBlock<N>>,
+    pub(crate) blocks_by_hash: HashMap<B256, ExecutedBlock<N>>,
     /// Executed blocks grouped by their respective block number.
     ///
     /// This maps unique block number to all known blocks for that height.
     ///
     /// Note: there can be multiple blocks at the same height due to forks.
-    pub blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock<N>>>,
+    pub(crate) blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock<N>>>,
     /// Map of any parent block hash to its children.
-    pub parent_to_child: HashMap<B256, HashSet<B256>>,
+    pub(crate) parent_to_child: HashMap<B256, HashSet<B256>>,
     /// Currently tracked canonical head of the chain.
-    pub current_canonical_head: BlockNumHash,
+    pub(crate) current_canonical_head: BlockNumHash,
     /// The engine API variant of this handler
-    pub engine_kind: EngineApiKind,
+    pub(crate) engine_kind: EngineApiKind,
     /// Pre-computed lazy overlay for the canonical head.
     ///
     /// This is optimistically prepared after the canonical head changes, so that
     /// the next payload building on the canonical head can use it immediately
     /// without recomputing.
-    pub cached_canonical_overlay: Option<PreparedCanonicalOverlay>,
+    pub(crate) cached_canonical_overlay: Option<PreparedCanonicalOverlay>,
 }
 
 impl<N: NodePrimitives> TreeState<N> {

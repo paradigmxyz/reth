@@ -136,14 +136,14 @@ where
 #[derive(Debug)]
 pub struct EngineApiTreeState<N: NodePrimitives> {
     /// Tracks the state of the blockchain tree.
-    pub tree_state: TreeState<N>,
+    tree_state: TreeState<N>,
     /// Tracks the forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// Buffer of detached blocks.
     buffer: BlockBuffer<N::Block>,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
-    pub invalid_headers: InvalidHeaderCache,
+    invalid_headers: InvalidHeaderCache,
 }
 
 impl<N: NodePrimitives> EngineApiTreeState<N> {
@@ -159,6 +159,16 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
             tree_state: TreeState::new(canonical_block, engine_kind),
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
+    }
+
+    /// Returns a reference to the tree state.
+    pub const fn tree_state(&self) -> &TreeState<N> {
+        &self.tree_state
+    }
+
+    /// Returns true if the block has been marked as invalid.
+    pub fn has_invalid_header(&mut self, hash: &B256) -> bool {
+        self.invalid_headers.get(hash).is_some()
     }
 }
 
