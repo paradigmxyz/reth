@@ -1045,6 +1045,7 @@ mod tests {
             },
             rpc_send_raw_transaction_sync_timeout: std::time::Duration::from_secs(30),
             testing_skip_invalid_transactions: true,
+            rpc_force_blob_sidecar_upcasting: false,
         };
 
         let parsed_args = CommandParser::<RpcServerArgs>::parse_from([
