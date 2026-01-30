@@ -214,6 +214,14 @@ pub struct PersistenceHandle<N: NodePrimitives = EthPrimitives> {
 }
 
 impl<T: NodePrimitives> PersistenceHandle<T> {
+    /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
+    ///
+    /// This is intended for testing purposes where you want to mock the persistence service.
+    /// For production use, prefer [`spawn_service`](Self::spawn_service).
+    pub fn new(sender: Sender<PersistenceAction<T>>) -> Self {
+        Self { sender, _service_guard: Arc::new(ServiceGuard(None)) }
+    }
+
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
     ///
     /// The returned handle can be cloned and shared. When all clones are dropped, the service
