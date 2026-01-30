@@ -13,7 +13,7 @@ pub(crate) struct EthstatsCredentials {
     pub secret: String,
     /// Host address of the `EthStats` server
     pub host: String,
-    /// Whether to use secure WebSocket (WSS) connection
+    /// Whether to use secure `WebSocket` (`WSS`) connection
     pub use_tls: bool,
 }
 
@@ -24,9 +24,9 @@ impl FromStr for EthstatsCredentials {
     /// "`node_id:secret@wss://host`"
     ///
     /// Supports the following formats:
-    /// - `node_id:secret@host` - Uses plain WebSocket (ws://)
-    /// - `node_id:secret@ws://host` - Explicitly use plain WebSocket
-    /// - `node_id:secret@wss://host` - Use secure WebSocket (WSS)
+    /// - `node_id:secret@host` - Uses plain `WebSocket` (`ws://`)
+    /// - `node_id:secret@ws://host` - Explicitly use plain `WebSocket`
+    /// - `node_id:secret@wss://host` - Use secure `WebSocket` (`WSS`)
     ///
     /// # Arguments
     /// * `s` - String containing credentials
