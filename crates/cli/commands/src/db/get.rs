@@ -2,8 +2,8 @@ use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
 use reth_db::{
     static_file::{
-        AccountChangesetMask, ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask,
-        ReceiptMask, TransactionMask, TransactionSenderMask,
+        ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
+        TransactionSenderMask,
     },
     RawDupSort,
 };
@@ -19,9 +19,8 @@ use reth_db_common::DbTool;
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
 use reth_primitives_traits::ValueWithSubKey;
-use reth_provider::{providers::ProviderNodeTypes, ChangeSetReader, StaticFileProviderFactory};
+use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::StorageChangeSetReader;
 use tracing::error;
 
 /// The arguments for the `reth db get` command
@@ -82,95 +81,23 @@ impl Command {
             Subcommand::Mdbx { table, key, subkey, end_key, end_subkey, raw } => {
                 table.view(&GetValueViewer { tool, key, subkey, end_key, end_subkey, raw })?
             }
-            Subcommand::StaticFile { segment, key, subkey, raw } => {
-                if let StaticFileSegment::StorageChangeSets = segment {
-                    let storage_key =
-                        table_subkey::<tables::StorageChangeSets>(subkey.as_deref()).ok();
-                    let key = table_key::<tables::StorageChangeSets>(&key)?;
-
-                    let provider = tool.provider_factory.static_file_provider();
-
-                    if let Some(storage_key) = storage_key {
-                        let entry = provider.get_storage_before_block(
-                            key.block_number(),
-                            key.address(),
-                            storage_key,
-                        )?;
-
-                        if let Some(entry) = entry {
-                            println!("{}", serde_json::to_string_pretty(&entry)?);
-                        } else {
-                            error!(target: "reth::cli", "No content for the given table key.");
-                        }
-                        return Ok(());
-                    }
-
-                    let changesets = provider.storage_changeset(key.block_number())?;
-                    println!("{}", serde_json::to_string_pretty(&changesets)?);
-                    return Ok(());
-                }
-
-                let (key, subkey, mask): (u64, _, _) = match segment {
+            Subcommand::StaticFile { segment, key, subkey: _, raw } => {
+                let (key, mask): (u64, _) = match segment {
                     StaticFileSegment::Headers => (
                         table_key::<tables::Headers>(&key)?,
-                        None,
                         <HeaderWithHashMask<HeaderTy<N>>>::MASK,
                     ),
-                    StaticFileSegment::Transactions => (
-                        table_key::<tables::Transactions>(&key)?,
-                        None,
-                        <TransactionMask<TxTy<N>>>::MASK,
-                    ),
-                    StaticFileSegment::Receipts => (
-                        table_key::<tables::Receipts>(&key)?,
-                        None,
-                        <ReceiptMask<ReceiptTy<N>>>::MASK,
-                    ),
+                    StaticFileSegment::Transactions => {
+                        (table_key::<tables::Transactions>(&key)?, <TransactionMask<TxTy<N>>>::MASK)
+                    }
+                    StaticFileSegment::Receipts => {
+                        (table_key::<tables::Receipts>(&key)?, <ReceiptMask<ReceiptTy<N>>>::MASK)
+                    }
                     StaticFileSegment::TransactionSenders => (
                         table_key::<tables::TransactionSenders>(&key)?,
-                        None,
                         TransactionSenderMask::MASK,
                     ),
-                    StaticFileSegment::AccountChangeSets => {
-                        let subkey =
-                            table_subkey::<tables::AccountChangeSets>(subkey.as_deref()).ok();
-                        (
-                            table_key::<tables::AccountChangeSets>(&key)?,
-                            subkey,
-                            AccountChangesetMask::MASK,
-                        )
-                    }
-                    StaticFileSegment::StorageChangeSets => {
-                        unreachable!("storage changesets handled above");
-                    }
                 };
-
-                // handle account changesets differently if a subkey is provided.
-                if let StaticFileSegment::AccountChangeSets = segment {
-                    let Some(subkey) = subkey else {
-                        // get all changesets for the block
-                        let changesets = tool
-                            .provider_factory
-                            .static_file_provider()
-                            .account_block_changeset(key)?;
-
-                        println!("{}", serde_json::to_string_pretty(&changesets)?);
-                        return Ok(())
-                    };
-
-                    let account = tool
-                        .provider_factory
-                        .static_file_provider()
-                        .get_account_before_block(key, subkey)?;
-
-                    if let Some(account) = account {
-                        println!("{}", serde_json::to_string_pretty(&account)?);
-                    } else {
-                        error!(target: "reth::cli", "No content for the given table key.");
-                    }
-
-                    return Ok(())
-                }
 
                 let content = tool.provider_factory.static_file_provider().find_static_file(
                     segment,
@@ -217,12 +144,6 @@ impl Command {
                                             content[0].as_slice(),
                                         )?;
                                     println!("{}", serde_json::to_string_pretty(&sender)?);
-                                }
-                                StaticFileSegment::AccountChangeSets => {
-                                    unreachable!("account changeset static files are special cased before this match")
-                                }
-                                StaticFileSegment::StorageChangeSets => {
-                                    unreachable!("storage changeset static files are special cased before this match")
                                 }
                             }
                         }

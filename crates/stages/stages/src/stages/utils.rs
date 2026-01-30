@@ -4,8 +4,7 @@ use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::{
-        sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, AddressStorageKey, BlockNumberAddress, ShardedKey,
+        sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
     },
     table::{Decode, Decompress, Table},
     transaction::DbTx,
@@ -14,12 +13,12 @@ use reth_db_api::{
 use reth_etl::Collector;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileProvider, to_range, BlockReader, DBProvider, EitherWriter, ProviderError,
+    providers::StaticFileProvider, BlockReader, DBProvider, EitherWriter, ProviderError,
     StaticFileProviderFactory,
 };
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
+
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
 
@@ -97,135 +96,6 @@ where
         }
     }
     collect(&mut cache)?;
-
-    Ok(collector)
-}
-
-/// Allows collecting indices from a cache with a custom insert fn
-fn collect_indices<K, F>(
-    cache: impl Iterator<Item = (K, Vec<u64>)>,
-    mut insert_fn: F,
-) -> Result<(), StageError>
-where
-    F: FnMut(K, Vec<u64>) -> Result<(), StageError>,
-{
-    for (key, indices) in cache {
-        insert_fn(key, indices)?
-    }
-    Ok(())
-}
-
-/// Collects account history indices using a provider that implements `ChangeSetReader`.
-pub(crate) fn collect_account_history_indices<Provider>(
-    provider: &Provider,
-    range: impl RangeBounds<BlockNumber>,
-    etl_config: &EtlConfig,
-) -> Result<Collector<ShardedKey<Address>, BlockNumberList>, StageError>
-where
-    Provider: DBProvider + ChangeSetReader + StaticFileProviderFactory,
-{
-    let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<Address, Vec<u64>> = HashMap::default();
-
-    let mut insert_fn = |address: Address, indices: Vec<u64>| {
-        let last = indices.last().expect("indices is non-empty");
-        collector.insert(
-            ShardedKey::new(address, *last),
-            BlockNumberList::new_pre_sorted(indices.into_iter()),
-        )?;
-        Ok(())
-    };
-
-    // Convert range bounds to concrete range
-    let range = to_range(range);
-
-    // Use the new walker for lazy iteration over static file changesets
-    let static_file_provider = provider.static_file_provider();
-
-    // Get total count for progress reporting
-    let total_changesets = static_file_provider.account_changeset_count()?;
-    let interval = (total_changesets / 1000).max(1);
-
-    let walker = static_file_provider.walk_account_changeset_range(range);
-
-    let mut flush_counter = 0;
-    let mut current_block_number = u64::MAX;
-
-    for (idx, changeset_result) in walker.enumerate() {
-        let (block_number, AccountBeforeTx { address, .. }) = changeset_result?;
-        cache.entry(address).or_default().push(block_number);
-
-        if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
-        }
-
-        if block_number != current_block_number {
-            current_block_number = block_number;
-            flush_counter += 1;
-        }
-
-        if flush_counter > DEFAULT_CACHE_THRESHOLD {
-            collect_indices(cache.drain(), &mut insert_fn)?;
-            flush_counter = 0;
-        }
-    }
-    collect_indices(cache.into_iter(), insert_fn)?;
-
-    Ok(collector)
-}
-
-/// Collects storage history indices using a provider that implements `StorageChangeSetReader`.
-pub(crate) fn collect_storage_history_indices<Provider>(
-    provider: &Provider,
-    range: impl RangeBounds<BlockNumber>,
-    etl_config: &EtlConfig,
-) -> Result<Collector<StorageShardedKey, BlockNumberList>, StageError>
-where
-    Provider: DBProvider + StorageChangeSetReader + StaticFileProviderFactory,
-{
-    let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<AddressStorageKey, Vec<u64>> = HashMap::default();
-
-    let mut insert_fn = |key: AddressStorageKey, indices: Vec<u64>| {
-        let last = indices.last().expect("qed");
-        collector.insert(
-            StorageShardedKey::new(key.0 .0, key.0 .1, *last),
-            BlockNumberList::new_pre_sorted(indices.into_iter()),
-        )?;
-        Ok::<(), StageError>(())
-    };
-
-    let range = to_range(range);
-    let static_file_provider = provider.static_file_provider();
-
-    let total_changesets = static_file_provider.storage_changeset_count()?;
-    let interval = (total_changesets / 1000).max(1);
-
-    let walker = static_file_provider.walk_storage_changeset_range(range);
-
-    let mut flush_counter = 0;
-    let mut current_block_number = u64::MAX;
-
-    for (idx, changeset_result) in walker.enumerate() {
-        let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
-        cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
-
-        if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
-        }
-
-        if block_number != current_block_number {
-            current_block_number = block_number;
-            flush_counter += 1;
-        }
-
-        if flush_counter > DEFAULT_CACHE_THRESHOLD {
-            collect_indices(cache.drain(), &mut insert_fn)?;
-            flush_counter = 0;
-        }
-    }
-
-    collect_indices(cache.into_iter(), insert_fn)?;
 
     Ok(collector)
 }

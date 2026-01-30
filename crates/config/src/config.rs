@@ -436,10 +436,6 @@ pub struct BlocksPerFileConfig {
     pub receipts: Option<u64>,
     /// Number of blocks per file for the transaction senders segment.
     pub transaction_senders: Option<u64>,
-    /// Number of blocks per file for the account changesets segment.
-    pub account_change_sets: Option<u64>,
-    /// Number of blocks per file for the storage changesets segment.
-    pub storage_change_sets: Option<u64>,
 }
 
 impl StaticFilesConfig {
@@ -447,14 +443,8 @@ impl StaticFilesConfig {
     ///
     /// Returns an error if any blocks per file value is zero.
     pub fn validate(&self) -> eyre::Result<()> {
-        let BlocksPerFileConfig {
-            headers,
-            transactions,
-            receipts,
-            transaction_senders,
-            account_change_sets,
-            storage_change_sets,
-        } = self.blocks_per_file;
+        let BlocksPerFileConfig { headers, transactions, receipts, transaction_senders } =
+            self.blocks_per_file;
         eyre::ensure!(headers != Some(0), "Headers segment blocks per file must be greater than 0");
         eyre::ensure!(
             transactions != Some(0),
@@ -468,27 +458,13 @@ impl StaticFilesConfig {
             transaction_senders != Some(0),
             "Transaction senders segment blocks per file must be greater than 0"
         );
-        eyre::ensure!(
-            account_change_sets != Some(0),
-            "Account changesets segment blocks per file must be greater than 0"
-        );
-        eyre::ensure!(
-            storage_change_sets != Some(0),
-            "Storage changesets segment blocks per file must be greater than 0"
-        );
         Ok(())
     }
 
     /// Converts the blocks per file configuration into a [`StaticFileMap`].
     pub fn as_blocks_per_file_map(&self) -> StaticFileMap<u64> {
-        let BlocksPerFileConfig {
-            headers,
-            transactions,
-            receipts,
-            transaction_senders,
-            account_change_sets,
-            storage_change_sets,
-        } = self.blocks_per_file;
+        let BlocksPerFileConfig { headers, transactions, receipts, transaction_senders } =
+            self.blocks_per_file;
 
         let mut map = StaticFileMap::default();
         // Iterating over all possible segments allows us to do an exhaustive match here,
@@ -499,8 +475,6 @@ impl StaticFilesConfig {
                 StaticFileSegment::Transactions => transactions,
                 StaticFileSegment::Receipts => receipts,
                 StaticFileSegment::TransactionSenders => transaction_senders,
-                StaticFileSegment::AccountChangeSets => account_change_sets,
-                StaticFileSegment::StorageChangeSets => storage_change_sets,
             };
 
             if let Some(blocks_per_file) = blocks_per_file {
