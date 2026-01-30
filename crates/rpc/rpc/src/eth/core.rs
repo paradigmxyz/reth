@@ -157,6 +157,7 @@ where
         raw_tx_forwarder: ForwardConfig,
         send_raw_transaction_sync_timeout: Duration,
         evm_memory_limit: u64,
+        force_blob_sidecar_upcasting: bool,
     ) -> Self {
         let inner = EthApiInner::new(
             components,
@@ -177,6 +178,7 @@ where
             raw_tx_forwarder.forwarder_client(),
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
+            force_blob_sidecar_upcasting,
         );
 
         Self { inner: Arc::new(inner) }
