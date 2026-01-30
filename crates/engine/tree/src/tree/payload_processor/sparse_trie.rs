@@ -7,12 +7,13 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use reth_errors::ProviderError;
 use reth_primitives_traits::Account;
 use reth_revm::state::EvmState;
 use reth_trie::{
-    proof_v2::Target, updates::TrieUpdates, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH,
+    proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, Nibbles,
+    TrieAccount, EMPTY_ROOT_HASH,
 };
 use reth_trie_parallel::{
     proof_task::{
@@ -253,6 +254,16 @@ where
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
                     };
+                    let ProofResult::V2(mut result) = result.result? else {
+                        unreachable!("sparse trie as cache must only be used with multiproof v2");
+                    };
+
+                    while let Ok(res) = self.proof_result_rx.try_recv() {
+                        let ProofResult::V2(res) = res.result? else {
+                            unreachable!("sparse trie as cache must only be used with multiproof v2");
+                        };
+                        result.extend(res);
+                    }
                     self.on_proof_result(result)?;
                 },
                 recv(self.updates) -> message => {
@@ -393,12 +404,8 @@ where
 
     fn on_proof_result(
         &mut self,
-        result: ProofResultMessage,
+        result: DecodedMultiProofV2,
     ) -> Result<(), ParallelStateRootError> {
-        let ProofResult::V2(result) = result.result? else {
-            unreachable!("sparse trie as cache must only be used with multiproof v2");
-        };
-
         self.trie.reveal_decoded_multiproof_v2(result).map_err(|e| {
             ParallelStateRootError::Other(format!("could not reveal multiproof: {e:?}"))
         })
@@ -422,7 +429,7 @@ where
                 (addr, updates, trie, fetched)
             })
             .collect::<Vec<_>>()
-            .par_iter()
+            .into_par_iter()
             .map(|(addr, mut updates, mut trie, mut fetched)| {
                 let mut targets = Vec::new();
                 trie.update_leaves(&mut updates, |path, min_len| match fetched.entry(path) {
