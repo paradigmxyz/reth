@@ -10,9 +10,7 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::{
-    IntoParallelRefMutIterator, ParallelBridge, ParallelIterator,
-};
+use rayon::iter::{IntoParallelRefMutIterator, ParallelBridge, ParallelIterator};
 use reth_primitives_traits::Account;
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -291,7 +289,10 @@ where
                 },
             }
 
-            if self.updates.is_empty() || self.pending_updates > 100 {
+            if (self.updates.is_empty() &&
+                (self.pending_updates > 10 || self.finished_state_updates)) ||
+                self.pending_updates > 100
+            {
                 self.process_leaf_updates()?;
             }
 
