@@ -39,7 +39,7 @@ where
     /// Creates a [`ClearedSparseStateTrie`] by clearing all the existing internal state of a
     /// [`SparseStateTrie`] and then storing that instance for later re-use.
     pub fn from_state_trie(mut trie: SparseStateTrie<A, S>) -> Self {
-        trie.state = trie.state.clear();
+        trie.state.clear();
         trie.revealed_account_paths.clear();
         trie.storage.clear();
         trie.account_rlp_buf.clear();
