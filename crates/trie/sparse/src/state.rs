@@ -1072,11 +1072,14 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
     /// Keeps the top `max_storage_tries` by a score combining size and recency.
     /// Evicts lower-scored tries entirely, prunes kept tries to `max_depth`.
     fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
+        let fn_start = std::time::Instant::now();
+        let total_tries = self.tries.len();
         let current_gen = self.generation;
 
         // Collect (hash, size, score) for all tries
         // Score = size * recency_multiplier
         // Recently modified tries (within last 2 generations) get 2x weight
+        let now = std::time::Instant::now();
         let mut trie_info: Vec<(B256, usize, usize)> = self
             .tries
             .iter()
@@ -1091,8 +1094,10 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
                 (*hash, size, size * recency_multiplier)
             })
             .collect();
+        println!("  collect trie_info ({} tries): {:?}", trie_info.len(), now.elapsed());
 
         // Use O(n) selection to find top max_storage_tries by score
+        let now = std::time::Instant::now();
         if trie_info.len() > max_storage_tries {
             trie_info
                 .select_nth_unstable_by(max_storage_tries.saturating_sub(1), |a, b| b.2.cmp(&a.2));
@@ -1100,47 +1105,63 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
         }
         let tries_to_keep: B256Map<usize> =
             trie_info.iter().map(|(hash, size, _)| (*hash, *size)).collect();
+        println!("  select top {} tries: {:?}", tries_to_keep.len(), now.elapsed());
 
         // Collect keys to evict
         let tries_to_clear: Vec<B256> =
             self.tries.keys().filter(|hash| !tries_to_keep.contains_key(*hash)).copied().collect();
+        println!("  tries to evict: {}, tries to keep: {}", tries_to_clear.len(), tries_to_keep.len());
 
         // Evict storage tries that exceeded limit, saving cleared allocations for reuse
-        for hash in tries_to_clear {
-            if let Some(trie) = self.tries.remove(&hash) {
+        let now = std::time::Instant::now();
+        for hash in &tries_to_clear {
+            if let Some(trie) = self.tries.remove(hash) {
                 self.cleared_tries.push(trie.clear());
             }
-            if let Some(mut paths) = self.revealed_paths.remove(&hash) {
+            if let Some(mut paths) = self.revealed_paths.remove(hash) {
                 paths.clear();
                 self.cleared_revealed_paths.push(paths);
             }
-            self.trie_generation.remove(&hash);
+            self.trie_generation.remove(hash);
         }
+        println!("  evict {} tries: {:?}", tries_to_clear.len(), now.elapsed());
 
         // Prune storage tries that are kept, but only if:
         // - They were modified since last prune (age <= 2)
         // - They're large enough to be worth pruning
         const MIN_SIZE_TO_PRUNE: usize = 1000;
+        let now = std::time::Instant::now();
+        let mut pruned_count = 0;
+        let mut skipped_small = 0;
+        let mut skipped_cold = 0;
         for (hash, size) in &tries_to_keep {
             if *size < MIN_SIZE_TO_PRUNE {
+                skipped_small += 1;
                 continue; // Small tries aren't worth the DFS cost
             }
             let last_modified = self.trie_generation.get(hash).copied().unwrap_or(0);
             let age = current_gen.saturating_sub(last_modified);
             if age > 2 {
+                skipped_cold += 1;
                 continue; // Skip cold tries - already pruned in previous cycles
             }
             if let Some(trie) = self.tries.get_mut(hash).and_then(|t| t.as_revealed_mut()) {
                 trie.prune(max_depth);
+                pruned_count += 1;
             }
         }
+        println!("  prune {} tries (skipped: {} small, {} cold): {:?}", pruned_count, skipped_small, skipped_cold, now.elapsed());
 
         // Clear revealed_paths for kept tries
+        let now = std::time::Instant::now();
         for hash in tries_to_keep.keys() {
             if let Some(paths) = self.revealed_paths.get_mut(hash) {
                 paths.clear();
             }
         }
+        println!("  clear revealed_paths: {:?}", now.elapsed());
+
+        println!("StorageTries::prune total ({} -> {} tries): {:?}", total_tries, self.tries.len(), fn_start.elapsed());
     }
 }
 
