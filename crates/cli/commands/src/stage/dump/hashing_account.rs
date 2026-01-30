@@ -36,7 +36,7 @@ pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = Databas
     if should_run {
         dry_run(
             ProviderFactory::<N>::new(
-                Arc::new(output_db),
+                output_db,
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
