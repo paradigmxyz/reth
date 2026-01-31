@@ -79,15 +79,22 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                     .delete_limit(DELETE_LIMIT)
                     .build_with_provider_factory(provider_factory);
 
-                let mut total_pruned = 0usize;
+                let mut total_pruned = 0u64;
                 loop {
                     let output = pruner.run(prune_tip)?;
-                    let batch_pruned: usize =
-                        output.segments.iter().map(|(_, seg)| seg.pruned).sum();
+                    let batch_pruned: u64 =
+                        output.segments.iter().map(|(_, seg)| seg.pruned as u64).sum();
                     total_pruned = total_pruned.saturating_add(batch_pruned);
 
                     if output.progress.is_finished() {
                         break;
+                    }
+
+                    if batch_pruned == 0 {
+                        return Err(eyre::eyre!(
+                            "pruner made no progress but reported more data remaining; \
+                             aborting to prevent infinite loop"
+                        ));
                     }
 
                     info!(
