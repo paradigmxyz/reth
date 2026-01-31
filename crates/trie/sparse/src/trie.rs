@@ -3082,11 +3082,11 @@ mod tests {
 
                 for (update, keys_to_delete) in updates {
                     // Insert state updates into the sparse trie and calculate the root
-                    for (key, account) in update.clone() {
-                        let account = account.into_trie_account(EMPTY_ROOT_HASH);
+                    for (key, account) in &update {
+                        let account = account.clone().into_trie_account(EMPTY_ROOT_HASH);
                         let mut account_rlp = Vec::new();
                         account.encode(&mut account_rlp);
-                        sparse.update_leaf(key, account_rlp, &default_provider).unwrap();
+                        sparse.update_leaf(key.clone(), account_rlp, &default_provider).unwrap();
                     }
                     // We need to clone the sparse trie, so that all updated branch nodes are
                     // preserved, and not only those that were changed after the last call to
