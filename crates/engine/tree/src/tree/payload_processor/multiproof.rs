@@ -100,7 +100,7 @@ impl SparseTrieUpdate {
 
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
-pub(super) enum MultiProofMessage {
+pub enum MultiProofMessage {
     /// Prefetch proof targets
     PrefetchProofs(VersionedMultiProofTargets),
     /// New state update from transaction execution with its source
@@ -257,7 +257,7 @@ fn extend_multiproof_targets(dest: &mut MultiProofTargets, src: &VersionedMultiP
 
 /// A set of multiproof targets which can be either in the legacy or V2 representations.
 #[derive(Debug)]
-pub(super) enum VersionedMultiProofTargets {
+pub enum VersionedMultiProofTargets {
     /// Legacy targets
     Legacy(MultiProofTargets),
     /// V2 targets
@@ -587,6 +587,8 @@ pub(crate) struct MultiProofTaskMetrics {
     pub first_update_wait_time_histogram: Histogram,
     /// Total time spent waiting for the last proof result.
     pub last_proof_wait_time_histogram: Histogram,
+    /// Time spent preparing the sparse trie for reuse after state root computation.
+    pub into_trie_for_reuse_duration_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant

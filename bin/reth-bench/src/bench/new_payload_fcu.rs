@@ -16,7 +16,7 @@ use crate::{
             write_benchmark_results, CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
         },
         persistence_waiter::{
-            engine_url_to_ws_url, setup_persistence_subscription, PersistenceWaiter,
+            derive_ws_rpc_url, setup_persistence_subscription, PersistenceWaiter,
             PERSISTENCE_CHECKPOINT_TIMEOUT,
         },
     },
@@ -32,7 +32,6 @@ use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_core::args::BenchmarkArgs;
 use std::time::{Duration, Instant};
 use tracing::{debug, info};
-use url::Url;
 
 /// `reth benchmark new-payload-fcu` command
 #[derive(Debug, Parser)]
@@ -101,7 +100,10 @@ impl Command {
         let mut waiter = match (self.wait_time, self.wait_for_persistence) {
             (Some(duration), _) => Some(PersistenceWaiter::with_duration(duration)),
             (None, true) => {
-                let ws_url = self.derive_ws_rpc_url()?;
+                let ws_url = derive_ws_rpc_url(
+                    self.benchmark.ws_rpc_url.as_deref(),
+                    &self.benchmark.engine_rpc_url,
+                )?;
                 let sub = setup_persistence_subscription(ws_url).await?;
                 Some(PersistenceWaiter::with_subscription(
                     sub,
@@ -259,34 +261,5 @@ impl Command {
         );
 
         Ok(())
-    }
-
-    /// Returns the websocket RPC URL used for the persistence subscription.
-    ///
-    /// Preference:
-    /// - If `--ws-rpc-url` is provided, use it directly.
-    /// - Otherwise, derive a WS RPC URL from `--engine-rpc-url`.
-    ///
-    /// The persistence subscription endpoint (`reth_subscribePersistedBlock`) is exposed on
-    /// the regular RPC server (WS port, usually 8546), not on the engine API port (usually 8551).
-    /// Since `BenchmarkArgs` only has the engine URL by default, we convert the scheme
-    /// (http→ws, https→wss) and force the port to 8546.
-    fn derive_ws_rpc_url(&self) -> eyre::Result<Url> {
-        if let Some(ref ws_url) = self.benchmark.ws_rpc_url {
-            let parsed: Url = ws_url
-                .parse()
-                .wrap_err_with(|| format!("Failed to parse WebSocket RPC URL: {ws_url}"))?;
-            info!(target: "reth-bench", ws_url = %parsed, "Using provided WebSocket RPC URL");
-            Ok(parsed)
-        } else {
-            let derived = engine_url_to_ws_url(&self.benchmark.engine_rpc_url)?;
-            debug!(
-                target: "reth-bench",
-                engine_url = %self.benchmark.engine_rpc_url,
-                %derived,
-                "Derived WebSocket RPC URL from engine RPC URL"
-            );
-            Ok(derived)
-        }
     }
 }

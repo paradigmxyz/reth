@@ -48,7 +48,7 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
 
 impl<N: NodePrimitives> TreeState<N> {
     /// Returns a new, empty tree state that points to the given canonical head.
-    pub(crate) fn new(current_canonical_head: BlockNumHash, engine_kind: EngineApiKind) -> Self {
+    pub fn new(current_canonical_head: BlockNumHash, engine_kind: EngineApiKind) -> Self {
         Self {
             blocks_by_hash: HashMap::default(),
             blocks_by_number: BTreeMap::new(),
@@ -60,25 +60,22 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Resets the state and points to the given canonical head.
-    pub(crate) fn reset(&mut self, current_canonical_head: BlockNumHash) {
+    pub fn reset(&mut self, current_canonical_head: BlockNumHash) {
         *self = Self::new(current_canonical_head, self.engine_kind);
     }
 
     /// Returns the number of executed blocks stored.
-    pub(crate) fn block_count(&self) -> usize {
+    pub fn block_count(&self) -> usize {
         self.blocks_by_hash.len()
     }
 
     /// Returns the [`ExecutedBlock`] by hash.
-    pub(crate) fn executed_block_by_hash(&self, hash: B256) -> Option<&ExecutedBlock<N>> {
+    pub fn executed_block_by_hash(&self, hash: B256) -> Option<&ExecutedBlock<N>> {
         self.blocks_by_hash.get(&hash)
     }
 
     /// Returns the sealed block header by hash.
-    pub(crate) fn sealed_header_by_hash(
-        &self,
-        hash: &B256,
-    ) -> Option<SealedHeader<N::BlockHeader>> {
+    pub fn sealed_header_by_hash(&self, hash: &B256) -> Option<SealedHeader<N::BlockHeader>> {
         self.blocks_by_hash.get(hash).map(|b| b.sealed_block().sealed_header().clone())
     }
 
@@ -87,7 +84,7 @@ impl<N: NodePrimitives> TreeState<N> {
     /// highest persisted block connected to this chain.
     ///
     /// Returns `None` if the block for the given hash is not found.
-    pub(crate) fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlock<N>>)> {
+    pub fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlock<N>>)> {
         let block = self.blocks_by_hash.get(&hash).cloned()?;
         let mut parent_hash = block.recovered_block().parent_hash();
         let mut blocks = vec![block];
@@ -160,7 +157,7 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Insert executed block into the state.
-    pub(crate) fn insert_executed(&mut self, executed: ExecutedBlock<N>) {
+    pub fn insert_executed(&mut self, executed: ExecutedBlock<N>) {
         let hash = executed.recovered_block().hash();
         let parent_hash = executed.recovered_block().parent_hash();
         let block_number = executed.recovered_block().number();
@@ -216,7 +213,7 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Returns whether or not the hash is part of the canonical chain.
-    pub(crate) fn is_canonical(&self, hash: B256) -> bool {
+    pub fn is_canonical(&self, hash: B256) -> bool {
         let mut current_block = self.current_canonical_head.hash;
         if current_block == hash {
             return true
@@ -234,11 +231,7 @@ impl<N: NodePrimitives> TreeState<N> {
 
     /// Removes canonical blocks below the upper bound, only if the last persisted hash is
     /// part of the canonical chain.
-    pub(crate) fn remove_canonical_until(
-        &mut self,
-        upper_bound: BlockNumber,
-        last_persisted_hash: B256,
-    ) {
+    pub fn remove_canonical_until(&mut self, upper_bound: BlockNumber, last_persisted_hash: B256) {
         debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removing canonical blocks from the tree");
 
         // If the last persisted hash is not canonical, then we don't want to remove any canonical
@@ -263,7 +256,7 @@ impl<N: NodePrimitives> TreeState<N> {
 
     /// Removes all blocks that are below the finalized block, as well as removing non-canonical
     /// sidechains that fork from below the finalized block.
-    pub(crate) fn prune_finalized_sidechains(&mut self, finalized_num_hash: BlockNumHash) {
+    pub fn prune_finalized_sidechains(&mut self, finalized_num_hash: BlockNumHash) {
         let BlockNumHash { number: finalized_num, hash: finalized_hash } = finalized_num_hash;
 
         // We remove disconnected sidechains in three steps:
@@ -323,7 +316,7 @@ impl<N: NodePrimitives> TreeState<N> {
     /// NOTE: if the finalized block is greater than the upper bound, the only blocks that will be
     /// removed are canonical blocks and sidechains that fork below the `upper_bound`. This is the
     /// same behavior as if the `finalized_num` were `Some(upper_bound)`.
-    pub(crate) fn remove_until(
+    pub fn remove_until(
         &mut self,
         upper_bound: BlockNumHash,
         last_persisted_hash: B256,
@@ -361,22 +354,22 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Updates the canonical head to the given block.
-    pub(crate) const fn set_canonical_head(&mut self, new_head: BlockNumHash) {
+    pub const fn set_canonical_head(&mut self, new_head: BlockNumHash) {
         self.current_canonical_head = new_head;
     }
 
     /// Returns the tracked canonical head.
-    pub(crate) const fn canonical_head(&self) -> &BlockNumHash {
+    pub const fn canonical_head(&self) -> &BlockNumHash {
         &self.current_canonical_head
     }
 
     /// Returns the block hash of the canonical head.
-    pub(crate) const fn canonical_block_hash(&self) -> B256 {
+    pub const fn canonical_block_hash(&self) -> B256 {
         self.canonical_head().hash
     }
 
     /// Returns the block number of the canonical head.
-    pub(crate) const fn canonical_block_number(&self) -> BlockNumber {
+    pub const fn canonical_block_number(&self) -> BlockNumber {
         self.canonical_head().number
     }
 }
@@ -386,7 +379,7 @@ impl<N: NodePrimitives> TreeState<N> {
     /// Determines if the second block is a descendant of the first block.
     ///
     /// If the two blocks are the same, this returns `false`.
-    pub(crate) fn is_descendant(
+    pub fn is_descendant(
         &self,
         first: BlockNumHash,
         second: alloy_eips::eip1898::BlockWithParent,

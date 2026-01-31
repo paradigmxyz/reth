@@ -36,8 +36,8 @@ pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
 >;
 
 /// Mock [`reth_node_types::NodeTypesWithDB`] for testing.
-pub type MockNodeTypesWithDB<DB = TempDatabase<DatabaseEnv>> =
-    NodeTypesWithDBAdapter<MockNodeTypes, Arc<DB>>;
+pub type MockNodeTypesWithDB<DB = Arc<TempDatabase<DatabaseEnv>>> =
+    NodeTypesWithDBAdapter<MockNodeTypes, DB>;
 
 /// Creates test provider factory with mainnet chain spec.
 pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
@@ -58,11 +58,12 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     let (static_dir, _) = create_test_static_files_dir();
     let (rocksdb_dir, _) = create_test_rocksdb_dir();
     let db = create_test_rw_db();
+    let rocksdb_path = rocksdb_dir.keep();
     ProviderFactory::new(
         db,
         chain_spec,
         StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
-        RocksDBBuilder::new(&rocksdb_dir)
+        RocksDBBuilder::new(&rocksdb_path)
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),

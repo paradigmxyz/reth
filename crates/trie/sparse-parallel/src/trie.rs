@@ -123,6 +123,9 @@ pub struct ParallelSparseTrie {
     update_actions_buffers: Vec<Vec<SparseTrieUpdatesAction>>,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ParallelismThresholds,
+    /// Tracks heat of lower subtries for smart pruning decisions.
+    /// Hot subtries are skipped during pruning to keep frequently-used data revealed.
+    subtrie_heat: SubtrieModifications,
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ParallelSparseTrieMetrics,
@@ -141,6 +144,7 @@ impl Default for ParallelSparseTrie {
             branch_node_masks: BranchNodeMasksMap::default(),
             update_actions_buffers: Vec::default(),
             parallelism_thresholds: Default::default(),
+            subtrie_heat: SubtrieModifications::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -148,27 +152,25 @@ impl Default for ParallelSparseTrie {
 }
 
 impl SparseTrie for ParallelSparseTrie {
-    fn with_root(
-        mut self,
+    fn set_root(
+        &mut self,
         root: TrieNode,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
-    ) -> SparseTrieResult<Self> {
+    ) -> SparseTrieResult<()> {
         // A fresh/cleared `ParallelSparseTrie` has a `SparseNode::Empty` at its root in the upper
         // subtrie. Delete that so we can reveal the new root node.
         let path = Nibbles::default();
         let _removed_root = self.upper_subtrie.nodes.remove(&path).expect("root node should exist");
         debug_assert_eq!(_removed_root, SparseNode::Empty);
 
-        self = self.with_updates(retain_updates);
+        self.set_updates(retain_updates);
 
-        self.reveal_upper_node(Nibbles::default(), &root, masks)?;
-        Ok(self)
+        self.reveal_upper_node(Nibbles::default(), &root, masks)
     }
 
-    fn with_updates(mut self, retain_updates: bool) -> Self {
+    fn set_updates(&mut self, retain_updates: bool) {
         self.updates = retain_updates.then(Default::default);
-        self
     }
 
     fn reveal_nodes(&mut self, mut nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()> {
@@ -338,6 +340,8 @@ impl SparseTrie for ParallelSparseTrie {
         let mut next = Some(Nibbles::default());
         // Track the original node that was modified (path, original_node) for rollback
         let mut modified_original: Option<(Nibbles, SparseNode)> = None;
+        // Track inserted branch masks for rollback
+        let mut inserted_masks: Vec<Nibbles> = Vec::new();
 
         // Traverse the upper subtrie to find the node to update or the subtrie to update.
         //
@@ -392,6 +396,7 @@ impl SparseTrie for ParallelSparseTrie {
                                     self.rollback_insert(
                                         &full_path,
                                         &new_nodes,
+                                        &inserted_masks,
                                         modified_original.take(),
                                     );
                                     return Err(e);
@@ -405,6 +410,7 @@ impl SparseTrie for ParallelSparseTrie {
                                         self.rollback_insert(
                                             &full_path,
                                             &new_nodes,
+                                            &inserted_masks,
                                             modified_original.take(),
                                         );
                                         return Err(e.into());
@@ -423,6 +429,7 @@ impl SparseTrie for ParallelSparseTrie {
                                     self.rollback_insert(
                                         &full_path,
                                         &new_nodes,
+                                        &inserted_masks,
                                         modified_original.take(),
                                     );
                                     return Err(e);
@@ -432,6 +439,7 @@ impl SparseTrie for ParallelSparseTrie {
                                 self.rollback_insert(
                                     &full_path,
                                     &new_nodes,
+                                    &inserted_masks,
                                     modified_original.take(),
                                 );
                                 return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
@@ -443,8 +451,9 @@ impl SparseTrie for ParallelSparseTrie {
                             None
                         };
 
-                        if let Some(masks) = reveal_masks {
-                            self.branch_node_masks.insert(reveal_path, masks);
+                        if let Some(_masks) = reveal_masks {
+                            self.branch_node_masks.insert(reveal_path, _masks);
+                            inserted_masks.push(reveal_path);
                         }
                     }
 
@@ -524,6 +533,10 @@ impl SparseTrie for ParallelSparseTrie {
                     // Clean up: remove the value from lower subtrie if it was inserted
                     if let Some(lower) = self.lower_subtrie_for_path_mut(&full_path) {
                         lower.inner.values.remove(&full_path);
+                    }
+                    // Clean up any branch masks that were inserted during upper subtrie traversal
+                    for mask_path in &inserted_masks {
+                        self.branch_node_masks.remove(mask_path);
                     }
                     return Err(e);
                 }
@@ -898,7 +911,17 @@ impl SparseTrie for ParallelSparseTrie {
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
-        self.updates.take().unwrap_or_default()
+        match self.updates.take() {
+            Some(updates) => {
+                // NOTE: we need to preserve Some case
+                self.updates = Some(SparseTrieUpdates::with_capacity(
+                    updates.updated_nodes.len(),
+                    updates.removed_nodes.len(),
+                ));
+                updates
+            }
+            None => SparseTrieUpdates::default(),
+        }
     }
 
     fn wipe(&mut self) {
@@ -906,6 +929,7 @@ impl SparseTrie for ParallelSparseTrie {
         self.lower_subtries = [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES];
         self.prefix_set = PrefixSetMut::all();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
+        self.subtrie_heat.clear();
     }
 
     fn clear(&mut self) {
@@ -917,6 +941,7 @@ impl SparseTrie for ParallelSparseTrie {
         self.prefix_set.clear();
         self.updates = None;
         self.branch_node_masks.clear();
+        self.subtrie_heat.clear();
         // `update_actions_buffers` doesn't need to be cleared; we want to reuse the Vecs it has
         // buffered, and all of those are already inherently cleared when they get used.
     }
@@ -1021,21 +1046,22 @@ impl SparseTrie for ParallelSparseTrie {
 }
 
 impl SparseTrieExt for ParallelSparseTrie {
-    /// Returns the count of revealed (non-hash) nodes across all subtries.
-    fn revealed_node_count(&self) -> usize {
-        let upper_count = self.upper_subtrie.nodes.values().filter(|n| !n.is_hash()).count();
-
+    /// O(1) size hint based on total node count (including hash stubs).
+    fn size_hint(&self) -> usize {
+        let upper_count = self.upper_subtrie.nodes.len();
         let lower_count: usize = self
             .lower_subtries
             .iter()
             .filter_map(|s| s.as_revealed_ref())
-            .map(|s| s.nodes.values().filter(|n| !n.is_hash()).count())
+            .map(|s| s.nodes.len())
             .sum();
-
         upper_count + lower_count
     }
 
     fn prune(&mut self, max_depth: usize) -> usize {
+        // Decay heat for subtries not modified this cycle
+        self.subtrie_heat.decay_and_reset();
+
         // DFS traversal to find nodes at max_depth that can be pruned.
         // Collects "effective pruned roots" - children of nodes at max_depth with computed hashes.
         // We replace nodes with Hash stubs inline during traversal.
@@ -1045,6 +1071,16 @@ impl SparseTrieExt for ParallelSparseTrie {
 
         // DFS traversal: pop path and depth, skip if subtrie or node not found.
         while let Some((path, depth)) = stack.pop() {
+            // Skip traversal into hot lower subtries beyond max_depth.
+            // At max_depth, we still need to process the node to convert children to hashes.
+            // This keeps frequently-modified subtries revealed to avoid expensive re-reveals.
+            if depth > max_depth &&
+                let SparseSubtrieType::Lower(idx) = SparseSubtrieType::from_path(&path) &&
+                self.subtrie_heat.is_hot(idx)
+            {
+                continue;
+            }
+
             // Get children to visit from current node (immutable access)
             let children: SmallVec<[Nibbles; 16]> = {
                 let Some(subtrie) = self.subtrie_for_path(&path) else { continue };
@@ -1085,10 +1121,11 @@ impl SparseTrieExt for ParallelSparseTrie {
                         .and_then(|n| n.hash());
 
                     if let Some(hash) = hash {
-                        self.subtrie_for_path_mut(&child)
-                            .nodes
-                            .insert(child, SparseNode::Hash(hash));
-                        effective_pruned_roots.push((child, hash));
+                        // Use untracked access to avoid marking subtrie as modified during pruning
+                        if let Some(subtrie) = self.subtrie_for_path_mut_untracked(&child) {
+                            subtrie.nodes.insert(child, SparseNode::Hash(hash));
+                            effective_pruned_roots.push((child, hash));
+                        }
                     }
                 } else {
                     stack.push((child, depth + 1));
@@ -1297,13 +1334,14 @@ impl ParallelSparseTrie {
     }
 
     /// Rolls back a partial update by removing the value, removing any inserted nodes,
-    /// and restoring any modified original node.
+    /// removing any inserted branch masks, and restoring any modified original node.
     /// This ensures `update_leaf` is atomic - either it succeeds completely or leaves the trie
     /// unchanged.
     fn rollback_insert(
         &mut self,
         full_path: &Nibbles,
         inserted_nodes: &[Nibbles],
+        inserted_masks: &[Nibbles],
         modified_original: Option<(Nibbles, SparseNode)>,
     ) {
         self.upper_subtrie.inner.values.remove(full_path);
@@ -1315,6 +1353,10 @@ impl ParallelSparseTrie {
                     subtrie.nodes.remove(node_path);
                 }
             }
+        }
+        // Remove any branch masks that were inserted
+        for mask_path in inserted_masks {
+            self.branch_node_masks.remove(mask_path);
         }
         // Restore the original node that was modified
         if let Some((path, original_node)) = modified_original {
@@ -1365,6 +1407,7 @@ impl ParallelSparseTrie {
             SparseSubtrieType::Upper => None,
             SparseSubtrieType::Lower(idx) => {
                 self.lower_subtries[idx].reveal(path);
+                self.subtrie_heat.mark_modified(idx);
                 Some(self.lower_subtries[idx].as_revealed_mut().expect("just revealed"))
             }
         }
@@ -1397,6 +1440,19 @@ impl ParallelSparseTrie {
             &mut self.upper_subtrie
         } else {
             self.lower_subtrie_for_path_mut(path).unwrap()
+        }
+    }
+
+    /// Returns a mutable reference to a subtrie without marking it as modified.
+    /// Used for internal operations like pruning that shouldn't affect heat tracking.
+    fn subtrie_for_path_mut_untracked(&mut self, path: &Nibbles) -> Option<&mut SparseSubtrie> {
+        if SparseSubtrieType::path_len_is_upper(path.len()) {
+            Some(&mut self.upper_subtrie)
+        } else {
+            match SparseSubtrieType::from_path(path) {
+                SparseSubtrieType::Upper => None,
+                SparseSubtrieType::Lower(idx) => self.lower_subtries[idx].as_revealed_mut(),
+            }
         }
     }
 
@@ -2036,7 +2092,90 @@ impl ParallelSparseTrie {
             }
 
             self.lower_subtries[index] = LowerSparseSubtrie::Revealed(subtrie);
+            self.subtrie_heat.mark_modified(index);
         }
+    }
+}
+
+/// Bitset tracking which of the 256 lower subtries were modified in the current cycle.
+#[derive(Clone, Default, PartialEq, Eq, Debug)]
+struct ModifiedSubtries([u64; 4]);
+
+impl ModifiedSubtries {
+    /// Marks a subtrie index as modified.
+    #[inline]
+    fn set(&mut self, idx: usize) {
+        debug_assert!(idx < NUM_LOWER_SUBTRIES);
+        self.0[idx >> 6] |= 1 << (idx & 63);
+    }
+
+    /// Returns whether a subtrie index is marked as modified.
+    #[inline]
+    fn get(&self, idx: usize) -> bool {
+        debug_assert!(idx < NUM_LOWER_SUBTRIES);
+        (self.0[idx >> 6] & (1 << (idx & 63))) != 0
+    }
+
+    /// Clears all modification flags.
+    #[inline]
+    const fn clear(&mut self) {
+        self.0 = [0; 4];
+    }
+}
+
+/// Tracks heat (modification frequency) for each of the 256 lower subtries.
+///
+/// Heat is used to avoid pruning frequently-modified subtries, which would cause
+/// expensive re-reveal operations on subsequent updates.
+///
+/// - Heat is incremented by 2 when a subtrie is modified
+/// - Heat decays by 1 each prune cycle for subtries not modified that cycle
+/// - Subtries with heat > 0 are considered "hot" and skipped during pruning
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct SubtrieModifications {
+    /// Heat level (0-255) for each of the 256 lower subtries.
+    heat: [u8; NUM_LOWER_SUBTRIES],
+    /// Tracks which subtries were modified in the current cycle.
+    modified: ModifiedSubtries,
+}
+
+impl Default for SubtrieModifications {
+    fn default() -> Self {
+        Self { heat: [0; NUM_LOWER_SUBTRIES], modified: ModifiedSubtries::default() }
+    }
+}
+
+impl SubtrieModifications {
+    /// Marks a subtrie as modified, incrementing its heat by 1.
+    #[inline]
+    fn mark_modified(&mut self, idx: usize) {
+        debug_assert!(idx < NUM_LOWER_SUBTRIES);
+        self.modified.set(idx);
+        self.heat[idx] = self.heat[idx].saturating_add(1);
+    }
+
+    /// Returns whether a subtrie is currently hot (heat > 0).
+    #[inline]
+    fn is_hot(&self, idx: usize) -> bool {
+        debug_assert!(idx < NUM_LOWER_SUBTRIES);
+        self.heat[idx] > 0
+    }
+
+    /// Decays heat for subtries not modified this cycle and resets modification tracking.
+    /// Called at the start of each prune cycle.
+    fn decay_and_reset(&mut self) {
+        for (idx, heat) in self.heat.iter_mut().enumerate() {
+            if !self.modified.get(idx) {
+                *heat = heat.saturating_sub(1);
+            }
+        }
+        self.modified.clear();
+    }
+
+    /// Clears all heat tracking state.
+    const fn clear(&mut self) {
+        self.heat = [0; NUM_LOWER_SUBTRIES];
+        self.modified.clear();
     }
 }
 
@@ -3107,9 +3246,9 @@ pub struct SparseSubtrieBuffers {
     /// Stack of RLP nodes
     rlp_node_stack: Vec<RlpNodeStackItem>,
     /// Reusable branch child path
-    branch_child_buf: SmallVec<[Nibbles; 16]>,
+    branch_child_buf: Vec<Nibbles>,
     /// Reusable branch value stack
-    branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
+    branch_value_stack_buf: Vec<RlpNode>,
     /// Reusable RLP buffer
     rlp_buf: Vec<u8>,
 }
@@ -3118,19 +3257,10 @@ impl SparseSubtrieBuffers {
     /// Clears all buffers.
     fn clear(&mut self) {
         self.path_stack.clear();
-        self.path_stack.shrink_to_fit();
-
         self.rlp_node_stack.clear();
-        self.rlp_node_stack.shrink_to_fit();
-
         self.branch_child_buf.clear();
-        self.branch_child_buf.shrink_to_fit();
-
         self.branch_value_stack_buf.clear();
-        self.branch_value_stack_buf.shrink_to_fit();
-
         self.rlp_buf.clear();
-        self.rlp_buf.shrink_to_fit();
     }
 }
 
@@ -7728,7 +7858,11 @@ mod tests {
 
     #[test]
     fn test_prune_at_various_depths() {
-        for max_depth in [0, 1, 2] {
+        // Test depths 0 and 1, which are in the Upper subtrie (no heat tracking).
+        // Depth 2 is the boundary where Lower subtries start (UPPER_TRIE_MAX_DEPTH=2),
+        // and with `depth >= max_depth` heat check, hot Lower subtries at depth 2
+        // are protected from pruning traversal.
+        for max_depth in [0, 1] {
             let provider = DefaultTrieNodeProvider;
             let mut trie = ParallelSparseTrie::default();
 
@@ -7748,21 +7882,27 @@ mod tests {
             }
 
             let root_before = trie.root();
-            let nodes_before = trie.revealed_node_count();
+            let nodes_before = trie.size_hint();
 
-            trie.prune(max_depth);
+            // Prune multiple times to allow heat to fully decay.
+            // Heat starts at 1 and decays by 1 each cycle for unmodified subtries,
+            // so we need 2 prune cycles: 1→0, then actual prune.
+            for _ in 0..2 {
+                trie.prune(max_depth);
+            }
 
             let root_after = trie.root();
             assert_eq!(root_before, root_after, "root hash should be preserved after prune");
 
-            let nodes_after = trie.revealed_node_count();
+            let nodes_after = trie.size_hint();
             assert!(
                 nodes_after < nodes_before,
                 "node count should decrease after prune at depth {max_depth}"
             );
 
             if max_depth == 0 {
-                assert_eq!(nodes_after, 1, "only root should be revealed after prune(0)");
+                // Root + 4 hash stubs for children at [0], [1], [2], [3]
+                assert_eq!(nodes_after, 5, "root + 4 hash stubs after prune(0)");
             }
         }
     }
@@ -7808,13 +7948,13 @@ mod tests {
         trie.update_leaf(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), value, &provider).unwrap();
 
         let root_before = trie.root();
-        let nodes_before = trie.revealed_node_count();
+        let nodes_before = trie.size_hint();
 
         trie.prune(0);
 
         let root_after = trie.root();
         assert_eq!(root_before, root_after, "root hash should be preserved");
-        assert_eq!(trie.revealed_node_count(), nodes_before, "single leaf trie should not change");
+        assert_eq!(trie.size_hint(), nodes_before, "single leaf trie should not change");
     }
 
     #[test]
@@ -7830,11 +7970,11 @@ mod tests {
         }
 
         trie.root();
-        let nodes_before = trie.revealed_node_count();
+        let nodes_before = trie.size_hint();
 
         trie.prune(100);
 
-        assert_eq!(nodes_before, trie.revealed_node_count(), "deep prune should have no effect");
+        assert_eq!(nodes_before, trie.size_hint(), "deep prune should have no effect");
     }
 
     #[test]
@@ -7850,10 +7990,16 @@ mod tests {
             .unwrap();
 
         let root_before = trie.root();
-        trie.prune(1);
+        // Prune multiple times to allow heat to fully decay.
+        // Heat starts at 1 and decays by 1 each cycle for unmodified subtries,
+        // so we need 2 prune cycles: 1→0, then actual prune.
+        for _ in 0..2 {
+            trie.prune(1);
+        }
 
         assert_eq!(root_before, trie.root(), "root hash should be preserved");
-        assert_eq!(trie.revealed_node_count(), 2, "should have root + extension after prune(1)");
+        // Root + extension + 2 hash stubs (for the two leaves' parent branches)
+        assert_eq!(trie.size_hint(), 4, "root + extension + hash stubs after prune(1)");
     }
 
     #[test]
@@ -7866,13 +8012,13 @@ mod tests {
         trie.update_leaf(Nibbles::from_nibbles([0x1]), small_value, &provider).unwrap();
 
         let root_before = trie.root();
-        let nodes_before = trie.revealed_node_count();
+        let nodes_before = trie.size_hint();
 
         trie.prune(0);
 
         assert_eq!(root_before, trie.root(), "root hash must be preserved");
 
-        if trie.revealed_node_count() == nodes_before {
+        if trie.size_hint() == nodes_before {
             assert!(trie.get_leaf_value(&Nibbles::from_nibbles([0x0])).is_some());
             assert!(trie.get_leaf_value(&Nibbles::from_nibbles([0x1])).is_some());
         }
@@ -7916,9 +8062,15 @@ mod tests {
         }
 
         let root_before = trie.root();
-        let pruned = trie.prune(1);
 
-        assert!(pruned > 0, "should have pruned some nodes");
+        // Prune multiple times to allow heat to fully decay.
+        // Heat starts at 1 and decays by 1 each cycle for unmodified subtries.
+        let mut total_pruned = 0;
+        for _ in 0..2 {
+            total_pruned += trie.prune(1);
+        }
+
+        assert!(total_pruned > 0, "should have pruned some nodes");
         assert_eq!(root_before, trie.root(), "root hash should be preserved");
 
         for key in &keys {
@@ -7940,14 +8092,14 @@ mod tests {
         }
 
         trie.root();
-        let nodes_before = trie.revealed_node_count();
+        let nodes_before = trie.size_hint();
 
         // If depth were truncated to u8, 300 would become 44 and might prune something
         trie.prune(300);
 
         assert_eq!(
             nodes_before,
-            trie.revealed_node_count(),
+            trie.size_hint(),
             "prune(300) should have no effect on a shallow trie"
         );
     }

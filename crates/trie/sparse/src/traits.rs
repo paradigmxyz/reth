@@ -40,17 +40,30 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// # Returns
     ///
-    /// Self if successful, or an error if revealing fails.
+    /// `Ok(())` if successful, or an error if revealing fails.
     ///
     /// # Panics
     ///
     /// May panic if the trie is not new/cleared, and has already revealed nodes.
-    fn with_root(
-        self,
+    fn set_root(
+        &mut self,
         root: TrieNode,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
-    ) -> SparseTrieResult<Self>;
+    ) -> SparseTrieResult<()>;
+
+    /// Configures the trie to have the given root node revealed.
+    ///
+    /// See [`Self::set_root`] for more details.
+    fn with_root(
+        mut self,
+        root: TrieNode,
+        masks: Option<BranchNodeMasks>,
+        retain_updates: bool,
+    ) -> SparseTrieResult<Self> {
+        self.set_root(root, masks, retain_updates)?;
+        Ok(self)
+    }
 
     /// Configures the trie to retain information about updates.
     ///
@@ -61,11 +74,15 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// # Arguments
     ///
     /// * `retain_updates` - Whether to track updates
+    fn set_updates(&mut self, retain_updates: bool);
+
+    /// Configures the trie to retain information about updates.
     ///
-    /// # Returns
-    ///
-    /// Self for method chaining.
-    fn with_updates(self, retain_updates: bool) -> Self;
+    /// See [`Self::set_updates`] for more details.
+    fn with_updates(mut self, retain_updates: bool) -> Self {
+        self.set_updates(retain_updates);
+        self
+    }
 
     /// Reserves capacity for additional trie nodes.
     ///
@@ -249,8 +266,12 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 /// converting nodes beyond a certain depth into hash stubs. This is useful for reducing
 /// memory usage when caching tries across payload validations.
 pub trait SparseTrieExt: SparseTrie {
-    /// Returns the number of revealed (non-Hash) nodes in the trie.
-    fn revealed_node_count(&self) -> usize;
+    /// Returns a cheap O(1) size hint for the trie representing the count of revealed
+    /// (non-Hash) nodes.
+    ///
+    /// This is used as a heuristic for prioritizing which storage tries to keep
+    /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
+    fn size_hint(&self) -> usize;
 
     /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
     ///
@@ -308,6 +329,17 @@ pub struct SparseTrieUpdates {
     pub removed_nodes: HashSet<Nibbles>,
     /// Flag indicating whether the trie was wiped.
     pub wiped: bool,
+}
+
+impl SparseTrieUpdates {
+    /// Initialize a [`Self`] with given capacities.
+    pub fn with_capacity(num_updated_nodes: usize, num_removed_nodes: usize) -> Self {
+        Self {
+            updated_nodes: HashMap::with_capacity_and_hasher(num_updated_nodes, Default::default()),
+            removed_nodes: HashSet::with_capacity_and_hasher(num_removed_nodes, Default::default()),
+            wiped: false,
+        }
+    }
 }
 
 /// Error type for a leaf lookup operation

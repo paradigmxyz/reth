@@ -24,7 +24,6 @@ use reth_trie_common::{
     LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, TrieMask, TrieNode, CHILD_INDEX_RANGE,
     EMPTY_ROOT_HASH,
 };
-use smallvec::SmallVec;
 use tracing::{debug, instrument, trace};
 
 /// The level below which the sparse trie hashes are calculated in
@@ -111,7 +110,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
                 Box::default()
             };
 
-            *revealed_trie = revealed_trie.with_root(root, masks, retain_updates)?;
+            revealed_trie.set_root(root, masks, retain_updates)?;
             *self = Self::Revealed(revealed_trie);
         }
 
@@ -218,18 +217,20 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         Some((revealed.root(), revealed.take_updates()))
     }
 
-    /// Returns a [`RevealableSparseTrie::Blind`] based on this one. If this instance was revealed,
-    /// or was itself a `Blind` with a pre-allocated [`RevealableSparseTrie`](SparseTrieTrait),
-    /// this will return a `Blind` carrying a cleared pre-allocated
-    /// [`RevealableSparseTrie`](SparseTrieTrait).
-    pub fn clear(self) -> Self {
-        match self {
-            Self::Blind(_) => self,
+    /// Clears this trie, setting it to a blind state.
+    ///
+    /// If this instance was revealed, or was itself a `Blind` with a pre-allocated
+    /// [`RevealableSparseTrie`](SparseTrieTrait), this will set to `Blind` carrying a cleared
+    /// pre-allocated [`RevealableSparseTrie`](SparseTrieTrait).
+    #[inline]
+    pub fn clear(&mut self) {
+        *self = match core::mem::replace(self, Self::blind()) {
+            s @ Self::Blind(_) => s,
             Self::Revealed(mut trie) => {
                 trie.clear();
                 Self::Blind(Some(trie))
             }
-        }
+        };
     }
 
     /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
@@ -452,13 +453,13 @@ impl Default for SerialSparseTrie {
 }
 
 impl SparseTrieTrait for SerialSparseTrie {
-    fn with_root(
-        mut self,
+    fn set_root(
+        &mut self,
         root: TrieNode,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
-    ) -> SparseTrieResult<Self> {
-        self = self.with_updates(retain_updates);
+    ) -> SparseTrieResult<()> {
+        self.set_updates(retain_updates);
 
         // A fresh/cleared `SerialSparseTrie` has a `SparseNode::Empty` at its root. Delete that
         // so we can reveal the new root node.
@@ -466,15 +467,13 @@ impl SparseTrieTrait for SerialSparseTrie {
         let _removed_root = self.nodes.remove(&path).expect("root node should exist");
         debug_assert_eq!(_removed_root, SparseNode::Empty);
 
-        self.reveal_node(path, root, masks)?;
-        Ok(self)
+        self.reveal_node(path, root, masks)
     }
 
-    fn with_updates(mut self, retain_updates: bool) -> Self {
+    fn set_updates(&mut self, retain_updates: bool) {
         if retain_updates {
             self.updates = Some(SparseTrieUpdates::default());
         }
-        self
     }
 
     fn reserve_nodes(&mut self, additional: usize) {
@@ -979,7 +978,17 @@ impl SparseTrieTrait for SerialSparseTrie {
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
-        self.updates.take().unwrap_or_default()
+        match self.updates.take() {
+            Some(updates) => {
+                // NOTE: we need to preserve Some case
+                self.updates = Some(SparseTrieUpdates::with_capacity(
+                    updates.updated_nodes.len(),
+                    updates.removed_nodes.len(),
+                ));
+                updates
+            }
+            None => SparseTrieUpdates::default(),
+        }
     }
 
     fn wipe(&mut self) {
@@ -1993,9 +2002,9 @@ pub struct RlpNodeBuffers {
     /// Stack of RLP nodes
     rlp_node_stack: Vec<RlpNodeStackItem>,
     /// Reusable branch child path
-    branch_child_buf: SmallVec<[Nibbles; 16]>,
+    branch_child_buf: Vec<Nibbles>,
     /// Reusable branch value stack
-    branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
+    branch_value_stack_buf: Vec<RlpNode>,
 }
 
 impl RlpNodeBuffers {
@@ -2008,8 +2017,8 @@ impl RlpNodeBuffers {
                 is_in_prefix_set: None,
             }],
             rlp_node_stack: Vec::new(),
-            branch_child_buf: SmallVec::<[Nibbles; 16]>::new_const(),
-            branch_value_stack_buf: SmallVec::<[RlpNode; 16]>::new_const(),
+            branch_child_buf: Vec::new(),
+            branch_value_stack_buf: Vec::new(),
         }
     }
 }

@@ -121,13 +121,13 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let genesis_block_number = self.chain.genesis().number.unwrap_or_default();
         let (db, sfp) = match access {
             AccessRights::RW => (
-                Arc::new(init_db(db_path, self.db.database_args())?),
+                init_db(db_path, self.db.database_args())?,
                 StaticFileProviderBuilder::read_write(sf_path)
                     .with_genesis_block_number(genesis_block_number)
                     .build()?,
             ),
             AccessRights::RO | AccessRights::RoInconsistent => {
-                (Arc::new(open_db_read_only(&db_path, self.db.database_args())?), {
+                (open_db_read_only(&db_path, self.db.database_args())?, {
                     let provider = StaticFileProviderBuilder::read_only(sf_path)
                         .with_genesis_block_number(genesis_block_number)
                         .build()?;
@@ -160,16 +160,16 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     fn create_provider_factory<N: CliNodeTypes>(
         &self,
         config: &Config,
-        db: Arc<DatabaseEnv>,
+        db: DatabaseEnv,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
         access: AccessRights,
-    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
+    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>>>
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         let prune_modes = config.prune.segments.clone();
-        let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(
+        let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::new(
             db,
             self.chain.clone(),
             static_file_provider,
@@ -200,7 +200,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
             // Builds and executes an unwind-only pipeline
-            let mut pipeline = Pipeline::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::builder()
+            let mut pipeline = Pipeline::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::builder()
                 .add_stages(DefaultStages::new(
                     factory.clone(),
                     tip_rx,
@@ -229,7 +229,7 @@ pub struct Environment<N: NodeTypes> {
     /// Configuration for reth node
     pub config: Config,
     /// Provider factory.
-    pub provider_factory: ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+    pub provider_factory: ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     /// Datadir path.
     pub data_dir: ChainPath<DataDirPath>,
 }
@@ -261,8 +261,8 @@ impl AccessRights {
 /// Helper alias to satisfy `FullNodeTypes` bound on [`Node`] trait generic.
 type FullTypesAdapter<T> = FullNodeTypesAdapter<
     T,
-    Arc<DatabaseEnv>,
-    BlockchainProvider<NodeTypesWithDBAdapter<T, Arc<DatabaseEnv>>>,
+    DatabaseEnv,
+    BlockchainProvider<NodeTypesWithDBAdapter<T, DatabaseEnv>>,
 >;
 
 /// Helper trait with a common set of requirements for the

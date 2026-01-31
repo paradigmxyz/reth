@@ -211,6 +211,26 @@ where
     // Behaviour reserved only for new nodes should be set in the storage settings.
     provider_rw.write_storage_settings(genesis_storage_settings)?;
 
+    // For non-zero genesis blocks, set expected_block_start BEFORE insert_genesis_state.
+    // When block_range is None, next_block_number() uses expected_block_start. By default,
+    // expected_block_start comes from find_fixed_range which returns the file range start (0),
+    // not the genesis block number. This would cause increment_block(N) to fail.
+    let static_file_provider = provider_rw.static_file_provider();
+    if genesis_block_number > 0 {
+        if genesis_storage_settings.account_changesets_in_static_files {
+            static_file_provider
+                .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
+                .user_header_mut()
+                .set_expected_block_start(genesis_block_number);
+        }
+        if genesis_storage_settings.storage_changesets_in_static_files {
+            static_file_provider
+                .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
+                .user_header_mut()
+                .set_expected_block_start(genesis_block_number);
+        }
+    }
+
     insert_genesis_hashes(&provider_rw, alloc.iter())?;
     insert_genesis_history(&provider_rw, alloc.iter())?;
 
@@ -228,16 +248,11 @@ where
         provider_rw.save_stage_checkpoint(stage, checkpoint)?;
     }
 
-    // Static file segments start empty, so we need to initialize the genesis block.
-    //
-    // We do not do this for changesets because they get initialized in `insert_state` /
-    // `write_state` / `write_state_reverts`. If the node is configured for writing changesets to
-    // static files they will be written there, otherwise they will be written to the DB.
+    // Static file segments start empty, so we need to initialize the block range.
+    // For genesis blocks with non-zero block numbers, we use get_writer() instead of
+    // latest_writer() and set_block_range() to ensure static files start at the correct block.
     let static_file_provider = provider_rw.static_file_provider();
 
-    // Static file segments start empty, so we need to initialize the genesis block.
-    // For genesis blocks with non-zero block numbers, we need to use get_writer() instead of
-    // latest_writer() to ensure the genesis block is stored in the correct static file range.
     static_file_provider
         .get_writer(genesis_block_number, StaticFileSegment::Receipts)?
         .user_header_mut()
@@ -945,8 +960,8 @@ mod tests {
             let provider = factory.provider().unwrap();
             let tx = provider.tx_ref();
             (
-                collect_table_entries::<Arc<DatabaseEnv>, tables::AccountsHistory>(tx).unwrap(),
-                collect_table_entries::<Arc<DatabaseEnv>, tables::StoragesHistory>(tx).unwrap(),
+                collect_table_entries::<DatabaseEnv, tables::AccountsHistory>(tx).unwrap(),
+                collect_table_entries::<DatabaseEnv, tables::StoragesHistory>(tx).unwrap(),
             )
         };
 
