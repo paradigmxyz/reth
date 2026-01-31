@@ -1,0 +1,99 @@
+name: Reproduce prometheus bug
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  reproduce-metrics-bug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Install Rust toolchains
+      run: |
+        rustup install stable
+        rustup component add --toolchain stable rustfmt clippy
+        rustup install nightly
+        rustup component add --toolchain nightly rustfmt clippy
+
+    - name: Cache Cargo registry and build
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Build Reth (release)
+      run: cargo build --release --bin reth
+
+    - name: Start Reth in dev mode and check metrics
+      run: |
+        nohup ./target/release/reth node --dev --metrics 127.0.0.1:9001 > reth.log 2>&1 &
+        RETH_PID=$!
+        echo "Reth started (PID: $RETH_PID)"
+
+        echo "eaiting for http://127.0.0.1:9001/metrics to be ready..."
+
+        for i in {1..60}; do
+          if curl -f -s http://127.0.0.1:9001/metrics > /dev/null 2>&1; then
+            echo "Metrics endpoint is ready!"
+            break
+          fi
+          sleep 5
+        done
+
+        curl -s http://127.0.0.1:9001/metrics > metrics.txt
+        echo ""
+        echo "=== Relevant metrics output ==="
+        grep 'reth_consensus_engine_persistence_save_blocks_block_count' metrics.txt || echo "Metric not found (may appear after more blocks are persisted)"
+        echo ""
+        if grep -q '^reth_consensus_engine_persistence_save_blocks_block_count[[:space:]]\+[0-9.]\+$' metrics.txt; then
+          echo " Bug reproduced: Invalid bare sample line (without quantile or suffix) detected!"
+          grep '^reth_consensus_engine_persistence_save_blocks_block_count' metrics.txt
+        else
+          echo " No invalid bare sample line found"
+        fi
+
+        kill $RETH_PID || true
+        wait $RETH_PID || true
+
+    - name: Upload metrics and logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: reth-metrics-and-logs
+        path: |
+          metrics.txt
+          reth.log
+
+    
+#    - name: Sync with upstream
+#      run:  |
+#        git remote add upstream https://github.com/paradigmxyz/reth.git || true
+#        git fetch upstream
+#        git checkout main
+#        git merge upstream main --ff-only
+#        git checkout -b fix/block-count-metric
+#        git config user.email "mukesh.ranjan@tutamail.com"
+#        git config user.name "Mukesh Ranjan"
+#        git add .
+#        git commit "merged with main reth repo [skip ci]" || echo "Nothing to commit"
+#        git push || echo "Push failed"
+
+    - name: Run make pr
+      run: make pr
