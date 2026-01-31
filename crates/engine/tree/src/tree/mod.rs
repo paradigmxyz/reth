@@ -2613,19 +2613,27 @@ where
         let block_num_hash = block_id.block;
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
 
-        match self.sealed_header_by_hash(block_num_hash.hash) {
-            Err(err) => {
-                let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block, err.into()).into());
+        // Check if block already exists - first in memory, then DB only if it could be persisted
+        if self.state.tree_state.sealed_header_by_hash(&block_num_hash.hash).is_some() {
+            convert_to_block(self, input)?;
+            return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
+        }
+
+        // Only query DB if block could be persisted (number <= last persisted block).
+        // New blocks from CL always have number > last persisted, so skip DB lookup for them.
+        if block_num_hash.number <= self.persistence_state.last_persisted_block.number {
+            match self.provider.sealed_header_by_hash(block_num_hash.hash) {
+                Err(err) => {
+                    let block = convert_to_block(self, input)?;
+                    return Err(InsertBlockError::new(block, err.into()).into());
+                }
+                Ok(Some(_)) => {
+                    convert_to_block(self, input)?;
+                    return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
+                }
+                Ok(None) => {}
             }
-            Ok(Some(_)) => {
-                // We now assume that we already have this block in the tree. However, we need to
-                // run the conversion to ensure that the block hash is valid.
-                convert_to_block(self, input)?;
-                return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid))
-            }
-            _ => {}
-        };
+        }
 
         // Ensure that the parent state is available.
         match self.state_provider_builder(block_id.parent) {
