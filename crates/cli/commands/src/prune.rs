@@ -1,4 +1,4 @@
-//! Command that runs pruning without any limits.
+//! Command that runs pruning.
 use crate::common::{AccessRights, CliNodeTypes, EnvironmentArgs};
 use clap::Parser;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -16,7 +16,7 @@ use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
 use tracing::info;
 
-/// Prunes according to the configuration without any limits
+/// Prunes according to the configuration
 #[derive(Debug, Parser)]
 pub struct PruneCommand<C: ChainSpecParser> {
     #[command(flatten)]
@@ -69,13 +69,45 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
         // Delete data which has been copied to static files.
         if let Some(prune_tip) = lowest_static_file_height {
             info!(target: "reth::cli", ?prune_tip, ?config, "Pruning data from database...");
-            // Run the pruner according to the configuration, and don't enforce any limits on it
-            let mut pruner = PrunerBuilder::new(config)
-                .delete_limit(usize::MAX)
-                .build_with_provider_factory(provider_factory);
 
-            pruner.run(prune_tip)?;
-            info!(target: "reth::cli", "Pruned data from database");
+            // With edge feature (static files), use batched pruning with a limit to bound memory.
+            // Run in a loop until all data is pruned.
+            #[cfg(feature = "edge")]
+            {
+                const DELETE_LIMIT: usize = 200_000;
+                let mut pruner = PrunerBuilder::new(config.clone())
+                    .delete_limit(DELETE_LIMIT)
+                    .build_with_provider_factory(provider_factory);
+
+                let mut total_pruned = 0usize;
+                loop {
+                    let output = pruner.run(prune_tip)?;
+                    let batch_pruned: usize =
+                        output.segments.iter().map(|(_, seg)| seg.pruned).sum();
+                    total_pruned = total_pruned.saturating_add(batch_pruned);
+
+                    if output.progress.is_finished() {
+                        break;
+                    }
+
+                    info!(
+                        target: "reth::cli",
+                        batch_pruned,
+                        total_pruned,
+                        "Pruning batch complete, continuing..."
+                    );
+                }
+                info!(target: "reth::cli", total_pruned, "Pruned data from database");
+            }
+
+            #[cfg(not(feature = "edge"))]
+            {
+                let mut pruner = PrunerBuilder::new(config)
+                    .delete_limit(usize::MAX)
+                    .build_with_provider_factory(provider_factory);
+                pruner.run(prune_tip)?;
+                info!(target: "reth::cli", "Pruned data from database");
+            }
         }
 
         Ok(())
