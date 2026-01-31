@@ -24,10 +24,13 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
+    hot_accounts::SmartPruneConfig,
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, LeafUpdate, SerialSparseTrie, SparseStateTrie, SparseTrie,
     SparseTrieExt,
 };
+
+use super::preserved_sparse_trie::SharedHotAccounts;
 use revm_primitives::{hash_map::Entry, B256Map};
 use smallvec::SmallVec;
 use std::{
@@ -70,7 +73,11 @@ where
         max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
+        hot_accounts: &SharedHotAccounts,
     ) -> SparseStateTrie<A, S> {
+        // Rotate hot account filters at end of block
+        hot_accounts.lock().end_block();
+
         match self {
             Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
             Self::Cached(task) => task.into_trie_for_reuse(
@@ -78,6 +85,7 @@ where
                 max_storage_tries,
                 max_nodes_capacity,
                 max_values_capacity,
+                hot_accounts,
             ),
         }
     }
@@ -273,15 +281,20 @@ where
 
     /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
     ///
-    /// Should be called after the state root result has been sent.
+    /// Uses hot account-aware pruning to preserve frequently-accessed accounts and their
+    /// storage tries. Should be called after the state root result has been sent.
     pub(super) fn into_trie_for_reuse(
         mut self,
         prune_depth: usize,
         max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
+        hot_accounts: &SharedHotAccounts,
     ) -> SparseStateTrie<A, S> {
-        self.trie.prune(prune_depth, max_storage_tries);
+        let guard = hot_accounts.lock();
+        let config = SmartPruneConfig::new(prune_depth, max_storage_tries, &guard);
+        self.trie.prune_preserving(&config);
+        drop(guard);
         self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
         self.trie
     }
