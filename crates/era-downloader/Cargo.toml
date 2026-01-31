@@ -20,8 +20,6 @@ reth-era.workspace = true
 # http
 bytes.workspace = true
 reqwest.workspace = true
-reqwest.default-features = false
-reqwest.features = ["stream", "rustls-tls-native-roots"]
 
 # async
 tokio.workspace = true
