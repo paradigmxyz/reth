@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -25,13 +25,15 @@ pub use alloy_chains::{Chain, ChainKind, NamedChain};
 /// Re-export for convenience
 pub use reth_ethereum_forks::*;
 
+pub use alloy_evm::EvmLimitParams;
 pub use api::EthChainSpec;
 pub use info::ChainInfo;
 #[cfg(any(test, feature = "test-utils"))]
 pub use spec::test_fork_ids;
 pub use spec::{
-    make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder,
-    ChainSpecProvider, DepositContract, ForkBaseFeeParams, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
+    blob_params_to_schedule, create_chain_config, mainnet_chain_config, make_genesis_header,
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
+    DepositContract, ForkBaseFeeParams, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
 };
 
 use reth_primitives_traits::sync::OnceLock;

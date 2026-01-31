@@ -16,7 +16,7 @@ workspace = true
 reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
 reth-trie-common.workspace = true
-tracing.workspace = true
+tracing = { workspace = true, features = ["attributes"] }
 alloy-trie.workspace = true
 
 # alloy
@@ -26,7 +26,6 @@ alloy-rlp.workspace = true
 # misc
 auto_impl.workspace = true
 rayon = { workspace = true, optional = true }
-smallvec = { workspace = true, features = ["const_new"] }
 
 # metrics
 reth-metrics = { workspace = true, optional = true }
@@ -80,7 +79,6 @@ arbitrary = [
     "alloy-trie/arbitrary",
     "reth-primitives-traits/arbitrary",
     "reth-trie-common/arbitrary",
-    "smallvec/arbitrary",
 ]
 
 [[bench]]

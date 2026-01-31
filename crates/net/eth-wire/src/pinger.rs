@@ -1,5 +1,6 @@
 use crate::errors::PingerError;
 use std::{
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -7,13 +8,13 @@ use std::{
 use tokio::time::{Instant, Interval, Sleep};
 use tokio_stream::Stream;
 
-/// The pinger is a state machine that is created with a maximum number of pongs that can be
-/// missed.
+/// The pinger is a simple state machine that sends a ping, waits for a pong,
+/// and transitions to timeout if the pong is not received within the timeout.
 #[derive(Debug)]
 pub(crate) struct Pinger {
     /// The timer used for the next ping.
     ping_interval: Interval,
-    /// The timer used for the next ping.
+    /// The timer used to detect a ping timeout.
     timeout_timer: Pin<Box<Sleep>>,
     /// The timeout duration for each ping.
     timeout: Duration,
@@ -38,7 +39,7 @@ impl Pinger {
     }
 
     /// Mark a pong as received, and transition the pinger to the `Ready` state if it was in the
-    /// `WaitingForPong` state. Unsets the sleep timer.
+    /// `WaitingForPong` state. Resets readiness by resetting the ping interval.
     pub(crate) fn on_pong(&mut self) -> Result<(), PingerError> {
         match self.state {
             PingState::Ready => Err(PingerError::UnexpectedPong),
@@ -77,7 +78,7 @@ impl Pinger {
                 }
             }
             PingState::WaitingForPong => {
-                if self.timeout_timer.is_elapsed() {
+                if self.timeout_timer.as_mut().poll(cx).is_ready() {
                     self.state = PingState::TimedOut;
                     return Poll::Ready(Ok(PingerEvent::Timeout))
                 }

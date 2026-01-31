@@ -131,6 +131,10 @@ pub struct TransactionsManagerMetrics {
     /// capacity. Note, this is not a limit to the number of inflight requests, but a health
     /// measure.
     pub(crate) capacity_pending_pool_imports: Counter,
+    /// Total number of transactions ignored because pending pool imports are at capacity.
+    pub(crate) skipped_transactions_pending_pool_imports_at_capacity: Counter,
+    /// The time it took to prepare transactions for import. This is mostly sender recovery.
+    pub(crate) pool_import_prepare_duration: Histogram,
 
     /* ================ POLL DURATION ================ */
 

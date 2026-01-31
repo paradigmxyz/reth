@@ -12,21 +12,23 @@ use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
-use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
+use reth_trie_common::{StorageTrieEntry, StoredNibbles, StoredNibblesSubKey, *};
 use serde::{Deserialize, Serialize};
 
 pub mod accounts;
 pub mod blocks;
 pub mod integer_list;
+pub mod metadata;
 pub mod sharded_key;
 pub mod storage_sharded_key;
 
 pub use accounts::*;
 pub use blocks::*;
 pub use integer_list::IntegerList;
+pub use metadata::*;
 pub use reth_db_models::{
-    AccountBeforeTx, ClientVersion, StaticFileBlockWithdrawals, StoredBlockBodyIndices,
-    StoredBlockWithdrawals,
+    AccountBeforeTx, ClientVersion, StaticFileBlockWithdrawals, StorageBeforeTx,
+    StoredBlockBodyIndices, StoredBlockWithdrawals,
 };
 pub use sharded_key::ShardedKey;
 
@@ -122,13 +124,10 @@ impl Decode for String {
 }
 
 impl Encode for StoredNibbles {
-    type Encoded = Vec<u8>;
+    type Encoded = arrayvec::ArrayVec<u8, 64>;
 
-    // Delegate to the Compact implementation
     fn encode(self) -> Self::Encoded {
-        // NOTE: This used to be `to_compact`, but all it does is append the bytes to the buffer,
-        // so we can just use the implementation of `Into<Vec<u8>>` to reuse the buffer.
-        self.0.to_vec()
+        self.0.iter().collect()
     }
 }
 
@@ -228,6 +227,7 @@ impl_compression_for_compact!(
     StaticFileBlockWithdrawals,
     Bytecode,
     AccountBeforeTx,
+    StorageBeforeTx,
     TransactionSigned,
     CompactU256,
     StageCheckpoint,
@@ -240,9 +240,9 @@ impl_compression_for_compact!(
 #[cfg(feature = "op")]
 mod op {
     use super::*;
-    use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+    use op_alloy_consensus::{OpReceipt, OpTxEnvelope};
 
-    impl_compression_for_compact!(OpTransactionSigned, OpReceipt);
+    impl_compression_for_compact!(OpTxEnvelope, OpReceipt);
 }
 
 macro_rules! impl_compression_fixed_compact {
@@ -256,7 +256,7 @@ macro_rules! impl_compression_fixed_compact {
                 }
 
                 fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
-                    let _  = Compact::to_compact(self, buf);
+                    let _ = Compact::to_compact(self, buf);
                 }
             }
 

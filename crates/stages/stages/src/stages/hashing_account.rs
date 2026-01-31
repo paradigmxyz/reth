@@ -64,14 +64,14 @@ impl AccountHashingStage {
         opts: SeedOpts,
     ) -> Result<Vec<(alloy_primitives::Address, Account)>, StageError>
     where
-        N::Primitives: reth_primitives_traits::FullNodePrimitives<
+        N::Primitives: reth_primitives_traits::NodePrimitives<
             Block = reth_ethereum_primitives::Block,
             BlockHeader = reth_primitives_traits::Header,
         >,
     {
         use alloy_primitives::U256;
         use reth_db_api::models::AccountBeforeTx;
-        use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
+        use reth_provider::{BlockWriter, StaticFileProviderFactory, StaticFileWriter};
         use reth_testing_utils::{
             generators,
             generators::{random_block_range, random_eoa_accounts, BlockRangeParams},
@@ -86,7 +86,7 @@ impl AccountHashingStage {
         );
 
         for block in blocks {
-            provider.insert_historical_block(block.try_recover().unwrap()).unwrap();
+            provider.insert_block(&block.try_recover().unwrap()).unwrap();
         }
         provider
             .static_file_provider()
@@ -99,7 +99,7 @@ impl AccountHashingStage {
             // Account State generator
             let mut account_cursor =
                 provider.tx_ref().cursor_write::<tables::PlainAccountState>()?;
-            accounts.sort_by(|a, b| a.0.cmp(&b.0));
+            accounts.sort_by_key(|a| a.0);
             for (addr, acc) in &accounts {
                 account_cursor.append(*addr, acc)?;
             }
@@ -344,7 +344,7 @@ mod tests {
                 done: true,
             }) if block_number == previous_stage &&
                 processed == total &&
-                total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
+                total == runner.db.count_entries::<tables::PlainAccountState>().unwrap() as u64
         );
 
         // Validate the stage execution
@@ -453,7 +453,7 @@ mod tests {
                 let provider = self.db.factory.database_provider_rw()?;
                 let res = Ok(AccountHashingStage::seed(
                     &provider,
-                    SeedOpts { blocks: 1..=input.target(), accounts: 10, txs: 0..3 },
+                    SeedOpts { blocks: 0..=input.target(), accounts: 10, txs: 0..3 },
                 )
                 .unwrap());
                 provider.commit().expect("failed to commit");

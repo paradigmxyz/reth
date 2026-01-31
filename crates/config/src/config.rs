@@ -2,6 +2,7 @@
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use reth_stages_types::ExecutionStageThresholds;
+use reth_static_file_types::{StaticFileMap, StaticFileSegment};
 use std::{
     path::{Path, PathBuf},
     time::Duration,
@@ -20,21 +21,23 @@ pub const DEFAULT_BLOCK_INTERVAL: usize = 5;
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct Config {
     /// Configuration for each stage in the pipeline.
-    // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
     /// Configuration for pruning.
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    pub prune: Option<PruneConfig>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub prune: PruneConfig,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
     /// Configuration for peer sessions.
     pub sessions: SessionsConfig,
+    /// Configuration for static files.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub static_files: StaticFilesConfig,
 }
 
 impl Config {
     /// Sets the pruning configuration.
-    pub fn update_prune_config(&mut self, prune_config: PruneConfig) {
-        self.prune = Some(prune_config);
+    pub fn set_prune_config(&mut self, prune_config: PruneConfig) {
+        self.prune = prune_config;
     }
 }
 
@@ -411,6 +414,103 @@ impl EtlConfig {
     }
 }
 
+/// Static files configuration.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct StaticFilesConfig {
+    /// Number of blocks per file for each segment.
+    pub blocks_per_file: BlocksPerFileConfig,
+}
+
+/// Configuration for the number of blocks per file for each segment.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct BlocksPerFileConfig {
+    /// Number of blocks per file for the headers segment.
+    pub headers: Option<u64>,
+    /// Number of blocks per file for the transactions segment.
+    pub transactions: Option<u64>,
+    /// Number of blocks per file for the receipts segment.
+    pub receipts: Option<u64>,
+    /// Number of blocks per file for the transaction senders segment.
+    pub transaction_senders: Option<u64>,
+    /// Number of blocks per file for the account changesets segment.
+    pub account_change_sets: Option<u64>,
+    /// Number of blocks per file for the storage changesets segment.
+    pub storage_change_sets: Option<u64>,
+}
+
+impl StaticFilesConfig {
+    /// Validates the static files configuration.
+    ///
+    /// Returns an error if any blocks per file value is zero.
+    pub fn validate(&self) -> eyre::Result<()> {
+        let BlocksPerFileConfig {
+            headers,
+            transactions,
+            receipts,
+            transaction_senders,
+            account_change_sets,
+            storage_change_sets,
+        } = self.blocks_per_file;
+        eyre::ensure!(headers != Some(0), "Headers segment blocks per file must be greater than 0");
+        eyre::ensure!(
+            transactions != Some(0),
+            "Transactions segment blocks per file must be greater than 0"
+        );
+        eyre::ensure!(
+            receipts != Some(0),
+            "Receipts segment blocks per file must be greater than 0"
+        );
+        eyre::ensure!(
+            transaction_senders != Some(0),
+            "Transaction senders segment blocks per file must be greater than 0"
+        );
+        eyre::ensure!(
+            account_change_sets != Some(0),
+            "Account changesets segment blocks per file must be greater than 0"
+        );
+        eyre::ensure!(
+            storage_change_sets != Some(0),
+            "Storage changesets segment blocks per file must be greater than 0"
+        );
+        Ok(())
+    }
+
+    /// Converts the blocks per file configuration into a [`StaticFileMap`].
+    pub fn as_blocks_per_file_map(&self) -> StaticFileMap<u64> {
+        let BlocksPerFileConfig {
+            headers,
+            transactions,
+            receipts,
+            transaction_senders,
+            account_change_sets,
+            storage_change_sets,
+        } = self.blocks_per_file;
+
+        let mut map = StaticFileMap::default();
+        // Iterating over all possible segments allows us to do an exhaustive match here,
+        // to not forget to configure new segments in the future.
+        for segment in StaticFileSegment::iter() {
+            let blocks_per_file = match segment {
+                StaticFileSegment::Headers => headers,
+                StaticFileSegment::Transactions => transactions,
+                StaticFileSegment::Receipts => receipts,
+                StaticFileSegment::TransactionSenders => transaction_senders,
+                StaticFileSegment::AccountChangeSets => account_change_sets,
+                StaticFileSegment::StorageChangeSets => storage_change_sets,
+            };
+
+            if let Some(blocks_per_file) = blocks_per_file {
+                map.insert(segment, blocks_per_file);
+            }
+        }
+        map
+    }
+}
+
 /// History stage configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -440,20 +540,27 @@ pub struct PruneConfig {
 
 impl Default for PruneConfig {
     fn default() -> Self {
-        Self { block_interval: DEFAULT_BLOCK_INTERVAL, segments: PruneModes::none() }
+        Self { block_interval: DEFAULT_BLOCK_INTERVAL, segments: PruneModes::default() }
     }
 }
 
 impl PruneConfig {
-    /// Returns whether there is any kind of receipt pruning configuration.
-    pub fn has_receipts_pruning(&self) -> bool {
-        self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
+    /// Returns whether this configuration is the default one.
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
     }
 
-    /// Merges another `PruneConfig` into this one, taking values from the other config if and only
-    /// if the corresponding value in this config is not set.
-    pub fn merge(&mut self, other: Option<Self>) {
-        let Some(other) = other else { return };
+    /// Returns whether there is any kind of receipt pruning configuration.
+    pub fn has_receipts_pruning(&self) -> bool {
+        self.segments.has_receipts_pruning()
+    }
+
+    /// Merges values from `other` into `self`.
+    /// - `Option<PruneMode>` fields: set from `other` only if `self` is `None`.
+    /// - `block_interval`: set from `other` only if `self.block_interval ==
+    ///   DEFAULT_BLOCK_INTERVAL`.
+    /// - `receipts_log_filter`: set from `other` only if `self` is empty and `other` is non-empty.
+    pub fn merge(&mut self, other: Self) {
         let Self {
             block_interval,
             segments:
@@ -976,18 +1083,6 @@ transaction_lookup = 'full'
 receipts = { distance = 16384 }
 #";
         let _conf: Config = toml::from_str(s).unwrap();
-
-        let s = r"#
-[prune]
-block_interval = 5
-
-[prune.segments]
-sender_recovery = { distance = 16384 }
-transaction_lookup = 'full'
-receipts = 'full'
-#";
-        let err = toml::from_str::<Config>(s).unwrap_err().to_string();
-        assert!(err.contains("invalid value: string \"full\""), "{}", err);
     }
 
     #[test]
@@ -1025,7 +1120,7 @@ receipts = 'full'
         };
 
         let original_filter = config1.segments.receipts_log_filter.clone();
-        config1.merge(Some(config2));
+        config1.merge(config2);
 
         // Check that the configuration has been merged. Any configuration present in config1
         // should not be overwritten by config2

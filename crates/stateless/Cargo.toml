@@ -18,6 +18,7 @@ alloy-rlp.workspace = true
 alloy-trie.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-debug.workspace = true
+alloy-genesis = { workspace = true, features = ["serde-bincode-compat"] }
 
 # reth
 reth-ethereum-consensus.workspace = true
@@ -36,3 +37,11 @@ thiserror.workspace = true
 itertools.workspace = true
 serde.workspace = true
 serde_with.workspace = true
+
+k256 = { workspace = true, optional = true }
+secp256k1 = { workspace = true, optional = true }
+
+[features]
+default = ["k256"]
+k256 = ["dep:k256"]
+secp256k1 = ["dep:secp256k1"]

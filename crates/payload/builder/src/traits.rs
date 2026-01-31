@@ -23,7 +23,6 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> {
     /// Represents the future that resolves the block that's returned to the CL.
     type ResolvePayloadFuture: Future<Output = Result<Self::BuiltPayload, PayloadBuilderError>>
         + Send
-        + Sync
         + 'static;
     /// Represents the built payload type that is returned to the CL.
     type BuiltPayload: BuiltPayload + Clone + std::fmt::Debug;

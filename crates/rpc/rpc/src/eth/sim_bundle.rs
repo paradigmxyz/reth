@@ -1,8 +1,8 @@
 //! `Eth` Sim bundle implementation and helpers.
 
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockNumberOrTag;
-use alloy_evm::overrides::apply_block_overrides;
+use alloy_evm::{env::BlockEnvironment, overrides::apply_block_overrides};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::BlockId;
 use alloy_rpc_types_mev::{
@@ -11,8 +11,7 @@ use alloy_rpc_types_mev::{
 };
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, Evm};
-use reth_primitives_traits::{Recovered, SignedTransaction};
-use reth_revm::{database::StateProviderDatabase, db::CacheDB};
+use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{block::LoadBlock, Call, EthTransactions},
@@ -22,7 +21,9 @@ use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::ProviderTx;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
+use revm::{
+    context::Block, context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef,
+};
 use std::{sync::Arc, time::Duration};
 use tracing::trace;
 
@@ -239,15 +240,14 @@ where
         let sim_response = self
             .inner
             .eth_api
-            .spawn_with_state_at_block(current_block_id, move |state| {
+            .spawn_with_state_at_block(current_block_id, move |_, mut db| {
                 // Setup environment
                 let current_block_number = current_block.number();
-                let coinbase = evm_env.block_env.beneficiary;
-                let basefee = evm_env.block_env.basefee;
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let coinbase = evm_env.block_env.beneficiary();
+                let basefee = evm_env.block_env.basefee();
 
                 // apply overrides
-                apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
+                apply_block_overrides(block_overrides, &mut db, evm_env.block_env.inner_mut());
 
                 let initial_coinbase_balance = DatabaseRef::basic_ref(&db, coinbase)
                     .map_err(EthApiError::from_eth_err)?
@@ -313,14 +313,14 @@ where
                     // logs. We should collect bundle logs when we are processing the bundle items.
                     if logs {
                         let tx_logs = result
-                            .logs()
-                            .iter()
-                            .map(|log| {
+                            .into_logs()
+                            .into_iter()
+                            .map(|inner| {
                                 let full_log = alloy_rpc_types_eth::Log {
-                                    inner: log.clone(),
-                                    block_hash: None,
-                                    block_number: None,
-                                    block_timestamp: None,
+                                    inner,
+                                    block_hash: Some(current_block.hash()),
+                                    block_number: Some(current_block.number()),
+                                    block_timestamp: Some(current_block.timestamp()),
                                     transaction_hash: Some(*item.tx.tx_hash()),
                                     transaction_index: Some(tx_index as u64),
                                     log_index: Some(log_index),
@@ -340,6 +340,8 @@ where
                 }
 
                 // After processing all transactions, process refunds
+                // Store the original refundable value to calculate all payouts correctly
+                let original_refundable_value = refundable_value;
                 for item in &flattened_bundle {
                     if let Some(refund_percent) = item.refund_percent {
                         // Get refund configurations
@@ -355,9 +357,11 @@ where
                         // Add gas used for payout transactions
                         total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
 
-                        // Calculate allocated refundable value (payout value)
-                        let payout_value =
-                            refundable_value * U256::from(refund_percent) / U256::from(100);
+                        // Calculate allocated refundable value (payout value) based on ORIGINAL
+                        // refundable value This ensures all refund_percent
+                        // values are calculated from the same base
+                        let payout_value = original_refundable_value * U256::from(refund_percent) /
+                            U256::from(100);
 
                         if payout_tx_fee > payout_value {
                             return Err(EthApiError::InvalidParams(
@@ -424,7 +428,7 @@ where
 
         let timeout = override_timeout
             .map(Duration::from_secs)
-            .filter(|&custom_duration| custom_duration <= MAX_SIM_TIMEOUT)
+            .map(|d| d.min(MAX_SIM_TIMEOUT))
             .unwrap_or(DEFAULT_SIM_TIMEOUT);
 
         let bundle_res =

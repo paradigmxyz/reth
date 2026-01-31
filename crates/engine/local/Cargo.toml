@@ -11,11 +11,12 @@ exclude.workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-engine-primitives.workspace = true
+reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-ethereum-engine-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
-reth-provider.workspace = true
+reth-primitives-traits.workspace = true
+reth-storage-api.workspace = true
 reth-transaction-pool.workspace = true
 
 # alloy
@@ -31,9 +32,7 @@ futures-util.workspace = true
 # misc
 eyre.workspace = true
 tracing.workspace = true
-
 op-alloy-rpc-types-engine = { workspace = true, optional = true }
-reth-optimism-chainspec = { workspace = true, optional = true }
 
 [lints]
 workspace = true
@@ -41,6 +40,6 @@ workspace = true
 [features]
 op = [
     "dep:op-alloy-rpc-types-engine",
-    "dep:reth-optimism-chainspec",
     "reth-payload-primitives/op",
+    "reth-primitives-traits/op",
 ]

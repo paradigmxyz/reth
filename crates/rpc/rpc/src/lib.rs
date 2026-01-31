@@ -22,7 +22,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use http as _;
@@ -33,6 +33,7 @@ use pin_project as _;
 use tower as _;
 
 mod admin;
+mod aliases;
 mod debug;
 mod engine;
 pub mod eth;
@@ -41,12 +42,14 @@ mod net;
 mod otterscan;
 mod reth;
 mod rpc;
+mod testing;
 mod trace;
 mod txpool;
 mod validation;
 mod web3;
 
 pub use admin::AdminApi;
+pub use aliases::*;
 pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};
 pub use eth::{helpers::SyncListener, EthApi, EthApiBuilder, EthBundle, EthFilter, EthPubSub};
@@ -56,6 +59,7 @@ pub use otterscan::OtterscanApi;
 pub use reth::RethApi;
 pub use reth_rpc_convert::RpcTypes;
 pub use rpc::RPCApi;
+pub use testing::TestingApi;
 pub use trace::TraceApi;
 pub use txpool::TxPoolApi;
 pub use validation::{ValidationApi, ValidationApiConfig};

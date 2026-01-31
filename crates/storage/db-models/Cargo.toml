@@ -40,7 +40,6 @@ arbitrary = { workspace = true, features = ["derive"] }
 
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-test-fuzz.workspace = true
 
 [features]
 default = ["std"]

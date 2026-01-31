@@ -6,12 +6,12 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use core::{fmt::Debug, marker::PhantomData};
 pub use reth_primitives_traits::{
-    Block, BlockBody, FullBlock, FullNodePrimitives, FullReceipt, FullSignedTx, NodePrimitives,
+    Block, BlockBody, FullBlock, FullReceipt, FullSignedTx, NodePrimitives,
 };
 
 use reth_chainspec::EthChainSpec;

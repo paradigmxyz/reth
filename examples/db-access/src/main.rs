@@ -1,13 +1,13 @@
 #![warn(unused_crate_dependencies)]
 
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{keccak256, Address, B256};
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
     node::EthereumNode,
     primitives::{AlloyBlockHeader, SealedBlock, SealedHeader},
     provider::{
-        providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
-        ReceiptProvider, StateProvider, TransactionVariant, TransactionsProvider,
+        providers::ReadOnlyConfig, AccountReader, BlockNumReader, BlockReader, BlockSource,
+        HeaderProvider, ReceiptProvider, StateProvider, TransactionVariant, TransactionsProvider,
     },
     rpc::eth::primitives::Filter,
     TransactionSigned,
@@ -39,15 +39,12 @@ fn main() -> eyre::Result<()> {
     txs_provider_example(&provider)?;
     receipts_provider_example(&provider)?;
 
+    state_provider_example(factory.latest()?, &provider, provider.best_block_number()?)?;
+    state_provider_example(factory.history_by_block_number(block_num)?, &provider, block_num)?;
+
     // Closes the RO transaction opened in the `factory.provider()` call. This is optional and
     // would happen anyway at the end of the function scope.
     drop(provider);
-
-    // Run the example against latest state
-    state_provider_example(factory.latest()?)?;
-
-    // Run it with historical state
-    state_provider_example(factory.history_by_block_number(block_num)?)?;
 
     Ok(())
 }
@@ -63,13 +60,8 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
 
     // Can also query the header by hash!
     let header_by_hash =
-        provider.header(&sealed_header.hash())?.ok_or(eyre::eyre!("header by hash not found"))?;
+        provider.header(sealed_header.hash())?.ok_or(eyre::eyre!("header by hash not found"))?;
     assert_eq!(sealed_header.header(), &header_by_hash);
-
-    // The header's total difficulty is stored in a separate table, so we have a separate call for
-    // it. This is not needed for post PoS transition chains.
-    let td = provider.header_td_by_number(number)?.ok_or(eyre::eyre!("header td not found"))?;
-    assert!(!td.is_zero());
 
     // Can query headers by range as well, already sealed!
     let headers = provider.sealed_headers_range(100..200)?;
@@ -103,9 +95,6 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
     let id = provider.transaction_id(*tx.tx_hash())?.ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(id, txid);
 
-    // Can find the block of a transaction given its key
-    let _block = provider.transaction_block(txid)?;
-
     // Can query the txs in the range [100, 200)
     let _txs_by_tx_range = provider.transactions_by_tx_range(100..200)?;
     // Can query the txs in the _block_ range [100, 200)]
@@ -123,7 +112,7 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
     let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
     assert_eq!(block.number, number);
 
-    // Can query a block with its senders, this is useful when you'd want to execute a block and do
+    // Can query a block with its senders, this is useful when you want to execute a block and do
     // not want to manually recover the senders for each transaction (as each transaction is
     // stored on disk with its v,r,s but not its `from` field.).
     let _recovered_block = provider
@@ -145,7 +134,7 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
         .ok_or(eyre::eyre!("block by hash not found"))?;
     assert_eq!(block, block_by_hash2);
 
-    // Or you can also specify the datasource. For this provider this always return `None`, but
+    // Or you can also specify the datasource. For this provider this always returns `None`, but
     // the blockchain tree is also able to access pending state not available in the db yet.
     let block_by_hash3 = provider
         .find_block_by_hash(sealed_block.hash(), BlockSource::Any)?
@@ -186,15 +175,21 @@ fn receipts_provider_example<
     let header = provider.header_by_number(header_num)?.unwrap();
     let bloom = header.logs_bloom();
 
-    // 2. Construct the address/topics filters
-    // For a hypothetical address, we'll want to filter down for a specific indexed topic (e.g.
-    // `from`).
-    let addr = Address::random();
-    let topic = B256::random();
+    // 2. Construct the address/topics filters. topic0 always refers to the event signature, so
+    // filter it with event_signature() (or use the .event() helper). The remaining helpers map to
+    // the indexed parameters in declaration order (topic1 -> first indexed param, etc).
+    let contract_addr = Address::random();
+    let indexed_from = Address::random();
+    let indexed_to = Address::random();
+    let transfer_signature = keccak256("Transfer(address,address,uint256)");
 
-    // TODO: Make it clearer how to choose between event_signature(topic0) (event name) and the
-    // other 3 indexed topics. This API is a bit clunky and not obvious to use at the moment.
-    let filter = Filter::new().address(addr).event_signature(topic);
+    // This matches ERC-20 Transfer events emitted by contract_addr where both indexed addresses are
+    // fixed. If your event declares a third indexed parameter, continue with topic3(...).
+    let filter = Filter::new()
+        .address(contract_addr)
+        .event_signature(transfer_signature)
+        .topic1(indexed_from)
+        .topic2(indexed_to);
 
     // 3. If the address & topics filters match do something. We use the outer check against the
     // bloom filter stored in the header to avoid having to query the receipts table when there
@@ -212,16 +207,39 @@ fn receipts_provider_example<
     Ok(())
 }
 
-fn state_provider_example<T: StateProvider + AccountReader>(provider: T) -> eyre::Result<()> {
+/// The `StateProvider` allows querying the state tables.
+fn state_provider_example<T: StateProvider + AccountReader, H: HeaderProvider>(
+    provider: T,
+    headers: &H,
+    number: u64,
+) -> eyre::Result<()> {
     let address = Address::random();
     let storage_key = B256::random();
+    let slots = [storage_key];
+
+    let header = headers.header_by_number(number)?.ok_or(eyre::eyre!("header not found"))?;
+    let state_root = header.state_root();
 
     // Can get account / storage state with simple point queries
-    let _account = provider.basic_account(&address)?;
-    let _code = provider.account_code(&address)?;
-    let _storage = provider.storage(address, storage_key)?;
-    // TODO: unimplemented.
-    // let _proof = provider.proof(address, &[])?;
+    let account = provider.basic_account(&address)?;
+    let code = provider.account_code(&address)?;
+    let storage_value = provider.storage(address, storage_key)?;
+
+    println!(
+        "state at block #{number}: addr={address:?}, nonce={}, balance={}, storage[{:?}]={:?}, has_code={}",
+        account.as_ref().map(|acc| acc.nonce).unwrap_or_default(),
+        account.as_ref().map(|acc| acc.balance).unwrap_or_default(),
+        storage_key,
+        storage_value,
+        code.is_some()
+    );
+
+    // Returns a bundled proof with the account's info
+    let proof = provider.proof(Default::default(), address, &slots)?;
+
+    // Can verify the returned proof against the state root
+    proof.verify(state_root)?;
+    println!("account proof verified against state root {state_root:?}");
 
     Ok(())
 }

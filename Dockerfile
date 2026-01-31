@@ -7,7 +7,7 @@ LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
 LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"
 
 # Install system dependencies
-RUN apt-get update && apt-get -y upgrade && apt-get install -y libclang-dev pkg-config
+RUN apt-get update && apt-get install -y libclang-dev pkg-config
 
 # Builds a cargo-chef plan
 FROM chef AS planner
@@ -18,7 +18,7 @@ FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 
 # Build profile, release by default
-ARG BUILD_PROFILE=release
+ARG BUILD_PROFILE=maxperf
 ENV BUILD_PROFILE=$BUILD_PROFILE
 
 # Extra Cargo flags

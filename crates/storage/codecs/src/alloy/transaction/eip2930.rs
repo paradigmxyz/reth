@@ -52,7 +52,8 @@ impl Compact for AlloyTxEip2930 {
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (tx, _) = TxEip2930::from_compact(buf, len);
+        // Return the remaining slice from the inner from_compact to advance the cursor correctly.
+        let (tx, remaining) = TxEip2930::from_compact(buf, len);
         let alloy_tx = Self {
             chain_id: tx.chain_id,
             nonce: tx.nonce,
@@ -63,6 +64,6 @@ impl Compact for AlloyTxEip2930 {
             access_list: tx.access_list,
             input: tx.input,
         };
-        (alloy_tx, buf)
+        (alloy_tx, remaining)
     }
 }

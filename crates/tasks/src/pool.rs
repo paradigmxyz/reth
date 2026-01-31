@@ -69,8 +69,9 @@ impl BlockingTaskPool {
 
     /// Convenience function to build a new threadpool with the default configuration.
     ///
-    /// Uses [`rayon::ThreadPoolBuilder::build`](rayon::ThreadPoolBuilder::build) defaults but
-    /// increases the stack size to 8MB.
+    /// Uses [`rayon::ThreadPoolBuilder::build`](rayon::ThreadPoolBuilder::build) defaults.
+    /// If a different stack size or other parameters are needed, they can be configured via
+    /// [`rayon::ThreadPoolBuilder`] returned by [`Self::builder`].
     pub fn build() -> Result<Self, rayon::ThreadPoolBuildError> {
         Self::builder().build().map(Self::new)
     }

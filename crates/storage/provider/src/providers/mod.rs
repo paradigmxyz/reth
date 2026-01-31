@@ -2,21 +2,25 @@
 
 use reth_chainspec::EthereumHardforks;
 use reth_db_api::table::Value;
-use reth_node_types::{FullNodePrimitives, NodeTypes, NodeTypesWithDB};
+use reth_node_types::{NodePrimitives, NodeTypes, NodeTypesWithDB};
 
 mod database;
 pub use database::*;
 
 mod static_file;
 pub use static_file::{
-    StaticFileAccess, StaticFileJarProvider, StaticFileProvider, StaticFileProviderRW,
-    StaticFileProviderRWRefMut, StaticFileWriter,
+    StaticFileAccess, StaticFileJarProvider, StaticFileProvider, StaticFileProviderBuilder,
+    StaticFileProviderRW, StaticFileProviderRWRefMut, StaticFileWriteCtx, StaticFileWriter,
 };
 
 mod state;
 pub use state::{
-    historical::{HistoricalStateProvider, HistoricalStateProviderRef, LowestAvailableBlocks},
+    historical::{
+        compute_history_rank, history_info, needs_prev_shard_check, HistoricalStateProvider,
+        HistoricalStateProviderRef, HistoryInfo, LowestAvailableBlocks,
+    },
     latest::{LatestStateProvider, LatestStateProviderRef},
+    overlay::{OverlayStateProvider, OverlayStateProviderFactory},
 };
 
 mod consistent_view;
@@ -28,6 +32,17 @@ pub use blockchain_provider::BlockchainProvider;
 mod consistent;
 pub use consistent::ConsistentProvider;
 
+// RocksDB currently only supported on Unix platforms
+// Windows support is planned for future releases
+#[cfg_attr(all(unix, feature = "rocksdb"), path = "rocksdb/mod.rs")]
+#[cfg_attr(not(all(unix, feature = "rocksdb")), path = "rocksdb_stub.rs")]
+pub(crate) mod rocksdb;
+
+pub use rocksdb::{
+    RocksDBBatch, RocksDBBuilder, RocksDBIter, RocksDBProvider, RocksDBRawIter, RocksDBStats,
+    RocksDBTableStats, RocksTx,
+};
+
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy
 /// [`ProviderNodeTypes`].
 pub trait NodeTypesForProvider
@@ -35,7 +50,7 @@ where
     Self: NodeTypes<
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<Self::Primitives>,
-        Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
     >,
 {
 }
@@ -44,7 +59,7 @@ impl<T> NodeTypesForProvider for T where
     T: NodeTypes<
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<T::Primitives>,
-        Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
     >
 {
 }

@@ -6,7 +6,7 @@ use crate::{
     DatabaseError,
 };
 use reth_db_api::{
-    table::{Compress, DupSort, Encode, Table, TableImporter},
+    table::{Compress, DupSort, Encode, IntoVec, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
@@ -14,6 +14,7 @@ use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, trace, warn};
 use std::{
     backtrace::Backtrace,
+    collections::HashMap,
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -29,7 +30,10 @@ const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 #[derive(Debug)]
 pub struct Tx<K: TransactionKind> {
     /// Libmdbx-sys transaction.
-    pub inner: Transaction<K>,
+    inner: Transaction<K>,
+
+    /// Cached MDBX DBIs for reuse.
+    dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
 
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
     /// closed by [`Tx::commit`] or [`Tx::abort`], but we still need to report it in the metrics.
@@ -39,17 +43,12 @@ pub struct Tx<K: TransactionKind> {
 }
 
 impl<K: TransactionKind> Tx<K> {
-    /// Creates new `Tx` object with a `RO` or `RW` transaction.
-    #[inline]
-    pub const fn new(inner: Transaction<K>) -> Self {
-        Self::new_inner(inner, None)
-    }
-
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
     #[inline]
     #[track_caller]
-    pub(crate) fn new_with_metrics(
+    pub(crate) fn new(
         inner: Transaction<K>,
+        dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> reth_libmdbx::Result<Self> {
         let metrics_handler = env_metrics
@@ -60,12 +59,12 @@ impl<K: TransactionKind> Tx<K> {
                 Ok(handler)
             })
             .transpose()?;
-        Ok(Self::new_inner(inner, metrics_handler))
+        Ok(Self { inner, dbis, metrics_handler })
     }
 
-    #[inline]
-    const fn new_inner(inner: Transaction<K>, metrics_handler: Option<MetricsHandler<K>>) -> Self {
-        Self { inner, metrics_handler }
+    /// Returns a reference to the inner libmdbx transaction.
+    pub const fn inner(&self) -> &Transaction<K> {
+        &self.inner
     }
 
     /// Gets this transaction ID.
@@ -73,12 +72,23 @@ impl<K: TransactionKind> Tx<K> {
         self.metrics_handler.as_ref().map_or_else(|| self.inner.id(), |handler| Ok(handler.txn_id))
     }
 
-    /// Gets a table database handle if it exists, otherwise creates it.
+    /// Gets a table database handle by name if it exists, otherwise, check the
+    /// database, opening the DB if it exists.
+    pub fn get_dbi_raw(&self, name: &str) -> Result<MDBX_dbi, DatabaseError> {
+        if let Some(dbi) = self.dbis.get(name) {
+            Ok(*dbi)
+        } else {
+            self.inner
+                .open_db(Some(name))
+                .map(|db| db.dbi())
+                .map_err(|e| DatabaseError::Open(e.into()))
+        }
+    }
+
+    /// Gets a table database handle by name if it exists, otherwise, check the
+    /// database, opening the DB if it exists.
     pub fn get_dbi<T: Table>(&self) -> Result<MDBX_dbi, DatabaseError> {
-        self.inner
-            .open_db(Some(T::NAME))
-            .map(|db| db.dbi())
-            .map_err(|e| DatabaseError::Open(e.into()))
+        self.get_dbi_raw(T::NAME)
     }
 
     /// Create db Cursor
@@ -297,10 +307,10 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         })
     }
 
-    fn commit(self) -> Result<bool, DatabaseError> {
+    fn commit(self) -> Result<(), DatabaseError> {
         self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
             match this.inner.commit().map_err(|e| DatabaseError::Commit(e.into())) {
-                Ok((v, latency)) => (Ok(v), Some(latency)),
+                Ok(latency) => (Ok(()), Some(latency)),
                 Err(e) => (Err(e), None),
             }
         })
@@ -342,28 +352,64 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum PutKind {
+    /// Default kind that inserts a new key-value or overwrites an existed key.
+    Upsert,
+    /// Append the key-value to the end of the table -- fast path when the new
+    /// key is the highest so far, like the latest block number.
+    Append,
+}
+
+impl PutKind {
+    const fn into_operation_and_flags(self) -> (Operation, DatabaseWriteOperation, WriteFlags) {
+        match self {
+            Self::Upsert => {
+                (Operation::PutUpsert, DatabaseWriteOperation::PutUpsert, WriteFlags::UPSERT)
+            }
+            Self::Append => {
+                (Operation::PutAppend, DatabaseWriteOperation::PutAppend, WriteFlags::APPEND)
+            }
+        }
+    }
+}
+
+impl Tx<RW> {
+    /// The inner implementation mapping to `mdbx_put` that supports different
+    /// put kinds like upserting and appending.
+    fn put<T: Table>(
+        &self,
+        kind: PutKind,
+        key: T::Key,
+        value: T::Value,
+    ) -> Result<(), DatabaseError> {
+        let key = key.encode();
+        let value = value.compress();
+        let (operation, write_operation, flags) = kind.into_operation_and_flags();
+        self.execute_with_operation_metric::<T, _>(operation, Some(value.as_ref().len()), |tx| {
+            tx.put(self.get_dbi::<T>()?, key.as_ref(), value, flags).map_err(|e| {
+                DatabaseWriteError {
+                    info: e.into(),
+                    operation: write_operation,
+                    table_name: T::NAME,
+                    key: key.into_vec(),
+                }
+                .into()
+            })
+        })
+    }
+}
+
 impl DbTxMut for Tx<RW> {
     type CursorMut<T: Table> = Cursor<RW, T>;
     type DupCursorMut<T: DupSort> = Cursor<RW, T>;
 
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
-        let key = key.encode();
-        let value = value.compress();
-        self.execute_with_operation_metric::<T, _>(
-            Operation::Put,
-            Some(value.as_ref().len()),
-            |tx| {
-                tx.put(self.get_dbi::<T>()?, key.as_ref(), value, WriteFlags::UPSERT).map_err(|e| {
-                    DatabaseWriteError {
-                        info: e.into(),
-                        operation: DatabaseWriteOperation::Put,
-                        table_name: T::NAME,
-                        key: key.into(),
-                    }
-                    .into()
-                })
-            },
-        )
+        self.put::<T>(PutKind::Upsert, key, value)
+    }
+
+    fn append<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        self.put::<T>(PutKind::Append, key, value)
     }
 
     fn delete<T: Table>(
@@ -426,10 +472,9 @@ mod tests {
         sleep(MAX_DURATION + Duration::from_millis(100));
 
         // Transaction has not timed out.
-        assert_eq!(
-            tx.get::<tables::Transactions>(0),
-            Err(DatabaseError::Open(reth_libmdbx::Error::NotFound.into()))
-        );
+        assert!(matches!(
+            tx.get::<tables::Transactions>(0).unwrap_err(),
+            DatabaseError::Open(err) if err == reth_libmdbx::Error::NotFound.into()));
         // Backtrace is not recorded.
         assert!(!tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
     }
@@ -451,10 +496,9 @@ mod tests {
         sleep(MAX_DURATION + Duration::from_millis(100));
 
         // Transaction has timed out.
-        assert_eq!(
-            tx.get::<tables::Transactions>(0),
-            Err(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionTimeout.into()))
-        );
+        assert!(matches!(
+            tx.get::<tables::Transactions>(0).unwrap_err(),
+            DatabaseError::Open(err) if err == reth_libmdbx::Error::ReadTransactionTimeout.into()));
         // Backtrace is recorded.
         assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
     }

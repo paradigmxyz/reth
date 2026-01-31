@@ -112,3 +112,8 @@ harness = false
 name = "get"
 required-features = ["test-utils"]
 harness = false
+
+[[bench]]
+name = "put"
+required-features = ["test-utils"]
+harness = false

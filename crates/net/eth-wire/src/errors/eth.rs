@@ -110,4 +110,15 @@ pub enum EthHandshakeError {
         /// The maximum allowed bit length for the total difficulty.
         maximum: usize,
     },
+    #[error("earliest block > latest block: got {got}, latest {latest}")]
+    /// Earliest block > latest block.
+    EarliestBlockGreaterThanLatestBlock {
+        /// The earliest block.
+        got: u64,
+        /// The latest block.
+        latest: u64,
+    },
+    #[error("blockhash is zero")]
+    /// Blockhash is zero.
+    BlockhashZero,
 }

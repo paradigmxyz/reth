@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod validator;
 pub use validator::{OpL1BlockInfo, OpTransactionValidator};
@@ -24,8 +24,8 @@ pub mod estimated_da_size;
 use reth_transaction_pool::{CoinbaseTipOrdering, Pool, TransactionValidationTaskExecutor};
 
 /// Type alias for default optimism transaction pool
-pub type OpTransactionPool<Client, S, T = OpPooledTransaction> = Pool<
-    TransactionValidationTaskExecutor<OpTransactionValidator<Client, T>>,
+pub type OpTransactionPool<Client, S, Evm, T = OpPooledTransaction> = Pool<
+    TransactionValidationTaskExecutor<OpTransactionValidator<Client, T, Evm>>,
     CoinbaseTipOrdering<T>,
     S,
 >;

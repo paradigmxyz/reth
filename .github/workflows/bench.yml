@@ -11,18 +11,29 @@ env:
   CARGO_TERM_COLOR: always
   BASELINE: base
   SEED: reth
+  RUSTC_WRAPPER: "sccache"
 
 name: bench
 jobs:
   codspeed:
-    runs-on:
-      group: Reth
+    runs-on: depot-ubuntu-latest
+    strategy:
+      matrix:
+        partition: [1, 2]
+        total_partitions: [2]
+        include:
+          - partition: 1
+            crates: "-p reth-primitives -p reth-trie-common -p reth-trie-sparse"
+          - partition: 2
+            crates: "-p reth-trie"
+    name: codspeed (${{ matrix.partition }}/${{ matrix.total_partitions }})
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: true
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -31,9 +42,10 @@ jobs:
         with:
           tool: cargo-codspeed
       - name: Build the benchmark target(s)
-        run: ./.github/scripts/codspeed-build.sh
+        run: cargo codspeed build --profile profiling --features test-utils ${{ matrix.crates }}
       - name: Run the benchmarks
-        uses: CodSpeedHQ/action@v3
+        uses: CodSpeedHQ/action@v4
         with:
-          run: cargo codspeed run --workspace
+          run: cargo codspeed run ${{ matrix.crates }}
+          mode: instrumentation
           token: ${{ secrets.CODSPEED_TOKEN }}

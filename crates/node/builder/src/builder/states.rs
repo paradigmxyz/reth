@@ -235,6 +235,27 @@ where
     }
 
     /// Modifies the addons with the given closure.
+    ///
+    /// This method provides access to methods on the addons type that don't have
+    /// direct builder methods. It's useful for advanced configuration scenarios
+    /// where you need to call addon-specific methods.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use tower::layer::util::Identity;
+    ///
+    /// let builder = NodeBuilder::new(config)
+    ///     .with_types::<EthereumNode>()
+    ///     .with_components(EthereumNode::components())
+    ///     .with_add_ons(EthereumAddOns::default())
+    ///     .map_add_ons(|addons| addons.with_rpc_middleware(Identity::default()));
+    /// ```
+    ///
+    /// # See also
+    ///
+    /// - [`NodeAddOns`] trait for available addon types
+    /// - [`crate::NodeBuilderWithComponents::extend_rpc_modules`] for RPC module configuration
     pub fn map_add_ons<F>(mut self, f: F) -> Self
     where
         F: FnOnce(AO) -> AO,
@@ -251,11 +272,11 @@ where
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {
     /// Launches the node with the given launcher.
-    pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
+    pub fn launch_with<L>(self, launcher: L) -> L::Future
     where
         L: LaunchNode<Self>,
     {
-        launcher.launch_node(self).await
+        launcher.launch_node(self)
     }
 
     /// Sets the hook that is run once the rpc server is started.

@@ -11,7 +11,7 @@ use reth_provider::{
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig, SegmentOutput,
-    MINIMUM_PRUNING_DISTANCE,
+    MINIMUM_UNWIND_SAFE_DISTANCE,
 };
 use tracing::{instrument, trace};
 #[derive(Debug)]
@@ -45,12 +45,12 @@ where
         PrunePurpose::User
     }
 
-    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
+    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         // Contract log filtering removes every receipt possible except the ones in the list. So,
         // for the other receipts it's as if they had a `PruneMode::Distance()` of
-        // `MINIMUM_PRUNING_DISTANCE`.
-        let to_block = PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
+        // `MINIMUM_UNWIND_SAFE_DISTANCE`.
+        let to_block = PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)
             .prune_target_block(input.to_block, PruneSegment::ContractLogs, PrunePurpose::User)?
             .map(|(bn, _)| bn)
             .unwrap_or_default();
@@ -180,7 +180,7 @@ where
 
             last_pruned_block = Some(
                 provider
-                    .transaction_block(last_pruned_transaction)?
+                    .block_by_transaction_id(last_pruned_transaction)?
                     .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
                     // If there's more receipts to prune, set the checkpoint block number to
                     // previous, so we could finish pruning its receipts on the
@@ -227,12 +227,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, PruneLimiter, ReceiptsByLogs, Segment};
+    use crate::segments::{user::ReceiptsByLogs, PruneInput, PruneLimiter, Segment};
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
     use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
     use reth_primitives_traits::InMemorySize;
-    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader, TransactionsProvider};
+    use reth_provider::{BlockReader, DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{PruneMode, PruneSegment, ReceiptsLogPruneConfig};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
@@ -355,7 +355,7 @@ mod tests {
             // set by tip - 128
             assert!(
                 receipt.logs.iter().any(|l| l.address == deposit_contract_addr) ||
-                    provider.transaction_block(tx_num).unwrap().unwrap() > tip - 128,
+                    provider.block_by_transaction_id(tx_num).unwrap().unwrap() > tip - 128,
             );
         }
     }

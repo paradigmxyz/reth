@@ -9,7 +9,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 /// Node event hooks.
 pub mod hooks;
@@ -31,7 +31,7 @@ pub use builder::{add_ons::AddOns, *};
 
 mod launch;
 pub use launch::{
-    debug::{DebugNode, DebugNodeLauncher},
+    debug::{DebugNode, DebugNodeLauncher, DebugNodeLauncherFuture, DefaultDebugBlockProvider},
     engine::EngineNodeLauncher,
     *,
 };

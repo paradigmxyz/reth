@@ -59,7 +59,7 @@ where
     /// Create a new instance of the [`ValidationApi`]
     pub fn new(
         provider: Provider,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
         evm_config: E,
         config: ValidationApiConfig,
         task_spawner: Box<dyn TaskSpawner>,
@@ -143,10 +143,10 @@ where
                 if self.disallow.contains(sender) {
                     return Err(ValidationApiError::Blacklist(*sender))
                 }
-                if let Some(to) = tx.to() {
-                    if self.disallow.contains(&to) {
-                        return Err(ValidationApiError::Blacklist(to))
-                    }
+                if let Some(to) = tx.to() &&
+                    self.disallow.contains(&to)
+                {
+                    return Err(ValidationApiError::Blacklist(to))
                 }
             }
         }
@@ -201,7 +201,7 @@ where
         // update the cached reads
         self.update_cached_reads(parent_header_hash, request_cache).await;
 
-        self.consensus.validate_block_post_execution(&block, &output)?;
+        self.consensus.validate_block_post_execution(&block, &output, None)?;
 
         self.ensure_payment(&block, &output, &message)?;
 
@@ -334,10 +334,10 @@ where
             return Err(ValidationApiError::ProposerPayment)
         }
 
-        if let Some(block_base_fee) = block.header().base_fee_per_gas() {
-            if tx.effective_tip_per_gas(block_base_fee).unwrap_or_default() != 0 {
-                return Err(ValidationApiError::ProposerPayment)
-            }
+        if let Some(block_base_fee) = block.header().base_fee_per_gas() &&
+            tx.effective_tip_per_gas(block_base_fee).unwrap_or_default() != 0
+        {
+            return Err(ValidationApiError::ProposerPayment)
         }
 
         Ok(())
@@ -561,7 +561,7 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// Consensus implementation.
-    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<E::Primitives>>,
     /// Execution payload validator.
     payload_validator:
         Arc<dyn PayloadValidator<T, Block = <E::Primitives as NodePrimitives>::Block>>,

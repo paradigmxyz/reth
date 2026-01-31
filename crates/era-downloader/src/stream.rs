@@ -262,47 +262,47 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
             self.fetch_file_list();
         }
 
-        if self.state == State::FetchFileList {
-            if let Poll::Ready(result) = self.fetch_file_list.poll_unpin(cx) {
-                match result {
-                    Ok(_) => self.delete_outside_range(),
-                    Err(e) => {
-                        self.fetch_file_list();
+        if self.state == State::FetchFileList &&
+            let Poll::Ready(result) = self.fetch_file_list.poll_unpin(cx)
+        {
+            match result {
+                Ok(_) => self.delete_outside_range(),
+                Err(e) => {
+                    self.fetch_file_list();
 
-                        return Poll::Ready(Some(Box::pin(async move { Err(e) })));
-                    }
+                    return Poll::Ready(Some(Box::pin(async move { Err(e) })));
                 }
             }
         }
 
-        if self.state == State::DeleteOutsideRange {
-            if let Poll::Ready(result) = self.delete_outside_range.poll_unpin(cx) {
-                match result {
-                    Ok(_) => self.recover_index(),
-                    Err(e) => {
-                        self.delete_outside_range();
+        if self.state == State::DeleteOutsideRange &&
+            let Poll::Ready(result) = self.delete_outside_range.poll_unpin(cx)
+        {
+            match result {
+                Ok(_) => self.recover_index(),
+                Err(e) => {
+                    self.delete_outside_range();
 
-                        return Poll::Ready(Some(Box::pin(async move { Err(e) })));
-                    }
+                    return Poll::Ready(Some(Box::pin(async move { Err(e) })));
                 }
             }
         }
 
-        if self.state == State::RecoverIndex {
-            if let Poll::Ready(last) = self.recover_index.poll_unpin(cx) {
-                self.last = last;
-                self.count_files();
-            }
+        if self.state == State::RecoverIndex &&
+            let Poll::Ready(last) = self.recover_index.poll_unpin(cx)
+        {
+            self.last = last;
+            self.count_files();
         }
 
-        if self.state == State::CountFiles {
-            if let Poll::Ready(downloaded) = self.files_count.poll_unpin(cx) {
-                let max_missing = self
-                    .max_files
-                    .saturating_sub(downloaded + self.downloading)
-                    .max(self.last.unwrap_or_default().saturating_sub(self.index));
-                self.state = State::Missing(max_missing);
-            }
+        if self.state == State::CountFiles &&
+            let Poll::Ready(downloaded) = self.files_count.poll_unpin(cx)
+        {
+            let max_missing = self
+                .max_files
+                .saturating_sub(downloaded + self.downloading)
+                .max(self.last.unwrap_or_default().saturating_sub(self.index));
+            self.state = State::Missing(max_missing);
         }
 
         if let State::Missing(max_missing) = self.state {
@@ -316,18 +316,16 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
             }
         }
 
-        if let State::NextUrl(max_missing) = self.state {
-            if let Poll::Ready(url) = self.next_url.poll_unpin(cx) {
-                self.state = State::Missing(max_missing - 1);
+        if let State::NextUrl(max_missing) = self.state &&
+            let Poll::Ready(url) = self.next_url.poll_unpin(cx)
+        {
+            self.state = State::Missing(max_missing - 1);
 
-                return Poll::Ready(url.transpose().map(|url| -> DownloadFuture {
-                    let mut client = self.client.clone();
+            return Poll::Ready(url.transpose().map(|url| -> DownloadFuture {
+                let mut client = self.client.clone();
 
-                    Box::pin(
-                        async move { client.download_to_file(url?).await.map(EraRemoteMeta::new) },
-                    )
-                }));
-            }
+                Box::pin(async move { client.download_to_file(url?).await.map(EraRemoteMeta::new) })
+            }));
         }
 
         Poll::Pending

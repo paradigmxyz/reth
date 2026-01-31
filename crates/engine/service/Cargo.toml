@@ -25,13 +25,13 @@ reth-tasks.workspace = true
 reth-node-types.workspace = true
 reth-chainspec.workspace = true
 reth-engine-primitives.workspace = true
+reth-trie-db.workspace = true
 
 # async
 futures.workspace = true
 pin-project.workspace = true
 
 # misc
-thiserror.workspace = true
 
 [dev-dependencies]
 reth-engine-tree = { workspace = true, features = ["test-utils"] }
@@ -41,6 +41,8 @@ reth-evm-ethereum.workspace = true
 reth-exex-types.workspace = true
 reth-primitives-traits.workspace = true
 reth-node-ethereum.workspace = true
+reth-trie-db.workspace = true
 
+alloy-eips.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true

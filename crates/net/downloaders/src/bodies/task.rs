@@ -42,7 +42,7 @@ impl<B: Block + 'static> TaskDownloader<B> {
     /// # Example
     ///
     /// ```
-    /// use reth_consensus::{Consensus, ConsensusError};
+    /// use reth_consensus::Consensus;
     /// use reth_downloaders::bodies::{bodies::BodiesDownloaderBuilder, task::TaskDownloader};
     /// use reth_network_p2p::bodies::client::BodiesClient;
     /// use reth_primitives_traits::{Block, InMemorySize};
@@ -55,7 +55,7 @@ impl<B: Block + 'static> TaskDownloader<B> {
     ///     Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
     /// >(
     ///     client: Arc<C>,
-    ///     consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+    ///     consensus: Arc<dyn Consensus<B>>,
     ///     provider: Provider,
     /// ) {
     ///     let downloader =
@@ -190,7 +190,7 @@ mod tests {
         let factory = create_test_provider_factory();
         let (headers, mut bodies) = generate_bodies(0..=19);
 
-        insert_headers(factory.db_ref().db(), &headers);
+        insert_headers(&factory, &headers);
 
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),

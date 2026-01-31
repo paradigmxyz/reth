@@ -1,4 +1,4 @@
-//! Example for how hook into the node via the CLI extension mechanism without registering
+//! Example for how to hook into the node via the CLI extension mechanism without registering
 //! additional arguments
 //!
 //! Run with
@@ -62,7 +62,8 @@ where
             ctx.provider().clone(),
             pool,
             evm_config,
-            EthereumBuilderConfig::new(),
+            EthereumBuilderConfig::new()
+                .with_extra_data(ctx.payload_builder_config().extra_data_bytes()),
         );
 
         let conf = ctx.payload_builder_config();

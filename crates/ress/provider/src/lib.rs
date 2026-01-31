@@ -6,14 +6,12 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Bytes, B256};
 use parking_lot::Mutex;
-use reth_chain_state::{
-    ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates, MemoryOverlayStateProvider,
-};
+use reth_chain_state::{ExecutedBlock, MemoryOverlayStateProvider};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
 use reth_evm::{execute::Executor, ConfigureEvm};
@@ -120,19 +118,13 @@ where
                     let mut executed = self.pending_state.executed_block(&ancestor_hash);
 
                     // If it's not present, attempt to lookup invalid block.
-                    if executed.is_none() {
-                        if let Some(invalid) =
+                    if executed.is_none() &&
+                        let Some(invalid) =
                             self.pending_state.invalid_recovered_block(&ancestor_hash)
-                        {
-                            trace!(target: "reth::ress_provider", %block_hash, %ancestor_hash, "Using invalid ancestor block for witness construction");
-                            executed = Some(ExecutedBlockWithTrieUpdates {
-                                block: ExecutedBlock {
-                                    recovered_block: invalid,
-                                    ..Default::default()
-                                },
-                                trie: ExecutedTrieUpdates::empty(),
-                            });
-                        }
+                    {
+                        trace!(target: "reth::ress_provider", %block_hash, %ancestor_hash, "Using invalid ancestor block for witness construction");
+                        executed =
+                            Some(ExecutedBlock { recovered_block: invalid, ..Default::default() });
                     }
 
                     let Some(executed) = executed else {
@@ -164,10 +156,11 @@ where
         // NOTE: there might be a race condition where target ancestor hash gets evicted from the
         // database.
         let witness_state_provider = self.provider.state_by_block_hash(ancestor_hash)?;
-        let mut trie_input = TrieInput::default();
-        for block in executed_ancestors.into_iter().rev() {
-            trie_input.append_cached_ref(block.trie.as_ref().unwrap(), &block.hashed_state);
-        }
+        let bundles: Vec<_> =
+            executed_ancestors.iter().rev().map(|block| block.trie_data()).collect();
+        let trie_input = TrieInput::from_blocks_sorted(
+            bundles.iter().map(|data| (data.hashed_state.as_ref(), data.trie_updates.as_ref())),
+        );
         let mut hashed_state = db.into_state();
         hashed_state.extend(record.hashed_state);
 

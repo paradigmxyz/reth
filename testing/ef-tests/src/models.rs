@@ -265,7 +265,7 @@ pub enum ForkSpec {
     FrontierToHomesteadAt5,
     /// Homestead
     Homestead,
-    /// Homestead to Tangerine
+    /// Homestead to DAO
     HomesteadToDaoAt5,
     /// Homestead to Tangerine
     HomesteadToEIP150At5,
@@ -317,6 +317,8 @@ pub enum ForkSpec {
     CancunToPragueAtTime15k,
     /// Prague
     Prague,
+    /// Osaka
+    Osaka,
 }
 
 impl From<ForkSpec> for ChainSpec {
@@ -371,6 +373,7 @@ impl From<ForkSpec> for ChainSpec {
                 .cancun_activated()
                 .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(15_000)),
             ForkSpec::Prague => spec_builder.prague_activated(),
+            ForkSpec::Osaka => spec_builder.osaka_activated(),
         }
         .build()
     }

@@ -3,10 +3,12 @@ use alloy_consensus::{BlockHeader, Transaction};
 use op_revm::L1BlockInfo;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpecProvider;
+use reth_evm::ConfigureEvm;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
+    transaction::error::InvalidTransactionError, Block, BlockBody, BlockTy, GotExpected,
+    SealedBlock,
 };
 use reth_storage_api::{AccountInfoReader, BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
@@ -28,8 +30,6 @@ pub struct OpL1BlockInfo {
     l1_block_info: RwLock<L1BlockInfo>,
     /// Current block timestamp.
     timestamp: AtomicU64,
-    /// Current block number.
-    number: AtomicU64,
 }
 
 impl OpL1BlockInfo {
@@ -41,9 +41,9 @@ impl OpL1BlockInfo {
 
 /// Validator for Optimism transactions.
 #[derive(Debug, Clone)]
-pub struct OpTransactionValidator<Client, Tx> {
+pub struct OpTransactionValidator<Client, Tx, Evm> {
     /// The type that performs the actual validation.
-    inner: Arc<EthTransactionValidator<Client, Tx>>,
+    inner: Arc<EthTransactionValidator<Client, Tx, Evm>>,
     /// Additional block info required for validation.
     block_info: Arc<OpL1BlockInfo>,
     /// If true, ensure that the transaction's sender has enough balance to cover the L1 gas fee
@@ -56,7 +56,7 @@ pub struct OpTransactionValidator<Client, Tx> {
     fork_tracker: Arc<OpForkTracker>,
 }
 
-impl<Client, Tx> OpTransactionValidator<Client, Tx> {
+impl<Client, Tx, Evm> OpTransactionValidator<Client, Tx, Evm> {
     /// Returns the configured chain spec
     pub fn chain_spec(&self) -> Arc<Client::ChainSpec>
     where
@@ -88,13 +88,15 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
     }
 }
 
-impl<Client, Tx> OpTransactionValidator<Client, Tx>
+impl<Client, Tx, Evm> OpTransactionValidator<Client, Tx, Evm>
 where
-    Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
+    Client:
+        ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt + Sync,
     Tx: EthPoolTransaction + OpPooledTx,
+    Evm: ConfigureEvm,
 {
     /// Create a new [`OpTransactionValidator`].
-    pub fn new(inner: EthTransactionValidator<Client, Tx>) -> Self {
+    pub fn new(inner: EthTransactionValidator<Client, Tx, Evm>) -> Self {
         let this = Self::with_block_info(inner, OpL1BlockInfo::default());
         if let Ok(Some(block)) =
             this.inner.client().block_by_number_or_tag(alloy_eips::BlockNumberOrTag::Latest)
@@ -103,7 +105,6 @@ where
             // so that we will accept txs into the pool before the first block
             if block.header().number() == 0 {
                 this.block_info.timestamp.store(block.header().timestamp(), Ordering::Relaxed);
-                this.block_info.number.store(block.header().number(), Ordering::Relaxed);
             } else {
                 this.update_l1_block_info(block.header(), block.body().transactions().first());
             }
@@ -114,7 +115,7 @@ where
 
     /// Create a new [`OpTransactionValidator`] with the given [`OpL1BlockInfo`].
     pub fn with_block_info(
-        inner: EthTransactionValidator<Client, Tx>,
+        inner: EthTransactionValidator<Client, Tx, Evm>,
         block_info: OpL1BlockInfo,
     ) -> Self {
         Self {
@@ -141,10 +142,9 @@ where
         T: Transaction,
     {
         self.block_info.timestamp.store(header.timestamp(), Ordering::Relaxed);
-        self.block_info.number.store(header.number(), Ordering::Relaxed);
 
-        if let Some(Ok(cost_addition)) = tx.map(reth_optimism_evm::extract_l1_info_from_tx) {
-            *self.block_info.l1_block_info.write() = cost_addition;
+        if let Some(Ok(l1_block_info)) = tx.map(reth_optimism_evm::extract_l1_info_from_tx) {
+            *self.block_info.l1_block_info.write() = l1_block_info;
         }
 
         if self.chain_spec().is_interop_active_at_timestamp(header.timestamp()) {
@@ -181,7 +181,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn AccountInfoReader>>,
+        state: &mut Option<Box<dyn AccountInfoReader + Send>>,
     ) -> TransactionValidationOutcome<Tx> {
         if transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
@@ -291,12 +291,15 @@ where
     }
 }
 
-impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
+impl<Client, Tx, Evm> TransactionValidator for OpTransactionValidator<Client, Tx, Evm>
 where
-    Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
+    Client:
+        ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt + Sync,
     Tx: EthPoolTransaction + OpPooledTx,
+    Evm: ConfigureEvm,
 {
     type Transaction = Tx;
+    type Block = BlockTy<Evm::Primitives>;
 
     async fn validate_transaction(
         &self,
@@ -327,10 +330,7 @@ where
         .await
     }
 
-    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
-    where
-        B: Block,
-    {
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         self.inner.on_new_head_block(new_tip_block);
         self.update_l1_block_info(
             new_tip_block.header(),

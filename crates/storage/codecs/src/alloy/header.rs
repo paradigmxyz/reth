@@ -3,6 +3,7 @@
 use crate::Compact;
 use alloy_consensus::Header as AlloyHeader;
 use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, U256};
+use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 
 /// Block header
 ///
@@ -19,6 +20,7 @@ use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, U256};
 #[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
 #[reth_codecs(crate = "crate")]
+#[add_arbitrary_tests(crate, compact)]
 pub(crate) struct Header {
     parent_hash: B256,
     ommers_hash: B256,
@@ -56,6 +58,7 @@ pub(crate) struct Header {
 #[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
 #[reth_codecs(crate = "crate")]
+#[add_arbitrary_tests(crate, compact)]
 pub(crate) struct HeaderExt {
     requests_hash: Option<B256>,
 }
@@ -134,6 +137,8 @@ impl Compact for AlloyHeader {
         (alloy_header, buf)
     }
 }
+
+generate_tests!(#[crate, compact] AlloyHeader, AlloyHeaderTests);
 
 #[cfg(test)]
 mod tests {

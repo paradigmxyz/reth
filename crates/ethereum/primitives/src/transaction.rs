@@ -3,12 +3,12 @@
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable},
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
     EthereumTxEnvelope, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
     TxLegacy, TxType, Typed2718,
 };
 use alloy_eips::{
-    eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
+    eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718, IsTyped2718},
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
@@ -236,7 +236,7 @@ impl reth_codecs::Compact for Transaction {
     // # Panics
     //
     // A panic will be triggered if an identifier larger than 3 is passed from the database. For
-    // optimism a identifier with value [`DEPOSIT_TX_TYPE_ID`] is allowed.
+    // optimism an identifier with value [`DEPOSIT_TX_TYPE_ID`] is allowed.
     fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
         let (tx_type, buf) = TxType::from_compact(buf, identifier);
 
@@ -658,11 +658,19 @@ impl SignerRecoverable for TransactionSigned {
     }
 }
 
-impl SignedTransaction for TransactionSigned {
+impl TxHashRef for TransactionSigned {
     fn tx_hash(&self) -> &TxHash {
         self.hash.get_or_init(|| self.recalculate_hash())
     }
 }
+
+impl IsTyped2718 for TransactionSigned {
+    fn is_type(type_id: u8) -> bool {
+        <alloy_consensus::TxEnvelope as IsTyped2718>::is_type(type_id)
+    }
+}
+
+impl SignedTransaction for TransactionSigned {}
 
 #[cfg(test)]
 mod tests {

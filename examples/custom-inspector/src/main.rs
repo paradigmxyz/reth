@@ -44,7 +44,7 @@ fn main() {
             // create a new subscription to pending transactions
             let mut pending_transactions = node.pool.new_pending_pool_transactions_listener();
 
-            // get an instance of the `trace_` API handler
+            // get an instance of the `eth_` API handler
             let eth_api = node.rpc_registry.eth_api().clone();
 
             println!("Spawning trace task!");
@@ -56,43 +56,43 @@ fn main() {
                     let tx = event.transaction;
                     println!("Transaction received: {tx:?}");
 
-                    if let Some(recipient) = tx.to() {
-                        if args.is_match(&recipient) {
-                            // convert the pool transaction
-                            let call_request =
-                                TransactionRequest::from_recovered_transaction(tx.to_consensus());
+                    if let Some(recipient) = tx.to() &&
+                        args.is_match(&recipient)
+                    {
+                        // convert the pool transaction
+                        let call_request =
+                            TransactionRequest::from_recovered_transaction(tx.to_consensus());
 
-                            let evm_config = node.evm_config.clone();
+                        let evm_config = node.evm_config.clone();
 
-                            let result = eth_api
-                                .spawn_with_call_at(
-                                    call_request,
-                                    BlockNumberOrTag::Latest.into(),
-                                    EvmOverrides::default(),
-                                    move |db, evm_env, tx_env| {
-                                        let mut dummy_inspector = DummyInspector::default();
-                                        let mut evm = evm_config.evm_with_env_and_inspector(
-                                            db,
-                                            evm_env,
-                                            &mut dummy_inspector,
-                                        );
-                                        // execute the transaction on a blocking task and await
-                                        // the
-                                        // inspector result
-                                        let _ = evm.transact(tx_env)?;
-                                        Ok(dummy_inspector)
-                                    },
-                                )
-                                .await;
+                        let result = eth_api
+                            .spawn_with_call_at(
+                                call_request,
+                                BlockNumberOrTag::Latest.into(),
+                                EvmOverrides::default(),
+                                move |db, evm_env, tx_env| {
+                                    let mut dummy_inspector = DummyInspector::default();
+                                    let mut evm = evm_config.evm_with_env_and_inspector(
+                                        db,
+                                        evm_env,
+                                        &mut dummy_inspector,
+                                    );
+                                    // execute the transaction on a blocking task and await
+                                    // the
+                                    // inspector result
+                                    let _ = evm.transact(tx_env)?;
+                                    Ok(dummy_inspector)
+                                },
+                            )
+                            .await;
 
-                            if let Ok(ret_val) = result {
-                                let hash = tx.hash();
-                                println!(
-                                    "Inspector result for transaction {}: \n {}",
-                                    hash,
-                                    ret_val.ret_val.join("\n")
-                                );
-                            }
+                        if let Ok(ret_val) = result {
+                            let hash = tx.hash();
+                            println!(
+                                "Inspector result for transaction {}: \n {}",
+                                hash,
+                                ret_val.ret_val.join("\n")
+                            );
                         }
                     }
                 }
@@ -106,13 +106,13 @@ fn main() {
 /// Our custom cli args extension that adds one flag to reth default CLI.
 #[derive(Debug, Clone, Default, clap::Args)]
 struct RethCliTxpoolExt {
-    /// The addresses of the recipients that we want to trace.
+    /// The addresses of the recipients that we want to inspect.
     #[arg(long, value_delimiter = ',')]
     pub recipients: Vec<Address>,
 }
 
 impl RethCliTxpoolExt {
-    /// Check if the recipient is in the list of recipients to trace.
+    /// Check if the recipient is in the list of recipients to inspect.
     pub fn is_match(&self, recipient: &Address) -> bool {
         self.recipients.is_empty() || self.recipients.contains(recipient)
     }

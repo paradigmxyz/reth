@@ -38,11 +38,14 @@ use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 /// or 17 minutes of 1-second blocks.
 pub const DEFAULT_EXEX_MANAGER_CAPACITY: usize = 1024;
 
-/// The maximum number of blocks allowed in the WAL before emitting a warning.
+/// Default maximum number of blocks allowed in the WAL before emitting a warning.
 ///
-/// This constant defines the threshold for the Write-Ahead Log (WAL) size. If the number of blocks
-/// in the WAL exceeds this limit, a warning is logged to indicate potential issues.
-pub const WAL_BLOCKS_WARNING: usize = 128;
+/// This constant defines the default threshold for the Write-Ahead Log (WAL) size. If the number
+/// of blocks in the WAL exceeds this limit, a warning is logged to indicate potential issues.
+///
+/// This value is appropriate for Ethereum mainnet with ~12 second block times. For L2 chains with
+/// faster block times, this value should be increased proportionally to avoid excessive warnings.
+pub const DEFAULT_WAL_BLOCKS_WARNING: usize = 128;
 
 /// The source of the notification.
 ///
@@ -247,6 +250,8 @@ pub struct ExExManager<P, N: NodePrimitives> {
     wal: Wal<N>,
     /// A stream of finalized headers.
     finalized_header_stream: ForkChoiceStream<SealedHeader<N::BlockHeader>>,
+    /// The threshold for the number of blocks in the WAL before emitting a warning.
+    wal_blocks_warning: usize,
 
     /// A handle to the `ExEx` manager.
     handle: ExExManagerHandle<N>,
@@ -306,6 +311,7 @@ where
 
             wal,
             finalized_header_stream,
+            wal_blocks_warning: DEFAULT_WAL_BLOCKS_WARNING,
 
             handle: ExExManagerHandle {
                 exex_tx: handle_tx,
@@ -322,6 +328,16 @@ where
     /// Returns the handle to the manager.
     pub fn handle(&self) -> ExExManagerHandle<N> {
         self.handle.clone()
+    }
+
+    /// Sets the threshold for the number of blocks in the WAL before emitting a warning.
+    ///
+    /// For L2 chains with faster block times, this value should be increased proportionally
+    /// to avoid excessive warnings. For example, a chain with 2-second block times might use
+    /// a value 6x higher than the default.
+    pub const fn with_wal_blocks_warning(mut self, threshold: usize) -> Self {
+        self.wal_blocks_warning = threshold;
+        self
     }
 
     /// Updates the current buffer capacity and notifies all `is_ready` watchers of the manager's
@@ -370,7 +386,7 @@ where
             .map(|(exex_id, num_hash)| {
                 num_hash.map_or(Ok((exex_id, num_hash, false)), |num_hash| {
                     self.provider
-                        .is_known(&num_hash.hash)
+                        .is_known(num_hash.hash)
                         // Save the ExEx ID, finished height, and whether the hash is canonical
                         .map(|is_canonical| (exex_id, Some(num_hash), is_canonical))
                 })
@@ -390,10 +406,11 @@ where
                 .unwrap();
 
             self.wal.finalize(lowest_finished_height)?;
-            if self.wal.num_blocks() > WAL_BLOCKS_WARNING {
+            if self.wal.num_blocks() > self.wal_blocks_warning {
                 warn!(
                     target: "exex::manager",
                     blocks = ?self.wal.num_blocks(),
+                    threshold = self.wal_blocks_warning,
                     "WAL contains too many blocks and is not getting cleared. That will lead to increased disk space usage. Check that you emit the FinishedHeight event from your ExExes."
                 );
             }
@@ -486,6 +503,7 @@ where
             }
             break
         }
+        let buffer_full = this.buffer.len() >= this.max_capacity;
 
         // Update capacity
         this.update_capacity();
@@ -501,11 +519,11 @@ where
                 .next_notification_id
                 .checked_sub(this.min_id)
                 .expect("exex expected notification ID outside the manager's range");
-            if let Some(notification) = this.buffer.get(notification_index) {
-                if let Poll::Ready(Err(err)) = exex.send(cx, notification) {
-                    // The channel was closed, which is irrecoverable for the manager
-                    return Poll::Ready(Err(err.into()))
-                }
+            if let Some(notification) = this.buffer.get(notification_index) &&
+                let Poll::Ready(Err(err)) = exex.send(cx, notification)
+            {
+                // The channel was closed, which is irrecoverable for the manager
+                return Poll::Ready(Err(err.into()))
             }
             min_id = min_id.min(exex.next_notification_id);
             this.exex_handles.push(exex);
@@ -518,6 +536,12 @@ where
 
         // Update capacity
         this.update_capacity();
+
+        // If the buffer was full and we made space, we need to wake up to accept new notifications
+        if buffer_full && this.buffer.len() < this.max_capacity {
+            debug!(target: "exex::manager", "Buffer has space again, waking up senders");
+            cx.waker().wake_by_ref();
+        }
 
         // Update watch channel block number
         let finished_height = this.exex_handles.iter_mut().try_fold(u64::MAX, |curr, exex| {
@@ -667,7 +691,7 @@ mod tests {
     use reth_primitives_traits::RecoveredBlock;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockReader,
-        BlockWriter, Chain, DatabaseProviderFactory, StorageLocation, TransactionVariant,
+        BlockWriter, Chain, DBProvider, DatabaseProviderFactory, TransactionVariant,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
 
@@ -1127,7 +1151,7 @@ mod tests {
         // Setup a notification
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![block1.clone(), block2.clone()],
+                vec![Default::default()],
                 Default::default(),
                 Default::default(),
             )),
@@ -1303,7 +1327,7 @@ mod tests {
         .try_recover()
         .unwrap();
         let provider_rw = provider_factory.database_provider_rw().unwrap();
-        provider_rw.insert_block(block.clone(), StorageLocation::Database).unwrap();
+        provider_rw.insert_block(&block).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = BlockchainProvider::new(provider_factory).unwrap();
@@ -1320,10 +1344,14 @@ mod tests {
         );
 
         let genesis_notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![genesis_block.clone()], Default::default(), None)),
+            new: Arc::new(Chain::new(
+                vec![genesis_block.clone()],
+                Default::default(),
+                Default::default(),
+            )),
         };
         let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![block.clone()], Default::default(), None)),
+            new: Arc::new(Chain::new(vec![block.clone()], Default::default(), Default::default())),
         };
 
         let (finalized_headers_tx, rx) = watch::channel(None);
@@ -1392,5 +1420,79 @@ mod tests {
         assert_eq!(exex_manager.wal.iter_notifications()?.next().transpose()?, None);
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_deadlock_manager_wakes_after_buffer_clears() {
+        // This test simulates the scenario where the buffer fills up, ingestion pauses,
+        // and then space clears. We verify the manager wakes up to process pending items.
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+        let provider_factory = create_test_provider_factory();
+        init_genesis(&provider_factory).unwrap();
+        let provider = BlockchainProvider::new(provider_factory.clone()).unwrap();
+
+        // 1. Setup Manager with Capacity = 1
+        let (exex_handle, _, mut notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Default::default(),
+            provider,
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+
+        let max_capacity = 2;
+        let exex_manager = ExExManager::new(
+            provider_factory,
+            vec![exex_handle],
+            max_capacity,
+            wal,
+            empty_finalized_header_stream(),
+        );
+
+        let manager_handle = exex_manager.handle();
+
+        // Spawn manager in background so it runs continuously
+        tokio::spawn(async move {
+            exex_manager.await.ok();
+        });
+
+        // Helper to create notifications
+        let mut rng = generators::rng();
+        let mut make_notif = |id: u64| {
+            let block = random_block(&mut rng, id, BlockParams::default()).try_recover().unwrap();
+            ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(vec![block], Default::default(), Default::default())),
+            }
+        };
+
+        manager_handle.send(ExExNotificationSource::Pipeline, make_notif(1)).unwrap();
+
+        // Send the "Stuck" Item (Notification #100).
+        // At this point, the Manager loop has skipped the ingestion logic because buffer is full
+        // (buffer_full=true). This item sits in the unbounded 'handle_rx' channel waiting.
+        manager_handle.send(ExExNotificationSource::Pipeline, make_notif(100)).unwrap();
+
+        // 3. Relieve Pressure
+        // We consume items from the ExEx.
+        // As we pull items out, the ExEx frees space -> Manager sends buffered item -> Manager
+        // frees space. Once Manager frees space, the FIX (wake_by_ref) should trigger,
+        // causing it to read Notif #100.
+
+        // Consume the jam
+        let _ = notifications.next().await.unwrap();
+
+        // 4. Assert No Deadlock
+        // We expect Notification #100 next.
+        // If the wake_by_ref fix is missing, this will Time Out because the manager is sleeping
+        // despite having empty buffer.
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(1), notifications.next()).await;
+
+        assert!(
+            result.is_ok(),
+            "Deadlock detected! Manager failed to wake up and process Pending Item #100."
+        );
     }
 }

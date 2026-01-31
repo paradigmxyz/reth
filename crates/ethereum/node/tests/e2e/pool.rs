@@ -153,7 +153,7 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
         w1.address(),
     );
     let pooled_tx1 = EthPooledTransaction::new(tx1.clone(), 200);
-    let tx_hash1 = *pooled_tx1.clone().hash();
+    let tx_hash1 = *pooled_tx1.hash();
 
     // build tx2 from wallet2
     let envelop2 = TransactionTestContext::transfer_tx(1, w2.clone()).await;
@@ -162,7 +162,7 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
         w2.address(),
     );
     let pooled_tx2 = EthPooledTransaction::new(tx2.clone(), 200);
-    let tx_hash2 = *pooled_tx2.clone().hash();
+    let tx_hash2 = *pooled_tx2.hash();
 
     let block_info = BlockInfo {
         block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,

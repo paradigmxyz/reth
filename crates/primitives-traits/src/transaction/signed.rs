@@ -3,11 +3,11 @@
 use crate::{InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat};
 use alloc::fmt;
 use alloy_consensus::{
-    transaction::{Recovered, RlpEcdsaEncodableTx, SignerRecoverable},
+    transaction::{Recovered, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
     EthereumTxEnvelope, SignableTransaction,
 };
-use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, Address, Signature, TxHash, B256};
+use alloy_eips::eip2718::{Decodable2718, Encodable2718, IsTyped2718};
+use alloy_primitives::{keccak256, Address, Signature, B256};
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
 
@@ -45,9 +45,18 @@ pub trait SignedTransaction:
     + MaybeSerde
     + InMemorySize
     + SignerRecoverable
+    + TxHashRef
+    + IsTyped2718
 {
-    /// Returns reference to transaction hash.
-    fn tx_hash(&self) -> &TxHash;
+    /// Returns whether this is a system transaction.
+    ///
+    /// System transactions are created at the protocol level rather than by users. They are
+    /// typically used by L2s for special purposes (e.g., Optimism deposit transactions with type
+    /// 126) and may have different validation rules or fee handling compared to standard
+    /// user-initiated transactions.
+    fn is_system_tx(&self) -> bool {
+        false
+    }
 
     /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
     /// network.
@@ -136,15 +145,6 @@ where
     T: RlpEcdsaEncodableTx + SignableTransaction<Signature> + Unpin,
     Self: Clone + PartialEq + Eq + Decodable + Decodable2718 + MaybeSerde + InMemorySize,
 {
-    fn tx_hash(&self) -> &TxHash {
-        match self {
-            Self::Legacy(tx) => tx.hash(),
-            Self::Eip2930(tx) => tx.hash(),
-            Self::Eip1559(tx) => tx.hash(),
-            Self::Eip7702(tx) => tx.hash(),
-            Self::Eip4844(tx) => tx.hash(),
-        }
-    }
 }
 
 #[cfg(feature = "op")]
@@ -152,26 +152,7 @@ mod op {
     use super::*;
     use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 
-    impl SignedTransaction for OpPooledTransaction {
-        fn tx_hash(&self) -> &TxHash {
-            match self {
-                Self::Legacy(tx) => tx.hash(),
-                Self::Eip2930(tx) => tx.hash(),
-                Self::Eip1559(tx) => tx.hash(),
-                Self::Eip7702(tx) => tx.hash(),
-            }
-        }
-    }
+    impl SignedTransaction for OpPooledTransaction {}
 
-    impl SignedTransaction for OpTxEnvelope {
-        fn tx_hash(&self) -> &TxHash {
-            match self {
-                Self::Legacy(tx) => tx.hash(),
-                Self::Eip2930(tx) => tx.hash(),
-                Self::Eip1559(tx) => tx.hash(),
-                Self::Eip7702(tx) => tx.hash(),
-                Self::Deposit(tx) => tx.hash_ref(),
-            }
-        }
-    }
+    impl SignedTransaction for OpTxEnvelope {}
 }

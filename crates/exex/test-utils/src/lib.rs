@@ -5,7 +5,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use std::{
@@ -20,7 +20,9 @@ use futures_util::FutureExt;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_consensus::test_utils::TestConsensus;
 use reth_db::{
-    test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
+    test_utils::{
+        create_test_rocksdb_dir, create_test_rw_db, create_test_static_files_dir, TempDatabase,
+    },
     DatabaseEnv,
 };
 use reth_db_common::init::init_genesis;
@@ -50,7 +52,7 @@ use reth_node_ethereum::{
 use reth_payload_builder::noop::NoopPayloadBuilderService;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
-    providers::{BlockchainProvider, StaticFileProvider},
+    providers::{BlockchainProvider, RocksDBProvider, StaticFileProvider},
     BlockReader, EthStorage, ProviderFactory,
 };
 use reth_tasks::TaskManager;
@@ -64,13 +66,17 @@ use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 #[non_exhaustive]
 pub struct TestPoolBuilder;
 
-impl<Node> PoolBuilder<Node> for TestPoolBuilder
+impl<Node, Evm: Send> PoolBuilder<Node, Evm> for TestPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<Primitives: NodePrimitives<SignedTx = TransactionSigned>>>,
 {
     type Pool = TestPool;
 
-    async fn build_pool(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
+    async fn build_pool(
+        self,
+        _ctx: &BuilderContext<Node>,
+        _evm_config: Evm,
+    ) -> eyre::Result<Self::Pool> {
         Ok(testing_pool())
     }
 }
@@ -239,12 +245,14 @@ pub async fn test_exex_context_with_chain_spec(
     let consensus = Arc::new(TestConsensus::default());
 
     let (static_dir, _) = create_test_static_files_dir();
+    let (rocksdb_dir, _) = create_test_rocksdb_dir();
     let db = create_test_rw_db();
     let provider_factory = ProviderFactory::<NodeTypesWithDBAdapter<TestNode, _>>::new(
         db,
         chain_spec.clone(),
         StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
-    );
+        RocksDBProvider::builder(rocksdb_dir.keep()).with_default_tables().build().unwrap(),
+    )?;
 
     let genesis_hash = init_genesis(&provider_factory)?;
     let provider = BlockchainProvider::new(provider_factory.clone())?;

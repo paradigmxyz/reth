@@ -1,20 +1,26 @@
 //! Logic to export from database era1 block history
 //! and injecting them into era1 files with `Era1Writer`.
 
+use crate::calculate_td_by_number;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, B256, U256};
 use eyre::{eyre, Result};
 use reth_era::{
-    e2s_types::IndexEntry,
-    era1_file::Era1Writer,
-    era1_types::{BlockIndex, Era1Id},
-    era_file_ops::{EraFileId, StreamWriter},
-    execution_types::{
-        Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
-        TotalDifficulty, MAX_BLOCKS_PER_ERA1,
+    common::file_ops::{EraFileId, StreamWriter},
+    e2s::types::IndexEntry,
+    era1::{
+        file::Era1Writer,
+        types::{
+            execution::{
+                Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
+                TotalDifficulty, MAX_BLOCKS_PER_ERA1,
+            },
+            group::{BlockIndex, Era1Id},
+        },
     },
 };
 use reth_fs_util as fs;
+use reth_primitives_traits::Block;
 use reth_storage_api::{BlockNumReader, BlockReader, HeaderProvider};
 use std::{
     path::PathBuf,
@@ -114,9 +120,7 @@ where
 
     let mut total_difficulty = if config.first_block_number > 0 {
         let prev_block_number = config.first_block_number - 1;
-        provider
-            .header_td_by_number(prev_block_number)?
-            .ok_or_else(|| eyre!("Total difficulty not found for block {prev_block_number}"))?
+        calculate_td_by_number(provider, prev_block_number)?
     } else {
         U256::ZERO
     };
@@ -146,6 +150,12 @@ where
 
         let era1_id = Era1Id::new(&config.network, start_block, block_count as u32)
             .with_hash(historical_root);
+
+        let era1_id = if config.max_blocks_per_file == MAX_BLOCKS_PER_ERA1 as u64 {
+            era1_id
+        } else {
+            era1_id.with_era_count()
+        };
 
         debug!("Final file name {}", era1_id.to_file_name());
         let file_path = config.dir.join(era1_id.to_file_name());
@@ -216,12 +226,12 @@ where
             writer.write_accumulator(&accumulator)?;
             writer.write_block_index(&block_index)?;
             writer.flush()?;
-            created_files.push(file_path.clone());
 
             info!(
                 target: "era::history::export",
                 "Wrote ERA1 file: {file_path:?} with {blocks_written} blocks"
             );
+            created_files.push(file_path);
         }
     }
 
@@ -286,9 +296,11 @@ where
         return Err(eyre!("Expected block {expected_block_number}, got {actual_block_number}"));
     }
 
+    // CompressedBody must contain the block *body* (rlp(body)), not the full block (rlp(block)).
     let body = provider
         .block_by_number(actual_block_number)?
-        .ok_or_else(|| eyre!("Block body not found for block {}", actual_block_number))?;
+        .ok_or_else(|| eyre!("Block not found for block {}", actual_block_number))?
+        .into_body();
 
     let receipts = provider
         .receipts_by_block(actual_block_number.into())?
@@ -307,7 +319,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::ExportConfig;
-    use reth_era::execution_types::MAX_BLOCKS_PER_ERA1;
+    use reth_era::era1::types::execution::MAX_BLOCKS_PER_ERA1;
     use tempfile::tempdir;
 
     #[test]

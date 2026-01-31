@@ -4,24 +4,26 @@
 
 use std::{sync::Arc, time::Instant};
 
+use crate::block::BlockAndReceipts;
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{BlockHash, B256};
+use alloy_primitives::{BlockHash, TxHash, B256};
 use derive_more::Constructor;
-use reth_chain_state::{
-    BlockState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
-};
+use reth_chain_state::{BlockState, ExecutedBlock};
 use reth_ethereum_primitives::Receipt;
-use reth_evm::EvmEnv;
-use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_evm::{ConfigureEvm, EvmEnvFor};
+use reth_primitives_traits::{
+    Block, BlockTy, IndexedTx, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader,
+};
+use reth_rpc_convert::{RpcConvert, RpcTypes};
 
-/// Configured [`EvmEnv`] for a pending block.
+/// Configured [`reth_evm::EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
-pub struct PendingBlockEnv<B: Block, R, Spec> {
-    /// Configured [`EvmEnv`] for the pending block.
-    pub evm_env: EvmEnv<Spec>,
+pub struct PendingBlockEnv<Evm: ConfigureEvm> {
+    /// Configured [`reth_evm::EvmEnv`] for the pending block.
+    pub evm_env: EvmEnvFor<Evm>,
     /// Origin block for the config
-    pub origin: PendingBlockEnvOrigin<B, R>,
+    pub origin: PendingBlockEnvOrigin<BlockTy<Evm::Primitives>, ReceiptTy<Evm::Primitives>>,
 }
 
 /// The origin for a configured [`PendingBlockEnv`]
@@ -76,15 +78,9 @@ impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
     }
 }
 
-/// A type alias for an [`Arc`] wrapped [`RecoveredBlock`].
-pub type PendingRecoveredBlock<N> = Arc<RecoveredBlock<<N as NodePrimitives>::Block>>;
-
-/// A type alias for an [`Arc`] wrapped vector of [`NodePrimitives::Receipt`].
-pub type PendingBlockReceipts<N> = Arc<Vec<<N as NodePrimitives>::Receipt>>;
-
 /// A type alias for a pair of an [`Arc`] wrapped [`RecoveredBlock`] and a vector of
 /// [`NodePrimitives::Receipt`].
-pub type PendingBlockAndReceipts<N> = (PendingRecoveredBlock<N>, PendingBlockReceipts<N>);
+pub type PendingBlockAndReceipts<N> = BlockAndReceipts<N>;
 
 /// Locally built pending block for `pending` tag.
 #[derive(Debug, Clone, Constructor)]
@@ -92,7 +88,7 @@ pub struct PendingBlock<N: NodePrimitives> {
     /// Timestamp when the pending block is considered outdated.
     pub expires_at: Instant,
     /// The receipts for the pending block
-    pub receipts: PendingBlockReceipts<N>,
+    pub receipts: Arc<Vec<ReceiptTy<N>>>,
     /// The locally built pending block with execution output.
     pub executed_block: ExecutedBlock<N>,
 }
@@ -103,43 +99,66 @@ impl<N: NodePrimitives> PendingBlock<N> {
     pub fn with_executed_block(expires_at: Instant, executed_block: ExecutedBlock<N>) -> Self {
         Self {
             expires_at,
-            receipts: Arc::new(
-                executed_block.execution_output.receipts.iter().flatten().cloned().collect(),
-            ),
+            receipts: Arc::new(executed_block.execution_output.receipts.clone()),
             executed_block,
         }
     }
 
     /// Returns the locally built pending [`RecoveredBlock`].
-    pub const fn block(&self) -> &PendingRecoveredBlock<N> {
+    pub const fn block(&self) -> &Arc<RecoveredBlock<BlockTy<N>>> {
         &self.executed_block.recovered_block
     }
 
     /// Converts this [`PendingBlock`] into a pair of [`RecoveredBlock`] and a vector of
     /// [`NodePrimitives::Receipt`]s, taking self.
     pub fn into_block_and_receipts(self) -> PendingBlockAndReceipts<N> {
-        (self.executed_block.recovered_block, self.receipts)
+        BlockAndReceipts { block: self.executed_block.recovered_block, receipts: self.receipts }
     }
 
     /// Returns a pair of [`RecoveredBlock`] and a vector of  [`NodePrimitives::Receipt`]s by
     /// cloning from borrowed self.
     pub fn to_block_and_receipts(&self) -> PendingBlockAndReceipts<N> {
-        (self.executed_block.recovered_block.clone(), self.receipts.clone())
+        BlockAndReceipts {
+            block: self.executed_block.recovered_block.clone(),
+            receipts: self.receipts.clone(),
+        }
     }
 
     /// Returns a hash of the parent block for this `executed_block`.
     pub fn parent_hash(&self) -> BlockHash {
         self.executed_block.recovered_block().parent_hash()
     }
+
+    /// Finds a transaction by hash and returns it along with its corresponding receipt.
+    ///
+    /// Returns `None` if the transaction is not found in this block.
+    pub fn find_transaction_and_receipt_by_hash(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<(IndexedTx<'_, N::Block>, &N::Receipt)> {
+        let indexed_tx = self.executed_block.recovered_block().find_indexed(tx_hash)?;
+        let receipt = self.receipts.get(indexed_tx.index())?;
+        Some((indexed_tx, receipt))
+    }
+
+    /// Returns the rpc transaction receipt for the given transaction hash if it exists.
+    ///
+    /// This uses the given converter to turn [`Self::find_transaction_and_receipt_by_hash`] into
+    /// the rpc format.
+    pub fn find_and_convert_transaction_receipt<C>(
+        &self,
+        tx_hash: TxHash,
+        converter: &C,
+    ) -> Option<Result<<C::Network as RpcTypes>::Receipt, C::Error>>
+    where
+        C: RpcConvert<Primitives = N>,
+    {
+        self.to_block_and_receipts().find_and_convert_transaction_receipt(tx_hash, converter)
+    }
 }
 
 impl<N: NodePrimitives> From<PendingBlock<N>> for BlockState<N> {
     fn from(pending_block: PendingBlock<N>) -> Self {
-        Self::new(ExecutedBlockWithTrieUpdates::<N>::new(
-            pending_block.executed_block.recovered_block,
-            pending_block.executed_block.execution_output,
-            pending_block.executed_block.hashed_state,
-            ExecutedTrieUpdates::Missing,
-        ))
+        Self::new(pending_block.executed_block)
     }
 }

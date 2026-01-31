@@ -18,7 +18,7 @@ reth-errors.workspace = true
 reth-evm.workspace = true
 reth-execution-types.workspace = true
 reth-metrics.workspace = true
-reth-ethereum-primitives.workspace = true
+reth-ethereum-primitives = { workspace = true, features = ["rpc"] }
 reth-primitives-traits = { workspace = true, features = ["rpc-compat"] }
 reth-storage-api.workspace = true
 reth-revm.workspace = true
@@ -56,6 +56,7 @@ metrics.workspace = true
 
 # misc
 serde = { workspace = true, features = ["derive"] }
+url = { workspace = true, features = ["serde"] }
 thiserror.workspace = true
 derive_more.workspace = true
 schnellru.workspace = true

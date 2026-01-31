@@ -1,10 +1,9 @@
 //! Database debugging tool
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
-use itertools::Itertools;
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_db::{mdbx::tx::Tx, static_file::iter_static_files, DatabaseError};
+use reth_db::{mdbx::tx::Tx, DatabaseError};
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
@@ -16,7 +15,8 @@ use reth_db_common::{
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
 use reth_provider::{
-    writer::UnifiedStorageWriter, DatabaseProviderFactory, StaticFileProviderFactory,
+    DBProvider, RocksDBProviderFactory, StaticFileProviderFactory, StaticFileWriter,
+    StorageSettingsCache,
 };
 use reth_prune::PruneSegment;
 use reth_stages::StageId;
@@ -46,33 +46,65 @@ impl<C: ChainSpecParser> Command<C> {
             StageEnum::Headers => Some(StaticFileSegment::Headers),
             StageEnum::Bodies => Some(StaticFileSegment::Transactions),
             StageEnum::Execution => Some(StaticFileSegment::Receipts),
+            StageEnum::Senders => Some(StaticFileSegment::TransactionSenders),
             _ => None,
         };
 
-        // Delete static file segment data before inserting the genesis header below
+        // Calling `StaticFileProviderRW::prune_*` will instruct the writer to prune rows only
+        // when `StaticFileProviderRW::commit` is called. We need to do that instead of
+        // deleting the jar files, otherwise if the task were to be interrupted after we
+        // have deleted them, BUT before we have committed the checkpoints to the database, we'd
+        // lose essential data.
         if let Some(static_file_segment) = static_file_segment {
             let static_file_provider = tool.provider_factory.static_file_provider();
-            let static_files = iter_static_files(static_file_provider.directory())?;
-            if let Some(segment_static_files) = static_files.get(&static_file_segment) {
-                // Delete static files from the highest to the lowest block range
-                for (block_range, _) in segment_static_files
-                    .iter()
-                    .sorted_by_key(|(block_range, _)| block_range.start())
-                    .rev()
-                {
-                    static_file_provider.delete_jar(static_file_segment, block_range.start())?;
+            if let Some(highest_block) =
+                static_file_provider.get_highest_static_file_block(static_file_segment)
+            {
+                let mut writer = static_file_provider.latest_writer(static_file_segment)?;
+
+                match static_file_segment {
+                    StaticFileSegment::Headers => {
+                        // Prune all headers leaving genesis intact.
+                        writer.prune_headers(highest_block)?;
+                    }
+                    StaticFileSegment::Transactions => {
+                        let to_delete = static_file_provider
+                            .get_highest_static_file_tx(static_file_segment)
+                            .map(|tx_num| tx_num + 1)
+                            .unwrap_or_default();
+                        writer.prune_transactions(to_delete, 0)?;
+                    }
+                    StaticFileSegment::Receipts => {
+                        let to_delete = static_file_provider
+                            .get_highest_static_file_tx(static_file_segment)
+                            .map(|tx_num| tx_num + 1)
+                            .unwrap_or_default();
+                        writer.prune_receipts(to_delete, 0)?;
+                    }
+                    StaticFileSegment::TransactionSenders => {
+                        let to_delete = static_file_provider
+                            .get_highest_static_file_tx(static_file_segment)
+                            .map(|tx_num| tx_num + 1)
+                            .unwrap_or_default();
+                        writer.prune_transaction_senders(to_delete, 0)?;
+                    }
+                    StaticFileSegment::AccountChangeSets => {
+                        writer.prune_account_changesets(highest_block)?;
+                    }
+                    StaticFileSegment::StorageChangeSets => {
+                        writer.prune_storage_changesets(highest_block)?;
+                    }
                 }
             }
         }
 
-        let provider_rw = tool.provider_factory.database_provider_rw()?;
+        let provider_rw = tool.provider_factory.unwind_provider_rw()?;
         let tx = provider_rw.tx_ref();
 
         match self.stage {
             StageEnum::Headers => {
                 tx.clear::<tables::CanonicalHeaders>()?;
                 tx.clear::<tables::Headers<HeaderTy<N>>>()?;
-                tx.clear::<tables::HeaderTerminalDifficulties>()?;
                 tx.clear::<tables::HeaderNumbers>()?;
                 reset_stage_checkpoint(tx, StageId::Headers)?;
 
@@ -81,7 +113,6 @@ impl<C: ChainSpecParser> Command<C> {
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
                 tx.clear::<tables::Transactions<TxTy<N>>>()?;
-                reset_prune_checkpoint(tx, PruneSegment::Transactions)?;
 
                 tx.clear::<tables::TransactionBlocks>()?;
                 tx.clear::<tables::BlockOmmers<HeaderTy<N>>>()?;
@@ -141,8 +172,20 @@ impl<C: ChainSpecParser> Command<C> {
                 )?;
             }
             StageEnum::AccountHistory | StageEnum::StorageHistory => {
-                tx.clear::<tables::AccountsHistory>()?;
-                tx.clear::<tables::StoragesHistory>()?;
+                let settings = provider_rw.cached_storage_settings();
+                let rocksdb = tool.provider_factory.rocksdb_provider();
+
+                if settings.account_history_in_rocksdb {
+                    rocksdb.clear::<tables::AccountsHistory>()?;
+                } else {
+                    tx.clear::<tables::AccountsHistory>()?;
+                }
+
+                if settings.storages_history_in_rocksdb {
+                    rocksdb.clear::<tables::StoragesHistory>()?;
+                } else {
+                    tx.clear::<tables::StoragesHistory>()?;
+                }
 
                 reset_stage_checkpoint(tx, StageId::IndexAccountHistory)?;
                 reset_stage_checkpoint(tx, StageId::IndexStorageHistory)?;
@@ -150,7 +193,14 @@ impl<C: ChainSpecParser> Command<C> {
                 insert_genesis_history(&provider_rw, self.env.chain.genesis().alloc.iter())?;
             }
             StageEnum::TxLookup => {
-                tx.clear::<tables::TransactionHashNumbers>()?;
+                if provider_rw.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+                    tool.provider_factory
+                        .rocksdb_provider()
+                        .clear::<tables::TransactionHashNumbers>()?;
+                } else {
+                    tx.clear::<tables::TransactionHashNumbers>()?;
+                }
+
                 reset_prune_checkpoint(tx, PruneSegment::TransactionLookup)?;
 
                 reset_stage_checkpoint(tx, StageId::TransactionLookup)?;
@@ -160,7 +210,7 @@ impl<C: ChainSpecParser> Command<C> {
 
         tx.put::<tables::StageCheckpoints>(StageId::Finish.to_string(), Default::default())?;
 
-        UnifiedStorageWriter::commit_unwind(provider_rw)?;
+        provider_rw.commit()?;
 
         Ok(())
     }

@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -17,12 +17,13 @@ use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, RecoveredBlock};
+use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
-pub use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
+#[cfg(feature = "std")]
+pub use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator, ExecutableTxTuple};
 pub use reth_payload_primitives::ExecutionPayload;
 
 mod error;
@@ -61,7 +62,8 @@ pub trait EngineTypes:
                           + TryInto<Self::ExecutionPayloadEnvelopeV2>
                           + TryInto<Self::ExecutionPayloadEnvelopeV3>
                           + TryInto<Self::ExecutionPayloadEnvelopeV4>
-                          + TryInto<Self::ExecutionPayloadEnvelopeV5>,
+                          + TryInto<Self::ExecutionPayloadEnvelopeV5>
+                          + TryInto<Self::ExecutionPayloadEnvelopeV6>,
     > + DeserializeOwned
     + Serialize
 {
@@ -105,6 +107,14 @@ pub trait EngineTypes:
         + Send
         + Sync
         + 'static;
+    /// Execution Payload V6 envelope type.
+    type ExecutionPayloadEnvelopeV6: DeserializeOwned
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static;
 }
 
 /// Type that validates the payloads processed by the engine API.
@@ -131,6 +141,21 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// The block type used by the engine.
     type Block: Block;
 
+    /// Converts the given payload into a sealed block without recovering signatures.
+    ///
+    /// This function validates the payload and converts it into a [`SealedBlock`] which contains
+    /// the block hash but does not perform signature recovery on transactions.
+    ///
+    /// This is more efficient than [`Self::ensure_well_formed_payload`] when signature recovery
+    /// is not needed immediately or will be performed later.
+    ///
+    /// Implementers should ensure that the checks are done in the order that conforms with the
+    /// engine-API specification.
+    fn convert_payload_to_block(
+        &self,
+        payload: Types::ExecutionData,
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
+
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout.
     ///
@@ -142,7 +167,10 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     fn ensure_well_formed_payload(
         &self,
         payload: Types::ExecutionData,
-    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError>;
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+        let sealed_block = self.convert_payload_to_block(payload)?;
+        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
+    }
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
     fn validate_block_post_execution_with_hashed_state(

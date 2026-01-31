@@ -4,7 +4,7 @@ use crate::{
 };
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{BlockNumber, TxNumber, B256};
 use core::ops::RangeInclusive;
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
@@ -54,7 +54,6 @@ pub trait BlockReader:
     + TransactionsProvider
     + ReceiptProvider
     + Send
-    + Sync
 {
     /// The block type this provider reads.
     type Block: reth_primitives_traits::Block<
@@ -144,9 +143,12 @@ pub trait BlockReader:
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>>;
+
+    /// Returns the block number that contains the given transaction.
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>>;
 }
 
-impl<T: BlockReader> BlockReader for Arc<T> {
+impl<T: BlockReader + Send + Sync> BlockReader for Arc<T> {
     type Block = T::Block;
 
     fn find_block_by_hash(
@@ -202,9 +204,12 @@ impl<T: BlockReader> BlockReader for Arc<T> {
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         T::recovered_block_range(self, range)
     }
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        T::block_by_transaction_id(self, id)
+    }
 }
 
-impl<T: BlockReader> BlockReader for &T {
+impl<T: BlockReader + Send + Sync> BlockReader for &T {
     type Block = T::Block;
 
     fn find_block_by_hash(
@@ -259,6 +264,9 @@ impl<T: BlockReader> BlockReader for &T {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         T::recovered_block_range(self, range)
+    }
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        T::block_by_transaction_id(self, id)
     }
 }
 
@@ -373,7 +381,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
 }
 
 /// Functionality to read the last known chain blocks from the database.
-pub trait ChainStateBlockReader: Send + Sync {
+pub trait ChainStateBlockReader: Send {
     /// Returns the last finalized block number.
     ///
     /// If no finalized block has been written yet, this returns `None`.
@@ -385,7 +393,7 @@ pub trait ChainStateBlockReader: Send + Sync {
 }
 
 /// Functionality to write the last known chain blocks to the database.
-pub trait ChainStateBlockWriter: Send + Sync {
+pub trait ChainStateBlockWriter: Send {
     /// Saves the given finalized block number in the DB.
     fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()>;
 

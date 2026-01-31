@@ -7,7 +7,6 @@ use crate::{
     Cursor, Error, Stat, TableObject,
 };
 use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
-use indexmap::IndexSet;
 use parking_lot::{Mutex, MutexGuard};
 use std::{
     ffi::{c_uint, c_void},
@@ -94,7 +93,6 @@ where
 
         let inner = TransactionInner {
             txn,
-            primed_dbis: Mutex::new(IndexSet::new()),
             committed: AtomicBool::new(false),
             env,
             _marker: Default::default(),
@@ -172,51 +170,37 @@ where
     /// Commits the transaction.
     ///
     /// Any pending operations will be saved.
-    pub fn commit(self) -> Result<(bool, CommitLatency)> {
-        self.commit_and_rebind_open_dbs().map(|v| (v.0, v.1))
-    }
+    pub fn commit(self) -> Result<CommitLatency> {
+        match self.txn_execute(|txn| {
+            if K::IS_READ_ONLY {
+                #[cfg(feature = "read-tx-timeouts")]
+                self.env().txn_manager().remove_active_read_transaction(txn);
 
-    pub fn prime_for_permaopen(&self, db: Database) {
-        self.inner.primed_dbis.lock().insert(db.dbi());
-    }
-
-    /// Commits the transaction and returns table handles permanently open until dropped.
-    pub fn commit_and_rebind_open_dbs(self) -> Result<(bool, CommitLatency, Vec<Database>)> {
-        let result = {
-            let result = self.txn_execute(|txn| {
-                if K::IS_READ_ONLY {
-                    #[cfg(feature = "read-tx-timeouts")]
-                    self.env().txn_manager().remove_active_read_transaction(txn);
-
-                    let mut latency = CommitLatency::new();
-                    mdbx_result(unsafe {
-                        ffi::mdbx_txn_commit_ex(txn, latency.mdb_commit_latency())
-                    })
+                let mut latency = CommitLatency::new();
+                mdbx_result(unsafe { ffi::mdbx_txn_commit_ex(txn, latency.mdb_commit_latency()) })
                     .map(|v| (v, latency))
-                } else {
-                    let (sender, rx) = sync_channel(0);
-                    self.env()
-                        .txn_manager()
-                        .send_message(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender });
-                    rx.recv().unwrap()
-                }
-            })?;
-
-            self.inner.set_committed();
-            result
-        };
-        result.map(|(v, latency)| {
-            (
-                v,
-                latency,
-                self.inner
-                    .primed_dbis
-                    .lock()
-                    .iter()
-                    .map(|&dbi| Database::new_from_ptr(dbi, self.env().clone()))
-                    .collect(),
-            )
-        })
+            } else {
+                let (sender, rx) = sync_channel(0);
+                self.env()
+                    .txn_manager()
+                    .send_message(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender });
+                rx.recv().unwrap()
+            }
+        })? {
+            //
+            Ok((false, lat)) => {
+                self.inner.set_committed();
+                Ok(lat)
+            }
+            Ok((true, _)) => {
+                // MDBX_RESULT_TRUE means the transaction was aborted due to prior errors.
+                // The transaction is still finished/freed by MDBX, so we must mark it as
+                // committed to prevent the Drop impl from trying to abort it again.
+                self.inner.set_committed();
+                Err(Error::BotchedTransaction)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Opens a handle to an MDBX database.
@@ -235,11 +219,15 @@ where
     }
 
     /// Gets the option flags for the given database in the transaction.
-    pub fn db_flags(&self, db: &Database) -> Result<DatabaseFlags> {
+    pub fn db_flags(&self, dbi: ffi::MDBX_dbi) -> Result<DatabaseFlags> {
         let mut flags: c_uint = 0;
         unsafe {
             self.txn_execute(|txn| {
-                mdbx_result(ffi::mdbx_dbi_flags_ex(txn, db.dbi(), &mut flags, ptr::null_mut()))
+                // `mdbx_dbi_flags_ex` requires `status` to be a non-NULL ptr, otherwise it will
+                // return an EINVAL and panic below, so we just provide a placeholder variable
+                // which we discard immediately.
+                let mut _status: c_uint = 0;
+                mdbx_result(ffi::mdbx_dbi_flags_ex(txn, dbi, &mut flags, &mut _status))
             })??;
         }
 
@@ -249,8 +237,8 @@ where
     }
 
     /// Retrieves database statistics.
-    pub fn db_stat(&self, db: &Database) -> Result<Stat> {
-        self.db_stat_with_dbi(db.dbi())
+    pub fn db_stat(&self, dbi: ffi::MDBX_dbi) -> Result<Stat> {
+        self.db_stat_with_dbi(dbi)
     }
 
     /// Retrieves database statistics by the given dbi.
@@ -265,8 +253,8 @@ where
     }
 
     /// Open a new cursor on the given database.
-    pub fn cursor(&self, db: &Database) -> Result<Cursor<K>> {
-        Cursor::new(self.clone(), db.dbi())
+    pub fn cursor(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<K>> {
+        Cursor::new(self.clone(), dbi)
     }
 
     /// Open a new cursor on the given dbi.
@@ -308,8 +296,6 @@ where
 {
     /// The transaction pointer itself.
     txn: TransactionPtr,
-    /// A set of database handles that are primed for permaopen.
-    primed_dbis: Mutex<IndexSet<ffi::MDBX_dbi>>,
     /// Whether the transaction has committed.
     committed: AtomicBool,
     env: Environment,
@@ -353,26 +339,31 @@ where
     fn drop(&mut self) {
         // To be able to abort a timed out transaction, we need to renew it first.
         // Hence the usage of `txn_execute_renew_on_timeout` here.
-        self.txn
-            .txn_execute_renew_on_timeout(|txn| {
-                if !self.has_committed() {
-                    if K::IS_READ_ONLY {
-                        #[cfg(feature = "read-tx-timeouts")]
-                        self.env.txn_manager().remove_active_read_transaction(txn);
+        //
+        // We intentionally ignore errors here because Drop should never panic.
+        // MDBX can return errors (e.g., MDBX_PANIC) during abort if the environment
+        // is in a fatal state, but panicking in Drop can cause double-panics during
+        // unwinding which terminates the process.
+        let _ = self.txn.txn_execute_renew_on_timeout(|txn| {
+            if !self.has_committed() {
+                if K::IS_READ_ONLY {
+                    #[cfg(feature = "read-tx-timeouts")]
+                    self.env.txn_manager().remove_active_read_transaction(txn);
 
-                        unsafe {
-                            ffi::mdbx_txn_abort(txn);
-                        }
-                    } else {
-                        let (sender, rx) = sync_channel(0);
-                        self.env
-                            .txn_manager()
-                            .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
-                        rx.recv().unwrap().unwrap();
+                    unsafe {
+                        ffi::mdbx_txn_abort(txn);
+                    }
+                } else {
+                    let (sender, rx) = sync_channel(0);
+                    self.env
+                        .txn_manager()
+                        .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
+                    if let Ok(Err(e)) = rx.recv() {
+                        tracing::error!(target: "libmdbx", %e, "failed to abort transaction in drop");
                     }
                 }
-            })
-            .unwrap();
+            }
+        });
     }
 }
 
@@ -426,10 +417,18 @@ impl Transaction<RW> {
     /// Returns a buffer which can be used to write a value into the item at the
     /// given key and with the given length. The buffer must be completely
     /// filled by the caller.
+    ///
+    /// This should not be used on dupsort tables.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the returned buffer is not used after the transaction is
+    /// committed or aborted, or if another value is inserted. To be clear: the second call to
+    /// this function is not permitted while the returned slice is reachable.
     #[allow(clippy::mut_from_ref)]
-    pub fn reserve(
+    pub unsafe fn reserve(
         &self,
-        db: &Database,
+        dbi: ffi::MDBX_dbi,
         key: impl AsRef<[u8]>,
         len: usize,
         flags: WriteFlags,
@@ -441,13 +440,7 @@ impl Transaction<RW> {
             ffi::MDBX_val { iov_len: len, iov_base: ptr::null_mut::<c_void>() };
         unsafe {
             mdbx_result(self.txn_execute(|txn| {
-                ffi::mdbx_put(
-                    txn,
-                    db.dbi(),
-                    &key_val,
-                    &mut data_val,
-                    flags.bits() | ffi::MDBX_RESERVE,
-                )
+                ffi::mdbx_put(txn, dbi, &key_val, &mut data_val, flags.bits() | ffi::MDBX_RESERVE)
             })?)?;
             Ok(slice::from_raw_parts_mut(data_val.iov_base as *mut u8, data_val.iov_len))
         }
@@ -502,10 +495,10 @@ impl Transaction<RW> {
     /// Drops the database from the environment.
     ///
     /// # Safety
-    /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
-    /// BEFORE calling this function.
-    pub unsafe fn drop_db(&self, db: Database) -> Result<()> {
-        mdbx_result(self.txn_execute(|txn| ffi::mdbx_drop(txn, db.dbi(), true))?)?;
+    /// Caller must close ALL other [Database] and [Cursor] instances pointing
+    /// to the same dbi BEFORE calling this function.
+    pub unsafe fn drop_db(&self, dbi: ffi::MDBX_dbi) -> Result<()> {
+        mdbx_result(self.txn_execute(|txn| unsafe { ffi::mdbx_drop(txn, dbi, true) })?)?;
 
         Ok(())
     }
@@ -517,8 +510,8 @@ impl Transaction<RO> {
     /// # Safety
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
-    pub unsafe fn close_db(&self, db: Database) -> Result<()> {
-        mdbx_result(ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()))?;
+    pub unsafe fn close_db(&self, dbi: ffi::MDBX_dbi) -> Result<()> {
+        mdbx_result(unsafe { ffi::mdbx_dbi_close(self.env().env_ptr(), dbi) })?;
 
         Ok(())
     }

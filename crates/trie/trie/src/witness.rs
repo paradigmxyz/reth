@@ -7,7 +7,7 @@ use crate::{
 use alloy_rlp::EMPTY_STRING_CODE;
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie_common::HashedPostState;
-use reth_trie_sparse::SparseTrieInterface;
+use reth_trie_sparse::SparseTrie;
 
 use alloy_primitives::{
     keccak256,
@@ -24,7 +24,7 @@ use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
     SerialSparseTrie, SparseStateTrie,
 };
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -84,7 +84,7 @@ impl<T, H> TrieWitness<T, H> {
         self
     }
 
-    /// Set `always_include_root_node` to true. Root node will be included even on empty state.
+    /// Set `always_include_root_node` to true. Root node will be included even in empty state.
     /// This setting is useful if the caller wants to verify the witness against the
     /// parent state root.
     pub const fn always_include_root_node(mut self) -> Self {
@@ -95,8 +95,8 @@ impl<T, H> TrieWitness<T, H> {
 
 impl<T, H> TrieWitness<T, H>
 where
-    T: TrieCursorFactory + Clone + Send + Sync,
-    H: HashedCursorFactory + Clone + Send + Sync,
+    T: TrieCursorFactory + Clone,
+    H: HashedCursorFactory + Clone,
 {
     /// Compute the state transition witness for the trie. Gather all required nodes
     /// to apply `state` on top of the current trie state.
@@ -115,9 +115,10 @@ where
         } else {
             self.get_proof_targets(&state)?
         };
+        let prefix_sets = core::mem::take(&mut self.prefix_sets);
         let multiproof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
-                .with_prefix_sets_mut(self.prefix_sets.clone())
+                .with_prefix_sets_mut(prefix_sets)
                 .multiproof(proof_targets.clone())?;
 
         // No need to reconstruct the rest of the trie, we just need to include
@@ -147,11 +148,7 @@ where
 
         let (tx, rx) = mpsc::channel();
         let blinded_provider_factory = WitnessTrieNodeProviderFactory::new(
-            ProofTrieNodeProviderFactory::new(
-                self.trie_cursor_factory,
-                self.hashed_cursor_factory,
-                Arc::new(self.prefix_sets),
-            ),
+            ProofTrieNodeProviderFactory::new(self.trie_cursor_factory, self.hashed_cursor_factory),
             tx,
         );
         let mut sparse_trie = SparseStateTrie::<SerialSparseTrie>::new();
@@ -187,9 +184,6 @@ where
                     })?;
                 }
             }
-
-            // Calculate storage root after updates.
-            storage_trie.root();
 
             let account = state
                 .accounts

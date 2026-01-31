@@ -33,7 +33,7 @@ async fn main() -> eyre::Result<()> {
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
         .node(EthereumNode::default())
-        .launch()
+        .launch_with_debug_capabilities()
         .await?;
 
     let mut notifications = node.provider.canonical_state_stream();

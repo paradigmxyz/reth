@@ -155,11 +155,7 @@ where
         let mut populated_blocks = 0;
 
         // we only check a maximum of 2 * max_block_history, or the number of blocks in the chain
-        let max_blocks = if self.oracle_config.max_block_history * 2 > header.number() {
-            header.number()
-        } else {
-            self.oracle_config.max_block_history * 2
-        };
+        let max_blocks = header.number().min(self.oracle_config.max_block_history * 2);
 
         for _ in 0..max_blocks {
             // Check if current hash is in cache
@@ -204,10 +200,10 @@ where
         };
 
         // constrain to the max price
-        if let Some(max_price) = self.oracle_config.max_price {
-            if price > max_price {
-                price = max_price;
-            }
+        if let Some(max_price) = self.oracle_config.max_price &&
+            price > max_price
+        {
+            price = max_price;
         }
 
         inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price };
@@ -254,10 +250,10 @@ where
             };
 
             // ignore transactions with a tip under the configured threshold
-            if let Some(ignore_under) = self.ignore_price {
-                if effective_tip < Some(ignore_under) {
-                    continue
-                }
+            if let Some(ignore_under) = self.ignore_price &&
+                effective_tip < Some(ignore_under)
+            {
+                continue
             }
 
             // check if the sender was the coinbase, if so, ignore
@@ -338,10 +334,10 @@ where
         }
 
         // constrain to the max price
-        if let Some(max_price) = self.oracle_config.max_price {
-            if suggestion > max_price {
-                suggestion = max_price;
-            }
+        if let Some(max_price) = self.oracle_config.max_price &&
+            suggestion > max_price
+        {
+            suggestion = max_price;
         }
 
         inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price: suggestion };

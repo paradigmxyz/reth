@@ -48,7 +48,7 @@ pub struct NippyJarWriter<H: NippyJarHeader = ()> {
 impl<H: NippyJarHeader> NippyJarWriter<H> {
     /// Creates a [`NippyJarWriter`] from [`NippyJar`].
     ///
-    /// If will **always** attempt to heal any inconsistent state when called.
+    /// It will **always** attempt to heal any inconsistent state when called.
     pub fn new(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
@@ -292,7 +292,12 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                 // If all rows are to be pruned
                 if new_num_offsets <= 1 {
                     // <= 1 because the one offset would actually be the expected file data size
-                    self.offsets_file.get_mut().set_len(1)?;
+                    //
+                    // When no rows remain, keep the offset size byte and the final offset (data
+                    // file size = 0). This maintains the same structure as when
+                    // a file is initially created.
+                    // See `NippyJarWriter::create_or_open_files` for the initial file format.
+                    self.offsets_file.get_mut().set_len(1 + OFFSET_SIZE_BYTES as u64)?;
                     self.data_file.get_mut().set_len(0)?;
                 } else {
                     // Calculate the new length for the on-disk offset list
@@ -342,11 +347,27 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
     /// Commits configuration and offsets to disk. It drains the internal offset list.
     pub fn commit(&mut self) -> Result<(), NippyJarError> {
+        self.sync_all()?;
+        self.finalize()?;
+        Ok(())
+    }
+
+    /// Syncs data and offsets to disk.
+    ///
+    /// This does NOT commit the configuration. Call [`Self::finalize`] after to write the
+    /// configuration and mark the writer as clean.
+    pub fn sync_all(&mut self) -> Result<(), NippyJarError> {
         self.data_file.flush()?;
         self.data_file.get_ref().sync_all()?;
 
         self.commit_offsets()?;
+        Ok(())
+    }
 
+    /// Commits configuration to disk and marks the writer as clean.
+    ///
+    /// Must be called after [`Self::sync_all`] to complete the commit.
+    pub fn finalize(&mut self) -> Result<(), NippyJarError> {
         // Flushes `max_row_size` and total `rows` to disk.
         self.jar.freeze_config()?;
         self.dirty = false;
@@ -404,10 +425,10 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         // Appends new offsets to disk
         for offset in self.offsets.drain(..) {
-            if let Some(last_offset_ondisk) = last_offset_ondisk.take() {
-                if last_offset_ondisk == offset {
-                    continue
-                }
+            if let Some(last_offset_ondisk) = last_offset_ondisk.take() &&
+                last_offset_ondisk == offset
+            {
+                continue
             }
             self.offsets_file.write_all(&offset.to_le_bytes())?;
         }

@@ -1,24 +1,27 @@
 //! Transactions management for the p2p network.
 
+use alloy_consensus::transaction::TxHashRef;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
 /// Aggregation on configurable parameters for [`TransactionsManager`].
 pub mod config;
 /// Default and spec'd bounds.
 pub mod constants;
 /// Component responsible for fetching transactions from [`NewPooledTransactionHashes`].
 pub mod fetcher;
-/// Defines the [`TransactionPolicies`] trait for aggregating transaction-related policies.
+/// Defines the traits for transaction-related policies.
 pub mod policy;
 
 pub use self::constants::{
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
-use config::{AnnouncementAcceptance, StrictEthAnnouncementFilter, TransactionPropagationKind};
+use config::AnnouncementAcceptance;
 pub use config::{
-    AnnouncementFilteringPolicy, TransactionFetcherConfig, TransactionPropagationMode,
-    TransactionPropagationPolicy, TransactionsManagerConfig,
+    AnnouncementFilteringPolicy, TransactionFetcherConfig, TransactionIngressPolicy,
+    TransactionPropagationMode, TransactionPropagationPolicy, TransactionsManagerConfig,
 };
-use policy::{NetworkPolicies, TransactionPolicies};
+use policy::NetworkPolicies;
 
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
 
@@ -26,14 +29,14 @@ use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_B
 use crate::{
     budget::{
         DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
-        DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
-        DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+        DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_STREAM,
     },
     cache::LruCache,
     duration_metered_exec, metered_poll_nested_stream_with_budget,
     metrics::{
         AnnouncedTxTypesMetrics, TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE,
     },
+    transactions::config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
     NetworkHandle, TxTypesCounter,
 };
 use alloy_primitives::{TxHash, B256};
@@ -75,7 +78,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
-use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, trace};
 
 /// The future for importing transactions into the pool.
@@ -97,8 +100,6 @@ pub struct TransactionsHandle<N: NetworkPrimitives = EthNetworkPrimitives> {
     manager_tx: mpsc::UnboundedSender<TransactionsCommand<N>>,
 }
 
-/// Implementation of the `TransactionsHandle` API for use in testnet via type
-/// [`PeerHandle`](crate::test_utils::PeerHandle).
 impl<N: NetworkPrimitives> TransactionsHandle<N> {
     fn send(&self, cmd: TransactionsCommand<N>) {
         let _ = self.manager_tx.send(cmd);
@@ -242,7 +243,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 /// propagate new transactions over the network.
 ///
 /// It can be configured with different policies for transaction propagation and announcement
-/// filtering. See [`NetworkPolicies`] and [`TransactionPolicies`] for more details.
+/// filtering. See [`NetworkPolicies`] for more details.
 ///
 /// ## Network Transaction Processing
 ///
@@ -279,14 +280,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 /// Rate limiting via reputation, bad transaction isolation, peer scoring.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct TransactionsManager<
-    Pool,
-    N: NetworkPrimitives = EthNetworkPrimitives,
-    PBundle: TransactionPolicies = NetworkPolicies<
-        TransactionPropagationKind,
-        StrictEthAnnouncementFilter,
-    >,
-> {
+pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Access to the transaction pool.
     pool: Pool,
     /// Network access.
@@ -337,26 +331,20 @@ pub struct TransactionsManager<
     ///   - no nonce gaps
     ///   - all dynamic fee requirements are (currently) met
     ///   - account has enough balance to cover the transaction's gas
-    pending_transactions: ReceiverStream<TxHash>,
+    pending_transactions: mpsc::Receiver<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent<N>>,
     /// How the `TransactionsManager` is configured.
     config: TransactionsManagerConfig,
     /// Network Policies
-    policies: PBundle,
+    policies: NetworkPolicies<N>,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
     /// `AnnouncedTxTypes` metrics
     announced_tx_types_metrics: AnnouncedTxTypesMetrics,
 }
 
-impl<Pool: TransactionPool, N: NetworkPrimitives>
-    TransactionsManager<
-        Pool,
-        N,
-        NetworkPolicies<TransactionPropagationKind, StrictEthAnnouncementFilter>,
-    >
-{
+impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Sets up a new instance.
     ///
     /// Note: This expects an existing [`NetworkManager`](crate::NetworkManager) instance.
@@ -371,14 +359,15 @@ impl<Pool: TransactionPool, N: NetworkPrimitives>
             pool,
             from_network,
             transactions_manager_config,
-            NetworkPolicies::default(),
+            NetworkPolicies::new(
+                TransactionPropagationKind::default(),
+                StrictEthAnnouncementFilter::default(),
+            ),
         )
     }
 }
 
-impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
-    TransactionsManager<Pool, N, PBundle>
-{
+impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Sets up a new instance with given the settings.
     ///
     /// Note: This expects an existing [`NetworkManager`](crate::NetworkManager) instance.
@@ -387,7 +376,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
         pool: Pool,
         from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent<N>>,
         transactions_manager_config: TransactionsManagerConfig,
-        policies: PBundle,
+        policies: NetworkPolicies<N>,
     ) -> Self {
         let network_events = network.event_listener();
 
@@ -420,7 +409,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
-            pending_transactions: ReceiverStream::new(pending),
+            pending_transactions: pending,
             transaction_events: UnboundedMeteredReceiver::new(
                 from_network,
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
@@ -440,9 +429,20 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
     /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns
     /// `false` if [`TransactionsManager`] is operating close to full capacity.
     fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
-        self.pending_pool_imports_info
-            .has_capacity(self.pending_pool_imports_info.max_pending_pool_imports) &&
+        self.has_capacity_for_pending_pool_imports() &&
             self.transaction_fetcher.has_capacity_for_fetching_pending_hashes()
+    }
+
+    /// Returns `true` if [`TransactionsManager`] has capacity for more pending pool imports.
+    fn has_capacity_for_pending_pool_imports(&self) -> bool {
+        self.remaining_pool_import_capacity() > 0
+    }
+
+    /// Returns the remaining capacity for pending pool imports.
+    fn remaining_pool_import_capacity(&self) -> usize {
+        self.pending_pool_imports_info.max_pending_pool_imports.saturating_sub(
+            self.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed),
+        )
     }
 
     fn report_peer_bad_transactions(&self, peer_id: PeerId) {
@@ -507,7 +507,9 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
     }
 
     /// Runs an operation to fetch hashes that are cached in [`TransactionFetcher`].
-    fn on_fetch_hashes_pending_fetch(&mut self) {
+    ///
+    /// Returns `true` if a request was sent.
+    fn on_fetch_hashes_pending_fetch(&mut self) -> bool {
         // try drain transaction hashes pending fetch
         let info = &self.pending_pool_imports_info;
         let max_pending_pool_imports = info.max_pending_pool_imports;
@@ -515,7 +517,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
             |divisor| info.has_capacity(max_pending_pool_imports / divisor);
 
         self.transaction_fetcher
-            .on_fetch_pending_hashes(&self.peers, has_capacity_wrt_pending_pool_imports);
+            .on_fetch_pending_hashes(&self.peers, has_capacity_wrt_pending_pool_imports)
     }
 
     fn on_request_error(&self, peer_id: PeerId, req_err: RequestError) {
@@ -558,9 +560,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
     }
 }
 
-impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
-    TransactionsManager<Pool, N, PBundle>
-{
+impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Processes a batch import results.
     fn on_batch_import_result(&mut self, batch_results: Vec<PoolResult<AddedTransactionOutcome>>) {
         for res in batch_results {
@@ -648,7 +648,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
         //
         // known txns have already been successfully fetched or received over gossip.
         //
-        // most hashes will be filtered out here since this the mempool protocol is a gossip
+        // most hashes will be filtered out here since the mempool protocol is a gossip
         // protocol, healthy peers will send many of the same hashes.
         //
         let hashes_count_pre_pool_filter = partially_valid_msg.len();
@@ -695,12 +695,11 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
                 }
             };
 
-            if is_eth68_message {
-                if let Some((actual_ty_byte, _)) = *metadata_ref_mut {
-                    if let Ok(parsed_tx_type) = TxType::try_from(actual_ty_byte) {
-                        tx_types_counter.increase_by_tx_type(parsed_tx_type);
-                    }
-                }
+            if is_eth68_message &&
+                let Some((actual_ty_byte, _)) = *metadata_ref_mut &&
+                let Ok(parsed_tx_type) = TxType::try_from(actual_ty_byte)
+            {
+                tx_types_counter.increase_by_tx_type(parsed_tx_type);
             }
 
             let decision = self
@@ -828,16 +827,13 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
     }
 }
 
-impl<Pool, N, PBundle> TransactionsManager<Pool, N, PBundle>
+impl<Pool, N> TransactionsManager<Pool, N>
 where
     Pool: TransactionPool + Unpin + 'static,
-
     N: NetworkPrimitives<
             BroadcastedTransaction: SignedTransaction,
             PooledTransaction: SignedTransaction,
         > + Unpin,
-
-    PBundle: TransactionPolicies,
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
 {
@@ -875,9 +871,8 @@ where
         peer_id: PeerId,
         propagation_mode: PropagationMode,
     ) -> Option<PropagatedTransactions> {
-        trace!(target: "net::tx", ?peer_id, "Propagating transactions to peer");
-
         let peer = self.peers.get_mut(&peer_id)?;
+        trace!(target: "net::tx", ?peer_id, "Propagating transactions to peer");
         let mut propagated = PropagatedTransactions::default();
 
         // filter all transactions unknown to the peer
@@ -1282,10 +1277,26 @@ where
         }
     }
 
+    /// Returns true if the ingress policy allows processing messages from the given peer.
+    fn accepts_incoming_from(&self, peer_id: &PeerId) -> bool {
+        if self.config.ingress_policy.allows_all() {
+            return true;
+        }
+        let Some(peer) = self.peers.get(peer_id) else {
+            return false;
+        };
+        self.config.ingress_policy.allows(peer.peer_kind())
+    }
+
     /// Handles dedicated transaction events related to the `eth` protocol.
     fn on_network_tx_event(&mut self, event: NetworkTransactionEvent<N>) {
         match event {
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
+                if !self.accepts_incoming_from(&peer_id) {
+                    trace!(target: "net::tx", peer_id=format!("{peer_id:#}"), policy=?self.config.ingress_policy, "Ignoring full transactions from peer blocked by ingress policy");
+                    return;
+                }
+
                 // ensure we didn't receive any blob transactions as these are disallowed to be
                 // broadcasted in full
 
@@ -1306,6 +1317,10 @@ where
                 }
             }
             NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
+                if !self.accepts_incoming_from(&peer_id) {
+                    trace!(target: "net::tx", peer_id=format!("{peer_id:#}"), policy=?self.config.ingress_policy, "Ignoring transaction hashes from peer blocked by ingress policy");
+                    return;
+                }
                 self.on_new_pooled_transaction_hashes(peer_id, msg)
             }
             NetworkTransactionEvent::GetPooledTransactions { peer_id, request, response } => {
@@ -1332,12 +1347,20 @@ where
             return
         }
 
+        // Early return if we don't have capacity for any imports
+        if !self.has_capacity_for_pending_pool_imports() {
+            return
+        }
+
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
+        let client_version = peer.client_version.clone();
         let mut transactions = transactions.0;
+
+        let start = Instant::now();
 
         // mark the transactions as received
         self.transaction_fetcher
-            .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| *tx.tx_hash()));
+            .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| tx.tx_hash()));
 
         // track that the peer knows these transaction, but only if this is a new broadcast.
         // If we received the transactions as the response to our `GetPooledTransactions``
@@ -1363,51 +1386,61 @@ where
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
 
-        // 2. filter out transactions that are invalid or already pending import pre-size to avoid
-        //    reallocations
-        let mut new_txs = Vec::with_capacity(transactions.len());
-        for tx in transactions {
-            // recover transaction
-            let tx = match tx.try_into_recovered() {
-                Ok(tx) => tx,
+        // Remove known and invalid transactions
+        transactions.retain(|tx| {
+            if let Entry::Occupied(mut entry) = self.transactions_by_peers.entry(*tx.tx_hash()) {
+                entry.get_mut().insert(peer_id);
+                return false
+            }
+            if self.bad_imports.contains(tx.tx_hash()) {
+                trace!(target: "net::tx",
+                    peer_id=format!("{peer_id:#}"),
+                    hash=%tx.tx_hash(),
+                    %client_version,
+                    "received a known bad transaction from peer"
+                );
+                has_bad_transactions = true;
+                return false;
+            }
+            true
+        });
+
+        // Truncate to remaining capacity before recovery to avoid wasting CPU on transactions
+        // that won't be imported anyway.
+        let capacity = self.remaining_pool_import_capacity();
+        if transactions.len() > capacity {
+            let skipped = transactions.len() - capacity;
+            transactions.truncate(capacity);
+            self.metrics
+                .skipped_transactions_pending_pool_imports_at_capacity
+                .increment(skipped as u64);
+            trace!(target: "net::tx", skipped, capacity, "Truncated transactions batch to capacity");
+        }
+
+        let txs_len = transactions.len();
+
+        let new_txs = transactions
+            .into_par_iter()
+            .filter_map(|tx| match tx.try_into_recovered() {
+                Ok(tx) => Some(Pool::Transaction::from_pooled(tx)),
                 Err(badtx) => {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         hash=%badtx.tx_hash(),
-                        client_version=%peer.client_version,
+                        client_version=%client_version,
                         "failed ecrecovery for transaction"
                     );
-                    has_bad_transactions = true;
-                    continue
+                    None
                 }
-            };
+            })
+            .collect::<Vec<_>>();
 
-            match self.transactions_by_peers.entry(*tx.tx_hash()) {
-                Entry::Occupied(mut entry) => {
-                    // transaction was already inserted
-                    entry.get_mut().insert(peer_id);
-                }
-                Entry::Vacant(entry) => {
-                    if self.bad_imports.contains(tx.tx_hash()) {
-                        trace!(target: "net::tx",
-                            peer_id=format!("{peer_id:#}"),
-                            hash=%tx.tx_hash(),
-                            client_version=%peer.client_version,
-                            "received a known bad transaction from peer"
-                        );
-                        has_bad_transactions = true;
-                    } else {
-                        // this is a new transaction that should be imported into the pool
+        has_bad_transactions |= new_txs.len() != txs_len;
 
-                        let pool_transaction = Pool::Transaction::from_pooled(tx);
-                        new_txs.push(pool_transaction);
-
-                        entry.insert(HashSet::from([peer_id]));
-                    }
-                }
-            }
+        // Record the transactions as seen by the peer
+        for tx in &new_txs {
+            self.transactions_by_peers.insert(*tx.hash(), HashSet::from([peer_id]));
         }
-        new_txs.shrink_to_fit();
 
         // 3. import new transactions as a batch to minimize lock contention on the underlying
         // pool
@@ -1445,7 +1478,7 @@ where
             self.metrics
                 .occurrences_of_transaction_already_seen_by_peer
                 .increment(num_already_seen_by_peer);
-            trace!(target: "net::tx", num_txs=%num_already_seen_by_peer, ?peer_id, client=?peer.client_version, "Peer sent already seen transactions");
+            trace!(target: "net::tx", num_txs=%num_already_seen_by_peer, ?peer_id, client=%client_version, "Peer sent already seen transactions");
         }
 
         if has_bad_transactions {
@@ -1456,6 +1489,8 @@ where
         if num_already_seen_by_peer > 0 {
             self.report_already_seen(peer_id);
         }
+
+        self.metrics.pool_import_prepare_duration.record(start.elapsed());
     }
 
     /// Processes a [`FetchEvent`].
@@ -1491,8 +1526,7 @@ impl<
                 BroadcastedTransaction: SignedTransaction,
                 PooledTransaction: SignedTransaction,
             > + Unpin,
-        PBundle: TransactionPolicies + Unpin,
-    > Future for TransactionsManager<Pool, N, PBundle>
+    > Future for TransactionsManager<Pool, N>
 where
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
@@ -1528,36 +1562,31 @@ where
         // We don't expect this buffer to be large, since only pending transactions are
         // emitted here.
         let mut new_txs = Vec::new();
-        let maybe_more_pending_txns = metered_poll_nested_stream_with_budget!(
-            poll_durations.acc_imported_txns,
-            "net::tx",
-            "Pending transactions stream",
-            DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
-            this.pending_transactions.poll_next_unpin(cx),
-            |hash| new_txs.push(hash)
-        );
+        let maybe_more_pending_txns = match this.pending_transactions.poll_recv_many(
+            cx,
+            &mut new_txs,
+            SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
+        ) {
+            Poll::Ready(count) => {
+                if count == SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE {
+                    // we filled the entire buffer capacity and need to try again on the next poll
+                    // immediately
+                    true
+                } else {
+                    // try once more, because mostlikely the channel is now empty and the waker is
+                    // registered if this is pending, if we filled additional hashes, we poll again
+                    // on the next iteration
+                    let limit =
+                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE -
+                            new_txs.len();
+                    this.pending_transactions.poll_recv_many(cx, &mut new_txs, limit).is_ready()
+                }
+            }
+            Poll::Pending => false,
+        };
         if !new_txs.is_empty() {
             this.on_new_pending_transactions(new_txs);
         }
-
-        // Advance inflight fetch requests (flush transaction fetcher and queue for
-        // import to pool).
-        //
-        // The smallest decodable transaction is an empty legacy transaction, 10 bytes
-        // (2 MiB / 10 bytes > 200k transactions).
-        //
-        // Since transactions aren't validated until they are inserted into the pool,
-        // this can potentially queue >200k transactions for insertion to pool. More
-        // if the message size is bigger than the soft limit on a `PooledTransactions`
-        // response which is 2 MiB.
-        let maybe_more_tx_fetch_events = metered_poll_nested_stream_with_budget!(
-            poll_durations.acc_fetch_events,
-            "net::tx",
-            "Transaction fetch events stream",
-            DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-            this.transaction_fetcher.poll_next_unpin(cx),
-            |event| this.on_fetch_event(event),
-        );
 
         // Advance incoming transaction events (stream new txns/announcements from
         // network manager and queue for import to pool/fetch txns).
@@ -1580,6 +1609,25 @@ where
             DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
             this.transaction_events.poll_next_unpin(cx),
             |event| this.on_network_tx_event(event),
+        );
+
+        // Advance inflight fetch requests (flush transaction fetcher and queue for
+        // import to pool).
+        //
+        // The smallest decodable transaction is an empty legacy transaction, 10 bytes
+        // (2 MiB / 10 bytes > 200k transactions).
+        //
+        // Since transactions aren't validated until they are inserted into the pool,
+        // this can potentially queue >200k transactions for insertion to pool. More
+        // if the message size is bigger than the soft limit on a `PooledTransactions`
+        // response which is 2 MiB.
+        let mut maybe_more_tx_fetch_events = metered_poll_nested_stream_with_budget!(
+            poll_durations.acc_fetch_events,
+            "net::tx",
+            "Transaction fetch events stream",
+            DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+            this.transaction_fetcher.poll_next_unpin(cx),
+            |event| this.on_fetch_event(event),
         );
 
         // Advance pool imports (flush txns to pool).
@@ -1611,8 +1659,10 @@ where
         // Sends at most one request.
         duration_metered_exec!(
             {
-                if this.has_capacity_for_fetching_pending_hashes() {
-                    this.on_fetch_hashes_pending_fetch();
+                if this.has_capacity_for_fetching_pending_hashes() &&
+                    this.on_fetch_hashes_pending_fetch()
+                {
+                    maybe_more_tx_fetch_events = true;
                 }
             },
             poll_durations.acc_pending_fetch
@@ -1903,14 +1953,22 @@ impl PooledTransactionsHashesBuilder {
     fn new(version: EthVersion) -> Self {
         match version {
             EthVersion::Eth66 | EthVersion::Eth67 => Self::Eth66(Default::default()),
-            EthVersion::Eth68 | EthVersion::Eth69 => Self::Eth68(Default::default()),
+            EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 => {
+                Self::Eth68(Default::default())
+            }
         }
     }
 
     fn build(self) -> NewPooledTransactionHashes {
         match self {
-            Self::Eth66(msg) => msg.into(),
-            Self::Eth68(msg) => msg.into(),
+            Self::Eth66(mut msg) => {
+                msg.0.shrink_to_fit();
+                msg.into()
+            }
+            Self::Eth68(mut msg) => {
+                msg.shrink_to_fit();
+                msg.into()
+            }
         }
     }
 }
@@ -1972,7 +2030,7 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
         &self.request_tx
     }
 
-    /// Return a
+    /// Returns a mutable reference to the seen transactions LRU cache.
     pub const fn seen_transactions_mut(&mut self) -> &mut LruCache<TxHash> {
         &mut self.seen_transactions
     }
@@ -2894,11 +2952,7 @@ mod tests {
         let network_handle = network_manager.handle().clone();
         let network_service_handle = tokio::spawn(network_manager);
 
-        let mut tx_manager = TransactionsManager::<
-            TestPool,
-            EthNetworkPrimitives,
-            NetworkPolicies<TransactionPropagationKind, RelaxedEthAnnouncementFilter>,
-        >::with_policy(
+        let mut tx_manager = TransactionsManager::<TestPool, EthNetworkPrimitives>::with_policy(
             network_handle.clone(),
             pool.clone(),
             from_network_rx,

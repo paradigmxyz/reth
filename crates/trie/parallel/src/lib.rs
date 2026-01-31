@@ -5,7 +5,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 mod storage_root_targets;
@@ -21,6 +21,12 @@ pub mod root;
 pub mod proof;
 
 pub mod proof_task;
+
+/// Async value encoder for V2 proofs.
+pub(crate) mod value_encoder;
+
+/// V2 multiproof targets and chunking.
+pub mod targets_v2;
 
 /// Parallel state root metrics.
 #[cfg(feature = "metrics")]

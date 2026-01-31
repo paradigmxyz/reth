@@ -11,7 +11,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub use crate::resolver::{DnsResolver, MapResolver, Resolver};
 use crate::{
@@ -268,9 +268,6 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                     }
                     DnsEntry::Link(link_entry) => {
                         if kind.is_link() {
-                            if let Some(tree) = self.trees.get_mut(&link) {
-                                tree.resolved_links_mut().insert(hash, link_entry.clone());
-                            }
                             self.sync_tree_with_link(link_entry)
                         } else {
                             debug!(target: "disc::dns",%link_entry, domain=%link.domain, ?hash, "resolved unexpected Link entry");
@@ -583,8 +580,14 @@ mod tests {
         // await recheck timeout
         tokio::time::sleep(config.recheck_interval).await;
 
+        let mut new_root = root.clone();
+        new_root.sequence_number = new_root.sequence_number.saturating_add(1);
+        new_root.enr_root = "NEW_ENR_ROOT".to_string();
+        new_root.sign(&secret_key).unwrap();
+        resolver.insert(link.domain.clone(), new_root.to_string());
+
         let enr = Enr::empty(&secret_key).unwrap();
-        resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
+        resolver.insert(format!("{}.{}", new_root.enr_root.clone(), link.domain), enr.to_base64());
 
         let event = poll_fn(|cx| service.poll(cx)).await;
 

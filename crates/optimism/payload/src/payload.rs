@@ -12,16 +12,17 @@ use alloy_rpc_types_engine::{
     BlobsBundleV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2, ExecutionPayloadV1,
     ExecutionPayloadV3, PayloadId,
 };
-use op_alloy_consensus::{encode_holocene_extra_data, EIP1559ParamError};
+use op_alloy_consensus::{encode_holocene_extra_data, encode_jovian_extra_data, EIP1559ParamError};
 use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpExecutionPayloadV4,
 };
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_chainspec::EthChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
 use reth_payload_builder::{EthPayloadBuilderAttributes, PayloadBuilderError};
-use reth_payload_primitives::{BuildNextEnv, BuiltPayload, PayloadBuilderAttributes};
+use reth_payload_primitives::{
+    BuildNextEnv, BuiltPayload, BuiltPayloadExecutedBlock, PayloadBuilderAttributes,
+};
 use reth_primitives_traits::{
     NodePrimitives, SealedBlock, SealedHeader, SignedTransaction, WithEncoded,
 };
@@ -44,6 +45,8 @@ pub struct OpPayloadBuilderAttributes<T> {
     pub gas_limit: Option<u64>,
     /// EIP-1559 parameters for the generated payload
     pub eip_1559_params: Option<B64>,
+    /// Min base fee for the generated payload (only available post-Jovian)
+    pub min_base_fee: Option<u64>,
 }
 
 impl<T> Default for OpPayloadBuilderAttributes<T> {
@@ -54,18 +57,32 @@ impl<T> Default for OpPayloadBuilderAttributes<T> {
             gas_limit: Default::default(),
             eip_1559_params: Default::default(),
             transactions: Default::default(),
+            min_base_fee: Default::default(),
         }
     }
 }
 
 impl<T> OpPayloadBuilderAttributes<T> {
-    /// Extracts the `eip1559` parameters for the payload.
+    /// Extracts the extra data parameters post-Holocene hardfork.
+    /// In Holocene, those parameters are the EIP-1559 base fee parameters.
     pub fn get_holocene_extra_data(
         &self,
         default_base_fee_params: BaseFeeParams,
     ) -> Result<Bytes, EIP1559ParamError> {
         self.eip_1559_params
             .map(|params| encode_holocene_extra_data(params, default_base_fee_params))
+            .ok_or(EIP1559ParamError::NoEIP1559Params)?
+    }
+
+    /// Extracts the extra data parameters post-Jovian hardfork.
+    /// Those parameters are the EIP-1559 parameters from Holocene and the minimum base fee.
+    pub fn get_jovian_extra_data(
+        &self,
+        default_base_fee_params: BaseFeeParams,
+    ) -> Result<Bytes, EIP1559ParamError> {
+        let min_base_fee = self.min_base_fee.ok_or(EIP1559ParamError::MinBaseFeeNotSet)?;
+        self.eip_1559_params
+            .map(|params| encode_jovian_extra_data(params, default_base_fee_params, min_base_fee))
             .ok_or(EIP1559ParamError::NoEIP1559Params)?
     }
 }
@@ -91,14 +108,7 @@ impl<T: Decodable2718 + Send + Sync + Debug + Unpin + 'static> PayloadBuilderAtt
             .unwrap_or_default()
             .into_iter()
             .map(|data| {
-                let mut buf = data.as_ref();
-                let tx = Decodable2718::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
-
-                if !buf.is_empty() {
-                    return Err(alloy_rlp::Error::UnexpectedLength);
-                }
-
-                Ok(WithEncoded::new(data, tx))
+                Decodable2718::decode_2718_exact(data.as_ref()).map(|tx| WithEncoded::new(data, tx))
             })
             .collect::<Result<_, _>>()?;
 
@@ -118,6 +128,7 @@ impl<T: Decodable2718 + Send + Sync + Debug + Unpin + 'static> PayloadBuilderAtt
             transactions,
             gas_limit: attributes.gas_limit,
             eip_1559_params: attributes.eip_1559_params,
+            min_base_fee: attributes.min_base_fee,
         })
     }
 
@@ -166,7 +177,7 @@ pub struct OpBuiltPayload<N: NodePrimitives = OpPrimitives> {
     /// Sealed block
     pub(crate) block: Arc<SealedBlock<N::Block>>,
     /// Block execution data for the payload, if any.
-    pub(crate) executed_block: Option<ExecutedBlockWithTrieUpdates<N>>,
+    pub(crate) executed_block: Option<BuiltPayloadExecutedBlock<N>>,
     /// The fees of the block
     pub(crate) fees: U256,
 }
@@ -179,7 +190,7 @@ impl<N: NodePrimitives> OpBuiltPayload<N> {
         id: PayloadId,
         block: Arc<SealedBlock<N::Block>>,
         fees: U256,
-        executed_block: Option<ExecutedBlockWithTrieUpdates<N>>,
+        executed_block: Option<BuiltPayloadExecutedBlock<N>>,
     ) -> Self {
         Self { id, block, fees, executed_block }
     }
@@ -216,7 +227,7 @@ impl<N: NodePrimitives> BuiltPayload for OpBuiltPayload<N> {
         self.fees
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<N>> {
+    fn executed_block(&self) -> Option<BuiltPayloadExecutedBlock<N>> {
         self.executed_block.clone()
     }
 
@@ -332,6 +343,9 @@ where
 /// Generates the payload id for the configured payload from the [`OpPayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
+///
+/// Note: This must be updated whenever the [`OpPayloadAttributes`] changes for a hardfork.
+/// See also <https://github.com/ethereum-optimism/op-geth/blob/d401af16f2dd94b010a72eaef10e07ac10b31931/miner/payload_building.go#L59-L59>
 pub fn payload_id_optimism(
     parent: &B256,
     attributes: &OpPayloadAttributes,
@@ -377,8 +391,14 @@ pub fn payload_id_optimism(
         hasher.update(eip_1559_params.as_slice());
     }
 
+    if let Some(min_base_fee) = attributes.min_base_fee {
+        hasher.update(min_base_fee.to_be_bytes());
+    }
+
     let mut out = hasher.finalize();
     out[0] = payload_version;
+
+    #[allow(deprecated)] // generic-array 0.14 deprecated
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
 }
 
@@ -394,7 +414,13 @@ where
         parent: &SealedHeader<H>,
         chain_spec: &ChainSpec,
     ) -> Result<Self, PayloadBuilderError> {
-        let extra_data = if chain_spec.is_holocene_active_at_timestamp(attributes.timestamp()) {
+        let extra_data = if chain_spec.is_jovian_active_at_timestamp(attributes.timestamp()) {
+            attributes
+                .get_jovian_extra_data(
+                    chain_spec.base_fee_params_at_timestamp(attributes.timestamp()),
+                )
+                .map_err(PayloadBuilderError::other)?
+        } else if chain_spec.is_holocene_active_at_timestamp(attributes.timestamp()) {
             attributes
                 .get_holocene_extra_data(
                     chain_spec.base_fee_params_at_timestamp(attributes.timestamp()),
@@ -443,6 +469,7 @@ mod tests {
             no_tx_pool: None,
             gas_limit: Some(30000000),
             eip_1559_params: None,
+            min_base_fee: None,
         };
 
         // Reth's `PayloadId` should match op-geth's `PayloadId`. This fails
@@ -452,6 +479,37 @@ mod tests {
                 &b256!("0x3533bf30edaf9505d0810bf475cbe4e5f4b9889904b9845e83efdeab4e92eb1e"),
                 &attrs,
                 EngineApiMessageVersion::V3 as u8
+            )
+        );
+    }
+
+    #[test]
+    fn test_payload_id_parity_op_geth_jovian() {
+        // <https://github.com/ethereum-optimism/op-geth/compare/optimism...mattsse:op-geth:matt/check-payload-id-equality>
+        let expected =
+            PayloadId::new(FixedBytes::<8>::from_str("0x046c65ffc4d659ec").unwrap().into());
+        let attrs = OpPayloadAttributes {
+            payload_attributes: PayloadAttributes {
+                timestamp: 1728933301,
+                prev_randao: b256!("0x9158595abbdab2c90635087619aa7042bbebe47642dfab3c9bfb934f6b082765"),
+                suggested_fee_recipient: address!("0x4200000000000000000000000000000000000011"),
+                withdrawals: Some([].into()),
+                parent_beacon_block_root: b256!("0x8fe0193b9bf83cb7e5a08538e494fecc23046aab9a497af3704f4afdae3250ff").into(),
+            },
+            transactions: Some([bytes!("7ef8f8a0dc19cfa777d90980e4875d0a548a881baaa3f83f14d1bc0d3038bc329350e54194deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e20000f424000000000000000000000000300000000670d6d890000000000000125000000000000000000000000000000000000000000000000000000000000000700000000000000000000000000000000000000000000000000000000000000014bf9181db6e381d4384bbf69c48b0ee0eed23c6ca26143c6d2544f9d39997a590000000000000000000000007f83d659683caf2767fd3c720981d51f5bc365bc")].into()),
+            no_tx_pool: None,
+            gas_limit: Some(30000000),
+            eip_1559_params: None,
+            min_base_fee: Some(100),
+        };
+
+        // Reth's `PayloadId` should match op-geth's `PayloadId`. This fails
+        assert_eq!(
+            expected,
+            payload_id_optimism(
+                &b256!("0x3533bf30edaf9505d0810bf475cbe4e5f4b9889904b9845e83efdeab4e92eb1e"),
+                &attrs,
+                EngineApiMessageVersion::V4 as u8
             )
         );
     }
@@ -473,5 +531,51 @@ mod tests {
             OpPayloadBuilderAttributes { eip_1559_params: Some(B64::ZERO), ..Default::default() };
         let extra_data = attributes.get_holocene_extra_data(BaseFeeParams::new(80, 60));
         assert_eq!(extra_data.unwrap(), Bytes::copy_from_slice(&[0, 0, 0, 0, 80, 0, 0, 0, 60]));
+    }
+
+    #[test]
+    fn test_get_extra_data_post_jovian() {
+        let attributes: OpPayloadBuilderAttributes<OpTransactionSigned> =
+            OpPayloadBuilderAttributes {
+                eip_1559_params: Some(B64::from_str("0x0000000800000008").unwrap()),
+                min_base_fee: Some(10),
+                ..Default::default()
+            };
+        let extra_data = attributes.get_jovian_extra_data(BaseFeeParams::new(80, 60));
+        assert_eq!(
+            extra_data.unwrap(),
+            // Version byte is 1 for Jovian, then holocene payload followed by 8 bytes for the
+            // minimum base fee
+            Bytes::copy_from_slice(&[1, 0, 0, 0, 8, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 10])
+        );
+    }
+
+    #[test]
+    fn test_get_extra_data_post_jovian_default() {
+        let attributes: OpPayloadBuilderAttributes<OpTransactionSigned> =
+            OpPayloadBuilderAttributes {
+                eip_1559_params: Some(B64::ZERO),
+                min_base_fee: Some(10),
+                ..Default::default()
+            };
+        let extra_data = attributes.get_jovian_extra_data(BaseFeeParams::new(80, 60));
+        assert_eq!(
+            extra_data.unwrap(),
+            // Version byte is 1 for Jovian, then holocene payload followed by 8 bytes for the
+            // minimum base fee
+            Bytes::copy_from_slice(&[1, 0, 0, 0, 80, 0, 0, 0, 60, 0, 0, 0, 0, 0, 0, 0, 10])
+        );
+    }
+
+    #[test]
+    fn test_get_extra_data_post_jovian_no_base_fee() {
+        let attributes: OpPayloadBuilderAttributes<OpTransactionSigned> =
+            OpPayloadBuilderAttributes {
+                eip_1559_params: Some(B64::ZERO),
+                min_base_fee: None,
+                ..Default::default()
+            };
+        let extra_data = attributes.get_jovian_extra_data(BaseFeeParams::new(80, 60));
+        assert_eq!(extra_data.unwrap_err(), EIP1559ParamError::MinBaseFeeNotSet);
     }
 }

@@ -6,10 +6,16 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod in_memory;
 pub use in_memory::*;
+
+mod deferred_trie;
+pub use deferred_trie::*;
+
+mod lazy_overlay;
+pub use lazy_overlay::*;
 
 mod noop;
 
@@ -20,7 +26,8 @@ mod notifications;
 pub use notifications::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications, ForkChoiceStream,
-    ForkChoiceSubscriptions,
+    ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
+    WatchValueStream,
 };
 
 mod memory_overlay;

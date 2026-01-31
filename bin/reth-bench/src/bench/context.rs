@@ -7,6 +7,7 @@ use alloy_primitives::address;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
+use alloy_transport::layers::RetryBackoffLayer;
 use reqwest::Url;
 use reth_node_core::args::BenchmarkArgs;
 use tracing::info;
@@ -49,7 +50,9 @@ impl BenchContext {
         }
 
         // set up alloy client for blocks
-        let client = ClientBuilder::default().http(rpc_url.parse()?);
+        let client = ClientBuilder::default()
+            .layer(RetryBackoffLayer::new(10, 800, u64::MAX))
+            .http(rpc_url.parse()?);
         let block_provider = RootProvider::<AnyNetwork>::new(client);
 
         // Check if this is an OP chain by checking code at a predeploy address.
@@ -100,14 +103,20 @@ impl BenchContext {
             (bench_args.from, bench_args.to)
         };
 
-        // If neither `--from` nor `--to` are provided, we will run the benchmark continuously,
+        // If `--to` are not provided, we will run the benchmark continuously,
         // starting at the latest block.
-        let mut benchmark_mode = BenchMode::new(from, to)?;
+        let latest_block = block_provider
+            .get_block_by_number(BlockNumberOrTag::Latest)
+            .full()
+            .await?
+            .ok_or_else(|| eyre::eyre!("Failed to fetch latest block from RPC"))?;
+        let mut benchmark_mode = BenchMode::new(from, to, latest_block.into_inner().number())?;
 
         let first_block = match benchmark_mode {
-            BenchMode::Continuous => {
-                // fetch Latest block
-                block_provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap()
+            BenchMode::Continuous(start) => {
+                block_provider.get_block_by_number(start.into()).full().await?.ok_or_else(|| {
+                    eyre::eyre!("Failed to fetch block {} from RPC for continuous mode", start)
+                })?
             }
             BenchMode::Range(ref mut range) => {
                 match range.next() {
@@ -117,7 +126,9 @@ impl BenchContext {
                             .get_block_by_number(block_number.into())
                             .full()
                             .await?
-                            .unwrap()
+                            .ok_or_else(|| {
+                                eyre::eyre!("Failed to fetch block {} from RPC", block_number)
+                            })?
                     }
                     None => {
                         return Err(eyre::eyre!(

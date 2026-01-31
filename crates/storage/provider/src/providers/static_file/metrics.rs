@@ -3,13 +3,13 @@ use std::{collections::HashMap, time::Duration};
 use itertools::Itertools;
 use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
-use reth_static_file_types::StaticFileSegment;
+use reth_static_file_types::{StaticFileMap, StaticFileSegment};
 use strum::{EnumIter, IntoEnumIterator};
 
 /// Metrics for the static file provider.
 #[derive(Debug)]
 pub struct StaticFileProviderMetrics {
-    segments: HashMap<StaticFileSegment, StaticFileSegmentMetrics>,
+    segments: StaticFileMap<StaticFileSegmentMetrics>,
     segment_operations: HashMap<
         (StaticFileSegment, StaticFileProviderOperation),
         StaticFileProviderOperationMetrics,
@@ -19,14 +19,19 @@ pub struct StaticFileProviderMetrics {
 impl Default for StaticFileProviderMetrics {
     fn default() -> Self {
         Self {
-            segments: StaticFileSegment::iter()
-                .map(|segment| {
-                    (
-                        segment,
-                        StaticFileSegmentMetrics::new_with_labels(&[("segment", segment.as_str())]),
-                    )
-                })
-                .collect(),
+            segments: Box::new(
+                StaticFileSegment::iter()
+                    .map(|segment| {
+                        (
+                            segment,
+                            StaticFileSegmentMetrics::new_with_labels(&[(
+                                "segment",
+                                segment.as_str(),
+                            )]),
+                        )
+                    })
+                    .collect(),
+            ),
             segment_operations: StaticFileSegment::iter()
                 .cartesian_product(StaticFileProviderOperation::iter())
                 .map(|(segment, operation)| {
@@ -51,10 +56,10 @@ impl StaticFileProviderMetrics {
         files: usize,
         entries: usize,
     ) {
-        self.segments.get(&segment).expect("segment metrics should exist").size.set(size as f64);
-        self.segments.get(&segment).expect("segment metrics should exist").files.set(files as f64);
+        self.segments.get(segment).expect("segment metrics should exist").size.set(size as f64);
+        self.segments.get(segment).expect("segment metrics should exist").files.set(files as f64);
         self.segments
-            .get(&segment)
+            .get(segment)
             .expect("segment metrics should exist")
             .entries
             .set(entries as f64);
@@ -66,18 +71,15 @@ impl StaticFileProviderMetrics {
         operation: StaticFileProviderOperation,
         duration: Option<Duration>,
     ) {
-        self.segment_operations
+        let segment_operation = self
+            .segment_operations
             .get(&(segment, operation))
-            .expect("segment operation metrics should exist")
-            .calls_total
-            .increment(1);
+            .expect("segment operation metrics should exist");
+
+        segment_operation.calls_total.increment(1);
 
         if let Some(duration) = duration {
-            self.segment_operations
-                .get(&(segment, operation))
-                .expect("segment operation metrics should exist")
-                .write_duration_seconds
-                .record(duration.as_secs_f64());
+            segment_operation.write_duration_seconds.record(duration.as_secs_f64());
         }
     }
 

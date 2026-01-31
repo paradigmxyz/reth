@@ -1,38 +1,21 @@
 //! Internal errors for the tree module.
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::B256;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
 use reth_evm::execute::InternalBlockExecutionError;
 use reth_payload_primitives::NewPayloadError;
 use reth_primitives_traits::{Block, BlockBody, SealedBlock};
-use tokio::sync::oneshot::error::TryRecvError;
 
-/// This is an error that can come from advancing persistence. Either this can be a
-/// [`TryRecvError`], or this can be a [`ProviderError`]
+/// This is an error that can come from advancing persistence.
 #[derive(Debug, thiserror::Error)]
 pub enum AdvancePersistenceError {
-    /// An error that can be from failing to receive a value from persistence
-    #[error(transparent)]
-    RecvError(#[from] TryRecvError),
+    /// The persistence channel was closed unexpectedly
+    #[error("persistence channel closed")]
+    ChannelClosed,
     /// A provider error
     #[error(transparent)]
     Provider(#[from] ProviderError),
-    /// Missing ancestor.
-    ///
-    /// This error occurs when we need to compute the state root for a block with missing trie
-    /// updates, but the ancestor block is not available. State root computation requires the state
-    /// from the parent block as a starting point.
-    ///
-    /// A block may be missing the trie updates when it's a fork chain block building on top of the
-    /// historical database state. Since we don't store the historical trie state, we cannot
-    /// generate the trie updates for it until the moment when database is unwound to the canonical
-    /// chain.
-    ///
-    /// Also see [`reth_chain_state::ExecutedTrieUpdates::Missing`].
-    #[error("Missing ancestor with hash {0}")]
-    MissingAncestor(B256),
 }
 
 #[derive(thiserror::Error)]
