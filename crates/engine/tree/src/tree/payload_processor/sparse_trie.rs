@@ -703,7 +703,7 @@ where
     // branch node during a removal and then re-add that branch back during a later leaf addition.
     // This is an optimization, but also a requirement inherited from multiproof generating, which
     // can't know the order that leaf operations happen in.
-    let mut removed_accounts = Vec::new();
+    let mut removed_accounts = Vec::with_capacity(state.accounts.len() + results.len());
 
     // Update account storage roots
     let _enter =
