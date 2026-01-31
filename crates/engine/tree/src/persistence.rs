@@ -157,7 +157,7 @@ where
 
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
-        self.metrics.save_blocks_block_count.record(block_count as f64);
+        self.metrics.save_blocks_batch_size.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
 
         Ok(last_block)
@@ -391,3 +391,4 @@ mod tests {
         }
     }
 }
+
