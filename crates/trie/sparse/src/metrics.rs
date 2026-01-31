@@ -1,6 +1,9 @@
 //! Metrics for the sparse state trie
 
-use reth_metrics::{metrics::Histogram, Metrics};
+use reth_metrics::{
+    metrics::{Counter, Histogram},
+    Metrics,
+};
 
 /// Metrics for the sparse state trie
 #[derive(Default, Debug)]
@@ -72,4 +75,15 @@ pub(crate) struct SparseStateTrieInnerMetrics {
     pub(crate) multiproof_skipped_storage_nodes: Histogram,
     /// Histogram of total storage nodes, including those that were skipped.
     pub(crate) multiproof_total_storage_nodes: Histogram,
+}
+
+/// Metrics for hot account tracking during pruning
+#[allow(dead_code)]
+#[derive(Metrics)]
+#[metrics(scope = "sparse_trie_hot_accounts")]
+pub(crate) struct HotAccountMetrics {
+    /// Number of storage tries preserved due to hot account status
+    pub(crate) hot_storage_tries_preserved: Counter,
+    /// Number of storage tries evicted (not hot)
+    pub(crate) cold_storage_tries_evicted: Counter,
 }

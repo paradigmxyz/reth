@@ -1073,6 +1073,54 @@ where
             },
         );
     }
+
+    /// Prunes the trie while preserving hot accounts.
+    ///
+    /// This method combines depth-based pruning with hot account preservation:
+    /// - Hot accounts (Tier A/B/C) are preserved at full depth
+    /// - Cold accounts are pruned aggressively or evicted entirely
+    /// - Storage tries for hot accounts are preserved
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Configuration for smart pruning with hot account tracking
+    ///
+    /// # Preconditions
+    ///
+    /// Node hashes must be computed via `root()` before calling this method.
+    #[cfg(feature = "std")]
+    #[instrument(target = "trie::sparse", skip_all)]
+    pub fn prune_preserving(&mut self, config: &crate::hot_accounts::SmartPruneConfig<'_>) {
+        let fn_start = std::time::Instant::now();
+
+        // Prune state and storage tries in parallel
+        rayon::join(
+            || {
+                // Prune account trie with hot account awareness
+                if let Some(trie) = self.state.as_revealed_mut() {
+                    trie.prune_preserving(config);
+                }
+                // Keep revealed paths only for hot accounts
+                self.revealed_account_paths.retain(|path| {
+                    if path.len() >= 64 {
+                        let hashed = B256::from_slice(&path.pack()[..32]);
+                        config.hot_accounts.should_preserve(&hashed)
+                    } else {
+                        false
+                    }
+                });
+            },
+            || {
+                self.storage.prune_preserving(config);
+            },
+        );
+
+        debug!(
+            target: "trie::sparse",
+            elapsed = ?fn_start.elapsed(),
+            "SparseStateTrie::prune_preserving completed"
+        );
+    }
 }
 
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
@@ -1202,6 +1250,142 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             ?stats.prune_elapsed,
             ?stats.total_elapsed,
             "StorageTries::prune completed"
+        );
+    }
+
+    /// Prunes storage tries using tiered eviction based on hotness levels.
+    ///
+    /// Eviction order (when over budget):
+    /// 1. Cold accounts (eviction_priority = 0) - evicted first
+    /// 2. Dynamic accounts (eviction_priority = 1) - evicted under memory pressure
+    /// 3. Tier A/B accounts - never evicted
+    ///
+    /// Pruning (depth-limiting):
+    /// - Tier A/B: Full depth preserved
+    /// - Dynamic/Cold: Pruned to max_depth
+    fn prune_preserving(&mut self, config: &crate::hot_accounts::SmartPruneConfig<'_>) {
+        let fn_start = std::time::Instant::now();
+
+        // Update heat for accessed tries
+        self.modifications.update_and_reset();
+
+        // Categorize tries by eviction priority
+        // None = never evict, Some(0) = cold (evict first), Some(1) = dynamic (evict under
+        // pressure)
+        let mut never_evict = Vec::new();
+        let mut cold_tries = Vec::new(); // priority 0
+        let mut dynamic_tries = Vec::new(); // priority 1
+
+        for (address, trie) in &self.tries {
+            let size = match trie {
+                RevealableSparseTrie::Blind(_) => 0,
+                RevealableSparseTrie::Revealed(t) => t.size_hint(),
+            };
+
+            match config.eviction_priority(address) {
+                None => never_evict.push((*address, size)),
+                Some(0) => cold_tries.push((*address, size)),
+                Some(_) => dynamic_tries.push((*address, size)),
+            }
+        }
+
+        // Calculate budget: max_storage_tries is a soft limit
+        // We always keep never_evict, then fill remaining slots with dynamic, then cold
+        let budget = config.max_storage_tries;
+        let always_kept = never_evict.len();
+
+        let mut tries_to_evict = Vec::new();
+        let mut tries_to_keep_prunable = Vec::new();
+
+        // If we're under budget with just never_evict, we can keep some dynamic and cold
+        if always_kept < budget {
+            let remaining_budget = budget - always_kept;
+
+            // Sort dynamic and cold by size (larger = more valuable to keep)
+            // Add heat multiplier for cold tries
+            let mut cold_scored: Vec<_> = cold_tries
+                .iter()
+                .map(|(addr, size)| {
+                    let heat = self.modifications.heat(addr);
+                    let heat_multiplier = 1 + (heat.min(4) / 2) as usize;
+                    (*addr, *size, size * heat_multiplier)
+                })
+                .collect();
+
+            let mut dynamic_scored: Vec<_> =
+                dynamic_tries.iter().map(|(addr, size)| (*addr, *size, *size * 2)).collect();
+
+            // Sort by score descending (use Reverse for descending order)
+            cold_scored.sort_unstable_by_key(|(_, _, score)| std::cmp::Reverse(*score));
+            dynamic_scored.sort_unstable_by_key(|(_, _, score)| std::cmp::Reverse(*score));
+
+            // Keep top dynamic tries first (they're hotter), then cold
+            let mut kept = 0;
+            for (addr, size, _) in dynamic_scored {
+                if kept >= remaining_budget {
+                    tries_to_evict.push(addr);
+                } else {
+                    tries_to_keep_prunable.push((addr, size));
+                    kept += 1;
+                }
+            }
+            for (addr, size, _) in cold_scored {
+                if kept >= remaining_budget {
+                    tries_to_evict.push(addr);
+                } else {
+                    tries_to_keep_prunable.push((addr, size));
+                    kept += 1;
+                }
+            }
+        } else {
+            // Over budget with just never_evict - evict all cold and dynamic
+            tries_to_evict.extend(cold_tries.iter().map(|(addr, _)| *addr));
+            tries_to_evict.extend(dynamic_tries.iter().map(|(addr, _)| *addr));
+        }
+
+        // Evict selected tries
+        for address in &tries_to_evict {
+            if let Some(mut trie) = self.tries.remove(address) {
+                trie.clear();
+                self.cleared_tries.push(trie);
+            }
+            if let Some(mut paths) = self.revealed_paths.remove(address) {
+                paths.clear();
+                self.cleared_revealed_paths.push(paths);
+            }
+            self.modifications.remove(address);
+        }
+
+        // Prune kept tries that should have depth-limiting
+        const MIN_SIZE_TO_PRUNE: usize = 1000;
+        for (address, size) in &tries_to_keep_prunable {
+            if *size < MIN_SIZE_TO_PRUNE {
+                continue;
+            }
+            let Some(heat_state) = self.modifications.get_mut(address) else { continue };
+            if heat_state.prune_backlog < 2 {
+                continue;
+            }
+            if let Some(trie) = self.tries.get_mut(address).and_then(|t| t.as_revealed_mut()) {
+                trie.prune(config.max_depth);
+                heat_state.prune_backlog = 0;
+            }
+        }
+
+        // Clear revealed_paths for prunable tries only (not never_evict)
+        for (addr, _) in &tries_to_keep_prunable {
+            if let Some(paths) = self.revealed_paths.get_mut(addr) {
+                paths.clear();
+            }
+        }
+
+        debug!(
+            target: "trie::sparse",
+            never_evict = never_evict.len(),
+            kept_prunable = tries_to_keep_prunable.len(),
+            evicted = tries_to_evict.len(),
+            elapsed = ?fn_start.elapsed(),
+            "StorageTries::prune_preserving completed"
         );
     }
 }

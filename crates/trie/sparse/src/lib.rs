@@ -16,6 +16,14 @@ pub use traits::*;
 
 pub mod provider;
 
+#[cfg(feature = "std")]
+pub mod hot_accounts;
+#[cfg(feature = "std")]
+pub use hot_accounts::{
+    BloomFilter, HotAccountConfig, HotStorageSlots, Hotness, RotatingBloomFilter, SmartPruneConfig,
+    StorageSlotKey, TieredHotAccounts,
+};
+
 #[cfg(feature = "metrics")]
 mod metrics;
 
