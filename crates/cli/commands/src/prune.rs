@@ -86,7 +86,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                         output.segments.iter().map(|(_, seg)| seg.pruned).sum();
                     total_pruned = total_pruned.saturating_add(batch_pruned);
 
-                    if output.progress.is_finished() {
+                    // Check if all segments are finished (not just the overall progress,
+                    // since the pruner sets overall progress from the last segment only)
+                    let all_segments_finished =
+                        output.segments.iter().all(|(_, seg)| seg.progress.is_finished());
+
+                    if all_segments_finished {
                         break;
                     }
 
