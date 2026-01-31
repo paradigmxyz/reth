@@ -4,7 +4,7 @@ use crate::dirs::{LogsDir, PlatformPath};
 use clap::{ArgAction, Args, ValueEnum};
 use reth_tracing::{
     tracing_subscriber::filter::Directive, FileInfo, FileWorkerGuard, LayerInfo, Layers, LogFormat,
-    RethTracer, Tracer,
+    RethTracer, Tracer, TracingInitResult,
 };
 use std::{fmt, fmt::Display};
 use tracing::{level_filters::LevelFilter, Level};
@@ -127,21 +127,26 @@ impl LogArgs {
 
     /// Initializes tracing with the configured options from cli args.
     ///
-    /// Uses default layers for tracing. If you need to include custom layers,
-    /// use `init_tracing_with_layers` instead.
-    ///
     /// Returns the file worker guard if a file worker was configured.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        self.init_tracing_with_layers(Layers::new())
+        self.init_tracing_with_layers(Layers::new(), false).map(|r| r.into_guard())
     }
 
     /// Initializes tracing with the configured options from cli args.
     ///
-    /// Returns the file worker guard, and the file name, if a file worker was configured.
+    /// When `enable_reload` is true, a global log handle is installed that allows changing
+    /// log levels at runtime via RPC methods like `debug_verbosity` and `debug_vmodule`.
+    ///
+    /// # Arguments
+    /// * `layers` - Pre-configured layers to include
+    /// * `enable_reload` - If true, enables runtime log level changes
+    ///
+    /// Returns the tracing result containing the file worker guard.
     pub fn init_tracing_with_layers(
         &self,
         layers: Layers,
-    ) -> eyre::Result<Option<FileWorkerGuard>> {
+        enable_reload: bool,
+    ) -> eyre::Result<TracingInitResult> {
         let mut tracer = RethTracer::new();
 
         let stdout = self.layer_info(self.log_stdout_format, self.log_stdout_filter.clone(), true);
@@ -168,8 +173,7 @@ impl LogArgs {
             tracer = tracer.with_tracy(config);
         }
 
-        let guard = tracer.init_with_layers(layers)?;
-        Ok(guard)
+        tracer.init_with_layers_and_reload(layers, enable_reload)
     }
 }
 

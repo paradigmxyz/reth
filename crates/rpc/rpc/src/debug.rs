@@ -1073,12 +1073,12 @@ where
         Ok(())
     }
 
-    async fn debug_verbosity(&self, _level: usize) -> RpcResult<()> {
-        Ok(())
+    async fn debug_verbosity(&self, level: usize) -> RpcResult<()> {
+        reth_tracing::set_log_verbosity(level).map_err(internal_rpc_err)
     }
 
-    async fn debug_vmodule(&self, _pattern: String) -> RpcResult<()> {
-        Ok(())
+    async fn debug_vmodule(&self, pattern: String) -> RpcResult<()> {
+        reth_tracing::set_log_vmodule(&pattern).map_err(internal_rpc_err)
     }
 
     async fn debug_write_block_profile(&self, _file: String) -> RpcResult<()> {

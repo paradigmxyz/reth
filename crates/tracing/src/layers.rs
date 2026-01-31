@@ -1,4 +1,4 @@
-use crate::{formatter::LogFormat, LayerInfo};
+use crate::{formatter::LogFormat, LayerInfo, LogFilterReloadHandle};
 #[cfg(feature = "otlp-logs")]
 use reth_tracing_otlp::{log_layer, OtlpLogsConfig};
 #[cfg(feature = "otlp")]
@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
+use tracing_subscriber::{filter::Directive, reload, EnvFilter, Layer, Registry};
 
 /// A worker guard returned by the file layer.
 ///
@@ -108,6 +108,33 @@ impl Layers {
         let layer = format.apply(filter, color, None);
         self.add_layer(layer);
         Ok(())
+    }
+
+    /// Adds a stdout layer with reloadable filter support.
+    ///
+    /// This is similar to [`Self::stdout`] but wraps the filter in a reload layer,
+    /// allowing the filter to be changed at runtime via the returned handle.
+    ///
+    /// # Arguments
+    /// * `format` - The log message format.
+    /// * `default_directive` - Directive for the default logging level.
+    /// * `filters` - Additional filter directives as a string.
+    /// * `color` - Optional color configuration for the log messages.
+    ///
+    /// # Returns
+    /// An `eyre::Result<LogFilterReloadHandle>` containing the handle to reload the filter.
+    pub(crate) fn stdout_reloadable(
+        &mut self,
+        format: LogFormat,
+        default_directive: Directive,
+        filters: &str,
+        color: Option<String>,
+    ) -> eyre::Result<LogFilterReloadHandle> {
+        let filter = build_env_filter(Some(default_directive), filters)?;
+        let (reloadable_filter, handle) = reload::Layer::new(filter);
+        let layer = format.apply_reloadable(reloadable_filter, color);
+        self.add_layer(layer);
+        Ok(handle)
     }
 
     /// Adds a file logging layer to the layers collection.
