@@ -293,6 +293,18 @@ pub trait SparseTrieExt: SparseTrie {
     /// The number of nodes converted to hash stubs.
     fn prune(&mut self, max_depth: usize) -> usize;
 
+    /// Prunes the trie while preserving hot accounts.
+    ///
+    /// Similar to `prune`, but applies different depth limits based on account hotness:
+    /// - Hot accounts (Tier A/B/C) are preserved at full depth
+    /// - Cold accounts are pruned to `max_depth`
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Configuration containing hot account tracker and depth settings
+    #[cfg(feature = "std")]
+    fn prune_preserving(&mut self, config: &crate::hot_accounts::SmartPruneConfig<'_>);
+
     /// Applies leaf updates to the sparse trie.
     ///
     /// When a [`LeafUpdate::Changed`] is successfully applied, it is removed from the

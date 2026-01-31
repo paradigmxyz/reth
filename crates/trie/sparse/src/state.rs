@@ -1073,6 +1073,54 @@ where
             },
         );
     }
+
+    /// Prunes the trie while preserving hot accounts.
+    ///
+    /// This method combines depth-based pruning with hot account preservation:
+    /// - Hot accounts (Tier A/B/C) are preserved at full depth
+    /// - Cold accounts are pruned aggressively or evicted entirely
+    /// - Storage tries for hot accounts are preserved
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Configuration for smart pruning with hot account tracking
+    ///
+    /// # Preconditions
+    ///
+    /// Node hashes must be computed via `root()` before calling this method.
+    #[cfg(feature = "std")]
+    #[instrument(target = "trie::sparse", skip_all)]
+    pub fn prune_preserving(&mut self, config: &crate::hot_accounts::SmartPruneConfig<'_>) {
+        let fn_start = std::time::Instant::now();
+
+        // Prune state and storage tries in parallel
+        rayon::join(
+            || {
+                // Prune account trie with hot account awareness
+                if let Some(trie) = self.state.as_revealed_mut() {
+                    trie.prune_preserving(config);
+                }
+                // Keep revealed paths only for hot accounts
+                self.revealed_account_paths.retain(|path| {
+                    if path.len() >= 64 {
+                        let hashed = B256::from_slice(&path.pack()[..32]);
+                        config.hot_accounts.should_preserve(&hashed)
+                    } else {
+                        false
+                    }
+                });
+            },
+            || {
+                self.storage.prune_preserving(config);
+            },
+        );
+
+        debug!(
+            target: "trie::sparse",
+            elapsed = ?fn_start.elapsed(),
+            "SparseStateTrie::prune_preserving completed"
+        );
+    }
 }
 
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
@@ -1202,6 +1250,106 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             ?stats.prune_elapsed,
             ?stats.total_elapsed,
             "StorageTries::prune completed"
+        );
+    }
+
+    /// Prunes storage tries while preserving hot accounts.
+    ///
+    /// Hot accounts (as determined by the tracker) are preserved entirely.
+    /// Cold accounts are subject to normal pruning/eviction.
+    fn prune_preserving(&mut self, config: &crate::hot_accounts::SmartPruneConfig<'_>) {
+        let fn_start = std::time::Instant::now();
+
+        // Update heat for accessed tries
+        self.modifications.update_and_reset();
+
+        // Score tries: hot accounts get infinite score, cold accounts get size*heat
+        let trie_info: Vec<(B256, usize, bool)> = self
+            .tries
+            .iter()
+            .map(|(address, trie)| {
+                let is_hot = config.hot_accounts.should_preserve_storage(address);
+                let size = match trie {
+                    RevealableSparseTrie::Blind(_) => 0,
+                    RevealableSparseTrie::Revealed(t) => t.size_hint(),
+                };
+                (*address, size, is_hot)
+            })
+            .collect();
+
+        // Separate hot and cold tries
+        let hot_addrs: HashSet<B256> =
+            trie_info.iter().filter(|(_, _, hot)| *hot).map(|(addr, _, _)| *addr).collect();
+
+        let mut cold_tries: Vec<(B256, usize)> = trie_info
+            .iter()
+            .filter(|(_, _, hot)| !*hot)
+            .map(|(addr, size, _)| {
+                let heat = self.modifications.heat(addr);
+                let heat_multiplier = 1 + (heat.min(4) / 2) as usize;
+                (*addr, size * heat_multiplier)
+            })
+            .collect();
+
+        // Keep top N cold tries by score
+        let cold_slots = config.max_storage_tries.saturating_sub(hot_addrs.len());
+        if cold_tries.len() > cold_slots {
+            cold_tries.select_nth_unstable_by(cold_slots.saturating_sub(1), |a, b| b.1.cmp(&a.1));
+            cold_tries.truncate(cold_slots);
+        }
+        let cold_to_keep: HashSet<B256> = cold_tries.iter().map(|(addr, _)| *addr).collect();
+
+        // Evict cold tries that didn't make the cut
+        let tries_to_evict: Vec<B256> = self
+            .tries
+            .keys()
+            .filter(|addr| !hot_addrs.contains(*addr) && !cold_to_keep.contains(*addr))
+            .copied()
+            .collect();
+
+        for address in &tries_to_evict {
+            if let Some(mut trie) = self.tries.remove(address) {
+                trie.clear();
+                self.cleared_tries.push(trie);
+            }
+            if let Some(mut paths) = self.revealed_paths.remove(address) {
+                paths.clear();
+                self.cleared_revealed_paths.push(paths);
+            }
+            self.modifications.remove(address);
+        }
+
+        // Prune cold tries that were kept (hot tries are not pruned)
+        const MIN_SIZE_TO_PRUNE: usize = 1000;
+        for (address, size) in &cold_tries {
+            if *size < MIN_SIZE_TO_PRUNE {
+                continue;
+            }
+            if let Some(heat_state) = self.modifications.get_mut(address) {
+                if heat_state.prune_backlog < 2 {
+                    continue;
+                }
+                if let Some(trie) = self.tries.get_mut(address).and_then(|t| t.as_revealed_mut()) {
+                    trie.prune(config.max_depth);
+                    heat_state.prune_backlog = 0;
+                }
+            }
+        }
+
+        // Clear revealed_paths for cold tries only
+        for addr in &cold_to_keep {
+            if let Some(paths) = self.revealed_paths.get_mut(addr) {
+                paths.clear();
+            }
+        }
+
+        debug!(
+            target: "trie::sparse",
+            hot_preserved = hot_addrs.len(),
+            cold_kept = cold_to_keep.len(),
+            evicted = tries_to_evict.len(),
+            elapsed = ?fn_start.elapsed(),
+            "StorageTries::prune_preserving completed"
         );
     }
 }
