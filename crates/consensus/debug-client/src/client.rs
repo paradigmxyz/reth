@@ -160,7 +160,7 @@ mod tests {
 
         // Push hashes 0..65
         for i in 0..65u8 {
-            buffer.push(B256::with_last_byte(i));
+            buffer.enqueue(B256::with_last_byte(i));
         }
 
         // offset=0 should return the most recent (64)
@@ -181,7 +181,7 @@ mod tests {
         let mut buffer: AllocRingBuffer<B256> = AllocRingBuffer::new(65);
 
         // With only 1 entry, only offset=0 works
-        buffer.push(B256::with_last_byte(1));
+        buffer.enqueue(B256::with_last_byte(1));
         assert_eq!(get_hash_at_offset(&buffer, 0), Some(B256::with_last_byte(1)));
         assert_eq!(get_hash_at_offset(&buffer, 1), None);
         assert_eq!(get_hash_at_offset(&buffer, 32), None);
@@ -189,7 +189,7 @@ mod tests {
 
         // With 33 entries, offset=32 works but offset=64 doesn't
         for i in 2..=33u8 {
-            buffer.push(B256::with_last_byte(i));
+            buffer.enqueue(B256::with_last_byte(i));
         }
         assert_eq!(get_hash_at_offset(&buffer, 32), Some(B256::with_last_byte(1)));
         assert_eq!(get_hash_at_offset(&buffer, 64), None);
