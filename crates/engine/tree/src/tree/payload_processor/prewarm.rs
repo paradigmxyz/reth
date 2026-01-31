@@ -52,7 +52,7 @@ use tracing::{debug, debug_span, instrument, trace, warn, Span};
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
     /// Prewarm by executing transactions from a stream.
-    Transactions(Receiver<Tx>),
+    Transactions(Receiver<(usize, Tx)>),
     /// Prewarm by prefetching slots from a Block Access List.
     BlockAccessList(Arc<BlockAccessList>),
 }
@@ -140,7 +140,7 @@ where
     /// subsequent transactions in the block.
     fn spawn_all<Tx>(
         &self,
-        pending: mpsc::Receiver<Tx>,
+        pending: mpsc::Receiver<(usize, Tx)>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
     ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
@@ -169,8 +169,8 @@ where
             let tx_sender = ctx.clone().spawn_workers(workers_needed, &executor, actions_tx.clone(), done_tx.clone());
 
             // Distribute transactions to workers
-            let mut tx_index = 0usize;
-            while let Ok(tx) = pending.recv() {
+            let mut total_tx_executed = 0usize;
+            while let Ok((tx_index, tx)) = pending.recv() {
                 // Stop distributing if termination was requested
                 if ctx.terminate_execution.load(Ordering::Relaxed) {
                     trace!(
@@ -187,7 +187,7 @@ where
                 // exit early when signaled.
                 let _ = tx_sender.send(indexed_tx);
 
-                tx_index += 1;
+                total_tx_executed += 1;
             }
 
             // drop sender and wait for all tasks to finish
@@ -196,7 +196,7 @@ where
             while done_rx.recv().is_ok() {}
 
             let _ = actions_tx
-                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_index });
+                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: total_tx_executed });
         });
     }
 
