@@ -2,13 +2,16 @@
 
 use alloy_primitives::B256;
 use parking_lot::Mutex;
-use reth_trie_sparse::SparseStateTrie;
+use reth_trie_sparse::{hot_accounts::TieredHotAccounts, SparseStateTrie};
 use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::sync::Arc;
 use tracing::debug;
 
 /// Type alias for the sparse trie type used in preservation.
 pub(super) type SparseTrie = SparseStateTrie<ParallelSparseTrie, ParallelSparseTrie>;
+
+/// Shared handle to hot accounts tracker for recording touches across threads.
+pub(super) type SharedHotAccounts = Arc<Mutex<TieredHotAccounts>>;
 
 /// Shared handle to a preserved sparse trie that can be reused across payload validations.
 ///
@@ -57,11 +60,15 @@ pub(super) enum PreservedSparseTrie {
         /// The state root this trie represents (computed from the previous block).
         /// Used to verify continuity: new payload's `parent_state_root` must match this.
         state_root: B256,
+        /// Hot accounts tracker for trie update optimization (shared for cross-thread access).
+        hot_accounts: SharedHotAccounts,
     },
     /// Cleared trie with preserved allocations, ready for fresh use.
     Cleared {
         /// The sparse state trie with cleared data but preserved allocations.
         trie: SparseTrie,
+        /// Hot accounts tracker for trie update optimization (shared for cross-thread access).
+        hot_accounts: SharedHotAccounts,
     },
 }
 
@@ -70,31 +77,37 @@ impl PreservedSparseTrie {
     ///
     /// The `state_root` is the computed state root from the trie, which becomes the
     /// anchor for determining if subsequent payloads can reuse this trie.
-    pub(super) const fn anchored(trie: SparseTrie, state_root: B256) -> Self {
-        Self::Anchored { trie, state_root }
+    pub(super) const fn anchored(
+        trie: SparseTrie,
+        state_root: B256,
+        hot_accounts: SharedHotAccounts,
+    ) -> Self {
+        Self::Anchored { trie, state_root, hot_accounts }
     }
 
     /// Creates a cleared preserved trie (allocations preserved, data cleared).
-    pub(super) const fn cleared(trie: SparseTrie) -> Self {
-        Self::Cleared { trie }
+    pub(super) const fn cleared(trie: SparseTrie, hot_accounts: SharedHotAccounts) -> Self {
+        Self::Cleared { trie, hot_accounts }
     }
 
-    /// Consumes self and returns the trie for reuse.
+    /// Consumes self and returns the trie and shared hot accounts for reuse.
     ///
     /// If the preserved trie is anchored and the parent state root matches, the pruned
     /// trie structure is reused directly. Otherwise, the trie is cleared but allocations
     /// are preserved to reduce memory overhead.
-    pub(super) fn into_trie_for(self, parent_state_root: B256) -> SparseTrie {
+    pub(super) fn into_trie_for(self, parent_state_root: B256) -> (SparseTrie, SharedHotAccounts) {
         match self {
-            Self::Anchored { trie, state_root } if state_root == parent_state_root => {
+            Self::Anchored { trie, state_root, hot_accounts }
+                if state_root == parent_state_root =>
+            {
                 debug!(
                     target: "engine::tree::payload_processor",
                     %state_root,
                     "Reusing anchored sparse trie for continuation payload"
                 );
-                trie
+                (trie, hot_accounts)
             }
-            Self::Anchored { mut trie, state_root } => {
+            Self::Anchored { mut trie, state_root, hot_accounts } => {
                 debug!(
                     target: "engine::tree::payload_processor",
                     anchor_root = %state_root,
@@ -102,15 +115,16 @@ impl PreservedSparseTrie {
                     "Clearing anchored sparse trie - parent state root mismatch"
                 );
                 trie.clear();
-                trie
+                hot_accounts.lock().clear_dynamic();
+                (trie, hot_accounts)
             }
-            Self::Cleared { trie } => {
+            Self::Cleared { trie, hot_accounts } => {
                 debug!(
                     target: "engine::tree::payload_processor",
                     %parent_state_root,
                     "Using cleared sparse trie with preserved allocations"
                 );
-                trie
+                (trie, hot_accounts)
             }
         }
     }

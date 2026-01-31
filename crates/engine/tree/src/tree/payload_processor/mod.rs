@@ -39,7 +39,9 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{ClearedSparseStateTrie, RevealableSparseTrie, SparseStateTrie};
+use reth_trie_sparse::{
+    hot_accounts::TieredHotAccounts, ClearedSparseStateTrie, RevealableSparseTrie, SparseStateTrie,
+};
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
     collections::BTreeMap,
@@ -61,7 +63,7 @@ pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
 
-use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
+use preserved_sparse_trie::{PreservedSparseTrie, SharedHotAccounts, SharedPreservedSparseTrie};
 
 /// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
 ///
@@ -323,7 +325,7 @@ where
         let (state_root_tx, state_root_rx) = channel();
 
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
-        self.spawn_sparse_trie_task(
+        let hot_accounts = self.spawn_sparse_trie_task(
             sparse_trie_rx,
             proof_handle,
             state_root_tx,
@@ -337,6 +339,7 @@ where
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
+            hot_accounts: Some(hot_accounts),
             _span: span,
         }
     }
@@ -364,6 +367,7 @@ where
             prewarm_handle,
             state_root: None,
             transactions: execution_rx,
+            hot_accounts: None, // Cache-exclusive path doesn't use sparse trie
             _span: Span::current(),
         }
     }
@@ -511,6 +515,7 @@ where
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
+    /// Returns the shared hot accounts tracker for use in the state hook.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task(
         &self,
@@ -520,7 +525,7 @@ where
         from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
         config: &TreeConfig,
         parent_state_root: B256,
-    ) {
+    ) -> SharedHotAccounts {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
         let span = Span::current();
@@ -528,31 +533,33 @@ where
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
 
+        // Extract or create hot accounts BEFORE spawning the task so we can return a clone
+        let (sparse_state_trie, hot_accounts): (_, SharedHotAccounts) = preserved_sparse_trie
+            .take()
+            .map(|preserved| preserved.into_trie_for(parent_state_root))
+            .unwrap_or_else(|| {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    "Creating new sparse trie - no preserved trie available"
+                );
+                let default_trie = RevealableSparseTrie::blind_from(
+                    ParallelSparseTrie::default()
+                        .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
+                );
+                let trie = SparseStateTrie::new()
+                    .with_accounts_trie(default_trie.clone())
+                    .with_default_storage_trie(default_trie)
+                    .with_updates(true);
+                let hot_accounts =
+                    Arc::new(parking_lot::Mutex::new(TieredHotAccounts::for_mainnet()));
+                (trie, hot_accounts)
+            });
+
+        // Clone for the caller before moving into spawned task
+        let hot_accounts_for_caller = hot_accounts.clone();
+
         self.executor.spawn_blocking(move || {
             let _enter = span.entered();
-
-            // Reuse a stored SparseStateTrie if available, applying continuation logic.
-            // If this payload's parent state root matches the preserved trie's anchor,
-            // we can reuse the pruned trie structure. Otherwise, we clear the trie but
-            // keep allocations.
-            let sparse_state_trie = preserved_sparse_trie
-                .take()
-                .map(|preserved| preserved.into_trie_for(parent_state_root))
-                .unwrap_or_else(|| {
-                    debug!(
-                        target: "engine::tree::payload_processor",
-                        "Creating new sparse trie - no preserved trie available"
-                    );
-                    let default_trie = RevealableSparseTrie::blind_from(
-                        ParallelSparseTrie::default().with_parallelism_thresholds(
-                            PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS,
-                        ),
-                    );
-                    SparseStateTrie::new()
-                        .with_accounts_trie(default_trie.clone())
-                        .with_default_storage_trie(default_trie)
-                        .with_updates(true)
-                });
 
             let mut task = if disable_sparse_trie_as_cache {
                 SpawnedSparseTrieTask::Cleared(SparseTrieTask::new(
@@ -593,7 +600,7 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                guard.store(PreservedSparseTrie::cleared(trie));
+                guard.store(PreservedSparseTrie::cleared(trie, hot_accounts));
                 return;
             }
 
@@ -608,11 +615,12 @@ where
                     max_storage_tries,
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                    &hot_accounts,
                 );
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                guard.store(PreservedSparseTrie::anchored(trie, state_root));
+                guard.store(PreservedSparseTrie::anchored(trie, state_root, hot_accounts));
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
@@ -622,9 +630,11 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                guard.store(PreservedSparseTrie::cleared(trie));
+                guard.store(PreservedSparseTrie::cleared(trie, hot_accounts));
             }
         });
+
+        hot_accounts_for_caller
     }
 
     /// Updates the execution cache with the post-execution state from an inserted block.
@@ -692,6 +702,8 @@ pub struct PayloadHandle<Tx, Err, R> {
     transactions: mpsc::Receiver<Result<Tx, Err>>,
     /// Receiver for the state root
     state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    /// Shared hot accounts tracker for recording touched accounts during execution.
+    hot_accounts: Option<SharedHotAccounts>,
     /// Span for tracing
     _span: Span,
 }
@@ -719,13 +731,37 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Returns a state hook to be used to send state updates to this task.
     ///
     /// If a multiproof task is spawned the hook will notify it about new states.
+    /// Also records touched accounts in the hot accounts tracker for preservation.
     pub fn state_hook(&self) -> impl OnStateHook {
+        use alloy_primitives::keccak256;
+
         // convert the channel into a `StateHookSender` that emits an event on drop
         let to_multi_proof = self.to_multi_proof.clone().map(StateHookSender::new);
+        let hot_accounts = self.hot_accounts.clone();
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
                 let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
+            }
+
+            // Record touched accounts in the hot accounts tracker
+            if let Some(ref tracker) = hot_accounts {
+                // Batch the addresses to minimize lock contention
+                let touched: Vec<_> = state
+                    .iter()
+                    .map(|(addr, account)| {
+                        let hashed = keccak256(addr);
+                        // Has code if storage is modified (implies contract) or if account has code
+                        let has_code = !account.storage.is_empty() ||
+                            account.info.code.as_ref().is_some_and(|c| !c.is_empty());
+                        (hashed, has_code)
+                    })
+                    .collect();
+
+                let mut guard = tracker.lock();
+                for (hashed_addr, has_code) in touched {
+                    guard.record(hashed_addr, has_code);
+                }
             }
         }
     }
