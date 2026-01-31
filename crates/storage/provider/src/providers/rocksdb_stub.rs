@@ -208,3 +208,14 @@ impl<T: reth_db_api::table::Table> Iterator for RocksDBIter<T> {
         None
     }
 }
+
+/// Outcome of pruning a history shard in RocksDB (stub).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneShardOutcome {
+    /// Shard was deleted entirely.
+    Deleted,
+    /// Shard was updated with filtered block numbers.
+    Updated,
+    /// Shard was unchanged (no blocks <= `to_block`).
+    Unchanged,
+}
