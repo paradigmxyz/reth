@@ -284,7 +284,9 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
 
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
     fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let key = self.key().expect("key must exist");
+        let Some(key) = self.key() else {
+            return Err(DatabaseError::Other("trie walker key missing".to_string()))
+        };
         let entry = if exact { self.cursor.seek_exact(*key)? } else { self.cursor.seek(*key)? };
         #[cfg(feature = "metrics")]
         self.metrics.inc_branch_nodes_seeked();
