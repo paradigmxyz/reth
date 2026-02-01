@@ -571,6 +571,9 @@ where
             };
 
             let result = task.run();
+            if let Err(e) = &result {
+                tracing::error!(target: "engine::tree::payload_processor", "State root computation failed: {e:?}");
+            }
             // Capture the computed state_root before sending the result
             let computed_state_root = result.as_ref().ok().map(|outcome| outcome.state_root);
 
