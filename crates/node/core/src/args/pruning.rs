@@ -6,7 +6,7 @@ use clap::{builder::RangedU64ValueParser, Args};
 use reth_chainspec::EthereumHardforks;
 use reth_config::config::PruneConfig;
 use reth_prune_types::{
-    PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_UNWIND_SAFE_DISTANCE,
+    PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_DISTANCE, MINIMUM_UNWIND_SAFE_DISTANCE,
 };
 use std::{collections::BTreeMap, ops::Not, sync::OnceLock};
 
@@ -81,7 +81,7 @@ impl Default for DefaultPruningValues {
             minimal_prune_modes: PruneModes {
                 sender_recovery: Some(PruneMode::Full),
                 transaction_lookup: Some(PruneMode::Full),
-                receipts: Some(PruneMode::Full),
+                receipts: Some(PruneMode::Distance(MINIMUM_DISTANCE)),
                 account_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
                 storage_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
                 bodies_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
