@@ -14,7 +14,6 @@ pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
     engine::EngineApiEvent,
 };
-use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::ConfigureEvm;
 use reth_network_p2p::BlockClient;
 use reth_node_types::{BlockTy, NodeTypes};
@@ -97,7 +96,7 @@ where
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
         let persistence_handle =
-            PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx);
+            PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 

@@ -5852,13 +5852,12 @@ dependencies = [
 
 [[package]]
 name = "metrics-derive"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3dbdd96ed57d565ec744cba02862d707acf373c5772d152abae6ec5c4e24f6c"
+checksum = "37a87f4b19620e4c561f7b48f5e6ca085b1780def671696a6a3d9d0c137360ec"
 dependencies = [
  "proc-macro2",
  "quote",
- "regex",
  "syn 2.0.114",
 ]
 
@@ -8437,7 +8436,6 @@ dependencies = [
  "reth-engine-tree",
  "reth-ethereum-consensus",
  "reth-ethereum-engine-primitives",
- "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
  "reth-exex-types",
@@ -10945,6 +10943,7 @@ dependencies = [
  "fixed-map",
  "insta",
  "reth-nippy-jar",
+ "reth-stages-types",
  "serde",
  "serde_json",
  "strum",
