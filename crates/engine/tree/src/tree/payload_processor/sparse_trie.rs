@@ -34,10 +34,67 @@ use reth_trie_sparse::{
 use revm_primitives::{hash_map::Entry, B256Map};
 use smallvec::SmallVec;
 use std::{
+    collections::HashMap,
     sync::mpsc,
     time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, error, instrument, trace};
+
+/// Cache of fetched proof targets that tracks prefixes for coverage detection.
+///
+/// This enables detecting when a target is covered by other targets with different keys
+/// that share a common prefix. For example, if we've fetched `(0x123abc, min_len=3)`,
+/// any subsequent target `(0x123xyz, min_len=3)` is already covered because they share
+/// the prefix `0x123` and we've revealed nodes to depth 3.
+#[derive(Debug, Default, Clone)]
+struct FetchedPrefixes {
+    /// Maps prefix (as Nibbles) to the maximum depth revealed for paths through that prefix.
+    prefixes: HashMap<Nibbles, u8>,
+}
+
+impl FetchedPrefixes {
+    /// Checks if the given target is already covered by previously fetched prefixes.
+    ///
+    /// A target `(key, min_len)` is covered if we've previously fetched any target
+    /// `(other_key, other_min_len)` where:
+    /// - `other_key` shares at least `min_len` nibbles with `key`
+    /// - `other_min_len <= min_len`
+    ///
+    /// This works because both paths share the same node at depth `min_len`, and the
+    /// previous fetch revealed from that depth down. For depths beyond `min_len`,
+    /// coverage requires the same key to have been fetched with a higher `min_len`.
+    fn is_covered(&self, key: B256, min_len: u8) -> bool {
+        if min_len == 0 {
+            return !self.prefixes.is_empty();
+        }
+        let nibbles = Nibbles::unpack(key);
+        let prefix = nibbles.slice(..min_len as usize);
+        self.prefixes.get(&prefix).is_some_and(|&depth| depth >= min_len)
+    }
+
+    /// Marks a target as fetched, recording all prefixes up to `min_len`.
+    ///
+    /// When fetching `(key, min_len)`, we reveal nodes from depth `min_len` down to the leaf.
+    /// The node at depth `min_len` is shared by all keys with the same prefix of length `min_len`.
+    /// So any future target with shared prefix >= `min_len` has its depth `min_len` covered.
+    fn mark_fetched(&mut self, key: B256, min_len: u8) {
+        let nibbles = Nibbles::unpack(key);
+        for len in 1..=min_len {
+            let prefix = nibbles.slice(..len as usize);
+            self.prefixes.entry(prefix).and_modify(|v| *v = (*v).max(min_len)).or_insert(min_len);
+        }
+    }
+
+    /// Checks if covered, and if not, marks as fetched. Returns true if should dispatch.
+    fn check_and_mark(&mut self, key: B256, min_len: u8) -> bool {
+        if self.is_covered(key, min_len) {
+            false
+        } else {
+            self.mark_fetched(key, min_len);
+            true
+        }
+    }
+}
 
 #[expect(clippy::large_enum_variant)]
 pub(super) enum SpawnedSparseTrieTask<BPF, A, S>
@@ -237,11 +294,11 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     ///     to complete.
     pending_account_updates: B256Map<Option<Option<Account>>>,
     /// Cache of account proof targets that were already fetched/requested from the proof workers.
-    /// account -> lowest `min_len` requested.
-    fetched_account_targets: B256Map<u8>,
+    /// Tracks prefixes to detect when targets are covered by other targets with shared prefixes.
+    fetched_account_targets: FetchedPrefixes,
     /// Cache of storage proof targets that have already been fetched/requested from the proof
-    /// workers. account -> slot -> lowest `min_len` requested.
-    fetched_storage_targets: B256Map<B256Map<u8>>,
+    /// workers. Maps account address to prefix cache for that account's storage trie.
+    fetched_storage_targets: B256Map<FetchedPrefixes>,
     /// Whether the last state update has been received.
     finished_state_updates: bool,
     /// Pending targets to be dispatched to the proof workers.
@@ -513,15 +570,8 @@ where
             .map(|(address, mut updates, mut fetched, trie)| {
                 let mut targets = Vec::new();
 
-                trie.update_leaves(&mut updates, |path, min_len| match fetched.entry(path) {
-                    Entry::Occupied(mut entry) => {
-                        if min_len < *entry.get() {
-                            entry.insert(min_len);
-                            targets.push(Target::new(path).with_min_len(min_len));
-                        }
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(min_len);
+                trie.update_leaves(&mut updates, |path, min_len| {
+                    if fetched.check_and_mark(path, min_len) {
                         targets.push(Target::new(path).with_min_len(min_len));
                     }
                 })?;
@@ -540,25 +590,13 @@ where
         }
 
         // Process account trie updates and fill the account targets.
-        self.trie.trie_mut().update_leaves(
-            &mut self.account_updates,
-            |target, min_len| match self.fetched_account_targets.entry(target) {
-                Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
-                        self.pending_targets
-                            .account_targets
-                            .push(Target::new(target).with_min_len(min_len));
-                    }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    self.pending_targets
-                        .account_targets
-                        .push(Target::new(target).with_min_len(min_len));
-                }
-            },
-        )?;
+        self.trie.trie_mut().update_leaves(&mut self.account_updates, |target, min_len| {
+            if self.fetched_account_targets.check_and_mark(target, min_len) {
+                self.pending_targets
+                    .account_targets
+                    .push(Target::new(target).with_min_len(min_len));
+            }
+        })?;
 
         Ok(())
     }
@@ -655,25 +693,13 @@ where
         });
 
         // Process account trie updates and fill the account targets.
-        self.trie.trie_mut().update_leaves(
-            &mut self.account_updates,
-            |target, min_len| match self.fetched_account_targets.entry(target) {
-                Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
-                        self.pending_targets
-                            .account_targets
-                            .push(Target::new(target).with_min_len(min_len));
-                    }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    self.pending_targets
-                        .account_targets
-                        .push(Target::new(target).with_min_len(min_len));
-                }
-            },
-        )?;
+        self.trie.trie_mut().update_leaves(&mut self.account_updates, |target, min_len| {
+            if self.fetched_account_targets.check_and_mark(target, min_len) {
+                self.pending_targets
+                    .account_targets
+                    .push(Target::new(target).with_min_len(min_len));
+            }
+        })?;
 
         Ok(())
     }
