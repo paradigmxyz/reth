@@ -407,6 +407,7 @@ where
             hash: input.hash(),
             parent_hash: input.parent_hash(),
             parent_state_root: parent_block.state_root(),
+            transaction_count: input.transaction_count(),
         };
 
         // Plan the strategy used for state root computation.
