@@ -72,9 +72,9 @@ use std::{
         mpsc::{channel, Receiver, Sender},
         Arc,
     },
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
-use tokio::runtime::Handle;
 use tracing::{debug, debug_span, error, trace};
 
 #[cfg(feature = "metrics")]
@@ -123,6 +123,10 @@ pub struct ProofWorkerHandle {
     account_worker_count: usize,
     /// Whether V2 storage proofs are enabled
     v2_proofs_enabled: bool,
+    /// Storage worker thread handles (wrapped in Arc for Clone)
+    _storage_threads: Arc<Vec<JoinHandle<()>>>,
+    /// Account worker thread handles (wrapped in Arc for Clone)
+    _account_threads: Arc<Vec<JoinHandle<()>>>,
 }
 
 impl ProofWorkerHandle {
@@ -131,14 +135,16 @@ impl ProofWorkerHandle {
     /// Returns a handle for submitting proof tasks to the worker pools.
     /// Workers run until the last handle is dropped.
     ///
+    /// Uses dedicated OS threads instead of Tokio's blocking pool to avoid spawn overhead
+    /// on the critical execution path. Threads are pre-started and block on crossbeam
+    /// receivers, providing zero-latency work dispatch.
+    ///
     /// # Parameters
-    /// - `executor`: Tokio runtime handle for spawning blocking tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `storage_worker_count`: Number of storage workers to spawn
     /// - `account_worker_count`: Number of account workers to spawn
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
     pub fn new<Factory>(
-        executor: Handle,
         task_ctx: ProofTaskCtx<Factory>,
         storage_worker_count: usize,
         account_worker_count: usize,
@@ -165,13 +171,15 @@ impl ProofWorkerHandle {
             storage_worker_count,
             account_worker_count,
             ?v2_proofs_enabled,
-            "Spawning proof worker pools"
+            "Spawning dedicated proof worker thread pools"
         );
 
         let parent_span =
             debug_span!(target: "trie::proof_task", "storage proof workers", ?storage_worker_count)
                 .entered();
-        // Spawn storage workers
+
+        // Spawn storage workers on dedicated OS threads
+        let mut storage_threads = Vec::with_capacity(storage_worker_count);
         for worker_id in 0..storage_worker_count {
             let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
             let task_ctx_clone = task_ctx.clone();
@@ -179,41 +187,48 @@ impl ProofWorkerHandle {
             let storage_available_workers_clone = storage_available_workers.clone();
             let cached_storage_roots = cached_storage_roots.clone();
 
-            executor.spawn_blocking(move || {
-                #[cfg(feature = "metrics")]
-                let metrics = ProofTaskTrieMetrics::default();
-                #[cfg(feature = "metrics")]
-                let cursor_metrics = ProofTaskCursorMetrics::new();
+            let handle = thread::Builder::new()
+                .name(format!("proof-storage-{worker_id}"))
+                .spawn(move || {
+                    #[cfg(feature = "metrics")]
+                    let metrics = ProofTaskTrieMetrics::default();
+                    #[cfg(feature = "metrics")]
+                    let cursor_metrics = ProofTaskCursorMetrics::new();
 
-                let _guard = span.enter();
-                let worker = StorageProofWorker::new(
-                    task_ctx_clone,
-                    work_rx_clone,
-                    worker_id,
-                    storage_available_workers_clone,
-                    cached_storage_roots,
-                    #[cfg(feature = "metrics")]
-                    metrics,
-                    #[cfg(feature = "metrics")]
-                    cursor_metrics,
-                )
-                .with_v2_proofs(v2_proofs_enabled);
-                if let Err(error) = worker.run() {
-                    error!(
-                        target: "trie::proof_task",
+                    let _guard = span.enter();
+                    let worker = StorageProofWorker::new(
+                        task_ctx_clone,
+                        work_rx_clone,
                         worker_id,
-                        ?error,
-                        "Storage worker failed"
-                    );
-                }
-            });
+                        storage_available_workers_clone,
+                        cached_storage_roots,
+                        #[cfg(feature = "metrics")]
+                        metrics,
+                        #[cfg(feature = "metrics")]
+                        cursor_metrics,
+                    )
+                    .with_v2_proofs(v2_proofs_enabled);
+                    if let Err(error) = worker.run() {
+                        error!(
+                            target: "trie::proof_task",
+                            worker_id,
+                            ?error,
+                            "Storage worker failed"
+                        );
+                    }
+                })
+                .expect("failed to spawn storage proof worker thread");
+
+            storage_threads.push(handle);
         }
         drop(parent_span);
 
         let parent_span =
             debug_span!(target: "trie::proof_task", "account proof workers", ?account_worker_count)
                 .entered();
-        // Spawn account workers
+
+        // Spawn account workers on dedicated OS threads
+        let mut account_threads = Vec::with_capacity(account_worker_count);
         for worker_id in 0..account_worker_count {
             let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
             let task_ctx_clone = task_ctx.clone();
@@ -222,35 +237,40 @@ impl ProofWorkerHandle {
             let account_available_workers_clone = account_available_workers.clone();
             let cached_storage_roots = cached_storage_roots.clone();
 
-            executor.spawn_blocking(move || {
-                #[cfg(feature = "metrics")]
-                let metrics = ProofTaskTrieMetrics::default();
-                #[cfg(feature = "metrics")]
-                let cursor_metrics = ProofTaskCursorMetrics::new();
+            let handle = thread::Builder::new()
+                .name(format!("proof-account-{worker_id}"))
+                .spawn(move || {
+                    #[cfg(feature = "metrics")]
+                    let metrics = ProofTaskTrieMetrics::default();
+                    #[cfg(feature = "metrics")]
+                    let cursor_metrics = ProofTaskCursorMetrics::new();
 
-                let _guard = span.enter();
-                let worker = AccountProofWorker::new(
-                    task_ctx_clone,
-                    work_rx_clone,
-                    worker_id,
-                    storage_work_tx_clone,
-                    account_available_workers_clone,
-                    cached_storage_roots,
-                    #[cfg(feature = "metrics")]
-                    metrics,
-                    #[cfg(feature = "metrics")]
-                    cursor_metrics,
-                )
-                .with_v2_proofs(v2_proofs_enabled);
-                if let Err(error) = worker.run() {
-                    error!(
-                        target: "trie::proof_task",
+                    let _guard = span.enter();
+                    let worker = AccountProofWorker::new(
+                        task_ctx_clone,
+                        work_rx_clone,
                         worker_id,
-                        ?error,
-                        "Account worker failed"
-                    );
-                }
-            });
+                        storage_work_tx_clone,
+                        account_available_workers_clone,
+                        cached_storage_roots,
+                        #[cfg(feature = "metrics")]
+                        metrics,
+                        #[cfg(feature = "metrics")]
+                        cursor_metrics,
+                    )
+                    .with_v2_proofs(v2_proofs_enabled);
+                    if let Err(error) = worker.run() {
+                        error!(
+                            target: "trie::proof_task",
+                            worker_id,
+                            ?error,
+                            "Account worker failed"
+                        );
+                    }
+                })
+                .expect("failed to spawn account proof worker thread");
+
+            account_threads.push(handle);
         }
         drop(parent_span);
 
@@ -262,6 +282,8 @@ impl ProofWorkerHandle {
             storage_worker_count,
             account_worker_count,
             v2_proofs_enabled,
+            _storage_threads: Arc::new(storage_threads),
+            _account_threads: Arc::new(account_threads),
         }
     }
 
@@ -2014,7 +2036,6 @@ mod tests {
     fn spawn_proof_workers_creates_handle() {
         let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
         runtime.block_on(async {
-            let handle = tokio::runtime::Handle::current();
             let provider_factory = create_test_provider_factory();
             let changeset_cache = reth_trie_db::ChangesetCache::new();
             let factory = reth_provider::providers::OverlayStateProviderFactory::new(
@@ -2023,7 +2044,7 @@ mod tests {
             );
             let ctx = test_ctx(factory);
 
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, false);
+            let proof_handle = ProofWorkerHandle::new(ctx, 5, 3, false);
 
             // Verify handle can be cloned
             let _cloned_handle = proof_handle.clone();
