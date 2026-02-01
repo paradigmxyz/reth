@@ -52,6 +52,9 @@ struct FetchedPrefixes {
 }
 
 impl FetchedPrefixes {
+    /// The depth of the prefixes to cache.
+    const CACHE_DEPTH: u8 = 6;
+
     /// Checks if the given target is already covered by previously fetched prefixes.
     ///
     /// A target `(key, min_len)` is covered if we've previously fetched any target
@@ -69,7 +72,8 @@ impl FetchedPrefixes {
             return None;
         }
 
-        while self.prefixes.contains(&key.slice(..min_len as usize)) {
+        while min_len <= Self::CACHE_DEPTH && self.prefixes.contains(&key.slice(..min_len as usize))
+        {
             min_len += 1;
         }
 
@@ -83,7 +87,9 @@ impl FetchedPrefixes {
     /// So any future target with shared prefix >= `min_len` has its depth `min_len` covered.
     fn mark_fetched(&mut self, key: B256, min_len: u8) {
         let nibbles = Nibbles::unpack(key);
-        for len in min_len..=64 {
+        self.prefixes.insert(nibbles);
+
+        for len in min_len..=Self::CACHE_DEPTH {
             self.prefixes.insert(nibbles.slice(..len as usize));
         }
     }
