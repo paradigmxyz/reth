@@ -235,7 +235,7 @@ where
         let rev_walker = provider
             .block_body_indices_range(range.clone())?
             .into_iter()
-            .zip(range.collect::<Vec<_>>())
+            .zip(range) 
             .rev();
 
         for (body, number) in rev_walker {
