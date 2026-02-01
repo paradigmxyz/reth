@@ -504,6 +504,9 @@ where
         let block_access_list_hash =
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal));
 
+        tracing::debug!("Bal is {:?}", block_access_list);
+        tracing::debug!("Bal hash is {:?}", block_access_list_hash);
+
         // calculate the state root
         let hashed_state = state.hashed_post_state(&db.bundle_state);
         let (state_root, trie_updates) = state
