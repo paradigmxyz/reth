@@ -1651,14 +1651,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         // If static file entry is ahead of the database entries, then ensure the checkpoint block
         // number matches.
-        let stage_id = match segment {
-            StaticFileSegment::Headers => StageId::Headers,
-            StaticFileSegment::Transactions => StageId::Bodies,
-            StaticFileSegment::Receipts |
-            StaticFileSegment::AccountChangeSets |
-            StaticFileSegment::StorageChangeSets => StageId::Execution,
-            StaticFileSegment::TransactionSenders => StageId::SenderRecovery,
-        };
+        let stage_id = segment_stage_id(segment);
         let checkpoint_block_number =
             provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
         debug!(target: "reth::providers::static_file", ?segment, ?stage_id, checkpoint_block_number, highest_static_file_block, "Retrieved stage checkpoint");
@@ -1790,14 +1783,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         let highest_static_file_block = highest_static_file_block.unwrap_or_default();
 
-        let stage_id = match segment {
-            StaticFileSegment::Headers => StageId::Headers,
-            StaticFileSegment::Transactions => StageId::Bodies,
-            StaticFileSegment::Receipts |
-            StaticFileSegment::AccountChangeSets |
-            StaticFileSegment::StorageChangeSets => StageId::Execution,
-            StaticFileSegment::TransactionSenders => StageId::SenderRecovery,
-        };
+        let stage_id = segment_stage_id(segment);
         let checkpoint_block_number =
             provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
 
@@ -3030,6 +3016,18 @@ where
     let (tx_id, tx) = entry;
     tx.encode_2718(rlp_buf);
     Ok((keccak256(rlp_buf), tx_id))
+}
+
+/// Maps a [`StaticFileSegment`] to the [`StageId`] responsible for it.
+const fn segment_stage_id(segment: StaticFileSegment) -> StageId {
+    match segment {
+        StaticFileSegment::Headers => StageId::Headers,
+        StaticFileSegment::Transactions => StageId::Bodies,
+        StaticFileSegment::Receipts |
+        StaticFileSegment::AccountChangeSets |
+        StaticFileSegment::StorageChangeSets => StageId::Execution,
+        StaticFileSegment::TransactionSenders => StageId::SenderRecovery,
+    }
 }
 
 #[cfg(test)]
