@@ -37,14 +37,15 @@ use reth_primitives_traits::{
     AlloyBlockHeader as _, BlockBody as _, RecoveredBlock, SealedHeader, SignedTransaction,
     StorageEntry,
 };
+use reth_prune_types::PruneSegment;
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileMap,
     StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
 use reth_storage_api::{
-    BlockBodyIndicesProvider, ChangeSetReader, DBProvider, StorageChangeSetReader,
-    StorageSettingsCache,
+    BlockBodyIndicesProvider, ChangeSetReader, DBProvider, PruneCheckpointReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
 use std::{
@@ -1293,6 +1294,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Provider: DBProvider
             + BlockReader
             + StageCheckpointReader
+            + PruneCheckpointReader
             + ChainSpecProvider
             + StorageSettingsCache,
         N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
@@ -1609,7 +1611,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         highest_static_file_block: Option<BlockNumber>,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + BlockReader + StageCheckpointReader,
+        Provider: DBProvider + BlockReader + StageCheckpointReader + PruneCheckpointReader,
     {
         debug!(target: "reth::providers::static_file", ?segment, ?highest_static_file_entry, ?highest_static_file_block, "Ensuring invariants");
         let mut db_cursor = provider.tx_ref().cursor_read::<T>()?;
@@ -1663,16 +1665,34 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
         debug!(target: "reth::providers::static_file", ?segment, ?stage_id, checkpoint_block_number, highest_static_file_block, "Retrieved stage checkpoint");
 
-        // If the checkpoint is ahead, then we lost static file data. May be data corruption.
-        if checkpoint_block_number > highest_static_file_block {
+        // For segments that can be pruned, check if the data was intentionally pruned rather than
+        // lost/corrupted. The effective "data available from" block is the maximum of the static
+        // file highest block and the prune checkpoint block.
+        let prune_segment = match segment {
+            StaticFileSegment::TransactionSenders => Some(PruneSegment::SenderRecovery),
+            StaticFileSegment::Receipts => Some(PruneSegment::Receipts),
+            _ => None,
+        };
+
+        let effective_available_block = if let Some(ps) = prune_segment {
+            let prune_checkpoint_block =
+                provider.get_prune_checkpoint(ps)?.and_then(|c| c.block_number).unwrap_or(0);
+            std::cmp::max(highest_static_file_block, prune_checkpoint_block)
+        } else {
+            highest_static_file_block
+        };
+
+        // If the checkpoint is ahead of the effective available block, then we lost static file
+        // data that wasn't intentionally pruned. This may be data corruption.
+        if checkpoint_block_number > effective_available_block {
             info!(
                 target: "reth::providers::static_file",
                 checkpoint_block_number,
-                unwind_target = highest_static_file_block,
+                unwind_target = effective_available_block,
                 ?segment,
                 "Setting unwind target."
             );
-            return Ok(Some(highest_static_file_block));
+            return Ok(Some(effective_available_block));
         }
 
         // If the checkpoint is behind, then we failed to do a database commit **but committed** to
@@ -1745,7 +1765,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         block_from_key: F,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + BlockReader + StageCheckpointReader,
+        Provider: DBProvider + BlockReader + StageCheckpointReader + PruneCheckpointReader,
         T: Table,
         F: Fn(&T::Key) -> BlockNumber,
     {
@@ -1801,15 +1821,32 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let checkpoint_block_number =
             provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
 
-        if checkpoint_block_number > highest_static_file_block {
+        // For segments that can be pruned, check if the data was intentionally pruned rather than
+        // lost/corrupted. The effective "data available from" block is the maximum of the static
+        // file highest block and the prune checkpoint block.
+        let prune_segment = match segment {
+            StaticFileSegment::AccountChangeSets => Some(PruneSegment::AccountHistory),
+            StaticFileSegment::StorageChangeSets => Some(PruneSegment::StorageHistory),
+            _ => None,
+        };
+
+        let effective_available_block = if let Some(ps) = prune_segment {
+            let prune_checkpoint_block =
+                provider.get_prune_checkpoint(ps)?.and_then(|c| c.block_number).unwrap_or(0);
+            std::cmp::max(highest_static_file_block, prune_checkpoint_block)
+        } else {
+            highest_static_file_block
+        };
+
+        if checkpoint_block_number > effective_available_block {
             info!(
                 target: "reth::providers::static_file",
                 checkpoint_block_number,
-                unwind_target = highest_static_file_block,
+                unwind_target = effective_available_block,
                 ?segment,
                 "Setting unwind target."
             );
-            return Ok(Some(highest_static_file_block))
+            return Ok(Some(effective_available_block))
         }
 
         if checkpoint_block_number < highest_static_file_block {
