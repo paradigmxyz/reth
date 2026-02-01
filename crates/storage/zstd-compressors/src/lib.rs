@@ -85,6 +85,59 @@ pub fn create_receipt_decompressor() -> ReusableDecompressor {
     )
 }
 
+/// Executes `f` with the thread-local transaction compressor on `std`, otherwise creates a new one.
+#[inline]
+pub fn with_tx_compressor<R>(f: impl FnOnce(&mut Compressor<'static>) -> R) -> R {
+    #[cfg(feature = "std")]
+    {
+        TRANSACTION_COMPRESSOR.with(|c| f(&mut c.borrow_mut()))
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        f(&mut create_tx_compressor())
+    }
+}
+
+/// Executes `f` with the thread-local transaction decompressor on `std`, otherwise creates a new
+/// one.
+#[inline]
+pub fn with_tx_decompressor<R>(f: impl FnOnce(&mut ReusableDecompressor) -> R) -> R {
+    #[cfg(feature = "std")]
+    {
+        TRANSACTION_DECOMPRESSOR.with(|c| f(&mut c.borrow_mut()))
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        f(&mut create_tx_decompressor())
+    }
+}
+
+/// Executes `f` with the thread-local receipt compressor on `std`, otherwise creates a new one.
+#[inline]
+pub fn with_receipt_compressor<R>(f: impl FnOnce(&mut Compressor<'static>) -> R) -> R {
+    #[cfg(feature = "std")]
+    {
+        RECEIPT_COMPRESSOR.with(|c| f(&mut c.borrow_mut()))
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        f(&mut create_receipt_compressor())
+    }
+}
+
+/// Executes `f` with the thread-local receipt decompressor on `std`, otherwise creates a new one.
+#[inline]
+pub fn with_receipt_decompressor<R>(f: impl FnOnce(&mut ReusableDecompressor) -> R) -> R {
+    #[cfg(feature = "std")]
+    {
+        RECEIPT_DECOMPRESSOR.with(|c| f(&mut c.borrow_mut()))
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        f(&mut create_receipt_decompressor())
+    }
+}
+
 /// Reusable decompressor that uses its own internal buffer.
 #[expect(missing_debug_implementations)]
 pub struct ReusableDecompressor {
