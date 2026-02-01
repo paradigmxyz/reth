@@ -334,10 +334,13 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         // necessary drop it early.
         //
         // The last block of `in_memory_chain` is the lowest block number.
-        let (in_memory, storage_range) = match in_memory_chain.last().as_ref().map(|b| b.number()) {
-            Some(lowest_memory_block) if lowest_memory_block <= end => {
-                let highest_memory_block =
-                    in_memory_chain.first().as_ref().map(|b| b.number()).expect("qed");
+        let (in_memory, storage_range) = match (
+            in_memory_chain.first().as_ref().map(|b| b.number()),
+            in_memory_chain.last().as_ref().map(|b| b.number()),
+        ) {
+            (Some(highest_memory_block), Some(lowest_memory_block))
+                if lowest_memory_block <= end =>
+            {
 
                 // Database will for a time overlap with in-memory-chain blocks. In
                 // case of a re-org, it can mean that the database blocks are of a forked chain, and
