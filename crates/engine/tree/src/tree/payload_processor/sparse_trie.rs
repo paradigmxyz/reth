@@ -9,7 +9,7 @@ use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::ParallelIterator;
 use reth_errors::ProviderError;
-use reth_primitives_traits::{Account, ParallelBridgeCollected};
+use reth_primitives_traits::{Account, ParallelBridgeBuffered};
 use reth_revm::state::EvmState;
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH,
@@ -657,7 +657,7 @@ where
         .storages
         .into_iter()
         .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
-        .par_bridge_collected()
+        .par_bridge_buffered()
         .map(|(address, storage, storage_trie)| {
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie", ?address)

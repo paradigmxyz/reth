@@ -12,7 +12,7 @@ use rayon::iter::IntoParallelIterator;
 ///
 /// # When to use
 ///
-/// Use `par_bridge_collected` instead of `par_bridge` when:
+/// Use `par_bridge_buffered` instead of `par_bridge` when:
 /// - The iterator produces items quickly
 /// - The parallel work per item is relatively light
 /// - The total number of items is known to be reasonable for memory
@@ -20,13 +20,13 @@ use rayon::iter::IntoParallelIterator;
 /// Stick with `par_bridge` when:
 /// - The iterator is slow (e.g., I/O bound) and you want to overlap iteration with processing
 /// - Memory is constrained and you cannot afford to collect all items upfront
-pub trait ParallelBridgeCollected: Iterator<Item: Send> + Sized {
+pub trait ParallelBridgeBuffered: Iterator<Item: Send> + Sized {
     /// Collects this iterator into a `Vec` and returns a parallel iterator over it.
     ///
-    /// See [this trait's documentation](ParallelBridgeCollected) for more details.
-    fn par_bridge_collected(self) -> rayon::vec::IntoIter<Self::Item> {
+    /// See [this trait's documentation](ParallelBridgeBuffered) for more details.
+    fn par_bridge_buffered(self) -> rayon::vec::IntoIter<Self::Item> {
         self.collect::<Vec<_>>().into_par_iter()
     }
 }
 
-impl<I: Iterator<Item: Send>> ParallelBridgeCollected for I {}
+impl<I: Iterator<Item: Send>> ParallelBridgeBuffered for I {}

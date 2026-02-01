@@ -14,7 +14,7 @@ use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{
-    Block as BlockTrait, ParallelBridgeCollected, RecoveredBlock, SealedBlock,
+    Block as BlockTrait, ParallelBridgeBuffered, RecoveredBlock, SealedBlock,
 };
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
@@ -182,7 +182,7 @@ impl Case for BlockchainTestCase {
         self.tests
             .iter()
             .filter(|(_, case)| !Self::excluded_fork(case.network))
-            .par_bridge_collected()
+            .par_bridge_buffered()
             .try_for_each(|(name, case)| Self::run_single_case(name, case).map(|_| ()))?;
 
         Ok(())

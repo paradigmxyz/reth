@@ -192,7 +192,7 @@ pub use size::InMemorySize;
 #[cfg(feature = "rayon")]
 pub mod rayon;
 #[cfg(feature = "rayon")]
-pub use rayon::ParallelBridgeCollected;
+pub use rayon::ParallelBridgeBuffered;
 
 /// Node traits
 pub mod node;
