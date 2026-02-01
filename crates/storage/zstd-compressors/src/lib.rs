@@ -60,7 +60,8 @@ mod locals {
 
 /// Fn creates tx [`Compressor`]
 pub fn create_tx_compressor() -> Compressor<'static> {
-    Compressor::with_dictionary(0, RECEIPT_DICTIONARY).expect("Failed to instantiate tx compressor")
+    Compressor::with_dictionary(0, TRANSACTION_DICTIONARY)
+        .expect("Failed to instantiate tx compressor")
 }
 
 /// Fn creates tx [`Decompressor`]
