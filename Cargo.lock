@@ -10943,6 +10943,7 @@ dependencies = [
  "fixed-map",
  "insta",
  "reth-nippy-jar",
+ "reth-stages-types",
  "serde",
  "serde_json",
  "strum",
