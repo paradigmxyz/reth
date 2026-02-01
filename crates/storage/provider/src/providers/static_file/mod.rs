@@ -115,7 +115,7 @@ mod tests {
 
         let mut provider_rw = factory.provider_rw().unwrap();
         let tx = provider_rw.tx_mut();
-        for header in headers.clone() {
+        for header in &headers {
             let hash = header.hash();
 
             tx.put::<CanonicalHeaders>(header.number, hash).unwrap();
