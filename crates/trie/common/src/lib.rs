@@ -84,5 +84,8 @@ pub mod serde_bincode_compat {
     };
 }
 
+mod mask_ext;
+pub use mask_ext::{TrieMaskExt, TrieMaskIter};
+
 /// Re-export
 pub use alloy_trie::{nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, EMPTY_ROOT_HASH};
