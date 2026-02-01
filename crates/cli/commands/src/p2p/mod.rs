@@ -183,7 +183,7 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
 
         if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {
             eyre::bail!(
-                "No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`"
+                "No trusted nodes. Set trusted peer with `--trusted-peers <enode record>` or set `--trusted-only` to `false`"
             )
         }
 
