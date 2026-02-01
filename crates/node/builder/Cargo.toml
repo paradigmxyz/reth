@@ -57,6 +57,7 @@ reth-transaction-pool.workspace = true
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-basic-payload-builder.workspace = true
 reth-node-ethstats.workspace = true
+reth-zstd-compressors.workspace = true
 
 ## ethereum
 alloy-consensus.workspace = true

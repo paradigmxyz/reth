@@ -159,7 +159,7 @@ impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for 
                     }
                     #[cfg(not(feature = "std"))]
                     {
-                        let mut compressor = reth_zstd_compressors::create_tx_compressor();
+                        let mut compressor = reth_zstd_compressors::create_tx_compressor(false);
                         compressor.compress(&tx_buf)
                     }
                 }

@@ -115,6 +115,9 @@ impl EngineNodeLauncher {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
                 let settings = this.provider_factory().cached_storage_settings();
                 info!(target: "reth::cli", ?settings, "Loaded storage settings");
+
+                // Configure zstd compression based on storage settings
+                reth_zstd_compressors::set_omit_dictionary_id(settings.zstd_omit_dictionary_id);
             })
             .with_metrics_task()
             // passing FullNodeTypes as type parameter here so that we can build

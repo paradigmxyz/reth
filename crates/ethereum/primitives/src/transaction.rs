@@ -585,7 +585,7 @@ impl reth_codecs::Compact for TransactionSigned {
                     tx_bits as u8
                 })
             } else {
-                let mut compressor = reth_zstd_compressors::create_tx_compressor();
+                let mut compressor = reth_zstd_compressors::create_tx_compressor(false);
                 let tx_bits = self.transaction.to_compact(&mut tmp);
                 buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
                 tx_bits as u8

@@ -34,6 +34,12 @@ pub struct StorageSettings {
     /// Whether this node should read and write storage changesets from static files.
     #[serde(default)]
     pub storage_changesets_in_static_files: bool,
+    /// Whether to omit the dictionary ID from zstd compressed frames.
+    ///
+    /// When enabled, saves 4 bytes per compressed transaction/receipt by not writing
+    /// the dictionary ID to the frame header. Safe because reth uses hardcoded dictionaries.
+    #[serde(default)]
+    pub zstd_omit_dictionary_id: bool,
 }
 
 impl StorageSettings {
@@ -56,6 +62,7 @@ impl StorageSettings {
     /// - Receipts and transaction senders in static files
     /// - History indices in `RocksDB` (storages, accounts, transaction hashes)
     /// - Account changesets in static files
+    /// - Omit dictionary ID from zstd frames (saves ~4 bytes per tx/receipt)
     #[cfg(feature = "edge")]
     pub const fn edge() -> Self {
         Self {
@@ -66,6 +73,7 @@ impl StorageSettings {
             storages_history_in_rocksdb: true,
             transaction_hash_numbers_in_rocksdb: true,
             account_history_in_rocksdb: true,
+            zstd_omit_dictionary_id: true,
         }
     }
 
@@ -83,6 +91,7 @@ impl StorageSettings {
             account_history_in_rocksdb: false,
             account_changesets_in_static_files: false,
             storage_changesets_in_static_files: false,
+            zstd_omit_dictionary_id: false,
         }
     }
 
@@ -125,6 +134,12 @@ impl StorageSettings {
     /// Sets the `storage_changesets_in_static_files` flag to the provided value.
     pub const fn with_storage_changesets_in_static_files(mut self, value: bool) -> Self {
         self.storage_changesets_in_static_files = value;
+        self
+    }
+
+    /// Sets the `zstd_omit_dictionary_id` flag to the provided value.
+    pub const fn with_zstd_omit_dictionary_id(mut self, value: bool) -> Self {
+        self.zstd_omit_dictionary_id = value;
         self
     }
 

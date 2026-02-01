@@ -13,7 +13,31 @@ extern crate alloc;
 
 use crate::alloc::string::ToString;
 use alloc::vec::Vec;
+#[cfg(feature = "std")]
+use core::sync::atomic::{AtomicBool, Ordering};
 use zstd::bulk::{Compressor, Decompressor};
+pub use zstd::zstd_safe::CParameter;
+
+/// Global flag to omit dictionary ID from compressed frames.
+/// When set to true, saves 4 bytes per compressed transaction/receipt.
+/// This is safe because reth uses hardcoded dictionaries.
+#[cfg(feature = "std")]
+static OMIT_DICTIONARY_ID: AtomicBool = AtomicBool::new(false);
+
+/// Sets the global flag to omit dictionary ID from compressed frames.
+///
+/// Should be called once at node startup based on `StorageSettings::zstd_omit_dictionary_id`.
+/// Once set, all subsequently created compressors will omit the dictionary ID.
+#[cfg(feature = "std")]
+pub fn set_omit_dictionary_id(omit: bool) {
+    OMIT_DICTIONARY_ID.store(omit, Ordering::SeqCst);
+}
+
+/// Returns whether the dictionary ID should be omitted from compressed frames.
+#[cfg(feature = "std")]
+pub fn should_omit_dictionary_id() -> bool {
+    OMIT_DICTIONARY_ID.load(Ordering::SeqCst)
+}
 
 /// Compression/Decompression dictionary for `Receipt`.
 pub static RECEIPT_DICTIONARY: &[u8] = include_bytes!("../receipt_dictionary.bin");
@@ -32,8 +56,7 @@ mod locals {
     std::thread_local! {
         /// Thread Transaction compressor.
         pub static TRANSACTION_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
-            Compressor::with_dictionary(0, TRANSACTION_DICTIONARY)
-                .expect("failed to initialize transaction compressor"),
+            create_tx_compressor(should_omit_dictionary_id()),
         );
 
         /// Thread Transaction decompressor.
@@ -45,8 +68,7 @@ mod locals {
 
         /// Thread receipt compressor.
         pub static RECEIPT_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
-            Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
-                .expect("failed to initialize receipt compressor"),
+            create_receipt_compressor(should_omit_dictionary_id()),
         );
 
         /// Thread receipt decompressor.
@@ -58,9 +80,17 @@ mod locals {
     }
 }
 
-/// Fn creates tx [`Compressor`]
-pub fn create_tx_compressor() -> Compressor<'static> {
-    Compressor::with_dictionary(0, RECEIPT_DICTIONARY).expect("Failed to instantiate tx compressor")
+/// Creates a tx [`Compressor`].
+///
+/// If `omit_dictionary_id` is true, the dictionary ID will not be written to the
+/// compressed frame header, saving 4 bytes per frame.
+pub fn create_tx_compressor(omit_dictionary_id: bool) -> Compressor<'static> {
+    let mut compressor = Compressor::with_dictionary(0, TRANSACTION_DICTIONARY)
+        .expect("Failed to instantiate tx compressor");
+    if omit_dictionary_id {
+        compressor.set_parameter(CParameter::DictIdFlag(false)).expect("Failed to set DictIdFlag");
+    }
+    compressor
 }
 
 /// Fn creates tx [`Decompressor`]
@@ -71,10 +101,17 @@ pub fn create_tx_decompressor() -> ReusableDecompressor {
     )
 }
 
-/// Fn creates receipt [`Compressor`]
-pub fn create_receipt_compressor() -> Compressor<'static> {
-    Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
-        .expect("Failed to instantiate receipt compressor")
+/// Creates a receipt [`Compressor`].
+///
+/// If `omit_dictionary_id` is true, the dictionary ID will not be written to the
+/// compressed frame header, saving 4 bytes per frame.
+pub fn create_receipt_compressor(omit_dictionary_id: bool) -> Compressor<'static> {
+    let mut compressor = Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
+        .expect("Failed to instantiate receipt compressor");
+    if omit_dictionary_id {
+        compressor.set_parameter(CParameter::DictIdFlag(false)).expect("Failed to set DictIdFlag");
+    }
+    compressor
 }
 
 /// Fn creates receipt [`Decompressor`]
@@ -146,5 +183,67 @@ impl ReusableDecompressor {
                 existing = self.buf.capacity(),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tx_roundtrip_with_dict_id() {
+        let data = b"some transaction data to compress and decompress for testing purposes";
+
+        let mut compressor = create_tx_compressor(false);
+        let compressed = compressor.compress(data).expect("compression failed");
+
+        let mut decompressor = create_tx_decompressor();
+        let decompressed = decompressor.decompress(&compressed);
+
+        assert_eq!(data.as_slice(), decompressed);
+    }
+
+    #[test]
+    fn test_tx_roundtrip_without_dict_id() {
+        let data = b"some transaction data to compress and decompress for testing purposes";
+
+        let mut compressor = create_tx_compressor(true);
+        let compressed = compressor.compress(data).expect("compression failed");
+
+        let mut decompressor = create_tx_decompressor();
+        let decompressed = decompressor.decompress(&compressed);
+
+        assert_eq!(data.as_slice(), decompressed);
+    }
+
+    #[test]
+    fn test_omitting_dict_id_saves_bytes() {
+        let data = b"some transaction data to compress and decompress for testing purposes";
+
+        let mut compressor_with = create_tx_compressor(false);
+        let compressed_with = compressor_with.compress(data).expect("compression failed");
+
+        let mut compressor_without = create_tx_compressor(true);
+        let compressed_without = compressor_without.compress(data).expect("compression failed");
+
+        assert!(
+            compressed_with.len() > compressed_without.len(),
+            "omitting dict ID should save bytes: with={}, without={}",
+            compressed_with.len(),
+            compressed_without.len()
+        );
+    }
+
+    #[test]
+    fn test_receipt_roundtrip() {
+        let data = b"some receipt data to compress and decompress for testing purposes";
+
+        let mut compressor = create_receipt_compressor(false);
+        let compressed = compressor.compress(data).expect("compression failed");
+
+        let mut decompressor = create_receipt_decompressor();
+        let decompressed = decompressor.decompress(&compressed);
+
+        assert_eq!(data.as_slice(), decompressed);
     }
 }

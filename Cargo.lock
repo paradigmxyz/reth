@@ -9410,6 +9410,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-db",
+ "reth-zstd-compressors",
  "secp256k1 0.30.0",
  "serde_json",
  "tempfile",
