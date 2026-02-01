@@ -28,8 +28,7 @@ use reth_trie_parallel::{
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    ClearedSparseStateTrie, LeafUpdate, SerialSparseTrie, SparseStateTrie, SparseTrie,
-    SparseTrieExt,
+    LeafUpdate, SerialSparseTrie, SparseStateTrie, SparseTrie, SparseTrieExt,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use smallvec::SmallVec;
@@ -258,11 +257,11 @@ where
     S: SparseTrieExt + Default + Clone,
 {
     /// Creates a new sparse trie, pre-populating with a [`ClearedSparseStateTrie`].
-    pub(super) fn new_with_cleared_trie(
+    pub(super) fn new(
         updates: CrossbeamReceiver<MultiProofMessage>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: MultiProofTaskMetrics,
-        sparse_state_trie: ClearedSparseStateTrie<A, S>,
+        trie: SparseStateTrie<A, S>,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         Self {
@@ -270,7 +269,7 @@ where
             proof_result_rx,
             updates,
             proof_worker_handle,
-            trie: sparse_state_trie.into_inner(),
+            trie,
             account_updates: Default::default(),
             storage_updates: Default::default(),
             pending_account_updates: Default::default(),
