@@ -200,7 +200,6 @@ impl StaticFileSegment {
     }
 
     /// Maps this segment to the [`reth_stages_types::StageId`] responsible for it.
-    ///
     pub const fn to_stage_id(&self) -> reth_stages_types::StageId {
         use reth_stages_types::StageId;
         match self {
