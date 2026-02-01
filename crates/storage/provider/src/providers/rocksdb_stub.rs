@@ -209,7 +209,7 @@ impl<T: reth_db_api::table::Table> Iterator for RocksDBIter<T> {
     }
 }
 
-/// Outcome of pruning a history shard in RocksDB (stub).
+/// Outcome of pruning a history shard in `RocksDB` (stub).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PruneShardOutcome {
     /// Shard was deleted entirely.
