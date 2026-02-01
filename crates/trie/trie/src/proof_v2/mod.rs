@@ -103,13 +103,13 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
         Self {
             trie_cursor,
             hashed_cursor,
-            branch_stack: Vec::<_>::with_capacity(64),
+            branch_stack: Vec::with_capacity(64),
             branch_path: Nibbles::new(),
-            child_stack: Vec::<_>::new(),
-            cached_branch_stack: Vec::<_>::with_capacity(64),
-            retained_proofs: Vec::<_>::new(),
-            rlp_nodes_bufs: Vec::<_>::new(),
-            rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
+            child_stack: Vec::new(),
+            cached_branch_stack: Vec::with_capacity(64),
+            retained_proofs: Vec::new(),
+            rlp_nodes_bufs: Vec::new(),
+            rlp_encode_buf: Vec::with_capacity(RLP_ENCODE_BUF_SIZE),
         }
     }
 }
