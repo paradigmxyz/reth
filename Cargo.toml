@@ -595,7 +595,7 @@ chrono = "0.4.41"
 
 # metrics
 metrics = "0.24.0"
-metrics-derive = "0.1"
+metrics-derive = "0.1.1"
 metrics-exporter-prometheus = { version = "0.18.0", default-features = false }
 metrics-process = "2.1.0"
 metrics-util = { default-features = false, version = "0.20.0" }
