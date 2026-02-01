@@ -31,6 +31,7 @@ alloy-rpc-types-engine.workspace = true
 # Misc
 parking_lot = { workspace = true, optional = true }
 derive_more = { workspace = true, optional = true }
+tracing.workspace = true
 
 [dev-dependencies]
 reth-testing-utils.workspace = true
@@ -57,6 +58,7 @@ std = [
     "derive_more?/std",
     "alloy-rpc-types-engine/std",
     "reth-storage-errors/std",
+    "tracing/std",
 ]
 test-utils = [
     "std",

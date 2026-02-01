@@ -8843,6 +8843,7 @@ dependencies = [
  "reth-testing-utils",
  "revm",
  "secp256k1 0.30.0",
+ "tracing",
 ]
 
 [[package]]

@@ -54,9 +54,14 @@ where
         let timestamp = evm_env.block_env.timestamp().saturating_to();
 
         let transactions_root = proofs::calculate_transaction_root(&transactions);
+
         let receipts_root = calculate_receipt_root(
             &receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>(),
         );
+
+        tracing::debug!("Receipts : {:?}", receipts);
+        tracing::debug!("Receipts root : {:?}", receipts_root);
+
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| r.logs()));
 
         let withdrawals = self
