@@ -229,7 +229,7 @@ mod tests {
             hex!("0303050a").to_vec(),
         ];
 
-        for key in data.clone() {
+        for key in &data {
             cursor
                 .upsert(
                     key.into(),
@@ -252,7 +252,7 @@ mod tests {
 
         assert_eq!(
             cursor.seek(hex!("0303040f").to_vec().into()).unwrap().map(|(k, _)| k.0.to_vec()),
-            Some(data[1].clone())
+            Some(data[1].to_vec())
         );
     }
 
