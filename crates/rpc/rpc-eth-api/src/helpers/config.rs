@@ -104,13 +104,19 @@ where
         fork_timestamps.sort_unstable();
         fork_timestamps.dedup();
 
-        let (current_fork_idx, current_fork_timestamp) = fork_timestamps
-            .iter()
-            .position(|ts| &latest.timestamp() < ts)
-            .and_then(|idx| idx.checked_sub(1))
-            .or_else(|| fork_timestamps.len().checked_sub(1))
-            .and_then(|idx| fork_timestamps.get(idx).map(|ts| (idx, *ts)))
-            .ok_or_else(|| RethError::msg("no active timestamp fork found"))?;
+        let current_fork_idx = match fork_timestamps.iter().position(|ts| &latest.timestamp() < ts)
+        {
+            // All forks are in the future, no active fork yet
+            Some(0) => return Err(RethError::msg("no active timestamp fork found")),
+            // Found a future fork, current is the previous one
+            Some(idx) => idx - 1,
+            // No future fork found, current is the last one
+            None => fork_timestamps
+                .len()
+                .checked_sub(1)
+                .ok_or_else(|| RethError::msg("no active timestamp fork found"))?,
+        };
+        let current_fork_timestamp = fork_timestamps[current_fork_idx];
 
         let current = self.build_fork_config_at(current_fork_timestamp, current_precompiles);
 
