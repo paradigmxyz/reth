@@ -90,7 +90,7 @@ pub fn create_receipt_decompressor() -> ReusableDecompressor {
 pub fn with_tx_compressor<R>(f: impl FnOnce(&mut Compressor<'static>) -> R) -> R {
     #[cfg(feature = "std")]
     {
-        TRANSACTION_COMPRESSOR.with(|c| f(&mut c.borrow_mut()))
+        TRANSACTION_COMPRESSOR.with_borrow_mut(f)
     }
     #[cfg(not(feature = "std"))]
     {
@@ -104,7 +104,7 @@ pub fn with_tx_compressor<R>(f: impl FnOnce(&mut Compressor<'static>) -> R) -> R
 pub fn with_tx_decompressor<R>(f: impl FnOnce(&mut ReusableDecompressor) -> R) -> R {
     #[cfg(feature = "std")]
     {
-        TRANSACTION_DECOMPRESSOR.with(|c| f(&mut c.borrow_mut()))
+        TRANSACTION_DECOMPRESSOR.with_borrow_mut(f)
     }
     #[cfg(not(feature = "std"))]
     {
@@ -117,7 +117,7 @@ pub fn with_tx_decompressor<R>(f: impl FnOnce(&mut ReusableDecompressor) -> R) -
 pub fn with_receipt_compressor<R>(f: impl FnOnce(&mut Compressor<'static>) -> R) -> R {
     #[cfg(feature = "std")]
     {
-        RECEIPT_COMPRESSOR.with(|c| f(&mut c.borrow_mut()))
+        RECEIPT_COMPRESSOR.with_borrow_mut(f)
     }
     #[cfg(not(feature = "std"))]
     {
@@ -130,7 +130,7 @@ pub fn with_receipt_compressor<R>(f: impl FnOnce(&mut Compressor<'static>) -> R)
 pub fn with_receipt_decompressor<R>(f: impl FnOnce(&mut ReusableDecompressor) -> R) -> R {
     #[cfg(feature = "std")]
     {
-        RECEIPT_DECOMPRESSOR.with(|c| f(&mut c.borrow_mut()))
+        RECEIPT_DECOMPRESSOR.with_borrow_mut(f)
     }
     #[cfg(not(feature = "std"))]
     {
