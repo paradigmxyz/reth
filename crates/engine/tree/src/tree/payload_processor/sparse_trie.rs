@@ -89,8 +89,10 @@ impl FetchedPrefixes {
         let nibbles = Nibbles::unpack(key);
         self.prefixes.insert(nibbles);
 
-        for len in min_len..=Self::CACHE_DEPTH {
-            self.prefixes.insert(nibbles.slice(..len as usize));
+        if min_len <= Self::CACHE_DEPTH {
+            for len in min_len..=Self::CACHE_DEPTH {
+                self.prefixes.insert(nibbles.slice(..len as usize));
+            }
         }
     }
 
