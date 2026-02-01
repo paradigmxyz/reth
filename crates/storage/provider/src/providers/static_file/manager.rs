@@ -3018,19 +3018,6 @@ where
     Ok((keccak256(rlp_buf), tx_id))
 }
 
-/// Maps this segment to the [`StageId`] responsible for it.                                  
-pub const fn to_stage_id(&self) -> reth_stages_types::StageId {                               
-    use reth_stages_types::StageId;                                                           
-    match self {                                                                              
-        Self::Headers => StageId::Headers,                                                    
-        Self::Transactions => StageId::Bodies,                                                
-        Self::Receipts | Self::AccountChangeSets | Self::StorageChangeSets => {               
-            StageId::Execution                                                                
-        }                                                                                     
-        Self::TransactionSenders => StageId::SenderRecovery,                                  
-    }                                                                                         
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
