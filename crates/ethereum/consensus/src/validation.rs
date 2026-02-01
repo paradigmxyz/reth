@@ -4,6 +4,7 @@ use alloy_eips::{eip7685::Requests, Encodable2718};
 use alloy_primitives::{Bloom, Bytes, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
+use reth_consensus_common::validation::compare_receipts_root_and_logs_bloom;
 use reth_primitives_traits::{
     receipt::gas_spent_by_transactions, Block, GotExpected, Receipt, RecoveredBlock,
 };
@@ -99,29 +100,6 @@ fn verify_receipts<R: Receipt>(
         expected_receipts_root,
         expected_logs_bloom,
     )
-}
-
-/// Compare the calculated receipts root with the expected receipts root, also compare
-/// the calculated logs bloom with the expected logs bloom.
-fn compare_receipts_root_and_logs_bloom(
-    calculated_receipts_root: B256,
-    calculated_logs_bloom: Bloom,
-    expected_receipts_root: B256,
-    expected_logs_bloom: Bloom,
-) -> Result<(), ConsensusError> {
-    if calculated_receipts_root != expected_receipts_root {
-        return Err(ConsensusError::BodyReceiptRootDiff(
-            GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }.into(),
-        ))
-    }
-
-    if calculated_logs_bloom != expected_logs_bloom {
-        return Err(ConsensusError::BodyBloomLogDiff(
-            GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into(),
-        ))
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
