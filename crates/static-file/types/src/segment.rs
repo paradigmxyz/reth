@@ -79,18 +79,6 @@ impl StaticFileSegment {
             Self::StorageChangeSets => "storage-change-sets",
         }
     }
-        /// Maps this segment to the [`StageId`] responsible for it.                              
-    pub const fn to_stage_id(&self) -> reth_stages_types::StageId {                           
-        use reth_stages_types::StageId;                                                       
-        match self {                                                                          
-            Self::Headers => StageId::Headers,                                                
-            Self::Transactions => StageId::Bodies,                                            
-            Self::Receipts | Self::AccountChangeSets | Self::StorageChangeSets => {           
-                StageId::Execution                                                            
-            }                                                                                 
-            Self::TransactionSenders => StageId::SenderRecovery,                              
-        }                                                                                     
-    }
 
     /// Returns an iterator over all segments.
     pub fn iter() -> impl Iterator<Item = Self> {
@@ -209,6 +197,19 @@ impl StaticFileSegment {
     /// that the user header contains a block range or a max block
     pub const fn is_block_or_change_based(&self) -> bool {
         self.is_block_based() || self.is_change_based()
+    }
+    
+    /// Maps this segment to the [`StageId`] responsible for it.                              
+    pub const fn to_stage_id(&self) -> reth_stages_types::StageId {                           
+        use reth_stages_types::StageId;                                                       
+        match self {                                                                          
+            Self::Headers => StageId::Headers,                                                
+            Self::Transactions => StageId::Bodies,                                            
+            Self::Receipts | Self::AccountChangeSets | Self::StorageChangeSets => {           
+                StageId::Execution                                                            
+            }                                                                                 
+            Self::TransactionSenders => StageId::SenderRecovery,                              
+        }                                                                                     
     }
 }
 
