@@ -14,7 +14,6 @@ pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
     engine::EngineApiEvent,
 };
-
 use reth_evm::ConfigureEvm;
 use reth_network_p2p::BlockClient;
 use reth_node_types::{BlockTy, NodeTypes};
