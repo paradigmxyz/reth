@@ -1,4 +1,5 @@
 use crate::{find_fixed_range, BlockNumber, Compression};
+use reth_stages_types::StageId;
 use alloc::{format, string::String, vec::Vec};
 use alloy_primitives::TxNumber;
 use core::{
@@ -199,9 +200,8 @@ impl StaticFileSegment {
         self.is_block_based() || self.is_change_based()
     }
 
-    /// Maps this segment to the [`reth_stages_types::StageId`] responsible for it.
-    pub const fn to_stage_id(&self) -> reth_stages_types::StageId {
-        use reth_stages_types::StageId;
+    /// Maps this segment to the [`StageId`] responsible for it.
+    pub const fn to_stage_id(&self) -> StageId {
         match self {
             Self::Headers => StageId::Headers,
             Self::Transactions => StageId::Bodies,
