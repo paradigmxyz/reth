@@ -520,6 +520,8 @@ where
         trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
         trie.reveal_nodes(&mut nodes)?;
 
+        self.proof_nodes_buf.extend(nodes);
+
         Ok(())
     }
 
