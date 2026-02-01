@@ -37,7 +37,7 @@ use reth_primitives_traits::{
     AlloyBlockHeader as _, BlockBody as _, RecoveredBlock, SealedHeader, SignedTransaction,
     StorageEntry,
 };
-use reth_stages_types::{PipelineTarget, StageId};
+use reth_stages_types::PipelineTarget;
 use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileMap,
     StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
@@ -1651,7 +1651,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         // If static file entry is ahead of the database entries, then ensure the checkpoint block
         // number matches.
-        let stage_id = segment_stage_id(segment);
+        let stage_id = segment.to_stage_id();
         let checkpoint_block_number =
             provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
         debug!(target: "reth::providers::static_file", ?segment, ?stage_id, checkpoint_block_number, highest_static_file_block, "Retrieved stage checkpoint");
@@ -1783,7 +1783,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         let highest_static_file_block = highest_static_file_block.unwrap_or_default();
 
-        let stage_id = segment_stage_id(segment);
+        let stage_id = segment.to_stage_id();
         let checkpoint_block_number =
             provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
 
@@ -3018,16 +3018,17 @@ where
     Ok((keccak256(rlp_buf), tx_id))
 }
 
-/// Maps a [`StaticFileSegment`] to the [`StageId`] responsible for it.
-const fn segment_stage_id(segment: StaticFileSegment) -> StageId {
-    match segment {
-        StaticFileSegment::Headers => StageId::Headers,
-        StaticFileSegment::Transactions => StageId::Bodies,
-        StaticFileSegment::Receipts |
-        StaticFileSegment::AccountChangeSets |
-        StaticFileSegment::StorageChangeSets => StageId::Execution,
-        StaticFileSegment::TransactionSenders => StageId::SenderRecovery,
-    }
+/// Maps this segment to the [`StageId`] responsible for it.                                  
+pub const fn to_stage_id(&self) -> reth_stages_types::StageId {                               
+    use reth_stages_types::StageId;                                                           
+    match self {                                                                              
+        Self::Headers => StageId::Headers,                                                    
+        Self::Transactions => StageId::Bodies,                                                
+        Self::Receipts | Self::AccountChangeSets | Self::StorageChangeSets => {               
+            StageId::Execution                                                                
+        }                                                                                     
+        Self::TransactionSenders => StageId::SenderRecovery,                                  
+    }                                                                                         
 }
 
 #[cfg(test)]
