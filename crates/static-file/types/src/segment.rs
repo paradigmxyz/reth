@@ -1,11 +1,11 @@
 use crate::{find_fixed_range, BlockNumber, Compression};
-use reth_stages_types::StageId;
 use alloc::{format, string::String, vec::Vec};
 use alloy_primitives::TxNumber;
 use core::{
     ops::{Range, RangeInclusive},
     str::FromStr,
 };
+use reth_stages_types::StageId;
 use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 use strum::{EnumIs, EnumString};
 
