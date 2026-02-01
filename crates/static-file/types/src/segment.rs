@@ -199,7 +199,8 @@ impl StaticFileSegment {
         self.is_block_based() || self.is_change_based()
     }
 
-    /// Maps this segment to the [`reth_stages_types::StageId`] responsible for it.                              
+    /// Maps this segment to the [`reth_stages_types::StageId`] responsible for it.
+    ///
     pub const fn to_stage_id(&self) -> reth_stages_types::StageId {
         use reth_stages_types::StageId;
         match self {
@@ -209,7 +210,7 @@ impl StaticFileSegment {
                 StageId::Execution
             }
             Self::TransactionSenders => StageId::SenderRecovery,
-        }                                
+        }
     }
 }
 
