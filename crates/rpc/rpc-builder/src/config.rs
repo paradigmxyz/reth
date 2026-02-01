@@ -107,6 +107,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .pending_block_kind(self.rpc_pending_block)
             .raw_tx_forwarder(self.rpc_forwarder.clone())
             .rpc_evm_memory_limit(self.rpc_evm_memory_limit)
+            .force_blob_sidecar_upcasting(self.rpc_force_blob_sidecar_upcasting)
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
