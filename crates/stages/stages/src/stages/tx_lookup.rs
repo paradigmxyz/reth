@@ -233,7 +233,7 @@ where
 
         let static_file_provider = provider.static_file_provider();
         let rev_walker =
-            provider.block_body_indices_range(range.clone())?.into_iter().zip(range).rev();
+            provider.block_body_indices_range(range.clone())?.into_iter().rev().zip(range.rev());;
 
         for (body, number) in rev_walker {
             if number <= unwind_to {
