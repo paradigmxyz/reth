@@ -40,7 +40,7 @@ use reth_trie_parallel::{
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
-    hot_accounts::TieredHotAccounts, ClearedSparseStateTrie, RevealableSparseTrie, SparseStateTrie,
+    hot_accounts::TieredHotAccounts, RevealableSparseTrie, SparseStateTrie,
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
@@ -546,26 +546,30 @@ where
         let max_storage_tries = self.sparse_trie_max_storage_tries;
         let hot_accounts = self.default_hot_accounts.clone();
 
-        let sparse_state_trie = preserved_sparse_trie
-            .take()
-            .map(|preserved| preserved.into_trie_for(parent_state_root))
-            .unwrap_or_else(|| {
-                debug!(
-                    target: "engine::tree::payload_processor",
-                    "Creating new sparse trie - no preserved trie available"
-                );
-                let default_trie = RevealableSparseTrie::blind_from(
-                    ParallelSparseTrie::default()
-                        .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
-                );
-                SparseStateTrie::new()
-                    .with_accounts_trie(default_trie.clone())
-                    .with_default_storage_trie(default_trie)
-                    .with_updates(true)
-            });
-
         self.executor.spawn_blocking(move || {
             let _enter = span.entered();
+
+            // Reuse a stored SparseStateTrie if available, applying continuation logic.
+            // If this payload's parent state root matches the preserved trie's anchor,
+            // we can reuse the pruned trie structure. Otherwise, we clear the trie but
+            // keep allocations.
+            let sparse_state_trie = preserved_sparse_trie
+                .take()
+                .map(|preserved| preserved.into_trie_for(parent_state_root))
+                .unwrap_or_else(|| {
+                    debug!(
+                        target: "engine::tree::payload_processor",
+                        "Creating new sparse trie - no preserved trie available"
+                    );
+                    let default_trie = RevealableSparseTrie::blind_from(
+                        ParallelSparseTrie::default()
+                            .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
+                    );
+                    SparseStateTrie::new()
+                        .with_accounts_trie(default_trie.clone())
+                        .with_default_storage_trie(default_trie)
+                        .with_updates(true)
+                });
 
             let mut task = if disable_sparse_trie_as_cache {
                 SpawnedSparseTrieTask::Cleared(SparseTrieTask::new(
@@ -575,11 +579,11 @@ where
                     sparse_state_trie,
                 ))
             } else {
-                SpawnedSparseTrieTask::Cached(SparseTrieCacheTask::new_with_cleared_trie(
+                SpawnedSparseTrieTask::Cached(SparseTrieCacheTask::new_with_trie(
                     from_multi_proof,
                     proof_worker_handle,
                     trie_metrics.clone(),
-                    ClearedSparseStateTrie::from_state_trie(sparse_state_trie),
+                    sparse_state_trie,
                 ))
             };
 

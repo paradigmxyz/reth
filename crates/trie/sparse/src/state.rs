@@ -23,48 +23,6 @@ use reth_trie_common::{
 use tracing::debug;
 use tracing::{instrument, trace};
 
-/// Provides type-safe re-use of cleared [`SparseStateTrie`]s, which helps to save allocations
-/// across payload runs.
-#[derive(Debug)]
-pub struct ClearedSparseStateTrie<
-    A = SerialSparseTrie, // Account trie implementation
-    S = SerialSparseTrie, // Storage trie implementation
->(SparseStateTrie<A, S>);
-
-impl<A, S> ClearedSparseStateTrie<A, S>
-where
-    A: SparseTrieTrait,
-    S: SparseTrieTrait,
-{
-    /// Creates a [`ClearedSparseStateTrie`] by clearing all the existing internal state of a
-    /// [`SparseStateTrie`] and then storing that instance for later re-use.
-    pub fn from_state_trie(mut trie: SparseStateTrie<A, S>) -> Self {
-        trie.state.clear();
-        trie.revealed_account_paths.clear();
-        trie.storage.clear();
-        trie.account_rlp_buf.clear();
-        Self(trie)
-    }
-
-    /// Returns the cleared [`SparseStateTrie`], consuming this instance.
-    pub fn into_inner(self) -> SparseStateTrie<A, S> {
-        self.0
-    }
-}
-
-impl<A, S> ClearedSparseStateTrie<A, S>
-where
-    A: SparseTrieTrait + SparseTrieExt + Default,
-    S: SparseTrieTrait + SparseTrieExt + Default + Clone,
-{
-    /// Shrink the cleared sparse trie's capacity to the given node and value size.
-    ///
-    /// Delegates to the inner `SparseStateTrie::shrink_to`.
-    pub fn shrink_to(&mut self, max_nodes: usize, max_values: usize) {
-        self.0.shrink_to(max_nodes, max_values);
-    }
-}
-
 #[derive(Debug)]
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<
@@ -355,8 +313,16 @@ where
         &mut self,
         multiproof: reth_trie_common::DecodedMultiProofV2,
     ) -> SparseStateTrieResult<()> {
-        // Reveal the account proof nodes
-        self.reveal_account_v2_proof_nodes(multiproof.account_proofs)?;
+        // Reveal the account proof nodes.
+        //
+        // Skip revealing account nodes if this result only contains storage proofs.
+        // `reveal_account_v2_proof_nodes` will return an error if empty `nodes` are passed into it
+        // before the accounts trie root was revealed. This might happen in cases when first account
+        // trie proof arrives later than first storage trie proof even though the account trie proof
+        // was requested first.
+        if !multiproof.account_proofs.is_empty() {
+            self.reveal_account_v2_proof_nodes(multiproof.account_proofs)?;
+        }
 
         #[cfg(not(feature = "std"))]
         // If nostd then serially reveal storage proof nodes for each storage trie

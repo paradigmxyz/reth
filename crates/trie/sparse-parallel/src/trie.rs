@@ -1242,8 +1242,8 @@ impl SparseTrieExt for ParallelSparseTrie {
                             Ok(()) => {}
                             Err(e) => {
                                 if let Some(path) = Self::get_retriable_path(&e) {
-                                    let target_key = Self::nibbles_to_padded_b256(&path);
-                                    let min_len = (path.len() as u8).min(64);
+                                    let (target_key, min_len) =
+                                        Self::proof_target_for_path(key, &full_path, &path);
                                     proof_required_fn(target_key, min_len);
                                     updates.insert(key, LeafUpdate::Changed(value));
                                 } else {
@@ -1256,8 +1256,8 @@ impl SparseTrieExt for ParallelSparseTrie {
                         if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider)
                         {
                             if let Some(path) = Self::get_retriable_path(&e) {
-                                let target_key = Self::nibbles_to_padded_b256(&path);
-                                let min_len = (path.len() as u8).min(64);
+                                let (target_key, min_len) =
+                                    Self::proof_target_for_path(key, &full_path, &path);
                                 proof_required_fn(target_key, min_len);
                                 updates.insert(key, LeafUpdate::Changed(value));
                             } else {
@@ -1270,8 +1270,8 @@ impl SparseTrieExt for ParallelSparseTrie {
                     // Touched is read-only: check if path is accessible, request proof if blinded.
                     match self.find_leaf(&full_path, None) {
                         Err(LeafLookupError::BlindedNode { path, .. }) => {
-                            let target_key = Self::nibbles_to_padded_b256(&path);
-                            let min_len = (path.len() as u8).min(64);
+                            let (target_key, min_len) =
+                                Self::proof_target_for_path(key, &full_path, &path);
                             proof_required_fn(target_key, min_len);
                             updates.insert(key, LeafUpdate::Touched);
                         }
@@ -1356,10 +1356,21 @@ impl ParallelSparseTrie {
 
     /// Converts a nibbles path to a B256, right-padding with zeros to 64 nibbles.
     fn nibbles_to_padded_b256(path: &Nibbles) -> B256 {
-        let packed = path.pack();
         let mut bytes = [0u8; 32];
-        bytes[..packed.len()].copy_from_slice(&packed);
+        path.pack_to(&mut bytes);
         B256::from(bytes)
+    }
+
+    /// Computes the proof target key and `min_len` for a blinded node error.
+    ///
+    /// Returns `(target_key, min_len)` where:
+    /// - `target_key` is `full_key` if `path` is a prefix of `full_path`, otherwise the padded path
+    /// - `min_len` is always based on `path.len()`
+    fn proof_target_for_path(full_key: B256, full_path: &Nibbles, path: &Nibbles) -> (B256, u8) {
+        let min_len = (path.len() as u8).min(64);
+        let target_key =
+            if full_path.starts_with(path) { full_key } else { Self::nibbles_to_padded_b256(path) };
+        (target_key, min_len)
     }
 
     /// Rolls back a partial update by removing the value, removing any inserted nodes,
@@ -8875,5 +8886,29 @@ mod tests {
             value_count_before, value_count_after,
             "Value count should be unchanged after atomic failure (no dangling values)"
         );
+    }
+
+    #[test]
+    fn test_nibbles_to_padded_b256() {
+        // Empty nibbles should produce all zeros
+        let empty = Nibbles::default();
+        assert_eq!(ParallelSparseTrie::nibbles_to_padded_b256(&empty), B256::ZERO);
+
+        // Full 64-nibble path should round-trip through B256
+        let full_key = b256!("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        let full_nibbles = Nibbles::unpack(full_key);
+        assert_eq!(ParallelSparseTrie::nibbles_to_padded_b256(&full_nibbles), full_key);
+
+        // Partial nibbles should be left-aligned with zero padding on the right
+        // 4 nibbles [0x1, 0x2, 0x3, 0x4] should pack to 0x1234...00
+        let partial = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
+        let expected = b256!("1234000000000000000000000000000000000000000000000000000000000000");
+        assert_eq!(ParallelSparseTrie::nibbles_to_padded_b256(&partial), expected);
+
+        // Single nibble
+        let single = Nibbles::from_nibbles_unchecked([0xf]);
+        let expected_single =
+            b256!("f000000000000000000000000000000000000000000000000000000000000000");
+        assert_eq!(ParallelSparseTrie::nibbles_to_padded_b256(&single), expected_single);
     }
 }
