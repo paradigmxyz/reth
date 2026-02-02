@@ -11164,6 +11164,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.2",
+ "rayon",
  "reth-ethereum-primitives",
  "reth-execution-errors",
  "reth-metrics",

@@ -42,10 +42,16 @@ struct StateRootBranchNodesIter<H> {
     curr_storage: Option<(B256, Vec<(Nibbles, BranchNodeCompact)>)>,
     intermediate_state: Option<Box<IntermediateStateRootState>>,
     complete: bool,
+    /// Optional prefix filter. If set, only yields nodes whose paths start with this prefix.
+    prefix: Option<Nibbles>,
 }
 
 impl<H> StateRootBranchNodesIter<H> {
     fn new(hashed_cursor_factory: H) -> Self {
+        Self::with_prefix(hashed_cursor_factory, None)
+    }
+
+    fn with_prefix(hashed_cursor_factory: H, prefix: Option<Nibbles>) -> Self {
         Self {
             hashed_cursor_factory,
             account_nodes: Default::default(),
@@ -53,6 +59,7 @@ impl<H> StateRootBranchNodesIter<H> {
             curr_storage: None,
             intermediate_state: None,
             complete: false,
+            prefix,
         }
     }
 
@@ -91,7 +98,16 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
 
             // `storage_updates` is empty, check if there are account updates.
             if let Some((path, node)) = self.account_nodes.pop() {
-                return Some(Ok(BranchNode::Account(path, node)))
+                // Filter by prefix if set
+                let include = match &self.prefix {
+                    Some(p) => path.starts_with(p) || p.starts_with(&path),
+                    None => true,
+                };
+                if include {
+                    return Some(Ok(BranchNode::Account(path, node)))
+                }
+                // Skip this node and continue to the next
+                continue;
             }
 
             // All data from any previous runs of the `StateRoot` has been produced, run the next
@@ -119,12 +135,26 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
 
             // collect account updates and sort them in descending order, so that when we pop them
             // off the Vec they are popped in ascending order.
-            self.account_nodes.extend(updates.account_nodes);
+            // Filter by prefix if set
+            let prefix = self.prefix;
+            self.account_nodes.extend(updates.account_nodes.into_iter().filter(|(path, _)| {
+                match &prefix {
+                    Some(p) => path.starts_with(p) || p.starts_with(path),
+                    None => true,
+                }
+            }));
             Self::sort_updates(&mut self.account_nodes);
 
             self.storage_tries = updates
                 .storage_tries
                 .into_iter()
+                .filter(|(account, _)| match &prefix {
+                    Some(p) => {
+                        let account_nibbles = Nibbles::unpack(*account);
+                        account_nibbles.starts_with(p) || p.starts_with(&account_nibbles)
+                    }
+                    None => true,
+                })
                 .filter_map(|(account, t)| {
                     (!t.storage_nodes.is_empty()).then(|| {
                         let mut storage_nodes = t.storage_nodes.into_iter().collect::<Vec<_>>();
@@ -196,7 +226,15 @@ struct SingleVerifier<I> {
 
 impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
     fn new(account: Option<B256>, trie_cursor: C) -> Result<Self, DatabaseError> {
-        let mut trie_iter = DepthFirstTrieIterator::new(trie_cursor);
+        Self::with_prefix(account, trie_cursor, None)
+    }
+
+    fn with_prefix(
+        account: Option<B256>,
+        trie_cursor: C,
+        prefix: Option<Nibbles>,
+    ) -> Result<Self, DatabaseError> {
+        let mut trie_iter = DepthFirstTrieIterator::with_prefix(trie_cursor, prefix);
         let curr = trie_iter.next().transpose()?;
         Ok(Self { account, trie_iter, curr })
     }
@@ -309,6 +347,8 @@ pub struct Verifier<'a, T: TrieCursorFactory, H> {
     account: SingleVerifier<DepthFirstTrieIterator<T::AccountTrieCursor<'a>>>,
     storage: Option<(B256, SingleVerifier<DepthFirstTrieIterator<T::StorageTrieCursor<'a>>>)>,
     complete: bool,
+    /// Optional prefix filter for this verifier.
+    prefix: Option<Nibbles>,
 }
 
 impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H> {
@@ -317,14 +357,31 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
         trie_cursor_factory: &'a T,
         hashed_cursor_factory: H,
     ) -> Result<Self, DatabaseError> {
+        Self::with_prefix(trie_cursor_factory, hashed_cursor_factory, None)
+    }
+
+    /// Creates a new verifier instance constrained to a prefix.
+    ///
+    /// If `prefix` is `Some`, the verifier will only verify nodes whose paths start with the given
+    /// prefix. This is useful for parallelizing verification by dividing the trie by first nibble.
+    pub fn with_prefix(
+        trie_cursor_factory: &'a T,
+        hashed_cursor_factory: H,
+        prefix: Option<Nibbles>,
+    ) -> Result<Self, DatabaseError> {
         Ok(Self {
             trie_cursor_factory,
             hashed_cursor_factory: hashed_cursor_factory.clone(),
-            branch_node_iter: StateRootBranchNodesIter::new(hashed_cursor_factory),
+            branch_node_iter: StateRootBranchNodesIter::with_prefix(hashed_cursor_factory, prefix),
             outputs: Default::default(),
-            account: SingleVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?,
+            account: SingleVerifier::with_prefix(
+                None,
+                trie_cursor_factory.account_trie_cursor()?,
+                prefix,
+            )?,
             storage: None,
             complete: false,
+            prefix,
         })
     }
 }
@@ -341,6 +398,17 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
         storage.next(&mut self.outputs, path, node)?;
         self.storage = Some((account, storage));
         Ok(())
+    }
+
+    /// Returns true if the given account should be included based on the prefix filter.
+    fn should_include_account(&self, account: B256) -> bool {
+        match &self.prefix {
+            Some(prefix) => {
+                let account_nibbles = Nibbles::unpack(account);
+                account_nibbles.starts_with(prefix) || prefix.starts_with(&account_nibbles)
+            }
+            None => true,
+        }
     }
 
     /// This method is called using the account hashes at the boundary of [`BranchNode::Storage`]
@@ -371,6 +439,11 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
             }) else {
                 return Ok(())
             };
+
+            // Skip accounts that don't match the prefix filter
+            if !self.should_include_account(curr_account) {
+                continue;
+            }
 
             if curr_account < next_account || (end_inclusive && curr_account == next_account) {
                 trace!(target: "trie::verify", account = ?curr_account, "Verifying account has empty storage");
@@ -465,6 +538,62 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Iterator for Veri
             }
         }
     }
+}
+
+/// Runs verification in parallel by dividing the trie into 16 subtries based on the first nibble
+/// of node paths.
+///
+/// This creates 16 separate [`Verifier`] instances, each handling nodes starting with a different
+/// first nibble (0x0-0xF), and runs them concurrently using rayon's scoped parallelism.
+pub fn verify_parallel<'a, T, H>(
+    trie_cursor_factory: &'a T,
+    hashed_cursor_factory: H,
+) -> Result<Vec<Output>, StateRootError>
+where
+    T: TrieCursorFactory + Sync,
+    T::AccountTrieCursor<'a>: Send,
+    T::StorageTrieCursor<'a>: Send,
+    H: HashedCursorFactory + Clone + Send + Sync,
+{
+    use std::sync::Mutex;
+
+    // Create 16 prefixes for each first nibble (0x0-0xF)
+    let prefixes: Vec<Nibbles> = (0u8..16).map(|nibble| Nibbles::from_nibbles([nibble])).collect();
+
+    // Collect results from all parallel workers
+    let results: Mutex<Vec<Result<Vec<Output>, StateRootError>>> =
+        Mutex::new(Vec::with_capacity(16));
+
+    // Use rayon::scope to allow borrowed references
+    rayon::scope(|s| {
+        for prefix in prefixes {
+            let results_ref = &results;
+            let trie_cursor_factory_ref = trie_cursor_factory;
+            let hashed_cursor_factory_clone = hashed_cursor_factory.clone();
+
+            s.spawn(move |_| {
+                let result = (|| {
+                    let verifier = Verifier::with_prefix(
+                        trie_cursor_factory_ref,
+                        hashed_cursor_factory_clone,
+                        Some(prefix),
+                    )?;
+
+                    verifier.collect::<Result<Vec<_>, _>>()
+                })();
+
+                results_ref.lock().unwrap().push(result);
+            });
+        }
+    });
+
+    // Collect all outputs and propagate any errors
+    let mut all_outputs = Vec::new();
+    for result in results.into_inner().unwrap() {
+        all_outputs.extend(result?);
+    }
+
+    Ok(all_outputs)
 }
 
 #[cfg(test)]

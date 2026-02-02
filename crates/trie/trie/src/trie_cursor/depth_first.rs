@@ -55,17 +55,29 @@ pub struct DepthFirstTrieIterator<C: TrieCursor> {
     next: Vec<(Nibbles, BranchNodeCompact)>,
     /// Set to true once the cursor has been exhausted.
     complete: bool,
+    /// Optional prefix to constrain iteration. If set, only yields nodes whose paths start with
+    /// this prefix.
+    prefix: Option<Nibbles>,
 }
 
 impl<C: TrieCursor> DepthFirstTrieIterator<C> {
     /// Create a new depth-first iterator from a trie cursor.
     pub fn new(cursor: C) -> Self {
+        Self::with_prefix(cursor, None)
+    }
+
+    /// Create a new depth-first iterator from a trie cursor, constrained to a prefix.
+    ///
+    /// If `prefix` is `Some`, the iterator will only yield nodes whose paths start with the given
+    /// prefix. If `None`, it behaves the same as [`Self::new`].
+    pub fn with_prefix(cursor: C, prefix: Option<Nibbles>) -> Self {
         Self {
             cursor,
             initialized: false,
             stack: Default::default(),
             next: Default::default(),
             complete: false,
+            prefix,
         }
     }
 
@@ -107,7 +119,9 @@ impl<C: TrieCursor> DepthFirstTrieIterator<C> {
                 self.cursor.next()?
             } else {
                 self.initialized = true;
-                self.cursor.seek(Nibbles::new())?
+                // If we have a prefix, seek to it; otherwise seek to root
+                let seek_key = self.prefix.unwrap_or_default();
+                self.cursor.seek(seek_key)?
             }) else {
                 // Record that the cursor is empty and yield the stack. The stack is in reverse
                 // order of what we want to yield, but `next` is popped from, so we don't have to
@@ -116,6 +130,17 @@ impl<C: TrieCursor> DepthFirstTrieIterator<C> {
                 self.next = core::mem::take(&mut self.stack);
                 return Ok(())
             };
+
+            // If we have a prefix constraint, check if the path is still within our prefix range
+            if let Some(ref prefix) = self.prefix {
+                // Stop if path doesn't start with prefix and is not a prefix of our prefix
+                // (i.e., we've moved past our subtrie)
+                if !path.starts_with(prefix) && !prefix.starts_with(&path) {
+                    self.complete = true;
+                    self.next = core::mem::take(&mut self.stack);
+                    return Ok(());
+                }
+            }
 
             trace!(
                 target: "trie::trie_cursor::depth_first",

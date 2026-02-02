@@ -23,7 +23,7 @@ use reth_provider::{providers::ProviderNodeTypes, ChainSpecProvider, StageCheckp
 use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
 use reth_trie::{
-    verify::{Output, Verifier},
+    verify::{verify_parallel, Output, Verifier},
     Nibbles,
 };
 use reth_trie_common::{StorageTrieEntry, StoredNibbles, StoredNibblesSubKey};
@@ -42,6 +42,11 @@ pub struct Command {
     /// Only show inconsistencies without making any repairs
     #[arg(long)]
     pub(crate) dry_run: bool,
+
+    /// Run verification in parallel by dividing the trie into 16 subtries.
+    /// Only applicable with --dry-run.
+    #[arg(long)]
+    pub(crate) parallel: bool,
 
     /// Enable Prometheus metrics.
     ///
@@ -93,8 +98,15 @@ impl Command {
         };
 
         if self.dry_run {
-            verify_only(tool)?
+            if self.parallel {
+                verify_only_parallel(tool)?
+            } else {
+                verify_only(tool)?
+            }
         } else {
+            if self.parallel {
+                info!("Warning: --parallel is only applicable with --dry-run, ignoring");
+            }
             verify_and_repair(tool)?
         }
 
@@ -158,6 +170,67 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
     }
 
     info!("Found {} inconsistencies (dry run - no changes made)", inconsistent_nodes);
+
+    Ok(())
+}
+
+fn verify_only_parallel<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
+    // Log the database block tip from Finish stage checkpoint
+    let finish_checkpoint = tool
+        .provider_factory
+        .provider()?
+        .get_stage_checkpoint(StageId::Finish)?
+        .unwrap_or_default();
+    info!("Database block tip: {}", finish_checkpoint.block_number);
+
+    // Get a database transaction directly from the database
+    let db = tool.provider_factory.db_ref();
+    let mut tx = db.tx()?;
+    tx.disable_long_read_transaction_safety();
+
+    // Create cursor factories
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
+
+    let metrics = RepairTrieMetrics::new();
+    let start_time = Instant::now();
+
+    info!("Running parallel verification across 16 subtries...");
+
+    // Run parallel verification
+    let outputs = verify_parallel(&trie_cursor_factory, hashed_cursor_factory)?;
+
+    let mut inconsistent_nodes = 0;
+    for output in outputs {
+        // Skip progress indicators
+        if matches!(output, Output::Progress(_)) {
+            continue;
+        }
+
+        warn!("Inconsistency found: {output:?}");
+        inconsistent_nodes += 1;
+
+        // Record metrics based on output type
+        match output {
+            Output::AccountExtra(_, _) |
+            Output::AccountWrong { .. } |
+            Output::AccountMissing(_, _) => {
+                metrics.account_inconsistencies.increment(1);
+            }
+            Output::StorageExtra(_, _, _) |
+            Output::StorageWrong { .. } |
+            Output::StorageMissing(_, _, _) => {
+                metrics.storage_inconsistencies.increment(1);
+            }
+            Output::Progress(_) => {}
+        }
+    }
+
+    let elapsed = start_time.elapsed();
+    info!(
+        "Found {} inconsistencies in {:?} (dry run - no changes made)",
+        inconsistent_nodes, elapsed
+    );
 
     Ok(())
 }
