@@ -1463,6 +1463,20 @@ impl<'a> RocksDBBatch<'a> {
         let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
 
+        // Validate that new indices don't overlap with existing shard
+        if let Some(existing_max) = last_shard.iter().next_back() {
+            if let Some(&first_new) = indices.first() {
+                if first_new <= existing_max {
+                    return Err(ProviderError::Database(DatabaseError::Other(format!(
+                        "account history overlap: address={address}, \
+                         existing_max={existing_max}, first_new={first_new}, \
+                         new_range={first_new}..={}",
+                        indices.last().copied().unwrap_or(first_new)
+                    ))));
+                }
+            }
+        }
+
         last_shard.append(indices).map_err(ProviderError::other)?;
 
         // Fast path: all indices fit in one shard
@@ -1524,6 +1538,20 @@ impl<'a> RocksDBBatch<'a> {
         let last_key = StorageShardedKey::last(address, storage_key);
         let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+        // Validate that new indices don't overlap with existing shard
+        if let Some(existing_max) = last_shard.iter().next_back() {
+            if let Some(&first_new) = indices.first() {
+                if first_new <= existing_max {
+                    return Err(ProviderError::Database(DatabaseError::Other(format!(
+                        "storage history overlap: address={address}, slot={storage_key}, \
+                         existing_max={existing_max}, first_new={first_new}, \
+                         new_range={first_new}..={}",
+                        indices.last().copied().unwrap_or(first_new)
+                    ))));
+                }
+            }
+        }
 
         last_shard.append(indices).map_err(ProviderError::other)?;
 
