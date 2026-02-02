@@ -13,7 +13,7 @@ use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 
 use crate::provider::TrieNodeProvider;
 
-/// Statistics returned by [`SparseTrie::prune_preserving`].
+/// Statistics returned by [`SparseTrie] pruning,
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PruneTrieStats {
     /// Number of subtries skipped because they were recently modified.
