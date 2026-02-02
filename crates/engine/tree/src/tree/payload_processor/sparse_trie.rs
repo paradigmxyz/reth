@@ -362,11 +362,6 @@ where
             }
         }
 
-        // Process any remaining pending account updates.
-        if !self.pending_account_updates.is_empty() {
-            self.process_updates()?;
-        }
-
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
@@ -528,68 +523,82 @@ where
             }
         }
 
-        // Now handle pending account updates that can be upgraded to a proper update.
-        let account_rlp_buf = &mut self.account_rlp_buf;
-        self.pending_account_updates.retain(|addr, account| {
-            // If account has pending storage updates, it is still pending.
-            if self.storage_updates.get(addr).is_some_and(|updates| !updates.is_empty()) {
-                return true;
-            }
+        loop {
+            // Now handle pending account updates that can be upgraded to a proper update.
+            let account_rlp_buf = &mut self.account_rlp_buf;
+            self.pending_account_updates.retain(|addr, account| {
+                // If account has pending storage updates, it is still pending.
+                if self.storage_updates.get(addr).is_some_and(|updates| !updates.is_empty()) {
+                    return true;
+                }
 
-            // Get the current account state either from the trie or from latest account update.
-            let trie_account = if let Some(LeafUpdate::Changed(encoded)) = self.account_updates.get(addr) {
-                Some(encoded).filter(|encoded| !encoded.is_empty())
-            } else if !self.account_updates.contains_key(addr) {
-                self.trie.get_account_value(addr)
-            } else {
-                // Needs to be revealed first
-                return true;
-            };
+                // Get the current account state either from the trie or from latest account update.
+                let trie_account = if let Some(LeafUpdate::Changed(encoded)) = self.account_updates.get(addr) {
+                    Some(encoded).filter(|encoded| !encoded.is_empty())
+                } else if !self.account_updates.contains_key(addr) {
+                    self.trie.get_account_value(addr)
+                } else {
+                    // Needs to be revealed first
+                    return true;
+                };
 
-            let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
+                let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
 
-            let (account, storage_root) = if let Some(account) = account.take() {
-                // If account is Some(_) here it means it didn't have any storage updates
-                // and we can fetch the storage root directly from the account trie.
-                //
-                // If it did have storage updates, we would've had processed it above when iterating over storage tries.
-                let storage_root = trie_account.map(|account| account.storage_root).unwrap_or(EMPTY_ROOT_HASH);
+                let (account, storage_root) = if let Some(account) = account.take() {
+                    // If account is Some(_) here it means it didn't have any storage updates
+                    // and we can fetch the storage root directly from the account trie.
+                    //
+                    // If it did have storage updates, we would've had processed it above when iterating over storage tries.
+                    let storage_root = trie_account.map(|account| account.storage_root).unwrap_or(EMPTY_ROOT_HASH);
 
-                (account, storage_root)
-            } else {
-                (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
-            };
+                    (account, storage_root)
+                } else {
+                    (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
+                };
 
-            let encoded = if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
-                Vec::new()
-            } else {
-                account_rlp_buf.clear();
-                account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
-                account_rlp_buf.clone()
-            };
-            self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                let encoded = if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
+                    Vec::new()
+                } else {
+                    account_rlp_buf.clear();
+                    account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
+                    account_rlp_buf.clone()
+                };
+                self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
 
-            false
-        });
+                false
+            });
 
-        // Process account trie updates and fill the account targets.
-        self.trie
-            .trie_mut()
-            .update_leaves(&mut self.account_updates, |target, min_len| {
-                match self.fetched_account_targets.entry(target) {
-                    Entry::Occupied(mut entry) => {
-                        if min_len < *entry.get() {
+            let updates_len_before = self.account_updates.len();
+
+            // Process account trie updates and fill the account targets.
+            self.trie
+                .trie_mut()
+                .update_leaves(&mut self.account_updates, |target, min_len| {
+                    match self.fetched_account_targets.entry(target) {
+                        Entry::Occupied(mut entry) => {
+                            if min_len < *entry.get() {
+                                entry.insert(min_len);
+                                targets
+                                    .account_targets
+                                    .push(Target::new(target).with_min_len(min_len));
+                            }
+                        }
+                        Entry::Vacant(entry) => {
                             entry.insert(min_len);
                             targets.account_targets.push(Target::new(target).with_min_len(min_len));
                         }
                     }
-                    Entry::Vacant(entry) => {
-                        entry.insert(min_len);
-                        targets.account_targets.push(Target::new(target).with_min_len(min_len));
-                    }
-                }
-            })
-            .map_err(ProviderError::other)?;
+                })
+                .map_err(ProviderError::other)?;
+
+            if updates_len_before == self.account_updates.len() {
+                // Only exit when no new updates are processed.
+                //
+                // We need to keep iterating if any updates are being drained because that might
+                //indicate that more pending account updates can be promoted.
+                break;
+            }
+        }
 
         if !targets.is_empty() {
             self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput::V2 {
