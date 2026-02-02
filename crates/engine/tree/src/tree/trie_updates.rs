@@ -186,7 +186,8 @@ fn compare_storage_trie_updates<C: TrieCursor>(
     task: &mut StorageTrieUpdates,
     regular: &mut StorageTrieUpdates,
 ) -> Result<StorageTrieUpdatesDiff, DatabaseError> {
-    let database_not_exists = trie_cursor()?.next()?.is_none();
+    // Check if the storage trie exists by seeking to the first entry
+    let database_not_exists = trie_cursor()?.seek(Nibbles::default())?.is_none();
     let mut diff = StorageTrieUpdatesDiff {
         // If the deletion is a no-op, meaning that the entry is not in the
         // database, do not add it to the diff.
