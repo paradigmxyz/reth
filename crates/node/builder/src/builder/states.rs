@@ -51,7 +51,7 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
                 hooks: NodeHooks::default(),
                 exexs: Vec::new(),
                 add_ons: (),
-                wal_blocks_warning: None,
+                config: Default::default(),
             },
         }
     }
@@ -182,7 +182,7 @@ where
                 hooks: NodeHooks::default(),
                 exexs: Vec::new(),
                 add_ons,
-                wal_blocks_warning: None,
+                config: Default::default(),
             },
         }
     }

@@ -578,7 +578,7 @@ where
     /// builder.with_wal_blocks_warning(768)  // For 2-second block times (6x Ethereum mainnet)
     /// ```
     pub const fn with_wal_blocks_warning(mut self, threshold: usize) -> Self {
-        self.builder.add_ons.wal_blocks_warning = Some(threshold);
+        self.builder.add_ons.config.wal_blocks_warning = Some(threshold);
         self
     }
 
