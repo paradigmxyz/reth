@@ -3,7 +3,7 @@
 use crate::tree::{
     multiproof::{
         dispatch_with_chunking, evm_state_to_hashed_post_state, MultiProofMessage,
-        VersionedMultiProofTargets,
+        VersionedMultiProofTargets, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
     },
     payload_processor::multiproof::{MultiProofTaskMetrics, SparseTrieUpdate},
 };
@@ -217,6 +217,15 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     trie: SparseStateTrie<A, S>,
     /// Handle to the proof worker pools (storage and account).
     proof_worker_handle: ProofWorkerHandle,
+
+    /// The size of proof targets chunk to spawn in one calculation.
+    /// If None, chunking is disabled and all targets are processed in a single proof.
+    chunk_size: Option<usize>,
+    /// If this number is exceeded and chunking is enabled, then this will override whether or not
+    /// there are any active workers and force chunking across workers. This is to prevent tasks
+    /// which are very long from hitting a single worker.
+    max_targets_for_chunking: usize,
+
     /// Account trie updates.
     account_updates: B256Map<LeafUpdate>,
     /// Storage trie updates. hashed address -> slot -> update.
@@ -250,6 +259,7 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     /// Number of pending execution/prewarming updates received but not yet passed to
     /// `update_leaves`.
     pending_updates: usize,
+
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
 }
@@ -264,7 +274,8 @@ where
         updates: CrossbeamReceiver<MultiProofMessage>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: MultiProofTaskMetrics,
-        sparse_state_trie: SparseStateTrie<A, S>,
+        trie: SparseStateTrie<A, S>,
+        chunk_size: Option<usize>,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         Self {
@@ -272,7 +283,9 @@ where
             proof_result_rx,
             updates,
             proof_worker_handle,
-            trie: sparse_state_trie,
+            trie,
+            chunk_size,
+            max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             account_updates: Default::default(),
             storage_updates: Default::default(),
             pending_account_updates: Default::default(),
@@ -362,7 +375,7 @@ where
 
             if self.updates.is_empty() && self.proof_result_rx.is_empty() {
                 self.dispatch_pending_targets();
-                self.process_updates()?;
+                self.promote_pending_account_updates()?;
                 self.dispatch_pending_targets();
             } else if self.updates.is_empty() || self.pending_updates > 100 {
                 self.process_leaf_updates()?;
@@ -490,6 +503,8 @@ where
         })
     }
 
+    /// Applies all account and storage leaf updates to corresponding tries and collects any new
+    /// multiproof targets.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
@@ -573,13 +588,15 @@ where
         Ok(self.account_updates.len() < updates_len_before)
     }
 
-    /// Applies updates to the sparse trie and dispatches requested multiproof targets.
+    /// Iterates through all storage tries for which all updates were processed, computes their
+    /// storage roots, and promotes corresponding pending account updates into proper leaf updates
+    /// for accounts trie.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    fn process_updates(&mut self) -> SparseTrieResult<()> {
+    fn promote_pending_account_updates(&mut self) -> SparseTrieResult<()> {
         self.process_leaf_updates()?;
 
         if self.pending_account_updates.is_empty() {
@@ -693,8 +710,8 @@ where
             dispatch_with_chunking(
                 std::mem::take(&mut self.pending_targets),
                 chunking_length,
-                Some(60),
-                300,
+                self.chunk_size,
+                self.max_targets_for_chunking,
                 self.proof_worker_handle.available_account_workers(),
                 self.proof_worker_handle.available_storage_workers(),
                 MultiProofTargetsV2::chunks,
