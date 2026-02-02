@@ -292,7 +292,7 @@ where
         max_values_capacity: usize,
         hot_accounts: &SharedHotAccounts,
     ) -> SparseStateTrie<A, S> {
-        let guard = hot_accounts.lock();
+        let guard = hot_accounts.read();
         let config = SmartPruneConfig::new(prune_depth, max_storage_tries, &guard);
         self.trie.prune_preserving(&config);
         drop(guard);

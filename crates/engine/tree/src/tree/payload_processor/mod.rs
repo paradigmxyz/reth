@@ -566,7 +566,7 @@ where
                     .with_accounts_trie(default_trie.clone())
                     .with_default_storage_trie(default_trie)
                     .with_updates(true);
-                let hot_accounts = Arc::new(parking_lot::Mutex::new(default_hot_accounts));
+                let hot_accounts = Arc::new(parking_lot::RwLock::new(default_hot_accounts));
                 (trie, hot_accounts)
             });
 

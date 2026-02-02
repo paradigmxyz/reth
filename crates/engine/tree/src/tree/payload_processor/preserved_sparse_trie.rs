@@ -1,7 +1,7 @@
 //! Preserved sparse trie for reuse across payload validations.
 
 use alloy_primitives::B256;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use reth_trie_sparse::{hot_accounts::TieredHotAccounts, SparseStateTrie};
 use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::sync::Arc;
@@ -10,8 +10,12 @@ use tracing::debug;
 /// Type alias for the sparse trie type used in preservation.
 pub(super) type SparseTrie = SparseStateTrie<ParallelSparseTrie, ParallelSparseTrie>;
 
-/// Shared handle to hot accounts tracker for recording touches across threads.
-pub(super) type SharedHotAccounts = Arc<Mutex<TieredHotAccounts>>;
+/// Shared handle to hot accounts tracker.
+///
+/// Uses `RwLock` because access is single-threaded on the sparse trie task:
+/// - Write: `clear_fee_recipients()` on reorg (rare)
+/// - Read: `prune_preserving()` at end of block
+pub(super) type SharedHotAccounts = Arc<RwLock<TieredHotAccounts>>;
 
 /// Shared handle to a preserved sparse trie that can be reused across payload validations.
 ///
@@ -115,7 +119,7 @@ impl PreservedSparseTrie {
                     "Clearing anchored sparse trie - parent state root mismatch"
                 );
                 trie.clear();
-                hot_accounts.lock().clear_fee_recipients();
+                hot_accounts.write().clear_fee_recipients();
                 (trie, hot_accounts)
             }
             Self::Cleared { trie, hot_accounts } => {
