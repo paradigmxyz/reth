@@ -1058,9 +1058,12 @@ impl SparseTrieExt for ParallelSparseTrie {
         upper_count + lower_count
     }
 
-    fn prune(&mut self, max_depth: usize) -> usize {
+    #[cfg(feature = "std")]
+    fn prune_preserving(&mut self, config: &reth_trie_sparse::hot_accounts::SmartPruneConfig<'_>) {
         // Decay heat for subtries not modified this cycle
         self.subtrie_heat.decay_and_reset();
+
+        let max_depth = config.max_depth;
 
         // DFS traversal to find nodes at max_depth that can be pruned.
         // Collects "effective pruned roots" - children of nodes at max_depth with computed hashes.
@@ -1113,6 +1116,12 @@ impl SparseTrieExt for ParallelSparseTrie {
             // Process children - either continue traversal or prune
             for child in children {
                 if depth == max_depth {
+                    // Check if this child path leads to a hot account - preserve it
+                    if config.path_leads_to_hot_account(&child) {
+                        stack.push((child, depth + 1));
+                        continue;
+                    }
+
                     // Check if child has a computed hash and replace inline
                     let hash = self
                         .subtrie_for_path(&child)
@@ -1134,10 +1143,8 @@ impl SparseTrieExt for ParallelSparseTrie {
         }
 
         if effective_pruned_roots.is_empty() {
-            return 0;
+            return;
         }
-
-        let nodes_converted = effective_pruned_roots.len();
 
         // Sort roots by subtrie type (upper first), then by path for efficient partitioning.
         effective_pruned_roots.sort_unstable_by(|(path_a, _), (path_b, _)| {
@@ -1196,154 +1203,6 @@ impl SparseTrieExt for ParallelSparseTrie {
             };
 
             // Retain only nodes/values not descended from any pruned root.
-            subtrie.nodes.retain(|p, _| !is_strict_descendant_in(roots_group, p));
-            subtrie.inner.values.retain(|p, _| !starts_with_pruned_in(roots_group, p));
-        }
-
-        // Branch node masks pruning
-        self.branch_node_masks.retain(|p, _| {
-            if SparseSubtrieType::path_len_is_upper(p.len()) {
-                !starts_with_pruned_in(roots_upper, p)
-            } else {
-                !starts_with_pruned_in(roots_lower, p) && !starts_with_pruned_in(roots_upper, p)
-            }
-        });
-
-        nodes_converted
-    }
-
-    #[cfg(feature = "std")]
-    fn prune_preserving(&mut self, config: &reth_trie_sparse::hot_accounts::SmartPruneConfig<'_>) {
-        // Decay heat for subtries not modified this cycle
-        self.subtrie_heat.decay_and_reset();
-
-        let max_depth = config.max_depth;
-
-        // DFS traversal to find nodes at max_depth that can be pruned.
-        // Hot accounts are preserved at full depth by skipping pruning for their paths.
-        let mut effective_pruned_roots = Vec::<(Nibbles, B256)>::new();
-        let mut stack: SmallVec<[(Nibbles, usize); 32]> = SmallVec::new();
-        stack.push((Nibbles::default(), 0));
-
-        while let Some((path, depth)) = stack.pop() {
-            // Skip traversal into hot lower subtries beyond max_depth.
-            if depth > max_depth &&
-                let SparseSubtrieType::Lower(idx) = SparseSubtrieType::from_path(&path) &&
-                self.subtrie_heat.is_hot(idx)
-            {
-                continue;
-            }
-
-            // Get children to visit from current node (immutable access)
-            let children: SmallVec<[Nibbles; 16]> = {
-                let Some(subtrie) = self.subtrie_for_path(&path) else { continue };
-                let Some(node) = subtrie.nodes.get(&path) else { continue };
-
-                match node {
-                    SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {
-                        SmallVec::new()
-                    }
-                    SparseNode::Extension { key, .. } => {
-                        let mut child = path;
-                        child.extend(key);
-                        SmallVec::from_buf_and_len([child; 16], 1)
-                    }
-                    SparseNode::Branch { state_mask, .. } => {
-                        let mut children = SmallVec::new();
-                        let mut mask = state_mask.get();
-                        while mask != 0 {
-                            let nibble = mask.trailing_zeros() as u8;
-                            mask &= mask - 1;
-                            let mut child = path;
-                            child.push_unchecked(nibble);
-                            children.push(child);
-                        }
-                        children
-                    }
-                }
-            };
-
-            // Process children - either continue traversal or prune
-            for child in children {
-                if depth == max_depth {
-                    // Check if this child path leads to a hot account.
-                    // For account tries, we can check if any hot account's nibble path
-                    // starts with this child path.
-                    if Self::path_leads_to_hot_account(&child, config) {
-                        // Don't prune hot account paths - continue traversal
-                        stack.push((child, depth + 1));
-                        continue;
-                    }
-
-                    // Check if child has a computed hash and replace inline
-                    let hash = self
-                        .subtrie_for_path(&child)
-                        .and_then(|s| s.nodes.get(&child))
-                        .filter(|n| !n.is_hash())
-                        .and_then(|n| n.hash());
-
-                    if let Some(hash) = hash &&
-                        let Some(subtrie) = self.subtrie_for_path_mut_untracked(&child)
-                    {
-                        subtrie.nodes.insert(child, SparseNode::Hash(hash));
-                        effective_pruned_roots.push((child, hash));
-                    }
-                } else {
-                    stack.push((child, depth + 1));
-                }
-            }
-        }
-
-        if effective_pruned_roots.is_empty() {
-            return;
-        }
-
-        // Sort roots by subtrie type (upper first), then by path for efficient partitioning.
-        effective_pruned_roots.sort_unstable_by(|(path_a, _), (path_b, _)| {
-            let subtrie_type_a = SparseSubtrieType::from_path(path_a);
-            let subtrie_type_b = SparseSubtrieType::from_path(path_b);
-            subtrie_type_a.cmp(&subtrie_type_b).then(path_a.cmp(path_b))
-        });
-
-        // Split off upper subtrie roots (they come first due to sorting)
-        let num_upper_roots = effective_pruned_roots
-            .iter()
-            .position(|(p, _)| !SparseSubtrieType::path_len_is_upper(p.len()))
-            .unwrap_or(effective_pruned_roots.len());
-
-        let roots_upper = &effective_pruned_roots[..num_upper_roots];
-        let roots_lower = &effective_pruned_roots[num_upper_roots..];
-
-        // Upper prune roots that are prefixes of lower subtrie root paths cause the entire
-        // subtrie to be cleared (preserving allocations for reuse).
-        if !roots_upper.is_empty() {
-            for subtrie in &mut self.lower_subtries {
-                let should_clear = subtrie.as_revealed_ref().is_some_and(|s| {
-                    let search_idx = roots_upper.partition_point(|(root, _)| root <= &s.path);
-                    search_idx > 0 && s.path.starts_with(&roots_upper[search_idx - 1].0)
-                });
-                if should_clear {
-                    subtrie.clear();
-                }
-            }
-        }
-
-        // Upper subtrie: prune nodes and values
-        self.upper_subtrie.nodes.retain(|p, _| !is_strict_descendant_in(roots_upper, p));
-        self.upper_subtrie.inner.values.retain(|p, _| {
-            !starts_with_pruned_in(roots_upper, p) && !starts_with_pruned_in(roots_lower, p)
-        });
-
-        // Process lower subtries using chunk_by to group roots by subtrie
-        for roots_group in roots_lower.chunk_by(|(path_a, _), (path_b, _)| {
-            SparseSubtrieType::from_path(path_a) == SparseSubtrieType::from_path(path_b)
-        }) {
-            let subtrie_idx = path_subtrie_index_unchecked(&roots_group[0].0);
-
-            let Some(subtrie) = self.lower_subtries[subtrie_idx].as_revealed_mut() else {
-                continue;
-            };
-
             subtrie.nodes.retain(|p, _| !is_strict_descendant_in(roots_group, p));
             subtrie.inner.values.retain(|p, _| !starts_with_pruned_in(roots_group, p));
         }
@@ -1434,6 +1293,18 @@ impl ParallelSparseTrie {
         self
     }
 
+    /// Convenience method for pruning without hot account tracking.
+    ///
+    /// Creates an empty hot account config and calls `prune_preserving`.
+    /// Primarily used for testing.
+    #[cfg(feature = "std")]
+    pub fn prune(&mut self, max_depth: usize) {
+        let hot_accounts = reth_trie_sparse::hot_accounts::TieredHotAccounts::new();
+        let config =
+            reth_trie_sparse::hot_accounts::SmartPruneConfig::new(max_depth, 0, &hot_accounts);
+        <Self as reth_trie_sparse::SparseTrieExt>::prune_preserving(self, &config);
+    }
+
     /// Returns true if retaining updates is enabled for the overall trie.
     const fn updates_enabled(&self) -> bool {
         self.updates.is_some()
@@ -1489,49 +1360,6 @@ impl ParallelSparseTrie {
         let mut bytes = [0u8; 32];
         bytes[..packed.len()].copy_from_slice(&packed);
         B256::from(bytes)
-    }
-
-    /// Checks if a trie path leads to a hot account that should be preserved.
-    ///
-    /// For paths shorter than 64 nibbles (partial account paths), we check if any
-    /// hot account's hashed address starts with this path prefix. This is done
-    /// efficiently by checking if the path prefix matches any Tier A/B accounts
-    /// or if the dynamic filters indicate a hot account in this subtrie.
-    #[cfg(feature = "std")]
-    fn path_leads_to_hot_account(
-        path: &Nibbles,
-        config: &reth_trie_sparse::hot_accounts::SmartPruneConfig<'_>,
-    ) -> bool {
-        // For complete account paths (64 nibbles), check directly
-        if path.len() >= 64 {
-            let hashed = B256::from_slice(&path.pack()[..32]);
-            return config.hot_accounts.should_preserve(&hashed);
-        }
-
-        // For partial paths, check if any known hot account has this prefix
-        let hot_accounts = config.hot_accounts;
-
-        // Check Tier A: system contracts and major contracts
-        for addr in hot_accounts.tier_a_iter() {
-            let account_path = Nibbles::unpack(*addr);
-            if account_path.starts_with(path) {
-                return true;
-            }
-        }
-
-        // Check Tier B: known builders and fee recipients
-        for addr in hot_accounts.tier_b_iter() {
-            let account_path = Nibbles::unpack(*addr);
-            if account_path.starts_with(path) {
-                return true;
-            }
-        }
-
-        // For dynamic (Tier C) accounts, we can't efficiently check partial paths
-        // since bloom filters don't support prefix queries. Conservative approach:
-        // don't preserve based on dynamic accounts for partial paths.
-        // This means only statically-known hot accounts get full preservation.
-        false
     }
 
     /// Rolls back a partial update by removing the value, removing any inserted nodes,
@@ -8266,14 +8094,13 @@ mod tests {
 
         // Prune multiple times to allow heat to fully decay.
         // Heat starts at 1 and decays by 1 each cycle for unmodified subtries.
-        let mut total_pruned = 0;
         for _ in 0..2 {
-            total_pruned += trie.prune(1);
+            trie.prune(1);
         }
 
-        assert!(total_pruned > 0, "should have pruned some nodes");
         assert_eq!(root_before, trie.root(), "root hash should be preserved");
 
+        // Verify values are pruned (replaced with hash stubs)
         for key in &keys {
             assert!(trie.get_leaf_value(key).is_none(), "value should be pruned");
         }

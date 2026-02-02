@@ -1210,7 +1210,7 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
                 continue;
             }
             if let Some(trie) = self.tries.get_mut(address).and_then(|t| t.as_revealed_mut()) {
-                trie.prune(config.max_depth);
+                trie.prune_preserving(config);
                 heat_state.prune_backlog = 0;
             }
         }

@@ -78,81 +78,54 @@ impl TieredHotAccounts {
 
         // Tier A: System contracts (addresses from EIPs)
         // EIP-4788: Beacon roots
-        tracker.add_system_contract(keccak256(address!(
-            "0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02"
-        )));
+        tracker
+            .add_system_contract(keccak256(address!("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")));
         // EIP-2935: Block hash history
-        tracker.add_system_contract(keccak256(address!(
-            "0x0000F90827F1C53a10cb7A02335B175320002935"
-        )));
+        tracker
+            .add_system_contract(keccak256(address!("0x0000F90827F1C53a10cb7A02335B175320002935")));
         // EIP-7002: Withdrawal requests
-        tracker.add_system_contract(keccak256(address!(
-            "0x00000961Ef480Eb55e80D19ad83579A64c007002"
-        )));
+        tracker
+            .add_system_contract(keccak256(address!("0x00000961Ef480Eb55e80D19ad83579A64c007002")));
         // EIP-7251: Consolidation requests
-        tracker.add_system_contract(keccak256(address!(
-            "0x0000BBdDc7CE488642fb579F8B00f3a590007251"
-        )));
+        tracker
+            .add_system_contract(keccak256(address!("0x0000BBdDc7CE488642fb579F8B00f3a590007251")));
 
         // Tier A: Major defi contracts
         // WETH
-        tracker.add_major_contract(keccak256(address!(
-            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
-        )));
+        tracker
+            .add_major_contract(keccak256(address!("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")));
         // USDC
-        tracker.add_major_contract(keccak256(address!(
-            "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-        )));
+        tracker
+            .add_major_contract(keccak256(address!("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")));
         // USDT
-        tracker.add_major_contract(keccak256(address!(
-            "0xdAC17F958D2ee523a2206206994597C13D831ec7"
-        )));
+        tracker
+            .add_major_contract(keccak256(address!("0xdAC17F958D2ee523a2206206994597C13D831ec7")));
         // Uniswap V3 Router
-        tracker.add_major_contract(keccak256(address!(
-            "0xE592427A0AEce92De3Edee1F18E0157C05861564"
-        )));
+        tracker
+            .add_major_contract(keccak256(address!("0xE592427A0AEce92De3Edee1F18E0157C05861564")));
         // Uniswap Universal Router
-        tracker.add_major_contract(keccak256(address!(
-            "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
-        )));
+        tracker
+            .add_major_contract(keccak256(address!("0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD")));
 
         // Tier B: Known block builders
         // Beaverbuild
-        tracker.add_builder(keccak256(address!(
-            "0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5"
-        )));
+        tracker.add_builder(keccak256(address!("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5")));
         // Titan Builder
-        tracker.add_builder(keccak256(address!(
-            "0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97"
-        )));
+        tracker.add_builder(keccak256(address!("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97")));
         // Rsync
-        tracker.add_builder(keccak256(address!(
-            "0x1f9090aaE28b8a3dCeaDf281B0F12828e676c326"
-        )));
+        tracker.add_builder(keccak256(address!("0x1f9090aaE28b8a3dCeaDf281B0F12828e676c326")));
         // Flashbots
-        tracker.add_builder(keccak256(address!(
-            "0xDAFEA492D9c6733ae3d56b7Ed1ADb60692c98Bc5"
-        )));
+        tracker.add_builder(keccak256(address!("0xDAFEA492D9c6733ae3d56b7Ed1ADb60692c98Bc5")));
         // Builder0x69
-        tracker.add_builder(keccak256(address!(
-            "0x690B9A9E9aa1C9dB991C7721a92d351Db4FaC990"
-        )));
+        tracker.add_builder(keccak256(address!("0x690B9A9E9aa1C9dB991C7721a92d351Db4FaC990")));
         // BuilderNet
-        tracker.add_builder(keccak256(address!(
-            "0xdadb0d80178819f2319190d340ce9a924f783711"
-        )));
+        tracker.add_builder(keccak256(address!("0xdadb0d80178819f2319190d340ce9a924f783711")));
         // bloXroute
-        tracker.add_builder(keccak256(address!(
-            "0x965Df5Ff6116C395187E288e5C87fb96CfB8141c"
-        )));
+        tracker.add_builder(keccak256(address!("0x965Df5Ff6116C395187E288e5C87fb96CfB8141c")));
         // Lido Execution Layer Rewards Vault
-        tracker.add_builder(keccak256(address!(
-            "0x388C818CA8B9251b393131C08a736A67ccB19297"
-        )));
+        tracker.add_builder(keccak256(address!("0x388C818CA8B9251b393131C08a736A67ccB19297")));
         // Quasar
-        tracker.add_builder(keccak256(address!(
-            "0x396343362be2a4da1ce0c1c210945346fb82aa49"
-        )));
+        tracker.add_builder(keccak256(address!("0x396343362be2a4da1ce0c1c210945346fb82aa49")));
 
         tracker
     }
@@ -164,17 +137,14 @@ impl TieredHotAccounts {
         let mut tracker = Self::new();
 
         // L1 Block contract
-        tracker.add_system_contract(keccak256(address!(
-            "0x4200000000000000000000000000000000000015"
-        )));
+        tracker
+            .add_system_contract(keccak256(address!("0x4200000000000000000000000000000000000015")));
         // L2 Cross Domain Messenger
-        tracker.add_system_contract(keccak256(address!(
-            "0x4200000000000000000000000000000000000007"
-        )));
+        tracker
+            .add_system_contract(keccak256(address!("0x4200000000000000000000000000000000000007")));
         // Gas Price Oracle
-        tracker.add_system_contract(keccak256(address!(
-            "0x420000000000000000000000000000000000000F"
-        )));
+        tracker
+            .add_system_contract(keccak256(address!("0x420000000000000000000000000000000000000F")));
 
         tracker
     }
@@ -325,6 +295,39 @@ impl<'a> SmartPruneConfig<'a> {
         hot_accounts: &'a TieredHotAccounts,
     ) -> Self {
         Self { max_depth, max_storage_tries, hot_accounts }
+    }
+
+    /// Checks if a trie path leads to a hot account that should be preserved during pruning.
+    ///
+    /// For complete account paths (64 nibbles), checks directly against hot accounts.
+    /// For partial paths, checks if any hot account's hashed address starts with this prefix.
+    pub fn path_leads_to_hot_account(&self, path: &reth_trie_common::Nibbles) -> bool {
+        use alloy_primitives::B256;
+
+        // For complete account paths (64 nibbles), check directly
+        if path.len() >= 64 {
+            let hashed = B256::from_slice(&path.pack()[..32]);
+            return self.hot_accounts.should_preserve(&hashed);
+        }
+
+        // For partial paths, check if any known hot account has this prefix
+        // Check Tier A: system contracts and major contracts
+        for addr in self.hot_accounts.tier_a_iter() {
+            let account_path = reth_trie_common::Nibbles::unpack(*addr);
+            if account_path.starts_with(path) {
+                return true;
+            }
+        }
+
+        // Check Tier B: known builders and fee recipients
+        for addr in self.hot_accounts.tier_b_iter() {
+            let account_path = reth_trie_common::Nibbles::unpack(*addr);
+            if account_path.starts_with(path) {
+                return true;
+            }
+        }
+
+        false
     }
 }
 

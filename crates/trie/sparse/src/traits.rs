@@ -273,10 +273,13 @@ pub trait SparseTrieExt: SparseTrie {
     /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
     fn size_hint(&self) -> usize;
 
-    /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
+    /// Prunes the trie while preserving hot accounts at full depth.
     ///
     /// Depth counts nodes traversed (not nibbles), so extension nodes count as 1 depth
     /// regardless of key length. `max_depth == 0` prunes all children of the root node.
+    ///
+    /// Hot accounts (Tier A/B) are preserved at full depth, cold accounts are pruned to
+    /// `max_depth`.
     ///
     /// # Preconditions
     ///
@@ -286,22 +289,7 @@ pub trait SparseTrieExt: SparseTrie {
     /// # Behavior
     ///
     /// - Embedded nodes (RLP < 32 bytes) are preserved since they have no hash
-    /// - Returns 0 if `max_depth` exceeds trie depth or trie is empty
-    ///
-    /// # Returns
-    ///
-    /// The number of nodes converted to hash stubs.
-    fn prune(&mut self, max_depth: usize) -> usize;
-
-    /// Prunes the trie while preserving hot accounts.
-    ///
-    /// Similar to `prune`, but applies different depth limits based on account hotness:
-    /// - Hot accounts (Tier A/B/C) are preserved at full depth
-    /// - Cold accounts are pruned to `max_depth`
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Configuration containing hot account tracker and depth settings
+    /// - Hot account paths are never pruned
     #[cfg(feature = "std")]
     fn prune_preserving(&mut self, config: &crate::hot_accounts::SmartPruneConfig<'_>);
 
