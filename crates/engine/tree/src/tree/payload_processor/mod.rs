@@ -63,7 +63,7 @@ pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
 
-use preserved_sparse_trie::{PreservedSparseTrie, SharedHotAccounts, SharedPreservedSparseTrie};
+use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
 
 /// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
 ///
@@ -347,7 +347,7 @@ where
         let (state_root_tx, state_root_rx) = channel();
 
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
-        let hot_accounts = self.spawn_sparse_trie_task(
+        self.spawn_sparse_trie_task(
             sparse_trie_rx,
             proof_handle,
             state_root_tx,
@@ -361,7 +361,6 @@ where
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
-            hot_accounts: Some(hot_accounts),
             _span: span,
         }
     }
@@ -389,7 +388,6 @@ where
             prewarm_handle,
             state_root: None,
             transactions: execution_rx,
-            hot_accounts: None, // Cache-exclusive path doesn't use sparse trie
             _span: Span::current(),
         }
     }
@@ -530,7 +528,6 @@ where
     /// Spawns the [`SparseTrieTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
-    /// Returns the shared hot accounts tracker for use in the state hook.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_sparse_trie_task(
         &self,
@@ -540,17 +537,16 @@ where
         from_multi_proof: CrossbeamReceiver<MultiProofMessage>,
         config: &TreeConfig,
         parent_state_root: B256,
-    ) -> SharedHotAccounts {
+    ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
         let span = Span::current();
         let disable_sparse_trie_as_cache = !config.enable_sparse_trie_as_cache();
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
-        let default_hot_accounts = self.default_hot_accounts.clone();
+        let hot_accounts = self.default_hot_accounts.clone();
 
-        // Extract or create hot accounts BEFORE spawning the task so we can return a clone
-        let (sparse_state_trie, hot_accounts): (_, SharedHotAccounts) = preserved_sparse_trie
+        let sparse_state_trie = preserved_sparse_trie
             .take()
             .map(|preserved| preserved.into_trie_for(parent_state_root))
             .unwrap_or_else(|| {
@@ -562,16 +558,11 @@ where
                     ParallelSparseTrie::default()
                         .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
                 );
-                let trie = SparseStateTrie::new()
+                SparseStateTrie::new()
                     .with_accounts_trie(default_trie.clone())
                     .with_default_storage_trie(default_trie)
-                    .with_updates(true);
-                let hot_accounts = Arc::new(parking_lot::RwLock::new(default_hot_accounts));
-                (trie, hot_accounts)
+                    .with_updates(true)
             });
-
-        // Clone for the caller before moving into spawned task
-        let hot_accounts_for_caller = hot_accounts.clone();
 
         self.executor.spawn_blocking(move || {
             let _enter = span.entered();
@@ -615,7 +606,7 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                guard.store(PreservedSparseTrie::cleared(trie, hot_accounts));
+                guard.store(PreservedSparseTrie::cleared(trie));
                 return;
             }
 
@@ -635,7 +626,7 @@ where
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                guard.store(PreservedSparseTrie::anchored(trie, state_root, hot_accounts));
+                guard.store(PreservedSparseTrie::anchored(trie, state_root));
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
@@ -645,11 +636,9 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                guard.store(PreservedSparseTrie::cleared(trie, hot_accounts));
+                guard.store(PreservedSparseTrie::cleared(trie));
             }
         });
-
-        hot_accounts_for_caller
     }
 
     /// Updates the execution cache with the post-execution state from an inserted block.
@@ -717,10 +706,6 @@ pub struct PayloadHandle<Tx, Err, R> {
     transactions: mpsc::Receiver<Result<Tx, Err>>,
     /// Receiver for the state root
     state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
-    /// Shared hot accounts tracker (used for trie preservation, may be used for fee recipient
-    /// recording in the future).
-    #[allow(dead_code)]
-    hot_accounts: Option<SharedHotAccounts>,
     /// Span for tracing
     _span: Span,
 }
