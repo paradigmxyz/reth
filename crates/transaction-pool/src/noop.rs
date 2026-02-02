@@ -19,10 +19,10 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::{Address, TxHash, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
-use std::{collections::HashSet, marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
 /// A [`TransactionPool`] implementation that does nothing.
@@ -312,7 +312,7 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         vec![]
     }
 
-    fn unique_senders(&self) -> HashSet<Address> {
+    fn unique_senders(&self) -> AddressSet {
         Default::default()
     }
 

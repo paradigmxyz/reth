@@ -5,7 +5,7 @@ use crate::{
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
-    map::{B256Map, HashSet},
+    map::{B256Map, B256Set, HashSet},
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
@@ -1344,7 +1344,7 @@ struct StorageTrieModifications {
     /// Access frequency and prune state per storage trie address.
     state: B256Map<TrieModificationState>,
     /// Tracks which tries were accessed in the current cycle (between prune calls).
-    accessed_this_cycle: HashSet<B256>,
+    accessed_this_cycle: B256Set,
 }
 
 #[allow(dead_code)]

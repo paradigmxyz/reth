@@ -28,7 +28,8 @@ use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{
-    map::HashMap, Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256,
+    map::{B256Map, HashMap},
+    Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256,
 };
 use alloy_provider::{ext::DebugApi, network::Network, Provider};
 use alloy_rpc_types::{AccountInfo, BlockId};
@@ -912,7 +913,7 @@ where
     /// Cached bytecode for accounts
     ///
     /// Since the state provider is short-lived, we don't worry about memory leaks.
-    code_store: RwLock<HashMap<B256, Bytecode>>,
+    code_store: RwLock<B256Map<Bytecode>>,
     /// Whether to use Reth-specific RPC methods for better performance
     reth_rpc_support: bool,
 }

@@ -11,7 +11,7 @@ use reth_trie_db::ChangesetCache;
 
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256Map, B256Set},
     Bytes, B256,
 };
 use alloy_rlp::Decodable;
@@ -234,11 +234,11 @@ impl TestHarness {
     }
 
     fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
-        let mut blocks_by_hash = HashMap::default();
+        let mut blocks_by_hash = B256Map::default();
         let mut blocks_by_number = BTreeMap::new();
-        let mut state_by_hash = HashMap::default();
+        let mut state_by_hash = B256Map::default();
         let mut hash_by_number = BTreeMap::new();
-        let mut parent_to_child: HashMap<B256, HashSet<B256>> = HashMap::default();
+        let mut parent_to_child: B256Map<B256Set> = B256Map::default();
         let mut parent_hash = B256::ZERO;
 
         for block in &blocks {
@@ -959,7 +959,7 @@ async fn test_engine_tree_fcu_missing_head() {
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
         EngineApiEvent::Download(DownloadRequest::BlockSet(actual_block_set)) => {
-            let expected_block_set = HashSet::from_iter([missing_block.hash()]);
+            let expected_block_set = B256Set::from_iter([missing_block.hash()]);
             assert_eq!(actual_block_set, expected_block_set);
         }
         _ => panic!("Unexpected event: {event:#?}"),
@@ -1004,7 +1004,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
         EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
-            assert_eq!(hash_set, HashSet::from_iter([main_chain_last_hash]));
+            assert_eq!(hash_set, B256Set::from_iter([main_chain_last_hash]));
         }
         _ => panic!("Unexpected event: {event:#?}"),
     }
@@ -1013,7 +1013,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
         EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
-            assert_eq!(hash_set, HashSet::from_iter([main_chain_last_hash]));
+            assert_eq!(hash_set, B256Set::from_iter([main_chain_last_hash]));
         }
         _ => panic!("Unexpected event: {event:#?}"),
     }

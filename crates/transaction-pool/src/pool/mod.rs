@@ -88,7 +88,10 @@ use crate::{
     TransactionValidator,
 };
 
-use alloy_primitives::{Address, TxHash, B256};
+use alloy_primitives::{
+    map::{AddressSet, HashSet},
+    Address, TxHash, B256,
+};
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
@@ -97,7 +100,6 @@ use alloy_eips::{eip7594::BlobTransactionSidecarVariant, Typed2718};
 use reth_primitives_traits::Recovered;
 use rustc_hash::FxHashMap;
 use std::{
-    collections::HashSet,
     fmt,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -218,7 +220,7 @@ where
     }
 
     /// Returns all senders in the pool
-    pub fn unique_senders(&self) -> HashSet<Address> {
+    pub fn unique_senders(&self) -> AddressSet {
         self.get_pool_data().unique_senders()
     }
 

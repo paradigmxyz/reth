@@ -1,7 +1,10 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
 use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
-use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
+use alloy_primitives::{
+    map::{AddressMap, HashMap},
+    Address, BlockNumber, TxNumber, B256,
+};
 use itertools::Itertools;
 use metrics::Label;
 use parking_lot::Mutex;
@@ -28,7 +31,7 @@ use rocksdb::{
     DB,
 };
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
@@ -1058,8 +1061,8 @@ impl RocksDBProvider {
         &self,
         last_indices: &[(Address, BlockNumber)],
     ) -> ProviderResult<WriteBatchWithTransaction<true>> {
-        let mut address_min_block: HashMap<Address, BlockNumber> =
-            HashMap::with_capacity_and_hasher(last_indices.len(), Default::default());
+        let mut address_min_block: AddressMap<BlockNumber> =
+            AddressMap::with_capacity_and_hasher(last_indices.len(), Default::default());
         for &(address, block_number) in last_indices {
             address_min_block
                 .entry(address)

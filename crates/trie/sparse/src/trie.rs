@@ -2234,7 +2234,7 @@ mod find_leaf_tests {
         let blinded_hash = B256::repeat_byte(0xBB);
         let leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
 
-        let mut nodes = alloy_primitives::map::HashMap::default();
+        let mut nodes = HashMap::default();
         // Create path to the blinded node
         nodes.insert(
             Nibbles::default(),

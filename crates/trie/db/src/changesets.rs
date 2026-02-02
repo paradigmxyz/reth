@@ -20,12 +20,7 @@ use reth_trie::{
     HashedPostStateSorted, KeccakKeyHasher, StateRoot, TrieInputSorted,
 };
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
-use std::{
-    collections::{BTreeMap, HashMap},
-    ops::RangeInclusive,
-    sync::Arc,
-    time::Instant,
-};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc, time::Instant};
 use tracing::debug;
 
 #[cfg(feature = "metrics")]
@@ -535,7 +530,7 @@ impl ChangesetCache {
 #[derive(Debug)]
 struct ChangesetCacheInner {
     /// Cache entries: block hash -> (block number, changesets)
-    entries: HashMap<B256, (u64, Arc<TrieUpdatesSorted>)>,
+    entries: B256Map<(u64, Arc<TrieUpdatesSorted>)>,
 
     /// Block number to hashes mapping for eviction
     block_numbers: BTreeMap<u64, Vec<B256>>,
@@ -579,7 +574,7 @@ impl ChangesetCacheInner {
     /// via the `evict()` method to manage memory usage.
     fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: B256Map::default(),
             block_numbers: BTreeMap::new(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
@@ -683,7 +678,7 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::map::B256Map;
+    use alloy_primitives::map::{B256Map, HashMap};
 
     // Helper function to create empty TrieUpdatesSorted for testing
     fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
@@ -760,7 +755,7 @@ mod tests {
         let mut cache = ChangesetCacheInner::new();
 
         // Insert blocks 100-165
-        let mut hashes = std::collections::HashMap::new();
+        let mut hashes = HashMap::new();
         for i in 100..=165 {
             let hash = B256::random();
             cache.insert(hash, i, create_test_changesets());

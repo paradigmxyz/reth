@@ -70,7 +70,7 @@ use alloy_eips::{
     eip7594::BlobTransactionSidecarVariant,
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
@@ -78,7 +78,7 @@ use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt,
     fmt::Debug,
     future::Future,
@@ -612,7 +612,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     }
 
     /// Returns a set of all senders of transactions in the pool
-    fn unique_senders(&self) -> HashSet<Address>;
+    fn unique_senders(&self) -> AddressSet;
 
     /// Returns the [`BlobTransactionSidecarVariant`] for the given transaction hash if it exists in
     /// the blob store.
