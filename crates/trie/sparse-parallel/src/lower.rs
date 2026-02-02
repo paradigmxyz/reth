@@ -136,4 +136,8 @@ impl LowerSparseSubtrie {
             Self::Blind(None) => 0,
         }
     }
+
+    pub(crate) fn wipe(&mut self) {
+        *self = Self::default();
+    }
 }
