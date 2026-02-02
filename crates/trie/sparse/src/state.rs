@@ -355,8 +355,16 @@ where
         &mut self,
         multiproof: reth_trie_common::DecodedMultiProofV2,
     ) -> SparseStateTrieResult<()> {
-        // Reveal the account proof nodes
-        self.reveal_account_v2_proof_nodes(multiproof.account_proofs)?;
+        // Reveal the account proof nodes.
+        //
+        // Skip revealing account nodes if this result only contains storage proofs.
+        // `reveal_account_v2_proof_nodes` will return an error if empty `nodes` are passed into it
+        // before the accounts trie root was revealed. This might happen in cases when first account
+        // trie proof arrives later than first storage trie proof even though the account trie proof
+        // was requested first.
+        if !multiproof.account_proofs.is_empty() {
+            self.reveal_account_v2_proof_nodes(multiproof.account_proofs)?;
+        }
 
         #[cfg(not(feature = "std"))]
         // If nostd then serially reveal storage proof nodes for each storage trie
