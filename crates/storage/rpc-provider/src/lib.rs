@@ -59,7 +59,9 @@ use reth_storage_api::{
     BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, NodePrimitivesProvider,
     ReceiptProviderIdExt, StatsReader,
 };
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, MultiProof, TrieInput};
+use reth_trie::{
+    updates::TrieUpdates, AccountProof, HashedPostState, KeccakKeyHasher, MultiProof, TrieInput,
+};
 use std::{
     collections::BTreeMap,
     future::{Future, IntoFuture},
@@ -1307,9 +1309,8 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn hashed_post_state(&self, _bundle_state: &revm::database::BundleState) -> HashedPostState {
-        // Return empty hashed post state for RPC provider
-        HashedPostState::default()
+    fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> HashedPostState {
+        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
 }
 
