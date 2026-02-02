@@ -8881,7 +8881,6 @@ dependencies = [
  "futures-util",
  "metrics",
  "rayon",
- "reth-ethereum-forks",
  "reth-ethereum-primitives",
  "reth-execution-errors",
  "reth-execution-types",
