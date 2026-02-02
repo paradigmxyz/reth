@@ -479,6 +479,11 @@ where
         &mut self,
         nodes: Vec<ProofTrieNode>,
     ) -> SparseStateTrieResult<()> {
+        // Short-circuit if there are no nodes to reveal.
+        if nodes.is_empty() {
+            return Ok(());
+        }
+
         let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values: _metric_values } =
             filter_revealed_v2_proof_nodes(nodes, &mut self.revealed_account_paths)?;
 
