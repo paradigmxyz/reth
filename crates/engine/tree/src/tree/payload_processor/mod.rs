@@ -51,7 +51,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, warn, Span};
+use tracing::{debug, debug_span, error, instrument, warn, Span};
 
 pub mod bal;
 pub mod executor;
@@ -563,6 +563,10 @@ where
             let result = task.run();
             // Capture the computed state_root before sending the result
             let computed_state_root = result.as_ref().ok().map(|outcome| outcome.state_root);
+
+            if let Err(err) = &result {
+                error!(target: "engine::tree::payload_processor", "Error computing state root: {:?}", err);
+            }
 
             // Acquire the guard before sending the result to prevent a race condition:
             // Without this, the next block could start after send() but before store(),
