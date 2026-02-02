@@ -610,6 +610,15 @@ where
         self.pool.pending_transactions()
     }
 
+    fn is_transaction_ready(&self, sender: &Address, nonce: u64) -> bool {
+        let pool_data = self.pool.get_pool_data();
+        pool_data
+            .pending()
+            .independent_transactions()
+            .values()
+            .any(|tx| tx.transaction.sender() == *sender && tx.transaction.nonce() == nonce)
+    }
+
     fn pending_transactions_max(
         &self,
         max: usize,
