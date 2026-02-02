@@ -454,7 +454,7 @@ impl<'a> SmartPruneConfig<'a> {
     /// Returns whether the account should be pruned (depth-limited) vs preserved at full depth.
     ///
     /// - Tier A/B: Full depth (no pruning)
-    /// - Tier C/Cold: Pruned to max_depth
+    /// - Tier C/Cold: Pruned to `max_depth`
     pub fn should_prune_depth(&self, address: &B256) -> bool {
         match self.hot_accounts.hotness(address) {
             Hotness::Always | Hotness::Likely => false, // Keep full depth

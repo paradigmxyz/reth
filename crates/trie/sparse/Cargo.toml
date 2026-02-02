@@ -55,17 +55,18 @@ rand_08.workspace = true
 [features]
 default = ["std", "metrics"]
 std = [
-    "dep:rayon",
-    "dep:rustc-hash",
-    "alloy-primitives/std",
-    "alloy-rlp/std",
-    "alloy-trie/std",
-    "reth-execution-errors/std",
-    "reth-primitives-traits/std",
-    "reth-primitives-traits/rayon",
-    "reth-storage-api/std",
-    "reth-trie-common/std",
-    "tracing/std",
+	"dep:rayon",
+	"dep:rustc-hash",
+	"alloy-primitives/std",
+	"alloy-rlp/std",
+	"alloy-trie/std",
+	"reth-execution-errors/std",
+	"reth-primitives-traits/std",
+	"reth-primitives-traits/rayon",
+	"reth-storage-api/std",
+	"reth-trie-common/std",
+	"tracing/std",
+	"rustc-hash?/std"
 ]
 metrics = ["dep:reth-metrics", "dep:metrics", "std"]
 test-utils = [

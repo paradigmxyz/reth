@@ -1258,13 +1258,13 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
     /// Prunes storage tries using tiered eviction based on hotness levels.
     ///
     /// Eviction order (when over budget):
-    /// 1. Cold accounts (eviction_priority = 0) - evicted first
-    /// 2. Dynamic accounts (eviction_priority = 1) - evicted under memory pressure
+    /// 1. Cold accounts (`eviction_priority` = 0) - evicted first
+    /// 2. Dynamic accounts (`eviction_priority` = 1) - evicted under memory pressure
     /// 3. Tier A/B accounts - never evicted
     ///
     /// Pruning (depth-limiting):
     /// - Tier A/B: Full depth preserved
-    /// - Dynamic/Cold: Pruned to max_depth
+    /// - Dynamic/Cold: Pruned to `max_depth`
     fn prune_preserving(&mut self, config: &crate::hot_accounts::SmartPruneConfig<'_>) {
         let fn_start = std::time::Instant::now();
 
