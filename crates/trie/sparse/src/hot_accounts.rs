@@ -50,6 +50,151 @@ const DEFAULT_HOT_THRESHOLD: usize = 8;
 /// Maximum number of recent fee recipients to track (prevents unbounded growth).
 const MAX_RECENT_FEE_RECIPIENTS: usize = 128;
 
+// =============================================================================
+// PUBLIC API TYPES
+// =============================================================================
+
+/// Hotness level for an account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Hotness {
+    /// Cold: not tracked as hot.
+    Cold = 0,
+    /// Dynamic: detected as hot via bloom filter.
+    Dynamic = 1,
+    /// Likely: known builder/fee recipient.
+    Likely = 2,
+    /// Always: system contract or major defi.
+    Always = 3,
+}
+
+impl Hotness {
+    /// Returns true if this hotness level indicates the account should be preserved.
+    pub const fn should_preserve(self) -> bool {
+        matches!(self, Self::Always | Self::Likely | Self::Dynamic)
+    }
+
+    /// Returns true if this hotness level indicates the storage trie should be preserved.
+    pub const fn should_preserve_storage(self) -> bool {
+        matches!(self, Self::Always | Self::Likely)
+    }
+}
+
+/// Configuration for hot account tracking.
+#[derive(Debug, Clone)]
+pub struct HotAccountConfig {
+    /// Number of historical blocks to track.
+    pub history_blocks: usize,
+    /// Threshold for EOAs to be considered hot.
+    pub eoa_hot_threshold: usize,
+    /// Threshold for contracts to be considered hot (lower, as contracts are more valuable).
+    pub contract_hot_threshold: usize,
+    /// Expected accounts per block.
+    pub expected_accounts_per_block: usize,
+    /// Maximum memory usage for filters (bytes).
+    pub max_memory_bytes: usize,
+}
+
+impl Default for HotAccountConfig {
+    fn default() -> Self {
+        Self {
+            history_blocks: 32,
+            eoa_hot_threshold: 8,
+            contract_hot_threshold: 4,
+            expected_accounts_per_block: 500,
+            max_memory_bytes: 256 * 1024, // 256KB
+        }
+    }
+}
+
+/// Tiered hot account tracking.
+///
+/// Tracks hot accounts using a combination of:
+/// - Static known-hot addresses (system contracts, major defi)
+/// - Semi-static addresses (builders, fee recipients)
+/// - Dynamic detection via rotating bloom filters
+#[derive(Debug, Clone)]
+pub struct TieredHotAccounts {
+    // === Tier A: Always hot (known contracts) ===
+    /// System contract addresses (hashed).
+    system_contracts: HashSet<B256>,
+    /// Major defi contract addresses (hashed).
+    major_contracts: HashSet<B256>,
+
+    // === Tier B: Likely hot (semi-static) ===
+    /// Known builder/searcher addresses (hashed).
+    known_builders: HashSet<B256>,
+    /// Recent fee recipients as a ring buffer (most recent first).
+    /// Capped at `MAX_RECENT_FEE_RECIPIENTS` to prevent unbounded growth.
+    recent_fee_recipients: VecDeque<B256>,
+    /// Set for O(1) membership checks of recent fee recipients.
+    recent_fee_recipients_set: HashSet<B256>,
+
+    // === Tier C: Dynamic hot (runtime detected) ===
+    /// Rotating bloom filter for EOAs.
+    eoa_filter: RotatingBloomFilter,
+    /// Rotating bloom filter for contracts (separate because they have storage).
+    contract_filter: RotatingBloomFilter,
+    /// Bloom filter to track which addresses are contracts.
+    is_contract: BloomFilter,
+
+    // === Configuration ===
+    /// Configuration for the hot account tracker.
+    #[allow(dead_code)]
+    config: HotAccountConfig,
+}
+
+/// Configuration for smart pruning with hot account preservation.
+#[derive(Debug)]
+pub struct SmartPruneConfig<'a> {
+    /// Maximum depth to keep in account trie (for non-hot accounts).
+    pub max_depth: usize,
+    /// Maximum number of storage tries to keep (soft limit, hot accounts can exceed).
+    pub max_storage_tries: usize,
+    /// Hot account tracker.
+    pub hot_accounts: &'a TieredHotAccounts,
+}
+
+impl<'a> SmartPruneConfig<'a> {
+    /// Creates a new smart prune configuration.
+    pub const fn new(
+        max_depth: usize,
+        max_storage_tries: usize,
+        hot_accounts: &'a TieredHotAccounts,
+    ) -> Self {
+        Self { max_depth, max_storage_tries, hot_accounts }
+    }
+
+    /// Returns the eviction priority for an account's storage trie.
+    ///
+    /// Lower values = evict first. Returns `None` for accounts that should never be evicted.
+    /// - Tier A (Always): Never evicted (None)
+    /// - Tier B (Likely): Never evicted (None)
+    /// - Tier C (Dynamic): Low priority eviction (Some(1))
+    /// - Cold: High priority eviction (Some(0))
+    pub fn eviction_priority(&self, address: &B256) -> Option<u8> {
+        match self.hot_accounts.hotness(address) {
+            Hotness::Always | Hotness::Likely => None, // Never evict
+            Hotness::Dynamic => Some(1),               // Evict under pressure
+            Hotness::Cold => Some(0),                  // Evict first
+        }
+    }
+
+    /// Returns whether the account should be pruned (depth-limited) vs preserved at full depth.
+    ///
+    /// - Tier A/B: Full depth (no pruning)
+    /// - Tier C/Cold: Pruned to `max_depth`
+    pub fn should_prune_depth(&self, address: &B256) -> bool {
+        match self.hot_accounts.hotness(address) {
+            Hotness::Always | Hotness::Likely => false, // Keep full depth
+            Hotness::Dynamic | Hotness::Cold => true,   // Prune to max_depth
+        }
+    }
+}
+
+// =============================================================================
+// IMPLEMENTATION DETAILS
+// =============================================================================
+
 /// A simple bloom filter backed by a bit vector.
 ///
 /// Uses multiple hash functions derived from the input to set/check bits.
@@ -149,7 +294,7 @@ impl BloomFilter {
 ///
 /// Maintains a ring buffer of bloom filters, one per block. Elements are considered
 /// "hot" if they appear in at least `hot_threshold` of the recent blocks.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RotatingBloomFilter {
     /// Current block's filter (being filled).
     current: BloomFilter,
@@ -246,19 +391,6 @@ impl RotatingBloomFilter {
         let history_bytes: usize = self.history.iter().map(|f| f.len() / 8).sum();
         current_bytes + history_bytes
     }
-}
-
-/// Hotness level for an account.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Hotness {
-    /// Cold: not tracked as hot.
-    Cold = 0,
-    /// Dynamic: detected as hot via bloom filter.
-    Dynamic = 1,
-    /// Likely: known builder/fee recipient.
-    Likely = 2,
-    /// Always: system contract or major defi.
-    Always = 3,
 }
 
 /// A storage slot key combining account and slot hashes.
@@ -363,130 +495,6 @@ impl HotStorageSlots {
             StorageSlotKey::new(beacon_roots_addr, beacon_root_slot),
             StorageSlotKey::new(history_addr, history_slot),
         ]
-    }
-}
-
-impl Hotness {
-    /// Returns true if this account should be preserved.
-    pub const fn should_preserve(&self) -> bool {
-        !matches!(self, Self::Cold)
-    }
-
-    /// Returns true if storage trie should be preserved.
-    pub const fn should_preserve_storage(&self) -> bool {
-        matches!(self, Self::Always | Self::Likely)
-    }
-}
-
-/// Tiered hot account tracking.
-///
-/// Tracks hot accounts using a combination of:
-/// - Static known-hot addresses (system contracts, major defi)
-/// - Semi-static addresses (builders, fee recipients)
-/// - Dynamic detection via rotating bloom filters
-#[derive(Debug)]
-pub struct TieredHotAccounts {
-    // === Tier A: Always hot (known contracts) ===
-    /// System contract addresses (hashed).
-    system_contracts: HashSet<B256>,
-    /// Major defi contract addresses (hashed).
-    major_contracts: HashSet<B256>,
-
-    // === Tier B: Likely hot (semi-static) ===
-    /// Known builder/searcher addresses (hashed).
-    known_builders: HashSet<B256>,
-    /// Recent fee recipients as a ring buffer (most recent first).
-    /// Capped at `MAX_RECENT_FEE_RECIPIENTS` to prevent unbounded growth.
-    recent_fee_recipients: VecDeque<B256>,
-    /// Set for O(1) membership checks of recent fee recipients.
-    recent_fee_recipients_set: HashSet<B256>,
-
-    // === Tier C: Dynamic hot (runtime detected) ===
-    /// Rotating bloom filter for EOAs.
-    eoa_filter: RotatingBloomFilter,
-    /// Rotating bloom filter for contracts (separate because they have storage).
-    contract_filter: RotatingBloomFilter,
-    /// Bloom filter to track which addresses are contracts.
-    is_contract: BloomFilter,
-
-    // === Configuration ===
-    /// Configuration for the hot account tracker.
-    #[allow(dead_code)]
-    config: HotAccountConfig,
-}
-
-/// Configuration for smart pruning with hot account preservation.
-#[derive(Debug)]
-pub struct SmartPruneConfig<'a> {
-    /// Maximum depth to keep in account trie (for non-hot accounts).
-    pub max_depth: usize,
-    /// Maximum number of storage tries to keep.
-    pub max_storage_tries: usize,
-    /// Hot account tracker.
-    pub hot_accounts: &'a TieredHotAccounts,
-}
-
-impl<'a> SmartPruneConfig<'a> {
-    /// Creates a new smart prune configuration.
-    pub const fn new(
-        max_depth: usize,
-        max_storage_tries: usize,
-        hot_accounts: &'a TieredHotAccounts,
-    ) -> Self {
-        Self { max_depth, max_storage_tries, hot_accounts }
-    }
-
-    /// Returns the eviction priority for an account's storage trie.
-    ///
-    /// Lower values = evict first. Returns `None` for accounts that should never be evicted.
-    /// - Tier A (Always): Never evicted (None)
-    /// - Tier B (Likely): Never evicted (None)
-    /// - Tier C (Dynamic): Low priority eviction (Some(1))
-    /// - Cold: High priority eviction (Some(0))
-    pub fn eviction_priority(&self, address: &B256) -> Option<u8> {
-        match self.hot_accounts.hotness(address) {
-            Hotness::Always | Hotness::Likely => None, // Never evict
-            Hotness::Dynamic => Some(1),               // Evict under pressure
-            Hotness::Cold => Some(0),                  // Evict first
-        }
-    }
-
-    /// Returns whether the account should be pruned (depth-limited) vs preserved at full depth.
-    ///
-    /// - Tier A/B: Full depth (no pruning)
-    /// - Tier C/Cold: Pruned to `max_depth`
-    pub fn should_prune_depth(&self, address: &B256) -> bool {
-        match self.hot_accounts.hotness(address) {
-            Hotness::Always | Hotness::Likely => false, // Keep full depth
-            Hotness::Dynamic | Hotness::Cold => true,   // Prune to max_depth
-        }
-    }
-}
-
-/// Configuration for hot account tracking.
-#[derive(Debug, Clone)]
-pub struct HotAccountConfig {
-    /// Number of historical blocks to track.
-    pub history_blocks: usize,
-    /// Threshold for EOAs to be considered hot.
-    pub eoa_hot_threshold: usize,
-    /// Threshold for contracts to be considered hot (lower, as contracts are more valuable).
-    pub contract_hot_threshold: usize,
-    /// Expected accounts per block.
-    pub expected_accounts_per_block: usize,
-    /// Maximum memory usage for filters (bytes).
-    pub max_memory_bytes: usize,
-}
-
-impl Default for HotAccountConfig {
-    fn default() -> Self {
-        Self {
-            history_blocks: 32,
-            eoa_hot_threshold: 8,
-            contract_hot_threshold: 4,
-            expected_accounts_per_block: 500,
-            max_memory_bytes: 256 * 1024, // 256KB
-        }
     }
 }
 

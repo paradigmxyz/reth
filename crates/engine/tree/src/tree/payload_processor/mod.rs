@@ -139,6 +139,9 @@ where
     sparse_trie_max_storage_tries: usize,
     /// Whether to disable cache metrics recording.
     disable_cache_metrics: bool,
+    /// Default hot account tracker to clone when creating a fresh sparse trie.
+    /// This allows network-specific configuration (mainnet, optimism, base).
+    default_hot_accounts: TieredHotAccounts,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -151,12 +154,33 @@ where
         &self.executor
     }
 
-    /// Creates a new payload processor.
+    /// Creates a new payload processor with the default mainnet hot account tracker.
     pub fn new(
         executor: WorkloadExecutor,
         evm_config: Evm,
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    ) -> Self {
+        Self::with_hot_accounts(
+            executor,
+            evm_config,
+            config,
+            precompile_cache_map,
+            TieredHotAccounts::for_mainnet(),
+        )
+    }
+
+    /// Creates a new payload processor with a custom hot account tracker.
+    ///
+    /// The provided tracker is cloned when creating a fresh sparse trie (no preserved trie
+    /// available). Use [`TieredHotAccounts::for_mainnet`], [`TieredHotAccounts::for_optimism`],
+    /// or [`TieredHotAccounts::for_base`] for network-specific defaults.
+    pub fn with_hot_accounts(
+        executor: WorkloadExecutor,
+        evm_config: Evm,
+        config: &TreeConfig,
+        precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+        default_hot_accounts: TieredHotAccounts,
     ) -> Self {
         Self {
             executor,
@@ -173,6 +197,7 @@ where
             sparse_trie_prune_depth: config.sparse_trie_prune_depth(),
             sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
             disable_cache_metrics: config.disable_cache_metrics(),
+            default_hot_accounts,
         }
     }
 }
@@ -522,6 +547,7 @@ where
         let disable_sparse_trie_as_cache = !config.enable_sparse_trie_as_cache();
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
+        let default_hot_accounts = self.default_hot_accounts.clone();
 
         // Extract or create hot accounts BEFORE spawning the task so we can return a clone
         let (sparse_state_trie, hot_accounts): (_, SharedHotAccounts) = preserved_sparse_trie
@@ -540,8 +566,7 @@ where
                     .with_accounts_trie(default_trie.clone())
                     .with_default_storage_trie(default_trie)
                     .with_updates(true);
-                let hot_accounts =
-                    Arc::new(parking_lot::Mutex::new(TieredHotAccounts::for_mainnet()));
+                let hot_accounts = Arc::new(parking_lot::Mutex::new(default_hot_accounts));
                 (trie, hot_accounts)
             });
 
