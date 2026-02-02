@@ -375,13 +375,19 @@ where
             }
 
             if self.updates.is_empty() && self.proof_result_rx.is_empty() {
+                // If we don't have any pending messages, we can spend some time on computing
+                // storage roots and promoting account updates.
                 self.dispatch_pending_targets();
                 self.promote_pending_account_updates()?;
                 self.dispatch_pending_targets();
             } else if self.updates.is_empty() || self.pending_updates > 100 {
+                // If we don't have any pending updates OR we've accumulated a lot already, apply
+                // them to the trie,
                 self.process_leaf_updates()?;
                 self.dispatch_pending_targets();
             } else if self.updates.is_empty() || self.pending_targets.chunking_length() > 100 {
+                // Make sure to dispatch targets if we don't have any updates or if we've
+                // accumulated a lot of them.
                 self.dispatch_pending_targets();
             }
 
