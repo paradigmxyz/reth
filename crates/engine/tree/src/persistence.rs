@@ -140,7 +140,10 @@ where
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
-        let provider_rw = self.provider.database_provider_rw()?;
+        // Use unwind provider to ensure correct commit order (MDBX → RocksDB → SF).
+        // This prevents crash-recovery issues where RocksDB is committed but MDBX is not,
+        // which would leave stale block numbers in RocksDB history shards.
+        let provider_rw = self.provider.unwind_provider_rw()?;
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
         provider_rw.remove_block_and_execution_above(new_tip_num)?;
