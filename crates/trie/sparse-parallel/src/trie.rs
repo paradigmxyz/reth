@@ -2536,6 +2536,14 @@ impl SparseSubtrie {
         // Only insert the value after all structural changes succeed
         self.inner.values.insert(full_path, value);
 
+        trace!(
+            target: "trie::parallel_sparse",
+            subtrie_path = ?self.path,
+            ?full_path,
+            total_values = self.inner.values.len(),
+            "SparseSubtrie::update_leaf completed - value inserted"
+        );
+
         Ok(revealed)
     }
 
@@ -3060,6 +3068,14 @@ impl SparseSubtrieInner {
                 let mut path = path;
                 path.extend(key);
                 let value = self.values.get(&path);
+                trace!(
+                    target: "trie::parallel_sparse",
+                    leaf_path = ?path,
+                    has_value = value.is_some(),
+                    has_hash = hash.is_some(),
+                    num_values = self.values.len(),
+                    "Processing leaf in rlp_node"
+                );
                 if let Some(value) = value.filter(|_| prefix_set_contains(&path) || hash.is_none())
                 {
                     // Encode the leaf node and update its hash if:
