@@ -189,9 +189,30 @@ impl SparseTrie for ParallelSparseTrie {
         );
 
         // Update the top-level branch node masks. This is simple and can't be done in parallel.
+        //
+        // Track mask changes for potential rollback on error:
+        // - `inserted_masks`: paths where new masks were inserted (rollback = remove)
+        // - `updated_masks`: paths where existing masks were overwritten (rollback = restore)
+        //
+        // Note: This only rolls back mask changes. Node changes from reveal operations are not
+        // rolled back, as that would require significant complexity. Callers should discard
+        // the trie on error.
+        let mut inserted_masks: Vec<Nibbles> = Vec::new();
+        let mut updated_masks: Vec<(Nibbles, BranchNodeMasks)> = Vec::new();
         for ProofTrieNode { path, masks, .. } in &nodes {
             if let Some(branch_masks) = masks {
-                self.branch_node_masks.insert(*path, *branch_masks);
+                match self.branch_node_masks.entry(*path) {
+                    Entry::Occupied(mut entry) => {
+                        // Save original value for rollback, then update
+                        updated_masks.push((*path, *entry.get()));
+                        entry.insert(*branch_masks);
+                    }
+                    Entry::Vacant(entry) => {
+                        // Track new insertion for rollback
+                        inserted_masks.push(*path);
+                        entry.insert(*branch_masks);
+                    }
+                }
             }
         }
 
@@ -210,13 +231,23 @@ impl SparseTrie for ParallelSparseTrie {
         // end up making many small capacity changes as we loop.
         self.upper_subtrie.nodes.reserve(upper_nodes.len());
         for node in upper_nodes {
-            self.reveal_upper_node(node.path, &node.node, node.masks)?;
+            if let Err(e) = self.reveal_upper_node(node.path, &node.node, node.masks) {
+                Self::rollback_masks(&mut self.branch_node_masks, &inserted_masks, &updated_masks);
+                return Err(e);
+            }
         }
 
         if !self.is_reveal_parallelism_enabled(lower_nodes.len()) {
             for node in lower_nodes {
                 if let Some(subtrie) = self.lower_subtrie_for_path_mut(&node.path) {
-                    subtrie.reveal_node(node.path, &node.node, node.masks)?;
+                    if let Err(e) = subtrie.reveal_node(node.path, &node.node, node.masks) {
+                        Self::rollback_masks(
+                            &mut self.branch_node_masks,
+                            &inserted_masks,
+                            &updated_masks,
+                        );
+                        return Err(e);
+                    }
                 } else {
                     panic!("upper subtrie node {node:?} found amongst lower nodes");
                 }
@@ -288,9 +319,14 @@ impl SparseTrie for ParallelSparseTrie {
             let mut any_err = Ok(());
             for (subtrie_idx, subtrie, res) in results {
                 self.lower_subtries[subtrie_idx] = LowerSparseSubtrie::Revealed(subtrie);
-                if res.is_err() {
-                    any_err = res;
+                if let Err(e) = res {
+                    any_err = Err(e);
                 }
+            }
+
+            // Rollback masks if any error occurred
+            if any_err.is_err() {
+                Self::rollback_masks(&mut self.branch_node_masks, &inserted_masks, &updated_masks);
             }
 
             any_err
@@ -1373,6 +1409,24 @@ impl ParallelSparseTrie {
         // Restore the original node that was modified
         if let Some((path, original_node)) = modified_original {
             self.upper_subtrie.nodes.insert(path, original_node);
+        }
+    }
+
+    /// Rolls back `branch_node_masks` changes made during `reveal_nodes`.
+    ///
+    /// This removes newly inserted masks and restores overwritten masks to their original values.
+    fn rollback_masks(
+        masks_map: &mut BranchNodeMasksMap,
+        inserted: &[Nibbles],
+        updated: &[(Nibbles, BranchNodeMasks)],
+    ) {
+        // Remove newly inserted masks
+        for path in inserted {
+            masks_map.remove(path);
+        }
+        // Restore overwritten masks to their original values
+        for (path, original_value) in updated {
+            masks_map.insert(*path, *original_value);
         }
     }
 
@@ -8858,6 +8912,129 @@ mod tests {
         assert_eq!(
             value_count_before, value_count_after,
             "Value count should be unchanged after atomic failure (no dangling values)"
+        );
+    }
+
+    /// Test to verify that `reveal_nodes` properly rolls back masks on failure.
+    ///
+    /// This test triggers a hash mismatch error during `reveal_nodes` and verifies
+    /// that batch-inserted masks are properly rolled back.
+    #[test]
+    fn test_reveal_nodes_masks_rollback() {
+        // Step 1: Create a trie with an extension node at root that points to a hash
+        // The extension's child path will be [0x1, 0x2] with hash 0xAA
+        let ext_node = create_extension_node([0x1, 0x2], B256::repeat_byte(0xAA));
+
+        let mut trie =
+            ParallelSparseTrie::from_root(ext_node, None, true).expect("Should create trie");
+
+        // Verify the hash node was created at the expected path
+        let child_path = Nibbles::from_nibbles([0x1, 0x2]);
+        let subtrie_idx = path_subtrie_index_unchecked(&child_path);
+        let lower_subtrie = trie.lower_subtries[subtrie_idx]
+            .as_revealed_ref()
+            .expect("Lower subtrie should be revealed");
+        assert!(
+            matches!(lower_subtrie.nodes.get(&child_path), Some(SparseNode::Hash(h)) if *h == B256::repeat_byte(0xAA)),
+            "Hash node should exist at path [0x1, 0x2]"
+        );
+
+        // Verify no masks exist yet
+        assert!(trie.branch_node_masks.is_empty(), "No masks should exist initially");
+
+        // Step 2: Try to reveal_nodes with:
+        // - A node with masks (inserted first in batch)
+        // - An extension node at root with DIFFERENT hash for child path (will fail)
+        let path_with_mask = Nibbles::from_nibbles([0x3]);
+        let masks_for_path = Some(BranchNodeMasks {
+            hash_mask: TrieMask::new(0b0011),
+            tree_mask: TrieMask::new(0b0001),
+        });
+
+        let branch_with_mask = create_branch_node_with_children(
+            &[0x0, 0x1],
+            [RlpNode::word_rlp(&B256::repeat_byte(1)), RlpNode::word_rlp(&B256::repeat_byte(2))],
+        );
+
+        // This extension has a DIFFERENT hash (0xBB vs 0xAA) - will cause hash mismatch
+        let conflicting_ext = create_extension_node([0x1, 0x2], B256::repeat_byte(0xBB));
+
+        let result = trie.reveal_nodes(vec![
+            ProofTrieNode { path: path_with_mask, node: branch_with_mask, masks: masks_for_path },
+            ProofTrieNode { path: Nibbles::default(), node: conflicting_ext, masks: None },
+        ]);
+
+        // The reveal should fail due to hash mismatch
+        assert!(result.is_err(), "reveal_nodes should fail due to hash mismatch");
+
+        // After fix: masks should be rolled back
+        assert!(
+            !trie.branch_node_masks.contains_key(&path_with_mask),
+            "Masks should be rolled back after reveal_nodes failure. Found: {:?}",
+            trie.branch_node_masks
+        );
+    }
+
+    /// Test to verify that `reveal_nodes` properly restores overwritten masks on failure.
+    ///
+    /// This test verifies that when a mask already exists and gets overwritten during
+    /// `reveal_nodes`, the original value is restored on failure.
+    #[test]
+    fn test_reveal_nodes_masks_update_rollback() {
+        // Step 1: Create a trie with an extension node
+        let ext_node = create_extension_node([0x1, 0x2], B256::repeat_byte(0xAA));
+        let mut trie =
+            ParallelSparseTrie::from_root(ext_node, None, true).expect("Should create trie");
+
+        // Step 2: Pre-populate a mask that will be overwritten
+        let existing_mask_path = Nibbles::from_nibbles([0x5]);
+        let original_mask =
+            BranchNodeMasks { hash_mask: TrieMask::new(0b1111), tree_mask: TrieMask::new(0b1010) };
+        trie.branch_node_masks.insert(existing_mask_path, original_mask);
+
+        // Verify the original mask exists
+        assert_eq!(
+            trie.branch_node_masks.get(&existing_mask_path),
+            Some(&original_mask),
+            "Original mask should exist"
+        );
+
+        // Step 3: Try to reveal_nodes with:
+        // - A node that overwrites the existing mask with different values
+        // - A conflicting extension that will cause failure
+        let new_mask = BranchNodeMasks {
+            hash_mask: TrieMask::new(0b0001), // Different from original
+            tree_mask: TrieMask::new(0b0010), // Different from original
+        };
+
+        let branch_with_updated_mask = create_branch_node_with_children(
+            &[0x0, 0x1],
+            [RlpNode::word_rlp(&B256::repeat_byte(1)), RlpNode::word_rlp(&B256::repeat_byte(2))],
+        );
+
+        // Conflicting extension with different hash
+        let conflicting_ext = create_extension_node([0x1, 0x2], B256::repeat_byte(0xBB));
+
+        let result = trie.reveal_nodes(vec![
+            // This will overwrite the existing mask
+            ProofTrieNode {
+                path: existing_mask_path,
+                node: branch_with_updated_mask,
+                masks: Some(new_mask),
+            },
+            // This will cause failure
+            ProofTrieNode { path: Nibbles::default(), node: conflicting_ext, masks: None },
+        ]);
+
+        // The reveal should fail
+        assert!(result.is_err(), "reveal_nodes should fail due to hash mismatch");
+
+        // After fix: the overwritten mask should be restored to its original value
+        assert_eq!(
+            trie.branch_node_masks.get(&existing_mask_path),
+            Some(&original_mask),
+            "Overwritten mask should be restored to original value. Found: {:?}",
+            trie.branch_node_masks.get(&existing_mask_path)
         );
     }
 }
