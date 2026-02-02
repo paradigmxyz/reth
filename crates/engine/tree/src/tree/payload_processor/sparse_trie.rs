@@ -353,6 +353,7 @@ where
                     };
 
                     self.on_multiproof_message(update);
+                    self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
                     let Ok(result) = message else {
