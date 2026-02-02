@@ -51,7 +51,6 @@ thiserror.workspace = true
 tracing.workspace = true
 rustc-hash.workspace = true
 schnellru.workspace = true
-dashmap = { workspace = true, features = ["inline"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 bitflags.workspace = true
@@ -97,7 +96,6 @@ serde = [
     "reth-chain-state/serde",
     "reth-storage-api/serde",
     "revm/serde",
-    "dashmap/serde",
 ]
 test-utils = [
     "rand",
@@ -127,7 +125,6 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
     "revm-primitives/arbitrary",
     "revm/arbitrary",
-    "dashmap/arbitrary",
 ]
 
 [[bench]]

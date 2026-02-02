@@ -8,10 +8,9 @@ use alloy_eips::{
     merge::EPOCH_SLOTS,
 };
 use alloy_primitives::{TxHash, B256};
-use dashmap::DashSet;
 use parking_lot::{Mutex, RwLock};
 use schnellru::{ByLength, LruMap};
-use std::{fmt, fs, io, path::PathBuf, sync::Arc};
+use std::{collections::HashSet, fmt, fs, io, path::PathBuf, sync::Arc};
 use tracing::{debug, trace};
 
 /// How many [`BlobTransactionSidecarVariant`] to cache in memory.
@@ -150,7 +149,7 @@ impl BlobStore for DiskFileBlobStore {
 
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {
         if self.inner.contains(tx)? {
-            self.inner.txs_to_delete.insert(tx);
+            self.inner.txs_to_delete.write().insert(tx);
         }
         Ok(())
     }
@@ -160,15 +159,12 @@ impl BlobStore for DiskFileBlobStore {
             return Ok(())
         }
         let txs = self.inner.retain_existing(txs)?;
-        for tx in txs {
-            self.inner.txs_to_delete.insert(tx);
-        }
+        self.inner.txs_to_delete.write().extend(txs);
         Ok(())
     }
 
     fn cleanup(&self) -> BlobStoreCleanupStat {
-        let txs_to_delete: Vec<_> = self.inner.txs_to_delete.iter().map(|r| *r.key()).collect();
-        self.inner.txs_to_delete.clear();
+        let txs_to_delete = std::mem::take(&mut *self.inner.txs_to_delete.write());
         let mut stat = BlobStoreCleanupStat::default();
         let mut subsize = 0;
         debug!(target:"txpool::blob", num_blobs=%txs_to_delete.len(), "Removing blobs from disk");
@@ -314,7 +310,7 @@ struct DiskFileBlobStoreInner {
     blob_cache: Mutex<LruMap<TxHash, Arc<BlobTransactionSidecarVariant>, ByLength>>,
     size_tracker: BlobStoreSize,
     file_lock: RwLock<()>,
-    txs_to_delete: DashSet<B256>,
+    txs_to_delete: RwLock<HashSet<B256>>,
     /// Tracks of known versioned hashes and a transaction they exist in
     ///
     /// Note: It is possible that one blob can appear in multiple transactions but this only tracks
@@ -622,7 +618,7 @@ impl fmt::Debug for DiskFileBlobStoreInner {
         f.debug_struct("DiskFileBlobStoreInner")
             .field("blob_dir", &self.blob_dir)
             .field("cached_blobs", &self.blob_cache.try_lock().map(|lock| lock.len()))
-            .field("txs_to_delete", &self.txs_to_delete)
+            .field("txs_to_delete", &self.txs_to_delete.try_read())
             .finish()
     }
 }
@@ -757,7 +753,7 @@ mod tests {
 
         assert!(store.contains(all_hashes[0]).unwrap());
         store.delete_all(all_hashes.clone()).unwrap();
-        assert!(store.inner.txs_to_delete.contains(&all_hashes[0]));
+        assert!(store.inner.txs_to_delete.read().contains(&all_hashes[0]));
         store.clear_cache();
         store.cleanup();
 
@@ -794,7 +790,7 @@ mod tests {
         assert!(store.is_cached(&tx));
 
         store.delete(tx).unwrap();
-        assert!(store.inner.txs_to_delete.contains(&tx));
+        assert!(store.inner.txs_to_delete.read().contains(&tx));
         store.cleanup();
 
         let result = store.get(tx).unwrap();
