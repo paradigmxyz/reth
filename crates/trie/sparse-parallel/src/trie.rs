@@ -1674,9 +1674,9 @@ impl ParallelSparseTrie {
 
         match node {
             Some(SparseNode::Leaf { .. }) => {
-                // If the leaf was the final node in its lower subtrie then we can blind the
-                // subtrie, effectively marking it as empty.
                 if subtrie.nodes.is_empty() {
+                    // If the leaf was the final node in its lower subtrie then we can blind the
+                    // subtrie, effectively marking it as empty.
                     debug!(
                         target: "trie::parallel_sparse",
                         subtrie_index = idx,
@@ -1684,6 +1684,25 @@ impl ParallelSparseTrie {
                         "Blinding empty lower subtrie after leaf removal"
                     );
                     self.lower_subtries[idx].clear();
+                } else if &subtrie.path == path {
+                    // If the removed leaf was the root node of a lower subtrie but other nodes
+                    // remain, we need to update the subtrie's path to the shortest remaining node
+                    // path. This can happen when V2 proofs don't include sibling nodes and
+                    // `reveal_remaining_child_on_leaf_removal` adds nodes from DB during a branch
+                    // collapse.
+                    if let Some(new_root_path) =
+                        subtrie.nodes.keys().min_by_key(|p| p.len()).copied()
+                    {
+                        debug!(
+                            target: "trie::parallel_sparse",
+                            subtrie_index = idx,
+                            old_subtrie_path = ?subtrie.path,
+                            new_subtrie_path = ?new_root_path,
+                            remaining_nodes = subtrie.nodes.len(),
+                            "Updating subtrie path after leaf removal at root with remaining nodes"
+                        );
+                        subtrie.path = new_root_path;
+                    }
                 }
             }
             Some(SparseNode::Extension { key, .. }) => {
