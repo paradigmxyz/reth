@@ -98,7 +98,7 @@ impl StorageTrieUpdatesDiff {
 
 /// Compares the trie updates from state root task, regular state root calculation and database,
 /// and logs the differences if there's any.
-pub(super) fn compare_trie_updates(
+pub(crate) fn compare_trie_updates(
     trie_cursor_factory: impl TrieCursorFactory,
     task: TrieUpdates,
     regular: TrieUpdates,
