@@ -44,9 +44,9 @@ where
         let mut pool_transaction =
             <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
-        // TODO: remove this after Osaka transition
-        // Convert legacy blob sidecars to EIP-7594 format
-        if pool_transaction.is_eip4844() {
+        // Optionally convert legacy blob sidecars to EIP-7594 format when Osaka is active
+        // This is opt-in via --rpc.force-blob-sidecar-upcasting
+        if self.inner.force_blob_sidecar_upcasting() && pool_transaction.is_eip4844() {
             let EthBlobTransactionSidecar::Present(sidecar) = pool_transaction.take_blob() else {
                 return Err(EthApiError::PoolError(RpcPoolError::Eip4844(
                     Eip4844PoolTransactionError::MissingEip4844BlobSidecar,

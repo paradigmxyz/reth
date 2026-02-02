@@ -1443,18 +1443,30 @@ impl ParallelSparseTrie {
     /// Will always return false in nostd builds.
     const fn is_reveal_parallelism_enabled(&self, num_nodes: usize) -> bool {
         #[cfg(not(feature = "std"))]
-        return false;
+        {
+            let _ = num_nodes;
+            return false;
+        }
 
-        num_nodes >= self.parallelism_thresholds.min_revealed_nodes
+        #[cfg(feature = "std")]
+        {
+            num_nodes >= self.parallelism_thresholds.min_revealed_nodes
+        }
     }
 
     /// Returns true if parallelism should be enabled for updating hashes with the given number
     /// of changed keys. Will always return false in nostd builds.
     const fn is_update_parallelism_enabled(&self, num_changed_keys: usize) -> bool {
         #[cfg(not(feature = "std"))]
-        return false;
+        {
+            let _ = num_changed_keys;
+            return false;
+        }
 
-        num_changed_keys >= self.parallelism_thresholds.min_updated_nodes
+        #[cfg(feature = "std")]
+        {
+            num_changed_keys >= self.parallelism_thresholds.min_updated_nodes
+        }
     }
 
     /// Checks if an error is retriable (`BlindedNode` or `NodeNotFoundInProvider`) and extracts

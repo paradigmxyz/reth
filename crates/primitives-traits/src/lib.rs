@@ -188,6 +188,12 @@ pub mod serde_bincode_compat;
 pub mod size;
 pub use size::InMemorySize;
 
+/// Rayon utilities
+#[cfg(feature = "rayon")]
+pub mod rayon;
+#[cfg(feature = "rayon")]
+pub use rayon::ParallelBridgeBuffered;
+
 /// Node traits
 pub mod node;
 pub use node::{BlockTy, BodyTy, HeaderTy, NodePrimitives, ReceiptTy, TxTy};

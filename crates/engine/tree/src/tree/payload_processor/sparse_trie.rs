@@ -5,14 +5,15 @@ use crate::tree::{
     payload_processor::multiproof::{MultiProofTaskMetrics, SparseTrieUpdate},
 };
 use alloy_primitives::B256;
-use alloy_rlp::Decodable;
+use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use rayon::iter::ParallelIterator;
 use reth_errors::ProviderError;
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, ParallelBridgeBuffered};
 use reth_revm::state::EvmState;
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_parallel::{
     proof_task::{
@@ -247,6 +248,8 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     /// Cache of storage proof targets that have already been fetched/requested from the proof
     /// workers. account -> slot -> lowest `min_len` requested.
     fetched_storage_targets: B256Map<B256Map<u8>>,
+    /// Reusable buffer for RLP encoding of accounts.
+    account_rlp_buf: Vec<u8>,
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
 }
@@ -275,6 +278,7 @@ where
             pending_account_updates: Default::default(),
             fetched_account_targets: Default::default(),
             fetched_storage_targets: Default::default(),
+            account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             metrics,
         }
     }
@@ -526,10 +530,12 @@ where
                     {
                         Vec::new()
                     } else {
-                        // TODO: optimize allocation
-                        alloy_rlp::encode(
-                            account.unwrap_or_default().into_trie_account(storage_root),
-                        )
+                        self.account_rlp_buf.clear();
+                        account
+                            .unwrap_or_default()
+                            .into_trie_account(storage_root)
+                            .encode(&mut self.account_rlp_buf);
+                        self.account_rlp_buf.clone()
                     };
                     self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                 }
@@ -537,6 +543,7 @@ where
         }
 
         // Now handle pending account updates that can be upgraded to a proper update.
+        let account_rlp_buf = &mut self.account_rlp_buf;
         self.pending_account_updates.retain(|addr, account| {
             // If account has pending storage updates, it is still pending.
             if self.storage_updates.get(addr).is_some_and(|updates| !updates.is_empty()) {
@@ -570,10 +577,9 @@ where
             let encoded = if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
                 Vec::new()
             } else {
-                let account = account.unwrap_or_default().into_trie_account(storage_root);
-
-                // TODO: optimize allocation
-                alloy_rlp::encode(account)
+                account_rlp_buf.clear();
+                account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
+                account_rlp_buf.clone()
             };
             self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
 
@@ -664,7 +670,7 @@ where
         .storages
         .into_iter()
         .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
-        .par_bridge()
+        .par_bridge_buffered()
         .map(|(address, storage, storage_trie)| {
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie", ?address)

@@ -62,6 +62,7 @@ std = [
     "alloy-trie/std",
     "reth-execution-errors/std",
     "reth-primitives-traits/std",
+    "reth-primitives-traits/rayon",
     "reth-storage-api/std",
     "reth-trie-common/std",
     "tracing/std",

@@ -286,7 +286,8 @@ where
         #[cfg(feature = "std")]
         // If std then reveal storage proofs in parallel
         {
-            use rayon::iter::{ParallelBridge, ParallelIterator};
+            use rayon::iter::ParallelIterator;
+            use reth_primitives_traits::ParallelBridgeBuffered;
 
             let retain_updates = self.retain_updates;
 
@@ -300,7 +301,7 @@ where
                     let trie = self.storage.take_or_create_trie(&account);
                     (account, storage_subtree, revealed_nodes, trie)
                 })
-                .par_bridge()
+                .par_bridge_buffered()
                 .map(|(account, storage_subtree, mut revealed_nodes, mut trie)| {
                     let result = Self::reveal_decoded_storage_multiproof_inner(
                         account,
@@ -372,7 +373,8 @@ where
         #[cfg(feature = "std")]
         // If std then reveal storage proofs in parallel
         {
-            use rayon::iter::{ParallelBridge, ParallelIterator};
+            use rayon::iter::ParallelIterator;
+            use reth_primitives_traits::ParallelBridgeBuffered;
 
             let retain_updates = self.retain_updates;
 
@@ -387,7 +389,7 @@ where
                     let trie = self.storage.take_or_create_trie(&account);
                     (account, storage_proofs, revealed_nodes, trie)
                 })
-                .par_bridge()
+                .par_bridge_buffered()
                 .map(|(account, storage_proofs, mut revealed_nodes, mut trie)| {
                     let result = Self::reveal_storage_v2_proof_nodes_inner(
                         account,

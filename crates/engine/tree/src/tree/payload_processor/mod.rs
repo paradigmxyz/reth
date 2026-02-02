@@ -237,8 +237,7 @@ where
             + 'static,
     {
         // start preparing transactions immediately
-        let (prewarm_rx, execution_rx, transaction_count_hint) =
-            self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
 
         let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
@@ -262,7 +261,6 @@ where
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
-                transaction_count_hint,
                 provider_builder.clone(),
                 None, // Don't send proof targets when BAL is present
                 Some(bal),
@@ -273,7 +271,6 @@ where
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
-                transaction_count_hint,
                 provider_builder.clone(),
                 Some(to_multi_proof.clone()),
                 None,
@@ -358,10 +355,10 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
         // This path doesn't use multiproof, so V2 proofs flag doesn't matter
         let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None, bal, false);
+            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal, false);
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
@@ -380,19 +377,15 @@ where
     ) -> (
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
-        usize,
     ) {
-        let (transactions, convert) = transactions.into();
-        let transactions = transactions.into_par_iter();
-        let transaction_count_hint = transactions.len();
-
         let (ooo_tx, ooo_rx) = mpsc::channel();
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
 
         // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
-        self.executor.spawn_blocking(move || {
-            transactions.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
+        rayon::spawn(move || {
+            let (transactions, convert) = transactions.into();
+            transactions.into_par_iter().enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
                 let tx = convert(tx);
                 let tx = tx.map(|tx| {
                     let (tx_env, tx) = tx.into_parts();
@@ -428,16 +421,14 @@ where
             }
         });
 
-        (prewarm_rx, execute_rx, transaction_count_hint)
+        (prewarm_rx, execute_rx)
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
-    #[expect(clippy::too_many_arguments)]
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
         mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
-        transaction_count_hint: usize,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
@@ -472,7 +463,6 @@ where
             self.execution_cache.clone(),
             prewarm_ctx,
             to_multi_proof,
-            transaction_count_hint,
             self.prewarm_max_concurrency,
         );
 
@@ -997,6 +987,10 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used for sparse trie continuation: if the preserved trie's anchor matches this,
     /// the trie can be reused directly.
     pub parent_state_root: B256,
+    /// Number of transactions in the block.
+    /// Used to determine parallel worker count for prewarming.
+    /// A value of 0 indicates the count is unknown.
+    pub transaction_count: usize,
 }
 
 impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
@@ -1009,6 +1003,7 @@ where
             hash: Default::default(),
             parent_hash: Default::default(),
             parent_state_root: Default::default(),
+            transaction_count: 0,
         }
     }
 }
