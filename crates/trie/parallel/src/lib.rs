@@ -22,7 +22,7 @@ pub mod proof;
 
 pub mod proof_task;
 
-/// Dedicated proof worker pool with session-based payload handling.
+/// Persistent proof worker pool with session-based execution.
 pub mod worker_pool;
 
 /// Async value encoder for V2 proofs.

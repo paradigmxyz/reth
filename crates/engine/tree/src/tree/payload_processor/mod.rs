@@ -38,6 +38,7 @@ use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFacto
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
+    worker_pool::ProofWorkerPool,
 };
 use reth_trie_sparse::{ClearedSparseStateTrie, RevealableSparseTrie, SparseStateTrie};
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
@@ -137,6 +138,8 @@ where
     sparse_trie_max_storage_tries: usize,
     /// Whether to disable cache metrics recording.
     disable_cache_metrics: bool,
+    /// Persistent proof worker pool for reusing threads across payloads.
+    proof_worker_pool: ProofWorkerPool,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -156,6 +159,10 @@ where
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     ) -> Self {
+        // Create persistent proof worker pool with total workers = storage + account
+        let total_workers = config.storage_worker_count() + config.account_worker_count();
+        let proof_worker_pool = ProofWorkerPool::new(total_workers);
+
         Self {
             executor,
             execution_cache: Default::default(),
@@ -171,6 +178,7 @@ where
             sparse_trie_prune_depth: config.sparse_trie_prune_depth(),
             sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
             disable_cache_metrics: config.disable_cache_metrics(),
+            proof_worker_pool,
         }
     }
 }
@@ -235,7 +243,8 @@ where
             + 'static,
     {
         // start preparing transactions immediately
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx, transaction_count_hint) =
+            self.spawn_tx_iterator(transactions);
 
         let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
@@ -259,6 +268,7 @@ where
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
+                transaction_count_hint,
                 provider_builder.clone(),
                 None, // Don't send proof targets when BAL is present
                 Some(bal),
@@ -269,6 +279,7 @@ where
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
+                transaction_count_hint,
                 provider_builder.clone(),
                 Some(to_multi_proof.clone()),
                 None,
@@ -276,12 +287,14 @@ where
             )
         };
 
-        // Create and spawn the storage proof task using dedicated OS threads
-        // to avoid Tokio blocking pool scheduler overhead
+        // Create proof handle using the persistent worker pool
+        // Workers are pre-started at PayloadProcessor initialization, eliminating
+        // thread spawn overhead on the critical path
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let proof_handle = ProofWorkerHandle::new_with_dedicated_threads(
+        let proof_handle = ProofWorkerHandle::new_with_pool(
+            &self.proof_worker_pool,
             task_ctx,
             storage_worker_count,
             account_worker_count,
@@ -352,10 +365,10 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
         // This path doesn't use multiproof, so V2 proofs flag doesn't matter
         let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, bal, false);
+            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None, bal, false);
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
@@ -373,15 +386,19 @@ where
     ) -> (
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
+        usize,
     ) {
+        let (transactions, convert) = transactions.into();
+        let transactions = transactions.into_par_iter();
+        let transaction_count_hint = transactions.len();
+
         let (ooo_tx, ooo_rx) = mpsc::channel();
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
 
         // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
-        rayon::spawn(move || {
-            let (transactions, convert) = transactions.into();
-            transactions.into_par_iter().enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
+        self.executor.spawn_blocking(move || {
+            transactions.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
                 let tx = convert(tx);
                 let tx = tx.map(|tx| {
                     let (tx_env, tx) = tx.into_parts();
@@ -417,14 +434,16 @@ where
             }
         });
 
-        (prewarm_rx, execute_rx)
+        (prewarm_rx, execute_rx, transaction_count_hint)
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
+    #[expect(clippy::too_many_arguments)]
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
         mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        transaction_count_hint: usize,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
@@ -459,6 +478,7 @@ where
             self.execution_cache.clone(),
             prewarm_ctx,
             to_multi_proof,
+            transaction_count_hint,
             self.prewarm_max_concurrency,
         );
 
@@ -951,10 +971,6 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used for sparse trie continuation: if the preserved trie's anchor matches this,
     /// the trie can be reused directly.
     pub parent_state_root: B256,
-    /// Number of transactions in the block.
-    /// Used to determine parallel worker count for prewarming.
-    /// A value of 0 indicates the count is unknown.
-    pub transaction_count: usize,
 }
 
 impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
@@ -967,7 +983,6 @@ where
             hash: Default::default(),
             parent_hash: Default::default(),
             parent_state_root: Default::default(),
-            transaction_count: 0,
         }
     }
 }
@@ -985,7 +1000,6 @@ mod tests {
     };
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_evm::block::StateChangeSource;
-    use alloy_primitives::map::{AddressMap, B256Map, HashMap};
     use rand::Rng;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
@@ -1002,7 +1016,7 @@ mod tests {
     use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState};
     use reth_trie_db::ChangesetCache;
-    use revm_primitives::{Address, B256, KECCAK_EMPTY, U256};
+    use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
     use std::sync::Arc;
 
@@ -1202,7 +1216,8 @@ mod tests {
 
         let state_updates = create_mock_state_updates(10, 10);
         let mut hashed_state = HashedPostState::default();
-        let mut accumulated_state: AddressMap<(Account, B256Map<U256>)> = AddressMap::default();
+        let mut accumulated_state: HashMap<Address, (Account, HashMap<B256, U256>)> =
+            HashMap::default();
 
         {
             let provider_rw = factory.provider_rw().expect("failed to get provider");
@@ -1232,7 +1247,7 @@ mod tests {
             hashed_state.extend(evm_state_to_hashed_post_state(update.clone()));
 
             for (address, account) in update {
-                let storage: B256Map<U256> = account
+                let storage: HashMap<B256, U256> = account
                     .storage
                     .iter()
                     .map(|(k, v)| (B256::from(*k), v.present_value))

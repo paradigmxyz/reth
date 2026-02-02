@@ -72,7 +72,6 @@ use std::{
         mpsc::{channel, Receiver, Sender},
         Arc,
     },
-    thread,
     time::{Duration, Instant},
 };
 use tokio::runtime::Handle;
@@ -266,20 +265,24 @@ impl ProofWorkerHandle {
         }
     }
 
-    /// Spawns storage and account worker pools using dedicated OS threads.
+    /// Creates a proof worker handle using a persistent worker pool.
     ///
-    /// This is similar to [`Self::new`] but uses `std::thread::spawn` instead of
-    /// Tokio's `spawn_blocking`, avoiding the blocking pool scheduler overhead.
+    /// Instead of spawning new threads, this dispatches session closures to
+    /// pre-existing workers in the pool. Workers create fresh database providers
+    /// per session, drain jobs, then return to waiting for the next session.
     ///
-    /// Workers are spawned as named threads (`proof-storage-N`, `proof-account-N`)
-    /// for easier debugging.
+    /// This eliminates thread spawn overhead on the critical path since workers
+    /// are pre-started at node initialization.
     ///
     /// # Parameters
+    /// - `pool`: The persistent worker pool (should have `storage_worker_count +
+    ///   account_worker_count` workers)
     /// - `task_ctx`: Shared context with database view and prefix sets
-    /// - `storage_worker_count`: Number of storage workers to spawn
-    /// - `account_worker_count`: Number of account workers to spawn
+    /// - `storage_worker_count`: Number of workers to use for storage proofs
+    /// - `account_worker_count`: Number of workers to use for account proofs
     /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
-    pub fn new_with_dedicated_threads<Factory>(
+    pub fn new_with_pool<Factory>(
+        pool: &crate::worker_pool::ProofWorkerPool,
         task_ctx: ProofTaskCtx<Factory>,
         storage_worker_count: usize,
         account_worker_count: usize,
@@ -304,91 +307,102 @@ impl ProofWorkerHandle {
             storage_worker_count,
             account_worker_count,
             ?v2_proofs_enabled,
-            "Spawning dedicated proof worker thread pools"
+            "Dispatching proof worker sessions to pool"
         );
 
-        // Spawn storage workers on dedicated OS threads
+        // Dispatch storage worker sessions
         for worker_id in 0..storage_worker_count {
-            let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = storage_work_rx.clone();
             let storage_available_workers_clone = storage_available_workers.clone();
-            let cached_storage_roots = cached_storage_roots.clone();
+            let cached_storage_roots_clone = cached_storage_roots.clone();
 
-            thread::Builder::new()
-                .name(format!("proof-storage-{worker_id}"))
-                .spawn(move || {
-                    #[cfg(feature = "metrics")]
-                    let metrics = ProofTaskTrieMetrics::default();
-                    #[cfg(feature = "metrics")]
-                    let cursor_metrics = ProofTaskCursorMetrics::new();
+            let session: crate::worker_pool::SessionRunner = Box::new(move |_pool_worker_id| {
+                #[cfg(feature = "metrics")]
+                let metrics = ProofTaskTrieMetrics::default();
+                #[cfg(feature = "metrics")]
+                let cursor_metrics = ProofTaskCursorMetrics::new();
 
-                    let _guard = span.enter();
-                    let worker = StorageProofWorker::new(
-                        task_ctx_clone,
-                        work_rx_clone,
+                let worker = StorageProofWorker::new(
+                    task_ctx_clone,
+                    work_rx_clone,
+                    worker_id,
+                    storage_available_workers_clone,
+                    cached_storage_roots_clone,
+                    #[cfg(feature = "metrics")]
+                    metrics,
+                    #[cfg(feature = "metrics")]
+                    cursor_metrics,
+                )
+                .with_v2_proofs(v2_proofs_enabled);
+
+                if let Err(error) = worker.run() {
+                    error!(
+                        target: "trie::proof_task",
                         worker_id,
-                        storage_available_workers_clone,
-                        cached_storage_roots,
-                        #[cfg(feature = "metrics")]
-                        metrics,
-                        #[cfg(feature = "metrics")]
-                        cursor_metrics,
-                    )
-                    .with_v2_proofs(v2_proofs_enabled);
-                    if let Err(error) = worker.run() {
-                        error!(
-                            target: "trie::proof_task",
-                            worker_id,
-                            ?error,
-                            "Storage worker failed"
-                        );
-                    }
-                })
-                .expect("failed to spawn storage proof worker thread");
+                        ?error,
+                        "Storage worker session failed"
+                    );
+                }
+            });
+
+            if pool.dispatch_session(worker_id, session).is_err() {
+                error!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    "Failed to dispatch storage worker session"
+                );
+            }
         }
 
-        // Spawn account workers on dedicated OS threads
+        // Dispatch account worker sessions
         for worker_id in 0..account_worker_count {
-            let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = account_work_rx.clone();
             let storage_work_tx_clone = storage_work_tx.clone();
             let account_available_workers_clone = account_available_workers.clone();
-            let cached_storage_roots = cached_storage_roots.clone();
+            let cached_storage_roots_clone = cached_storage_roots.clone();
 
-            thread::Builder::new()
-                .name(format!("proof-account-{worker_id}"))
-                .spawn(move || {
-                    #[cfg(feature = "metrics")]
-                    let metrics = ProofTaskTrieMetrics::default();
-                    #[cfg(feature = "metrics")]
-                    let cursor_metrics = ProofTaskCursorMetrics::new();
+            let session: crate::worker_pool::SessionRunner = Box::new(move |_pool_worker_id| {
+                #[cfg(feature = "metrics")]
+                let metrics = ProofTaskTrieMetrics::default();
+                #[cfg(feature = "metrics")]
+                let cursor_metrics = ProofTaskCursorMetrics::new();
 
-                    let _guard = span.enter();
-                    let worker = AccountProofWorker::new(
-                        task_ctx_clone,
-                        work_rx_clone,
+                let worker = AccountProofWorker::new(
+                    task_ctx_clone,
+                    work_rx_clone,
+                    worker_id,
+                    storage_work_tx_clone,
+                    account_available_workers_clone,
+                    cached_storage_roots_clone,
+                    #[cfg(feature = "metrics")]
+                    metrics,
+                    #[cfg(feature = "metrics")]
+                    cursor_metrics,
+                )
+                .with_v2_proofs(v2_proofs_enabled);
+
+                if let Err(error) = worker.run() {
+                    error!(
+                        target: "trie::proof_task",
                         worker_id,
-                        storage_work_tx_clone,
-                        account_available_workers_clone,
-                        cached_storage_roots,
-                        #[cfg(feature = "metrics")]
-                        metrics,
-                        #[cfg(feature = "metrics")]
-                        cursor_metrics,
-                    )
-                    .with_v2_proofs(v2_proofs_enabled);
-                    if let Err(error) = worker.run() {
-                        error!(
-                            target: "trie::proof_task",
-                            worker_id,
-                            ?error,
-                            "Account worker failed"
-                        );
-                    }
-                })
-                .expect("failed to spawn account proof worker thread");
+                        ?error,
+                        "Account worker session failed"
+                    );
+                }
+            });
+
+            // Account workers use pool indices after storage workers
+            let pool_worker_id = storage_worker_count + worker_id;
+            if pool.dispatch_session(pool_worker_id, session).is_err() {
+                error!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    pool_worker_id,
+                    "Failed to dispatch account worker session"
+                );
+            }
         }
 
         Self {
