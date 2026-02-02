@@ -162,6 +162,7 @@ members = [
     "examples/exex-test",
     "examples/full-contract-state",
     "examples/manual-p2p/",
+    "examples/migrate-changeset-offsets/",
     "examples/network-txpool/",
     "examples/network/",
     "examples/network-proxy/",

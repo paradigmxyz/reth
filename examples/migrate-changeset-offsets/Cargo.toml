@@ -1,0 +1,20 @@
+[package]
+name = "example-migrate-changeset-offsets"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "migrate-changeset-offsets"
+path = "src/main.rs"
+
+[dependencies]
+reth-fs-util.workspace = true
+reth-nippy-jar = { workspace = true, features = ["test-utils"] }
+reth-static-file-types = { workspace = true, features = ["std"] }
+
+bincode.workspace = true
+clap = { workspace = true, features = ["derive"] }
+eyre.workspace = true
+serde = { workspace = true, features = ["derive"] }
