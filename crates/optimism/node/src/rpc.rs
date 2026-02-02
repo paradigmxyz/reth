@@ -13,7 +13,7 @@
 //!     components::ComponentsBuilder,
 //!     hooks::OnComponentInitializedHook,
 //!     rpc::{EthApiBuilder, EthApiCtx},
-//!     LaunchContext, NodeConfig, RethFullAdapter,
+//!     ConsensusEngineHandle, LaunchContext, NodeConfig, RethFullAdapter,
 //! };
 //! use reth_optimism_chainspec::OP_SEPOLIA;
 //! use reth_optimism_evm::OpEvmConfig;
@@ -24,6 +24,7 @@
 //! use reth_rpc::TraceApi;
 //! use reth_rpc_eth_types::{EthConfig, EthStateCache};
 //! use reth_tasks::{pool::BlockingTaskGuard, TaskManager};
+//! use reth_trie_db::ChangesetCache;
 //! use std::sync::Arc;
 //!
 //! #[tokio::main]
@@ -37,7 +38,7 @@
 //!         .with_loaded_toml_config(sepolia)
 //!         .unwrap()
 //!         .attach(Arc::new(db))
-//!         .with_provider_factory::<_, OpEvmConfig>()
+//!         .with_provider_factory::<_, OpEvmConfig>(ChangesetCache::new())
 //!         .await
 //!         .unwrap()
 //!         .with_genesis()
@@ -51,9 +52,9 @@
 //!             ComponentsBuilder::default()
 //!                 .node_types::<RethFullAdapter<_, OpNode>>()
 //!                 .noop_pool::<OpPooledTransaction>()
-//!                 .noop_network::<OpNetworkPrimitives>()
-//!                 .noop_consensus()
 //!                 .executor(OpExecutorBuilder::default())
+//!                 .noop_consensus()
+//!                 .noop_network::<OpNetworkPrimitives>()
 //!                 .noop_payload(),
 //!             Box::new(()) as Box<dyn OnComponentInitializedHook<_>>,
 //!         )
@@ -67,7 +68,14 @@
 //!         config.cache,
 //!         node.task_executor().clone(),
 //!     );
-//!     let ctx = EthApiCtx { components: node.node_adapter(), config, cache };
+//!     // Create a dummy beacon engine handle for offline mode
+//!     let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+//!     let ctx = EthApiCtx {
+//!         components: node.node_adapter(),
+//!         config,
+//!         cache,
+//!         engine_handle: ConsensusEngineHandle::new(tx),
+//!     };
 //!     let eth_api = OpEthApiBuilder::<Optimism>::default().build_eth_api(ctx).await.unwrap();
 //!
 //!     // build `trace` namespace API
@@ -139,6 +147,7 @@ where
             EngineCapabilities::new(OP_ENGINE_CAPABILITIES.iter().copied()),
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
+            ctx.node.network().clone(),
         );
 
         Ok(OpEngineApi::new(inner))

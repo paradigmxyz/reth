@@ -5,7 +5,7 @@ use alloy_primitives::BlockNumber;
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_config::BodiesConfig;
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::Consensus;
 use reth_network_p2p::{
     bodies::{
         client::BodiesClient,
@@ -21,7 +21,6 @@ use std::{
     cmp::Ordering,
     collections::BinaryHeap,
     fmt::Debug,
-    mem,
     ops::RangeInclusive,
     pin::Pin,
     sync::Arc,
@@ -42,7 +41,7 @@ pub struct BodiesDownloader<
     /// The bodies client
     client: Arc<C>,
     /// The consensus client
-    consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+    consensus: Arc<dyn Consensus<B>>,
     /// The database handle
     provider: Provider,
     /// The maximum number of non-empty blocks per one request
@@ -215,9 +214,7 @@ where
 
     /// Adds a new response to the internal buffer
     fn buffer_bodies_response(&mut self, response: Vec<BlockResponse<B>>) {
-        // take into account capacity
-        let size = response.iter().map(BlockResponse::size).sum::<usize>() +
-            response.capacity() * mem::size_of::<BlockResponse<B>>();
+        let size = response.iter().map(BlockResponse::size).sum::<usize>();
 
         let response = OrderedBodiesResponse { resp: response, size };
         let response_len = response.len();
@@ -310,12 +307,14 @@ where
 {
     type Block = B;
 
-    /// Set a new download range (exclusive).
+    /// Set a new download range (inclusive).
     ///
-    /// This method will drain all queued bodies, filter out ones outside the range and put them
-    /// back into the buffer.
-    /// If there are any bodies between the range start and last queued body that have not been
-    /// downloaded or are not in progress, they will be re-requested.
+    /// If the provided range is a suffix of the current range with the same end block, the
+    /// existing download already covers it and the call is a no-op.
+    /// If the range starts immediately after the current range, it is treated as the next
+    /// consecutive range and appended without resetting the in-flight state.
+    /// For all other ranges, the downloader state is cleared and the new range replaces the old
+    /// one.
     fn set_download_range(&mut self, range: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
         // Check if the range is valid.
         if range.is_empty() {
@@ -347,6 +346,12 @@ where
         // written by external services (e.g. BlockchainTree).
         tracing::trace!(target: "downloaders::bodies", ?range, prev_range = ?self.download_range, "Download range reset");
         info!(target: "downloaders::bodies", count, ?range, "Downloading bodies");
+        // Increment out-of-order requests metric if the new start is below the last returned block
+        if let Some(last_returned) = self.latest_queued_block_number &&
+            *range.start() < last_returned
+        {
+            self.metrics.out_of_order_requests.increment(1);
+        }
         self.clear();
         self.download_range = range;
         Ok(())
@@ -574,7 +579,7 @@ impl BodiesDownloaderBuilder {
     pub fn build<B, C, Provider>(
         self,
         client: C,
-        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B>>,
         provider: Provider,
     ) -> BodiesDownloader<B, C, Provider>
     where

@@ -6,16 +6,16 @@ use crate::{
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
 };
 use alloy_primitives::B256;
+use crossbeam_channel::Sender;
 use futures::{Stream, StreamExt};
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::{BeaconEngineMessage, ConsensusEngineEvent};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::PayloadTypes;
-use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{Block, NodePrimitives, SealedBlock};
 use std::{
     collections::HashSet,
     fmt::Display,
-    sync::mpsc::Sender,
     task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -246,7 +246,7 @@ pub enum EngineApiRequest<T: PayloadTypes, N: NodePrimitives> {
     /// A request received from the consensus engine.
     Beacon(BeaconEngineMessage<T>),
     /// Request to insert an already executed block, e.g. via payload building.
-    InsertExecutedBlock(ExecutedBlockWithTrieUpdates<N>),
+    InsertExecutedBlock(ExecutedBlock<N>),
 }
 
 impl<T: PayloadTypes, N: NodePrimitives> Display for EngineApiRequest<T, N> {
@@ -307,7 +307,7 @@ pub enum FromEngine<Req, B: Block> {
     /// Request from the engine.
     Request(Req),
     /// Downloaded blocks from the network.
-    DownloadedBlocks(Vec<RecoveredBlock<B>>),
+    DownloadedBlocks(Vec<SealedBlock<B>>),
 }
 
 impl<Req: Display, B: Block> Display for FromEngine<Req, B> {

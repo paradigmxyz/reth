@@ -14,7 +14,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 
-ARG BUILD_PROFILE=release
+ARG BUILD_PROFILE=maxperf
 ENV BUILD_PROFILE=$BUILD_PROFILE
 
 ARG RUSTFLAGS=""
@@ -31,7 +31,7 @@ RUN cargo build --profile $BUILD_PROFILE --features "$FEATURES" --bin op-reth --
 RUN ls -la /app/target/$BUILD_PROFILE/op-reth
 RUN cp /app/target/$BUILD_PROFILE/op-reth /app/op-reth
 
-FROM ubuntu:22.04 AS runtime
+FROM ubuntu AS runtime
 
 RUN apt-get update && \
     apt-get install -y ca-certificates libssl-dev pkg-config strace && \

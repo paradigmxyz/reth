@@ -30,6 +30,7 @@ reth-config = { workspace = true, features = ["serde"] }
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
+reth-net-banlist.workspace = true
 reth-network-peers.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
@@ -45,7 +46,7 @@ alloy-eips.workspace = true
 
 # misc
 eyre.workspace = true
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env", "string"] }
 humantime.workspace = true
 rand.workspace = true
 derive_more.workspace = true
@@ -54,13 +55,14 @@ serde.workspace = true
 strum = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 url.workspace = true
-
+ipnet.workspace = true
 # io
 dirs-next.workspace = true
 shellexpand.workspace = true
 
-# tracing
+# obs
 tracing.workspace = true
+reth-tracing-otlp.workspace = true
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
@@ -77,6 +79,19 @@ tokio.workspace = true
 # Features for vergen to generate correct env vars
 jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
+keccak-cache-global = ["alloy-primitives/keccak-cache-global"]
+otlp = ["reth-tracing/otlp", "reth-tracing-otlp/otlp"]
+otlp-logs = ["reth-tracing/otlp-logs", "reth-tracing-otlp/otlp-logs"]
+tracy = ["reth-tracing/tracy"]
+
+min-error-logs = ["tracing/release_max_level_error"]
+min-warn-logs = ["tracing/release_max_level_warn"]
+min-info-logs = ["tracing/release_max_level_info"]
+min-debug-logs = ["tracing/release_max_level_debug"]
+min-trace-logs = ["tracing/release_max_level_trace"]
+
+# Marker feature for edge/unstable builds - captured by vergen in build.rs
+edge = ["reth-storage-api/edge"]
 
 [build-dependencies]
 vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }

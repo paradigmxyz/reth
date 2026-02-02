@@ -1,5 +1,6 @@
 //! clap [Args](clap::Args) for network related arguments.
 
+use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
@@ -10,16 +11,18 @@ use std::{
 use crate::version::version_metadata;
 use clap::Args;
 use reth_chainspec::EthChainSpec;
+use reth_cli_util::{get_secret_key, load_secret_key::SecretKeyError};
 use reth_config::Config;
 use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
     discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
+use reth_net_banlist::IpFilter;
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
     transactions::{
-        config::TransactionPropagationKind,
+        config::{TransactionIngressPolicy, TransactionPropagationKind},
         constants::{
             tx_fetcher::{
                 DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
@@ -33,10 +36,11 @@ use reth_network::{
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
-    HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives, SessionsConfig,
+    HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives,
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
+use std::str::FromStr;
 use tracing::error;
 
 /// Parameters for configuring the network more granularity via CLI
@@ -81,8 +85,15 @@ pub struct NetworkArgs {
     ///
     /// This will also deterministically set the peer ID. If not specified, it will be set in the
     /// data dir for the chain being used.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", conflicts_with = "p2p_secret_key_hex")]
     pub p2p_secret_key: Option<PathBuf>,
+
+    /// Hex encoded secret key to use for this node.
+    ///
+    /// This will also deterministically set the peer ID. Cannot be used together with
+    /// `--p2p-secret-key`.
+    #[arg(long, value_name = "HEX", conflicts_with = "p2p_secret_key")]
+    pub p2p_secret_key_hex: Option<B256>,
 
     /// Do not persist peers.
     #[arg(long, verbatim_doc_comment)]
@@ -100,13 +111,25 @@ pub struct NetworkArgs {
     #[arg(long = "port", value_name = "PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
     pub port: u16,
 
-    /// Maximum number of outbound requests. default: 100
+    /// Maximum number of outbound peers. default: 100
     #[arg(long)]
     pub max_outbound_peers: Option<usize>,
 
-    /// Maximum number of inbound requests. default: 30
+    /// Maximum number of inbound peers. default: 30
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
+
+    /// Maximum number of total peers (inbound + outbound).
+    ///
+    /// Splits peers using approximately 2:1 inbound:outbound ratio. Cannot be used together with
+    /// `--max-outbound-peers` or `--max-inbound-peers`.
+    #[arg(
+        long,
+        value_name = "COUNT",
+        conflicts_with = "max_outbound_peers",
+        conflicts_with = "max_inbound_peers"
+    )]
+    pub max_peers: Option<usize>,
 
     /// Max concurrent `GetPooledTransactions` requests.
     #[arg(long = "max-tx-reqs", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, verbatim_doc_comment)]
@@ -162,6 +185,12 @@ pub struct NetworkArgs {
     #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationKind::All)]
     pub tx_propagation_policy: TransactionPropagationKind,
 
+    /// Transaction ingress policy
+    ///
+    /// Determines which peers' transactions are accepted over P2P.
+    #[arg(long = "tx-ingress-policy", default_value_t = TransactionIngressPolicy::All)]
+    pub tx_ingress_policy: TransactionIngressPolicy,
+
     /// Disable transaction pool gossip
     ///
     /// Disables gossiping of transactions in the mempool to peers. This can be omitted for
@@ -180,10 +209,24 @@ pub struct NetworkArgs {
     )]
     pub propagation_mode: TransactionPropagationMode,
 
-    /// Comma separated list of required block hashes.
+    /// Comma separated list of required block hashes or block number=hash pairs.
     /// Peers that don't have these blocks will be filtered out.
-    #[arg(long = "required-block-hashes", value_delimiter = ',')]
-    pub required_block_hashes: Vec<B256>,
+    /// Format: hash or `block_number=hash` (e.g., 23115201=0x1234...)
+    #[arg(long = "required-block-hashes", value_delimiter = ',', value_parser = parse_block_num_hash)]
+    pub required_block_hashes: Vec<BlockNumHash>,
+
+    /// Optional network ID to override the chain specification's network ID for P2P connections
+    #[arg(long)]
+    pub network_id: Option<u64>,
+
+    /// Restrict network communication to the given IP networks (CIDR masks).
+    ///
+    /// Comma separated list of CIDR network specifications.
+    /// Only peers with IP addresses within these ranges will be allowed to connect.
+    ///
+    /// Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
+    #[arg(long, value_name = "NETRESTRICT")]
+    pub netrestrict: Option<String>,
 }
 
 impl NetworkArgs {
@@ -214,6 +257,34 @@ impl NetworkArgs {
             bootnodes.into_iter().filter_map(|node| node.resolve_blocking().ok()).collect()
         })
     }
+
+    /// Returns the max inbound peers (2:1 ratio).
+    pub fn resolved_max_inbound_peers(&self) -> Option<usize> {
+        if let Some(max_peers) = self.max_peers {
+            if max_peers == 0 {
+                Some(0)
+            } else {
+                let outbound = (max_peers / 3).max(1);
+                Some(max_peers.saturating_sub(outbound))
+            }
+        } else {
+            self.max_inbound_peers
+        }
+    }
+
+    /// Returns the max outbound peers (1:2 ratio).
+    pub fn resolved_max_outbound_peers(&self) -> Option<usize> {
+        if let Some(max_peers) = self.max_peers {
+            if max_peers == 0 {
+                Some(0)
+            } else {
+                Some((max_peers / 3).max(1))
+            }
+        } else {
+            self.max_outbound_peers
+        }
+    }
+
     /// Configures and returns a `TransactionsManagerConfig` based on the current settings.
     pub const fn transactions_manager_config(&self) -> TransactionsManagerConfig {
         TransactionsManagerConfig {
@@ -226,6 +297,7 @@ impl NetworkArgs {
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             propagation_mode: self.propagation_mode,
+            ingress_policy: self.tx_ingress_policy,
         }
     }
 
@@ -254,20 +326,20 @@ impl NetworkArgs {
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
+        let ip_filter = self.ip_filter().unwrap_or_default();
         let peers_config = config
-            .peers
-            .clone()
-            .with_max_inbound_opt(self.max_inbound_peers)
-            .with_max_outbound_opt(self.max_outbound_peers);
+            .peers_config_with_basic_nodes_from_file(
+                self.persistent_peers_file(peers_file).as_deref(),
+            )
+            .with_max_inbound_opt(self.resolved_max_inbound_peers())
+            .with_max_outbound_opt(self.resolved_max_outbound_peers())
+            .with_ip_filter(ip_filter);
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key)
-            .peer_config(config.peers_config_with_basic_nodes_from_file(
-                self.persistent_peers_file(peers_file).as_deref(),
-            ))
-            .external_ip_resolver(self.nat)
+            .external_ip_resolver(self.nat.clone())
             .sessions_config(
-                SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
+                config.sessions.clone().with_upscaled_event_buffer(peers_config.max_peers()),
             )
             .peer_config(peers_config)
             .boot_nodes(chain_bootnodes.clone())
@@ -297,11 +369,18 @@ impl NetworkArgs {
             ))
             .disable_tx_gossip(self.disable_tx_gossip)
             .required_block_hashes(self.required_block_hashes.clone())
+            .network_id(self.network_id)
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
     pub fn persistent_peers_file(&self, peers_file: PathBuf) -> Option<PathBuf> {
         self.no_persist_peers.not().then_some(peers_file)
+    }
+
+    /// Configures the [`DiscoveryArgs`].
+    pub const fn with_discovery(mut self, discovery: DiscoveryArgs) -> Self {
+        self.discovery = discovery;
+        self
     }
 
     /// Sets the p2p port to zero, to allow the OS to assign a random unused port when
@@ -316,6 +395,12 @@ impl NetworkArgs {
     pub const fn with_unused_ports(mut self) -> Self {
         self = self.with_unused_p2p_port();
         self.discovery = self.discovery.with_unused_discovery_port();
+        self
+    }
+
+    /// Configures the [`NatResolver`]
+    pub fn with_nat_resolver(mut self, nat: NatResolver) -> Self {
+        self.nat = nat;
         self
     }
 
@@ -339,6 +424,36 @@ impl NetworkArgs {
         )
         .await
     }
+
+    /// Load the p2p secret key from the provided options.
+    ///
+    /// If `p2p_secret_key_hex` is provided, it will be used directly.
+    /// If `p2p_secret_key` is provided, it will be loaded from the file.
+    /// If neither is provided, the `default_secret_key_path` will be used.
+    pub fn secret_key(
+        &self,
+        default_secret_key_path: PathBuf,
+    ) -> Result<SecretKey, SecretKeyError> {
+        if let Some(b256) = &self.p2p_secret_key_hex {
+            // Use the B256 value directly (already validated as 32 bytes)
+            SecretKey::from_slice(b256.as_slice()).map_err(SecretKeyError::SecretKeyDecodeError)
+        } else {
+            // Load from file (either provided path or default)
+            let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
+            get_secret_key(&secret_key_path)
+        }
+    }
+
+    /// Creates an IP filter from the netrestrict argument.
+    ///
+    /// Returns an error if the CIDR format is invalid.
+    pub fn ip_filter(&self) -> Result<IpFilter, ipnet::AddrParseError> {
+        if let Some(netrestrict) = &self.netrestrict {
+            IpFilter::from_cidr_string(netrestrict)
+        } else {
+            Ok(IpFilter::allow_all())
+        }
+    }
 }
 
 impl Default for NetworkArgs {
@@ -352,12 +467,14 @@ impl Default for NetworkArgs {
             peers_file: None,
             identity: version_metadata().p2p_client_version.to_string(),
             p2p_secret_key: None,
+            p2p_secret_key_hex: None,
             no_persist_peers: false,
             nat: NatResolver::Any,
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
             max_outbound_peers: None,
             max_inbound_peers: None,
+            max_peers: None,
             max_concurrent_tx_requests: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
             max_concurrent_tx_requests_per_peer: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             soft_limit_byte_size_pooled_transactions_response:
@@ -368,9 +485,12 @@ impl Default for NetworkArgs {
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
             net_if: None,
             tx_propagation_policy: TransactionPropagationKind::default(),
+            tx_ingress_policy: TransactionIngressPolicy::default(),
             disable_tx_gossip: false,
             propagation_mode: TransactionPropagationMode::Sqrt,
             required_block_hashes: vec![],
+            network_id: None,
+            netrestrict: None,
         }
     }
 }
@@ -536,6 +656,12 @@ impl DiscoveryArgs {
         self
     }
 
+    /// Set the discovery V5 port
+    pub const fn with_discv5_port(mut self, port: u16) -> Self {
+        self.discv5_port = port;
+        self
+    }
+
     /// Change networking port numbers based on the instance number.
     /// Ports are updated to `previous_value + instance - 1`
     ///
@@ -570,10 +696,32 @@ impl Default for DiscoveryArgs {
     }
 }
 
+/// Parse a block number=hash pair or just a hash into `BlockNumHash`
+fn parse_block_num_hash(s: &str) -> Result<BlockNumHash, String> {
+    if let Some((num_str, hash_str)) = s.split_once('=') {
+        let number = num_str.parse().map_err(|_| format!("Invalid block number: {}", num_str))?;
+        let hash = B256::from_str(hash_str).map_err(|_| format!("Invalid hash: {}", hash_str))?;
+        Ok(BlockNumHash::new(number, hash))
+    } else {
+        // For backward compatibility, treat as hash-only with number 0
+        let hash = B256::from_str(s).map_err(|_| format!("Invalid hash: {}", s))?;
+        Ok(BlockNumHash::new(0, hash))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::Parser;
+    use reth_chainspec::MAINNET;
+    use reth_config::Config;
+    use reth_network_peers::NodeRecord;
+    use secp256k1::SecretKey;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
@@ -634,10 +782,11 @@ mod tests {
         let tests = vec![0, 10];
 
         for retries in tests {
+            let retries_str = retries.to_string();
             let args = CommandParser::<NetworkArgs>::parse_from([
                 "reth",
                 "--dns-retries",
-                retries.to_string().as_str(),
+                retries_str.as_str(),
             ])
             .args;
 
@@ -649,6 +798,96 @@ mod tests {
     fn parse_disable_tx_gossip_args() {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--disable-tx-gossip"]).args;
         assert!(args.disable_tx_gossip);
+    }
+
+    #[test]
+    fn parse_max_peers_flag() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "90"]).args;
+
+        assert_eq!(args.max_peers, Some(90));
+        assert_eq!(args.max_outbound_peers, None);
+        assert_eq!(args.max_inbound_peers, None);
+        assert_eq!(args.resolved_max_outbound_peers(), Some(30));
+        assert_eq!(args.resolved_max_inbound_peers(), Some(60));
+    }
+
+    #[test]
+    fn max_peers_conflicts_with_outbound() {
+        let result = CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--max-peers",
+            "90",
+            "--max-outbound-peers",
+            "50",
+        ]);
+        assert!(
+            result.is_err(),
+            "Should fail when both --max-peers and --max-outbound-peers are used"
+        );
+    }
+
+    #[test]
+    fn max_peers_conflicts_with_inbound() {
+        let result = CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--max-peers",
+            "90",
+            "--max-inbound-peers",
+            "30",
+        ]);
+        assert!(
+            result.is_err(),
+            "Should fail when both --max-peers and --max-inbound-peers are used"
+        );
+    }
+
+    #[test]
+    fn max_peers_split_calculation() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "90"]).args;
+
+        assert_eq!(args.max_peers, Some(90));
+        assert_eq!(args.resolved_max_outbound_peers(), Some(30));
+        assert_eq!(args.resolved_max_inbound_peers(), Some(60));
+    }
+
+    #[test]
+    fn max_peers_small_values() {
+        let args1 = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "1"]).args;
+        assert_eq!(args1.resolved_max_outbound_peers(), Some(1));
+        assert_eq!(args1.resolved_max_inbound_peers(), Some(0));
+
+        let args2 = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "2"]).args;
+        assert_eq!(args2.resolved_max_outbound_peers(), Some(1));
+        assert_eq!(args2.resolved_max_inbound_peers(), Some(1));
+
+        let args3 = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "3"]).args;
+        assert_eq!(args3.resolved_max_outbound_peers(), Some(1));
+        assert_eq!(args3.resolved_max_inbound_peers(), Some(2));
+    }
+
+    #[test]
+    fn resolved_peers_without_max_peers() {
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--max-outbound-peers",
+            "75",
+            "--max-inbound-peers",
+            "15",
+        ])
+        .args;
+
+        assert_eq!(args.max_peers, None);
+        assert_eq!(args.resolved_max_outbound_peers(), Some(75));
+        assert_eq!(args.resolved_max_inbound_peers(), Some(15));
+    }
+
+    #[test]
+    fn resolved_peers_with_defaults() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+
+        assert_eq!(args.max_peers, None);
+        assert_eq!(args.resolved_max_outbound_peers(), None);
+        assert_eq!(args.resolved_max_inbound_peers(), None);
     }
 
     #[test]
@@ -664,17 +903,21 @@ mod tests {
         let args = CommandParser::<NetworkArgs>::parse_from([
             "reth",
             "--required-block-hashes",
-            "0x1111111111111111111111111111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222222222222222222222222222",
+            "0x1111111111111111111111111111111111111111111111111111111111111111,23115201=0x2222222222222222222222222222222222222222222222222222222222222222",
         ])
         .args;
 
         assert_eq!(args.required_block_hashes.len(), 2);
+        // First hash without block number (should default to 0)
+        assert_eq!(args.required_block_hashes[0].number, 0);
         assert_eq!(
-            args.required_block_hashes[0].to_string(),
+            args.required_block_hashes[0].hash.to_string(),
             "0x1111111111111111111111111111111111111111111111111111111111111111"
         );
+        // Second with block number=hash format
+        assert_eq!(args.required_block_hashes[1].number, 23115201);
         assert_eq!(
-            args.required_block_hashes[1].to_string(),
+            args.required_block_hashes[1].hash.to_string(),
             "0x2222222222222222222222222222222222222222222222222222222222222222"
         );
     }
@@ -683,5 +926,176 @@ mod tests {
     fn parse_empty_required_block_hashes() {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
         assert!(args.required_block_hashes.is_empty());
+    }
+
+    #[test]
+    fn test_parse_block_num_hash() {
+        // Test hash only format
+        let result = parse_block_num_hash(
+            "0x1111111111111111111111111111111111111111111111111111111111111111",
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().number, 0);
+
+        // Test block_number=hash format
+        let result = parse_block_num_hash(
+            "23115201=0x2222222222222222222222222222222222222222222222222222222222222222",
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().number, 23115201);
+
+        // Test invalid formats
+        assert!(parse_block_num_hash("invalid").is_err());
+        assert!(parse_block_num_hash(
+            "abc=0x1111111111111111111111111111111111111111111111111111111111111111"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn parse_p2p_secret_key_hex() {
+        let hex = "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--p2p-secret-key-hex", hex]).args;
+
+        let expected: B256 = hex.parse().unwrap();
+        assert_eq!(args.p2p_secret_key_hex, Some(expected));
+        assert_eq!(args.p2p_secret_key, None);
+    }
+
+    #[test]
+    fn parse_p2p_secret_key_hex_with_0x_prefix() {
+        let hex = "0x4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--p2p-secret-key-hex", hex]).args;
+
+        let expected: B256 = hex.parse().unwrap();
+        assert_eq!(args.p2p_secret_key_hex, Some(expected));
+        assert_eq!(args.p2p_secret_key, None);
+    }
+
+    #[test]
+    fn test_p2p_secret_key_and_hex_are_mutually_exclusive() {
+        let result = CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--p2p-secret-key",
+            "/path/to/key",
+            "--p2p-secret-key-hex",
+            "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f",
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_secret_key_method_with_hex() {
+        let hex = "4c0883a69102937d6231471b5dbb6204fe512961708279f8c5c58b3b9c4e8b8f";
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--p2p-secret-key-hex", hex]).args;
+
+        let temp_dir = std::env::temp_dir();
+        let default_path = temp_dir.join("default_key");
+        let secret_key = args.secret_key(default_path).unwrap();
+
+        // Verify the secret key matches the hex input
+        assert_eq!(alloy_primitives::hex::encode(secret_key.secret_bytes()), hex);
+    }
+
+    #[test]
+    fn parse_netrestrict_single_network() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "192.168.0.0/16"])
+                .args;
+
+        assert_eq!(args.netrestrict, Some("192.168.0.0/16".to_string()));
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
+        assert!(!ip_filter.is_allowed(&"10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn parse_netrestrict_multiple_networks() {
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--netrestrict",
+            "192.168.0.0/16,10.0.0.0/8",
+        ])
+        .args;
+
+        assert_eq!(args.netrestrict, Some("192.168.0.0/16,10.0.0.0/8".to_string()));
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
+        assert!(ip_filter.is_allowed(&"10.5.10.20".parse().unwrap()));
+        assert!(!ip_filter.is_allowed(&"172.16.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn parse_netrestrict_ipv6() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "2001:db8::/32"])
+                .args;
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"2001:db8::1".parse().unwrap()));
+        assert!(!ip_filter.is_allowed(&"2001:db9::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn netrestrict_not_set() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.netrestrict, None);
+
+        let ip_filter = args.ip_filter().unwrap();
+        assert!(!ip_filter.has_restrictions());
+        assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
+        assert!(ip_filter.is_allowed(&"10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn netrestrict_invalid_cidr() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "invalid-cidr"])
+                .args;
+
+        assert!(args.ip_filter().is_err());
+    }
+
+    #[test]
+    fn network_config_preserves_basic_nodes_from_peers_file() {
+        let enode = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+
+        let peers_file = std::env::temp_dir().join(format!("reth_peers_test_{}.json", unique));
+        fs::write(&peers_file, format!("[\"{}\"]", enode)).expect("write peers file");
+
+        // Build NetworkArgs with peers_file set and no_persist_peers=false
+        let args = NetworkArgs {
+            peers_file: Some(peers_file.clone()),
+            no_persist_peers: false,
+            ..Default::default()
+        };
+
+        // Build the network config using a deterministic secret key
+        let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let builder = args.network_config::<reth_network::EthNetworkPrimitives>(
+            &Config::default(),
+            MAINNET.clone(),
+            secret_key,
+            peers_file.clone(),
+        );
+
+        let net_cfg = builder.build_with_noop_provider(MAINNET.clone());
+
+        // Assert basic_nodes contains our node
+        let node: NodeRecord = enode.parse().unwrap();
+        assert!(net_cfg.peers_config.basic_nodes.contains(&node));
+
+        // Cleanup
+        let _ = fs::remove_file(&peers_file);
     }
 }

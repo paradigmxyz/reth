@@ -53,7 +53,7 @@ fn main() {
                     Ok(())
                 })
                 // launch the node with custom rpc
-                .launch()
+                .launch_with_debug_capabilities()
                 .await?;
 
             handle.wait_for_node_exit().await
@@ -91,7 +91,7 @@ pub trait TxpoolExtApi {
     ) -> SubscriptionResult;
 }
 
-/// The type that implements the `txpool` rpc namespace trait
+/// The type that implements the `txpoolExt` rpc namespace trait
 pub struct TxpoolExt<Pool> {
     pool: Pool,
 }

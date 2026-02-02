@@ -6,7 +6,7 @@ use alloy_consensus::{
     transaction::{Recovered, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
     EthereumTxEnvelope, SignableTransaction,
 };
-use alloy_eips::eip2718::{Decodable2718, Encodable2718};
+use alloy_eips::eip2718::{Decodable2718, Encodable2718, IsTyped2718};
 use alloy_primitives::{keccak256, Address, Signature, B256};
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
@@ -46,7 +46,18 @@ pub trait SignedTransaction:
     + InMemorySize
     + SignerRecoverable
     + TxHashRef
+    + IsTyped2718
 {
+    /// Returns whether this is a system transaction.
+    ///
+    /// System transactions are created at the protocol level rather than by users. They are
+    /// typically used by L2s for special purposes (e.g., Optimism deposit transactions with type
+    /// 126) and may have different validation rules or fee handling compared to standard
+    /// user-initiated transactions.
+    fn is_system_tx(&self) -> bool {
+        false
+    }
+
     /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
     /// network.
     ///

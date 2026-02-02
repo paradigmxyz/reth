@@ -31,7 +31,6 @@ pub fn db(c: &mut Criterion) {
     group.warm_up_time(std::time::Duration::from_millis(200));
 
     measure_table_db::<CanonicalHeaders>(&mut group);
-    measure_table_db::<HeaderTerminalDifficulties>(&mut group);
     measure_table_db::<HeaderNumbers>(&mut group);
     measure_table_db::<Headers>(&mut group);
     measure_table_db::<BlockBodyIndices>(&mut group);
@@ -48,7 +47,6 @@ pub fn serialization(c: &mut Criterion) {
     group.warm_up_time(std::time::Duration::from_millis(200));
 
     measure_table_serialization::<CanonicalHeaders>(&mut group);
-    measure_table_serialization::<HeaderTerminalDifficulties>(&mut group);
     measure_table_serialization::<HeaderNumbers>(&mut group);
     measure_table_serialization::<Headers>(&mut group);
     measure_table_serialization::<BlockBodyIndices>(&mut group);
@@ -139,7 +137,8 @@ where
                 for (k, _, v, _) in input {
                     crsr.append(k, &v).expect("submit");
                 }
-                tx.inner.commit().unwrap()
+                drop(crsr);
+                tx.commit().unwrap()
             },
         )
     });
@@ -159,8 +158,8 @@ where
                     let (k, _, v, _) = input.get(index).unwrap().clone();
                     crsr.insert(k, &v).expect("submit");
                 }
-
-                tx.inner.commit().unwrap()
+                drop(crsr);
+                tx.commit().unwrap()
             },
         )
     });
@@ -221,7 +220,8 @@ where
                 for (k, _, v, _) in input {
                     crsr.append_dup(k, v).expect("submit");
                 }
-                tx.inner.commit().unwrap()
+                drop(crsr);
+                tx.commit().unwrap()
             },
         )
     });
@@ -241,7 +241,7 @@ where
                     let (k, _, v, _) = input.get(index).unwrap().clone();
                     tx.put::<T>(k, v).unwrap();
                 }
-                tx.inner.commit().unwrap();
+                tx.commit().unwrap()
             },
         )
     });

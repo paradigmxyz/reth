@@ -8,8 +8,10 @@ use alloy_primitives::BlockNumber;
 use reth_exex_types::FinishedExExHeight;
 use reth_provider::{
     DBProvider, DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
+    StageCheckpointReader,
 };
 use reth_prune_types::{PruneProgress, PrunedSegmentInfo, PrunerOutput};
+use reth_stages_types::StageId;
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
@@ -100,7 +102,7 @@ where
 
 impl<Provider, S> Pruner<Provider, S>
 where
-    Provider: PruneCheckpointReader + PruneCheckpointWriter,
+    Provider: PruneCheckpointReader + PruneCheckpointWriter + StageCheckpointReader,
 {
     /// Listen for events on the pruner.
     pub fn events(&self) -> EventStream<PrunerEvent> {
@@ -147,21 +149,7 @@ where
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        let message = match output.progress {
-            PruneProgress::HasMoreData(_) => "Pruner interrupted and has more data to prune",
-            PruneProgress::Finished => "Pruner finished",
-        };
-
-        debug!(
-            target: "pruner",
-            %tip_block_number,
-            ?elapsed,
-            ?deleted_entries,
-            ?limiter,
-            ?output,
-            ?stats,
-            "{message}",
-        );
+        output.debug_log(tip_block_number, deleted_entries, elapsed);
 
         self.event_sender.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
 
@@ -200,6 +188,19 @@ where
                 .transpose()?
                 .flatten()
             {
+                // Check if segment has a required stage that must be finished first
+                if let Some(required_stage) = segment.required_stage() &&
+                    !is_stage_finished(provider, required_stage)?
+                {
+                    debug!(
+                        target: "pruner",
+                        segment = ?segment.segment(),
+                        ?required_stage,
+                        "Segment's required stage not finished, skipping"
+                    );
+                    continue
+                }
+
                 debug!(
                     target: "pruner",
                     segment = ?segment.segment(),
@@ -318,7 +319,9 @@ where
 
 impl<PF> Pruner<PF::ProviderRW, PF>
 where
-    PF: DatabaseProviderFactory<ProviderRW: PruneCheckpointWriter + PruneCheckpointReader>,
+    PF: DatabaseProviderFactory<
+        ProviderRW: PruneCheckpointWriter + PruneCheckpointReader + StageCheckpointReader,
+    >,
 {
     /// Run the pruner. This will only prune data up to the highest finished ExEx height, if there
     /// are no ExExes.
@@ -331,6 +334,19 @@ where
         provider.commit()?;
         result
     }
+}
+
+/// Checks if the given stage has caught up with the `Finish` stage.
+///
+/// Returns `true` if the stage checkpoint is >= the Finish stage checkpoint.
+fn is_stage_finished<Provider: StageCheckpointReader>(
+    provider: &Provider,
+    stage_id: StageId,
+) -> Result<bool, PrunerError> {
+    let stage_checkpoint = provider.get_stage_checkpoint(stage_id)?.map(|c| c.block_number);
+    let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish)?.map(|c| c.block_number);
+
+    Ok(stage_checkpoint >= finish_checkpoint)
 }
 
 #[cfg(test)]

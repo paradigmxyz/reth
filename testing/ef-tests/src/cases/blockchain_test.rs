@@ -5,22 +5,27 @@ use crate::{
     Case, Error, Suite,
 };
 use alloy_rlp::{Decodable, Encodable};
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use rayon::iter::ParallelIterator;
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
-use reth_ethereum_primitives::Block;
+use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{
+    Block as BlockTrait, ParallelBridgeBuffered, RecoveredBlock, SealedBlock,
+};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
     ExecutionOutcome, HeaderProvider, HistoryWriter, OriginalValuesKnown, StateProofProvider,
-    StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    StateWriteConfig, StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
-use reth_stateless::{validation::stateless_validation, ExecutionWitness};
+use reth_stateless::{
+    trie::StatelessSparseTrie, validation::stateless_validation_with_trie, ExecutionWitness,
+    UncompressedPublicKey,
+};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
 use std::{
@@ -177,7 +182,7 @@ impl Case for BlockchainTestCase {
         self.tests
             .iter()
             .filter(|(_, case)| !Self::excluded_fork(case.network))
-            .par_bridge()
+            .par_bridge_buffered()
             .try_for_each(|(name, case)| Self::run_single_case(name, case).map(|_| ()))?;
 
         Ok(())
@@ -215,7 +220,7 @@ fn run_case(
     .unwrap();
 
     provider
-        .insert_block(genesis_block.clone())
+        .insert_block(&genesis_block)
         .map_err(|err| Error::block_failed(0, Default::default(), err))?;
 
     // Increment block number for receipts static file
@@ -246,7 +251,7 @@ fn run_case(
 
         // Insert the block into the database
         provider
-            .insert_block(block.clone())
+            .insert_block(block)
             .map_err(|err| Error::block_failed(block_number, Default::default(), err))?;
         // Commit static files, so we can query the headers for stateless execution below
         provider
@@ -274,7 +279,7 @@ fn run_case(
             .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
         // Consensus checks after block execution
-        validate_block_post_execution(block, &chain_spec, &output.receipts, &output.requests)
+        validate_block_post_execution(block, &chain_spec, &output.receipts, &output.requests, None)
             .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
         // Generate the stateless witness
@@ -307,9 +312,11 @@ fn run_case(
         // Compute and check the post state root
         let hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
-        let (computed_state_root, _) =
-            StateRoot::overlay_root_with_updates(provider.tx_ref(), hashed_state.clone())
-                .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
+        let (computed_state_root, _) = StateRoot::overlay_root_with_updates(
+            provider.tx_ref(),
+            &hashed_state.clone_into_sorted(),
+        )
+        .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
         if computed_state_root != block.state_root {
             return Err(Error::block_failed(
                 block_number,
@@ -320,7 +327,11 @@ fn run_case(
 
         // Commit the post state/state diff to the database
         provider
-            .write_state(&ExecutionOutcome::single(block.number, output), OriginalValuesKnown::Yes)
+            .write_state(
+                &ExecutionOutcome::single(block.number, output),
+                OriginalValuesKnown::Yes,
+                StateWriteConfig::default(),
+            )
             .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
         provider
@@ -356,9 +367,16 @@ fn run_case(
     }
 
     // Now validate using the stateless client if everything else passes
-    for (block, execution_witness) in &program_inputs {
-        stateless_validation(
-            block.clone(),
+    for (recovered_block, execution_witness) in &program_inputs {
+        let block = recovered_block.clone().into_block();
+
+        // Recover the actual public keys from the transaction signatures
+        let public_keys = recover_signers(block.body().transactions())
+            .expect("Failed to recover public keys from transaction signatures");
+
+        stateless_validation_with_trie::<StatelessSparseTrie, _, _>(
+            block,
+            public_keys,
             execution_witness.clone(),
             chain_spec.clone(),
             EthEvmConfig::new(chain_spec.clone()),
@@ -411,6 +429,26 @@ fn pre_execution_checks(
     consensus.validate_block_pre_execution(block)?;
 
     Ok(())
+}
+
+/// Recover public keys from transaction signatures.
+fn recover_signers<'a, I>(txs: I) -> Result<Vec<UncompressedPublicKey>, Box<dyn std::error::Error>>
+where
+    I: IntoIterator<Item = &'a TransactionSigned>,
+{
+    txs.into_iter()
+        .enumerate()
+        .map(|(i, tx)| {
+            tx.signature()
+                .recover_from_prehash(&tx.signature_hash())
+                .map(|keys| {
+                    UncompressedPublicKey(
+                        keys.to_encoded_point(false).as_bytes().try_into().unwrap(),
+                    )
+                })
+                .map_err(|e| format!("failed to recover signature for tx #{i}: {e}").into())
+        })
+        .collect::<Result<Vec<UncompressedPublicKey>, _>>()
 }
 
 /// Returns whether the test at the given path should be skipped.

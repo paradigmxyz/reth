@@ -20,11 +20,10 @@ use reth_evm::OnStateHook;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{Account as RethAccount, Recovered, StorageEntry};
 use reth_provider::{
-    providers::{BlockchainProvider, ConsistentDbView},
+    providers::{BlockchainProvider, OverlayStateProviderFactory},
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
     AccountReader, ChainSpecProvider, HashingWriter, ProviderFactory,
 };
-use reth_trie::TrieInput;
 use revm_primitives::{HashMap, U256};
 use revm_state::{Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
 use std::{hint::black_box, sync::Arc};
@@ -63,6 +62,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
                     storage: HashMap::default(),
                     status: AccountStatus::SelfDestructed,
                     transaction_id: 0,
+                    original_info: Box::new(AccountInfo::default()),
                 }
             } else {
                 RevmAccount {
@@ -71,6 +71,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
                         nonce: rng.random::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
+                        account_id: None,
                     },
                     storage: (0..rng.random_range(0..=params.storage_slots_per_account))
                         .map(|_| {
@@ -85,6 +86,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
                         })
                         .collect(),
                     status: AccountStatus::Touched,
+                    original_info: Box::new(AccountInfo::default()),
                     transaction_id: 0,
                 }
             };
@@ -230,13 +232,22 @@ fn bench_state_root(c: &mut Criterion) {
                         black_box({
                             let mut handle = payload_processor.spawn(
                                 Default::default(),
-                                core::iter::empty::<
-                                    Result<Recovered<TransactionSigned>, core::convert::Infallible>,
-                                >(),
+                                (
+                                    Vec::<
+                                        Result<
+                                            Recovered<TransactionSigned>,
+                                            core::convert::Infallible,
+                                        >,
+                                    >::new(),
+                                    std::convert::identity,
+                                ),
                                 StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-                                ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-                                TrieInput::default(),
+                                OverlayStateProviderFactory::new(
+                                    provider,
+                                    reth_trie_db::ChangesetCache::new(),
+                                ),
                                 &TreeConfig::default(),
+                                None,
                             );
 
                             let mut state_hook = handle.state_hook();

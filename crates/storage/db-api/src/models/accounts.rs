@@ -5,7 +5,7 @@ use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
-use alloy_primitives::{Address, BlockNumber, StorageKey, B256};
+use alloy_primitives::{Address, BlockNumber, StorageKey};
 use serde::{Deserialize, Serialize};
 use std::ops::{Bound, Range, RangeBounds, RangeInclusive};
 
@@ -105,43 +105,6 @@ impl<R: RangeBounds<BlockNumber>> From<R> for BlockNumberAddressRange {
         };
 
         Self { start, end }
-    }
-}
-
-/// [`BlockNumber`] concatenated with [`B256`] (hashed address).
-///
-/// Since it's used as a key, it isn't compressed when encoding it.
-#[derive(
-    Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Ord, PartialOrd, Hash,
-)]
-pub struct BlockNumberHashedAddress(pub (BlockNumber, B256));
-
-impl From<(BlockNumber, B256)> for BlockNumberHashedAddress {
-    fn from(tpl: (BlockNumber, B256)) -> Self {
-        Self(tpl)
-    }
-}
-
-impl Encode for BlockNumberHashedAddress {
-    type Encoded = [u8; 40];
-
-    fn encode(self) -> Self::Encoded {
-        let block_number = self.0 .0;
-        let hashed_address = self.0 .1;
-
-        let mut buf = [0u8; 40];
-
-        buf[..8].copy_from_slice(&block_number.to_be_bytes());
-        buf[8..].copy_from_slice(hashed_address.as_slice());
-        buf
-    }
-}
-
-impl Decode for BlockNumberHashedAddress {
-    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
-        let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::Decode)?);
-        let hash = B256::from_slice(&value[8..]);
-        Ok(Self((num, hash)))
     }
 }
 

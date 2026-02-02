@@ -38,7 +38,7 @@ pub enum ProtocolEvent {
     },
 }
 
-/// Protocol state is an helper struct to store the protocol events.
+/// Protocol state is a helper struct to store the protocol events.
 #[derive(Clone, Debug)]
 pub struct ProtocolState {
     /// Protocol event sender.

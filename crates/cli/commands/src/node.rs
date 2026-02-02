@@ -5,18 +5,18 @@ use clap::{value_parser, Args, Parser};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_cli_util::parse_socket_address;
 use reth_db::init_db;
 use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
-        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, NetworkArgs,
-        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, MetricArgs,
+        NetworkArgs, PayloadBuilderArgs, PruningArgs, RocksDbArgs, RpcServerArgs, StaticFilesArgs,
+        TxPoolArgs,
     },
     node_config::NodeConfig,
     version,
 };
-use std::{ffi::OsString, fmt, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{ffi::OsString, fmt, path::PathBuf, sync::Arc};
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -39,11 +39,9 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     )]
     pub chain: Arc<C::ChainSpec>,
 
-    /// Enable Prometheus metrics.
-    ///
-    /// The metrics will be served at the given interface and port.
-    #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
-    pub metrics: Option<SocketAddr>,
+    /// Prometheus metrics configuration.
+    #[command(flatten)]
+    pub metrics: MetricArgs,
 
     /// Add a new instance of a node.
     ///
@@ -105,6 +103,10 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[command(flatten)]
     pub pruning: PruningArgs,
 
+    /// All `RocksDB` table routing arguments
+    #[command(flatten)]
+    pub rocksdb: RocksDbArgs,
+
     /// Engine cli arguments
     #[command(flatten, next_help_heading = "Engine")]
     pub engine: EngineArgs,
@@ -112,6 +114,10 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     /// All ERA related arguments with --era prefix
     #[command(flatten, next_help_heading = "ERA")]
     pub era: EraArgs,
+
+    /// All static files related arguments
+    #[command(flatten, next_help_heading = "Static Files")]
+    pub static_files: StaticFilesArgs,
 
     /// Additional cli arguments
     #[command(flatten, next_help_heading = "Extension")]
@@ -148,7 +154,7 @@ where
     where
         L: Launcher<C, Ext>,
     {
-        tracing::info!(target: "reth::cli", version = ?version::version_metadata().short_version, "Starting reth");
+        tracing::info!(target: "reth::cli", version = ?version::version_metadata().short_version, "Starting {}",  version::version_metadata().name_client);
 
         let Self {
             datadir,
@@ -165,10 +171,15 @@ where
             db,
             dev,
             pruning,
-            ext,
+            rocksdb,
             engine,
             era,
+            static_files,
+            ext,
         } = self;
+
+        // Validate RocksDB arguments
+        rocksdb.validate()?;
 
         // set up node config
         let mut node_config = NodeConfig {
@@ -185,15 +196,17 @@ where
             db,
             dev,
             pruning,
+            rocksdb,
             engine,
             era,
+            static_files,
         };
 
         let data_dir = node_config.datadir();
         let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics());
+        let database = init_db(db_path.clone(), self.db.database_args())?.with_metrics();
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();
@@ -225,7 +238,7 @@ mod tests {
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ethereum_cli::chainspec::{EthereumChainSpecParser, SUPPORTED_CHAINS};
     use std::{
-        net::{IpAddr, Ipv4Addr},
+        net::{IpAddr, Ipv4Addr, SocketAddr},
         path::Path,
     };
 
@@ -286,15 +299,24 @@ mod tests {
     fn parse_metrics_port() {
         let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--metrics", "9001"]).unwrap();
-        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
+        assert_eq!(
+            cmd.metrics.prometheus,
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001))
+        );
 
         let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--metrics", ":9001"]).unwrap();
-        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
+        assert_eq!(
+            cmd.metrics.prometheus,
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001))
+        );
 
         let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--metrics", "localhost:9001"]).unwrap();
-        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
+        assert_eq!(
+            cmd.metrics.prometheus,
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001))
+        );
     }
 
     #[test]

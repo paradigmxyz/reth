@@ -1,5 +1,7 @@
-use alloy_consensus::{EnvKzgSettings, SidecarBuilder, SimpleCoder, TxEip4844Variant, TxEnvelope};
-use alloy_eips::eip7702::SignedAuthorization;
+use alloy_consensus::{
+    EnvKzgSettings, EthereumTxEnvelope, SidecarBuilder, SimpleCoder, TxEip4844Variant, TxEnvelope,
+};
+use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
 use alloy_network::{
     eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder, TransactionBuilder4844,
 };
@@ -33,6 +35,18 @@ impl TransactionTestContext {
     /// Creates a static transfer and signs it, returning bytes.
     pub async fn transfer_tx_bytes(chain_id: u64, wallet: PrivateKeySigner) -> Bytes {
         let signed = Self::transfer_tx(chain_id, wallet).await;
+        signed.encoded_2718().into()
+    }
+
+    /// Creates a transfer with a specific nonce and signs it, returning bytes.
+    /// Uses high `max_fee_per_gas` (1000 gwei) to ensure tx acceptance regardless of basefee.
+    pub async fn transfer_tx_bytes_with_nonce(
+        chain_id: u64,
+        wallet: PrivateKeySigner,
+        nonce: u64,
+    ) -> Bytes {
+        let tx = tx(chain_id, 21000, None, None, nonce, Some(1000e9 as u128));
+        let signed = Self::sign_tx(wallet, tx).await;
         signed.encoded_2718().into()
     }
 
@@ -146,11 +160,13 @@ impl TransactionTestContext {
 
     /// Validates the sidecar of a given tx envelope and returns the versioned hashes
     #[track_caller]
-    pub fn validate_sidecar(tx: TxEnvelope) -> Vec<B256> {
+    pub fn validate_sidecar(
+        tx: EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>,
+    ) -> Vec<B256> {
         let proof_setting = EnvKzgSettings::Default;
 
         match tx {
-            TxEnvelope::Eip4844(signed) => match signed.tx() {
+            EthereumTxEnvelope::Eip4844(signed) => match signed.tx() {
                 TxEip4844Variant::TxEip4844WithSidecar(tx) => {
                     tx.validate_blob(proof_setting.get()).unwrap();
                     tx.sidecar.versioned_hashes().collect()

@@ -563,6 +563,13 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     response,
                 })
             }
+            PeerRequest::GetReceipts70 { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetReceipts70 {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
             PeerRequest::GetPooledTransactions { request, response } => {
                 self.notify_tx_manager(NetworkTransactionEvent::GetPooledTransactions {
                     peer_id,

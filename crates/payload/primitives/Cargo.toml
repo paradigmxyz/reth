@@ -17,8 +17,11 @@ reth-primitives-traits.workspace = true
 reth-chainspec.workspace = true
 reth-errors.workspace = true
 reth-chain-state.workspace = true
+reth-execution-types.workspace = true
+reth-trie-common.workspace = true
 
 # alloy
+alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
@@ -38,6 +41,8 @@ assert_matches.workspace = true
 default = ["std"]
 std = [
     "reth-chainspec/std",
+    "reth-execution-types/std",
+    "reth-trie-common/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-rpc-types-engine/std",
@@ -46,6 +51,7 @@ std = [
     "thiserror/std",
     "reth-primitives-traits/std",
     "either/std",
+    "alloy-consensus/std",
 ]
 op = [
     "dep:op-alloy-rpc-types-engine",

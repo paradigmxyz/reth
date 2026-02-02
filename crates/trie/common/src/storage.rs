@@ -1,6 +1,9 @@
 use super::{BranchNodeCompact, StoredNibblesSubKey};
+use reth_primitives_traits::ValueWithSubKey;
 
 /// Account storage trie node.
+///
+/// `nibbles` is the subkey when used as a value in the `StorageTrie` table.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageTrieEntry {
@@ -8,6 +11,14 @@ pub struct StorageTrieEntry {
     pub nibbles: StoredNibblesSubKey,
     /// Encoded node.
     pub node: BranchNodeCompact,
+}
+
+impl ValueWithSubKey for StorageTrieEntry {
+    type SubKey = StoredNibblesSubKey;
+
+    fn get_subkey(&self) -> Self::SubKey {
+        self.nibbles.clone()
+    }
 }
 
 // NOTE: Removing reth_codec and manually encode subkey

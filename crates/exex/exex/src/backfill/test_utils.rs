@@ -10,10 +10,10 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_node_api::FullNodePrimitives;
+use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
+    providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProvider,
     ProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -58,7 +58,7 @@ pub(crate) fn execute_block_and_commit_to_database<N>(
 ) -> eyre::Result<BlockExecutionOutput<Receipt>>
 where
     N: ProviderNodeTypes<
-        Primitives: FullNodePrimitives<
+        Primitives: NodePrimitives<
             Block = reth_ethereum_primitives::Block,
             BlockBody = reth_ethereum_primitives::BlockBody,
             Receipt = reth_ethereum_primitives::Receipt,
@@ -69,7 +69,7 @@ where
 
     // Execute the block to produce a block execution output
     let mut block_execution_output = EthEvmConfig::ethereum(chain_spec)
-        .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)))
+        .batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)))
         .execute(block)?;
     block_execution_output.state.reverts.sort();
 
@@ -169,7 +169,7 @@ pub(crate) fn blocks_and_execution_outputs<N>(
 >
 where
     N: ProviderNodeTypes<
-        Primitives: FullNodePrimitives<
+        Primitives: NodePrimitives<
             Block = reth_ethereum_primitives::Block,
             BlockBody = reth_ethereum_primitives::BlockBody,
             Receipt = reth_ethereum_primitives::Receipt,
@@ -193,7 +193,7 @@ pub(crate) fn blocks_and_execution_outcome<N>(
 ) -> eyre::Result<(Vec<RecoveredBlock<reth_ethereum_primitives::Block>>, ExecutionOutcome)>
 where
     N: ProviderNodeTypes,
-    N::Primitives: FullNodePrimitives<
+    N::Primitives: NodePrimitives<
         Block = reth_ethereum_primitives::Block,
         Receipt = reth_ethereum_primitives::Receipt,
     >,
@@ -203,8 +203,8 @@ where
     let provider = provider_factory.provider()?;
 
     let evm_config = EthEvmConfig::new(chain_spec);
-    let executor = evm_config
-        .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)));
+    let executor =
+        evm_config.batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)));
 
     let mut execution_outcome = executor.execute_batch(vec![&block1, &block2])?;
     execution_outcome.state_mut().reverts.sort();

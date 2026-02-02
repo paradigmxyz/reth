@@ -157,7 +157,6 @@ pub fn write_blocks_to_rlp(blocks: &[SealedBlock], path: &Path) -> std::io::Resu
         );
 
         // Debug: check what's in the encoded data
-        debug!(target: "e2e::import", "Block {} encoded to {} bytes", i, buf.len());
         if buf.len() < 20 {
             debug!(target: "e2e::import", "  Raw bytes: {:?}", &buf);
         } else {

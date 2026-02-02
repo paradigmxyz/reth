@@ -1,9 +1,9 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, StateProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
-    TransactionsProvider,
+    ChainSpecProvider, ChangeSetReader, HeaderProvider, PruneCheckpointReader,
+    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{
     constants::EMPTY_ROOT_HASH,
@@ -27,14 +27,14 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
-    SignerRecoverable,
+    SignerRecoverable, StorageEntry,
 };
-use reth_prune_types::PruneModes;
+use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageRootProvider,
+    StorageChangeSetReader, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -117,7 +117,6 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
     /// Add multiple blocks to local block store
     pub fn extend_blocks(&self, iter: impl IntoIterator<Item = (B256, T::Block)>) {
         for (hash, block) in iter {
-            self.add_header(hash, block.header().clone());
             self.add_block(hash, block)
         }
     }
@@ -188,6 +187,21 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             tx: self.tx,
             prune_modes: self.prune_modes,
         }
+    }
+
+    /// Adds the genesis block from the chain spec to the provider.
+    ///
+    /// This is useful for tests that require a valid latest block (e.g., transaction validation).
+    pub fn with_genesis_block(self) -> Self
+    where
+        ChainSpec: EthChainSpec<Header = <T::Block as Block>::Header>,
+        <T::Block as Block>::Body: Default,
+    {
+        let genesis_hash = self.chain_spec.genesis_hash();
+        let genesis_header = self.chain_spec.genesis_header().clone();
+        let genesis_block = T::Block::new(genesis_header, Default::default());
+        self.add_block(genesis_hash, genesis_block);
+        self
     }
 }
 
@@ -267,7 +281,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
         self.tx
     }
 
-    fn commit(self) -> ProviderResult<bool> {
+    fn commit(self) -> ProviderResult<()> {
         Ok(self.tx.commit()?)
     }
 
@@ -289,24 +303,6 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderP
     fn header_by_number(&self, num: u64) -> ProviderResult<Option<Self::Header>> {
         let lock = self.headers.lock();
         Ok(lock.values().find(|h| h.number() == num).cloned())
-    }
-
-    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
-        let lock = self.headers.lock();
-        Ok(lock.get(&hash).map(|target| {
-            lock.values()
-                .filter(|h| h.number() < target.number())
-                .fold(target.difficulty(), |td, h| td + h.difficulty())
-        }))
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        let lock = self.headers.lock();
-        let sum = lock
-            .values()
-            .filter(|h| h.number() <= number)
-            .fold(U256::ZERO, |td, h| td + h.difficulty());
-        Ok(Some(sum))
     }
 
     fn headers_range(
@@ -416,18 +412,6 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> TransactionsProvider
                     return Ok(Some((tx.clone(), meta)))
                 }
             }
-        }
-        Ok(None)
-    }
-
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        let lock = self.blocks.lock();
-        let mut current_tx_number: TxNumber = 0;
-        for block in lock.values() {
-            if current_tx_number + (block.body().transaction_count() as TxNumber) > id {
-                return Ok(Some(block.header().number()))
-            }
-            current_tx_number += block.body().transaction_count() as TxNumber;
         }
         Ok(None)
     }
@@ -773,6 +757,21 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StageCheckpointReader
     }
 }
 
+impl<T: NodePrimitives, ChainSpec: Send + Sync> PruneCheckpointReader
+    for MockEthProvider<T, ChainSpec>
+{
+    fn get_prune_checkpoint(
+        &self,
+        _segment: PruneSegment,
+    ) -> ProviderResult<Option<PruneCheckpoint>> {
+        Ok(None)
+    }
+
+    fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        Ok(vec![])
+    }
+}
+
 impl<T, ChainSpec> StateRootProvider for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
@@ -991,6 +990,48 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
         _address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
         Ok(None)
+    }
+
+    fn account_changesets_range(
+        &self,
+        _range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        Ok(Vec::default())
+    }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        Ok(0)
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
+    for MockEthProvider<T, ChainSpec>
+{
+    fn storage_changeset(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+        Ok(Vec::default())
+    }
+
+    fn get_storage_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+        _storage_key: B256,
+    ) -> ProviderResult<Option<StorageEntry>> {
+        Ok(None)
+    }
+
+    fn storage_changesets_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+        Ok(Vec::default())
+    }
+
+    fn storage_changeset_count(&self) -> ProviderResult<usize> {
+        Ok(0)
     }
 }
 

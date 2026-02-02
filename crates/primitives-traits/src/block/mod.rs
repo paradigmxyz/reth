@@ -50,17 +50,9 @@ pub mod serde_bincode_compat {
 }
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullBlock:
-    Block<Header: FullBlockHeader, Body: FullBlockBody> + alloy_rlp::Encodable + alloy_rlp::Decodable
-{
-}
+pub trait FullBlock: Block<Header: FullBlockHeader, Body: FullBlockBody> {}
 
-impl<T> FullBlock for T where
-    T: Block<Header: FullBlockHeader, Body: FullBlockBody>
-        + alloy_rlp::Encodable
-        + alloy_rlp::Decodable
-{
-}
+impl<T> FullBlock for T where T: Block<Header: FullBlockHeader, Body: FullBlockBody> {}
 
 /// Helper trait to access [`BlockBody::Transaction`] given a [`Block`].
 pub type BlockTx<B> = <<B as Block>::Body as BlockBody>::Transaction;
@@ -274,6 +266,11 @@ pub trait TestBlock: Block<Header: crate::test_utils::TestHeader> {
     /// Updates the block number.
     fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
         crate::header::test_utils::TestHeader::set_block_number(self.header_mut(), number);
+    }
+
+    /// Updates the block timestamp.
+    fn set_timestamp(&mut self, timestamp: u64) {
+        crate::header::test_utils::TestHeader::set_timestamp(self.header_mut(), timestamp);
     }
 
     /// Updates the block state root.

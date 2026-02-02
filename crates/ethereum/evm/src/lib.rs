@@ -19,31 +19,36 @@ extern crate alloc;
 
 use alloc::{borrow::Cow, sync::Arc};
 use alloy_consensus::Header;
-use alloy_eips::Decodable2718;
-pub use alloy_evm::EthEvm;
 use alloy_evm::{
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
-use alloy_primitives::{Bytes, U256};
-use alloy_rpc_types_engine::ExecutionData;
 use core::{convert::Infallible, fmt::Debug};
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, MAINNET};
+use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
-    eth::NextEvmEnvAttributes, precompiles::PrecompilesMap, ConfigureEngineEvm, ConfigureEvm,
-    EvmEnv, EvmEnvFor, EvmFactory, ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes,
-    TransactionEnv,
+    eth::NextEvmEnvAttributes, precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmFactory,
+    NextBlockEnvAttributes, TransactionEnv,
 };
-use reth_primitives_traits::{
-    constants::MAX_TX_GAS_LIMIT_OSAKA, SealedBlock, SealedHeader, SignedTransaction, TxTy,
+use reth_primitives_traits::{SealedBlock, SealedHeader};
+use revm::{context::BlockEnv, primitives::hardfork::SpecId};
+
+#[cfg(feature = "std")]
+use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
+#[allow(unused_imports)]
+use {
+    alloy_eips::Decodable2718,
+    alloy_primitives::{Bytes, U256},
+    alloy_rpc_types_engine::ExecutionData,
+    reth_chainspec::EthereumHardforks,
+    reth_evm::{EvmEnvFor, ExecutionCtxFor},
+    reth_primitives_traits::{constants::MAX_TX_GAS_LIMIT_OSAKA, SignedTransaction, TxTy},
+    reth_storage_errors::any::AnyError,
+    revm::context::CfgEnv,
+    revm::context_interface::block::BlobExcessGasAndPrice,
 };
-use reth_storage_errors::any::AnyError;
-use revm::{
-    context::{BlockEnv, CfgEnv},
-    context_interface::block::BlobExcessGasAndPrice,
-    primitives::hardfork::SpecId,
-};
+
+pub use alloy_evm::EthEvm;
 
 mod config;
 use alloy_evm::eth::spec::EthExecutorSpec;
@@ -116,12 +121,6 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         self.executor_factory.spec()
     }
-
-    /// Sets the extra data for the block assembler.
-    pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
-        self.block_assembler.extra_data = extra_data;
-        self
-    }
 }
 
 impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
@@ -132,6 +131,7 @@ where
                     + FromRecoveredTx<TransactionSigned>
                     + FromTxWithEncoded<TransactionSigned>,
             Spec = SpecId,
+            BlockEnv = BlockEnv,
             Precompiles = PrecompilesMap,
         > + Clone
         + Debug
@@ -154,7 +154,7 @@ where
         &self.block_assembler
     }
 
-    fn evm_env(&self, header: &Header) -> Result<EvmEnv, Self::Error> {
+    fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {
         Ok(EvmEnv::for_eth_block(
             header,
             self.chain_spec(),
@@ -188,10 +188,12 @@ where
         block: &'a SealedBlock<Block>,
     ) -> Result<EthBlockExecutionCtx<'a>, Self::Error> {
         Ok(EthBlockExecutionCtx {
+            tx_count_hint: Some(block.transaction_count()),
             parent_hash: block.header().parent_hash,
             parent_beacon_block_root: block.header().parent_beacon_block_root,
             ommers: &block.body().ommers,
             withdrawals: block.body().withdrawals.as_ref().map(Cow::Borrowed),
+            extra_data: block.header().extra_data.clone(),
         })
     }
 
@@ -201,14 +203,17 @@ where
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<EthBlockExecutionCtx<'_>, Self::Error> {
         Ok(EthBlockExecutionCtx {
+            tx_count_hint: None,
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             ommers: &[],
             withdrawals: attributes.withdrawals.map(Cow::Owned),
+            extra_data: attributes.extra_data,
         })
     }
 }
 
+#[cfg(feature = "std")]
 impl<ChainSpec, EvmF> ConfigureEngineEvm<ExecutionData> for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
@@ -217,6 +222,7 @@ where
                     + FromRecoveredTx<TransactionSigned>
                     + FromTxWithEncoded<TransactionSigned>,
             Spec = SpecId,
+            BlockEnv = BlockEnv,
             Precompiles = PrecompilesMap,
         > + Clone
         + Debug
@@ -234,8 +240,9 @@ where
             revm_spec_by_timestamp_and_block_number(self.chain_spec(), timestamp, block_number);
 
         // configure evm env based on parent block
-        let mut cfg_env =
-            CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+        let mut cfg_env = CfgEnv::new()
+            .with_chain_id(self.chain_spec().chain().id())
+            .with_spec_and_mainnet_gas_params(spec);
 
         if let Some(blob_params) = &blob_params {
             cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
@@ -276,10 +283,12 @@ where
         payload: &'a ExecutionData,
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
         Ok(EthBlockExecutionCtx {
+            tx_count_hint: Some(payload.payload.transactions().len()),
             parent_hash: payload.parent_hash(),
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root(),
             ommers: &[],
             withdrawals: payload.payload.withdrawals().map(|w| Cow::Owned(w.clone().into())),
+            extra_data: payload.payload.as_v1().extra_data.clone(),
         })
     }
 
@@ -287,12 +296,15 @@ where
         &self,
         payload: &ExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
-        Ok(payload.payload.transactions().clone().into_iter().map(|tx| {
+        let txs = payload.payload.transactions().clone();
+        let convert = |tx: Bytes| {
             let tx =
                 TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
             let signer = tx.try_recover().map_err(AnyError::new)?;
             Ok::<_, AnyError>(tx.with_signer(signer))
-        }))
+        };
+
+        Ok((txs, convert))
     }
 }
 
@@ -399,7 +411,7 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let evm_env = EvmEnv {
-            cfg_env: CfgEnv::new().with_spec(SpecId::CONSTANTINOPLE),
+            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::CONSTANTINOPLE),
             ..Default::default()
         };
 
@@ -466,7 +478,7 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let evm_env = EvmEnv {
-            cfg_env: CfgEnv::new().with_spec(SpecId::CONSTANTINOPLE),
+            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::CONSTANTINOPLE),
             ..Default::default()
         };
 

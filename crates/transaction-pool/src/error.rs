@@ -182,6 +182,9 @@ pub enum Eip4844PoolTransactionError {
     /// Thrown if blob transaction has an EIP-4844 style sidecar after Osaka.
     #[error("unexpected eip-4844 sidecar after osaka")]
     UnexpectedEip4844SidecarAfterOsaka,
+    /// Thrown if blob transaction has an EIP-7594 style sidecar but EIP-7594 support is disabled.
+    #[error("eip-7594 sidecar disallowed")]
+    Eip7594SidecarDisallowed,
 }
 
 /// Represents all errors that can happen when validating transactions for the pool for EIP-7702
@@ -237,8 +240,13 @@ pub enum InvalidPoolTransactionError {
     /// Thrown if the input data of a transaction is greater
     /// than some meaningful limit a user might use. This is not a consensus error
     /// making the transaction invalid, rather a DOS protection.
-    #[error("input data too large")]
-    OversizedData(usize, usize),
+    #[error("oversized data: transaction size {size}, limit {limit}")]
+    OversizedData {
+        /// Size of the transaction/input data that exceeded the limit.
+        size: usize,
+        /// Configured limit that was exceeded.
+        limit: usize,
+    },
     /// Thrown if the transaction's fee is below the minimum fee
     #[error("transaction underpriced")]
     Underpriced,
@@ -335,7 +343,7 @@ impl InvalidPoolTransactionError {
             }
             Self::ExceedsFeeCap { max_tx_fee_wei: _, tx_fee_cap_wei: _ } => true,
             Self::ExceedsMaxInitCodeSize(_, _) => true,
-            Self::OversizedData(_, _) => true,
+            Self::OversizedData { .. } => true,
             Self::Underpriced => {
                 // local setting
                 false
@@ -369,7 +377,8 @@ impl InvalidPoolTransactionError {
                         true
                     }
                     Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka |
-                    Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka => {
+                    Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka |
+                    Eip4844PoolTransactionError::Eip7594SidecarDisallowed => {
                         // for now we do not want to penalize peers for broadcasting different
                         // sidecars
                         false
@@ -391,9 +400,26 @@ impl InvalidPoolTransactionError {
         }
     }
 
+    /// Returns true if this is a [`Self::Consensus`] variant.
+    pub const fn as_consensus(&self) -> Option<&InvalidTransactionError> {
+        match self {
+            Self::Consensus(err) => Some(err),
+            _ => None,
+        }
+    }
+
+    /// Returns true if this is [`InvalidTransactionError::NonceNotConsistent`] and the
+    /// transaction's nonce is lower than the state's.
+    pub fn is_nonce_too_low(&self) -> bool {
+        match self {
+            Self::Consensus(err) => err.is_nonce_too_low(),
+            _ => false,
+        }
+    }
+
     /// Returns `true` if an import failed due to an oversized transaction
     pub const fn is_oversized(&self) -> bool {
-        matches!(self, Self::OversizedData(_, _))
+        matches!(self, Self::OversizedData { .. })
     }
 
     /// Returns `true` if an import failed due to nonce gap.

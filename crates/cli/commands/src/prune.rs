@@ -1,8 +1,16 @@
 //! Command that runs pruning without any limits.
-use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
+use crate::common::{AccessRights, CliNodeTypes, EnvironmentArgs};
 use clap::Parser;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
+use reth_cli_runner::CliContext;
+use reth_node_builder::common::metrics_hooks;
+use reth_node_core::{args::MetricArgs, version::version_metadata};
+use reth_node_metrics::{
+    chain::ChainSpecInfo,
+    server::{MetricServer, MetricServerConfig},
+    version::VersionInfo,
+};
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
@@ -13,27 +21,56 @@ use tracing::info;
 pub struct PruneCommand<C: ChainSpecParser> {
     #[command(flatten)]
     env: EnvironmentArgs<C>,
+
+    /// Prometheus metrics configuration.
+    #[command(flatten)]
+    metrics: MetricArgs,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneCommand<C> {
     /// Execute the `prune` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
-        let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
-        let prune_config = config.prune.unwrap_or_default();
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+        self,
+        ctx: CliContext,
+    ) -> eyre::Result<()> {
+        let env = self.env.init::<N>(AccessRights::RW)?;
+        let provider_factory = env.provider_factory;
+        let config = env.config.prune;
+        let data_dir = env.data_dir;
+
+        if let Some(listen_addr) = self.metrics.prometheus {
+            let config = MetricServerConfig::new(
+                listen_addr,
+                VersionInfo {
+                    version: version_metadata().cargo_pkg_version.as_ref(),
+                    build_timestamp: version_metadata().vergen_build_timestamp.as_ref(),
+                    cargo_features: version_metadata().vergen_cargo_features.as_ref(),
+                    git_sha: version_metadata().vergen_git_sha.as_ref(),
+                    target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
+                    build_profile: version_metadata().build_profile_name.as_ref(),
+                },
+                ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
+                ctx.task_executor,
+                metrics_hooks(&provider_factory),
+                data_dir.pprof_dumps(),
+            );
+
+            MetricServer::new(config).serve().await?;
+        }
 
         // Copy data from database to static files
         info!(target: "reth::cli", "Copying data from database to static files...");
         let static_file_producer =
-            StaticFileProducer::new(provider_factory.clone(), prune_config.segments.clone());
+            StaticFileProducer::new(provider_factory.clone(), config.segments.clone());
         let lowest_static_file_height =
             static_file_producer.lock().copy_to_static_files()?.min_block_num();
         info!(target: "reth::cli", ?lowest_static_file_height, "Copied data from database to static files");
 
         // Delete data which has been copied to static files.
         if let Some(prune_tip) = lowest_static_file_height {
-            info!(target: "reth::cli", ?prune_tip, ?prune_config, "Pruning data from database...");
+            info!(target: "reth::cli", ?prune_tip, ?config, "Pruning data from database...");
             // Run the pruner according to the configuration, and don't enforce any limits on it
-            let mut pruner = PrunerBuilder::new(prune_config)
+            let mut pruner = PrunerBuilder::new(config)
                 .delete_limit(usize::MAX)
                 .build_with_provider_factory(provider_factory);
 

@@ -25,13 +25,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use http as _;
-use http_body as _;
-use hyper as _;
-use jsonwebtoken as _;
-use pin_project as _;
-use tower as _;
-
 mod admin;
 mod aliases;
 mod debug;
@@ -42,6 +35,7 @@ mod net;
 mod otterscan;
 mod reth;
 mod rpc;
+mod testing;
 mod trace;
 mod txpool;
 mod validation;
@@ -58,6 +52,7 @@ pub use otterscan::OtterscanApi;
 pub use reth::RethApi;
 pub use reth_rpc_convert::RpcTypes;
 pub use rpc::RPCApi;
+pub use testing::TestingApi;
 pub use trace::TraceApi;
 pub use txpool::TxPoolApi;
 pub use validation::{ValidationApi, ValidationApiConfig};

@@ -6,8 +6,11 @@ use crate::{
 use alloy_eips::eip2718::Encodable2718;
 use rayon::prelude::*;
 use reth_db_api::{tables, transaction::DbTxMut};
-use reth_provider::{BlockReader, DBProvider, PruneCheckpointReader};
-use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint};
+use reth_provider::{BlockReader, DBProvider, PruneCheckpointReader, StaticFileProviderFactory};
+use reth_prune_types::{
+    PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutputCheckpoint,
+};
+use reth_static_file_types::StaticFileSegment;
 use tracing::{debug, instrument, trace};
 
 #[derive(Debug)]
@@ -23,8 +26,10 @@ impl TransactionLookup {
 
 impl<Provider> Segment<Provider> for TransactionLookup
 where
-    Provider:
-        DBProvider<Tx: DbTxMut> + BlockReader<Transaction: Encodable2718> + PruneCheckpointReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + BlockReader<Transaction: Encodable2718>
+        + PruneCheckpointReader
+        + StaticFileProviderFactory,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::TransactionLookup
@@ -38,7 +43,7 @@ where
         PrunePurpose::User
     }
 
-    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
+    #[instrument(target = "pruner", skip(self, provider), ret(level = "trace"))]
     fn prune(
         &self,
         provider: &Provider,
@@ -47,18 +52,26 @@ where
         // It is not possible to prune TransactionLookup data for which we don't have transaction
         // data. If the TransactionLookup checkpoint is lagging behind (which can happen e.g. when
         // pre-merge history is dropped and then later tx lookup pruning is enabled) then we can
-        // only prune from the tx checkpoint and onwards.
-        if let Some(txs_checkpoint) = provider.get_prune_checkpoint(PruneSegment::Transactions)? &&
+        // only prune from the lowest static file.
+        if let Some(lowest_range) =
+            provider.static_file_provider().get_lowest_range(StaticFileSegment::Transactions) &&
             input
                 .previous_checkpoint
-                .is_none_or(|checkpoint| checkpoint.block_number < txs_checkpoint.block_number)
+                .is_none_or(|checkpoint| checkpoint.block_number < Some(lowest_range.start()))
         {
-            input.previous_checkpoint = Some(txs_checkpoint);
-            debug!(
-                target: "pruner",
-                transactions_checkpoint = ?input.previous_checkpoint,
-                "No TransactionLookup checkpoint found, using Transactions checkpoint as fallback"
-            );
+            let new_checkpoint = lowest_range.start().saturating_sub(1);
+            if let Some(body_indices) = provider.block_body_indices(new_checkpoint)? {
+                input.previous_checkpoint = Some(PruneCheckpoint {
+                    block_number: Some(new_checkpoint),
+                    tx_number: Some(body_indices.last_tx_num()),
+                    prune_mode: self.mode,
+                });
+                debug!(
+                    target: "pruner",
+                    static_file_checkpoint = ?input.previous_checkpoint,
+                    "Using static file transaction checkpoint as TransactionLookup starting point"
+                );
+            }
         }
 
         let (start, end) = match input.get_next_tx_num_range(provider)? {
@@ -69,18 +82,50 @@ where
             }
         }
         .into_inner();
+
+        // For PruneMode::Full, clear the entire table in one operation
+        if self.mode.is_full() {
+            let pruned = provider.tx_ref().clear_table::<tables::TransactionHashNumbers>()?;
+            trace!(target: "pruner", %pruned, "Cleared transaction lookup table");
+
+            let last_pruned_block = provider
+                .block_by_transaction_id(end)?
+                .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?;
+
+            return Ok(SegmentOutput {
+                progress: PruneProgress::Finished,
+                pruned,
+                checkpoint: Some(SegmentOutputCheckpoint {
+                    block_number: Some(last_pruned_block),
+                    tx_number: Some(end),
+                }),
+            });
+        }
+
         let tx_range = start..=
             Some(end)
-                .min(input.limiter.deleted_entries_limit_left().map(|left| start + left as u64 - 1))
+                .min(
+                    input
+                        .limiter
+                        .deleted_entries_limit_left()
+                        // Use saturating addition here to avoid panicking on
+                        // `deleted_entries_limit == usize::MAX`
+                        .map(|left| start.saturating_add(left as u64) - 1),
+                )
                 .unwrap();
         let tx_range_end = *tx_range.end();
 
         // Retrieve transactions in the range and calculate their hashes in parallel
-        let hashes = provider
+        let mut hashes = provider
             .transactions_by_tx_range(tx_range.clone())?
             .into_par_iter()
             .map(|transaction| transaction.trie_hash())
             .collect::<Vec<_>>();
+
+        // Sort hashes to enable efficient cursor traversal through the TransactionHashNumbers
+        // table, which is keyed by hash. Without sorting, each seek would be O(log n) random
+        // access; with sorting, the cursor advances sequentially through the B+tree.
+        hashes.sort_unstable();
 
         // Number of transactions retrieved from the database should match the tx range count
         let tx_count = tx_range.count();
@@ -109,7 +154,7 @@ where
         let last_pruned_transaction = last_pruned_transaction.unwrap_or(tx_range_end);
 
         let last_pruned_block = provider
-            .transaction_block(last_pruned_transaction)?
+            .block_by_transaction_id(last_pruned_transaction)?
             .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
             // If there's more transaction lookup entries to prune, set the checkpoint block number
             // to previous, so we could finish pruning its transaction lookup entries on the next

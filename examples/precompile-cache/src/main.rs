@@ -16,7 +16,7 @@ use reth_ethereum::{
     evm::{
         primitives::{Database, EvmEnv},
         revm::{
-            context::{Context, TxEnv},
+            context::{BlockEnv, Context, TxEnv},
             context_interface::result::{EVMError, HaltReason},
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
@@ -69,6 +69,7 @@ impl EvmFactory for MyEvmFactory {
     type HaltReason = HaltReason;
     type Context<DB: Database> = EthEvmContext<DB>;
     type Spec = SpecId;
+    type BlockEnv = BlockEnv;
     type Precompiles = PrecompilesMap;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {

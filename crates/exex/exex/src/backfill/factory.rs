@@ -24,7 +24,7 @@ impl<E, P> BackfillJobFactory<E, P> {
         Self {
             evm_config,
             provider,
-            prune_modes: PruneModes::none(),
+            prune_modes: PruneModes::default(),
             thresholds: ExecutionStageThresholds {
                 // Default duration for a database transaction to be considered long-lived is
                 // 60 seconds, so we limit the backfill job to the half of it to be sure we finish

@@ -8,7 +8,7 @@ use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_util::{get_secret_key, hash_or_num_value_parser};
+use reth_cli_util::hash_or_num_value_parser;
 use reth_config::Config;
 use reth_network::{BlockDownloaderProvider, NetworkConfigBuilder};
 use reth_network_p2p::bodies::client::BodiesClient;
@@ -18,6 +18,7 @@ use reth_node_core::{
 };
 
 pub mod bootnode;
+pub mod enode;
 pub mod rlpx;
 
 /// `reth p2p` command
@@ -38,9 +39,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                 let header = (move || get_single_header(fetch_client.clone(), id))
                     .retry(backoff)
-                    .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
+                    .notify(|err, _| tracing::warn!(target: "reth::cli", error = %err, "Error requesting header. Retrying..."))
                     .await?;
-                println!("Successfully downloaded header: {header:?}");
+                tracing::info!(target: "reth::cli", ?header, "Successfully downloaded header");
             }
 
             Subcommands::Body { args, id } => {
@@ -51,13 +52,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let hash = match id {
                     BlockHashOrNumber::Hash(hash) => hash,
                     BlockHashOrNumber::Number(number) => {
-                        println!("Block number provided. Downloading header first...");
+                        tracing::info!(target: "reth::cli", "Block number provided. Downloading header first...");
                         let client = fetch_client.clone();
                         let header = (move || {
                             get_single_header(client.clone(), BlockHashOrNumber::Number(number))
                         })
                         .retry(backoff)
-                        .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
+                        .notify(|err, _| tracing::warn!(target: "reth::cli", error = %err, "Error requesting header. Retrying..."))
                         .await?;
                         header.hash()
                     }
@@ -67,23 +68,26 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     client.get_block_bodies(vec![hash])
                 })
                 .retry(backoff)
-                .notify(|err, _| println!("Error requesting block: {err}. Retrying..."))
+                .notify(|err, _| tracing::warn!(target: "reth::cli", error = %err, "Error requesting block. Retrying..."))
                 .await?
                 .split();
                 if result.len() != 1 {
                     eyre::bail!(
-                        "Invalid number of headers received. Expected: 1. Received: {}",
+                        "Invalid number of bodies received. Expected: 1. Received: {}",
                         result.len()
                     )
                 }
                 let body = result.into_iter().next().unwrap();
-                println!("Successfully downloaded body: {body:?}")
+                tracing::info!(target: "reth::cli", ?body, "Successfully downloaded body")
             }
             Subcommands::Rlpx(command) => {
                 command.execute().await?;
             }
             Subcommands::Bootnode(command) => {
                 command.execute().await?;
+            }
+            Subcommands::Enode(command) => {
+                command.execute()?;
             }
         }
 
@@ -99,6 +103,7 @@ impl<C: ChainSpecParser> Command<C> {
             Subcommands::Body { args, .. } => Some(&args.chain),
             Subcommands::Rlpx(_) => None,
             Subcommands::Bootnode(_) => None,
+            Subcommands::Enode(_) => None,
         }
     }
 }
@@ -126,6 +131,8 @@ pub enum Subcommands<C: ChainSpecParser> {
     Rlpx(rlpx::Command),
     /// Bootnode command
     Bootnode(bootnode::Command),
+    /// Print enode identifier
+    Enode(enode::Command),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -183,15 +190,14 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
         config.peers.trusted_nodes_only = self.network.trusted_only;
 
         let default_secret_key_path = data_dir.p2p_secret();
-        let secret_key_path =
-            self.network.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
-        let p2p_secret_key = get_secret_key(&secret_key_path)?;
+        let p2p_secret_key = self.network.secret_key(default_secret_key_path)?;
         let rlpx_socket = (self.network.addr, self.network.port).into();
         let boot_nodes = self.chain.bootnodes().unwrap_or_default();
 
         let net = NetworkConfigBuilder::<N::NetworkPrimitives>::new(p2p_secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(None))
-            .external_ip_resolver(self.network.nat)
+            .external_ip_resolver(self.network.nat.clone())
+            .network_id(self.network.network_id)
             .boot_nodes(boot_nodes.clone())
             .apply(|builder| {
                 self.network.discovery.apply_to_builder(builder, rlpx_socket, boot_nodes)
@@ -225,5 +231,17 @@ mod tests {
     fn parse_body_cmd() {
         let _args: Command<EthereumChainSpecParser> =
             Command::parse_from(["reth", "body", "--chain", "mainnet", "1000"]);
+    }
+
+    #[test]
+    fn parse_enode_cmd() {
+        let _args: Command<EthereumChainSpecParser> =
+            Command::parse_from(["reth", "enode", "/tmp/secret"]);
+    }
+
+    #[test]
+    fn parse_enode_cmd_with_ip() {
+        let _args: Command<EthereumChainSpecParser> =
+            Command::parse_from(["reth", "enode", "/tmp/secret", "--ip", "192.168.1.1"]);
     }
 }

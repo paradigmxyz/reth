@@ -148,6 +148,7 @@ pub use block::{
     Block, FullBlock, RecoveredBlock, SealedBlock,
 };
 
+#[cfg(test)]
 mod withdrawal;
 pub use alloy_eips::eip2718::WithEncoded;
 
@@ -156,13 +157,14 @@ pub mod crypto;
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
 
+#[cfg(test)]
 mod log;
 pub use alloy_primitives::{logs_bloom, Log, LogData};
 
 pub mod proofs;
 
 mod storage;
-pub use storage::StorageEntry;
+pub use storage::{StorageEntry, ValueWithSubKey};
 
 pub mod sync;
 
@@ -186,9 +188,15 @@ pub mod serde_bincode_compat;
 pub mod size;
 pub use size::InMemorySize;
 
+/// Rayon utilities
+#[cfg(feature = "rayon")]
+pub mod rayon;
+#[cfg(feature = "rayon")]
+pub use rayon::ParallelBridgeBuffered;
+
 /// Node traits
 pub mod node;
-pub use node::{BlockTy, BodyTy, FullNodePrimitives, HeaderTy, NodePrimitives, ReceiptTy, TxTy};
+pub use node::{BlockTy, BodyTy, HeaderTy, NodePrimitives, ReceiptTy, TxTy};
 
 /// Helper trait that requires de-/serialize implementation since `serde` feature is enabled.
 #[cfg(feature = "serde")]

@@ -1,9 +1,9 @@
-use alloy_primitives::{bytes::BufMut, keccak256, B256};
+use alloy_primitives::{b256, bytes::BufMut, keccak256, Address, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
-    models::{BlockNumberAddress, CompactU256},
+    models::CompactU256,
     table::Decompress,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -27,6 +27,10 @@ const MAXIMUM_CHANNELS: usize = 10_000;
 
 /// Maximum number of storage entries to hash per rayon worker job.
 const WORKER_CHUNK_SIZE: usize = 100;
+
+/// Keccak256 hash of the zero address.
+const HASHED_ZERO_ADDRESS: B256 =
+    b256!("0x5380c7b7ae81a58eb98d9c78de4a1fd7fd9535fc953ed2be602daaa41767312a");
 
 /// Storage hashing stage hashes plain storage.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
@@ -101,9 +105,15 @@ where
                 let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
+                    // Cache hashed address since PlainStorageState is sorted by address
+                    let (mut last_addr, mut hashed_addr) = (Address::ZERO, HASHED_ZERO_ADDRESS);
                     for (address, slot) in chunk {
+                        if address != last_addr {
+                            last_addr = address;
+                            hashed_addr = keccak256(address);
+                        }
                         let mut addr_key = Vec::with_capacity(64);
-                        addr_key.put_slice(keccak256(address).as_slice());
+                        addr_key.put_slice(hashed_addr.as_slice());
                         addr_key.put_slice(keccak256(slot.key).as_slice());
                         let _ = tx.send((addr_key, CompactU256::from(slot.value)));
                     }
@@ -169,7 +179,7 @@ where
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        provider.unwind_storage_hashing_range(BlockNumberAddress::range(range))?;
+        provider.unwind_storage_hashing_range(range)?;
 
         let mut stage_checkpoint =
             input.checkpoint.storage_hashing_stage_checkpoint().unwrap_or_default();
@@ -217,7 +227,7 @@ mod tests {
     use rand::Rng;
     use reth_db_api::{
         cursor::{DbCursorRW, DbDupCursorRO},
-        models::StoredBlockBodyIndices,
+        models::{BlockNumberAddress, StoredBlockBodyIndices},
     };
     use reth_ethereum_primitives::Block;
     use reth_primitives_traits::SealedBlock;
@@ -346,6 +356,7 @@ mod tests {
             );
 
             self.db.insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
+            let mut tx_hash_numbers = Vec::new();
 
             let iter = blocks.iter();
             let mut next_tx_num = 0;
@@ -356,10 +367,7 @@ mod tests {
                 self.db.commit(|tx| {
                     progress.body().transactions.iter().try_for_each(
                         |transaction| -> Result<(), reth_db::DatabaseError> {
-                            tx.put::<tables::TransactionHashNumbers>(
-                                *transaction.tx_hash(),
-                                next_tx_num,
-                            )?;
+                            tx_hash_numbers.push((*transaction.tx_hash(), next_tx_num));
                             tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;
 
                             let (addr, _) = accounts
@@ -409,6 +417,7 @@ mod tests {
                     Ok(())
                 })?;
             }
+            self.db.insert_tx_hash_numbers(tx_hash_numbers)?;
 
             Ok(blocks)
         }

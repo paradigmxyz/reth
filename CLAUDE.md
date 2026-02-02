@@ -18,7 +18,7 @@ Reth is a high-performance Ethereum execution client written in Rust, focusing o
 6. **Pipeline (`crates/stages/`)**: Staged sync architecture for blockchain synchronization
 7. **Trie (`crates/trie/`)**: Merkle Patricia Trie implementation with parallel state root computation
 8. **Node Builder (`crates/node/`)**: High-level node orchestration and configuration
-9  **The Consensus Engine (`crates/engine/`)**: Handles processing blocks received from the consensus layer with the Engine API (newPayload, forkchoiceUpdated)
+9. **The Consensus Engine (`crates/engine/`)**: Handles processing blocks received from the consensus layer with the Engine API (newPayload, forkchoiceUpdated)
 
 ### Key Design Principles
 
@@ -38,7 +38,7 @@ Reth is a high-performance Ethereum execution client written in Rust, focusing o
 
 2. **Linting**: Run clippy with all features
    ```bash
-   RUSTFLAGS="-D warnings" cargo +nightly clippy --workspace --lib --examples --tests --benches --all-features --locked
+   cargo +nightly clippy --workspace --lib --examples --tests --benches --all-features 
    ```
 
 3. **Testing**: Use nextest for faster test execution
@@ -169,11 +169,10 @@ Based on PR patterns, avoid:
 Before submitting changes, ensure:
 
 1. **Format Check**: `cargo +nightly fmt --all --check`
-2. **Clippy**: No warnings with `RUSTFLAGS="-D warnings"`
+2. **Clippy**: No warnings
 3. **Tests Pass**: All unit and integration tests
 4. **Documentation**: Update relevant docs and add doc comments with `cargo docs --document-private-items`
 5. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
-
 
 ### Opening PRs against <https://github.com/paradigmxyz/reth>
 
@@ -236,6 +235,85 @@ Common refactoring pattern:
 - Add trait bounds for flexibility
 - Enable reuse across different chain types (Ethereum, Optimism)
 
+#### When to Comment
+
+Write comments that remain valuable after the PR is merged. Future readers won't have PR context - they only see the current code.
+
+##### ✅ DO: Add Value
+
+**Explain WHY and non-obvious behavior:**
+```rust
+// Process must handle allocations atomically to prevent race conditions
+// between dealloc on drop and concurrent limit checks
+unsafe impl GlobalAlloc for LimitedAllocator { ... }
+
+// Binary search requires sorted input. Panics on unsorted slices.
+fn find_index(items: &[Item], target: &Item) -> Option<usize>
+
+// Timeout set to 5s to match EVM block processing limits
+const TRACER_TIMEOUT: Duration = Duration::from_secs(5);
+```
+
+**Document constraints and assumptions:**
+```rust
+/// Returns heap size estimate.
+/// 
+/// Note: May undercount shared references (Rc/Arc). For precise
+/// accounting, combine with an allocator-based approach.
+fn deep_size_of(&self) -> usize
+```
+
+**Explain complex logic:**
+```rust
+// We reset limits at task start because tokio reuses threads in
+// spawn_blocking pool. Without reset, second task inherits first
+// task's allocation count and immediately hits limit.
+THREAD_ALLOCATED.with(|allocated| allocated.set(0));
+```
+
+##### ❌ DON'T: Describe Changes
+```rust
+// ❌ BAD - Describes the change, not the code
+// Changed from Vec to HashMap for O(1) lookups
+
+// ✅ GOOD - Explains the decision
+// HashMap provides O(1) symbol lookups during trace replay
+```
+```rust
+// ❌ BAD - PR-specific context
+// Fix for issue #234 where memory wasn't freed
+
+// ✅ GOOD - Documents the actual behavior
+// Explicitly drop allocations before limit check to ensure
+// accurate accounting
+```
+```rust
+// ❌ BAD - States the obvious
+// Increment counter
+counter += 1;
+
+// ✅ GOOD - Explains non-obvious purpose
+// Track allocations across all threads for global limit enforcement
+GLOBAL_COUNTER.fetch_add(1, Ordering::SeqCst);
+```
+
+✅ **Comment when:**
+- Non-obvious behavior or edge cases
+- Performance trade-offs
+- Safety requirements (unsafe blocks must always be documented)
+- Limitations or gotchas
+- Why simpler alternatives don't work
+
+❌ **Don't comment when:**
+- Code is self-explanatory
+- Just restating the code in English
+- Describing what changed in this PR
+
+##### The Test: "Will this make sense in 6 months?"
+
+Before adding a comment, ask: Would someone reading just the current code (no PR, no history) find this helpful?
+
+
 ### Example Contribution Workflow
 
 Let's say you want to fix a bug where external IP resolution fails on startup:
@@ -270,10 +348,10 @@ Let's say you want to fix a bug where external IP resolution fails on startup:
    }
    ```
 
-5. **Run checks**:
+5. **Run checks** (IMPORTANT!):
    ```bash
    cargo +nightly fmt --all
-   cargo clippy --all-features
+   cargo clippy --workspace --all-features # Make sure WHOLE WORKSPACE compiles!
    cargo test -p reth-discv4
    ```
 
@@ -295,7 +373,7 @@ Let's say you want to fix a bug where external IP resolution fails on startup:
 cargo +nightly fmt --all
 
 # Run lints
-RUSTFLAGS="-D warnings" cargo +nightly clippy --workspace --all-features --locked
+cargo +nightly clippy --workspace --all-features
 
 # Run tests
 cargo nextest run --workspace

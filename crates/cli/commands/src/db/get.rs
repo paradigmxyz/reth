@@ -1,21 +1,27 @@
-use alloy_consensus::Header;
 use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
 use reth_db::{
     static_file::{
-        ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
+        AccountChangesetMask, ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask,
+        ReceiptMask, TransactionMask, TransactionSenderMask,
     },
     RawDupSort,
 };
 use reth_db_api::{
-    table::{Decompress, DupSort, Table},
-    tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
+    cursor::{DbCursorRO, DbDupCursorRO},
+    database::Database,
+    table::{Compress, Decompress, DupSort, Table},
+    tables,
+    transaction::DbTx,
+    RawKey, RawTable, Receipts, TableViewer, Transactions,
 };
 use reth_db_common::DbTool;
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
-use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
+use reth_primitives_traits::ValueWithSubKey;
+use reth_provider::{providers::ProviderNodeTypes, ChangeSetReader, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
+use reth_storage_api::StorageChangeSetReader;
 use tracing::error;
 
 /// The arguments for the `reth db get` command
@@ -39,6 +45,14 @@ enum Subcommand {
         #[arg(value_parser = maybe_json_value_parser)]
         subkey: Option<String>,
 
+        /// Optional end key for range query (exclusive upper bound)
+        #[arg(value_parser = maybe_json_value_parser)]
+        end_key: Option<String>,
+
+        /// Optional end subkey for range query (exclusive upper bound)
+        #[arg(value_parser = maybe_json_value_parser)]
+        end_subkey: Option<String>,
+
         /// Output bytes instead of human-readable decoded value
         #[arg(long)]
         raw: bool,
@@ -51,6 +65,10 @@ enum Subcommand {
         #[arg(value_parser = maybe_json_value_parser)]
         key: String,
 
+        /// The subkey to get content for, for example address in changeset
+        #[arg(value_parser = maybe_json_value_parser)]
+        subkey: Option<String>,
+
         /// Output bytes instead of human-readable decoded value
         #[arg(long)]
         raw: bool,
@@ -61,21 +79,98 @@ impl Command {
     /// Execute `db get` command
     pub fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         match self.subcommand {
-            Subcommand::Mdbx { table, key, subkey, raw } => {
-                table.view(&GetValueViewer { tool, key, subkey, raw })?
+            Subcommand::Mdbx { table, key, subkey, end_key, end_subkey, raw } => {
+                table.view(&GetValueViewer { tool, key, subkey, end_key, end_subkey, raw })?
             }
-            Subcommand::StaticFile { segment, key, raw } => {
-                let (key, mask): (u64, _) = match segment {
-                    StaticFileSegment::Headers => {
-                        (table_key::<tables::Headers>(&key)?, <HeaderWithHashMask<Header>>::MASK)
+            Subcommand::StaticFile { segment, key, subkey, raw } => {
+                if let StaticFileSegment::StorageChangeSets = segment {
+                    let storage_key =
+                        table_subkey::<tables::StorageChangeSets>(subkey.as_deref()).ok();
+                    let key = table_key::<tables::StorageChangeSets>(&key)?;
+
+                    let provider = tool.provider_factory.static_file_provider();
+
+                    if let Some(storage_key) = storage_key {
+                        let entry = provider.get_storage_before_block(
+                            key.block_number(),
+                            key.address(),
+                            storage_key,
+                        )?;
+
+                        if let Some(entry) = entry {
+                            println!("{}", serde_json::to_string_pretty(&entry)?);
+                        } else {
+                            error!(target: "reth::cli", "No content for the given table key.");
+                        }
+                        return Ok(());
                     }
-                    StaticFileSegment::Transactions => {
-                        (table_key::<tables::Transactions>(&key)?, <TransactionMask<TxTy<N>>>::MASK)
+
+                    let changesets = provider.storage_changeset(key.block_number())?;
+                    println!("{}", serde_json::to_string_pretty(&changesets)?);
+                    return Ok(());
+                }
+
+                let (key, subkey, mask): (u64, _, _) = match segment {
+                    StaticFileSegment::Headers => (
+                        table_key::<tables::Headers>(&key)?,
+                        None,
+                        <HeaderWithHashMask<HeaderTy<N>>>::MASK,
+                    ),
+                    StaticFileSegment::Transactions => (
+                        table_key::<tables::Transactions>(&key)?,
+                        None,
+                        <TransactionMask<TxTy<N>>>::MASK,
+                    ),
+                    StaticFileSegment::Receipts => (
+                        table_key::<tables::Receipts>(&key)?,
+                        None,
+                        <ReceiptMask<ReceiptTy<N>>>::MASK,
+                    ),
+                    StaticFileSegment::TransactionSenders => (
+                        table_key::<tables::TransactionSenders>(&key)?,
+                        None,
+                        TransactionSenderMask::MASK,
+                    ),
+                    StaticFileSegment::AccountChangeSets => {
+                        let subkey =
+                            table_subkey::<tables::AccountChangeSets>(subkey.as_deref()).ok();
+                        (
+                            table_key::<tables::AccountChangeSets>(&key)?,
+                            subkey,
+                            AccountChangesetMask::MASK,
+                        )
                     }
-                    StaticFileSegment::Receipts => {
-                        (table_key::<tables::Receipts>(&key)?, <ReceiptMask<ReceiptTy<N>>>::MASK)
+                    StaticFileSegment::StorageChangeSets => {
+                        unreachable!("storage changesets handled above");
                     }
                 };
+
+                // handle account changesets differently if a subkey is provided.
+                if let StaticFileSegment::AccountChangeSets = segment {
+                    let Some(subkey) = subkey else {
+                        // get all changesets for the block
+                        let changesets = tool
+                            .provider_factory
+                            .static_file_provider()
+                            .account_block_changeset(key)?;
+
+                        println!("{}", serde_json::to_string_pretty(&changesets)?);
+                        return Ok(())
+                    };
+
+                    let account = tool
+                        .provider_factory
+                        .static_file_provider()
+                        .get_account_before_block(key, subkey)?;
+
+                    if let Some(account) = account {
+                        println!("{}", serde_json::to_string_pretty(&account)?);
+                    } else {
+                        error!(target: "reth::cli", "No content for the given table key.");
+                    }
+
+                    return Ok(())
+                }
 
                 let content = tool.provider_factory.static_file_provider().find_static_file(
                     segment,
@@ -116,6 +211,19 @@ impl Command {
                                     )?;
                                     println!("{}", serde_json::to_string_pretty(&receipt)?);
                                 }
+                                StaticFileSegment::TransactionSenders => {
+                                    let sender =
+                                        <<tables::TransactionSenders as Table>::Value>::decompress(
+                                            content[0].as_slice(),
+                                        )?;
+                                    println!("{}", serde_json::to_string_pretty(&sender)?);
+                                }
+                                StaticFileSegment::AccountChangeSets => {
+                                    unreachable!("account changeset static files are special cased before this match")
+                                }
+                                StaticFileSegment::StorageChangeSets => {
+                                    unreachable!("storage changeset static files are special cased before this match")
+                                }
                             }
                         }
                     }
@@ -144,6 +252,8 @@ struct GetValueViewer<'a, N: NodeTypesWithDB> {
     tool: &'a DbTool<N>,
     key: String,
     subkey: Option<String>,
+    end_key: Option<String>,
+    end_subkey: Option<String>,
     raw: bool,
 }
 
@@ -153,53 +263,158 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
         let key = table_key::<T>(&self.key)?;
 
-        let content = if self.raw {
-            self.tool
-                .get::<RawTable<T>>(RawKey::from(key))?
-                .map(|content| hex::encode_prefixed(content.raw_value()))
-        } else {
-            self.tool.get::<T>(key)?.as_ref().map(serde_json::to_string_pretty).transpose()?
-        };
+        // A non-dupsort table cannot have subkeys. The `subkey` arg becomes the `end_key`. First we
+        // check that `end_key` and `end_subkey` weren't previously given, as that wouldn't be
+        // valid.
+        if self.end_key.is_some() || self.end_subkey.is_some() {
+            return Err(eyre::eyre!("Only END_KEY can be given for non-DUPSORT tables"));
+        }
 
-        match content {
-            Some(content) => {
-                println!("{content}");
-            }
-            None => {
-                error!(target: "reth::cli", "No content for the given table key.");
-            }
-        };
+        let end_key = self.subkey.clone();
+
+        // Check if we're doing a range query
+        if let Some(ref end_key_str) = end_key {
+            let end_key = table_key::<T>(end_key_str)?;
+
+            // Use walk_range to iterate over the range
+            self.tool.provider_factory.db_ref().view(|tx| {
+                let mut cursor = tx.cursor_read::<T>()?;
+                let walker = cursor.walk_range(key..end_key)?;
+
+                for result in walker {
+                    let (k, v) = result?;
+                    let json_val = if self.raw {
+                        let raw_key = RawKey::from(k);
+                        serde_json::json!({
+                            "key": hex::encode_prefixed(raw_key.raw_key()),
+                            "val": hex::encode_prefixed(v.compress().as_ref()),
+                        })
+                    } else {
+                        serde_json::json!({
+                            "key": &k,
+                            "val": &v,
+                        })
+                    };
+
+                    println!("{}", serde_json::to_string_pretty(&json_val)?);
+                }
+
+                Ok::<_, eyre::Report>(())
+            })??;
+        } else {
+            // Single key lookup
+            let content = if self.raw {
+                self.tool
+                    .get::<RawTable<T>>(RawKey::from(key))?
+                    .map(|content| hex::encode_prefixed(content.raw_value()))
+            } else {
+                self.tool.get::<T>(key)?.as_ref().map(serde_json::to_string_pretty).transpose()?
+            };
+
+            match content {
+                Some(content) => {
+                    println!("{content}");
+                }
+                None => {
+                    error!(target: "reth::cli", "No content for the given table key.");
+                }
+            };
+        }
 
         Ok(())
     }
 
-    fn view_dupsort<T: DupSort>(&self) -> Result<(), Self::Error> {
+    fn view_dupsort<T: DupSort>(&self) -> Result<(), Self::Error>
+    where
+        T::Value: reth_primitives_traits::ValueWithSubKey<SubKey = T::SubKey>,
+    {
         // get a key for given table
         let key = table_key::<T>(&self.key)?;
 
-        // process dupsort table
-        let subkey = table_subkey::<T>(self.subkey.as_deref())?;
-
-        let content = if self.raw {
-            self.tool
-                .get_dup::<RawDupSort<T>>(RawKey::from(key), RawKey::from(subkey))?
-                .map(|content| hex::encode_prefixed(content.raw_value()))
-        } else {
-            self.tool
-                .get_dup::<T>(key, subkey)?
+        // Check if we're doing a range query
+        if let Some(ref end_key_str) = self.end_key {
+            let end_key = table_key::<T>(end_key_str)?;
+            let start_subkey = table_subkey::<T>(Some(
+                self.subkey.as_ref().expect("must have been given if end_key is given").as_str(),
+            ))?;
+            let end_subkey_parsed = self
+                .end_subkey
                 .as_ref()
-                .map(serde_json::to_string_pretty)
-                .transpose()?
-        };
+                .map(|s| table_subkey::<T>(Some(s.as_str())))
+                .transpose()?;
 
-        match content {
-            Some(content) => {
-                println!("{content}");
-            }
-            None => {
-                error!(target: "reth::cli", "No content for the given table subkey.");
-            }
-        };
+            self.tool.provider_factory.db_ref().view(|tx| {
+                let mut cursor = tx.cursor_dup_read::<T>()?;
+
+                // Seek to the starting key. If there is actually a key at the starting key then
+                // seek to the subkey within it.
+                if let Some((decoded_key, _)) = cursor.seek(key.clone())? &&
+                    decoded_key == key
+                {
+                    cursor.seek_by_key_subkey(key.clone(), start_subkey.clone())?;
+                }
+
+                // Get the current position to start iteration
+                let mut current = cursor.current()?;
+
+                while let Some((decoded_key, decoded_value)) = current {
+                    // Extract the subkey using the ValueWithSubKey trait
+                    let decoded_subkey = decoded_value.get_subkey();
+
+                    // Check if we've reached the end (exclusive)
+                    if (&decoded_key, Some(&decoded_subkey)) >=
+                        (&end_key, end_subkey_parsed.as_ref())
+                    {
+                        break;
+                    }
+
+                    // Output the entry with both key and subkey
+                    let json_val = if self.raw {
+                        let raw_key = RawKey::from(decoded_key.clone());
+                        serde_json::json!({
+                            "key": hex::encode_prefixed(raw_key.raw_key()),
+                            "val": hex::encode_prefixed(decoded_value.compress().as_ref()),
+                        })
+                    } else {
+                        serde_json::json!({
+                            "key": &decoded_key,
+                            "val": &decoded_value,
+                        })
+                    };
+
+                    println!("{}", serde_json::to_string_pretty(&json_val)?);
+
+                    // Move to next entry
+                    current = cursor.next()?;
+                }
+
+                Ok::<_, eyre::Report>(())
+            })??;
+        } else {
+            // Single key/subkey lookup
+            let subkey = table_subkey::<T>(self.subkey.as_deref())?;
+
+            let content = if self.raw {
+                self.tool
+                    .get_dup::<RawDupSort<T>>(RawKey::from(key), RawKey::from(subkey))?
+                    .map(|content| hex::encode_prefixed(content.raw_value()))
+            } else {
+                self.tool
+                    .get_dup::<T>(key, subkey)?
+                    .as_ref()
+                    .map(serde_json::to_string_pretty)
+                    .transpose()?
+            };
+
+            match content {
+                Some(content) => {
+                    println!("{content}");
+                }
+                None => {
+                    error!(target: "reth::cli", "No content for the given table subkey.");
+                }
+            };
+        }
         Ok(())
     }
 }
