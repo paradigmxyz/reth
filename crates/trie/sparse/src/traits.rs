@@ -13,6 +13,22 @@ use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 
 use crate::provider::TrieNodeProvider;
 
+/// Statistics returned by [`SparseTrie::prune_preserving`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PruneTrieStats {
+    /// Number of subtries skipped because they were recently modified.
+    pub skipped_modified: usize,
+    /// Number of paths skipped because they lead to hot accounts.
+    pub skipped_hot_accounts: usize,
+}
+
+impl core::ops::AddAssign for PruneTrieStats {
+    fn add_assign(&mut self, rhs: Self) {
+        self.skipped_modified += rhs.skipped_modified;
+        self.skipped_hot_accounts += rhs.skipped_hot_accounts;
+    }
+}
+
 /// Describes an update to a leaf in the sparse trie.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafUpdate {
@@ -291,7 +307,10 @@ pub trait SparseTrieExt: SparseTrie {
     /// - Embedded nodes (RLP < 32 bytes) are preserved since they have no hash
     /// - Hot account paths are never pruned
     #[cfg(feature = "std")]
-    fn prune_preserving(&mut self, config: &crate::hot_accounts::SmartPruneConfig<'_>);
+    fn prune_preserving(
+        &mut self,
+        config: &crate::hot_accounts::SmartPruneConfig<'_>,
+    ) -> PruneTrieStats;
 
     /// Applies leaf updates to the sparse trie.
     ///

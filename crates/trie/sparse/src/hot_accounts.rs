@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```ignore
-//! let mut tracker = TieredHotAccounts::for_mainnet();
+//! let mut tracker = HotAccounts::for_mainnet();
 //!
 //! // Record fee recipient for the block
 //! tracker.record_fee_recipient(hashed_address);
@@ -36,7 +36,7 @@ const MAX_RECENT_FEE_RECIPIENTS: usize = 128;
 /// - Static known-hot addresses (system contracts, major defi)
 /// - Semi-static addresses (builders, fee recipients)
 #[derive(Debug, Clone)]
-pub struct TieredHotAccounts {
+pub struct HotAccounts {
     /// System contract addresses (hashed) - Tier A.
     system_contracts: HashSet<B256>,
     /// Major defi contract addresses (hashed) - Tier A.
@@ -50,13 +50,13 @@ pub struct TieredHotAccounts {
     recent_fee_recipients_set: HashSet<B256>,
 }
 
-impl Default for TieredHotAccounts {
+impl Default for HotAccounts {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl TieredHotAccounts {
+impl HotAccounts {
     /// Creates a new empty hot account tracker.
     pub fn new() -> Self {
         Self {
@@ -68,15 +68,15 @@ impl TieredHotAccounts {
         }
     }
 
-    /// Creates a tracker configured for Ethereum mainnet.
+    /// Creates a tracker configured for any Ethereum network (mainnet, holesky, sepolia).
     ///
-    /// Includes known system contracts and major defi protocols.
-    pub fn for_mainnet() -> Self {
+    /// Includes system contracts from EIPs that are common across all Ethereum networks.
+    pub fn for_ethereum() -> Self {
         use alloy_primitives::keccak256;
 
         let mut tracker = Self::new();
 
-        // Tier A: System contracts (addresses from EIPs)
+        // Tier A: System contracts (addresses from EIPs - same across all Ethereum networks)
         // EIP-4788: Beacon roots
         tracker
             .add_system_contract(keccak256(address!("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")));
@@ -89,6 +89,17 @@ impl TieredHotAccounts {
         // EIP-7251: Consolidation requests
         tracker
             .add_system_contract(keccak256(address!("0x0000BBdDc7CE488642fb579F8B00f3a590007251")));
+
+        tracker
+    }
+
+    /// Creates a tracker configured for Ethereum mainnet.
+    ///
+    /// Includes system contracts and mainnet-specific defi protocols and builders.
+    pub fn for_mainnet() -> Self {
+        use alloy_primitives::keccak256;
+
+        let mut tracker = Self::for_ethereum();
 
         // Tier A: Major defi contracts
         // WETH
@@ -153,6 +164,25 @@ impl TieredHotAccounts {
     pub fn for_base() -> Self {
         // Base uses the same system contracts as Optimism
         Self::for_optimism()
+    }
+
+    /// Creates a tracker based on the chain ID.
+    ///
+    /// Returns the appropriate network-specific configuration:
+    /// - Chain ID 1 (Ethereum mainnet): [`Self::for_mainnet`]
+    /// - Chain ID 11155111 (Sepolia), 17000 (Holesky): [`Self::for_ethereum`]
+    /// - Chain ID 10 (Optimism): [`Self::for_optimism`]
+    /// - Chain ID 8453 (Base): [`Self::for_base`]
+    /// - Other chains: Empty tracker ([`Self::new`])
+    pub fn from_chain_id(chain_id: u64) -> Self {
+        match chain_id {
+            1 => Self::for_mainnet(),
+            // Sepolia, Holesky
+            11155111 | 17000 => Self::for_ethereum(),
+            10 => Self::for_optimism(),
+            8453 => Self::for_base(),
+            _ => Self::new(),
+        }
     }
 
     /// Adds a system contract address (Tier A - always hot).
@@ -284,7 +314,7 @@ pub struct SmartPruneConfig<'a> {
     /// Maximum number of storage tries to keep (soft limit, hot accounts can exceed).
     pub max_storage_tries: usize,
     /// Hot account tracker.
-    pub hot_accounts: &'a TieredHotAccounts,
+    pub hot_accounts: &'a HotAccounts,
 }
 
 impl<'a> SmartPruneConfig<'a> {
@@ -292,7 +322,7 @@ impl<'a> SmartPruneConfig<'a> {
     pub const fn new(
         max_depth: usize,
         max_storage_tries: usize,
-        hot_accounts: &'a TieredHotAccounts,
+        hot_accounts: &'a HotAccounts,
     ) -> Self {
         Self { max_depth, max_storage_tries, hot_accounts }
     }
@@ -338,7 +368,7 @@ mod tests {
 
     #[test]
     fn tiered_hot_accounts() {
-        let tracker = TieredHotAccounts::for_mainnet();
+        let tracker = HotAccounts::for_mainnet();
 
         // System contract should always be hot
         let system_addr =
@@ -352,7 +382,7 @@ mod tests {
 
     #[test]
     fn fee_recipient_tracking() {
-        let mut tracker = TieredHotAccounts::new();
+        let mut tracker = HotAccounts::new();
 
         let fee_recipient = B256::repeat_byte(0xAA);
         assert_eq!(tracker.hotness(&fee_recipient), Hotness::Cold);
@@ -366,7 +396,7 @@ mod tests {
 
     #[test]
     fn builder_tracking() {
-        let tracker = TieredHotAccounts::for_mainnet();
+        let tracker = HotAccounts::for_mainnet();
 
         // Beaverbuild should be Likely
         let beaverbuild =

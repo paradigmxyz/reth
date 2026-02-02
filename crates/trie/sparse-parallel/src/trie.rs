@@ -14,8 +14,8 @@ use reth_trie_common::{
 };
 use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrie,
-    SparseTrieExt, SparseTrieUpdates,
+    LeafLookup, LeafLookupError, PruneTrieStats, RlpNodeStackItem, SparseNode, SparseNodeType,
+    SparseTrie, SparseTrieExt, SparseTrieUpdates,
 };
 use smallvec::SmallVec;
 use std::cmp::{Ord, Ordering, PartialOrd};
@@ -125,7 +125,7 @@ pub struct ParallelSparseTrie {
     parallelism_thresholds: ParallelismThresholds,
     /// Tracks heat of lower subtries for smart pruning decisions.
     /// Hot subtries are skipped during pruning to keep frequently-used data revealed.
-    subtrie_heat: SubtrieModifications,
+    subtrie_modifications: SubtrieModifications,
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ParallelSparseTrieMetrics,
@@ -144,7 +144,7 @@ impl Default for ParallelSparseTrie {
             branch_node_masks: BranchNodeMasksMap::default(),
             update_actions_buffers: Vec::default(),
             parallelism_thresholds: Default::default(),
-            subtrie_heat: SubtrieModifications::default(),
+            subtrie_modifications: SubtrieModifications::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -543,6 +543,11 @@ impl SparseTrie for ParallelSparseTrie {
             }
         }
 
+        // Track modification for smart pruning
+        if let SparseSubtrieType::Lower(idx) = SparseSubtrieType::from_path(&full_path) {
+            self.subtrie_modifications.mark_modified(idx);
+        }
+
         // Insert into prefix_set only after all operations succeed
         self.prefix_set.insert(full_path);
 
@@ -813,6 +818,11 @@ impl SparseTrie for ParallelSparseTrie {
             }
         }
 
+        // Track modification for smart pruning
+        if let SparseSubtrieType::Lower(idx) = SparseSubtrieType::from_path(full_path) {
+            self.subtrie_modifications.mark_modified(idx);
+        }
+
         Ok(())
     }
 
@@ -929,7 +939,7 @@ impl SparseTrie for ParallelSparseTrie {
         self.lower_subtries = [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES];
         self.prefix_set = PrefixSetMut::all();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
-        self.subtrie_heat.clear();
+        self.subtrie_modifications.clear();
     }
 
     fn clear(&mut self) {
@@ -941,7 +951,7 @@ impl SparseTrie for ParallelSparseTrie {
         self.prefix_set.clear();
         self.updates = None;
         self.branch_node_masks.clear();
-        self.subtrie_heat.clear();
+        self.subtrie_modifications.clear();
         // `update_actions_buffers` doesn't need to be cleared; we want to reuse the Vecs it has
         // buffered, and all of those are already inherently cleared when they get used.
     }
@@ -1059,11 +1069,15 @@ impl SparseTrieExt for ParallelSparseTrie {
     }
 
     #[cfg(feature = "std")]
-    fn prune_preserving(&mut self, config: &reth_trie_sparse::hot_accounts::SmartPruneConfig<'_>) {
+    fn prune_preserving(
+        &mut self,
+        config: &reth_trie_sparse::hot_accounts::SmartPruneConfig<'_>,
+    ) -> PruneTrieStats {
         // Decay heat for subtries not modified this cycle
-        self.subtrie_heat.decay_and_reset();
+        self.subtrie_modifications.decay_and_reset();
 
         let max_depth = config.max_depth;
+        let mut stats = PruneTrieStats::default();
 
         // DFS traversal to find nodes at max_depth that can be pruned.
         // Collects "effective pruned roots" - children of nodes at max_depth with computed hashes.
@@ -1074,13 +1088,14 @@ impl SparseTrieExt for ParallelSparseTrie {
 
         // DFS traversal: pop path and depth, skip if subtrie or node not found.
         while let Some((path, depth)) = stack.pop() {
-            // Skip traversal into hot lower subtries beyond max_depth.
+            // Skip traversal into modified lower subtries beyond max_depth.
             // At max_depth, we still need to process the node to convert children to hashes.
             // This keeps frequently-modified subtries revealed to avoid expensive re-reveals.
             if depth > max_depth &&
                 let SparseSubtrieType::Lower(idx) = SparseSubtrieType::from_path(&path) &&
-                self.subtrie_heat.is_hot(idx)
+                self.subtrie_modifications.is_modified(idx)
             {
+                stats.skipped_modified += 1;
                 continue;
             }
 
@@ -1118,6 +1133,7 @@ impl SparseTrieExt for ParallelSparseTrie {
                 if depth == max_depth {
                     // Check if this child path leads to a hot account - preserve it
                     if config.path_leads_to_hot_account(&child) {
+                        stats.skipped_hot_accounts += 1;
                         stack.push((child, depth + 1));
                         continue;
                     }
@@ -1143,7 +1159,7 @@ impl SparseTrieExt for ParallelSparseTrie {
         }
 
         if effective_pruned_roots.is_empty() {
-            return;
+            return stats;
         }
 
         // Sort roots by subtrie type (upper first), then by path for efficient partitioning.
@@ -1215,6 +1231,8 @@ impl SparseTrieExt for ParallelSparseTrie {
                 !starts_with_pruned_in(roots_lower, p) && !starts_with_pruned_in(roots_upper, p)
             }
         });
+
+        stats
     }
 
     fn update_leaves(
@@ -1297,9 +1315,9 @@ impl ParallelSparseTrie {
     ///
     /// Creates an empty hot account config and calls `prune_preserving`.
     /// Primarily used for testing.
-    #[cfg(feature = "std")]
-    pub fn prune(&mut self, max_depth: usize) {
-        let hot_accounts = reth_trie_sparse::hot_accounts::TieredHotAccounts::new();
+    #[cfg(test)]
+    fn prune(&mut self, max_depth: usize) {
+        let hot_accounts = reth_trie_sparse::hot_accounts::HotAccounts::new();
         let config =
             reth_trie_sparse::hot_accounts::SmartPruneConfig::new(max_depth, 0, &hot_accounts);
         <Self as reth_trie_sparse::SparseTrieExt>::prune_preserving(self, &config);
@@ -1447,7 +1465,6 @@ impl ParallelSparseTrie {
             SparseSubtrieType::Upper => None,
             SparseSubtrieType::Lower(idx) => {
                 self.lower_subtries[idx].reveal(path);
-                self.subtrie_heat.mark_modified(idx);
                 Some(self.lower_subtries[idx].as_revealed_mut().expect("just revealed"))
             }
         }
@@ -2132,7 +2149,7 @@ impl ParallelSparseTrie {
             }
 
             self.lower_subtries[index] = LowerSparseSubtrie::Revealed(subtrie);
-            self.subtrie_heat.mark_modified(index);
+            self.subtrie_modifications.mark_modified(index);
         }
     }
 }
@@ -2194,9 +2211,9 @@ impl SubtrieModifications {
         self.heat[idx] = self.heat[idx].saturating_add(1);
     }
 
-    /// Returns whether a subtrie is currently hot (heat > 0).
+    /// Returns whether a subtrie was modified this cycle.
     #[inline]
-    fn is_hot(&self, idx: usize) -> bool {
+    fn is_modified(&self, idx: usize) -> bool {
         debug_assert!(idx < NUM_LOWER_SUBTRIES);
         self.heat[idx] > 0
     }
@@ -8910,5 +8927,184 @@ mod tests {
         let expected_single =
             b256!("f000000000000000000000000000000000000000000000000000000000000000");
         assert_eq!(ParallelSparseTrie::nibbles_to_padded_b256(&single), expected_single);
+    }
+
+    mod prune_preserving_tests {
+        use super::*;
+        use alloy_primitives::{keccak256, Address};
+        use reth_trie_sparse::hot_accounts::{HotAccounts, SmartPruneConfig};
+
+        fn address_to_nibbles(addr: Address) -> Nibbles {
+            Nibbles::unpack(keccak256(addr))
+        }
+
+        #[test]
+        fn test_prune_preserving_system_contract_preserved() {
+            let provider = DefaultTrieNodeProvider;
+            let large_value = large_account_value();
+
+            // Create hot account tracker with a system contract
+            let hot_address = Address::repeat_byte(0x42);
+            let hashed = keccak256(hot_address);
+            let mut hot_accounts = HotAccounts::new();
+            hot_accounts.add_system_contract(hashed);
+
+            let hot_key = Nibbles::unpack(hashed);
+            let cold_key = address_to_nibbles(Address::repeat_byte(0x99));
+
+            let mut trie = ParallelSparseTrie::default();
+            trie.update_leaf(hot_key, large_value.clone(), &provider).unwrap();
+            trie.update_leaf(cold_key, large_value.clone(), &provider).unwrap();
+
+            let root_before = trie.root();
+
+            // Prune with hot account config - prune at depth 1 to force pruning
+            let config = SmartPruneConfig::new(1, 0, &hot_accounts);
+            // Call prune_preserving multiple times to ensure heat decays for cold accounts
+            for _ in 0..2 {
+                <ParallelSparseTrie as SparseTrieExt>::prune_preserving(&mut trie, &config);
+            }
+
+            assert_eq!(root_before, trie.root(), "root hash must be preserved");
+
+            // Hot account should still be accessible
+            assert!(
+                trie.get_leaf_value(&hot_key).is_some(),
+                "system contract value should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_prune_preserving_cold_account_pruned() {
+            let provider = DefaultTrieNodeProvider;
+            let large_value = large_account_value();
+
+            // Create empty hot account tracker
+            let hot_accounts = HotAccounts::new();
+
+            // Use multiple keys to create a proper trie structure
+            // Keys go into lower subtries (nibble length > 2)
+            let mut keys = Vec::new();
+            for first in 0..4u8 {
+                for second in 0..4u8 {
+                    keys.push(Nibbles::from_nibbles([first, second, 0x1, 0x2, 0x3, 0x4]));
+                }
+            }
+
+            let mut trie = ParallelSparseTrie::default();
+            for key in &keys {
+                trie.update_leaf(*key, large_value.clone(), &provider).unwrap();
+            }
+
+            let root_before = trie.root();
+
+            // Prune with empty hot account config at depth 1
+            let config = SmartPruneConfig::new(1, 0, &hot_accounts);
+            // Prune multiple times to allow heat to decay
+            for _ in 0..2 {
+                <ParallelSparseTrie as SparseTrieExt>::prune_preserving(&mut trie, &config);
+            }
+
+            assert_eq!(root_before, trie.root(), "root hash must be preserved");
+
+            // Cold accounts should be pruned (values not accessible)
+            for key in &keys {
+                assert!(trie.get_leaf_value(key).is_none(), "cold account value should be pruned");
+            }
+        }
+
+        #[test]
+        fn test_prune_preserving_major_contract_preserved() {
+            let provider = DefaultTrieNodeProvider;
+            let large_value = large_account_value();
+
+            // Create hot account tracker with major contract (Tier A)
+            let major_address = Address::repeat_byte(0x11);
+            let hashed = keccak256(major_address);
+            let mut hot_accounts = HotAccounts::new();
+            hot_accounts.add_major_contract(hashed);
+
+            let major_key = Nibbles::unpack(hashed);
+
+            let mut trie = ParallelSparseTrie::default();
+            trie.update_leaf(major_key, large_value.clone(), &provider).unwrap();
+
+            let root_before = trie.root();
+
+            // Prune with hot account config
+            let config = SmartPruneConfig::new(1, 0, &hot_accounts);
+            for _ in 0..2 {
+                <ParallelSparseTrie as SparseTrieExt>::prune_preserving(&mut trie, &config);
+            }
+
+            assert_eq!(root_before, trie.root(), "root hash must be preserved");
+            assert!(
+                trie.get_leaf_value(&major_key).is_some(),
+                "major contract should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_prune_preserving_builder_preserved() {
+            let provider = DefaultTrieNodeProvider;
+            let large_value = large_account_value();
+
+            // Create hot account tracker with builder address (Tier B)
+            let builder_address = Address::repeat_byte(0x22);
+            let hashed = keccak256(builder_address);
+            let mut hot_accounts = HotAccounts::new();
+            hot_accounts.add_builder(hashed);
+
+            let builder_key = Nibbles::unpack(hashed);
+
+            let mut trie = ParallelSparseTrie::default();
+            trie.update_leaf(builder_key, large_value.clone(), &provider).unwrap();
+
+            let root_before = trie.root();
+
+            // Prune with hot account config
+            let config = SmartPruneConfig::new(1, 0, &hot_accounts);
+            for _ in 0..2 {
+                <ParallelSparseTrie as SparseTrieExt>::prune_preserving(&mut trie, &config);
+            }
+
+            assert_eq!(root_before, trie.root(), "root hash must be preserved");
+            assert!(
+                trie.get_leaf_value(&builder_key).is_some(),
+                "builder address should be preserved"
+            );
+        }
+
+        #[test]
+        fn test_prune_preserving_modified_subtrie_preserved() {
+            let provider = DefaultTrieNodeProvider;
+            let large_value = large_account_value();
+
+            // No hot accounts - rely on modification tracking
+            let hot_accounts = HotAccounts::new();
+
+            // Create key that goes into a specific lower subtrie
+            let key = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
+
+            let mut trie = ParallelSparseTrie::default();
+            trie.update_leaf(key, large_value.clone(), &provider).unwrap();
+
+            let root_before = trie.root();
+
+            // First prune - subtrie was just modified so should be preserved (hot)
+            let config = SmartPruneConfig::new(1, 0, &hot_accounts);
+            <ParallelSparseTrie as SparseTrieExt>::prune_preserving(&mut trie, &config);
+
+            assert_eq!(root_before, trie.root(), "root hash must be preserved");
+            // On first prune, recently modified subtrie should still be hot
+            assert!(
+                trie.get_leaf_value(&key).is_some(),
+                "recently modified subtrie should be preserved on first prune"
+            );
+
+            // Second prune - heat decays, should now be pruned
+            <ParallelSparseTrie as SparseTrieExt>::prune_preserving(&mut trie, &config);
+            assert_eq!(root_before, trie.root(), "root hash must be preserved");
+        }
     }
 }

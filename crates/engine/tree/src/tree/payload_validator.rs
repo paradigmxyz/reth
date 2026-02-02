@@ -45,6 +45,7 @@ use reth_revm::db::{states::bundle_state::BundleRetention, State};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use reth_trie_sparse::hot_accounts::HotAccounts;
 use revm_primitives::Address;
 use std::{
     collections::HashMap,
@@ -166,13 +167,15 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
+        hot_accounts: HotAccounts,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
-        let payload_processor = PayloadProcessor::new(
+        let payload_processor = PayloadProcessor::with_hot_accounts(
             WorkloadExecutor::default(),
             evm_config.clone(),
             &config,
             precompile_cache_map.clone(),
+            hot_accounts,
         );
         Self {
             provider,

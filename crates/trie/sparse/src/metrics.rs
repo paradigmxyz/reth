@@ -1,12 +1,9 @@
 //! Metrics for the sparse state trie
 
-use reth_metrics::{
-    metrics::{Counter, Histogram},
-    Metrics,
-};
+use reth_metrics::{metrics::Histogram, Metrics};
 
 /// Metrics for the sparse state trie
-#[derive(Default, Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct SparseStateTrieMetrics {
     /// Number of account nodes that were skipped during a multiproof reveal due to being redundant
     /// (i.e. they were already revealed)
@@ -20,6 +17,8 @@ pub(crate) struct SparseStateTrieMetrics {
     pub(crate) multiproof_total_storage_nodes: u64,
     /// The actual metrics we will record into the histogram
     pub(crate) histograms: SparseStateTrieInnerMetrics,
+    /// Metrics for trie pruning
+    pub(crate) prune: PruneTrieMetrics,
 }
 
 impl SparseStateTrieMetrics {
@@ -77,13 +76,16 @@ pub(crate) struct SparseStateTrieInnerMetrics {
     pub(crate) multiproof_total_storage_nodes: Histogram,
 }
 
-/// Metrics for hot account tracking during pruning
-#[allow(dead_code)]
-#[derive(Metrics)]
-#[metrics(scope = "sparse_trie_hot_accounts")]
-pub(crate) struct HotAccountMetrics {
-    /// Number of storage tries preserved due to hot account status
-    pub(crate) hot_storage_tries_preserved: Counter,
-    /// Number of storage tries evicted (not hot)
-    pub(crate) cold_storage_tries_evicted: Counter,
+/// Metrics for trie pruning statistics
+#[derive(Metrics, Clone)]
+#[metrics(scope = "sparse_trie_prune")]
+pub struct PruneTrieMetrics {
+    /// Histogram of subtries skipped during pruning due to recent modifications
+    pub skipped_modified: Histogram,
+    /// Histogram of paths skipped during pruning because they lead to hot accounts
+    pub skipped_hot_accounts: Histogram,
+    /// Histogram of storage tries preserved due to hot account status
+    pub hot_storage_tries_preserved: Histogram,
+    /// Histogram of storage tries evicted (cold accounts)
+    pub cold_storage_tries_evicted: Histogram,
 }

@@ -39,9 +39,7 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{
-    hot_accounts::TieredHotAccounts, RevealableSparseTrie, SparseStateTrie,
-};
+use reth_trie_sparse::{hot_accounts::HotAccounts, RevealableSparseTrie, SparseStateTrie};
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
     collections::BTreeMap,
@@ -141,7 +139,7 @@ where
     disable_cache_metrics: bool,
     /// Default hot account tracker to clone when creating a fresh sparse trie.
     /// This allows network-specific configuration (mainnet, optimism, base).
-    default_hot_accounts: TieredHotAccounts,
+    default_hot_accounts: Arc<HotAccounts>,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -166,21 +164,21 @@ where
             evm_config,
             config,
             precompile_cache_map,
-            TieredHotAccounts::for_mainnet(),
+            HotAccounts::for_mainnet(),
         )
     }
 
     /// Creates a new payload processor with a custom hot account tracker.
     ///
     /// The provided tracker is cloned when creating a fresh sparse trie (no preserved trie
-    /// available). Use [`TieredHotAccounts::for_mainnet`], [`TieredHotAccounts::for_optimism`],
-    /// or [`TieredHotAccounts::for_base`] for network-specific defaults.
+    /// available). Use [`HotAccounts::for_mainnet`], [`HotAccounts::for_optimism`],
+    /// or [`HotAccounts::for_base`] for network-specific defaults.
     pub fn with_hot_accounts(
         executor: WorkloadExecutor,
         evm_config: Evm,
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-        default_hot_accounts: TieredHotAccounts,
+        default_hot_accounts: HotAccounts,
     ) -> Self {
         Self {
             executor,
@@ -197,7 +195,7 @@ where
             sparse_trie_prune_depth: config.sparse_trie_prune_depth(),
             sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
             disable_cache_metrics: config.disable_cache_metrics(),
-            default_hot_accounts,
+            default_hot_accounts: Arc::new(default_hot_accounts),
         }
     }
 }
@@ -562,8 +560,9 @@ where
                         "Creating new sparse trie - no preserved trie available"
                     );
                     let default_trie = RevealableSparseTrie::blind_from(
-                        ParallelSparseTrie::default()
-                            .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
+                        ParallelSparseTrie::default().with_parallelism_thresholds(
+                            PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS,
+                        ),
                     );
                     SparseStateTrie::new()
                         .with_accounts_trie(default_trie.clone())

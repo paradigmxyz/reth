@@ -27,7 +27,7 @@ use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     hot_accounts::SmartPruneConfig,
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    LeafUpdate, SerialSparseTrie, SparseStateTrie, SparseTrie, SparseTrieExt, TieredHotAccounts,
+    HotAccounts, LeafUpdate, SerialSparseTrie, SparseStateTrie, SparseTrie, SparseTrieExt,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use smallvec::SmallVec;
@@ -71,7 +71,7 @@ where
         max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
-        hot_accounts: &TieredHotAccounts,
+        hot_accounts: &HotAccounts,
     ) -> SparseStateTrie<A, S> {
         match self {
             Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
@@ -287,7 +287,7 @@ where
         max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
-        hot_accounts: &TieredHotAccounts,
+        hot_accounts: &HotAccounts,
     ) -> SparseStateTrie<A, S> {
         let config = SmartPruneConfig::new(prune_depth, max_storage_tries, hot_accounts);
         self.trie.prune_preserving(&config);
