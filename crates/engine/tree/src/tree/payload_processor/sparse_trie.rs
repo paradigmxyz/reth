@@ -318,34 +318,92 @@ where
         let now = Instant::now();
 
         let mut finished_state_updates = false;
+        let mut iteration = 0u64;
+        let mut last_log = Instant::now();
+
         loop {
+            iteration += 1;
+
+            // Periodic status log every 2 seconds
+            if last_log.elapsed() > Duration::from_secs(2) {
+                let pending_storage: usize = self.storage_updates.values().map(|v| v.len()).sum();
+                let pending_storage_accounts =
+                    self.storage_updates.values().filter(|v| !v.is_empty()).count();
+                tracing::warn!(
+                    target: "engine::tree::payload_processor::sparse_trie",
+                    iteration,
+                    elapsed_ms = now.elapsed().as_millis(),
+                    finished_state_updates,
+                    account_updates = self.account_updates.len(),
+                    pending_storage,
+                    pending_storage_accounts,
+                    pending_accounts = self.pending_account_updates.len(),
+                    proof_result_rx_len = self.proof_result_rx.len(),
+                    updates_rx_len = self.updates.len(),
+                    "SparseTrieCacheTask run loop status"
+                );
+                last_log = Instant::now();
+            }
+
             crossbeam_channel::select_biased! {
                 recv(self.proof_result_rx) -> message => {
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
                     };
+                    debug!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        iteration,
+                        "Received proof result from proof_result_rx"
+                    );
                     self.on_proof_result(result)?;
                 },
                 recv(self.updates) -> message => {
                     let update = match message {
                         Ok(m) => m,
                         Err(_) => {
+                            debug!(
+                                target: "engine::tree::payload_processor::sparse_trie",
+                                iteration,
+                                "Updates channel closed, breaking loop"
+                            );
                             break
                         }
                     };
 
                     match update {
                         MultiProofMessage::PrefetchProofs(targets) => {
+                            debug!(
+                                target: "engine::tree::payload_processor::sparse_trie",
+                                iteration,
+                                "Received PrefetchProofs"
+                            );
                             self.on_prewarm_targets(targets);
                         }
                         MultiProofMessage::StateUpdate(_, state) => {
+                            debug!(
+                                target: "engine::tree::payload_processor::sparse_trie",
+                                iteration,
+                                accounts = state.len(),
+                                "Received StateUpdate"
+                            );
                             self.on_state_update(state);
                         }
                         MultiProofMessage::EmptyProof { sequence_number: _, state } => {
+                            debug!(
+                                target: "engine::tree::payload_processor::sparse_trie",
+                                iteration,
+                                "Received EmptyProof"
+                            );
                             self.on_hashed_state_update(state);
                         }
                         MultiProofMessage::BlockAccessList(_) => todo!(),
                         MultiProofMessage::FinishedStateUpdates => {
+                            debug!(
+                                target: "engine::tree::payload_processor::sparse_trie",
+                                iteration,
+                                elapsed_ms = now.elapsed().as_millis(),
+                                "Received FinishedStateUpdates"
+                            );
                             finished_state_updates = true;
                         }
                     }
@@ -354,15 +412,19 @@ where
 
             self.process_updates()?;
 
-            if finished_state_updates &&
-                self.account_updates.is_empty() &&
-                self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
-            {
+            let storage_empty = self.storage_updates.iter().all(|(_, updates)| updates.is_empty());
+            if finished_state_updates && self.account_updates.is_empty() && storage_empty {
+                debug!(
+                    target: "engine::tree::payload_processor::sparse_trie",
+                    iteration,
+                    elapsed_ms = now.elapsed().as_millis(),
+                    "Exit condition met, breaking loop"
+                );
                 break;
             }
         }
 
-        debug!(target: "engine::root", "All proofs processed, ending calculation");
+        debug!(target: "engine::root", iteration, elapsed_ms = now.elapsed().as_millis(), "All proofs processed, ending calculation");
 
         let start = Instant::now();
         let (state_root, trie_updates) =
@@ -460,6 +522,14 @@ where
             unreachable!("sparse trie as cache must only be used with multiproof v2");
         };
 
+        debug!(
+            target: "engine::tree::payload_processor::sparse_trie",
+            account_proofs = result.account_proofs.len(),
+            storage_accounts = result.storage_proofs.len(),
+            storage_proofs_total = result.storage_proofs.values().map(|v| v.len()).sum::<usize>(),
+            "on_proof_result: revealing multiproof"
+        );
+
         self.trie.reveal_decoded_multiproof_v2(result).map_err(|e| {
             ParallelStateRootError::Other(format!("could not reveal multiproof: {e:?}"))
         })
@@ -468,32 +538,43 @@ where
     /// Applies updates to the sparse trie and dispatches requested multiproof targets.
     fn process_updates(&mut self) -> Result<(), ProviderError> {
         let mut targets = MultiProofTargetsV2::default();
+        let mut storage_proofs_requested = 0usize;
+        #[allow(unused_variables)]
+        let storage_proofs_skipped = 0usize;
 
         for (addr, updates) in &mut self.storage_updates {
+            let updates_before = updates.len();
             let trie = self.trie.get_or_create_storage_trie_mut(*addr);
-            let fetched_storage = self.fetched_storage_targets.entry(*addr).or_default();
+            let _fetched_storage = self.fetched_storage_targets.entry(*addr).or_default();
 
-            trie.update_leaves(updates, |path, min_len| match fetched_storage.entry(path) {
-                Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
-                        targets
-                            .storage_targets
-                            .entry(*addr)
-                            .or_default()
-                            .push(Target::new(path).with_min_len(min_len));
-                    }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    targets
-                        .storage_targets
-                        .entry(*addr)
-                        .or_default()
-                        .push(Target::new(path).with_min_len(min_len));
-                }
+            trie.update_leaves(updates, |path, min_len| {
+                // Always dispatch proof request, bypassing cache to debug stall issue
+                debug!(
+                    target: "engine::tree::payload_processor::sparse_trie",
+                    ?addr,
+                    ?path,
+                    min_len,
+                    "update_leaves: requesting proof for blinded path"
+                );
+                targets
+                    .storage_targets
+                    .entry(*addr)
+                    .or_default()
+                    .push(Target::new(path).with_min_len(min_len));
+                storage_proofs_requested += 1;
             })
             .map_err(ProviderError::other)?;
+
+            // Log if updates were not drained
+            if !updates.is_empty() {
+                trace!(
+                    target: "engine::tree::payload_processor::sparse_trie",
+                    ?addr,
+                    updates_before,
+                    updates_remaining = updates.len(),
+                    "Storage updates not fully drained"
+                );
+            }
 
             // If all storage updates were processed, we can now compute the new storage root.
             if updates.is_empty() {
@@ -601,6 +682,15 @@ where
         }
 
         if !targets.is_empty() {
+            debug!(
+                target: "engine::tree::payload_processor::sparse_trie",
+                account_targets = targets.account_targets.len(),
+                storage_accounts = targets.storage_targets.len(),
+                storage_slots = targets.storage_targets.values().map(|v| v.len()).sum::<usize>(),
+                storage_proofs_requested,
+                storage_proofs_skipped,
+                "process_updates: dispatching multiproof request"
+            );
             self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput::V2 {
                 targets,
                 proof_result_sender: ProofResultContext::new(
@@ -610,6 +700,17 @@ where
                     Instant::now(),
                 ),
             })?;
+        } else if storage_proofs_skipped > 0 {
+            // This is expected when proofs are in flight - they will be re-requested
+            // after the proof results arrive and the cache is cleared.
+            trace!(
+                target: "engine::tree::payload_processor::sparse_trie",
+                storage_proofs_skipped,
+                storage_proofs_requested,
+                account_updates = self.account_updates.len(),
+                pending_storage = self.storage_updates.values().map(|v| v.len()).sum::<usize>(),
+                "process_updates: awaiting in-flight proofs"
+            );
         }
 
         Ok(())

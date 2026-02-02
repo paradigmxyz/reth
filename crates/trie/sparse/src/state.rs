@@ -19,9 +19,7 @@ use reth_trie_common::{
     Nibbles, ProofTrieNode, RlpNode, StorageMultiProof, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-#[cfg(feature = "std")]
-use tracing::debug;
-use tracing::{instrument, trace};
+use tracing::{debug, instrument, trace};
 
 #[derive(Debug)]
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
@@ -505,8 +503,22 @@ where
         trie: &mut RevealableSparseTrie<S>,
         retain_updates: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
+        let nodes_len_before_filter = nodes.len();
+        let revealed_nodes_len_before = revealed_nodes.len();
         let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values } =
             filter_revealed_v2_proof_nodes(nodes, revealed_nodes)?;
+
+        debug!(
+            target: "trie::sparse",
+            ?account,
+            nodes_len_before_filter,
+            revealed_nodes_len_before,
+            revealed_nodes_len_after = revealed_nodes.len(),
+            nodes_after_filter = nodes.len(),
+            skipped = metric_values.skipped_nodes,
+            has_root = root_node.is_some(),
+            "reveal_storage_v2_proof_nodes_inner: after filter"
+        );
 
         let trie = if let Some(root_node) = root_node {
             trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
@@ -1028,17 +1040,35 @@ where
     #[cfg(feature = "std")]
     #[instrument(target = "trie::sparse", skip_all, fields(max_depth, max_storage_tries))]
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
+        let revealed_account_paths_before = self.revealed_account_paths.len();
+        let storage_tries_before = self.storage.tries.len();
+
         // Prune state and storage tries in parallel
-        rayon::join(
+        let (account_nodes_pruned, _) = rayon::join(
             || {
-                if let Some(trie) = self.state.as_revealed_mut() {
-                    trie.prune(max_depth);
-                }
+                let nodes_pruned = if let Some(trie) = self.state.as_revealed_mut() {
+                    trie.prune(max_depth)
+                } else {
+                    0
+                };
                 self.revealed_account_paths.clear();
+                nodes_pruned
             },
             || {
                 self.storage.prune(max_depth, max_storage_tries);
             },
+        );
+
+        debug!(
+            target: "trie::sparse",
+            max_depth,
+            max_storage_tries,
+            revealed_account_paths_before,
+            revealed_account_paths_after = self.revealed_account_paths.len(),
+            storage_tries_before,
+            storage_tries_after = self.storage.tries.len(),
+            account_nodes_pruned,
+            "SparseStateTrie::prune completed - revealed_account_paths cleared"
         );
     }
 }
@@ -1144,6 +1174,11 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
                 trie.prune(max_depth);
                 heat_state.prune_backlog = 0; // Reset backlog after prune
                 stats.pruned_count += 1;
+                // Clear revealed_paths for this trie since pruning converts nodes back to
+                // SparseNode::Hash. They need to be re-revealed on next proof.
+                if let Some(paths) = self.revealed_paths.get_mut(address) {
+                    paths.clear();
+                }
             }
         }
         stats.prune_elapsed = prune_start.elapsed();

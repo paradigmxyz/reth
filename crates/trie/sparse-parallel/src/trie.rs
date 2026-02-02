@@ -1059,6 +1059,8 @@ impl SparseTrieExt for ParallelSparseTrie {
     }
 
     fn prune(&mut self, max_depth: usize) -> usize {
+        let prune_start = std::time::Instant::now();
+
         // Decay heat for subtries not modified this cycle
         self.subtrie_heat.decay_and_reset();
 
@@ -1209,6 +1211,27 @@ impl SparseTrieExt for ParallelSparseTrie {
             }
         });
 
+        debug!(
+            target: "trie::sparse::parallel",
+            max_depth,
+            nodes_converted,
+            upper_roots = roots_upper.len(),
+            lower_roots = roots_lower.len(),
+            elapsed_ms = prune_start.elapsed().as_millis(),
+            "ParallelSparseTrie::prune completed - nodes converted to Hash stubs"
+        );
+
+        // Log first few pruned paths for debugging
+        for (i, (path, hash)) in effective_pruned_roots.iter().take(5).enumerate() {
+            trace!(
+                target: "trie::sparse::parallel",
+                i,
+                ?path,
+                ?hash,
+                "Pruned node path"
+            );
+        }
+
         nodes_converted
     }
 
@@ -1348,9 +1371,14 @@ impl ParallelSparseTrie {
     ///
     /// Returns `(target_key, min_len)` where:
     /// - `target_key` is `full_key` if `path` is a prefix of `full_path`, otherwise the padded path
-    /// - `min_len` is always based on `path.len()`
+    /// - `min_len` is always 0 to ensure we get the full proof including the root.
+    ///   This is necessary because blinded nodes created by pruning may point to subtries
+    ///   where the target slot doesn't exist, and with min_len > 0 the proof calculator
+    ///   would return nothing (no nodes to prove non-existence).
     fn proof_target_for_path(full_key: B256, full_path: &Nibbles, path: &Nibbles) -> (B256, u8) {
-        let min_len = (path.len() as u8).min(64);
+        // Always use min_len=0 to ensure we get the root and full proof path.
+        // The target key still uses the blinded path to identify what we're looking for.
+        let min_len = 0;
         let target_key =
             if full_path.starts_with(path) { full_key } else { Self::nibbles_to_padded_b256(path) };
         (target_key, min_len)

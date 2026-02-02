@@ -1226,8 +1226,18 @@ where
             "Maybe retaining root",
         );
         match (sub_trie_targets.retain_root, self.child_stack.pop()) {
-            (false, _) => {
-                // Whether the root node is exists or not, we don't want it.
+            (false, None) => {
+                // Even if retain_root is false, when the trie is empty we must return EmptyRoot
+                // so the caller can reveal that the trie has no data at all. Otherwise the caller
+                // would receive an empty proof and have no way to unblind the trie.
+                self.retained_proofs.push(ProofTrieNode {
+                    path: Nibbles::new(),
+                    node: TrieNode::EmptyRoot,
+                    masks: None,
+                });
+            }
+            (false, Some(_)) => {
+                // Root node exists but we don't want it (min_len > 0 and there are leaves).
             }
             (true, None) => {
                 // If `child_stack` is empty it means there was no keys at all, retain an empty

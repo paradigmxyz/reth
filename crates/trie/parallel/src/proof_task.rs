@@ -1387,7 +1387,17 @@ where
         let account_proofs =
             v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?;
 
-        let (storage_proofs, value_encoder_stats) = value_encoder.finalize()?;
+        debug!(target: "trie::proof_task", "Starting value_encoder.finalize()");
+        let finalize_start = Instant::now();
+        let (storage_proofs, value_encoder_stats) = value_encoder.finalize().unwrap();
+        let finalize_elapsed = finalize_start.elapsed();
+        debug!(
+            target: "trie::proof_task",
+            finalize_elapsed_ms = finalize_elapsed.as_millis(),
+            storage_proofs_count = storage_proofs.len(),
+            storage_wait_time_ms = value_encoder_stats.storage_wait_time.as_millis(),
+            "value_encoder.finalize() completed"
+        );
 
         let proof = DecodedMultiProofV2 { account_proofs, storage_proofs };
 
@@ -1815,15 +1825,13 @@ fn dispatch_v2_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
 
-    // Collect hashed addresses from account targets that need their storage roots computed
-    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
-
-    // For storage targets with associated account proofs, ensure the first target has
-    // min_len(0) so the root node is returned for storage root computation
-    for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
-            let Some(first) = targets.first_mut()
-        {
+    // For all storage targets, ensure the first target has min_len(0) so the root node
+    // is always returned. This is needed because:
+    // 1. For accounts with account proofs: storage root computation requires the root
+    // 2. For storage-only targets: if the target path doesn't exist, we still need nodes
+    //    to prove non-existence. With min_len > 0, an empty subtrie returns no nodes.
+    for (_hashed_address, targets) in &mut storage_targets {
+        if let Some(first) = targets.first_mut() {
             *first = first.with_min_len(0);
         }
     }

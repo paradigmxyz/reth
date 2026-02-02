@@ -280,8 +280,21 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
 
         // Any remaining dispatched proofs need to have their results collected.
         // These are proofs that were pre-dispatched but not consumed during proof calculation.
-        for (hashed_address, rx) in &self.dispatched {
+        let dispatched_count = self.dispatched.len();
+        tracing::debug!(
+            target: "trie::value_encoder",
+            dispatched_count,
+            "finalize: collecting remaining dispatched proofs"
+        );
+        for (i, (hashed_address, rx)) in self.dispatched.iter().enumerate() {
             let wait_start = Instant::now();
+            tracing::debug!(
+                target: "trie::value_encoder",
+                i,
+                dispatched_count,
+                ?hashed_address,
+                "finalize: waiting for storage proof"
+            );
             let result = rx
                 .recv()
                 .map_err(|_| {
@@ -290,7 +303,16 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
                     )))
                 })?
                 .result?;
-            stats.storage_wait_time += wait_start.elapsed();
+            let wait_elapsed = wait_start.elapsed();
+            stats.storage_wait_time += wait_elapsed;
+            tracing::debug!(
+                target: "trie::value_encoder",
+                i,
+                dispatched_count,
+                ?hashed_address,
+                wait_elapsed_ms = wait_elapsed.as_millis(),
+                "finalize: received storage proof"
+            );
 
             let StorageProofResult::V2 { proof, .. } = result else {
                 panic!("StorageProofResult is not V2: {result:?}")
