@@ -54,8 +54,9 @@ impl LowerSparseSubtrie {
                 debug!(
                     target: "trie::parallel_sparse",
                     reveal_path = ?path,
+                    reveal_path_len = path.len(),
                     was_blind = true,
-                    "LowerSparseSubtrie::reveal - transitioning from Blind to Revealed"
+                    "LowerSparseSubtrie::reveal - transitioning from Blind to Revealed (subtrie path set, NO nodes yet)"
                 );
                 *self = if let Some(mut subtrie) = allocated.take() {
                     subtrie.path = *path;
@@ -71,10 +72,12 @@ impl LowerSparseSubtrie {
                     debug!(
                         target: "trie::parallel_sparse",
                         reveal_path = ?path,
+                        reveal_path_len = path.len(),
                         old_subtrie_path = ?old_path,
+                        old_subtrie_path_len = old_path.len(),
                         new_subtrie_path = ?subtrie.path,
                         was_blind = false,
-                        "LowerSparseSubtrie::reveal - updating path to shorter path"
+                        "LowerSparseSubtrie::reveal - UPDATING PATH TO SHORTER PATH (POTENTIAL BUG TRIGGER - caller must add node at new path)"
                     );
                 }
             }

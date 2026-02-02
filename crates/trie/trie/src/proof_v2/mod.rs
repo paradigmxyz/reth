@@ -222,7 +222,7 @@ where
             // point the target for 0xabc2 will not match the branch due to its prefix, but any of
             // the other targets would, so we need to check those as well.
             if lower.key.starts_with(path) {
-                return !check_min_len ||
+                let result = !check_min_len ||
                     (path.len() >= lower.min_len as usize ||
                         targets
                             .skip_iter()
@@ -231,7 +231,19 @@ where
                         targets
                             .rev_iter()
                             .take_while(|target| target.key.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize))
+                            .any(|target| path.len() >= target.min_len as usize));
+                // Log when a node is FILTERED OUT due to min_len (result = false when check_min_len = true)
+                if check_min_len && !result {
+                    tracing::debug!(
+                        target: TRACE_TARGET,
+                        ?path,
+                        path_len = path.len(),
+                        target_key = ?lower.key,
+                        target_min_len = lower.min_len,
+                        "NODE FILTERED OUT by min_len - this node will NOT be included in proof"
+                    );
+                }
+                return result
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until

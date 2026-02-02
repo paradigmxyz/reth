@@ -19,7 +19,7 @@ use reth_trie_sparse::{
 };
 use smallvec::SmallVec;
 use std::cmp::{Ord, Ordering, PartialOrd};
-use tracing::{debug, instrument, trace};
+use tracing::{debug, error, instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
 /// [`ParallelSparseTrie`]. All longer paths belong to a lower subtrie.
@@ -908,14 +908,29 @@ impl SparseTrie for ParallelSparseTrie {
 
             // Debug: log subtries being processed
             for changed_subtrie in &changed_subtries {
-                debug!(
-                    target: "trie::parallel_sparse",
-                    subtrie_path = ?changed_subtrie.subtrie.path,
-                    num_nodes = changed_subtrie.subtrie.nodes.len(),
-                    has_root_node = changed_subtrie.subtrie.nodes.contains_key(&changed_subtrie.subtrie.path),
-                    prefix_set_len = changed_subtrie.prefix_set.len(),
-                    "Subtrie queued for parallel hash update"
-                );
+                let has_root = changed_subtrie.subtrie.nodes.contains_key(&changed_subtrie.subtrie.path);
+                let node_paths: Vec<_> = changed_subtrie.subtrie.nodes.keys().collect();
+                if !has_root {
+                    // This is the bug condition - log at error level
+                    error!(
+                        target: "trie::parallel_sparse",
+                        subtrie_path = ?changed_subtrie.subtrie.path,
+                        subtrie_path_len = changed_subtrie.subtrie.path.len(),
+                        num_nodes = changed_subtrie.subtrie.nodes.len(),
+                        ?node_paths,
+                        prefix_set_len = changed_subtrie.prefix_set.len(),
+                        "BUG DETECTED: Subtrie queued for hash update WITHOUT root node - WILL PANIC"
+                    );
+                } else {
+                    debug!(
+                        target: "trie::parallel_sparse",
+                        subtrie_path = ?changed_subtrie.subtrie.path,
+                        num_nodes = changed_subtrie.subtrie.nodes.len(),
+                        has_root_node = has_root,
+                        prefix_set_len = changed_subtrie.prefix_set.len(),
+                        "Subtrie queued for parallel hash update"
+                    );
+                }
             }
 
             let branch_node_masks = &self.branch_node_masks;
@@ -1400,6 +1415,16 @@ impl ParallelSparseTrie {
         let min_len = (path.len() as u8).min(64);
         let target_key =
             if full_path.starts_with(path) { full_key } else { Self::nibbles_to_padded_b256(path) };
+        debug!(
+            target: "trie::parallel_sparse",
+            ?full_key,
+            ?full_path,
+            blinded_path = ?path,
+            blinded_path_len = path.len(),
+            min_len,
+            ?target_key,
+            "proof_target_for_path - REQUESTING PROOF with min_len (nodes shorter than this will be filtered)"
+        );
         (target_key, min_len)
     }
 
