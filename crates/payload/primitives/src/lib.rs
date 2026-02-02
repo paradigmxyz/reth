@@ -418,13 +418,16 @@ where
     Type: PayloadAttributes,
     T: EthereumHardforks,
 {
-    validate_block_access_list_presence(
-        chain_spec,
-        version,
-        payload_or_attrs.message_validation_kind(),
-        payload_or_attrs.timestamp(),
-        payload_or_attrs.block_access_list().is_some(),
-    )?;
+    // BAL only exists in ExecutionPayload, not PayloadAttributes (EIP-7928)
+    if let PayloadOrAttributes::ExecutionPayload(_) = payload_or_attrs {
+        validate_block_access_list_presence(
+            chain_spec,
+            version,
+            payload_or_attrs.message_validation_kind(),
+            payload_or_attrs.timestamp(),
+            payload_or_attrs.block_access_list().is_some(),
+        )?;
+    }
 
     validate_withdrawals_presence(
         chain_spec,
