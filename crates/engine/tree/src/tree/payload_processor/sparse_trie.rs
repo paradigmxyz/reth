@@ -567,30 +567,30 @@ where
     }
 
     /// Invokes `update_leaves` for the accounts trie and collects any new targets.
-    /// 
+    ///
     /// Returns whether any updates were drained (applied to the trie).
     fn process_account_leaf_updates(&mut self) -> SparseTrieResult<bool> {
         let updates_len_before = self.account_updates.len();
 
-        self.trie.trie_mut().update_leaves(&mut self.account_updates, |target, min_len| match self
-            .fetched_account_targets
-            .entry(target)
-        {
-            Entry::Occupied(mut entry) => {
-                if min_len < *entry.get() {
+        self.trie.trie_mut().update_leaves(
+            &mut self.account_updates,
+            |target, min_len| match self.fetched_account_targets.entry(target) {
+                Entry::Occupied(mut entry) => {
+                    if min_len < *entry.get() {
+                        entry.insert(min_len);
+                        self.pending_targets
+                            .account_targets
+                            .push(Target::new(target).with_min_len(min_len));
+                    }
+                }
+                Entry::Vacant(entry) => {
                     entry.insert(min_len);
                     self.pending_targets
                         .account_targets
                         .push(Target::new(target).with_min_len(min_len));
                 }
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(min_len);
-                self.pending_targets
-                    .account_targets
-                    .push(Target::new(target).with_min_len(min_len));
-            }
-        })?;
+            },
+        )?;
 
         Ok(self.account_updates.len() < updates_len_before)
     }
@@ -701,7 +701,6 @@ where
                 break
             }
         }
-            
 
         Ok(())
     }
