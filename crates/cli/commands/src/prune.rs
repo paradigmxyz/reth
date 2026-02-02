@@ -4,6 +4,7 @@ use clap::Parser;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
+use reth_db_api::tables::Tables;
 use reth_node_builder::common::metrics_hooks;
 use reth_node_core::{args::MetricArgs, version::version_metadata};
 use reth_node_metrics::{
@@ -11,6 +12,7 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
+use reth_provider::RocksDBProviderFactory;
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
@@ -74,7 +76,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
             const DELETE_LIMIT: usize = 200_000;
             let mut pruner = PrunerBuilder::new(config)
                 .delete_limit(DELETE_LIMIT)
-                .build_with_provider_factory(provider_factory);
+                .build_with_provider_factory(provider_factory.clone());
 
             let mut total_pruned = 0usize;
             loop {
@@ -106,6 +108,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                 );
             }
             info!(target: "reth::cli", total_pruned, "Pruned data from database");
+
+            // Flush RocksDB tables to persist deletions to SST files so space can be reclaimed.
+            let tables = [
+                Tables::AccountsHistory.name(),
+                Tables::StoragesHistory.name(),
+                Tables::TransactionHashNumbers.name(),
+            ];
+            info!(target: "reth::cli", "Flushing RocksDB tables...");
+            provider_factory.rocksdb_provider().flush(&tables)?;
+            info!(target: "reth::cli", "Flushed RocksDB tables");
         }
 
         Ok(())
