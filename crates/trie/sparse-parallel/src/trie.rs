@@ -3060,19 +3060,20 @@ impl SparseSubtrieInner {
                 let mut path = path;
                 path.extend(key);
                 let value = self.values.get(&path);
-                if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path) || value.is_none())
+                if let Some(value) = value.filter(|_| prefix_set_contains(&path) || hash.is_none())
                 {
-                    // If the node hash is already computed, and either the node path is not in
-                    // the prefix set or the leaf doesn't belong to the current trie (its value is
-                    // absent), return the pre-computed hash
-                    (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
-                } else {
-                    // Encode the leaf node and update its hash
-                    let value = self.values.get(&path).unwrap();
+                    // Encode the leaf node and update its hash if:
+                    // - the path is in the prefix set (node was modified), or
+                    // - there's no pre-computed hash
                     self.buffers.rlp_buf.clear();
                     let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.buffers.rlp_buf);
                     *hash = rlp_node.as_hash();
                     (rlp_node, SparseNodeType::Leaf)
+                } else {
+                    // Return pre-computed hash: either path is not in prefix set, or value is
+                    // absent (leaf doesn't belong to the current trie)
+                    let hash = hash.expect("leaf node must have a pre-computed hash if value is absent");
+                    (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                 }
             }
             SparseNode::Extension { key, hash, store_in_db_trie } => {
