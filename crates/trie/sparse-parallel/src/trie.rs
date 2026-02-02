@@ -3072,7 +3072,16 @@ impl SparseSubtrieInner {
                 } else {
                     // Return pre-computed hash: either path is not in prefix set, or value is
                     // absent (leaf doesn't belong to the current trie)
-                    let hash = hash.expect("leaf node must have a pre-computed hash if value is absent");
+                    let hash = hash.unwrap_or_else(|| {
+                        panic!(
+                            "leaf node at path {:?} (key {:?}) must have a pre-computed hash if value is absent. \
+                             prefix_set_contains={}, available_values={:?}",
+                            path,
+                            key,
+                            prefix_set_contains(&path),
+                            self.values.keys().collect::<Vec<_>>()
+                        )
+                    });
                     (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                 }
             }
