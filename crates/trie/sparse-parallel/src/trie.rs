@@ -8954,7 +8954,7 @@ mod tests {
 
             let mut trie = ParallelSparseTrie::default();
             trie.update_leaf(hot_key, large_value.clone(), &provider).unwrap();
-            trie.update_leaf(cold_key, large_value.clone(), &provider).unwrap();
+            trie.update_leaf(cold_key, large_value, &provider).unwrap();
 
             let root_before = trie.root();
 
@@ -9027,7 +9027,7 @@ mod tests {
             let major_key = Nibbles::unpack(hashed);
 
             let mut trie = ParallelSparseTrie::default();
-            trie.update_leaf(major_key, large_value.clone(), &provider).unwrap();
+            trie.update_leaf(major_key, large_value, &provider).unwrap();
 
             let root_before = trie.root();
 
@@ -9058,7 +9058,7 @@ mod tests {
             let builder_key = Nibbles::unpack(hashed);
 
             let mut trie = ParallelSparseTrie::default();
-            trie.update_leaf(builder_key, large_value.clone(), &provider).unwrap();
+            trie.update_leaf(builder_key, large_value, &provider).unwrap();
 
             let root_before = trie.root();
 
@@ -9087,7 +9087,7 @@ mod tests {
             let key = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
 
             let mut trie = ParallelSparseTrie::default();
-            trie.update_leaf(key, large_value.clone(), &provider).unwrap();
+            trie.update_leaf(key, large_value, &provider).unwrap();
 
             let root_before = trie.root();
 
