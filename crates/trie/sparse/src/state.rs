@@ -21,7 +21,7 @@ use reth_trie_common::{
 };
 #[cfg(feature = "std")]
 use tracing::debug;
-use tracing::{instrument, trace};
+use tracing::{instrument, trace, error};
 
 /// Provides type-safe re-use of cleared [`SparseStateTrie`]s, which helps to save allocations
 /// across payload runs.
@@ -356,7 +356,11 @@ where
         multiproof: reth_trie_common::DecodedMultiProofV2,
     ) -> SparseStateTrieResult<()> {
         // Reveal the account proof nodes
-        self.reveal_account_v2_proof_nodes(multiproof.account_proofs)?;
+        if let Err(err) = self.reveal_account_v2_proof_nodes(multiproof.account_proofs.clone()) {
+            error!(target: "trie::sparse", error = ?err, "Error revealing account proof nodes");
+            error!("Account proofs: {:?}", multiproof.account_proofs);
+            return Err(err);
+        }
 
         #[cfg(not(feature = "std"))]
         // If nostd then serially reveal storage proof nodes for each storage trie
