@@ -239,6 +239,7 @@ impl AccountHistory {
         Provider: DBProvider + StaticFileProviderFactory + ChangeSetReader + RocksDBProviderFactory,
     {
         use reth_provider::PruneShardOutcome;
+        use std::collections::hash_map::Entry;
 
         // Unlike MDBX path, we don't divide the limit by 2 because RocksDB path only prunes
         // history shards (no separate changeset table to delete from). The changesets are in
@@ -267,10 +268,24 @@ impl AccountHistory {
                 break;
             }
             let (block_number, changeset) = result?;
-            highest_deleted_accounts.insert(changeset.address, block_number);
+
+            // Always track scan progress (even if this address repeats)
             last_changeset_pruned_block = Some(block_number);
             changesets_processed += 1;
-            limiter.increment_deleted_entries_count();
+
+            // Only charge the limiter for NEW unique addresses (RocksDB shard work)
+            match highest_deleted_accounts.entry(changeset.address) {
+                Entry::Vacant(v) => {
+                    v.insert(block_number);
+                    limiter.increment_deleted_entries_count();
+                }
+                Entry::Occupied(mut o) => {
+                    // keep highest block seen for this address
+                    if block_number > *o.get() {
+                        o.insert(block_number);
+                    }
+                }
+            }
         }
         trace!(target: "pruner", processed = %changesets_processed, %done, "Scanned account changesets from static files");
 
@@ -1040,27 +1055,21 @@ mod tests {
         // the limiter should allow processing all 10 blocks since we only
         // touch 10 RocksDB shards.
 
-        // This assertion documents the CURRENT buggy behavior.
-        // After fixing RETH-292, this should be changed to assert that
-        // all blocks are processed (progress.is_finished() == true).
         assert!(
-            !result.progress.is_finished(),
-            "BUG CONFIRMED: With limit={} and {} changesets/block but only {} unique addresses, \
-             pruning stopped early at block {} because limiter counts changesets, not shards. \
-             Processed {} entries. \
-             EXPECTED: Should process all {} blocks since only {} RocksDB shards are touched.",
+            result.progress.is_finished(),
+            "RETH-292 FIX VERIFIED: With limit={} and {} changesets/block but only {} unique addresses, \
+             pruning should finish because limiter counts unique addresses (RocksDB shard work), not changesets. \
+             Checkpoint block: {}. Processed {} entries.",
             limit,
             changesets_per_block,
             unique_addresses,
             blocks_processed,
             result.pruned,
-            num_blocks,
-            unique_addresses
         );
 
         // Log the behavior for clarity
         eprintln!(
-            "\n=== RETH-292 Regression Test ===\n\
+            "\n=== RETH-292 Fix Verified ===\n\
              Limit: {}\n\
              Changesets per block: {}\n\
              Unique addresses (RocksDB shards): {}\n\
@@ -1068,16 +1077,16 @@ mod tests {
              Pruned count reported: {}\n\
              Finished: {}\n\
              \n\
-             BUG: Limiter counts {} changesets scanned, not {} shards modified.\n\
-             After fix, this test should process all {} blocks.\n",
+             FIX: Limiter now counts {} unique addresses (shards), not {} changesets.\n\
+             All {} blocks processed as expected.\n",
             limit,
             changesets_per_block,
             unique_addresses,
             blocks_processed,
             result.pruned,
             result.progress.is_finished(),
-            total_changesets,
             unique_addresses,
+            total_changesets,
             num_blocks
         );
     }

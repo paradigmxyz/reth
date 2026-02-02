@@ -243,6 +243,7 @@ impl StorageHistory {
         Provider: DBProvider + StaticFileProviderFactory + RocksDBProviderFactory,
     {
         use reth_provider::PruneShardOutcome;
+        use std::collections::hash_map::Entry;
 
         let mut limiter = input.limiter;
 
@@ -270,10 +271,25 @@ impl StorageHistory {
             let (block_address, entry) = result?;
             let block_number = block_address.block_number();
             let address = block_address.address();
-            highest_deleted_storages.insert((address, entry.key), block_number);
+
+            // Always track scan progress (even if this (address, slot) repeats)
             last_changeset_pruned_block = Some(block_number);
             changesets_processed += 1;
-            limiter.increment_deleted_entries_count();
+
+            let key = (address, entry.key);
+
+            // Only charge the limiter for NEW unique (address, slot) pairs (RocksDB shard work)
+            match highest_deleted_storages.entry(key) {
+                Entry::Vacant(v) => {
+                    v.insert(block_number);
+                    limiter.increment_deleted_entries_count();
+                }
+                Entry::Occupied(mut o) => {
+                    if block_number > *o.get() {
+                        o.insert(block_number);
+                    }
+                }
+            }
         }
 
         trace!(target: "pruner", processed = %changesets_processed, %done, "Scanned storage changesets from static files");
