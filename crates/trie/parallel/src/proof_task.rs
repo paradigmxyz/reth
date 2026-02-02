@@ -72,6 +72,7 @@ use std::{
         mpsc::{channel, Receiver, Sender},
         Arc,
     },
+    thread,
     time::{Duration, Instant},
 };
 use tokio::runtime::Handle;
@@ -253,6 +254,142 @@ impl ProofWorkerHandle {
             });
         }
         drop(parent_span);
+
+        Self {
+            storage_work_tx,
+            account_work_tx,
+            storage_available_workers,
+            account_available_workers,
+            storage_worker_count,
+            account_worker_count,
+            v2_proofs_enabled,
+        }
+    }
+
+    /// Spawns storage and account worker pools using dedicated OS threads.
+    ///
+    /// This is similar to [`Self::new`] but uses `std::thread::spawn` instead of
+    /// Tokio's `spawn_blocking`, avoiding the blocking pool scheduler overhead.
+    ///
+    /// Workers are spawned as named threads (`proof-storage-N`, `proof-account-N`)
+    /// for easier debugging.
+    ///
+    /// # Parameters
+    /// - `task_ctx`: Shared context with database view and prefix sets
+    /// - `storage_worker_count`: Number of storage workers to spawn
+    /// - `account_worker_count`: Number of account workers to spawn
+    /// - `v2_proofs_enabled`: Whether to enable V2 storage proofs
+    pub fn new_with_dedicated_threads<Factory>(
+        task_ctx: ProofTaskCtx<Factory>,
+        storage_worker_count: usize,
+        account_worker_count: usize,
+        v2_proofs_enabled: bool,
+    ) -> Self
+    where
+        Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + 'static,
+    {
+        let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
+        let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
+
+        let storage_available_workers = Arc::new(AtomicUsize::new(0));
+        let account_available_workers = Arc::new(AtomicUsize::new(0));
+
+        let cached_storage_roots = Arc::new(DashMap::new());
+
+        debug!(
+            target: "trie::proof_task",
+            storage_worker_count,
+            account_worker_count,
+            ?v2_proofs_enabled,
+            "Spawning dedicated proof worker thread pools"
+        );
+
+        // Spawn storage workers on dedicated OS threads
+        for worker_id in 0..storage_worker_count {
+            let span = debug_span!(target: "trie::proof_task", "storage worker", ?worker_id);
+            let task_ctx_clone = task_ctx.clone();
+            let work_rx_clone = storage_work_rx.clone();
+            let storage_available_workers_clone = storage_available_workers.clone();
+            let cached_storage_roots = cached_storage_roots.clone();
+
+            thread::Builder::new()
+                .name(format!("proof-storage-{worker_id}"))
+                .spawn(move || {
+                    #[cfg(feature = "metrics")]
+                    let metrics = ProofTaskTrieMetrics::default();
+                    #[cfg(feature = "metrics")]
+                    let cursor_metrics = ProofTaskCursorMetrics::new();
+
+                    let _guard = span.enter();
+                    let worker = StorageProofWorker::new(
+                        task_ctx_clone,
+                        work_rx_clone,
+                        worker_id,
+                        storage_available_workers_clone,
+                        cached_storage_roots,
+                        #[cfg(feature = "metrics")]
+                        metrics,
+                        #[cfg(feature = "metrics")]
+                        cursor_metrics,
+                    )
+                    .with_v2_proofs(v2_proofs_enabled);
+                    if let Err(error) = worker.run() {
+                        error!(
+                            target: "trie::proof_task",
+                            worker_id,
+                            ?error,
+                            "Storage worker failed"
+                        );
+                    }
+                })
+                .expect("failed to spawn storage proof worker thread");
+        }
+
+        // Spawn account workers on dedicated OS threads
+        for worker_id in 0..account_worker_count {
+            let span = debug_span!(target: "trie::proof_task", "account worker", ?worker_id);
+            let task_ctx_clone = task_ctx.clone();
+            let work_rx_clone = account_work_rx.clone();
+            let storage_work_tx_clone = storage_work_tx.clone();
+            let account_available_workers_clone = account_available_workers.clone();
+            let cached_storage_roots = cached_storage_roots.clone();
+
+            thread::Builder::new()
+                .name(format!("proof-account-{worker_id}"))
+                .spawn(move || {
+                    #[cfg(feature = "metrics")]
+                    let metrics = ProofTaskTrieMetrics::default();
+                    #[cfg(feature = "metrics")]
+                    let cursor_metrics = ProofTaskCursorMetrics::new();
+
+                    let _guard = span.enter();
+                    let worker = AccountProofWorker::new(
+                        task_ctx_clone,
+                        work_rx_clone,
+                        worker_id,
+                        storage_work_tx_clone,
+                        account_available_workers_clone,
+                        cached_storage_roots,
+                        #[cfg(feature = "metrics")]
+                        metrics,
+                        #[cfg(feature = "metrics")]
+                        cursor_metrics,
+                    )
+                    .with_v2_proofs(v2_proofs_enabled);
+                    if let Err(error) = worker.run() {
+                        error!(
+                            target: "trie::proof_task",
+                            worker_id,
+                            ?error,
+                            "Account worker failed"
+                        );
+                    }
+                })
+                .expect("failed to spawn account proof worker thread");
+        }
 
         Self {
             storage_work_tx,

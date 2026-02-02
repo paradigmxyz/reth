@@ -22,6 +22,9 @@ pub mod proof;
 
 pub mod proof_task;
 
+/// Dedicated proof worker pool with session-based payload handling.
+pub mod worker_pool;
+
 /// Async value encoder for V2 proofs.
 pub(crate) mod value_encoder;
 

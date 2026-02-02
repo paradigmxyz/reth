@@ -276,12 +276,12 @@ where
             )
         };
 
-        // Create and spawn the storage proof task
+        // Create and spawn the storage proof task using dedicated OS threads
+        // to avoid Tokio blocking pool scheduler overhead
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let proof_handle = ProofWorkerHandle::new(
-            self.executor.handle().clone(),
+        let proof_handle = ProofWorkerHandle::new_with_dedicated_threads(
             task_ctx,
             storage_worker_count,
             account_worker_count,
@@ -985,6 +985,7 @@ mod tests {
     };
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_evm::block::StateChangeSource;
+    use alloy_primitives::map::{AddressMap, B256Map, HashMap};
     use rand::Rng;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
@@ -1001,7 +1002,7 @@ mod tests {
     use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState};
     use reth_trie_db::ChangesetCache;
-    use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
+    use revm_primitives::{Address, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
     use std::sync::Arc;
 
@@ -1201,8 +1202,7 @@ mod tests {
 
         let state_updates = create_mock_state_updates(10, 10);
         let mut hashed_state = HashedPostState::default();
-        let mut accumulated_state: HashMap<Address, (Account, HashMap<B256, U256>)> =
-            HashMap::default();
+        let mut accumulated_state: AddressMap<(Account, B256Map<U256>)> = AddressMap::default();
 
         {
             let provider_rw = factory.provider_rw().expect("failed to get provider");
@@ -1232,7 +1232,7 @@ mod tests {
             hashed_state.extend(evm_state_to_hashed_post_state(update.clone()));
 
             for (address, account) in update {
-                let storage: HashMap<B256, U256> = account
+                let storage: B256Map<U256> = account
                     .storage
                     .iter()
                     .map(|(k, v)| (B256::from(*k), v.present_value))
