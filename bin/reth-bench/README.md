@@ -47,10 +47,39 @@ Make sure `reth` is running in the background with the proper configuration. Thi
 
 Any consensus layer client configured to connect to `reth` should be shut down, as all the engine API interactions during benchmarking will be driven by `reth-bench`.
 
-Depending on the block range you want to use in the benchmark you may need to unwind your node.
-The head of the node should be behind the lowest block in the range.
+#### Recommended: Snapshot Workflow
 
-Starting with a synced ethereum mainnet node, to run a benchmark starting at block 21,000,000, the node would need to be unwound first:
+For most benchmarks, especially hot/cold storage and big blocks benchmarking, use a fresh snapshot to ensure clean database state and avoid potential errors:
+
+1. **Download a reth-minimal snapshot** (or use an existing synced snapshot):
+   ```bash
+   # Download and extract to your datadir (adjust URL/paths as needed)
+   # Snapshots are typically available from public sources or internal infra
+   ```
+
+2. **Start the node with minimal config**:
+   ```bash
+   reth node --minimal --datadir /data/reth --chain mainnet --authrpc.jwtsecret <jwt_file_path>
+   ```
+
+3. **Run the benchmark**:
+   ```bash
+   reth-bench new-payload-fcu --rpc-url <rpc-url> --from <start_block> --to <end_block> --jwt-secret <jwt_file_path>
+   ```
+
+This workflow is preferred because:
+- It starts from a known-good database state
+- No unwinding required for most benchmarks
+- Avoids potential `UnsortedInput` errors that can occur with `stage unwind` on large databases
+
+#### Alternative: Stage Unwind Workflow (For Reorg/Unwind Testing Only)
+
+> [!WARNING]
+> Use this workflow **only when specifically testing unwind/reorg codepaths**.
+> Running `reth stage unwind` on large databases with big blocks may trigger `UnsortedInput` errors in RocksDB history tables.
+> For performance benchmarking, prefer the snapshot workflow above.
+
+If you need to test unwind/reorg behavior, starting with a synced ethereum mainnet node, to run a benchmark starting at block 21,000,000, the node would need to be unwound first:
 ```bash
 reth stage unwind to-block 21000000
 ```
@@ -60,7 +89,9 @@ The following `reth-bench` command would then start the benchmark at block 21,00
 reth-bench new-payload-fcu --rpc-url <rpc-url> --from 21000000 --to <end_block> --jwt-secret <jwt_file_path>
 ```
 
-Finally, make sure that reth is built using a build profile suitable for what you are trying to measure.
+#### Build Profiles
+
+Make sure that reth is built using a build profile suitable for what you are trying to measure.
 For example, if the purpose of the benchmark is to load test and measure `reth`'s maximum speed, it would be compiled with the `maxperf` profile:
 ```bash
 make maxperf
@@ -144,12 +175,16 @@ usage over time, and many other metrics that are useful for diagnosing performan
 
 ### Repeat
 
-To reproduce the benchmark, first re-set the node to the block that the benchmark started at, using `reth stage unwind` as mentioned above, and repeat all of the above steps.
+To reproduce the benchmark, reset the node to the starting block:
+- **Snapshot workflow (recommended)**: Restore the original snapshot or re-extract it to the datadir
+- **Unwind workflow**: Use `reth stage unwind` to roll back to the starting block (see warnings above about potential issues)
+
+Then repeat all of the above steps.
 
 ## Additional Considerations
 
 - **RPC Configuration**: The RPC endpoints should be accessible and configured correctly, specifically the RPC endpoint must support `eth_getBlockByNumber` and support fetching full transactions. The benchmark will make one RPC query per block as fast as possible, so ensure the RPC endpoint does not rate limit or block requests after a certain volume.
-- **Reproducibility**: Ensure that the node is at the same state before attempting to retry a benchmark. The `new-payload-fcu` command specifically will commit to the database, so the node must be rolled back using `reth stage unwind` to reproducibly retry benchmarks.
+- **Reproducibility**: Ensure that the node is at the same state before attempting to retry a benchmark. The `new-payload-fcu` command specifically will commit to the database, so the node must be reset either by restoring a snapshot (recommended) or using `reth stage unwind` (for reorg testing only) to reproducibly retry benchmarks.
 - **Profiling tools**: If you are collecting CPU profiles, tools like [`samply`](https://github.com/mstange/samply) and [`perf`](https://perf.wiki.kernel.org/index.php/Main_Page) can be useful for analyzing node performance.
 - **Benchmark Data**: `reth-bench` additionally contains a `--output` flag, which will output gas used benchmarks across the benchmark range in CSV format. This may be useful for further data analysis.
 - **Platform Information**: To ensure accurate and reproducible benchmarking, document the platform details, including hardware specifications, OS version, and any other relevant information before publishing any benchmarks.
