@@ -1339,9 +1339,8 @@ impl ParallelSparseTrie {
 
     /// Converts a nibbles path to a B256, right-padding with zeros to 64 nibbles.
     fn nibbles_to_padded_b256(path: &Nibbles) -> B256 {
-        let packed = path.pack();
         let mut bytes = [0u8; 32];
-        bytes[..packed.len()].copy_from_slice(&packed);
+        path.pack_to(&mut bytes);
         B256::from(bytes)
     }
 
@@ -8871,5 +8870,29 @@ mod tests {
             value_count_before, value_count_after,
             "Value count should be unchanged after atomic failure (no dangling values)"
         );
+    }
+
+    #[test]
+    fn test_nibbles_to_padded_b256() {
+        // Empty nibbles should produce all zeros
+        let empty = Nibbles::default();
+        assert_eq!(ParallelSparseTrie::nibbles_to_padded_b256(&empty), B256::ZERO);
+
+        // Full 64-nibble path should round-trip through B256
+        let full_key = b256!("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        let full_nibbles = Nibbles::unpack(full_key);
+        assert_eq!(ParallelSparseTrie::nibbles_to_padded_b256(&full_nibbles), full_key);
+
+        // Partial nibbles should be left-aligned with zero padding on the right
+        // 4 nibbles [0x1, 0x2, 0x3, 0x4] should pack to 0x1234...00
+        let partial = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
+        let expected = b256!("1234000000000000000000000000000000000000000000000000000000000000");
+        assert_eq!(ParallelSparseTrie::nibbles_to_padded_b256(&partial), expected);
+
+        // Single nibble
+        let single = Nibbles::from_nibbles_unchecked([0xf]);
+        let expected_single =
+            b256!("f000000000000000000000000000000000000000000000000000000000000000");
+        assert_eq!(ParallelSparseTrie::nibbles_to_padded_b256(&single), expected_single);
     }
 }
