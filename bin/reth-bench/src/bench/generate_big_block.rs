@@ -572,13 +572,22 @@ impl Command {
 
         for i in 0..self.count {
             // Get initial batch of transactions for this payload
-            let mut result = tx_buffer
-                .take_batch()
-                .await
-                .ok_or_else(|| eyre::eyre!("Transaction fetcher stopped unexpectedly"))?;
+            let Some(mut result) = tx_buffer.take_batch().await else {
+                info!(
+                    payloads_built = i,
+                    payloads_requested = self.count,
+                    "Transaction source exhausted, stopping"
+                );
+                break;
+            };
 
             if result.transactions.is_empty() {
-                return Err(eyre::eyre!("No transactions collected for payload {}", i + 1));
+                info!(
+                    payloads_built = i,
+                    payloads_requested = self.count,
+                    "No more transactions available, stopping"
+                );
+                break;
             }
 
             // Build with retry - may need to request more transactions
