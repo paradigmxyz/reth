@@ -170,15 +170,15 @@ impl HotAccounts {
     ///
     /// Returns the appropriate network-specific configuration:
     /// - Chain ID 1 (Ethereum mainnet): [`Self::for_mainnet`]
-    /// - Chain ID 11155111 (Sepolia), 17000 (Holesky): [`Self::for_ethereum`]
+    /// - Chain ID 11155111 (Sepolia), 17000 (Holesky), 560048 (Hoodi): [`Self::for_ethereum`]
     /// - Chain ID 10 (Optimism): [`Self::for_optimism`]
     /// - Chain ID 8453 (Base): [`Self::for_base`]
     /// - Other chains: Empty tracker ([`Self::new`])
     pub fn from_chain_id(chain_id: u64) -> Self {
         match chain_id {
             1 => Self::for_mainnet(),
-            // Sepolia, Holesky
-            11155111 | 17000 => Self::for_ethereum(),
+            // Sepolia, Holesky, Hoodi
+            11155111 | 17000 | 560048 => Self::for_ethereum(),
             10 => Self::for_optimism(),
             8453 => Self::for_base(),
             _ => Self::new(),
