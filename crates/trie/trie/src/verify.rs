@@ -540,56 +540,115 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Iterator for Veri
     }
 }
 
+/// Status update from parallel verification.
+#[derive(Debug, Clone)]
+pub enum ParallelVerifyStatus {
+    /// A subtrie (identified by first nibble 0-15) has started verification.
+    SubtrieStarted {
+        /// The first nibble (0-15) identifying the subtrie.
+        nibble: u8,
+    },
+    /// A subtrie has completed verification.
+    SubtrieCompleted {
+        /// The first nibble (0-15) identifying the subtrie.
+        nibble: u8,
+        /// Number of inconsistencies found in this subtrie.
+        inconsistencies: usize,
+    },
+    /// An inconsistency was found.
+    InconsistencyFound(Output),
+}
+
 /// Runs verification in parallel by dividing the trie into 16 subtries based on the first nibble
 /// of node paths.
 ///
 /// This creates 16 separate [`Verifier`] instances, each handling nodes starting with a different
 /// first nibble (0x0-0xF), and runs them concurrently using rayon's scoped parallelism.
-pub fn verify_parallel<'a, T, H>(
+///
+/// The optional `status_callback` is called with status updates as subtries start and complete.
+pub fn verify_parallel<'a, T, H, F>(
     trie_cursor_factory: &'a T,
     hashed_cursor_factory: H,
+    status_callback: Option<F>,
 ) -> Result<Vec<Output>, StateRootError>
 where
     T: TrieCursorFactory + Sync,
     T::AccountTrieCursor<'a>: Send,
     T::StorageTrieCursor<'a>: Send,
     H: HashedCursorFactory + Clone + Send + Sync,
+    F: Fn(ParallelVerifyStatus) + Send + Sync,
 {
     use std::sync::Mutex;
 
     // Create 16 prefixes for each first nibble (0x0-0xF)
-    let prefixes: Vec<Nibbles> = (0u8..16).map(|nibble| Nibbles::from_nibbles([nibble])).collect();
+    let prefixes: Vec<(u8, Nibbles)> =
+        (0u8..16).map(|nibble| (nibble, Nibbles::from_nibbles([nibble]))).collect();
 
     // Collect results from all parallel workers
-    let results: Mutex<Vec<Result<Vec<Output>, StateRootError>>> =
+    let results: Mutex<Vec<(u8, Result<Vec<Output>, StateRootError>)>> =
         Mutex::new(Vec::with_capacity(16));
 
     // Use rayon::scope to allow borrowed references
     rayon::scope(|s| {
-        for prefix in prefixes {
+        for (nibble, prefix) in prefixes {
             let results_ref = &results;
             let trie_cursor_factory_ref = trie_cursor_factory;
             let hashed_cursor_factory_clone = hashed_cursor_factory.clone();
+            let status_callback_ref = &status_callback;
 
             s.spawn(move |_| {
-                let result = (|| {
+                // Report start
+                if let Some(cb) = status_callback_ref {
+                    cb(ParallelVerifyStatus::SubtrieStarted { nibble });
+                }
+
+                let result: Result<Vec<Output>, StateRootError> = (|| {
                     let verifier = Verifier::with_prefix(
                         trie_cursor_factory_ref,
                         hashed_cursor_factory_clone,
                         Some(prefix),
                     )?;
 
-                    verifier.collect::<Result<Vec<_>, _>>()
+                    let mut outputs = Vec::new();
+
+                    for output_result in verifier {
+                        let output = output_result?;
+
+                        // Report inconsistencies immediately (skip progress indicators)
+                        if !matches!(output, Output::Progress(_)) {
+                            if let Some(cb) = status_callback_ref {
+                                cb(ParallelVerifyStatus::InconsistencyFound(output.clone()));
+                            }
+                        }
+
+                        outputs.push(output);
+                    }
+
+                    Ok(outputs)
                 })();
 
-                results_ref.lock().unwrap().push(result);
+                // Report completion
+                if let Some(cb) = status_callback_ref {
+                    let inconsistencies = result
+                        .as_ref()
+                        .map(|outputs| {
+                            outputs.iter().filter(|o| !matches!(o, Output::Progress(_))).count()
+                        })
+                        .unwrap_or(0);
+                    cb(ParallelVerifyStatus::SubtrieCompleted { nibble, inconsistencies });
+                }
+
+                results_ref.lock().unwrap().push((nibble, result));
             });
         }
     });
 
-    // Collect all outputs and propagate any errors
+    // Sort by nibble and collect all outputs
+    let mut all_results = results.into_inner().unwrap();
+    all_results.sort_by_key(|(nibble, _)| *nibble);
+
     let mut all_outputs = Vec::new();
-    for result in results.into_inner().unwrap() {
+    for (_, result) in all_results {
         all_outputs.extend(result?);
     }
 

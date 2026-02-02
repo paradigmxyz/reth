@@ -23,7 +23,7 @@ use reth_provider::{providers::ProviderNodeTypes, ChainSpecProvider, StageCheckp
 use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
 use reth_trie::{
-    verify::{verify_parallel, Output, Verifier},
+    verify::{verify_parallel, Output, ParallelVerifyStatus, Verifier},
     Nibbles,
 };
 use reth_trie_common::{StorageTrieEntry, StoredNibbles, StoredNibblesSubKey};
@@ -32,7 +32,7 @@ use std::{
     net::SocketAddr,
     time::{Duration, Instant},
 };
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 const PROGRESS_PERIOD: Duration = Duration::from_secs(5);
 
@@ -175,6 +175,8 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
 }
 
 fn verify_only_parallel<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     // Log the database block tip from Finish stage checkpoint
     let finish_checkpoint = tool
         .provider_factory
@@ -197,36 +199,52 @@ fn verify_only_parallel<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<
 
     info!("Running parallel verification across 16 subtries...");
 
+    // Track completed subtries and inconsistencies for progress reporting
+    let completed_count = AtomicUsize::new(0);
+    let total_inconsistencies = AtomicUsize::new(0);
+
+    // Status callback for progress reporting and immediate inconsistency logging
+    let status_callback = |status: ParallelVerifyStatus| match status {
+        ParallelVerifyStatus::SubtrieStarted { nibble } => {
+            trace!(target: "reth::cli::repair_trie", nibble = %format!("0x{nibble:X}"), "Started verifying subtrie");
+        }
+        ParallelVerifyStatus::SubtrieCompleted { nibble, inconsistencies } => {
+            let completed = completed_count.fetch_add(1, Ordering::Relaxed) + 1;
+            info!(
+                target: "reth::cli::repair_trie",
+                subtrie = %format!("0x{nibble:X}"),
+                progress = %format!("{completed}/16"),
+                inconsistencies,
+                "Subtrie verification complete"
+            );
+        }
+        ParallelVerifyStatus::InconsistencyFound(ref output) => {
+            total_inconsistencies.fetch_add(1, Ordering::Relaxed);
+            warn!("Inconsistency found: {output:?}");
+
+            // Record metrics based on output type
+            match output {
+                Output::AccountExtra(_, _) |
+                Output::AccountWrong { .. } |
+                Output::AccountMissing(_, _) => {
+                    metrics.account_inconsistencies.increment(1);
+                }
+                Output::StorageExtra(_, _, _) |
+                Output::StorageWrong { .. } |
+                Output::StorageMissing(_, _, _) => {
+                    metrics.storage_inconsistencies.increment(1);
+                }
+                Output::Progress(_) => {}
+            }
+        }
+    };
+
     // Run parallel verification
-    let outputs = verify_parallel(&trie_cursor_factory, hashed_cursor_factory)?;
-
-    let mut inconsistent_nodes = 0;
-    for output in outputs {
-        // Skip progress indicators
-        if matches!(output, Output::Progress(_)) {
-            continue;
-        }
-
-        warn!("Inconsistency found: {output:?}");
-        inconsistent_nodes += 1;
-
-        // Record metrics based on output type
-        match output {
-            Output::AccountExtra(_, _) |
-            Output::AccountWrong { .. } |
-            Output::AccountMissing(_, _) => {
-                metrics.account_inconsistencies.increment(1);
-            }
-            Output::StorageExtra(_, _, _) |
-            Output::StorageWrong { .. } |
-            Output::StorageMissing(_, _, _) => {
-                metrics.storage_inconsistencies.increment(1);
-            }
-            Output::Progress(_) => {}
-        }
-    }
+    let _outputs =
+        verify_parallel(&trie_cursor_factory, hashed_cursor_factory, Some(status_callback))?;
 
     let elapsed = start_time.elapsed();
+    let inconsistent_nodes = total_inconsistencies.load(Ordering::Relaxed);
     info!(
         "Found {} inconsistencies in {:?} (dry run - no changes made)",
         inconsistent_nodes, elapsed
