@@ -1258,25 +1258,21 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
     /// Prunes storage tries using tiered eviction based on hotness levels.
     ///
     /// Eviction order (when over budget):
-    /// 1. Cold accounts (`eviction_priority` = 0) - evicted first
-    /// 2. Dynamic accounts (`eviction_priority` = 1) - evicted under memory pressure
-    /// 3. Tier A/B accounts - never evicted
+    /// 1. Cold accounts - evicted first
+    /// 2. Tier A/B accounts (hot) - never evicted
     ///
     /// Pruning (depth-limiting):
     /// - Tier A/B: Full depth preserved
-    /// - Dynamic/Cold: Pruned to `max_depth`
+    /// - Cold: Pruned to `max_depth`
     fn prune_preserving(&mut self, config: &crate::hot_accounts::SmartPruneConfig<'_>) {
         let fn_start = std::time::Instant::now();
 
         // Update heat for accessed tries
         self.modifications.update_and_reset();
 
-        // Categorize tries by eviction priority
-        // None = never evict, Some(0) = cold (evict first), Some(1) = dynamic (evict under
-        // pressure)
+        // Categorize tries: hot accounts are never evicted, cold accounts can be evicted
         let mut never_evict = Vec::new();
-        let mut cold_tries = Vec::new(); // priority 0
-        let mut dynamic_tries = Vec::new(); // priority 1
+        let mut cold_tries = Vec::new();
 
         for (address, trie) in &self.tries {
             let size = match trie {
@@ -1284,27 +1280,26 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
                 RevealableSparseTrie::Revealed(t) => t.size_hint(),
             };
 
-            match config.eviction_priority(address) {
-                None => never_evict.push((*address, size)),
-                Some(0) => cold_tries.push((*address, size)),
-                Some(_) => dynamic_tries.push((*address, size)),
+            if config.hot_accounts.should_preserve(address) {
+                never_evict.push((*address, size));
+            } else {
+                cold_tries.push((*address, size));
             }
         }
 
         // Calculate budget: max_storage_tries is a soft limit
-        // We always keep never_evict, then fill remaining slots with dynamic, then cold
+        // We always keep never_evict, then fill remaining slots with cold
         let budget = config.max_storage_tries;
         let always_kept = never_evict.len();
 
         let mut tries_to_evict = Vec::new();
         let mut tries_to_keep_prunable = Vec::new();
 
-        // If we're under budget with just never_evict, we can keep some dynamic and cold
+        // If we're under budget with just never_evict, we can keep some cold tries
         if always_kept < budget {
             let remaining_budget = budget - always_kept;
 
-            // Sort dynamic and cold by size (larger = more valuable to keep)
-            // Add heat multiplier for cold tries
+            // Sort cold tries by score (size * heat_multiplier) - larger = more valuable to keep
             let mut cold_scored: Vec<_> = cold_tries
                 .iter()
                 .map(|(addr, size)| {
@@ -1314,35 +1309,20 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
                 })
                 .collect();
 
-            let mut dynamic_scored: Vec<_> =
-                dynamic_tries.iter().map(|(addr, size)| (*addr, *size, *size * 2)).collect();
-
-            // Sort by score descending (use Reverse for descending order)
+            // Sort by score descending
             cold_scored.sort_unstable_by_key(|(_, _, score)| std::cmp::Reverse(*score));
-            dynamic_scored.sort_unstable_by_key(|(_, _, score)| std::cmp::Reverse(*score));
 
-            // Keep top dynamic tries first (they're hotter), then cold
-            let mut kept = 0;
-            for (addr, size, _) in dynamic_scored {
-                if kept >= remaining_budget {
-                    tries_to_evict.push(addr);
-                } else {
-                    tries_to_keep_prunable.push((addr, size));
-                    kept += 1;
-                }
-            }
+            // Keep top cold tries up to budget
             for (addr, size, _) in cold_scored {
-                if kept >= remaining_budget {
+                if tries_to_keep_prunable.len() >= remaining_budget {
                     tries_to_evict.push(addr);
                 } else {
                     tries_to_keep_prunable.push((addr, size));
-                    kept += 1;
                 }
             }
         } else {
-            // Over budget with just never_evict - evict all cold and dynamic
+            // Over budget with just never_evict - evict all cold
             tries_to_evict.extend(cold_tries.iter().map(|(addr, _)| *addr));
-            tries_to_evict.extend(dynamic_tries.iter().map(|(addr, _)| *addr));
         }
 
         // Evict selected tries

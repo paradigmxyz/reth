@@ -326,30 +326,6 @@ impl<'a> SmartPruneConfig<'a> {
     ) -> Self {
         Self { max_depth, max_storage_tries, hot_accounts }
     }
-
-    /// Returns the eviction priority for an account's storage trie.
-    ///
-    /// Lower values = evict first. Returns `None` for accounts that should never be evicted.
-    /// - Tier A (Always): Never evicted (None)
-    /// - Tier B (Likely): Never evicted (None)
-    /// - Cold: High priority eviction (Some(0))
-    pub fn eviction_priority(&self, address: &B256) -> Option<u8> {
-        match self.hot_accounts.hotness(address) {
-            Hotness::Always | Hotness::Likely => None, // Never evict
-            Hotness::Cold => Some(0),                  // Evict first
-        }
-    }
-
-    /// Returns whether the account should be pruned (depth-limited) vs preserved at full depth.
-    ///
-    /// - Tier A/B: Full depth (no pruning)
-    /// - Cold: Pruned to `max_depth`
-    pub fn should_prune_depth(&self, address: &B256) -> bool {
-        match self.hot_accounts.hotness(address) {
-            Hotness::Always | Hotness::Likely => false, // Keep full depth
-            Hotness::Cold => true,                      // Prune to max_depth
-        }
-    }
 }
 
 #[cfg(test)]
