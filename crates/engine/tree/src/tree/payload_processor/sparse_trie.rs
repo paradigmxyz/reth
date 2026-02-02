@@ -595,7 +595,7 @@ where
                 // Only exit when no new updates are processed.
                 //
                 // We need to keep iterating if any updates are being drained because that might
-                //indicate that more pending account updates can be promoted.
+                // indicate that more pending account updates can be promoted.
                 break;
             }
         }
