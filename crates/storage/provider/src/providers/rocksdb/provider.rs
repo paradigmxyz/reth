@@ -28,7 +28,7 @@ use rocksdb::{
     DB,
 };
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
@@ -1215,7 +1215,11 @@ impl RocksDBProvider {
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
-        let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+        // Use BTreeSet to deduplicate block numbers per address.
+        // PlainStateReverts.accounts is Vec<Vec<(Address, ...)>> where outer Vec is
+        // per-transition (tx), so the same account modified in multiple txs within a block
+        // would otherwise produce duplicate block numbers.
+        let mut account_history: BTreeMap<Address, BTreeSet<u64>> = BTreeMap::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
@@ -1225,7 +1229,7 @@ impl RocksDBProvider {
             // changesets written, ensuring history indices match changeset entries.
             for account_block_reverts in reverts.accounts {
                 for (address, _) in account_block_reverts {
-                    account_history.entry(address).or_default().push(block_number);
+                    account_history.entry(address).or_default().insert(block_number);
                 }
             }
         }
@@ -1248,7 +1252,11 @@ impl RocksDBProvider {
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
-        let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+        // Use BTreeSet to deduplicate block numbers per (address, slot).
+        // PlainStateReverts.storage is Vec<Vec<PlainStorageRevert>> where outer Vec is
+        // per-transition (tx), so the same slot modified in multiple txs within a block
+        // would otherwise produce duplicate block numbers.
+        let mut storage_history: BTreeMap<(Address, B256), BTreeSet<u64>> = BTreeMap::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
@@ -1263,7 +1271,7 @@ impl RocksDBProvider {
                         storage_history
                             .entry((revert.address, key))
                             .or_default()
-                            .push(block_number);
+                            .insert(block_number);
                     }
                 }
             }
