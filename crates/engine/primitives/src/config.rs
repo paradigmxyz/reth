@@ -3,10 +3,16 @@
 use alloy_eips::merge::EPOCH_SLOTS;
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
-pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
+///
+/// Higher values improve write batching but use more memory. With threshold=16,
+/// persistence triggers when 17+ blocks are ahead of the last persisted block.
+pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 16;
 
 /// How close to the canonical head we persist blocks.
-pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
+///
+/// This is the "reorg-safe window" - reorgs shallower than this depth stay entirely
+/// in memory without triggering disk I/O. Set to 8 to handle typical reorg depths.
+pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 8;
 
 /// Minimum number of workers we allow configuring explicitly.
 pub const MIN_WORKER_COUNT: usize = 32;
