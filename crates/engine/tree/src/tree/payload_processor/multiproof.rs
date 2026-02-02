@@ -22,7 +22,7 @@ use reth_trie_parallel::{
         AccountMultiproofInput, ProofResult, ProofResultContext, ProofResultMessage,
         ProofWorkerHandle,
     },
-    targets_v2::{ChunkedMultiProofTargetsV2, MultiProofTargetsV2},
+    targets_v2::MultiProofTargetsV2,
 };
 use revm_primitives::map::{hash_map, B256Map};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
@@ -367,9 +367,7 @@ impl VersionedMultiProofTargets {
             Self::Legacy(targets) => {
                 Box::new(MultiProofTargets::chunks(targets, chunk_size).map(Self::Legacy))
             }
-            Self::V2(targets) => {
-                Box::new(ChunkedMultiProofTargetsV2::new(targets, chunk_size).map(Self::V2))
-            }
+            Self::V2(targets) => Box::new(targets.chunks(chunk_size).map(Self::V2)),
         }
     }
 }
@@ -1494,7 +1492,7 @@ fn get_proof_targets(
 /// Dispatches work items as a single unit or in chunks based on target size and worker
 /// availability.
 #[allow(clippy::too_many_arguments)]
-fn dispatch_with_chunking<T, I>(
+pub(crate) fn dispatch_with_chunking<T, I>(
     items: T,
     chunking_len: usize,
     chunk_size: Option<usize>,

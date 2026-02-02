@@ -1,19 +1,21 @@
 //! Sparse Trie task related functionality.
 
 use crate::tree::{
-    multiproof::{evm_state_to_hashed_post_state, MultiProofMessage, VersionedMultiProofTargets},
+    multiproof::{
+        dispatch_with_chunking, evm_state_to_hashed_post_state, MultiProofMessage,
+        VersionedMultiProofTargets,
+    },
     payload_processor::multiproof::{MultiProofTaskMetrics, SparseTrieUpdate},
 };
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::ParallelIterator;
-use reth_errors::ProviderError;
+use rayon::iter::{IntoParallelRefMutIterator, ParallelBridge, ParallelIterator};
 use reth_primitives_traits::{Account, ParallelBridgeBuffered};
 use reth_revm::state::EvmState;
 use reth_trie::{
-    proof_v2::Target, updates::TrieUpdates, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, Nibbles,
+    TrieAccount, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_parallel::{
     proof_task::{
@@ -24,7 +26,7 @@ use reth_trie_parallel::{
     targets_v2::MultiProofTargetsV2,
 };
 use reth_trie_sparse::{
-    errors::{SparseStateTrieResult, SparseTrieErrorKind},
+    errors::{SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     LeafUpdate, SerialSparseTrie, SparseStateTrie, SparseTrie, SparseTrieExt,
 };
@@ -34,7 +36,7 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-use tracing::{debug, debug_span, instrument, trace};
+use tracing::{debug, debug_span, error, instrument, trace};
 
 #[expect(clippy::large_enum_variant)]
 pub(super) enum SpawnedSparseTrieTask<BPF, A, S>
@@ -241,6 +243,13 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     fetched_storage_targets: B256Map<B256Map<u8>>,
     /// Reusable buffer for RLP encoding of accounts.
     account_rlp_buf: Vec<u8>,
+    /// Whether the last state update has been received.
+    finished_state_updates: bool,
+    /// Pending targets to be dispatched to the proof workers.
+    pending_targets: MultiProofTargetsV2,
+    /// Number of pending execution/prewarming updates received but not yet passed to
+    /// `update_leaves`.
+    pending_updates: usize,
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
 }
@@ -270,6 +279,9 @@ where
             fetched_account_targets: Default::default(),
             fetched_storage_targets: Default::default(),
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            finished_state_updates: Default::default(),
+            pending_targets: Default::default(),
+            pending_updates: Default::default(),
             metrics,
         }
     }
@@ -317,15 +329,8 @@ where
     pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
-        let mut finished_state_updates = false;
         loop {
             crossbeam_channel::select_biased! {
-                recv(self.proof_result_rx) -> message => {
-                    let Ok(result) = message else {
-                        unreachable!("we own the sender half")
-                    };
-                    self.on_proof_result(result)?;
-                },
                 recv(self.updates) -> message => {
                     let update = match message {
                         Ok(m) => m,
@@ -334,27 +339,39 @@ where
                         }
                     };
 
-                    match update {
-                        MultiProofMessage::PrefetchProofs(targets) => {
-                            self.on_prewarm_targets(targets);
-                        }
-                        MultiProofMessage::StateUpdate(_, state) => {
-                            self.on_state_update(state);
-                        }
-                        MultiProofMessage::EmptyProof { sequence_number: _, state } => {
-                            self.on_hashed_state_update(state);
-                        }
-                        MultiProofMessage::BlockAccessList(_) => todo!(),
-                        MultiProofMessage::FinishedStateUpdates => {
-                            finished_state_updates = true;
-                        }
-                    }
+                    self.on_multiproof_message(update);
                 }
+                recv(self.proof_result_rx) -> message => {
+                    let Ok(result) = message else {
+                        unreachable!("we own the sender half")
+                    };
+                    let ProofResult::V2(mut result) = result.result? else {
+                        unreachable!("sparse trie as cache must only be used with multiproof v2");
+                    };
+
+                    while let Ok(next) = self.proof_result_rx.try_recv() {
+                        let ProofResult::V2(res) = next.result? else {
+                            unreachable!("sparse trie as cache must only be used with multiproof v2");
+                        };
+                        result.extend(res);
+                    }
+
+                    self.on_proof_result(result)?;
+                },
             }
 
-            self.process_updates()?;
+            if self.updates.is_empty() && self.proof_result_rx.is_empty() {
+                self.dispatch_pending_targets();
+                self.process_updates()?;
+                self.dispatch_pending_targets();
+            } else if self.updates.is_empty() || self.pending_updates > 100 {
+                self.process_leaf_updates()?;
+                self.dispatch_pending_targets();
+            } else if self.updates.is_empty() || self.pending_targets.chunking_length() > 100 {
+                self.dispatch_pending_targets();
+            }
 
-            if finished_state_updates &&
+            if self.finished_state_updates &&
                 self.account_updates.is_empty() &&
                 self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
             {
@@ -377,6 +394,22 @@ where
         Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
 
+    /// Processes a [`MultiProofMessage`].
+    fn on_multiproof_message(&mut self, message: MultiProofMessage) {
+        match message {
+            MultiProofMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
+            MultiProofMessage::StateUpdate(_, state) => self.on_state_update(state),
+            MultiProofMessage::EmptyProof { .. } => unreachable!(),
+            MultiProofMessage::BlockAccessList(_) => todo!(),
+            MultiProofMessage::FinishedStateUpdates => self.finished_state_updates = true,
+        }
+    }
+
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
     fn on_prewarm_targets(&mut self, targets: VersionedMultiProofTargets) {
         let VersionedMultiProofTargets::V2(targets) = targets else {
             unreachable!("sparse trie as cache must only be used with V2 multiproof targets");
@@ -412,11 +445,7 @@ where
     )]
     fn on_state_update(&mut self, update: EvmState) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
-        self.on_hashed_state_update(hashed_state_update)
-    }
 
-    /// Processes a hashed state update and encodes all state changes as trie updates.
-    fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (address, storage) in hashed_state_update.storages {
             for (slot, value) in storage.storage {
                 let encoded = if value.is_zero() {
@@ -454,72 +483,144 @@ where
 
     fn on_proof_result(
         &mut self,
-        result: ProofResultMessage,
+        result: DecodedMultiProofV2,
     ) -> Result<(), ParallelStateRootError> {
-        let ProofResult::V2(result) = result.result? else {
-            unreachable!("sparse trie as cache must only be used with multiproof v2");
-        };
-
         self.trie.reveal_decoded_multiproof_v2(result).map_err(|e| {
             ParallelStateRootError::Other(format!("could not reveal multiproof: {e:?}"))
         })
     }
 
-    /// Applies updates to the sparse trie and dispatches requested multiproof targets.
-    fn process_updates(&mut self) -> Result<(), ProviderError> {
-        let mut targets = MultiProofTargetsV2::default();
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
+    fn process_leaf_updates(&mut self) -> SparseTrieResult<()> {
+        self.pending_updates = 0;
 
-        for (addr, updates) in &mut self.storage_updates {
-            let trie = self.trie.get_or_create_storage_trie_mut(*addr);
-            let fetched_storage = self.fetched_storage_targets.entry(*addr).or_default();
+        // Start with processing all storage updates in parallel.
+        let storage_results = self
+            .storage_updates
+            .iter_mut()
+            .map(|(address, updates)| {
+                let trie = self.trie.take_or_create_storage_trie(address);
+                let fetched = self.fetched_storage_targets.remove(address).unwrap_or_default();
 
-            trie.update_leaves(updates, |path, min_len| match fetched_storage.entry(path) {
-                Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
-                        targets
-                            .storage_targets
-                            .entry(*addr)
-                            .or_default()
-                            .push(Target::new(path).with_min_len(min_len));
-                    }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    targets
-                        .storage_targets
-                        .entry(*addr)
-                        .or_default()
-                        .push(Target::new(path).with_min_len(min_len));
-                }
+                (address, updates, fetched, trie)
             })
-            .map_err(ProviderError::other)?;
+            .par_bridge()
+            .map(|(address, updates, mut fetched, mut trie)| {
+                let mut targets = Vec::new();
 
-            // If all storage updates were processed, we can now compute the new storage root.
-            if updates.is_empty() {
-                let storage_root =
+                trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+                    Entry::Occupied(mut entry) => {
+                        if min_len < *entry.get() {
+                            entry.insert(min_len);
+                            targets.push(Target::new(path).with_min_len(min_len));
+                        }
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(min_len);
+                        targets.push(Target::new(path).with_min_len(min_len));
+                    }
+                })?;
+
+                SparseTrieResult::Ok((address, targets, fetched, trie))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for (address, targets, fetched, trie) in storage_results {
+            self.fetched_storage_targets.insert(*address, fetched);
+            self.trie.insert_storage_trie(*address, trie);
+
+            if !targets.is_empty() {
+                self.pending_targets.storage_targets.entry(*address).or_default().extend(targets);
+            }
+        }
+
+        // Process account trie updates and fill the account targets.
+        self.process_account_leaf_updates()?;
+
+        Ok(())
+    }
+
+    /// Invokes `update_leaves` for the accounts trie and collects any new targets.
+    /// 
+    /// Returns whether any updates were drained (applied to the trie).
+    fn process_account_leaf_updates(&mut self) -> SparseTrieResult<bool> {
+        let updates_len_before = self.account_updates.len();
+
+        self.trie.trie_mut().update_leaves(&mut self.account_updates, |target, min_len| match self
+            .fetched_account_targets
+            .entry(target)
+        {
+            Entry::Occupied(mut entry) => {
+                if min_len < *entry.get() {
+                    entry.insert(min_len);
+                    self.pending_targets
+                        .account_targets
+                        .push(Target::new(target).with_min_len(min_len));
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(min_len);
+                self.pending_targets
+                    .account_targets
+                    .push(Target::new(target).with_min_len(min_len));
+            }
+        })?;
+
+        Ok(self.account_updates.len() < updates_len_before)
+    }
+
+    /// Applies updates to the sparse trie and dispatches requested multiproof targets.
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
+    fn process_updates(&mut self) -> SparseTrieResult<()> {
+        self.process_leaf_updates()?;
+
+        if self.pending_account_updates.is_empty() {
+            return Ok(());
+        }
+
+        let roots = self
+            .trie
+            .storage_tries_mut()
+            .par_iter_mut()
+            .filter(|(address, _)| {
+                self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty())
+            })
+            .map(|(address, trie)| {
+                let root =
                     trie.root().expect("updates are drained, trie should be revealed by now");
 
-                // If there is a pending account update for this address with known info, we can
-                // encode it into proper update right away.
-                if let Entry::Occupied(entry) = self.pending_account_updates.entry(*addr) &&
-                    entry.get().is_some()
+                (address, root)
+            })
+            .collect::<Vec<_>>();
+
+        for (addr, storage_root) in roots {
+            // If the storage root is known and we have a pending update for this account, encode it
+            // into a proper update.
+            if let Entry::Occupied(entry) = self.pending_account_updates.entry(*addr) &&
+                entry.get().is_some()
+            {
+                let account = entry.remove().expect("just checked, should be Some");
+                let encoded = if account.is_none_or(|account| account.is_empty()) &&
+                    storage_root == EMPTY_ROOT_HASH
                 {
-                    let account = entry.remove().expect("just checked, should be Some");
-                    let encoded = if account.is_none_or(|account| account.is_empty()) &&
-                        storage_root == EMPTY_ROOT_HASH
-                    {
-                        Vec::new()
-                    } else {
-                        self.account_rlp_buf.clear();
-                        account
-                            .unwrap_or_default()
-                            .into_trie_account(storage_root)
-                            .encode(&mut self.account_rlp_buf);
-                        self.account_rlp_buf.clone()
-                    };
-                    self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
-                }
+                    Vec::new()
+                } else {
+                    self.account_rlp_buf.clear();
+                    account
+                        .unwrap_or_default()
+                        .into_trie_account(storage_root)
+                        .encode(&mut self.account_rlp_buf);
+                    self.account_rlp_buf.clone()
+                };
+                self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
             }
         }
 
@@ -568,51 +669,52 @@ where
                 false
             });
 
-            let updates_len_before = self.account_updates.len();
-
-            // Process account trie updates and fill the account targets.
-            self.trie
-                .trie_mut()
-                .update_leaves(&mut self.account_updates, |target, min_len| {
-                    match self.fetched_account_targets.entry(target) {
-                        Entry::Occupied(mut entry) => {
-                            if min_len < *entry.get() {
-                                entry.insert(min_len);
-                                targets
-                                    .account_targets
-                                    .push(Target::new(target).with_min_len(min_len));
-                            }
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(min_len);
-                            targets.account_targets.push(Target::new(target).with_min_len(min_len));
-                        }
-                    }
-                })
-                .map_err(ProviderError::other)?;
-
-            if updates_len_before == self.account_updates.len() {
-                // Only exit when no new updates are processed.
-                //
-                // We need to keep iterating if any updates are being drained because that might
-                // indicate that more pending account updates can be promoted.
-                break;
+            // Only exit when no new updates are processed.
+            //
+            // We need to keep iterating if any updates are being drained because that might
+            // indicate that more pending account updates can be promoted.
+            if !self.process_account_leaf_updates()? {
+                break
             }
         }
-
-        if !targets.is_empty() {
-            self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput::V2 {
-                targets,
-                proof_result_sender: ProofResultContext::new(
-                    self.proof_result_tx.clone(),
-                    0,
-                    HashedPostState::default(),
-                    Instant::now(),
-                ),
-            })?;
-        }
+            
 
         Ok(())
+    }
+
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
+    fn dispatch_pending_targets(&mut self) {
+        if !self.pending_targets.is_empty() {
+            let chunking_length = self.pending_targets.chunking_length();
+            dispatch_with_chunking(
+                std::mem::take(&mut self.pending_targets),
+                chunking_length,
+                Some(60),
+                300,
+                self.proof_worker_handle.available_account_workers(),
+                self.proof_worker_handle.available_storage_workers(),
+                MultiProofTargetsV2::chunks,
+                |proof_targets| {
+                    if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(
+                        AccountMultiproofInput::V2 {
+                            targets: proof_targets,
+                            proof_result_sender: ProofResultContext::new(
+                                self.proof_result_tx.clone(),
+                                0,
+                                HashedPostState::default(),
+                                Instant::now(),
+                            ),
+                        },
+                    ) {
+                        error!("failed to dispatch account multiproof: {e:?}");
+                    }
+                },
+            );
+        }
     }
 }
 
