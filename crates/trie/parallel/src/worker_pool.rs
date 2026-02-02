@@ -94,7 +94,7 @@ impl ProofWorkerPool {
     }
 
     /// Returns the number of workers in the pool.
-    pub fn worker_count(&self) -> usize {
+    pub const fn worker_count(&self) -> usize {
         self.worker_txs.len()
     }
 
