@@ -76,9 +76,6 @@ where
         max_values_capacity: usize,
         hot_accounts: &SharedHotAccounts,
     ) -> SparseStateTrie<A, S> {
-        // Rotate hot account filters at end of block
-        hot_accounts.lock().end_block();
-
         match self {
             Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
             Self::Cached(task) => task.into_trie_for_reuse(

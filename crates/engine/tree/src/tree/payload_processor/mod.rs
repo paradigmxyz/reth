@@ -717,7 +717,9 @@ pub struct PayloadHandle<Tx, Err, R> {
     transactions: mpsc::Receiver<Result<Tx, Err>>,
     /// Receiver for the state root
     state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
-    /// Shared hot accounts tracker for recording touched accounts during execution.
+    /// Shared hot accounts tracker (used for trie preservation, may be used for fee recipient
+    /// recording in the future).
+    #[allow(dead_code)]
     hot_accounts: Option<SharedHotAccounts>,
     /// Span for tracing
     _span: Span,
@@ -746,37 +748,13 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Returns a state hook to be used to send state updates to this task.
     ///
     /// If a multiproof task is spawned the hook will notify it about new states.
-    /// Also records touched accounts in the hot accounts tracker for preservation.
     pub fn state_hook(&self) -> impl OnStateHook {
-        use alloy_primitives::keccak256;
-
         // convert the channel into a `StateHookSender` that emits an event on drop
         let to_multi_proof = self.to_multi_proof.clone().map(StateHookSender::new);
-        let hot_accounts = self.hot_accounts.clone();
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
                 let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
-            }
-
-            // Record touched accounts in the hot accounts tracker
-            if let Some(ref tracker) = hot_accounts {
-                // Batch the addresses to minimize lock contention
-                let touched: Vec<_> = state
-                    .iter()
-                    .map(|(addr, account)| {
-                        let hashed = keccak256(addr);
-                        // Has code if storage is modified (implies contract) or if account has code
-                        let has_code = !account.storage.is_empty() ||
-                            account.info.code.as_ref().is_some_and(|c| !c.is_empty());
-                        (hashed, has_code)
-                    })
-                    .collect();
-
-                let mut guard = tracker.lock();
-                for (hashed_addr, has_code) in touched {
-                    guard.record(hashed_addr, has_code);
-                }
             }
         }
     }

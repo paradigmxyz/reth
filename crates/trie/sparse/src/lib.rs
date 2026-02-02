@@ -19,10 +19,7 @@ pub mod provider;
 #[cfg(feature = "std")]
 pub mod hot_accounts;
 #[cfg(feature = "std")]
-pub use hot_accounts::{
-    BloomFilter, HotAccountConfig, HotStorageSlots, Hotness, RotatingBloomFilter, SmartPruneConfig,
-    StorageSlotKey, TieredHotAccounts,
-};
+pub use hot_accounts::{Hotness, SmartPruneConfig, TieredHotAccounts};
 
 #[cfg(feature = "metrics")]
 mod metrics;

@@ -115,7 +115,7 @@ impl PreservedSparseTrie {
                     "Clearing anchored sparse trie - parent state root mismatch"
                 );
                 trie.clear();
-                hot_accounts.lock().clear_dynamic();
+                hot_accounts.lock().clear_fee_recipients();
                 (trie, hot_accounts)
             }
             Self::Cleared { trie, hot_accounts } => {

@@ -11302,7 +11302,6 @@ dependencies = [
  "reth-trie",
  "reth-trie-common",
  "reth-trie-db",
- "rustc-hash",
  "tracing",
 ]
 
