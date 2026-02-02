@@ -1155,12 +1155,11 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
         let mut stats =
             StorageTriesPruneStats { total_tries_before: self.tries.len(), ..Default::default() };
 
-        // Update heat for accessed tries
+        // Update access tracking: decay heat and reset per-cycle access flags
         self.modifications.update_and_reset();
 
         // Collect (address, size, score) for all tries
-        // Score = size * heat_multiplier
-        // Hot tries (high heat) get boosted weight
+        // Score = size * heat_multiplier (frequently accessed tries score higher)
         let mut trie_info: Vec<(B256, usize, usize)> = self
             .tries
             .iter()
@@ -1267,7 +1266,7 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
     fn prune_preserving(&mut self, config: &crate::hot_accounts::SmartPruneConfig<'_>) {
         let fn_start = std::time::Instant::now();
 
-        // Update heat for accessed tries
+        // Update access tracking: decay heat and reset per-cycle access flags
         self.modifications.update_and_reset();
 
         // Categorize tries: hot accounts are never evicted, cold accounts can be evicted
