@@ -70,56 +70,42 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
         if let Some(prune_tip) = lowest_static_file_height {
             info!(target: "reth::cli", ?prune_tip, ?config, "Pruning data from database...");
 
-            // With edge feature (static files), use batched pruning with a limit to bound memory.
-            // Run in a loop until all data is pruned.
-            #[cfg(feature = "edge")]
-            {
-                const DELETE_LIMIT: usize = 200_000;
-                let mut pruner = PrunerBuilder::new(config.clone())
-                    .delete_limit(DELETE_LIMIT)
-                    .build_with_provider_factory(provider_factory);
+            // Use batched pruning with a limit to bound memory, running in a loop until complete.
+            const DELETE_LIMIT: usize = 200_000;
+            let mut pruner = PrunerBuilder::new(config)
+                .delete_limit(DELETE_LIMIT)
+                .build_with_provider_factory(provider_factory);
 
-                let mut total_pruned = 0usize;
-                loop {
-                    let output = pruner.run(prune_tip)?;
-                    let batch_pruned: usize =
-                        output.segments.iter().map(|(_, seg)| seg.pruned).sum();
-                    total_pruned = total_pruned.saturating_add(batch_pruned);
+            let mut total_pruned = 0usize;
+            loop {
+                let output = pruner.run(prune_tip)?;
+                let batch_pruned: usize = output.segments.iter().map(|(_, seg)| seg.pruned).sum();
+                total_pruned = total_pruned.saturating_add(batch_pruned);
 
-                    // Check if all segments are finished (not just the overall progress,
-                    // since the pruner sets overall progress from the last segment only)
-                    let all_segments_finished =
-                        output.segments.iter().all(|(_, seg)| seg.progress.is_finished());
+                // Check if all segments are finished (not just the overall progress,
+                // since the pruner sets overall progress from the last segment only)
+                let all_segments_finished =
+                    output.segments.iter().all(|(_, seg)| seg.progress.is_finished());
 
-                    if all_segments_finished {
-                        break;
-                    }
-
-                    if batch_pruned == 0 {
-                        return Err(eyre::eyre!(
-                            "pruner made no progress but reported more data remaining; \
-                             aborting to prevent infinite loop"
-                        ));
-                    }
-
-                    info!(
-                        target: "reth::cli",
-                        batch_pruned,
-                        total_pruned,
-                        "Pruning batch complete, continuing..."
-                    );
+                if all_segments_finished {
+                    break;
                 }
-                info!(target: "reth::cli", total_pruned, "Pruned data from database");
-            }
 
-            #[cfg(not(feature = "edge"))]
-            {
-                let mut pruner = PrunerBuilder::new(config)
-                    .delete_limit(usize::MAX)
-                    .build_with_provider_factory(provider_factory);
-                pruner.run(prune_tip)?;
-                info!(target: "reth::cli", "Pruned data from database");
+                if batch_pruned == 0 {
+                    return Err(eyre::eyre!(
+                        "pruner made no progress but reported more data remaining; \
+                         aborting to prevent infinite loop"
+                    ));
+                }
+
+                info!(
+                    target: "reth::cli",
+                    batch_pruned,
+                    total_pruned,
+                    "Pruning batch complete, continuing..."
+                );
             }
+            info!(target: "reth::cli", total_pruned, "Pruned data from database");
         }
 
         Ok(())
