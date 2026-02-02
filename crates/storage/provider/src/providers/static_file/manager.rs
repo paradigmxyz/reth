@@ -1533,11 +1533,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     return false;
                 }
 
-                if Self::is_segment_fully_pruned(provider, PruneSegment::Receipts) {
-                    debug!(target: "reth::providers::static_file", ?segment, "Skipping receipts segment: fully pruned");
-                    return false;
-                }
-
                 true
             }
             StaticFileSegment::TransactionSenders => {

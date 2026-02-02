@@ -15,16 +15,13 @@ use reth_provider::{
     NodePrimitivesProvider, PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache,
     TransactionsProvider,
 };
-use reth_prune_types::{
-    PruneCheckpoint, PruneMode, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
-};
+use reth_prune_types::{PruneCheckpoint, PruneSegment, SegmentOutput, SegmentOutputCheckpoint};
 use reth_static_file_types::StaticFileSegment;
 use tracing::{debug, trace};
 
 pub(crate) fn prune<Provider>(
     provider: &Provider,
     input: PruneInput,
-    mode: PruneMode,
 ) -> Result<SegmentOutput, PrunerError>
 where
     Provider: DBProvider<Tx: DbTxMut>
@@ -36,16 +33,6 @@ where
 {
     if EitherWriter::receipts_destination(provider).is_static_file() {
         debug!(target: "pruner", "Pruning receipts from static files.");
-
-        if mode.is_full() {
-            debug!(target: "pruner", "PruneMode::Full: deleting all receipts static files.");
-            return segments::delete_static_files_segment(
-                provider,
-                input,
-                StaticFileSegment::Receipts,
-            )
-        }
-
         return segments::prune_static_files(provider, input, StaticFileSegment::Receipts)
     }
     debug!(target: "pruner", "Pruning receipts from database.");
@@ -201,7 +188,7 @@ mod tests {
                 .sub(1);
 
             let provider = db.factory.database_provider_rw().unwrap();
-            let result = super::prune(&provider, input, prune_mode).unwrap();
+            let result = super::prune(&provider, input).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 
             assert_matches!(
