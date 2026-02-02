@@ -50,7 +50,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     /// a value 6x higher than the default (768 instead of 128).
     ///
     /// If `None` is provided, the default threshold is used.
-    pub fn with_wal_blocks_warning(mut self, threshold: Option<usize>) -> Self {
+    pub const fn with_wal_blocks_warning(mut self, threshold: Option<usize>) -> Self {
         if let Some(threshold) = threshold {
             self.wal_blocks_warning = threshold;
         }
