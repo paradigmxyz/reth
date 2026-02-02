@@ -39,7 +39,7 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{ClearedSparseStateTrie, RevealableSparseTrie, SparseStateTrie};
+use reth_trie_sparse::{RevealableSparseTrie, SparseStateTrie};
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
     collections::BTreeMap,
@@ -552,11 +552,11 @@ where
                     sparse_state_trie,
                 ))
             } else {
-                SpawnedSparseTrieTask::Cached(SparseTrieCacheTask::new_with_cleared_trie(
+                SpawnedSparseTrieTask::Cached(SparseTrieCacheTask::new_with_trie(
                     from_multi_proof,
                     proof_worker_handle,
                     trie_metrics.clone(),
-                    ClearedSparseStateTrie::from_state_trie(sparse_state_trie),
+                    sparse_state_trie,
                 ))
             };
 
