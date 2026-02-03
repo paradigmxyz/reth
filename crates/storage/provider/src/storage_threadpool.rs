@@ -7,7 +7,7 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::sync::LazyLock;
 
 /// Number of threads in the storage I/O thread pool.
-const STORAGE_POOL_THREADS: usize = 8;
+const STORAGE_POOL_THREADS: usize = 16;
 
 /// Static thread pool for storage I/O operations.
 ///
@@ -16,7 +16,7 @@ const STORAGE_POOL_THREADS: usize = 8;
 pub(crate) static STORAGE_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
     ThreadPoolBuilder::new()
         .num_threads(STORAGE_POOL_THREADS)
-        .thread_name(|idx| format!("reth-storage-{idx}"))
+        .thread_name(|idx| format!("save-blocks-{idx}"))
         .build()
         .expect("failed to create storage thread pool")
 });
