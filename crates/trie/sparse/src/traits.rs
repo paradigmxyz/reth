@@ -119,6 +119,11 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// # Returns
     ///
     /// `Ok(())` if successful, or an error if any of the nodes was not revealed.
+    ///
+    /// # Note
+    ///
+    /// The implementation may modify the input nodes. A common thing to do is [`std::mem::replace`]
+    /// each node with [`TrieNode::EmptyRoot`] to avoid cloning.
     fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) -> SparseTrieResult<()>;
 
     /// Updates the value of a leaf node at the specified path.

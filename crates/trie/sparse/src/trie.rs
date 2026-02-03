@@ -476,6 +476,7 @@ impl SparseTrieTrait for SerialSparseTrie {
     fn reserve_nodes(&mut self, additional: usize) {
         self.nodes.reserve(additional);
     }
+
     fn reveal_node(
         &mut self,
         path: Nibbles,
