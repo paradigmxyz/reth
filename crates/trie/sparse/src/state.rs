@@ -23,14 +23,54 @@ use reth_trie_common::{
 use tracing::debug;
 use tracing::{instrument, trace};
 
-/// Holds data that should be dropped after any locks are released.
+/// Buffer pool for proof nodes with deferred clearing.
 ///
-/// This is used to defer expensive deallocations (like proof node buffers) until after final state
-/// root is calculated
+/// Buffers are reused across reveal operations to reduce allocations.
+/// After the lock is released, pending buffers are cleared and returned to the pool.
 #[derive(Debug, Default)]
-pub struct DeferredDrops {
-    /// Each nodes reveal operation creates a new buffer, uses it, and pushes it here.
-    pub proof_nodes_bufs: Vec<Vec<ProofTrieNode>>,
+pub struct ProofNodeBuffers {
+    /// Pool of cleared buffers ready for reuse.
+    pool: Vec<Vec<ProofTrieNode>>,
+    /// Buffers pending clear (consumed but not yet cleared).
+    pending_clear: Vec<Vec<ProofTrieNode>>,
+}
+
+impl ProofNodeBuffers {
+    /// Take a buffer from the pool or create a new one.
+    pub fn take_buffer(&mut self) -> Vec<ProofTrieNode> {
+        self.pool.pop().unwrap_or_default()
+    }
+
+    /// Try to take a buffer from pool or pending clear list for reuse.
+    ///
+    /// Returns `Some` if a buffer is available, `None` otherwise.
+    pub fn maybe_take_buffer(&mut self) -> Option<Vec<ProofTrieNode>> {
+        self.pool.pop()
+    }
+
+    /// Push a consumed buffer to the pending clear list.
+    pub fn push_pending(&mut self, buf: Vec<ProofTrieNode>) {
+        self.pending_clear.push(buf);
+    }
+
+    /// Extend pending clear list with multiple buffers.
+    pub fn extend_pending(&mut self, bufs: Vec<Vec<ProofTrieNode>>) {
+        self.pending_clear.extend(bufs);
+    }
+
+    /// Clear pending buffers and return them to the pool.
+    ///
+    /// This should be called after releasing any locks to avoid expensive
+    /// operations while holding locks. Keeps up to `max_pool_size` buffers.
+    pub fn clear_pending(&mut self, max_pool_size: usize) {
+        for mut buf in self.pending_clear.drain(..) {
+            if self.pool.len() < max_pool_size {
+                buf.clear();
+                self.pool.push(buf);
+            }
+            // else: drop the buffer (excess capacity)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -49,8 +89,8 @@ pub struct SparseStateTrie<
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
     account_rlp_buf: Vec<u8>,
-    /// Holds data that should be dropped after final state root is calculated.
-    deferred_drops: DeferredDrops,
+    /// Buffer pool for proof nodes with deferred clearing.
+    proof_node_buffers: ProofNodeBuffers,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -68,7 +108,7 @@ where
             storage: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
-            deferred_drops: DeferredDrops::default(),
+            proof_node_buffers: ProofNodeBuffers::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -119,12 +159,12 @@ impl<A, S> SparseStateTrie<A, S> {
         self
     }
 
-    /// Takes the data structures for deferred dropping.
+    /// Returns a mutable reference to the proof node buffers.
     ///
-    /// This allows the caller to drop the buffers later, avoiding expensive deallocations while
-    /// calculating the state root.
-    pub fn take_deferred_drops(&mut self) -> DeferredDrops {
-        core::mem::take(&mut self.deferred_drops)
+    /// Use this to call `clear_pending()` after releasing locks to avoid expensive
+    /// clearing operations while holding locks.
+    pub const fn proof_node_buffers_mut(&mut self) -> &mut ProofNodeBuffers {
+        &mut self.proof_node_buffers
     }
 }
 
@@ -285,33 +325,38 @@ where
             // Process all storage trie revealings in parallel, having first removed the
             // `reveal_nodes` tracking and `RevealableSparseTrie`s for each account from their
             // HashMaps. These will be returned after processing.
+            //
+            // Try to reuse pending buffers from previous reveals. Take them in the sequential
+            // map phase; if none available, allocate in the parallel phase.
             let results: Vec<_> = storages
                 .into_iter()
                 .map(|(account, storage_subtree)| {
                     let revealed_nodes = self.storage.take_or_create_revealed_paths(&account);
                     let trie = self.storage.take_or_create_trie(&account);
-                    (account, storage_subtree, revealed_nodes, trie)
+                    let buf = self.proof_node_buffers.maybe_take_buffer();
+                    (account, storage_subtree, revealed_nodes, trie, buf)
                 })
                 .par_bridge_buffered()
-                .map(|(account, storage_subtree, mut revealed_nodes, mut trie)| {
-                    let mut bufs = Vec::new();
-                    let result = Self::reveal_decoded_storage_multiproof_inner(
+                .map(|(account, storage_subtree, mut revealed_nodes, mut trie, buf)| {
+                    // Use provided buffer or allocate new one
+                    let mut buf = buf.unwrap_or_default();
+                    let result = Self::reveal_decoded_storage_multiproof_inner_with_buf(
                         account,
                         storage_subtree,
                         &mut revealed_nodes,
                         &mut trie,
-                        &mut bufs,
+                        &mut buf,
                         retain_updates,
                     );
 
-                    (account, revealed_nodes, trie, result, bufs)
+                    (account, revealed_nodes, trie, result, buf)
                 })
                 .collect();
 
             // Return `revealed_nodes` and `RevealableSparseTrie` for each account, incrementing
             // metrics and returning the last error seen if any.
             let mut any_err = Ok(());
-            for (account, revealed_nodes, trie, result, bufs) in results {
+            for (account, revealed_nodes, trie, result, buf) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
                 // Mark this storage trie as hot (accessed this tick)
@@ -328,8 +373,8 @@ where
                     any_err = result.map(|_| ());
                 }
 
-                // Keep buffers for deferred dropping
-                self.deferred_drops.proof_nodes_bufs.extend(bufs);
+                // Keep buffer for deferred clearing
+                self.proof_node_buffers.push_pending(buf);
             }
 
             any_err
@@ -385,31 +430,36 @@ where
             // Process all storage trie revealings in parallel, having first removed the
             // `reveal_nodes` tracking and `RevealableSparseTrie`s for each account from their
             // HashMaps. These will be returned after processing.
+            //
+            // Try to reuse pending buffers from previous reveals. Take them in the sequential
+            // map phase; if none available, allocate in the parallel phase.
             let results: Vec<_> = multiproof
                 .storage_proofs
                 .into_iter()
                 .map(|(account, storage_proofs)| {
                     let revealed_nodes = self.storage.take_or_create_revealed_paths(&account);
                     let trie = self.storage.take_or_create_trie(&account);
-                    (account, storage_proofs, revealed_nodes, trie)
+                    let buf = self.proof_node_buffers.maybe_take_buffer();
+                    (account, storage_proofs, revealed_nodes, trie, buf)
                 })
                 .par_bridge_buffered()
-                .map(|(account, storage_proofs, mut revealed_nodes, mut trie)| {
-                    let mut bufs = Vec::new();
-                    let result = Self::reveal_storage_v2_proof_nodes_inner(
+                .map(|(account, storage_proofs, mut revealed_nodes, mut trie, buf)| {
+                    // Use provided buffer or allocate new one
+                    let mut buf = buf.unwrap_or_default();
+                    let result = Self::reveal_storage_v2_proof_nodes_inner_with_buf(
                         account,
                         storage_proofs,
                         &mut revealed_nodes,
                         &mut trie,
-                        &mut bufs,
+                        &mut buf,
                         retain_updates,
                     );
-                    (account, result, revealed_nodes, trie, bufs)
+                    (account, result, revealed_nodes, trie, buf)
                 })
                 .collect();
 
             let mut any_err = Ok(());
-            for (account, result, revealed_nodes, trie, bufs) in results {
+            for (account, result, revealed_nodes, trie, buf) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
                 // Mark this storage trie as hot (accessed this tick)
@@ -426,8 +476,8 @@ where
                     any_err = result.map(|_| ());
                 }
 
-                // Keep buffers for deferred dropping
-                self.deferred_drops.proof_nodes_bufs.extend(bufs);
+                // Keep buffer for deferred clearing
+                self.proof_node_buffers.push_pending(buf);
             }
 
             any_err
@@ -460,6 +510,7 @@ where
             account_subtree,
             &mut self.revealed_account_paths,
             &branch_node_masks,
+            self.proof_node_buffers.take_buffer(),
         )?;
         #[cfg(feature = "metrics")]
         {
@@ -481,8 +532,8 @@ where
             trie.reveal_nodes(&mut nodes)?;
         }
 
-        // Keep buffer for deferred dropping
-        self.deferred_drops.proof_nodes_bufs.push(nodes);
+        // Keep buffer for deferred clearing
+        self.proof_node_buffers.push_pending(nodes);
 
         Ok(())
     }
@@ -496,7 +547,11 @@ where
         nodes: Vec<ProofTrieNode>,
     ) -> SparseStateTrieResult<()> {
         let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values: _metric_values } =
-            filter_revealed_v2_proof_nodes(nodes, &mut self.revealed_account_paths)?;
+            filter_revealed_v2_proof_nodes(
+                nodes,
+                &mut self.revealed_account_paths,
+                self.proof_node_buffers.take_buffer(),
+            )?;
 
         #[cfg(feature = "metrics")]
         {
@@ -516,8 +571,8 @@ where
         trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
         trie.reveal_nodes(&mut nodes)?;
 
-        // Keep buffer for deferred dropping
-        self.deferred_drops.proof_nodes_bufs.push(nodes);
+        // Keep buffer for deferred clearing
+        self.proof_node_buffers.push_pending(nodes);
 
         Ok(())
     }
@@ -537,7 +592,7 @@ where
             nodes,
             revealed_paths,
             trie,
-            &mut self.deferred_drops.proof_nodes_bufs,
+            &mut self.proof_node_buffers,
             self.retain_updates,
         )?;
 
@@ -557,11 +612,36 @@ where
         nodes: Vec<ProofTrieNode>,
         revealed_nodes: &mut HashSet<Nibbles>,
         trie: &mut RevealableSparseTrie<S>,
-        bufs: &mut Vec<Vec<ProofTrieNode>>,
+        bufs: &mut ProofNodeBuffers,
+        retain_updates: bool,
+    ) -> SparseStateTrieResult<ProofNodesMetricValues> {
+        let mut buf = bufs.take_buffer();
+        let result = Self::reveal_storage_v2_proof_nodes_inner_with_buf(
+            account,
+            nodes,
+            revealed_nodes,
+            trie,
+            &mut buf,
+            retain_updates,
+        );
+        bufs.push_pending(buf);
+        result
+    }
+
+    /// Reveals storage V2 proof nodes using a provided buffer.
+    ///
+    /// This variant is used for parallel processing where buffers are managed externally.
+    /// The buffer should be cleared before calling and will contain the filtered nodes after.
+    fn reveal_storage_v2_proof_nodes_inner_with_buf(
+        account: B256,
+        nodes: Vec<ProofTrieNode>,
+        revealed_nodes: &mut HashSet<Nibbles>,
+        trie: &mut RevealableSparseTrie<S>,
+        buf: &mut Vec<ProofTrieNode>,
         retain_updates: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
         let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values } =
-            filter_revealed_v2_proof_nodes(nodes, revealed_nodes)?;
+            filter_revealed_v2_proof_nodes(nodes, revealed_nodes, core::mem::take(buf))?;
 
         let trie = if let Some(root_node) = root_node {
             trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
@@ -575,8 +655,8 @@ where
         trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof");
         trie.reveal_nodes(&mut nodes)?;
 
-        // Keep buffer for deferred dropping
-        bufs.push(nodes);
+        // Return the buffer for reuse
+        *buf = nodes;
 
         Ok(metric_values)
     }
@@ -604,7 +684,7 @@ where
             storage_subtree,
             revealed_paths,
             trie,
-            &mut self.deferred_drops.proof_nodes_bufs,
+            &mut self.proof_node_buffers,
             self.retain_updates,
         )?;
 
@@ -624,7 +704,32 @@ where
         storage_subtree: DecodedStorageMultiProof,
         revealed_nodes: &mut HashSet<Nibbles>,
         trie: &mut RevealableSparseTrie<S>,
-        bufs: &mut Vec<Vec<ProofTrieNode>>,
+        bufs: &mut ProofNodeBuffers,
+        retain_updates: bool,
+    ) -> SparseStateTrieResult<ProofNodesMetricValues> {
+        let mut buf = bufs.take_buffer();
+        let result = Self::reveal_decoded_storage_multiproof_inner_with_buf(
+            account,
+            storage_subtree,
+            revealed_nodes,
+            trie,
+            &mut buf,
+            retain_updates,
+        );
+        bufs.push_pending(buf);
+        result
+    }
+
+    /// Reveals a decoded storage multiproof using a provided buffer.
+    ///
+    /// This variant is used for parallel processing where buffers are managed externally.
+    /// The buffer should be cleared before calling and will contain the filtered nodes after.
+    fn reveal_decoded_storage_multiproof_inner_with_buf(
+        account: B256,
+        storage_subtree: DecodedStorageMultiProof,
+        revealed_nodes: &mut HashSet<Nibbles>,
+        trie: &mut RevealableSparseTrie<S>,
+        buf: &mut Vec<ProofTrieNode>,
         retain_updates: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
         let FilterMappedProofNodes { root_node, mut nodes, new_nodes, metric_values } =
@@ -632,6 +737,7 @@ where
                 storage_subtree.subtree,
                 revealed_nodes,
                 &storage_subtree.branch_node_masks,
+                core::mem::take(buf),
             )?;
 
         if let Some(root_node) = root_node {
@@ -647,8 +753,8 @@ where
             trie.reveal_nodes(&mut nodes)?;
         }
 
-        // Keep buffer for deferred dropping
-        bufs.push(nodes);
+        // Return the buffer for reuse
+        *buf = nodes;
 
         Ok(metric_values)
     }
@@ -1451,10 +1557,12 @@ fn filter_map_revealed_nodes(
     proof_nodes: DecodedProofNodes,
     revealed_nodes: &mut HashSet<Nibbles>,
     branch_node_masks: &BranchNodeMasksMap,
+    mut nodes: Vec<ProofTrieNode>,
 ) -> SparseStateTrieResult<FilterMappedProofNodes> {
+    nodes.reserve(proof_nodes.len());
     let mut result = FilterMappedProofNodes {
         root_node: None,
-        nodes: Vec::with_capacity(proof_nodes.len()),
+        nodes,
         new_nodes: 0,
         metric_values: Default::default(),
     };
@@ -1536,10 +1644,12 @@ struct FilteredV2ProofNodes {
 fn filter_revealed_v2_proof_nodes(
     proof_nodes: Vec<ProofTrieNode>,
     revealed_nodes: &mut HashSet<Nibbles>,
+    mut nodes: Vec<ProofTrieNode>,
 ) -> SparseStateTrieResult<FilteredV2ProofNodes> {
+    nodes.reserve(proof_nodes.len());
     let mut result = FilteredV2ProofNodes {
         root_node: None,
-        nodes: Vec::with_capacity(proof_nodes.len()),
+        nodes,
         new_nodes: 0,
         metric_values: Default::default(),
     };
@@ -2063,7 +2173,7 @@ mod tests {
         let branch_node_masks = BranchNodeMasksMap::default();
 
         let decoded =
-            filter_map_revealed_nodes(proof_nodes, &mut revealed_nodes, &branch_node_masks)
+            filter_map_revealed_nodes(proof_nodes, &mut revealed_nodes, &branch_node_masks, vec![])
                 .unwrap();
 
         assert_eq!(

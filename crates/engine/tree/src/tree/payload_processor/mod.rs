@@ -94,6 +94,12 @@ pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
 /// 144MB.
 pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
+/// Maximum number of proof node buffers to keep in the pool for reuse.
+///
+/// After clearing pending buffers, we keep up to this many buffers in the pool.
+/// Excess buffers are dropped to limit memory usage.
+pub const PROOF_NODE_BUFFERS_MAX_POOL_SIZE: usize = 1024;
+
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>,
@@ -582,14 +588,13 @@ where
                     target: "engine::tree::payload_processor",
                     "State root receiver dropped, clearing trie"
                 );
-                let (trie, deferred) = task.into_cleared_trie(
+                let mut trie = task.into_cleared_trie(
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
+                // Clear pending buffers and return them to pool for reuse
+                trie.proof_node_buffers_mut().clear_pending(PROOF_NODE_BUFFERS_MAX_POOL_SIZE);
                 guard.store(PreservedSparseTrie::cleared(trie));
-                // Drop guard before deferred to release lock before expensive deallocations
-                drop(guard);
-                drop(deferred);
                 return;
             }
 
@@ -597,9 +602,9 @@ where
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            let deferred = if let Some(state_root) = computed_state_root {
+            if let Some(state_root) = computed_state_root {
                 let start = std::time::Instant::now();
-                let (trie, deferred) = task.into_trie_for_reuse(
+                let mut trie = task.into_trie_for_reuse(
                     prune_depth,
                     max_storage_tries,
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
@@ -608,23 +613,22 @@ where
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
+                // Clear pending buffers and return them to pool for reuse
+                trie.proof_node_buffers_mut().clear_pending(PROOF_NODE_BUFFERS_MAX_POOL_SIZE);
                 guard.store(PreservedSparseTrie::anchored(trie, state_root));
-                deferred
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
                     "State root computation failed, clearing trie"
                 );
-                let (trie, deferred) = task.into_cleared_trie(
+                let mut trie = task.into_cleared_trie(
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
+                // Clear pending buffers and return them to pool for reuse
+                trie.proof_node_buffers_mut().clear_pending(PROOF_NODE_BUFFERS_MAX_POOL_SIZE);
                 guard.store(PreservedSparseTrie::cleared(trie));
-                deferred
             };
-            // Drop guard before deferred to release lock before expensive deallocations
-            drop(guard);
-            drop(deferred);
         });
     }
 

@@ -28,7 +28,7 @@ use reth_trie_parallel::{
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    DeferredDrops, LeafUpdate, SerialSparseTrie, SparseStateTrie, SparseTrie, SparseTrieExt,
+    LeafUpdate, SerialSparseTrie, SparseStateTrie, SparseTrie, SparseTrieExt,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use smallvec::SmallVec;
@@ -72,7 +72,7 @@ where
         max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
-    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
+    ) -> SparseStateTrie<A, S> {
         match self {
             Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
             Self::Cached(task) => task.into_trie_for_reuse(
@@ -88,7 +88,7 @@ where
         self,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
-    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
+    ) -> SparseStateTrie<A, S> {
         match self {
             Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
             Self::Cached(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
@@ -198,11 +198,10 @@ where
         mut self,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
-    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
+    ) -> SparseStateTrie<A, S> {
         self.trie.clear();
         self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        let deferred = self.trie.take_deferred_drops();
-        (self.trie, deferred)
+        self.trie
     }
 }
 
@@ -312,11 +311,10 @@ where
         max_storage_tries: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
-    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
+    ) -> SparseStateTrie<A, S> {
         self.trie.prune(prune_depth, max_storage_tries);
         self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        let deferred = self.trie.take_deferred_drops();
-        (self.trie, deferred)
+        self.trie
     }
 
     /// Clears and shrinks the trie, discarding all state.
@@ -327,11 +325,10 @@ where
         mut self,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
-    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
+    ) -> SparseStateTrie<A, S> {
         self.trie.clear();
         self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        let deferred = self.trie.take_deferred_drops();
-        (self.trie, deferred)
+        self.trie
     }
 
     /// Runs the sparse trie task to completion.
