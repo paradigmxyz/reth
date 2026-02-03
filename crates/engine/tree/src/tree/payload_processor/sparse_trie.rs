@@ -360,6 +360,7 @@ where
 
                     let mut num_drained = 0;
 
+                    self.on_multiproof_message(update);
                     while let Ok(next) = self.updates.try_recv() {
                         self.on_multiproof_message(next);
                         num_drained += 1;
