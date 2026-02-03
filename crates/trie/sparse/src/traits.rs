@@ -29,6 +29,30 @@ impl core::ops::AddAssign for PruneTrieStats {
     }
 }
 
+/// Outcome of a [`SparseTrie::prune_preserving`] operation.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PruneTrieOutcome {
+    /// Pruning statistics.
+    pub stats: PruneTrieStats,
+    /// Paths where nodes were replaced with hash stubs.
+    /// All descendants of these paths are no longer revealed.
+    pub pruned_roots: Vec<Nibbles>,
+}
+
+impl PruneTrieOutcome {
+    /// Returns `true` if any pruning was performed.
+    pub const fn did_prune(&self) -> bool {
+        !self.pruned_roots.is_empty()
+    }
+}
+
+impl core::ops::AddAssign for PruneTrieOutcome {
+    fn add_assign(&mut self, rhs: Self) {
+        self.stats += rhs.stats;
+        self.pruned_roots.extend(rhs.pruned_roots);
+    }
+}
+
 /// Describes an update to a leaf in the sparse trie.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafUpdate {
@@ -315,7 +339,7 @@ pub trait SparseTrieExt: SparseTrie {
         &mut self,
         config: &crate::hot_accounts::SmartPruneConfig<'_>,
         kind: crate::hot_accounts::TrieKind,
-    ) -> PruneTrieStats;
+    ) -> PruneTrieOutcome;
 
     /// Applies leaf updates to the sparse trie.
     ///

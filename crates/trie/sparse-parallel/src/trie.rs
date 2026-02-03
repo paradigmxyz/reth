@@ -14,8 +14,8 @@ use reth_trie_common::{
 };
 use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, PruneTrieStats, RlpNodeStackItem, SparseNode, SparseNodeType,
-    SparseTrie, SparseTrieExt, SparseTrieUpdates,
+    LeafLookup, LeafLookupError, PruneTrieOutcome, PruneTrieStats, RlpNodeStackItem, SparseNode,
+    SparseNodeType, SparseTrie, SparseTrieExt, SparseTrieUpdates,
 };
 use smallvec::SmallVec;
 use std::cmp::{Ord, Ordering, PartialOrd};
@@ -1083,7 +1083,7 @@ impl SparseTrieExt for ParallelSparseTrie {
         &mut self,
         config: &reth_trie_sparse::hot_accounts::SmartPruneConfig<'_>,
         kind: reth_trie_sparse::hot_accounts::TrieKind,
-    ) -> PruneTrieStats {
+    ) -> PruneTrieOutcome {
         let max_depth = config.max_depth;
         let mut stats = PruneTrieStats::default();
 
@@ -1096,7 +1096,7 @@ impl SparseTrieExt for ParallelSparseTrie {
         // For storage tries, it's usize::MAX (always prune fully).
         let excess_memory = kind.excess_memory();
         if excess_memory == 0 {
-            return stats;
+            return PruneTrieOutcome::default();
         }
 
         // Track bytes freed during pruning - stop once we've freed enough (state trie only)
@@ -1201,7 +1201,7 @@ impl SparseTrieExt for ParallelSparseTrie {
         }
 
         if effective_pruned_roots.is_empty() {
-            return stats;
+            return PruneTrieOutcome { stats, pruned_roots: Vec::new() };
         }
 
         // Sort roots by subtrie type (upper first), then by path for efficient partitioning.
@@ -1274,7 +1274,9 @@ impl SparseTrieExt for ParallelSparseTrie {
             }
         });
 
-        stats
+        // Return outcome with pruned root paths (drop the hashes, keep only paths)
+        let pruned_roots = effective_pruned_roots.into_iter().map(|(path, _)| path).collect();
+        PruneTrieOutcome { stats, pruned_roots }
     }
 
     fn update_leaves(

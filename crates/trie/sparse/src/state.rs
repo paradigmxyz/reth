@@ -1077,35 +1077,42 @@ where
     #[cfg(feature = "std")]
     #[instrument(target = "trie::sparse", skip_all)]
     pub fn prune_preserving(&mut self, config: &crate::hot_accounts::SmartPruneConfig<'_>) {
-        use crate::{hot_accounts::TrieKind, PruneTrieStats};
+        use crate::{hot_accounts::TrieKind, PruneTrieOutcome};
         let fn_start = std::time::Instant::now();
 
         // Prune state and storage tries in parallel
-        let ((account_stats, state_prune_duration, state_memory), storage_result) = rayon::join(
+        let ((account_outcome, state_prune_duration, state_memory), storage_result) = rayon::join(
             || {
-                // Prune state trie if over memory budget. Returns (stats, duration, memory).
+                // Prune state trie if over memory budget. Returns (outcome, duration, memory).
                 // Skips pruning if trie not revealed or under budget.
                 let start = std::time::Instant::now();
 
                 let Some(trie) = self.state.as_revealed_mut() else {
-                    return (PruneTrieStats::default(), start.elapsed(), 0);
+                    return (PruneTrieOutcome::default(), start.elapsed(), 0);
                 };
 
                 let memory = trie.memory_size();
                 let excess = memory.saturating_sub(config.max_memory);
                 if excess == 0 {
-                    return (PruneTrieStats::default(), start.elapsed(), memory);
+                    return (PruneTrieOutcome::default(), start.elapsed(), memory);
                 }
 
-                let stats =
+                let outcome =
                     trie.prune_preserving(config, TrieKind::State { excess_memory: excess });
-                // Pruned nodes are now hash stubs - clear tracking so they get re-revealed
-                self.revealed_account_paths.clear();
 
-                (stats, start.elapsed(), memory)
+                // Remove revealed paths that are descendants of pruned roots
+                if outcome.did_prune() {
+                    self.revealed_account_paths.retain(|path| {
+                        !outcome.pruned_roots.iter().any(|root| path.starts_with(root))
+                    });
+                }
+
+                (outcome, start.elapsed(), memory)
             },
             || self.storage.prune_preserving(config),
         );
+
+        let account_stats = account_outcome.stats;
 
         let StorageTriePruneResult {
             stats: storage_stats,
@@ -1206,7 +1213,7 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
         &mut self,
         config: &crate::hot_accounts::SmartPruneConfig<'_>,
     ) -> StorageTriePruneResult {
-        use crate::{hot_accounts::TrieKind, PruneTrieStats};
+        use crate::{hot_accounts::TrieKind, PruneTrieOutcome, PruneTrieStats};
         use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 
         let fn_start = std::time::Instant::now();
@@ -1320,7 +1327,7 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
         // Prune storage tries in parallel
         let prune_start = std::time::Instant::now();
         let pruned_count = addresses_to_prune.len();
-        let stats: PruneTrieStats = self
+        let outcome: PruneTrieOutcome = self
             .tries
             .par_iter_mut()
             .filter_map(|(addr, trie)| {
@@ -1329,10 +1336,11 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
                 }
                 trie.as_revealed_mut().map(|t| t.prune_preserving(config, TrieKind::Storage))
             })
-            .reduce(PruneTrieStats::default, |mut acc, s| {
-                acc += s;
+            .reduce(PruneTrieOutcome::default, |mut acc, o| {
+                acc += o;
                 acc
             });
+        let stats = outcome.stats;
         let prune_duration = prune_start.elapsed();
 
         // Reset prune_backlog for pruned tries
@@ -1353,7 +1361,7 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
                 .map(|(addr, _)| *addr)
                 .collect();
 
-            let stats = self
+            let hot_outcome: PruneTrieOutcome = self
                 .tries
                 .par_iter_mut()
                 .filter_map(|(addr, trie)| {
@@ -1362,12 +1370,12 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
                     }
                     trie.as_revealed_mut().map(|t| t.prune_preserving(config, TrieKind::Storage))
                 })
-                .reduce(PruneTrieStats::default, |mut acc, s| {
-                    acc += s;
+                .reduce(PruneTrieOutcome::default, |mut acc, o| {
+                    acc += o;
                     acc
                 });
 
-            (stats, hot_addresses)
+            (hot_outcome.stats, hot_addresses)
         } else {
             (PruneTrieStats::default(), Vec::new())
         };
