@@ -54,6 +54,7 @@ impl ChangesetOffsetWriter {
                 "Truncating partial changeset offset record"
             );
             file.set_len(truncated_len)?;
+            file.sync_all()?; // Sync required for crash safety
             truncated_len
         } else {
             file_len
@@ -75,6 +76,7 @@ impl ChangesetOffsetWriter {
                     "Truncating uncommitted changeset offset records after crash recovery"
                 );
                 file.set_len(target_len)?;
+                file.sync_all()?; // Sync required for crash safety
             }
             std::cmp::Ordering::Less => {
                 // Unlikely: sidecar is shorter than header claims - data corruption or
@@ -121,10 +123,14 @@ impl ChangesetOffsetWriter {
         self.file.sync_all()
     }
 
-    /// Truncates the file to contain exactly `len` records.
+    /// Truncates the file to contain exactly `len` records and syncs to disk.
     /// Used after prune operations to reclaim space.
+    ///
+    /// The sync is required for crash safety - without it, a crash could
+    /// resurrect the old file length.
     pub fn truncate(&mut self, len: u64) -> io::Result<()> {
         self.file.set_len(len * Self::RECORD_SIZE as u64)?;
+        self.file.sync_all()?;
         self.records_written = len;
         Ok(())
     }
