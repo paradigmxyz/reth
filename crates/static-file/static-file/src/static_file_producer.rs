@@ -173,11 +173,10 @@ where
     /// Returns highest block numbers for all static file segments.
     pub fn copy_to_static_files(&self) -> ProviderResult<HighestStaticFiles> {
         let provider = self.provider.database_provider_ro()?;
-        let stages_checkpoints = std::iter::once(StageId::Execution)
-            .map(|stage| provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number)))
-            .collect::<Result<Vec<_>, _>>()?;
+        let execution_checkpoint =
+            provider.get_stage_checkpoint(StageId::Execution)?.map(|c| c.block_number);
 
-        let highest_static_files = HighestStaticFiles { receipts: stages_checkpoints[0] };
+        let highest_static_files = HighestStaticFiles { receipts: execution_checkpoint };
         let targets = self.get_static_file_targets(highest_static_files)?;
         self.run(targets)?;
 
