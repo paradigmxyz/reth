@@ -4,8 +4,8 @@
 //! - **Fixed duration waits**: Sleep for a fixed time between blocks
 //! - **Persistence-based waits**: Wait for blocks to be persisted using
 //!   `reth_subscribePersistedBlock` subscription
-//! - **Combined mode**: Wait at least the fixed duration, and also wait for persistence
-//!   if the block hasn't been persisted yet (whichever takes longer)
+//! - **Combined mode**: Wait at least the fixed duration, and also wait for persistence if the
+//!   block hasn't been persisted yet (whichever takes longer)
 
 use alloy_eips::BlockNumHash;
 use alloy_network::Ethereum;
