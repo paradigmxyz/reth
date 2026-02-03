@@ -4159,12 +4159,20 @@ enum txn_flags {
   txn_shrink_allowed = UINT32_C(0x40000000),
   txn_parked = MDBX_TXN_PARKED,
   txn_gc_drained = 0x40 /* GC was depleted up to oldest reader */,
+  txn_parallel_subtx = 0x80 /* This is a parallel subtxn (reth extension) */,
   txn_state_flags = MDBX_TXN_FINISHED | MDBX_TXN_ERROR | MDBX_TXN_DIRTY | MDBX_TXN_SPILLS | MDBX_TXN_HAS_CHILD |
-                    MDBX_TXN_INVALID | txn_gc_drained
+                    MDBX_TXN_INVALID | txn_gc_drained | txn_parallel_subtx
 };
 
 /* A database transaction.
  * Every operation requires a transaction handle. */
+/* Sub-allocator for parallel writes: bump allocator over reserved page range */
+typedef struct MDBX_suballoc {
+  pgno_t begin; /* First page in reserved range (inclusive) */
+  pgno_t next;  /* Next page to allocate (bump pointer) */
+  pgno_t end;   /* End of reserved range (exclusive) */
+} MDBX_suballoc_t;
+
 struct MDBX_txn {
   int32_t signature;
   uint32_t flags; /* Transaction Flags */
@@ -4252,6 +4260,14 @@ struct MDBX_txn {
         size_t writemap_spilled_npages;
       };
       /* In write txns, next is located the array of cursors for each DB */
+
+      /* --- Parallel subtransaction support (reth extension) --- */
+      MDBX_suballoc_t suballoc;     /* Page sub-allocator for this subtxn */
+      osal_ioring_t *txn_ioring;    /* Per-txn I/O ring (NULL = use env->ioring) */
+      void *txn_page_auxbuf;        /* Per-txn scratch buffer (NULL = use env) */
+      MDBX_txn *subparent;          /* Parent txn if this is a parallel subtxn */
+      MDBX_txn *subtxn_list;        /* List of child parallel subtxns */
+      MDBX_txn *subtxn_next;        /* Next sibling in parent's subtxn_list */
     } tw;
   };
 };
@@ -15585,6 +15601,318 @@ __cold int mdbx_env_chk(MDBX_env *env, const struct MDBX_chk_callbacks *cb, MDBX
   chk_dispose(chk);
   return LOG_IFERR(rc);
 }
+
+/*------------------------------------------------------------------------------
+ * Parallel Write Transactions (reth extension)
+ *
+ * These APIs enable parallel writes within a single transaction by partitioning
+ * page allocations. Each subtransaction gets its own page range and per-txn
+ * I/O resources, allowing thread-safe parallel cursor operations.
+ *----------------------------------------------------------------------------*/
+
+LIBMDBX_API int mdbx_txn_reserve_pages(MDBX_txn *txn, size_t num_pages, MDBX_page_range_t *range) {
+  if (unlikely(!txn || !range))
+    return MDBX_EINVAL;
+
+  int rc = check_txn(txn, MDBX_TXN_BLOCKED);
+  if (unlikely(rc != MDBX_SUCCESS))
+    return LOG_IFERR(rc);
+
+  if (unlikely(txn->flags & MDBX_TXN_RDONLY))
+    return LOG_IFERR(MDBX_EACCESS);
+
+  if (unlikely(txn->flags & txn_parallel_subtx))
+    return LOG_IFERR(MDBX_EPERM);
+
+  if (unlikely(num_pages == 0)) {
+    range->begin = range->end = 0;
+    return MDBX_SUCCESS;
+  }
+
+  const pgno_t current_end = txn->geo.first_unallocated;
+  const pgno_t new_end = current_end + (pgno_t)num_pages;
+
+  if (unlikely(new_end > txn->geo.upper))
+    return LOG_IFERR(MDBX_MAP_FULL);
+
+  /* Grow the database file if needed */
+  if (new_end > txn->geo.now) {
+    MDBX_env *const env = txn->env;
+    rc = dxb_resize(env, txn->geo.first_unallocated, new_end, txn->geo.upper, implicit_grow);
+    if (unlikely(rc != MDBX_SUCCESS))
+      return LOG_IFERR(rc);
+    txn->geo.now = new_end;
+    txn->flags |= MDBX_TXN_DIRTY;
+  }
+
+  range->begin = current_end;
+  range->end = new_end;
+  txn->geo.first_unallocated = new_end;
+
+  DEBUG("reserved pages %" PRIu64 " to %" PRIu64 " (%zu pages)",
+        range->begin, range->end, num_pages);
+
+  return MDBX_SUCCESS;
+}
+
+LIBMDBX_API int mdbx_txn_create_subtx(MDBX_txn *parent, const MDBX_page_range_t *range, MDBX_txn **subtxn) {
+  if (unlikely(!parent || !range || !subtxn))
+    return MDBX_EINVAL;
+
+  *subtxn = nullptr;
+
+  int rc = check_txn(parent, MDBX_TXN_BLOCKED);
+  if (unlikely(rc != MDBX_SUCCESS))
+    return LOG_IFERR(rc);
+
+  if (unlikely(parent->flags & MDBX_TXN_RDONLY))
+    return LOG_IFERR(MDBX_EACCESS);
+
+  if (unlikely(range->begin >= range->end))
+    return LOG_IFERR(MDBX_EINVAL);
+
+  MDBX_env *const env = parent->env;
+
+  /* Allocate txn structure with embedded arrays for dbs, cursors, dbi_seqs, dbi_state, dbi_sparse */
+#if MDBX_ENABLE_DBI_SPARSE
+  MDBX_txn *tmp = nullptr;
+  const intptr_t bitmap_bytes =
+      ceil_powerof2(env->max_dbi, CHAR_BIT * sizeof(tmp->dbi_sparse[0])) / CHAR_BIT;
+#else
+  const intptr_t bitmap_bytes = 0;
+#endif /* MDBX_ENABLE_DBI_SPARSE */
+
+  const size_t base = sizeof(MDBX_txn);
+  const size_t size = base + bitmap_bytes +
+      env->max_dbi * sizeof(tree_t) +           /* dbs */
+      env->max_dbi * sizeof(MDBX_cursor *) +    /* cursors */
+      env->max_dbi * sizeof(uint32_t) +         /* dbi_seqs */
+      env->max_dbi * sizeof(uint8_t);           /* dbi_state */
+
+  MDBX_txn *txn = osal_calloc(1, size);
+  if (unlikely(!txn))
+    return LOG_IFERR(MDBX_ENOMEM);
+
+  /* Set up pointers to embedded arrays (same layout as regular txn) */
+  txn->dbs = ptr_disp(txn, base);
+  txn->cursors = ptr_disp(txn->dbs, env->max_dbi * sizeof(tree_t));
+  txn->dbi_seqs = ptr_disp(txn->cursors, env->max_dbi * sizeof(MDBX_cursor *));
+  txn->dbi_state = ptr_disp(txn, size - env->max_dbi * sizeof(uint8_t));
+#if MDBX_ENABLE_DBI_SPARSE
+  txn->dbi_sparse = ptr_disp(txn->dbi_state, -bitmap_bytes);
+  /* Copy parent's dbi_sparse bitmap */
+  memcpy(txn->dbi_sparse, parent->dbi_sparse, bitmap_bytes);
+#endif /* MDBX_ENABLE_DBI_SPARSE */
+
+  /* Copy parent's dbs and state */
+  memcpy(txn->dbs, parent->dbs, parent->n_dbi * sizeof(tree_t));
+  memcpy(txn->dbi_seqs, parent->dbi_seqs, parent->n_dbi * sizeof(uint32_t));
+  memcpy(txn->dbi_state, parent->dbi_state, parent->n_dbi * sizeof(uint8_t));
+  /* cursors are already zero from calloc */
+
+  txn->signature = txn_signature;
+  txn->flags = (parent->flags & ~MDBX_TXN_HAS_CHILD) | txn_parallel_subtx;
+  txn->env = env;
+  txn->n_dbi = parent->n_dbi;
+  txn->owner = osal_thread_self();
+  txn->txnid = parent->txnid;
+  txn->front_txnid = parent->front_txnid;
+  txn->geo = parent->geo;
+  txn->canary = parent->canary;
+  txn->parent = nullptr;
+  txn->nested = nullptr;
+
+  txn->tw.subparent = parent;
+  txn->tw.suballoc.begin = (pgno_t)range->begin;
+  txn->tw.suballoc.next = (pgno_t)range->begin;
+  txn->tw.suballoc.end = (pgno_t)range->end;
+  txn->tw.subtxn_list = nullptr;
+  txn->tw.subtxn_next = nullptr;
+
+  txn->tw.dirtylist = nullptr;
+  rc = dpl_alloc(txn);
+  if (unlikely(rc != MDBX_SUCCESS)) {
+    osal_free(txn);
+    return LOG_IFERR(rc);
+  }
+
+  txn->tw.dirtyroom = env->options.dp_limit;
+  txn->tw.dirtylru = parent->tw.dirtylru;
+  txn->tw.retired_pages = nullptr;
+  txn->tw.repnl = nullptr;
+  txn->tw.loose_pages = nullptr;
+  txn->tw.loose_count = 0;
+  txn->tw.gc.retxl = nullptr;
+  txn->tw.gc.last_reclaimed = 0;
+  txn->tw.spilled.list = nullptr;
+  txn->tw.prefault_write_activated = parent->tw.prefault_write_activated;
+
+  const size_t auxbuf_size = env->ps * 3;
+  txn->tw.txn_page_auxbuf = osal_malloc(auxbuf_size);
+  if (unlikely(!txn->tw.txn_page_auxbuf)) {
+    dpl_free(txn);
+    osal_free(txn);
+    return LOG_IFERR(MDBX_ENOMEM);
+  }
+  memset(txn->tw.txn_page_auxbuf, 0, env->ps);
+  memset(ptr_disp(txn->tw.txn_page_auxbuf, env->ps), -1, env->ps);
+
+  txn->tw.txn_ioring = osal_calloc(1, sizeof(osal_ioring_t));
+  if (unlikely(!txn->tw.txn_ioring)) {
+    osal_free(txn->tw.txn_page_auxbuf);
+    dpl_free(txn);
+    osal_free(txn);
+    return LOG_IFERR(MDBX_ENOMEM);
+  }
+
+  rc = osal_ioring_create(txn->tw.txn_ioring
+#if defined(_WIN32) || defined(_WIN64)
+                          , false, INVALID_HANDLE_VALUE
+#endif
+  );
+  if (unlikely(rc != MDBX_SUCCESS)) {
+    osal_free(txn->tw.txn_ioring);
+    osal_free(txn->tw.txn_page_auxbuf);
+    dpl_free(txn);
+    osal_free(txn);
+    return LOG_IFERR(rc);
+  }
+
+  txn->tw.subtxn_next = parent->tw.subtxn_list;
+  parent->tw.subtxn_list = txn;
+
+  DEBUG("created parallel subtx %p with pages %" PRIu64 "-%" PRIu64,
+        (void *)txn, range->begin, range->end);
+
+  *subtxn = txn;
+  return MDBX_SUCCESS;
+}
+
+static void subtx_free_resources(MDBX_txn *subtxn) {
+  if (subtxn->tw.txn_ioring) {
+    osal_ioring_destroy(subtxn->tw.txn_ioring);
+    osal_free(subtxn->tw.txn_ioring);
+    subtxn->tw.txn_ioring = nullptr;
+  }
+  if (subtxn->tw.txn_page_auxbuf) {
+    osal_free(subtxn->tw.txn_page_auxbuf);
+    subtxn->tw.txn_page_auxbuf = nullptr;
+  }
+  if (subtxn->tw.dirtylist) {
+    dpl_free(subtxn);
+  }
+  if (subtxn->tw.retired_pages) {
+    pnl_free(subtxn->tw.retired_pages);
+  }
+  if (subtxn->tw.repnl) {
+    pnl_free(subtxn->tw.repnl);
+  }
+  if (subtxn->tw.spilled.list) {
+    pnl_free(subtxn->tw.spilled.list);
+  }
+  subtxn->signature = 0;
+}
+
+static void subtx_unlink_from_parent(MDBX_txn *subtxn) {
+  MDBX_txn *parent = subtxn->tw.subparent;
+  if (!parent)
+    return;
+
+  MDBX_txn **prev = &parent->tw.subtxn_list;
+  while (*prev && *prev != subtxn)
+    prev = &(*prev)->tw.subtxn_next;
+  if (*prev == subtxn)
+    *prev = subtxn->tw.subtxn_next;
+  subtxn->tw.subparent = nullptr;
+}
+
+LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
+  if (unlikely(!subtxn))
+    return MDBX_EINVAL;
+
+  if (unlikely(subtxn->signature != txn_signature))
+    return LOG_IFERR(MDBX_BAD_TXN);
+
+  if (unlikely(!(subtxn->flags & txn_parallel_subtx)))
+    return LOG_IFERR(MDBX_EINVAL);
+
+  if (unlikely(subtxn->flags & (MDBX_TXN_FINISHED | MDBX_TXN_ERROR)))
+    return LOG_IFERR(MDBX_BAD_TXN);
+
+  MDBX_txn *const parent = subtxn->tw.subparent;
+  if (unlikely(!parent))
+    return LOG_IFERR(MDBX_BAD_TXN);
+
+  DEBUG("committing parallel subtx %p, dirtylist length %zu",
+        (void *)subtxn, subtxn->tw.dirtylist ? subtxn->tw.dirtylist->length : 0);
+
+  /* Merge dirty pages into parent */
+  if (subtxn->tw.dirtylist && subtxn->tw.dirtylist->length > 0) {
+    dpl_t *const src = subtxn->tw.dirtylist;
+    const size_t count = src->length;
+
+    for (size_t i = 1; i <= count; ++i) {
+      page_t *const page = src->items[i].ptr;
+      const pgno_t pgno = src->items[i].pgno;
+      const unsigned npages = dpl_npages(src, i);
+
+      int rc = dpl_append(parent, pgno, page, npages);
+      if (unlikely(rc != MDBX_SUCCESS)) {
+        subtxn->flags |= MDBX_TXN_ERROR;
+        return LOG_IFERR(rc);
+      }
+      parent->tw.dirtyroom--;
+    }
+
+    src->length = 0;
+    parent->flags |= MDBX_TXN_DIRTY;
+  }
+
+  /* Merge dbi metadata (B-tree roots, stats) for modified databases.
+   * Note: This only works correctly when subtxns are committed serially
+   * and don't have overlapping modifications to the same dbi. */
+  for (size_t dbi = 0; dbi < subtxn->n_dbi; ++dbi) {
+    if (subtxn->dbi_state[dbi] & (DBI_DIRTY | DBI_FRESH)) {
+      parent->dbs[dbi] = subtxn->dbs[dbi];
+      parent->dbi_state[dbi] |= (subtxn->dbi_state[dbi] & (DBI_DIRTY | DBI_FRESH));
+    }
+  }
+
+  /* Update parent's canary if subtxn modified it */
+  parent->canary = subtxn->canary;
+
+  subtx_unlink_from_parent(subtxn);
+  subtx_free_resources(subtxn);
+  osal_free(subtxn);
+
+  return MDBX_SUCCESS;
+}
+
+LIBMDBX_API int mdbx_subtx_abort(MDBX_txn *subtxn) {
+  if (unlikely(!subtxn))
+    return MDBX_EINVAL;
+
+  if (unlikely(subtxn->signature != txn_signature))
+    return LOG_IFERR(MDBX_BAD_TXN);
+
+  if (unlikely(!(subtxn->flags & txn_parallel_subtx)))
+    return LOG_IFERR(MDBX_EINVAL);
+
+  DEBUG("aborting parallel subtx %p", (void *)subtxn);
+
+  subtx_unlink_from_parent(subtxn);
+  subtx_free_resources(subtxn);
+  osal_free(subtxn);
+
+  return MDBX_SUCCESS;
+}
+
+LIBMDBX_API int mdbx_txn_is_subtx(const MDBX_txn *txn) {
+  if (unlikely(!txn || txn->signature != txn_signature))
+    return 0;
+  return (txn->flags & txn_parallel_subtx) ? 1 : 0;
+}
+
 /// \copyright SPDX-License-Identifier: Apache-2.0
 /// \author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2025
 
@@ -22354,7 +22682,10 @@ static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn
      * грязной I/O очереди. Из-за этого штраф за лишнюю запись может быть
      * сравним с избегаемым ненужным чтением. */
     if (txn->tw.prefault_write_activated) {
-      void *const pattern = ptr_disp(env->page_auxbuf, need_clean ? env->ps : env->ps * 2);
+      void *const auxbuf = (txn->flags & txn_parallel_subtx) && txn->tw.txn_page_auxbuf
+                               ? txn->tw.txn_page_auxbuf
+                               : env->page_auxbuf;
+      void *const pattern = ptr_disp(auxbuf, need_clean ? env->ps : env->ps * 2);
       size_t file_offset = pgno2bytes(env, pgno);
       if (likely(num == 1)) {
         if (!mincore_probe(env, pgno)) {
@@ -22427,6 +22758,24 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
   pgr_t ret;
   MDBX_txn *const txn = mc->txn;
   MDBX_env *const env = txn->env;
+
+  /* For parallel subtxns, use the bump allocator from reserved range */
+  if (txn->flags & txn_parallel_subtx) {
+    if (num == 0) {
+      ret.page = nullptr;
+      ret.err = MDBX_SUCCESS;
+      return ret;
+    }
+    if (txn->tw.suballoc.next + num <= txn->tw.suballoc.end) {
+      const pgno_t pgno = txn->tw.suballoc.next;
+      txn->tw.suballoc.next += (pgno_t)num;
+      return page_alloc_finalize(env, txn, mc, pgno, num);
+    }
+    ret.page = nullptr;
+    ret.err = MDBX_MAP_FULL;
+    return ret;
+  }
+
 #if MDBX_ENABLE_PROFGC
   gc_prof_stat_t *const prof =
       (cursor_dbi(mc) == FREE_DBI) ? &env->lck->pgops.gc_prof.self : &env->lck->pgops.gc_prof.work;
@@ -22904,6 +23253,16 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
   MDBX_txn *const txn = mc->txn;
   tASSERT(txn, mc->txn->flags & MDBX_TXN_DIRTY);
   tASSERT(txn, F_ISSET(*cursor_dbi_state(mc), DBI_LINDO | DBI_VALID | DBI_DIRTY));
+
+  /* For parallel subtxns, use the bump allocator from reserved range */
+  if (txn->flags & txn_parallel_subtx) {
+    if (txn->tw.suballoc.next < txn->tw.suballoc.end) {
+      const pgno_t pgno = txn->tw.suballoc.next++;
+      return page_alloc_finalize(txn->env, txn, mc, pgno, 1);
+    }
+    pgr_t ret = {nullptr, MDBX_MAP_FULL};
+    return ret;
+  }
 
   /* If there are any loose pages, just use them */
   while (likely(txn->tw.loose_pages)) {
@@ -31607,7 +31966,7 @@ static __always_inline pgr_t page_get_inline(const uint16_t ILL, const MDBX_curs
         break;
       }
 
-      spiller = spiller->parent;
+      spiller = spiller->parent ? spiller->parent : spiller->tw.subparent;
     } while (unlikely(spiller));
   }
 
