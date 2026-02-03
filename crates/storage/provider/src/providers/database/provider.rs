@@ -616,9 +616,8 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
 
             // Enable parallel writes only in edge mode where SF handles receipts/changesets
             // This allows hashed state, trie updates, and block metadata to write in parallel
-            // TODO: Enable when MDBX parallel subtransactions are fully tested
             // Only use parallel path if enable_parallel_writes succeeds
-            let use_parallel_writes = false && save_mode.with_state()
+            let use_parallel_writes = save_mode.with_state()
                 && sf_ctx.write_receipts
                 && self.tx.enable_parallel_writes().is_ok();
 
