@@ -15732,10 +15732,16 @@ LIBMDBX_API int mdbx_txn_create_subtx(MDBX_txn *parent, const MDBX_page_range_t 
   txn->tw.subtxn_next = nullptr;
 
   txn->tw.dirtylist = nullptr;
-  rc = dpl_alloc(txn);
-  if (unlikely(rc != MDBX_SUCCESS)) {
-    osal_free(txn);
-    return LOG_IFERR(rc);
+  /* In WRITEMAP mode without MDBX_AVOID_MSYNC, pages are modified in-place
+   * in the mmap. We don't use a dirtylist - just track the count. */
+  if ((parent->flags & MDBX_WRITEMAP) && !MDBX_AVOID_MSYNC) {
+    txn->tw.writemap_dirty_npages = 0;
+  } else {
+    rc = dpl_alloc(txn);
+    if (unlikely(rc != MDBX_SUCCESS)) {
+      osal_free(txn);
+      return LOG_IFERR(rc);
+    }
   }
 
   txn->tw.dirtyroom = env->options.dp_limit;
@@ -15848,8 +15854,9 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
   DEBUG("committing parallel subtx %p, dirtylist length %zu",
         (void *)subtxn, subtxn->tw.dirtylist ? subtxn->tw.dirtylist->length : 0);
 
-  /* Merge dirty pages into parent */
+  /* Merge dirty pages/state into parent */
   if (subtxn->tw.dirtylist && subtxn->tw.dirtylist->length > 0) {
+    /* Non-WRITEMAP: merge dirtylist entries */
     dpl_t *const src = subtxn->tw.dirtylist;
     const size_t count = src->length;
 
@@ -15876,6 +15883,11 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
 
     src->length = 0;
     parent->flags |= MDBX_TXN_DIRTY;
+  } else if ((subtxn->flags & MDBX_WRITEMAP) && !MDBX_AVOID_MSYNC) {
+    /* WRITEMAP: pages already modified in-place, just merge the counter */
+    parent->tw.writemap_dirty_npages += subtxn->tw.writemap_dirty_npages;
+    if (subtxn->tw.writemap_dirty_npages > 0)
+      parent->flags |= MDBX_TXN_DIRTY;
   }
 
   /* Merge dbi metadata (B-tree roots, stats) for modified databases.

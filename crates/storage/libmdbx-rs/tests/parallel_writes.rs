@@ -417,3 +417,140 @@ fn test_parallel_subtx_different_dbis() {
         ffi::mdbx_env_close_ex(env, false);
     }
 }
+
+/// Test parallel writes to different DBIs with WRITEMAP mode (reth's default)
+#[test]
+fn test_parallel_subtx_writemap() {
+    let dir = tempdir().unwrap();
+    let path = std::ffi::CString::new(dir.path().to_str().unwrap()).unwrap();
+
+    unsafe {
+        let mut env: *mut ffi::MDBX_env = ptr::null_mut();
+        ffi::mdbx_env_create(&mut env);
+        ffi::mdbx_env_set_option(env, ffi::MDBX_opt_max_db, 4);
+        ffi::mdbx_env_open(
+            env,
+            path.as_ptr(),
+            ffi::MDBX_NOSTICKYTHREADS | ffi::MDBX_WRITEMAP,
+            0o644,
+        );
+
+        // Begin write transaction
+        let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
+        ffi::mdbx_txn_begin_ex(
+            env,
+            ptr::null_mut(),
+            ffi::MDBX_TXN_READWRITE,
+            &mut txn,
+            ptr::null_mut(),
+        );
+
+        // Open separate databases for each worker
+        let db_names: Vec<_> =
+            (0..3).map(|i| std::ffi::CString::new(format!("db{i}")).unwrap()).collect();
+        let mut dbis: Vec<ffi::MDBX_dbi> = Vec::new();
+        for name in &db_names {
+            let mut dbi: ffi::MDBX_dbi = 0;
+            let rc = ffi::mdbx_dbi_open(txn, name.as_ptr(), ffi::MDBX_CREATE, &mut dbi);
+            assert_eq!(rc, 0, "mdbx_dbi_open failed");
+            dbis.push(dbi);
+        }
+
+        // Reserve pages for parallel workers
+        let num_workers = 3;
+        let pages_per_worker = 100;
+        let mut range: ffi::MDBX_page_range_t = ffi::MDBX_page_range_t { begin: 0, end: 0 };
+        let rc = ffi::mdbx_txn_reserve_pages(txn, num_workers * pages_per_worker, &mut range);
+        assert_eq!(rc, 0, "mdbx_txn_reserve_pages failed");
+
+        // Create subtxns for each worker
+        let mut subtxns: Vec<*mut ffi::MDBX_txn> = Vec::new();
+        for i in 0..num_workers {
+            let start = range.begin + (i as u64) * (pages_per_worker as u64);
+            let end = start + pages_per_worker as u64;
+            let worker_range = ffi::MDBX_page_range_t { begin: start, end };
+
+            let mut subtx: *mut ffi::MDBX_txn = ptr::null_mut();
+            let rc = ffi::mdbx_txn_create_subtx(txn, &worker_range, &mut subtx);
+            assert_eq!(rc, 0, "mdbx_txn_create_subtx failed");
+            subtxns.push(subtx);
+        }
+
+        // Each worker writes to its own DBI in parallel
+        let keys_per_worker = 50;
+        let barrier = Arc::new(Barrier::new(num_workers));
+
+        let handles: Vec<_> = subtxns
+            .into_iter()
+            .enumerate()
+            .map(|(worker_id, subtx)| {
+                let barrier = barrier.clone();
+                let subtx_ptr = subtx as usize;
+                let dbi = dbis[worker_id];
+
+                thread::spawn(move || {
+                    barrier.wait();
+
+                    let subtx = subtx_ptr as *mut ffi::MDBX_txn;
+                    let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
+                    let rc = ffi::mdbx_cursor_open(subtx, dbi, &mut cursor);
+                    assert_eq!(rc, 0, "worker {worker_id} cursor_open failed: {rc}");
+
+                    for i in 0..keys_per_worker {
+                        let key = format!("worker{worker_id}_key{i:04}");
+                        let val = format!("value_from_worker{worker_id}_{i}");
+
+                        let mut k = to_val(key.as_bytes());
+                        let mut v = to_val(val.as_bytes());
+                        let rc = ffi::mdbx_cursor_put(
+                            cursor,
+                            &mut k,
+                            &mut v,
+                            ffi::MDBX_put_flags_t::default(),
+                        );
+                        assert_eq!(rc, 0, "worker {worker_id} put {i} failed: {rc}");
+                    }
+
+                    ffi::mdbx_cursor_close(cursor);
+                    subtx_ptr
+                })
+            })
+            .collect();
+
+        // Collect results and commit subtxns serially
+        for (idx, h) in handles.into_iter().enumerate() {
+            let subtx_ptr = h.join().expect("worker thread panicked");
+            let subtx = subtx_ptr as *mut ffi::MDBX_txn;
+            let rc = ffi::mdbx_subtx_commit(subtx);
+            assert_eq!(rc, 0, "mdbx_subtx_commit {idx} failed: {rc}");
+        }
+
+        // Commit parent transaction
+        let rc = ffi::mdbx_txn_commit_ex(txn, ptr::null_mut());
+        assert_eq!(rc, 0, "parent txn commit failed");
+
+        // Verify all keys were written
+        let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
+        ffi::mdbx_txn_begin_ex(
+            env,
+            ptr::null_mut(),
+            ffi::MDBX_TXN_RDONLY,
+            &mut txn,
+            ptr::null_mut(),
+        );
+
+        for worker_id in 0..num_workers {
+            let dbi = dbis[worker_id];
+            for i in 0..keys_per_worker {
+                let key = format!("worker{worker_id}_key{i:04}");
+                let k = to_val(key.as_bytes());
+                let mut v = ffi::MDBX_val { iov_base: ptr::null_mut(), iov_len: 0 };
+                let rc = ffi::mdbx_get(txn, dbi, &k, &mut v);
+                assert_eq!(rc, 0, "missing key in db{worker_id}: {key}");
+            }
+        }
+
+        ffi::mdbx_txn_abort(txn);
+        ffi::mdbx_env_close_ex(env, false);
+    }
+}
