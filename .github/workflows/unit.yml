@@ -93,7 +93,7 @@ jobs:
       - name: Run state tests
         run: |
           sudo sysctl -w vm.max_map_count=1048576
-          cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
+          RAYON_NUM_THREADS=1 cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
 
   doc:
     name: doc tests
