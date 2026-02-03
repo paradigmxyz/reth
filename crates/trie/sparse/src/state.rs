@@ -1417,6 +1417,8 @@ struct FilterMappedProofNodes {
 /// Filters the decoded nodes that are already revealed, maps them to `SparseTrieNode`s,
 /// separates the root node if present, and returns additional information about the number of
 /// total, skipped, and new nodes.
+///
+/// Resulting [trie nodes](`ProofTrieNode`) are pushed to the input `nodes` buffer.
 fn filter_map_revealed_nodes(
     proof_nodes: DecodedProofNodes,
     revealed_nodes: &mut HashSet<Nibbles>,
