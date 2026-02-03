@@ -54,7 +54,7 @@ pub struct SparseStateTrie<
     ///
     /// Each reveal operation creates a new buffer, uses it, and pushes it here.
     /// These are collected via [`Self::take_deferred_drops`] and dropped after locks are released.
-    proof_nodes_bufs: Vec<Vec<ProofTrieNode>>,
+    deferred_drops: DeferredDrops,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -72,7 +72,7 @@ where
             storage: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
-            proof_nodes_bufs: Vec::new(),
+            deferred_drops: DeferredDrops::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -128,7 +128,7 @@ impl<A, S> SparseStateTrie<A, S> {
     /// This allows the caller to drop the buffers after releasing any locks,
     /// avoiding expensive deallocations while holding locks.
     pub fn take_deferred_drops(&mut self) -> DeferredDrops {
-        DeferredDrops { proof_nodes_bufs: core::mem::take(&mut self.proof_nodes_bufs) }
+        core::mem::take(&mut self.deferred_drops)
     }
 }
 
@@ -333,7 +333,7 @@ where
                 }
 
                 // Keep buffers for deferred dropping
-                self.proof_nodes_bufs.extend(bufs);
+                self.deferred_drops.proof_nodes_bufs.extend(bufs);
             }
 
             any_err
@@ -431,7 +431,7 @@ where
                 }
 
                 // Keep buffers for deferred dropping
-                self.proof_nodes_bufs.extend(bufs);
+                self.deferred_drops.proof_nodes_bufs.extend(bufs);
             }
 
             any_err
@@ -486,7 +486,7 @@ where
         }
 
         // Keep buffer for deferred dropping
-        self.proof_nodes_bufs.push(nodes);
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
 
         Ok(())
     }
@@ -521,7 +521,7 @@ where
         trie.reveal_nodes(&mut nodes)?;
 
         // Keep buffer for deferred dropping
-        self.proof_nodes_bufs.push(nodes);
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
 
         Ok(())
     }
@@ -541,7 +541,7 @@ where
             nodes,
             revealed_paths,
             trie,
-            &mut self.proof_nodes_bufs,
+            &mut self.deferred_drops.proof_nodes_bufs,
             self.retain_updates,
         )?;
 
@@ -558,14 +558,14 @@ where
     /// designed to handle a variety of associated public functions.
     fn reveal_storage_v2_proof_nodes_inner(
         account: B256,
-        proof_nodes: Vec<ProofTrieNode>,
+        nodes: Vec<ProofTrieNode>,
         revealed_nodes: &mut HashSet<Nibbles>,
         trie: &mut RevealableSparseTrie<S>,
         bufs: &mut Vec<Vec<ProofTrieNode>>,
         retain_updates: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
         let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values } =
-            filter_revealed_v2_proof_nodes(proof_nodes, revealed_nodes)?;
+            filter_revealed_v2_proof_nodes(nodes, revealed_nodes)?;
 
         let trie = if let Some(root_node) = root_node {
             trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
@@ -608,7 +608,7 @@ where
             storage_subtree,
             revealed_paths,
             trie,
-            &mut self.proof_nodes_bufs,
+            &mut self.deferred_drops.proof_nodes_bufs,
             self.retain_updates,
         )?;
 
@@ -1523,7 +1523,7 @@ fn filter_map_revealed_nodes(
 struct FilteredV2ProofNodes {
     /// Root node which was pulled out of the original node set to be handled specially.
     root_node: Option<ProofTrieNode>,
-    /// The proof nodes to be revealed.
+    /// Filtered proof nodes. Root node is removed.
     nodes: Vec<ProofTrieNode>,
     /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
     /// if they are not in the proof.
