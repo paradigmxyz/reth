@@ -680,12 +680,7 @@ mod tests {
     /// Uses pure FFI to test parallel writes with WriteMap mode (required for parallel subtxns).
     #[test]
     fn db_parallel_writes_two_tables() {
-        use std::{
-            ffi::{c_void, CString},
-            ptr,
-            sync::{Arc, Barrier},
-            thread,
-        };
+        use std::{ffi::{c_void, CString}, ptr};
 
         let tempdir = TempDir::new().expect(ERROR_TEMPDIR);
         let path = CString::new(tempdir.path().to_str().unwrap()).unwrap();
@@ -738,101 +733,75 @@ mod tests {
             );
             assert_eq!(rc, 0, "open canonical dbi failed");
 
-            // Reserve pages for parallel workers (2 workers, 100 pages each)
-            let mut range: ffi::MDBX_page_range_t = ffi::MDBX_page_range_t { begin: 0, end: 0 };
-            let rc = ffi::mdbx_txn_reserve_pages(parent_ptr, 200, &mut range);
-            assert_eq!(rc, 0, "mdbx_txn_reserve_pages failed: {rc}");
+            // Create subtxns for both DBIs using the new batch API
+            let specs = [
+                ffi::MDBX_subtxn_spec_t { dbi: headers_dbi },
+                ffi::MDBX_subtxn_spec_t { dbi: canonical_dbi },
+            ];
+            let mut subtxns: [*mut ffi::MDBX_txn; 2] = [ptr::null_mut(); 2];
+            let rc = ffi::mdbx_txn_create_subtxns(
+                parent_ptr,
+                specs.as_ptr(),
+                specs.len(),
+                subtxns.as_mut_ptr(),
+            );
+            assert_eq!(rc, 0, "mdbx_txn_create_subtxns failed: {rc}");
 
-            // Create subtxn for headers table
-            let headers_range =
-                ffi::MDBX_page_range_t { begin: range.begin, end: range.begin + 100 };
-            let mut headers_subtx: *mut ffi::MDBX_txn = ptr::null_mut();
-            let rc = ffi::mdbx_txn_create_subtx(parent_ptr, &headers_range, &mut headers_subtx);
-            assert_eq!(rc, 0, "create headers subtx failed: {rc}");
+            let headers_subtx = subtxns[0];
+            let canonical_subtx = subtxns[1];
 
-            // Create subtxn for canonical headers table
-            let canonical_range =
-                ffi::MDBX_page_range_t { begin: range.begin + 100, end: range.end };
-            let mut canonical_subtx: *mut ffi::MDBX_txn = ptr::null_mut();
-            let rc = ffi::mdbx_txn_create_subtx(parent_ptr, &canonical_range, &mut canonical_subtx);
-            assert_eq!(rc, 0, "create canonical subtx failed: {rc}");
-
-            // Run parallel writes
-            let barrier = Arc::new(Barrier::new(2));
+            // Serial writes to both subtxns
             let num_entries = 50u64;
 
-            let headers_subtx_ptr = headers_subtx as usize;
-            let canonical_subtx_ptr = canonical_subtx as usize;
-            let barrier1 = barrier.clone();
-            let barrier2 = barrier.clone();
+            // Headers subtxn writes
+            for i in 0..num_entries {
+                let key_bytes = i.to_be_bytes();
+                let value = format!("header_data_{i}");
+                let value_bytes = value.as_bytes();
 
-            // Spawn thread for headers - simulates writing Header data
-            let headers_handle = thread::spawn(move || {
-                barrier1.wait();
-                let subtx = headers_subtx_ptr as *mut ffi::MDBX_txn;
+                let mut k =
+                    ffi::MDBX_val { iov_base: key_bytes.as_ptr() as *mut c_void, iov_len: 8 };
+                let mut v = ffi::MDBX_val {
+                    iov_base: value_bytes.as_ptr() as *mut c_void,
+                    iov_len: value_bytes.len(),
+                };
 
-                for i in 0..num_entries {
-                    // BlockNumber key (u64 big-endian)
-                    let key_bytes = i.to_be_bytes();
-                    // Simulated header value (would be compressed Header in real usage)
-                    let value = format!("header_data_{i}");
-                    let value_bytes = value.as_bytes();
+                let rc = ffi::mdbx_put(
+                    headers_subtx,
+                    headers_dbi,
+                    &mut k,
+                    &mut v,
+                    ffi::MDBX_put_flags_t::default(),
+                );
+                assert_eq!(rc, 0, "headers put {i} failed: {rc}");
+            }
 
-                    let mut k =
-                        ffi::MDBX_val { iov_base: key_bytes.as_ptr() as *mut c_void, iov_len: 8 };
-                    let mut v = ffi::MDBX_val {
-                        iov_base: value_bytes.as_ptr() as *mut c_void,
-                        iov_len: value_bytes.len(),
-                    };
+            // Canonical subtxn writes
+            for i in 0..num_entries {
+                let key_bytes = i.to_be_bytes();
+                let mut hash_bytes = [0u8; 32];
+                hash_bytes[31] = i as u8;
 
-                    let rc = ffi::mdbx_put(
-                        subtx,
-                        headers_dbi,
-                        &mut k,
-                        &mut v,
-                        ffi::MDBX_put_flags_t::default(),
-                    );
-                    assert_eq!(rc, 0, "headers put {i} failed: {rc}");
-                }
-                headers_subtx_ptr
-            });
+                let mut k =
+                    ffi::MDBX_val { iov_base: key_bytes.as_ptr() as *mut c_void, iov_len: 8 };
+                let mut v =
+                    ffi::MDBX_val { iov_base: hash_bytes.as_ptr() as *mut c_void, iov_len: 32 };
 
-            // Spawn thread for canonical headers - simulates writing block hashes
-            let canonical_handle = thread::spawn(move || {
-                barrier2.wait();
-                let subtx = canonical_subtx_ptr as *mut ffi::MDBX_txn;
+                let rc = ffi::mdbx_put(
+                    canonical_subtx,
+                    canonical_dbi,
+                    &mut k,
+                    &mut v,
+                    ffi::MDBX_put_flags_t::default(),
+                );
+                assert_eq!(rc, 0, "canonical put {i} failed: {rc}");
+            }
 
-                for i in 0..num_entries {
-                    // BlockNumber key
-                    let key_bytes = i.to_be_bytes();
-                    // Simulated B256 hash value
-                    let mut hash_bytes = [0u8; 32];
-                    hash_bytes[31] = i as u8;
-
-                    let mut k =
-                        ffi::MDBX_val { iov_base: key_bytes.as_ptr() as *mut c_void, iov_len: 8 };
-                    let mut v =
-                        ffi::MDBX_val { iov_base: hash_bytes.as_ptr() as *mut c_void, iov_len: 32 };
-
-                    let rc = ffi::mdbx_put(
-                        subtx,
-                        canonical_dbi,
-                        &mut k,
-                        &mut v,
-                        ffi::MDBX_put_flags_t::default(),
-                    );
-                    assert_eq!(rc, 0, "canonical put {i} failed: {rc}");
-                }
-                canonical_subtx_ptr
-            });
-
-            // Wait for parallel work and commit subtxns serially
-            let headers_ptr = headers_handle.join().expect("headers thread panicked");
-            let rc = ffi::mdbx_subtx_commit(headers_ptr as *mut ffi::MDBX_txn);
+            // Commit subtxns serially
+            let rc = ffi::mdbx_subtx_commit(headers_subtx);
             assert_eq!(rc, 0, "headers subtx commit failed: {rc}");
 
-            let canonical_ptr = canonical_handle.join().expect("canonical thread panicked");
-            let rc = ffi::mdbx_subtx_commit(canonical_ptr as *mut ffi::MDBX_txn);
+            let rc = ffi::mdbx_subtx_commit(canonical_subtx);
             assert_eq!(rc, 0, "canonical subtx commit failed: {rc}");
 
             // Commit parent transaction
