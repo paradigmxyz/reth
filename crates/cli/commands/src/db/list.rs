@@ -1,10 +1,14 @@
-use super::tui::DbListTUI;
+use super::{get::maybe_json_value_parser, tui::DbListTUI};
 use alloy_primitives::hex;
 use clap::Parser;
 use eyre::WrapErr;
 use reth_chainspec::EthereumHardforks;
 use reth_db::{transaction::DbTx, DatabaseEnv};
-use reth_db_api::{database::Database, table::Table, RawValue, TableViewer, Tables};
+use reth_db_api::{
+    database::Database,
+    table::{Encode, IntoVec, Table},
+    RawValue, TableViewer, Tables,
+};
 use reth_db_common::{DbTool, ListFilter};
 use reth_node_builder::{NodeTypes, NodeTypesWithDBAdapter};
 use std::cell::RefCell;
@@ -49,6 +53,15 @@ pub struct Command {
     /// Output bytes instead of human-readable decoded value
     #[arg(long)]
     raw: bool,
+    /// Start key for range query (inclusive). The query will start from this key using O(log n)
+    /// seek instead of scanning from the beginning. Format: JSON value matching the table's key
+    /// type. Examples: `123` for numeric keys, `"0xabc..."` for hash keys.
+    #[arg(long, value_parser = maybe_json_value_parser)]
+    start_key: Option<String>,
+    /// End key for range query (exclusive). The query will stop before this key. Format: JSON
+    /// value matching the table's key type.
+    #[arg(long, value_parser = maybe_json_value_parser)]
+    end_key: Option<String>,
 }
 
 impl Command {
@@ -84,6 +97,8 @@ impl Command {
             min_value_size: self.min_value_size,
             reverse: self.reverse,
             only_count: self.count,
+            start_key: None,
+            end_key: None,
         })
     }
 }
@@ -117,7 +132,21 @@ impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
             }
 
 
-            let list_filter = self.args.list_filter()?;
+            let mut list_filter = self.args.list_filter()?;
+
+            // Parse and set start_key if provided
+            if let Some(ref start_key_str) = self.args.start_key {
+                let key: T::Key = serde_json::from_str(start_key_str)
+                    .wrap_err("Failed to parse start-key as JSON")?;
+                list_filter.start_key = Some(T::Key::encode(key).into_vec());
+            }
+
+            // Parse and set end_key if provided
+            if let Some(ref end_key_str) = self.args.end_key {
+                let key: T::Key = serde_json::from_str(end_key_str)
+                    .wrap_err("Failed to parse end-key as JSON")?;
+                list_filter.end_key = Some(T::Key::encode(key).into_vec());
+            }
 
             if self.args.json || self.args.count {
                 let (list, count) = self.tool.list::<T>(&list_filter)?;

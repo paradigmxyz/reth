@@ -7,7 +7,7 @@ use reth_db_api::{
     database::Database,
     table::{Decode, Decompress, DupSort, Table, TableRow},
     transaction::{DbTx, DbTxMut},
-    DatabaseError, RawTable, TableRawRow,
+    DatabaseError, RawKey, RawTable, TableRawRow,
 };
 use reth_fs_util as fs;
 use reth_node_types::NodeTypesWithDB;
@@ -33,6 +33,9 @@ impl<N: NodeTypesWithDB> DbTool<N> {
     ///
     /// [`ListFilter`] can be used to further
     /// filter down the desired results. (eg. List only rows which include `0xd3adbeef`)
+    ///
+    /// If `start_key` is provided, the query starts from that key (O(log n) seek) instead of
+    /// scanning from the beginning. If `end_key` is provided, the query stops before that key.
     pub fn list<T: Table>(&self, filter: &ListFilter) -> Result<(Vec<TableRow<T>>, usize)> {
         let bmb = Rc::new(BMByte::from(&filter.search));
         if bmb.is_none() && filter.has_search() {
@@ -41,6 +44,9 @@ impl<N: NodeTypesWithDB> DbTool<N> {
 
         let mut hits = 0;
 
+        // Clone end_key for use in the closure
+        let end_key = filter.end_key.clone();
+
         let data = self.provider_factory.db_ref().view(|tx| {
             let mut cursor =
                 tx.cursor_read::<RawTable<T>>().expect("Was not able to obtain a cursor.");
@@ -48,6 +54,13 @@ impl<N: NodeTypesWithDB> DbTool<N> {
             let map_filter = |row: Result<TableRawRow<T>, _>| {
                 if let Ok((k, v)) = row {
                     let (key, value) = (k.into_key(), v.into_value());
+
+                    // Check end_key boundary (exclusive)
+                    if let Some(ref end) = end_key &&
+                        &key >= end
+                    {
+                        return None
+                    }
 
                     if key.len() + value.len() < filter.min_row_size {
                         return None
@@ -87,16 +100,19 @@ impl<N: NodeTypesWithDB> DbTool<N> {
                 None
             };
 
+            // Convert start_key to RawKey if provided
+            let start_key: Option<RawKey<T::Key>> = filter.start_key.clone().map(RawKey::from_vec);
+
             if filter.reverse {
                 Ok(cursor
-                    .walk_back(None)?
+                    .walk_back(start_key)?
                     .skip(filter.skip)
                     .filter_map(map_filter)
                     .take(filter.len)
                     .collect::<Vec<(_, _)>>())
             } else {
                 Ok(cursor
-                    .walk(None)?
+                    .walk(start_key)?
                     .skip(filter.skip)
                     .filter_map(map_filter)
                     .take(filter.len)
@@ -181,6 +197,12 @@ pub struct ListFilter {
     pub reverse: bool,
     /// Only counts the number of filtered entries without decoding and returning them.
     pub only_count: bool,
+    /// Start key for range query (encoded as raw bytes). If provided, the query starts from this
+    /// key instead of the beginning.
+    pub start_key: Option<Vec<u8>>,
+    /// End key for range query (encoded as raw bytes, exclusive). If provided, the query stops
+    /// before this key.
+    pub end_key: Option<Vec<u8>>,
 }
 
 impl ListFilter {
