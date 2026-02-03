@@ -980,6 +980,19 @@ impl SparseTrieTrait for SerialSparseTrie {
     fn take_updates(&mut self) -> SparseTrieUpdates {
         match self.updates.take() {
             Some(updates) => {
+                // Sync branch_node_masks with what's being committed to DB.
+                // This ensures that on subsequent root() calls, the masks reflect the actual
+                // DB state, which is needed for correct removal detection.
+                for (path, node) in &updates.updated_nodes {
+                    self.branch_node_masks.insert(
+                        *path,
+                        BranchNodeMasks { tree_mask: node.tree_mask, hash_mask: node.hash_mask },
+                    );
+                }
+                for path in &updates.removed_nodes {
+                    self.branch_node_masks.remove(path);
+                }
+
                 // NOTE: we need to preserve Some case
                 self.updates = Some(SparseTrieUpdates::with_capacity(
                     updates.updated_nodes.len(),
