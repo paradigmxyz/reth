@@ -10,7 +10,7 @@ use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, SparseTrieResu
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
-    ProofTrieNode, RlpNode, TrieNode, CHILD_INDEX_RANGE,
+    ProofTrieNode, RlpNode, TrieNode,
 };
 use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider},
@@ -2172,15 +2172,13 @@ impl ParallelSparseTrie {
                 // in the lower subtrie, and reveal accordingly.
                 if !SparseSubtrieType::path_len_is_upper(path.len() + 1) {
                     let mut stack_ptr = branch.as_ref().first_child_index();
-                    for idx in CHILD_INDEX_RANGE {
-                        if branch.state_mask.is_bit_set(idx) {
-                            let mut child_path = path;
-                            child_path.push_unchecked(idx);
-                            self.lower_subtrie_for_path_mut(&child_path)
-                                .expect("child_path must have a lower subtrie")
-                                .reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
-                            stack_ptr += 1;
-                        }
+                    for idx in branch.state_mask.iter() {
+                        let mut child_path = path;
+                        child_path.push_unchecked(idx);
+                        self.lower_subtrie_for_path_mut(&child_path)
+                            .expect("child_path must have a lower subtrie")
+                            .reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+                        stack_ptr += 1;
                     }
                 }
             }
@@ -2714,19 +2712,17 @@ impl SparseSubtrie {
                 self.nodes.insert(path, SparseNode::Empty);
             }
             TrieNode::Branch(branch) => {
-                // For a branch node, iterate over all potential children
+                // For a branch node, iterate over all children
                 let mut stack_ptr = branch.as_ref().first_child_index();
-                for idx in CHILD_INDEX_RANGE {
-                    if branch.state_mask.is_bit_set(idx) {
-                        let mut child_path = path;
-                        child_path.push_unchecked(idx);
-                        if Self::is_child_same_level(&path, &child_path) {
-                            // Reveal each child node or hash it has, but only if the child is on
-                            // the same level as the parent.
-                            self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
-                        }
-                        stack_ptr += 1;
+                for idx in branch.state_mask.iter() {
+                    let mut child_path = path;
+                    child_path.push_unchecked(idx);
+                    if Self::is_child_same_level(&path, &child_path) {
+                        // Reveal each child node or hash it has, but only if the child is on
+                        // the same level as the parent.
+                        self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
                     }
+                    stack_ptr += 1;
                 }
                 // Update the branch node entry in the nodes map, handling cases where a blinded
                 // node is now replaced with a revealed node.
@@ -3156,12 +3152,10 @@ impl SparseSubtrieInner {
                 self.buffers.branch_child_buf.clear();
                 // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
                 // from the stack and keep walking in the sorted order.
-                for bit in CHILD_INDEX_RANGE.rev() {
-                    if state_mask.is_bit_set(bit) {
-                        let mut child = path;
-                        child.push_unchecked(bit);
-                        self.buffers.branch_child_buf.push(child);
-                    }
+                for bit in state_mask.iter().rev() {
+                    let mut child = path;
+                    child.push_unchecked(bit);
+                    self.buffers.branch_child_buf.push(child);
                 }
 
                 self.buffers
