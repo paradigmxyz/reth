@@ -357,7 +357,10 @@ where
 
                     self.on_multiproof_message(update);
                     self.process_new_updates()?;
-                    self.dispatch_pending_targets();
+
+                    if self.updates.is_empty() || self.pending_targets.chunking_length() >= self.chunk_size.unwrap_or_default() {
+                        self.dispatch_pending_targets();
+                    }
                 }
                 recv(self.proof_result_rx) -> message => {
                     let Ok(result) = message else {
