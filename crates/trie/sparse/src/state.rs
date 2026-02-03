@@ -1077,28 +1077,32 @@ where
     #[cfg(feature = "std")]
     #[instrument(target = "trie::sparse", skip_all)]
     pub fn prune_preserving(&mut self, config: &crate::hot_accounts::SmartPruneConfig<'_>) {
-        use crate::hot_accounts::TrieKind;
+        use crate::{hot_accounts::TrieKind, PruneTrieStats};
         let fn_start = std::time::Instant::now();
 
         // Prune state and storage tries in parallel
         let ((account_stats, state_prune_duration, state_memory), storage_result) = rayon::join(
             || {
+                // Prune state trie if over memory budget. Returns (stats, duration, memory).
+                // Skips pruning if trie not revealed or under budget.
                 let start = std::time::Instant::now();
 
-                // Prune account trie with hot account awareness
-                let stats = self
-                    .state
-                    .as_revealed_mut()
-                    .map(|trie| trie.prune_preserving(config, TrieKind::State))
-                    .unwrap_or_default();
+                let Some(trie) = self.state.as_revealed_mut() else {
+                    return (PruneTrieStats::default(), start.elapsed(), 0);
+                };
 
+                let memory = trie.memory_size();
+                let excess = memory.saturating_sub(config.max_memory);
+                if excess == 0 {
+                    return (PruneTrieStats::default(), start.elapsed(), memory);
+                }
+
+                let stats =
+                    trie.prune_preserving(config, TrieKind::State { excess_memory: excess });
+                // Pruned nodes are now hash stubs - clear tracking so they get re-revealed
                 self.revealed_account_paths.clear();
 
-                let duration = start.elapsed();
-                let memory =
-                    self.state.as_revealed_ref().map(|trie| trie.memory_size()).unwrap_or_default();
-
-                (stats, duration, memory)
+                (stats, start.elapsed(), memory)
             },
             || self.storage.prune_preserving(config),
         );

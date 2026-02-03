@@ -31,8 +31,13 @@ use std::{borrow::Borrow, collections::VecDeque, hash::Hash};
 /// Identifies the type of trie being pruned, allowing different strategies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrieKind {
-    /// Account/state trie - uses depth-based pruning and node count limits.
-    State,
+    /// Account/state trie - uses depth-based pruning with pre-computed excess memory.
+    /// The `excess_memory` field indicates how many bytes over the budget the trie is.
+    /// If 0, pruning can be skipped entirely.
+    State {
+        /// Bytes over the memory budget that need to be freed.
+        excess_memory: usize,
+    },
     /// Storage trie - uses memory budget to decide eviction.
     Storage,
 }
@@ -40,12 +45,20 @@ pub enum TrieKind {
 impl TrieKind {
     /// Returns `true` if this is the state (account) trie.
     pub const fn is_state(self) -> bool {
-        matches!(self, Self::State)
+        matches!(self, Self::State { .. })
     }
 
     /// Returns `true` if this is a storage trie.
     pub const fn is_storage(self) -> bool {
         matches!(self, Self::Storage)
+    }
+
+    /// Returns the excess memory for state trie, or `usize::MAX` for storage tries.
+    pub const fn excess_memory(self) -> usize {
+        match self {
+            Self::State { excess_memory } => excess_memory,
+            Self::Storage => usize::MAX,
+        }
     }
 }
 

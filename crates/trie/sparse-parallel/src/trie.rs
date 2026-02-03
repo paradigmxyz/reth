@@ -1092,19 +1092,12 @@ impl SparseTrieExt for ParallelSparseTrie {
         // skipped.
         self.subtrie_modifications.decay_and_reset();
 
-        // Memory-based early exit only applies to state trie.
-        // Storage trie memory is managed separately via eviction in StorageTries::prune_preserving.
-        let excess_memory = if kind.is_state() {
-            let current_memory = self.memory_size();
-            let excess = current_memory.saturating_sub(config.max_memory);
-            if excess == 0 {
-                return stats;
-            }
-            excess
-        } else {
-            // For storage tries, always prune fully (no early exit)
-            usize::MAX
-        };
+        // Get excess memory from TrieKind. For state tries, this is pre-computed by the caller.
+        // For storage tries, it's usize::MAX (always prune fully).
+        let excess_memory = kind.excess_memory();
+        if excess_memory == 0 {
+            return stats;
+        }
 
         // Track bytes freed during pruning - stop once we've freed enough (state trie only)
         let mut bytes_freed = 0usize;
