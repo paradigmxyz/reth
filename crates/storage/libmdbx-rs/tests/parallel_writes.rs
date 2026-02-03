@@ -188,7 +188,7 @@ fn test_parallel_subtx_abort() {
 }
 
 /// Test sequential subtxn operations (each subtxn commits serially)
-/// 
+///
 /// Note: True parallel writes to the same dbi are not supported because
 /// B-tree modifications from concurrent subtxns cannot be merged. Each
 /// subtxn must commit before the next one can safely write to the same dbi.
@@ -204,7 +204,13 @@ fn test_parallel_subtx_threaded() {
 
         // Begin write transaction
         let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
-        ffi::mdbx_txn_begin_ex(env, ptr::null_mut(), ffi::MDBX_TXN_READWRITE, &mut txn, ptr::null_mut());
+        ffi::mdbx_txn_begin_ex(
+            env,
+            ptr::null_mut(),
+            ffi::MDBX_TXN_READWRITE,
+            &mut txn,
+            ptr::null_mut(),
+        );
 
         let mut dbi: ffi::MDBX_dbi = 0;
         ffi::mdbx_dbi_open(txn, ptr::null(), ffi::MDBX_CREATE, &mut dbi);
@@ -216,7 +222,7 @@ fn test_parallel_subtx_threaded() {
         // Sequential subtxn operations (2 sequential subtxns)
         let num_subtxns = 2;
         let keys_per_subtxn = 1;
-        
+
         for subtxn_id in 0..num_subtxns {
             let pages_per_subtxn = 10u64;
             let start = range.begin + (subtxn_id as u64) * pages_per_subtxn;
@@ -238,12 +244,8 @@ fn test_parallel_subtx_threaded() {
 
                 let mut k = to_val(key.as_bytes());
                 let mut v = to_val(val.as_bytes());
-                let rc = ffi::mdbx_cursor_put(
-                    cursor,
-                    &mut k,
-                    &mut v,
-                    ffi::MDBX_put_flags_t::default(),
-                );
+                let rc =
+                    ffi::mdbx_cursor_put(cursor, &mut k, &mut v, ffi::MDBX_put_flags_t::default());
                 assert_eq!(rc, 0, "subtx {subtxn_id} put {i} failed: {rc}");
             }
 
@@ -260,7 +262,13 @@ fn test_parallel_subtx_threaded() {
 
         // Verify all keys were written
         let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
-        ffi::mdbx_txn_begin_ex(env, ptr::null_mut(), ffi::MDBX_TXN_RDONLY, &mut txn, ptr::null_mut());
+        ffi::mdbx_txn_begin_ex(
+            env,
+            ptr::null_mut(),
+            ffi::MDBX_TXN_RDONLY,
+            &mut txn,
+            ptr::null_mut(),
+        );
 
         for subtxn_id in 0..num_subtxns {
             for i in 0..keys_per_subtxn {
@@ -300,9 +308,8 @@ fn test_parallel_subtx_different_dbis() {
         );
 
         // Open separate databases for each worker
-        let db_names: Vec<_> = (0..3)
-            .map(|i| std::ffi::CString::new(format!("db{i}")).unwrap())
-            .collect();
+        let db_names: Vec<_> =
+            (0..3).map(|i| std::ffi::CString::new(format!("db{i}")).unwrap()).collect();
         let mut dbis: Vec<ffi::MDBX_dbi> = Vec::new();
         for name in &db_names {
             let mut dbi: ffi::MDBX_dbi = 0;
