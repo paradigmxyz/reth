@@ -1768,10 +1768,11 @@ impl<'a> RocksDBBatch<'a> {
     /// Prunes account history for multiple addresses in a single iterator pass.
     ///
     /// This is more efficient than calling [`Self::prune_account_history_to`] repeatedly
-    /// because it reuses a single raw iterator with `seek()` instead of creating a new
-    /// iterator per address.
+    /// because it reuses a single raw iterator and skips seeks when the iterator is already
+    /// positioned correctly (which happens when targets are sorted and adjacent in key order).
     ///
-    /// `targets` should be sorted by address for optimal performance (matches on-disk key order).
+    /// `targets` MUST be sorted by address for correctness and optimal performance
+    /// (matches on-disk key order).
     pub fn prune_account_history_batch(
         &mut self,
         targets: &[(Address, BlockNumber)],
@@ -1780,31 +1781,61 @@ impl<'a> RocksDBBatch<'a> {
             return Ok(PrunedIndices::default());
         }
 
+        // ShardedKey<Address> layout: [address: 20][block: 8] = 28 bytes
+        // The first 20 bytes are the "prefix" that identifies the address
+        const PREFIX_LEN: usize = 20;
+
         let cf = self.provider.get_cf_handle::<tables::AccountsHistory>()?;
         let mut iter = self.provider.0.raw_iterator_cf(cf);
         let mut outcomes = PrunedIndices::default();
 
         for (address, to_block) in targets {
-            let start_key = ShardedKey::new(*address, 0u64);
-            iter.seek(start_key.encode());
+            // Build the target prefix (first 20 bytes = address)
+            let start_key = ShardedKey::new(*address, 0u64).encode();
+            let target_prefix = &start_key[..PREFIX_LEN];
 
-            iter.status().map_err(|e| {
-                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })?;
+            // Check if we need to seek or if the iterator is already positioned correctly.
+            // After processing the previous target, the iterator is either:
+            // 1. Positioned at a key with a different prefix (we iterated past our shards)
+            // 2. Invalid (no more keys)
+            // If the current key's prefix >= our target prefix, we may be able to skip the seek.
+            let needs_seek = if iter.valid() {
+                if let Some(current_key) = iter.key() {
+                    // If current key's prefix < target prefix, we need to seek forward
+                    // If current key's prefix > target prefix, this target has no shards (skip)
+                    // If current key's prefix == target prefix, we're already positioned
+                    current_key.get(..PREFIX_LEN).is_none_or(|p| p < target_prefix)
+                } else {
+                    true
+                }
+            } else {
+                true
+            };
 
+            if needs_seek {
+                iter.seek(start_key);
+                iter.status().map_err(|e| {
+                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })?;
+            }
+
+            // Collect all shards for this address using raw prefix comparison
             let mut shards = Vec::new();
             while iter.valid() {
                 let Some(key_bytes) = iter.key() else { break };
 
-                let key = ShardedKey::<Address>::decode(key_bytes)
-                    .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-
-                if key.key != *address {
+                // Use raw prefix comparison instead of full decode for the prefix check
+                let current_prefix = key_bytes.get(..PREFIX_LEN);
+                if current_prefix != Some(target_prefix) {
                     break;
                 }
+
+                // Now decode the full key (we need the block number)
+                let key = ShardedKey::<Address>::decode(key_bytes)
+                    .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
                 let Some(value_bytes) = iter.value() else { break };
                 let value = BlockNumberList::decompress(value_bytes)
@@ -1859,11 +1890,11 @@ impl<'a> RocksDBBatch<'a> {
     /// pass.
     ///
     /// This is more efficient than calling [`Self::prune_storage_history_to`] repeatedly
-    /// because it reuses a single raw iterator with `seek()` instead of creating a new
-    /// iterator per key.
+    /// because it reuses a single raw iterator and skips seeks when the iterator is already
+    /// positioned correctly (which happens when targets are sorted and adjacent in key order).
     ///
-    /// `targets` should be sorted by (address, `storage_key`) for optimal performance
-    /// (matches on-disk key order).
+    /// `targets` MUST be sorted by (address, `storage_key`) for correctness and optimal
+    /// performance (matches on-disk key order).
     pub fn prune_storage_history_batch(
         &mut self,
         targets: &[((Address, B256), BlockNumber)],
@@ -1872,35 +1903,61 @@ impl<'a> RocksDBBatch<'a> {
             return Ok(PrunedIndices::default());
         }
 
+        // StorageShardedKey layout: [address: 20][storage_key: 32][block: 8] = 60 bytes
+        // The first 52 bytes are the "prefix" that identifies (address, storage_key)
+        const PREFIX_LEN: usize = 52;
+
         let cf = self.provider.get_cf_handle::<tables::StoragesHistory>()?;
         let mut iter = self.provider.0.raw_iterator_cf(cf);
         let mut outcomes = PrunedIndices::default();
 
         for ((address, storage_key), to_block) in targets {
-            // Seek to start of this (address, storage_key)'s shards
-            let start_key = StorageShardedKey::new(*address, *storage_key, 0u64);
-            iter.seek(start_key.encode());
+            // Build the target prefix (first 52 bytes of encoded key)
+            let start_key = StorageShardedKey::new(*address, *storage_key, 0u64).encode();
+            let target_prefix = &start_key[..PREFIX_LEN];
 
-            // Check iterator status after seek
-            iter.status().map_err(|e| {
-                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })?;
+            // Check if we need to seek or if the iterator is already positioned correctly.
+            // After processing the previous target, the iterator is either:
+            // 1. Positioned at a key with a different prefix (we iterated past our shards)
+            // 2. Invalid (no more keys)
+            // If the current key's prefix >= our target prefix, we may be able to skip the seek.
+            let needs_seek = if iter.valid() {
+                if let Some(current_key) = iter.key() {
+                    // If current key's prefix < target prefix, we need to seek forward
+                    // If current key's prefix > target prefix, this target has no shards (skip)
+                    // If current key's prefix == target prefix, we're already positioned
+                    current_key.get(..PREFIX_LEN).is_none_or(|p| p < target_prefix)
+                } else {
+                    true
+                }
+            } else {
+                true
+            };
 
-            // Collect all shards for this (address, storage_key) pair
+            if needs_seek {
+                iter.seek(start_key);
+                iter.status().map_err(|e| {
+                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })?;
+            }
+
+            // Collect all shards for this (address, storage_key) pair using prefix comparison
             let mut shards = Vec::new();
             while iter.valid() {
                 let Some(key_bytes) = iter.key() else { break };
 
-                let key = StorageShardedKey::decode(key_bytes)
-                    .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-
-                // Stop when we reach a different (address, storage_key) pair
-                if key.address != *address || key.sharded_key.key != *storage_key {
+                // Use raw prefix comparison instead of full decode for the prefix check
+                let current_prefix = key_bytes.get(..PREFIX_LEN);
+                if current_prefix != Some(target_prefix) {
                     break;
                 }
+
+                // Now decode the full key (we need the block number)
+                let key = StorageShardedKey::decode(key_bytes)
+                    .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
                 let Some(value_bytes) = iter.value() else { break };
                 let value = BlockNumberList::decompress(value_bytes)
