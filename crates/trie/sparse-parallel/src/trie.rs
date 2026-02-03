@@ -1235,59 +1235,85 @@ impl SparseTrieExt for ParallelSparseTrie {
     ) -> SparseTrieResult<()> {
         use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
 
-        // Collect keys upfront since we mutate `updates` during iteration.
-        // On success, entries are removed; on blinded node failure, they're re-inserted.
-        let keys: Vec<B256> = updates.keys().copied().collect();
+        // Separate Touched entries (read-only) from Changed entries (mutating).
+        // Touched entries can be processed in parallel since find_leaf is read-only.
+        let (touched_keys, changed_entries): (Vec<_>, Vec<_>) = updates
+            .drain()
+            .partition(|(_, update)| matches!(update, LeafUpdate::Touched));
 
-        for key in keys {
-            let full_path = Nibbles::unpack(key);
-            // Remove upfront - we'll re-insert if the operation fails due to blinded node.
-            let update = updates.remove(&key).unwrap();
-
-            match update {
-                LeafUpdate::Changed(value) => {
-                    if value.is_empty() {
-                        // Removal: remove_leaf with NoRevealProvider is atomic - returns a
-                        // retriable error before any mutations (via pre_validate_reveal_chain).
-                        match self.remove_leaf(&full_path, NoRevealProvider) {
-                            Ok(()) => {}
-                            Err(e) => {
-                                if let Some(path) = Self::get_retriable_path(&e) {
-                                    let (target_key, min_len) =
-                                        Self::proof_target_for_path(key, &full_path, &path);
-                                    proof_required_fn(target_key, min_len);
-                                    updates.insert(key, LeafUpdate::Changed(value));
-                                } else {
-                                    return Err(e);
-                                }
-                            }
-                        }
-                    } else {
-                        // Update/insert: update_leaf is atomic - cleans up on error.
-                        if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider)
-                        {
-                            if let Some(path) = Self::get_retriable_path(&e) {
-                                let (target_key, min_len) =
-                                    Self::proof_target_for_path(key, &full_path, &path);
-                                proof_required_fn(target_key, min_len);
-                                updates.insert(key, LeafUpdate::Changed(value));
-                            } else {
-                                return Err(e);
-                            }
-                        }
-                    }
-                }
-                LeafUpdate::Touched => {
-                    // Touched is read-only: check if path is accessible, request proof if blinded.
+        // Process Touched entries in parallel - find_leaf is read-only
+        #[cfg(feature = "std")]
+        let blinded_touched: Vec<_> = {
+            use rayon::iter::{IntoParallelIterator, ParallelIterator};
+            touched_keys
+                .into_par_iter()
+                .filter_map(|(key, _)| {
+                    let full_path = Nibbles::unpack(key);
                     match self.find_leaf(&full_path, None) {
                         Err(LeafLookupError::BlindedNode { path, .. }) => {
                             let (target_key, min_len) =
                                 Self::proof_target_for_path(key, &full_path, &path);
-                            proof_required_fn(target_key, min_len);
-                            updates.insert(key, LeafUpdate::Touched);
+                            Some((key, target_key, min_len))
                         }
-                        // Path is fully revealed (exists or proven non-existent), no action needed.
-                        Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => {}
+                        Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => None,
+                    }
+                })
+                .collect()
+        };
+
+        #[cfg(not(feature = "std"))]
+        let blinded_touched: Vec<_> = touched_keys
+            .into_iter()
+            .filter_map(|(key, _)| {
+                let full_path = Nibbles::unpack(key);
+                match self.find_leaf(&full_path, None) {
+                    Err(LeafLookupError::BlindedNode { path, .. }) => {
+                        let (target_key, min_len) =
+                            Self::proof_target_for_path(key, &full_path, &path);
+                        Some((key, target_key, min_len))
+                    }
+                    Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => None,
+                }
+            })
+            .collect();
+
+        // Re-insert blinded Touched entries and call proof_required_fn
+        for (key, target_key, min_len) in blinded_touched {
+            proof_required_fn(target_key, min_len);
+            updates.insert(key, LeafUpdate::Touched);
+        }
+
+        // Process Changed entries sequentially (they mutate state)
+        for (key, update) in changed_entries {
+            let full_path = Nibbles::unpack(key);
+            let LeafUpdate::Changed(value) = update else { unreachable!() };
+
+            if value.is_empty() {
+                // Removal: remove_leaf with NoRevealProvider is atomic - returns a
+                // retriable error before any mutations (via pre_validate_reveal_chain).
+                match self.remove_leaf(&full_path, NoRevealProvider) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        if let Some(path) = Self::get_retriable_path(&e) {
+                            let (target_key, min_len) =
+                                Self::proof_target_for_path(key, &full_path, &path);
+                            proof_required_fn(target_key, min_len);
+                            updates.insert(key, LeafUpdate::Changed(value));
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                }
+            } else {
+                // Update/insert: update_leaf is atomic - cleans up on error.
+                if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider) {
+                    if let Some(path) = Self::get_retriable_path(&e) {
+                        let (target_key, min_len) =
+                            Self::proof_target_for_path(key, &full_path, &path);
+                        proof_required_fn(target_key, min_len);
+                        updates.insert(key, LeafUpdate::Changed(value));
+                    } else {
+                        return Err(e);
                     }
                 }
             }
