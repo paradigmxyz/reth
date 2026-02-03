@@ -78,7 +78,7 @@ fn generate_test_data(size: usize) -> HashMap<Address, BundleAccount> {
 
     let bundle_state = bundle_builder.build();
 
-    bundle_state.state
+    bundle_state.state.into_iter().collect()
 }
 
 criterion_group!(post_state, hash_post_state);
