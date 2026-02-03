@@ -1454,7 +1454,7 @@ fn filter_map_revealed_nodes(
 ) -> SparseStateTrieResult<FilterMappedProofNodes> {
     let mut result = FilterMappedProofNodes {
         root_node: None,
-        nodes: Vec::new(),
+        nodes: Vec::with_capacity(proof_nodes.len()),
         new_nodes: 0,
         metric_values: Default::default(),
     };
@@ -1539,7 +1539,7 @@ fn filter_revealed_v2_proof_nodes(
 ) -> SparseStateTrieResult<FilteredV2ProofNodes> {
     let mut result = FilteredV2ProofNodes {
         root_node: None,
-        nodes: Vec::new(),
+        nodes: Vec::with_capacity(proof_nodes.len()),
         new_nodes: 0,
         metric_values: Default::default(),
     };
@@ -2077,7 +2077,7 @@ mod tests {
                 nodes: vec![ProofTrieNode {
                     path: Nibbles::from_nibbles([0x1]),
                     node: leaf,
-                    masks: None
+                    masks: None,
                 }],
                 // Branch, two of its children, one leaf
                 new_nodes: 4,
