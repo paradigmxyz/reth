@@ -21,6 +21,7 @@ use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
     provider::{ProviderError, ProviderResult},
 };
+use reth_tasks::spawn_scoped_os_thread;
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
@@ -1152,13 +1153,21 @@ impl RocksDBProvider {
             let handles: Vec<_> = [
                 (ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
                     ctx.prune_tx_lookup.is_none_or(|m| !m.is_full()))
-                .then(|| s.spawn(|| self.write_tx_hash_numbers(blocks, tx_nums, &ctx))),
-                ctx.storage_settings
-                    .account_history_in_rocksdb
-                    .then(|| s.spawn(|| self.write_account_history(blocks, &ctx))),
-                ctx.storage_settings
-                    .storages_history_in_rocksdb
-                    .then(|| s.spawn(|| self.write_storage_history(blocks, &ctx))),
+                .then(|| {
+                    spawn_scoped_os_thread(s, "rocksdb-tx-hash", || {
+                        self.write_tx_hash_numbers(blocks, tx_nums, &ctx)
+                    })
+                }),
+                ctx.storage_settings.account_history_in_rocksdb.then(|| {
+                    spawn_scoped_os_thread(s, "rocksdb-account-history", || {
+                        self.write_account_history(blocks, &ctx)
+                    })
+                }),
+                ctx.storage_settings.storages_history_in_rocksdb.then(|| {
+                    spawn_scoped_os_thread(s, "rocksdb-storage-history", || {
+                        self.write_storage_history(blocks, &ctx)
+                    })
+                }),
             ]
             .into_iter()
             .enumerate()
