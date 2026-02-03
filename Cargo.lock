@@ -10248,7 +10248,6 @@ dependencies = [
  "reth-static-file-types",
  "reth-storage-api",
  "reth-storage-errors",
- "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
  "reth-trie",
