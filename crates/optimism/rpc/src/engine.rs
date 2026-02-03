@@ -3,8 +3,8 @@
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, B256, B64, U64};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
-    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadInputV2,
+    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
 use derive_more::Constructor;
 use jsonrpsee::proc_macros::rpc;
@@ -36,7 +36,9 @@ pub const OP_ENGINE_CAPABILITIES: &[&str] = &[
     "engine_newPayloadV3",
     "engine_newPayloadV4",
     "engine_getPayloadBodiesByHashV1",
+    "engine_getPayloadBodiesByHashV2",
     "engine_getPayloadBodiesByRangeV1",
+    "engine_getPayloadBodiesByRangeV2",
     "engine_signalSuperchainV1",
 ];
 
@@ -201,6 +203,17 @@ pub trait OpEngineApi<Engine: EngineTypes> {
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
 
+    /// Returns `ExecutionPayloadBodyV2` objects for the given block hashes.
+    ///
+    /// V2 includes the `block_access_list` field for EIP-7928 BAL support.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    #[method(name = "getPayloadBodiesByHashV2")]
+    async fn get_payload_bodies_by_hash_v2(
+        &self,
+        block_hashes: Vec<BlockHash>,
+    ) -> RpcResult<ExecutionPayloadBodiesV2>;
+
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
     /// blocks.
     ///
@@ -219,6 +232,18 @@ pub trait OpEngineApi<Engine: EngineTypes> {
         start: U64,
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
+
+    /// Returns `ExecutionPayloadBodyV2` objects for the given block range.
+    ///
+    /// V2 includes the `block_access_list` field for EIP-7928 BAL support.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-7928>
+    #[method(name = "getPayloadBodiesByRangeV2")]
+    async fn get_payload_bodies_by_range_v2(
+        &self,
+        start: U64,
+        count: U64,
+    ) -> RpcResult<ExecutionPayloadBodiesV2>;
 
     /// Signals superchain information to the Engine.
     /// Returns the latest supported OP-Stack protocol version of the execution engine.
@@ -366,6 +391,14 @@ where
         Ok(self.inner.get_payload_bodies_by_hash_v1_metered(block_hashes).await?)
     }
 
+    async fn get_payload_bodies_by_hash_v2(
+        &self,
+        block_hashes: Vec<BlockHash>,
+    ) -> RpcResult<ExecutionPayloadBodiesV2> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV2");
+        Ok(self.inner.get_payload_bodies_by_hash_v2_metered(block_hashes).await?)
+    }
+
     async fn get_payload_bodies_by_range_v1(
         &self,
         start: U64,
@@ -373,6 +406,15 @@ where
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
         Ok(self.inner.get_payload_bodies_by_range_v1_metered(start.to(), count.to()).await?)
+    }
+
+    async fn get_payload_bodies_by_range_v2(
+        &self,
+        start: U64,
+        count: U64,
+    ) -> RpcResult<ExecutionPayloadBodiesV2> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV2");
+        Ok(self.inner.get_payload_bodies_by_range_v2_metered(start.to(), count.to()).await?)
     }
 
     async fn signal_superchain_v1(&self, signal: SuperchainSignal) -> RpcResult<ProtocolVersion> {
