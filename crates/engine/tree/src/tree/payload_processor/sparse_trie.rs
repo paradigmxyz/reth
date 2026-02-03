@@ -28,7 +28,7 @@ use reth_trie_parallel::{
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    ClearedSparseStateTrie, DeferredDrops, LeafUpdate, SerialSparseTrie, SparseStateTrie,
+     DeferredDrops, LeafUpdate, SerialSparseTrie, SparseStateTrie,
     SparseTrie, SparseTrieExt,
 };
 use revm_primitives::{hash_map::Entry, B256Map};

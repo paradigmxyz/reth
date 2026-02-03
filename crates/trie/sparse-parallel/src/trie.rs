@@ -9005,7 +9005,7 @@ mod tests {
 
         // Create a trie with some data
         let mut trie = ParallelSparseTrie::default();
-        let nodes = vec![
+        let mut nodes = vec![
             ProofTrieNode {
                 path: Nibbles::from_nibbles_unchecked([0x1, 0x2]),
                 node: TrieNode::Leaf(LeafNode {
@@ -9023,7 +9023,7 @@ mod tests {
                 masks: None,
             },
         ];
-        trie.reveal_nodes(nodes).unwrap();
+        trie.reveal_nodes(&mut nodes).unwrap();
 
         let populated_size = trie.memory_size();
 
