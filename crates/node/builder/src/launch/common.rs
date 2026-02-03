@@ -556,11 +556,8 @@ where
                     %err,
                     unwind_block,
                     %inconsistency_source,
-                    "Cannot recover from storage inconsistency: required history data has been pruned."
-                );
-                error!(
-                    target: "reth::cli",
-                    "Recovery options:\n\
+                    "Cannot recover from storage inconsistency: required history data has been pruned.\n\
+                     Recovery options:\n\
                      1. Re-sync from scratch by removing the data directory\n\
                      2. Restore from a backup that has the required history\n\
                      3. If only static files are corrupted, try deleting the affected static files \

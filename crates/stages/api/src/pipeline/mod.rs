@@ -39,8 +39,9 @@ pub use set::*;
 /// - `Execution`: needs changesets to revert plain state
 /// - `AccountHashing`: calls `unwind_account_hashing_range` which reads `AccountChangeSets`
 /// - `StorageHashing`: calls `unwind_storage_hashing_range` which reads `StorageChangeSets`
-const STAGES_REQUIRING_HISTORY_FOR_UNWIND: [StageId; 3] =
-    [StageId::Execution, StageId::AccountHashing, StageId::StorageHashing];
+/// - `Merkle`: depends on AccountHashing/StorageHashing outputs
+const STAGES_REQUIRING_HISTORY_FOR_UNWIND: [StageId; 4] =
+    [StageId::Execution, StageId::AccountHashing, StageId::StorageHashing, StageId::Merkle];
 
 /// Returns `true` if any stage that requires history changesets would need to unwind
 /// (i.e., has a checkpoint above the unwind target).
