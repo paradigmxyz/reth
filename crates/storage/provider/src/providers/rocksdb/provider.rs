@@ -283,6 +283,19 @@ impl RocksDBBuilder {
     }
 
     /// Sets a custom block cache size.
+    ///
+    /// The block cache is shared across all column families and caches uncompressed data blocks.
+    /// For large databases, setting this to 25-50% of available RAM can significantly improve
+    /// read performance by reducing disk I/O.
+    ///
+    /// Default: 128 MB ([`DEFAULT_CACHE_SIZE`]).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Set cache to 1 GB
+    /// builder.with_block_cache_size(1 << 30)
+    /// ```
     pub fn with_block_cache_size(mut self, capacity_bytes: usize) -> Self {
         self.block_cache = Cache::new_lru_cache(capacity_bytes);
         self
