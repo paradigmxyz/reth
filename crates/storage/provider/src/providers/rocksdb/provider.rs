@@ -1,5 +1,9 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
-use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
+use crate::providers::{
+    compute_history_rank, needs_prev_shard_check,
+    rocksdb_types::{RocksDBStats, RocksDBTableStats},
+    HistoryInfo,
+};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
 use itertools::Itertools;
@@ -39,36 +43,6 @@ use tracing::instrument;
 
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
-
-/// Statistics for a single `RocksDB` table (column family).
-#[derive(Debug, Clone)]
-pub struct RocksDBTableStats {
-    /// Size of SST files on disk in bytes.
-    pub sst_size_bytes: u64,
-    /// Size of memtables in memory in bytes.
-    pub memtable_size_bytes: u64,
-    /// Name of the table/column family.
-    pub name: String,
-    /// Estimated number of keys in the table.
-    pub estimated_num_keys: u64,
-    /// Estimated size of live data in bytes (SST files + memtables).
-    pub estimated_size_bytes: u64,
-    /// Estimated bytes pending compaction (reclaimable space).
-    pub pending_compaction_bytes: u64,
-}
-
-/// Database-level statistics for `RocksDB`.
-///
-/// Contains both per-table statistics and DB-level metrics like WAL size.
-#[derive(Debug, Clone)]
-pub struct RocksDBStats {
-    /// Statistics for each table (column family).
-    pub tables: Vec<RocksDBTableStats>,
-    /// Total size of WAL (Write-Ahead Log) files in bytes.
-    ///
-    /// WAL is shared across all tables and not included in per-table metrics.
-    pub wal_size_bytes: u64,
-}
 
 /// Context for `RocksDB` block writes.
 #[derive(Clone)]
