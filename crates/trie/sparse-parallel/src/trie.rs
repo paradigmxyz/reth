@@ -2165,6 +2165,50 @@ impl ParallelSparseTrie {
             self.subtrie_modifications.mark_modified(index);
         }
     }
+
+    /// Returns a heuristic for the in-memory size of this trie in bytes.
+    ///
+    /// This is an approximation that accounts for:
+    /// - The upper subtrie nodes and values
+    /// - All revealed lower subtries nodes and values
+    /// - The prefix set keys
+    /// - The branch node masks map
+    /// - Updates if retained
+    /// - Update action buffers
+    ///
+    /// Note: Heap allocations for hash maps may be larger due to load factor overhead.
+    pub fn memory_size(&self) -> usize {
+        let mut size = core::mem::size_of::<Self>();
+
+        // Upper subtrie
+        size += self.upper_subtrie.memory_size();
+
+        // Lower subtries (both Revealed and Blind with allocation)
+        for subtrie in &self.lower_subtries {
+            size += subtrie.memory_size();
+        }
+
+        // Prefix set keys
+        size += self.prefix_set.len() * core::mem::size_of::<Nibbles>();
+
+        // Branch node masks map
+        size += self.branch_node_masks.len() *
+            (core::mem::size_of::<Nibbles>() + core::mem::size_of::<BranchNodeMasks>());
+
+        // Updates if present
+        if let Some(updates) = &self.updates {
+            size += updates.updated_nodes.len() *
+                (core::mem::size_of::<Nibbles>() + core::mem::size_of::<BranchNodeCompact>());
+            size += updates.removed_nodes.len() * core::mem::size_of::<Nibbles>();
+        }
+
+        // Update actions buffers
+        for buf in &self.update_actions_buffers {
+            size += buf.capacity() * core::mem::size_of::<SparseTrieUpdatesAction>();
+        }
+
+        size
+    }
 }
 
 /// Bitset tracking which of the 256 lower subtries were modified in the current cycle.
@@ -2859,6 +2903,30 @@ impl SparseSubtrie {
     pub(crate) fn shrink_values_to(&mut self, size: usize) {
         self.inner.values.shrink_to(size);
     }
+
+    /// Returns a heuristic for the in-memory size of this subtrie in bytes.
+    pub(crate) fn memory_size(&self) -> usize {
+        let mut size = core::mem::size_of::<Self>();
+
+        // Nodes map: key (Nibbles) + value (SparseNode)
+        for (path, node) in &self.nodes {
+            size += core::mem::size_of::<Nibbles>();
+            size += path.len(); // Nibbles heap allocation
+            size += node.memory_size();
+        }
+
+        // Values map: key (Nibbles) + value (Vec<u8>)
+        for (path, value) in &self.inner.values {
+            size += core::mem::size_of::<Nibbles>();
+            size += path.len(); // Nibbles heap allocation
+            size += core::mem::size_of::<Vec<u8>>() + value.capacity();
+        }
+
+        // Buffers
+        size += self.inner.buffers.memory_size();
+
+        size
+    }
 }
 
 /// Helper type for [`SparseSubtrie`] to mutably access only a subset of fields from the original
@@ -3331,6 +3399,19 @@ impl SparseSubtrieBuffers {
         self.branch_child_buf.clear();
         self.branch_value_stack_buf.clear();
         self.rlp_buf.clear();
+    }
+
+    /// Returns a heuristic for the in-memory size of these buffers in bytes.
+    const fn memory_size(&self) -> usize {
+        let mut size = core::mem::size_of::<Self>();
+
+        size += self.path_stack.capacity() * core::mem::size_of::<RlpNodePathStackItem>();
+        size += self.rlp_node_stack.capacity() * core::mem::size_of::<RlpNodeStackItem>();
+        size += self.branch_child_buf.capacity() * core::mem::size_of::<Nibbles>();
+        size += self.branch_value_stack_buf.capacity() * core::mem::size_of::<RlpNode>();
+        size += self.rlp_buf.capacity();
+
+        size
     }
 }
 
@@ -9119,5 +9200,42 @@ mod tests {
             <ParallelSparseTrie as SparseTrieExt>::prune_preserving(&mut trie, &config);
             assert_eq!(root_before, trie.root(), "root hash must be preserved");
         }
+    }
+
+    #[test]
+    fn test_memory_size() {
+        // Test that memory_size returns a reasonable value for an empty trie
+        let trie = ParallelSparseTrie::default();
+        let empty_size = trie.memory_size();
+
+        // Should at least be the size of the struct itself
+        assert!(empty_size >= core::mem::size_of::<ParallelSparseTrie>());
+
+        // Create a trie with some data
+        let mut trie = ParallelSparseTrie::default();
+        let nodes = vec![
+            ProofTrieNode {
+                path: Nibbles::from_nibbles_unchecked([0x1, 0x2]),
+                node: TrieNode::Leaf(LeafNode {
+                    key: Nibbles::from_nibbles_unchecked([0x3, 0x4]),
+                    value: vec![1, 2, 3],
+                }),
+                masks: None,
+            },
+            ProofTrieNode {
+                path: Nibbles::from_nibbles_unchecked([0x5, 0x6]),
+                node: TrieNode::Leaf(LeafNode {
+                    key: Nibbles::from_nibbles_unchecked([0x7, 0x8]),
+                    value: vec![4, 5, 6],
+                }),
+                masks: None,
+            },
+        ];
+        trie.reveal_nodes(nodes).unwrap();
+
+        let populated_size = trie.memory_size();
+
+        // Populated trie should use more memory than an empty one
+        assert!(populated_size > empty_size);
     }
 }
