@@ -1236,25 +1236,28 @@ impl SparseTrieExt for ParallelSparseTrie {
         use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
 
         // Process Touched entries in parallel - find_leaf is read-only.
-        // We iterate over updates directly, collecting only blinded results.
+        // We collect keys first to enable proper parallel chunking (HashMap par_iter has poor splitting).
         #[cfg(feature = "std")]
         let mut blinded_touched = {
-            use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-            updates
-                .par_iter()
-                .filter_map(|(&key, update)| {
-                    if !matches!(update, LeafUpdate::Touched) {
-                        return None;
-                    }
-                    let full_path = Nibbles::unpack(key);
-                    match self.find_leaf(&full_path, None) {
-                        Err(LeafLookupError::BlindedNode { path, .. }) => {
-                            let (target_key, min_len) =
-                                Self::proof_target_for_path(key, &full_path, &path);
-                            Some((key, (target_key, min_len)))
+            use rayon::slice::ParallelSlice;
+            use rayon::iter::ParallelIterator;
+            let keys: Vec<B256> = updates
+                .iter()
+                .filter_map(|(&key, update)| matches!(update, LeafUpdate::Touched).then_some(key))
+                .collect();
+            keys.par_chunks(keys.len().div_ceil(4).max(1))
+                .flat_map_iter(|chunk: &[B256]| {
+                    chunk.iter().filter_map(|&key| {
+                        let full_path = Nibbles::unpack(key);
+                        match self.find_leaf(&full_path, None) {
+                            Err(LeafLookupError::BlindedNode { path, .. }) => {
+                                let (target_key, min_len) =
+                                    Self::proof_target_for_path(key, &full_path, &path);
+                                Some((key, (target_key, min_len)))
+                            }
+                            Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => None,
                         }
-                        Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => None,
-                    }
+                    })
                 })
                 .collect::<B256Map<_>>()
         };
@@ -1300,7 +1303,7 @@ impl SparseTrieExt for ParallelSparseTrie {
                     let result = if value.is_empty() {
                         self.remove_leaf(&full_path, NoRevealProvider)
                     } else {
-                        self.update_leaf(full_path.clone(), value.clone(), NoRevealProvider)
+                        self.update_leaf(full_path, value.clone(), NoRevealProvider)
                     };
 
                     match result {
