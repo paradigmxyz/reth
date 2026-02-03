@@ -619,10 +619,37 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 );
             }
 
-            // Always enable parallel writes - creates subtransactions for all DBIs
-            // This allows cursors to use per-DBI subtransactions even in sequential mode
-            // Subtransactions are committed serially before parent commit
-            let _ = self.tx.enable_parallel_writes();
+            // Enable parallel writes only for tables written in save_blocks.
+            // This creates subtransactions for these specific tables, enabling safe
+            // parallel writes from multiple threads.
+            const SAVE_BLOCKS_TABLES: &[&str] = &[
+                // From insert_block_mdbx_only:
+                "TransactionSenders",
+                "HeaderNumbers",
+                "BlockBodyIndices",
+                "TransactionBlocks",
+                "BlockOmmers",
+                "BlockWithdrawals",
+                // From write_state:
+                "PlainAccountState",
+                "Bytecodes",
+                "PlainStorageState",
+                "StorageChangeSets",
+                "AccountChangeSets",
+                "Receipts",
+                // From write_hashed_state:
+                "HashedAccounts",
+                "HashedStorages",
+                // From write_trie_updates_sorted:
+                "AccountsTrie",
+                "StoragesTrie",
+                // From update_history_indices:
+                "AccountsHistory",
+                "StoragesHistory",
+                // From update_pipeline_stages:
+                "StageCheckpoints",
+            ];
+            let _ = self.tx.enable_parallel_writes_for_tables(SAVE_BLOCKS_TABLES);
 
             // Pre-compute merged hashed state and trie updates before write section
             let (merged_hashed_state, merged_trie) = if save_mode.with_state() {

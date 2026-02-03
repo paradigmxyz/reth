@@ -452,6 +452,29 @@ impl Tx<RW> {
             self.metrics_handler.as_ref().map(|h| h.env_metrics.clone()),
         ))
     }
+
+    /// Enables parallel writes mode only for the specified tables.
+    ///
+    /// Creates subtransactions only for the listed tables, allowing parallel
+    /// writes to those tables while other tables continue using the main transaction.
+    ///
+    /// # Arguments
+    /// * `tables` - Slice of table names to create subtransactions for.
+    ///
+    /// # Returns
+    /// Ok(()) on success, or an error if subtransaction creation fails.
+    pub fn enable_parallel_writes_for_tables(&self, tables: &[&str]) -> Result<(), DatabaseError> {
+        let dbis: Vec<MDBX_dbi> = tables
+            .iter()
+            .filter_map(|name| self.dbis.get(*name).copied())
+            .collect();
+
+        if dbis.is_empty() {
+            return Ok(());
+        }
+
+        self.inner.enable_parallel_writes(&dbis).map_err(|e| DatabaseError::InitCursor(e.into()))
+    }
 }
 
 impl DbTxMut for Tx<RW> {
@@ -516,6 +539,10 @@ impl DbTxMut for Tx<RW> {
 
     fn commit_subtxns(&self) -> Result<(), DatabaseError> {
         Tx::commit_subtxns(self)
+    }
+
+    fn enable_parallel_writes_for_tables(&self, tables: &[&str]) -> Result<(), DatabaseError> {
+        Tx::enable_parallel_writes_for_tables(self, tables)
     }
 }
 
