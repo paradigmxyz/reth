@@ -74,7 +74,8 @@ target "_base_amd64" {
   inherits  = ["_base"]
   platforms = ["linux/amd64"]
   args = {
-    RUSTFLAGS = "-C target-cpu=x86-64-v3"
+    # pclmulqdq required for rocksdb: https://github.com/rust-rocksdb/rust-rocksdb/issues/1069
+    RUSTFLAGS = "-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq"
   }
 }
 
