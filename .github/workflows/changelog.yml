@@ -11,7 +11,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - run: npm install -g @anthropic-ai/claude-cli
+      - run: npm install -g @anthropic-ai/claude-code
       - uses: wevm/changelogs-rs/gen@master
         with:
           ai: 'claude -x'
