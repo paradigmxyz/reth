@@ -671,7 +671,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         F: FnOnce(&mut StaticFileProviderRWRefMut<'_, N>) -> ProviderResult<()> + Send + 'env,
     {
         thread::Builder::new()
-            .name(format!("{segment}"))
+            .name(segment.as_short_str().into())
             .spawn_scoped(scope, move || {
                 let mut w = self.get_writer(first_block_number, segment)?;
                 f(&mut w)?;
