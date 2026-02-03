@@ -29,9 +29,9 @@ ARG MANIFEST_PATH=bin/reth
 ARG BUILD_PROFILE=release
 ENV BUILD_PROFILE=$BUILD_PROFILE
 
-# Extra Cargo flags
+# Extra Cargo flags (x86-64-v3 for amd64, empty for arm64)
+ARG TARGETARCH
 ARG RUSTFLAGS=""
-ENV RUSTFLAGS="$RUSTFLAGS"
 
 # Extra Cargo features
 ARG FEATURES=""
@@ -51,6 +51,8 @@ RUN --mount=type=secret,id=DEPOT_TOKEN,env=SCCACHE_WEBDAV_TOKEN \
     --mount=type=cache,target=/usr/local/cargo/registry,sharing=shared \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=shared \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=shared \
+    export RUSTFLAGS="$RUSTFLAGS"; \
+    if [ "$TARGETARCH" = "amd64" ]; then export RUSTFLAGS="$RUSTFLAGS -C target-cpu=x86-64-v3"; fi && \
     cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $BINARY --manifest-path $MANIFEST_PATH/Cargo.toml
 
 RUN sccache --show-stats || true
