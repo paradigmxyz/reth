@@ -2356,6 +2356,8 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
                     high = mid;
                 }
             } else {
+                // This is not expected but means we are out of the range / file somehow, and can't
+                // continue
                 debug!(
                     target: "provider::static_file",
                     ?low,
