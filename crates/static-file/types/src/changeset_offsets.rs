@@ -24,9 +24,14 @@ impl ChangesetOffsetWriter {
 
     /// Opens or creates the changeset offset file for appending.
     ///
-    /// If the file contains a partial record (from a crash mid-write), it is
-    /// truncated to the last complete record boundary.
-    pub fn new(path: impl AsRef<Path>) -> io::Result<Self> {
+    /// The file is healed to match `committed_len` (from the segment header):
+    /// - Partial records (from crash mid-write) are truncated to record boundary
+    /// - Extra complete records (from crash after sidecar sync but before header commit)
+    ///   are truncated to match the committed length
+    /// - If the file has fewer records than committed, returns an error (data corruption)
+    ///
+    /// This mirrors NippyJar's healing behavior where config/header is the commit boundary.
+    pub fn new(path: impl AsRef<Path>, committed_len: u64) -> io::Result<Self> {
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -37,7 +42,8 @@ impl ChangesetOffsetWriter {
         let file_len = file.metadata()?.len();
         let remainder = file_len % Self::RECORD_SIZE as u64;
 
-        if remainder != 0 {
+        // First, truncate any partial record from crash mid-write
+        let aligned_len = if remainder != 0 {
             let truncated_len = file_len - remainder;
             #[cfg(feature = "std")]
             tracing::warn!(
@@ -48,10 +54,45 @@ impl ChangesetOffsetWriter {
                 "Truncating partial changeset offset record"
             );
             file.set_len(truncated_len)?;
+            truncated_len
+        } else {
+            file_len
+        };
+
+        let records_in_file = aligned_len / Self::RECORD_SIZE as u64;
+
+        // Heal sidecar to match committed header length
+        match records_in_file.cmp(&committed_len) {
+            std::cmp::Ordering::Greater => {
+                // Sidecar has uncommitted records from a crash - truncate them
+                let target_len = committed_len * Self::RECORD_SIZE as u64;
+                #[cfg(feature = "std")]
+                tracing::warn!(
+                    target: "reth::static_file",
+                    path = %path.as_ref().display(),
+                    sidecar_records = records_in_file,
+                    committed_len,
+                    "Truncating uncommitted changeset offset records after crash recovery"
+                );
+                file.set_len(target_len)?;
+            }
+            std::cmp::Ordering::Less => {
+                // Unlikely: sidecar is shorter than header claims - data corruption or
+                // incomplete prune
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "Changeset offset sidecar has {} records but header expects {}: {}",
+                        records_in_file,
+                        committed_len,
+                        path.as_ref().display()
+                    ),
+                ));
+            }
+            std::cmp::Ordering::Equal => {}
         }
 
-        let records_written = file.metadata()?.len() / Self::RECORD_SIZE as u64;
-
+        let records_written = committed_len;
         let file = OpenOptions::new().create(true).append(true).open(path)?;
 
         Ok(Self { file, records_written })
@@ -189,9 +230,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("test.csoff");
 
-        // Write
+        // Write (new file, committed_len=0)
         {
-            let mut writer = ChangesetOffsetWriter::new(&path).unwrap();
+            let mut writer = ChangesetOffsetWriter::new(&path, 0).unwrap();
             writer.append(&ChangesetOffset::new(0, 5)).unwrap();
             writer.append(&ChangesetOffset::new(5, 3)).unwrap();
             writer.append(&ChangesetOffset::new(8, 10)).unwrap();
@@ -225,7 +266,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("test.csoff");
 
-        let mut writer = ChangesetOffsetWriter::new(&path).unwrap();
+        let mut writer = ChangesetOffsetWriter::new(&path, 0).unwrap();
         writer.append(&ChangesetOffset::new(0, 1)).unwrap();
         writer.append(&ChangesetOffset::new(1, 2)).unwrap();
         writer.append(&ChangesetOffset::new(3, 3)).unwrap();
@@ -258,8 +299,9 @@ mod tests {
         // Verify file has 24 bytes before opening with writer
         assert_eq!(std::fs::metadata(&path).unwrap().len(), 24);
 
-        // Open with writer - should truncate to 1 complete record
-        let writer = ChangesetOffsetWriter::new(&path).unwrap();
+        // Open with writer, committed_len=1 (header committed 1 record)
+        // Should truncate partial record and match committed length
+        let writer = ChangesetOffsetWriter::new(&path, 1).unwrap();
         assert_eq!(writer.len(), 1);
 
         // Verify file was truncated to 16 bytes
@@ -280,7 +322,7 @@ mod tests {
 
         // Write 3 records
         {
-            let mut writer = ChangesetOffsetWriter::new(&path).unwrap();
+            let mut writer = ChangesetOffsetWriter::new(&path, 0).unwrap();
             writer.append(&ChangesetOffset::new(0, 10)).unwrap();
             writer.append(&ChangesetOffset::new(10, 20)).unwrap();
             writer.append(&ChangesetOffset::new(30, 30)).unwrap();
@@ -310,15 +352,15 @@ mod tests {
     }
 
     #[test]
-    fn test_truncate_uncommitted_records() {
+    fn test_truncate_uncommitted_records_on_open() {
         // Simulates crash recovery where sidecar has more records than committed header length.
-        // The caller (StaticFileProviderRW::new) should truncate the sidecar to match.
+        // ChangesetOffsetWriter::new() should automatically truncate to committed_len.
         let dir = tempdir().unwrap();
         let path = dir.path().join("test.csoff");
 
         // Simulate: wrote 3 records, synced sidecar, but header only committed len=2
         {
-            let mut writer = ChangesetOffsetWriter::new(&path).unwrap();
+            let mut writer = ChangesetOffsetWriter::new(&path, 0).unwrap();
             writer.append(&ChangesetOffset::new(0, 5)).unwrap();
             writer.append(&ChangesetOffset::new(5, 10)).unwrap();
             writer.append(&ChangesetOffset::new(15, 7)).unwrap(); // uncommitted
@@ -326,20 +368,16 @@ mod tests {
             assert_eq!(writer.len(), 3);
         }
 
-        // On "restart", caller detects mismatch and truncates to committed length
+        // On "restart", new() heals by truncating to committed length
         let committed_len = 2u64;
         {
-            let mut writer = ChangesetOffsetWriter::new(&path).unwrap();
-            assert_eq!(writer.len(), 3); // Still has all records
-
-            // Caller heals by truncating to committed length
-            writer.truncate(committed_len).unwrap();
-            assert_eq!(writer.len(), 2);
+            let writer = ChangesetOffsetWriter::new(&path, committed_len).unwrap();
+            assert_eq!(writer.len(), 2); // Healed to committed length
         }
 
         // Verify file is now correct length and new appends go to the right place
         {
-            let mut writer = ChangesetOffsetWriter::new(&path).unwrap();
+            let mut writer = ChangesetOffsetWriter::new(&path, 2).unwrap();
             assert_eq!(writer.len(), 2);
 
             // Append a new record - should be at index 2, not index 3
@@ -366,5 +404,25 @@ mod tests {
             assert_eq!(entry2.offset(), 15);
             assert_eq!(entry2.num_changes(), 20); // Not 7 from the old uncommitted record
         }
+    }
+
+    #[test]
+    fn test_sidecar_shorter_than_committed_errors() {
+        // If sidecar has fewer records than committed, it's data corruption - should error.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.csoff");
+
+        // Write 1 record
+        {
+            let mut writer = ChangesetOffsetWriter::new(&path, 0).unwrap();
+            writer.append(&ChangesetOffset::new(0, 5)).unwrap();
+            writer.sync().unwrap();
+        }
+
+        // Try to open with committed_len=3 (header claims more than file has)
+        let result = ChangesetOffsetWriter::new(&path, 3);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 }

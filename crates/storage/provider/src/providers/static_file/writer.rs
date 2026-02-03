@@ -243,40 +243,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         let changeset_offsets = if segment.is_change_based() {
             let csoff_path = data_path.with_extension("csoff");
-            let mut csoff_writer =
-                ChangesetOffsetWriter::new(&csoff_path).map_err(ProviderError::other)?;
-
-            // Heal sidecar to match committed header length.
-            // This handles crash scenarios where the sidecar was synced but the header
-            // commit didn't complete - we must truncate uncommitted trailing records.
             let committed_len = writer.user_header().changeset_offsets_len();
-            match csoff_writer.len().cmp(&committed_len) {
-                std::cmp::Ordering::Greater => {
-                    // Sidecar has uncommitted records from a crash - truncate them
-                    tracing::warn!(
-                        target: "reth::static_file",
-                        path = %csoff_path.display(),
-                        sidecar_len = csoff_writer.len(),
-                        committed_len,
-                        "Truncating uncommitted changeset offset records after crash recovery"
-                    );
-                    csoff_writer.truncate(committed_len).map_err(ProviderError::other)?;
-                }
-                std::cmp::Ordering::Less => {
-                    // Unlikely: sidecar is shorter than header claims - data corruption or
-                    // incomplete prune
-                    return Err(StaticFileWriterError::new(format!(
-                        "Changeset offset sidecar has {} records but header expects {}: {}",
-                        csoff_writer.len(),
-                        committed_len,
-                        csoff_path.display()
-                    ))
-                    .into());
-                }
-                std::cmp::Ordering::Equal => {}
-            }
-
-            Some(csoff_writer)
+            Some(
+                ChangesetOffsetWriter::new(&csoff_path, committed_len)
+                    .map_err(ProviderError::other)?,
+            )
         } else {
             None
         };
@@ -640,11 +611,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 self.writer = writer;
                 self.data_path = data_path.clone();
 
-                // Update changeset offsets writer for the new file
+                // Update changeset offsets writer for the new file (starts empty)
                 if segment.is_change_based() {
                     let csoff_path = data_path.with_extension("csoff");
                     self.changeset_offsets = Some(
-                        ChangesetOffsetWriter::new(&csoff_path).map_err(ProviderError::other)?,
+                        ChangesetOffsetWriter::new(&csoff_path, 0)
+                            .map_err(ProviderError::other)?,
                     );
                 }
 
@@ -904,8 +876,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             }
             // Re-initialize the changeset offsets writer for the previous file
             let new_csoff_path = data_path.with_extension("csoff");
-            self.changeset_offsets =
-                Some(ChangesetOffsetWriter::new(&new_csoff_path).map_err(ProviderError::other)?);
+            let committed_len = self.writer.user_header().changeset_offsets_len();
+            self.changeset_offsets = Some(
+                ChangesetOffsetWriter::new(&new_csoff_path, committed_len)
+                    .map_err(ProviderError::other)?,
+            );
         }
 
         // Clear current changeset offset tracking since we're switching files
