@@ -818,11 +818,13 @@ impl RocksDBProvider {
         Ok(())
     }
 
-    /// Gets the first (smallest key) entry from the specified table.
-    pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+    fn get_boundary<T: Table>(
+        &self,
+        mode: IteratorMode<'_>,
+    ) -> ProviderResult<Option<(T::Key, T::Value)>> {
         self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
             let cf = this.get_cf_handle::<T>()?;
-            let mut iter = this.0.iterator_cf(cf, IteratorMode::Start);
+            let mut iter = this.0.iterator_cf(cf, mode);
 
             match iter.next() {
                 Some(Ok((key_bytes, value_bytes))) => {
@@ -843,29 +845,14 @@ impl RocksDBProvider {
         })
     }
 
+    /// Gets the first (smallest key) entry from the specified table.
+    pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        self.get_boundary::<T>(IteratorMode::Start)
+    }
+
     /// Gets the last (largest key) entry from the specified table.
     pub fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
-        self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
-            let cf = this.get_cf_handle::<T>()?;
-            let mut iter = this.0.iterator_cf(cf, IteratorMode::End);
-
-            match iter.next() {
-                Some(Ok((key_bytes, value_bytes))) => {
-                    let key = <T::Key as reth_db_api::table::Decode>::decode(&key_bytes)
-                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-                    let value = T::Value::decompress(&value_bytes)
-                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-                    Ok(Some((key, value)))
-                }
-                Some(Err(e)) => {
-                    Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    })))
-                }
-                None => Ok(None),
-            }
-        })
+        self.get_boundary::<T>(IteratorMode::End)
     }
 
     /// Creates an iterator over all entries in the specified table.
