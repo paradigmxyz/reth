@@ -1355,11 +1355,9 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         if self.cached_storage_settings().storage_changesets_in_static_files {
             self.static_file_provider.storage_changeset(block_number)
         } else {
-            let range = block_number..=block_number;
-            let storage_range = BlockNumberAddress::range(range);
             self.tx
                 .cursor_dup_read::<tables::StorageChangeSets>()?
-                .walk_range(storage_range)?
+                .walk_range(BlockNumberAddress::range(block_number..=block_number))?
                 .map(|r| r.map_err(Into::into))
                 .collect()
         }
@@ -1417,14 +1415,10 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
                 self.static_file_provider.account_block_changeset(block_number)?;
             Ok(static_changesets)
         } else {
-            let range = block_number..=block_number;
             self.tx
                 .cursor_read::<tables::AccountChangeSets>()?
-                .walk_range(range)?
-                .map(|result| -> ProviderResult<_> {
-                    let (_, account_before) = result?;
-                    Ok(account_before)
-                })
+                .walk_range(block_number..=block_number)?
+                .map(|r| r.map(|(_, account_before)| account_before).map_err(Into::into))
                 .collect()
         }
     }
