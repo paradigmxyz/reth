@@ -818,6 +818,7 @@ impl RocksDBProvider {
         Ok(())
     }
 
+    /// Retrieves the first or last entry from a table based on the iterator mode.
     #[inline]
     fn get_boundary<T: Table>(
         &self,
