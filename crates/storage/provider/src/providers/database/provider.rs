@@ -548,6 +548,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let rocksdb_provider = self.rocksdb_provider.clone();
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb_enabled = rocksdb_ctx.storage_settings.any_in_rocksdb();
 
         // Results from spawned tasks (set before in_place_scope returns).
         let mut sf_result = None;
@@ -569,7 +571,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // RocksDB writes
             #[cfg(all(unix, feature = "rocksdb"))]
-            if rocksdb_ctx.storage_settings.any_in_rocksdb() {
+            if rocksdb_enabled {
                 s.spawn(|_| {
                     let start = Instant::now();
                     rocksdb_result = Some(

@@ -11,8 +11,9 @@ const STORAGE_POOL_THREADS: usize = 16;
 
 /// Static thread pool for storage I/O operations.
 ///
-/// This pool is used by [`save_blocks`](crate::DatabaseProvider::save_blocks) and related
-/// methods to parallelize writes to different storage backends (static files, `RocksDB`).
+/// This pool is used exclusively by [`save_blocks`](crate::DatabaseProvider::save_blocks) to
+/// parallelize writes to different storage backends (static files, `RocksDB`). Since this is the
+/// only call site, all threads are always available when needed.
 pub(crate) static STORAGE_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
     ThreadPoolBuilder::new()
         .num_threads(STORAGE_POOL_THREADS)
