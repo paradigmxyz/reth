@@ -74,9 +74,9 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             jar,
             data_file,
             offsets_file,
-            tmp_buf: Vec::with_capacity(1_000_000),
+            tmp_buf: Vec::with_capacity(65536),
             uncompressed_row_size: 0,
-            offsets: Vec::with_capacity(1_000_000),
+            offsets: Vec::with_capacity(65536),
             column: 0,
             dirty: false,
         };
