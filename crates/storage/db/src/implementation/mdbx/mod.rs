@@ -680,7 +680,10 @@ mod tests {
     /// Uses pure FFI to test parallel writes with WriteMap mode (required for parallel subtxns).
     #[test]
     fn db_parallel_writes_two_tables() {
-        use std::{ffi::{c_void, CString}, ptr};
+        use std::{
+            ffi::{c_void, CString},
+            ptr,
+        };
 
         let tempdir = TempDir::new().expect(ERROR_TEMPDIR);
         let path = CString::new(tempdir.path().to_str().unwrap()).unwrap();
