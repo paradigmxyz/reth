@@ -28,6 +28,7 @@ use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::test_utils::MockEthProvider;
+use reth_tasks::spawn_os_thread;
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -540,10 +541,7 @@ async fn test_tree_persist_blocks() {
         .get_executed_blocks(1..tree_config.persistence_threshold() + 2)
         .collect();
     let test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
-    std::thread::Builder::new()
-        .name("Engine Task".to_string())
-        .spawn(|| test_harness.tree.run())
-        .unwrap();
+    spawn_os_thread("engine", || test_harness.tree.run());
 
     // send a message to the tree to enter the main loop.
     test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
@@ -1991,10 +1989,7 @@ mod forkchoice_updated_tests {
         let action_rx = test_harness.action_rx;
 
         // Spawn tree in background thread
-        std::thread::Builder::new()
-            .name("Engine Task".to_string())
-            .spawn(|| test_harness.tree.run())
-            .unwrap();
+        spawn_os_thread("engine", || test_harness.tree.run());
 
         // Send terminate request
         to_tree_tx

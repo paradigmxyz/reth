@@ -64,6 +64,7 @@ use reth_storage_api::{
     StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
+use reth_tasks::spawn_scoped_os_thread;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, StoredNibbles,
@@ -552,28 +553,20 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         thread::scope(|s| {
             // SF writes
-            let sf_handle = thread::Builder::new()
-                .name("static-files".into())
-                .spawn_scoped(s, || {
-                    let start = Instant::now();
-                    sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx)?;
-                    Ok::<_, ProviderError>(start.elapsed())
-                })
-                // Same panic happens in `scope.spawn`
-                .expect("failed to spawn thread");
+            let sf_handle = spawn_scoped_os_thread(s, "static-files", || {
+                let start = Instant::now();
+                sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx)?;
+                Ok::<_, ProviderError>(start.elapsed())
+            });
 
             // RocksDB writes
             #[cfg(all(unix, feature = "rocksdb"))]
             let rocksdb_handle = rocksdb_ctx.storage_settings.any_in_rocksdb().then(|| {
-                thread::Builder::new()
-                    .name("rocksdb".into())
-                    .spawn_scoped(s, || {
-                        let start = Instant::now();
-                        rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)?;
-                        Ok::<_, ProviderError>(start.elapsed())
-                    })
-                    // Same panic happens in `scope.spawn`
-                    .expect("failed to spawn thread")
+                spawn_scoped_os_thread(s, "rocksdb", || {
+                    let start = Instant::now();
+                    rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)?;
+                    Ok::<_, ProviderError>(start.elapsed())
+                })
             });
 
             // MDBX writes
