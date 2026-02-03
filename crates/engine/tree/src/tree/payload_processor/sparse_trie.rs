@@ -264,6 +264,9 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     finished_state_updates: bool,
     /// Pending targets to be dispatched to the proof workers.
     pending_targets: MultiProofTargetsV2,
+    /// Number of pending execution/prewarming updates received but not yet passed to
+    /// `update_leaves`.
+    pending_updates: usize,
 
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
@@ -301,6 +304,7 @@ where
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             finished_state_updates: Default::default(),
             pending_targets: Default::default(),
+            pending_updates: 0,
             metrics,
         }
     }
@@ -358,18 +362,8 @@ where
                         }
                     };
 
-                    let mut num_drained = 0;
-
                     self.on_multiproof_message(update);
-                    while let Ok(next) = self.updates.try_recv() {
-                        self.on_multiproof_message(next);
-                        num_drained += 1;
-                    }
-
-                    if self.updates.is_empty() || num_drained >= MAX_PENDING_UPDATES {
-                        self.process_new_updates()?;
-                        self.dispatch_pending_targets();
-                    }
+                    self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
                     let Ok(result) = message else {
@@ -394,7 +388,16 @@ where
                 // If we don't have any pending messages, we can spend some time on computing
                 // storage roots and promoting account updates.
                 self.dispatch_pending_targets();
+                self.process_new_updates()?;
                 self.promote_pending_account_updates()?;
+                self.dispatch_pending_targets();
+            } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
+                // If we don't have any pending updates OR we've accumulated a lot already, apply
+                // them to the trie,
+                self.process_new_updates()?;
+                self.dispatch_pending_targets();
+            } else if self.pending_targets.chunking_length() > self.chunk_size.unwrap_or_default() {
+                // Make sure to dispatch targets if we've accumulated a lot of them.
                 self.dispatch_pending_targets();
             }
 
