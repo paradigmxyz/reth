@@ -205,6 +205,9 @@ where
     }
 }
 
+/// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
+const MAX_PENDING_UPDATES: usize = 10;
+
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie> {
     /// Sender for proof results.
@@ -355,10 +358,15 @@ where
                         }
                     };
 
-                    self.on_multiproof_message(update);
-                    self.process_new_updates()?;
+                    let mut num_drained = 0;
 
-                    if self.updates.is_empty() || self.pending_targets.chunking_length() >= self.chunk_size.unwrap_or_default() {
+                    while let Ok(next) = self.updates.try_recv() {
+                        self.on_multiproof_message(next);
+                        num_drained += 1;
+                    }
+
+                    if self.updates.is_empty() || num_drained >= MAX_PENDING_UPDATES {
+                        self.process_new_updates()?;
                         self.dispatch_pending_targets();
                     }
                 }
