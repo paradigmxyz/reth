@@ -108,7 +108,7 @@ pub struct PruneTrieMetrics {
     pub storage_categorize_duration: Histogram,
     /// Time spent sorting cold tries by heat (microseconds)
     pub storage_sort_duration: Histogram,
-    /// Time spent evicting cold tries from HashMap (microseconds)
+    /// Time spent evicting cold tries from `HashMap` (microseconds)
     pub storage_eviction_duration: Histogram,
     /// Time spent calculating final memory after pruning (microseconds)
     pub storage_memory_calc_duration: Histogram,

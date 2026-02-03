@@ -1334,41 +1334,40 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
 
         // If all cold tries evicted and hot memory still exceeds budget, prune hot tries too.
         // We can't evict them but we can depth-prune to reduce memory.
-        let (hot_stats, pruned_hot_addresses) =
-            if tries_to_keep_prunable.is_empty() && hot_memory > max_memory {
-                let hot_addresses: Vec<_> = hot_tries
-                    .iter()
-                    .filter(|(_, mem)| *mem >= MIN_SIZE_TO_PRUNE)
-                    .map(|(addr, _)| *addr)
-                    .collect();
+        let (hot_stats, pruned_hot_addresses) = if tries_to_keep_prunable.is_empty() &&
+            hot_memory > max_memory
+        {
+            let hot_addresses: Vec<_> = hot_tries
+                .iter()
+                .filter(|(_, mem)| *mem >= MIN_SIZE_TO_PRUNE)
+                .map(|(addr, _)| *addr)
+                .collect();
 
-                let stats = self
-                    .tries
-                    .par_iter_mut()
-                    .filter_map(|(addr, trie)| {
-                        if !hot_addresses.contains(addr) {
-                            return None;
-                        }
-                        trie.as_revealed_mut().map(|t| t.prune_preserving(config, TrieKind::Storage))
-                    })
-                    .reduce(PruneTrieStats::default, |mut acc, s| {
-                        acc += s;
-                        acc
-                    });
+            let stats = self
+                .tries
+                .par_iter_mut()
+                .filter_map(|(addr, trie)| {
+                    if !hot_addresses.contains(addr) {
+                        return None;
+                    }
+                    trie.as_revealed_mut().map(|t| t.prune_preserving(config, TrieKind::Storage))
+                })
+                .reduce(PruneTrieStats::default, |mut acc, s| {
+                    acc += s;
+                    acc
+                });
 
-                (stats, hot_addresses)
-            } else {
-                (PruneTrieStats::default(), Vec::new())
-            };
+            (stats, hot_addresses)
+        } else {
+            (PruneTrieStats::default(), Vec::new())
+        };
 
         let mut stats = stats;
         stats += hot_stats;
 
         // Clear revealed_paths for all pruned tries (both cold and hot)
-        for addr in tries_to_keep_prunable
-            .iter()
-            .map(|(addr, _)| addr)
-            .chain(pruned_hot_addresses.iter())
+        for addr in
+            tries_to_keep_prunable.iter().map(|(addr, _)| addr).chain(pruned_hot_addresses.iter())
         {
             if let Some(paths) = self.revealed_paths.get_mut(addr) {
                 paths.clear();
