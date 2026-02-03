@@ -1,9 +1,9 @@
 //! Contains a precompile cache backed by `schnellru::LruMap` (LRU by length).
 
 use alloy_primitives::Bytes;
-use dashmap::DashMap;
 use moka::policy::EvictionPolicy;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
+use reth_primitives_traits::dashmap::DashMap;
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
 use std::{hash::Hash, sync::Arc};

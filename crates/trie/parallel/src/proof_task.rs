@@ -42,8 +42,8 @@ use alloy_primitives::{
 };
 use alloy_rlp::{BufMut, Encodable};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use dashmap::DashMap;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, StateProofError};
+use reth_primitives_traits::dashmap::{self, DashMap};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -155,10 +155,10 @@ impl ProofWorkerHandle {
 
         // Initialize availability counters at zero. Each worker will increment when it
         // successfully initializes, ensuring only healthy workers are counted.
-        let storage_available_workers = Arc::new(AtomicUsize::new(0));
-        let account_available_workers = Arc::new(AtomicUsize::new(0));
+        let storage_available_workers = Arc::<AtomicUsize>::default();
+        let account_available_workers = Arc::<AtomicUsize>::default();
 
-        let cached_storage_roots = Arc::new(DashMap::new());
+        let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
         debug!(
             target: "trie::proof_task",
