@@ -47,6 +47,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
+use reth_tasks::spawn_scoped_os_thread;
 use std::{
     collections::BTreeMap,
     fmt::Debug,
@@ -669,15 +670,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     where
         F: FnOnce(&mut StaticFileProviderRWRefMut<'_, N>) -> ProviderResult<()> + Send + 'env,
     {
-        thread::Builder::new()
-            .name(segment.as_short_str().into())
-            .spawn_scoped(scope, move || {
-                let mut w = self.get_writer(first_block_number, segment)?;
-                f(&mut w)?;
-                w.sync_all()
-            })
-            // Same panic happens in `scope.spawn`
-            .expect("failed to spawn thread")
+        spawn_scoped_os_thread(scope, segment.as_short_str(), move || {
+            let mut w = self.get_writer(first_block_number, segment)?;
+            f(&mut w)?;
+            w.sync_all()
+        })
     }
 
     /// Writes all static file data for multiple blocks in parallel per-segment.
