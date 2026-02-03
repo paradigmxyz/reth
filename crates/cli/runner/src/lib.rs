@@ -306,7 +306,9 @@ fn tokio_shutdown(rt: tokio::runtime::Runtime, wait: bool) {
         })
         .unwrap();
 
-    let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
-        debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
-    });
+    if wait {
+        let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
+            debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
+        });
+    }
 }
