@@ -45,13 +45,12 @@ group "nightly" {
 // Base target with shared configuration
 target "_base" {
   dockerfile = "Dockerfile.depot"
-  platforms  = ["linux/amd64", "linux/arm64"]
   args = {
-    BUILD_PROFILE      = "${BUILD_PROFILE}"
-    FEATURES           = "${FEATURES}"
-    VERGEN_GIT_SHA     = "${VERGEN_GIT_SHA}"
+    BUILD_PROFILE       = "${BUILD_PROFILE}"
+    FEATURES            = "${FEATURES}"
+    VERGEN_GIT_SHA      = "${VERGEN_GIT_SHA}"
     VERGEN_GIT_DESCRIBE = "${VERGEN_GIT_DESCRIBE}"
-    VERGEN_GIT_DIRTY   = "${VERGEN_GIT_DIRTY}"
+    VERGEN_GIT_DIRTY    = "${VERGEN_GIT_DIRTY}"
   }
   secret = [
     {
@@ -60,19 +59,47 @@ target "_base" {
     }
   ]
 }
+
+// amd64 base with x86-64-v3 optimizations
+target "_base_amd64" {
+  inherits  = ["_base"]
+  platforms = ["linux/amd64"]
+  args = {
+    RUSTFLAGS = "-C target-cpu=x86-64-v3"
+  }
+}
+
+// arm64 base
+target "_base_arm64" {
+  inherits  = ["_base"]
+  platforms = ["linux/arm64"]
+}
+
 target "_base_profiling" {
-  inherits = ["_base"]
-  platforms  = ["linux/amd64"]
+  inherits  = ["_base_amd64"]
 }
 
 // Ethereum (reth)
-target "ethereum" {
-  inherits = ["_base"]
+target "ethereum-amd64" {
+  inherits = ["_base_amd64"]
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
   }
   tags = ["${REGISTRY}/reth:${TAG}"]
+}
+
+target "ethereum-arm64" {
+  inherits = ["_base_arm64"]
+  args = {
+    BINARY        = "reth"
+    MANIFEST_PATH = "bin/reth"
+  }
+  tags = ["${REGISTRY}/reth:${TAG}"]
+}
+
+group "ethereum" {
+  targets = ["ethereum-amd64", "ethereum-arm64"]
 }
 
 target "ethereum-profiling" {
@@ -98,13 +125,26 @@ target "ethereum-edge-profiling" {
 }
 
 // Optimism (op-reth)
-target "optimism" {
-  inherits = ["_base"]
+target "optimism-amd64" {
+  inherits = ["_base_amd64"]
   args = {
     BINARY        = "op-reth"
     MANIFEST_PATH = "crates/optimism/bin"
   }
   tags = ["${REGISTRY}/op-reth:${TAG}"]
+}
+
+target "optimism-arm64" {
+  inherits = ["_base_arm64"]
+  args = {
+    BINARY        = "op-reth"
+    MANIFEST_PATH = "crates/optimism/bin"
+  }
+  tags = ["${REGISTRY}/op-reth:${TAG}"]
+}
+
+group "optimism" {
+  targets = ["optimism-amd64", "optimism-arm64"]
 }
 
 target "optimism-profiling" {
