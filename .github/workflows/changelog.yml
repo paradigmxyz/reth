@@ -16,6 +16,6 @@ jobs:
       - run: npm install -g @anthropic-ai/claude-code
       - uses: wevm/changelogs-rs/gen@master
         with:
-          ai: 'claude -x'
+          ai: 'claude -p'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
