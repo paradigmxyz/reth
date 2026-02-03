@@ -48,12 +48,20 @@ impl Bodies {
             .and_then(|cp| cp.block_number);
 
         // Determine the safe prune target, if any.
+        // tx_lookup's next_pruned_block tells us what block it will prune next.
+        // - None: tx_lookup has finished pruning (reached its target), bodies can prune freely
+        // - Some(next) > to_block: tx_lookup is ahead of our target, so we're safe to prune
+        //   to_block
+        // - Some(next) <= to_block: tx_lookup still needs to prune blocks we want to delete, so we
+        //   must wait and only prune up to (next - 1) to preserve tx data it needs
         let to_block = match tx_lookup_mode.next_pruned_block(tx_lookup_checkpoint) {
-            None => Some(input.to_block), /* tx_lookup is done */
-            Some(tx_lookup_next) if tx_lookup_next > input.to_block => Some(input.to_block), /* tx_lookup is ahead */
+            None => Some(input.to_block),
+            Some(tx_lookup_next) if tx_lookup_next > input.to_block => Some(input.to_block),
             Some(tx_lookup_next) => {
-                // We can only prune up to the block before tx_lookup's next block.
-                // If next is 0, there's nothing safe to prune yet.
+                // We can only prune bodies up to the block BEFORE tx_lookup's next target.
+                // tx_lookup_next is the next block tx_lookup will prune, meaning it still needs
+                // to read transactions from that block. We must preserve those transactions,
+                // so bodies can only safely delete up to (tx_lookup_next - 1).
                 let Some(safe) = tx_lookup_next.checked_sub(1) else {
                     return Ok(None);
                 };
@@ -106,10 +114,14 @@ where
             ));
         };
 
+        // Delete static file jars that are entirely below to_block.
+        // Returns headers of deleted jars so we can compute the actual checkpoint.
         let deleted_headers = provider
             .static_file_provider()
             .delete_segment_below_block(StaticFileSegment::Transactions, to_block + 1)?;
 
+        // No jars were deleted - either to_block falls within the first jar,
+        // or all jars are already above to_block.
         if deleted_headers.is_empty() {
             return Ok(SegmentOutput {
                 progress: PruneProgress::Finished,
@@ -125,7 +137,7 @@ where
         let pruned = tx_ranges.clone().map(|range| range.len()).sum::<u64>() as usize;
 
         // The highest block number in the deleted files is the actual checkpoint. to_block might
-        // refer to a block in the middle of a undeleted file.
+        // refer to a block in the middle of an undeleted file.
         let checkpoint_block = deleted_headers
             .iter()
             .filter_map(|header| header.block_range())
