@@ -205,6 +205,9 @@ where
     }
 }
 
+/// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
+const MAX_PENDING_UPDATES: usize = 100;
+
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie> {
     /// Sender for proof results.
@@ -380,12 +383,14 @@ where
                 self.dispatch_pending_targets();
                 self.promote_pending_account_updates()?;
                 self.dispatch_pending_targets();
-            } else if self.updates.is_empty() || self.pending_updates > 100 {
+            } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
                 // If we don't have any pending updates OR we've accumulated a lot already, apply
                 // them to the trie,
                 self.process_leaf_updates()?;
                 self.dispatch_pending_targets();
-            } else if self.updates.is_empty() || self.pending_targets.chunking_length() > 100 {
+            } else if self.updates.is_empty() ||
+                self.pending_targets.chunking_length() > self.chunk_size.unwrap_or_default()
+            {
                 // Make sure to dispatch targets if we don't have any updates or if we've
                 // accumulated a lot of them.
                 self.dispatch_pending_targets();
