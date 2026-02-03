@@ -41,6 +41,6 @@ for pid in "${saving_pids[@]}"; do
 done
 
 # Make sure we don't rebuild images on the CI jobs
-git apply ../.github/assets/hive/no_sim_build.diff
+git apply ../.github/scripts/hive/no_sim_build.diff
 go build .
 mv ./hive ../hive_assets/

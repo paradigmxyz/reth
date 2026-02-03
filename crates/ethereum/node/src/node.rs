@@ -119,10 +119,9 @@ impl EthereumNode {
     /// use reth_db::open_db_read_only;
     /// use reth_node_ethereum::EthereumNode;
     /// use reth_provider::providers::{RocksDBProvider, StaticFileProvider};
-    /// use std::sync::Arc;
     ///
     /// let factory = EthereumNode::provider_factory_builder()
-    ///     .db(Arc::new(open_db_read_only("db", Default::default()).unwrap()))
+    ///     .db(open_db_read_only("db", Default::default()).unwrap())
     ///     .chainspec(ChainSpecBuilder::mainnet().build().into())
     ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
     ///     .rocksdb_provider(RocksDBProvider::builder("db/rocksdb").build().unwrap())

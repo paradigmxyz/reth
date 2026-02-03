@@ -511,9 +511,8 @@ mod compact {
             total_length += flags.len() + buffer.len();
             buf.put_slice(&flags);
             if zstd {
-                reth_zstd_compressors::RECEIPT_COMPRESSOR.with(|compressor| {
-                    let compressed =
-                        compressor.borrow_mut().compress(&buffer).expect("Failed to compress.");
+                reth_zstd_compressors::with_receipt_compressor(|compressor| {
+                    let compressed = compressor.compress(&buffer).expect("Failed to compress.");
                     buf.put(compressed.as_slice());
                 });
             } else {
@@ -525,8 +524,7 @@ mod compact {
         fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
             let (flags, mut buf) = ReceiptFlags::from(buf);
             if flags.__zstd() != 0 {
-                reth_zstd_compressors::RECEIPT_DECOMPRESSOR.with(|decompressor| {
-                    let decompressor = &mut decompressor.borrow_mut();
+                reth_zstd_compressors::with_receipt_decompressor(|decompressor| {
                     let decompressed = decompressor.decompress(buf);
                     let original_buf = buf;
                     let mut buf: &[u8] = decompressed;

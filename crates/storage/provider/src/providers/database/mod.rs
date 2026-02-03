@@ -81,7 +81,7 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     changeset_cache: ChangesetCache,
 }
 
-impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
+impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>> {
     /// Instantiates the builder for this type
     pub fn builder() -> ProviderFactoryBuilder<N> {
         ProviderFactoryBuilder::default()
@@ -178,7 +178,7 @@ impl<N: NodeTypesWithDB> RocksDBProviderFactory for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
+impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
     pub fn new_with_database_path<P: AsRef<Path>>(
@@ -189,7 +189,7 @@ impl<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
         rocksdb_provider: RocksDBProvider,
     ) -> RethResult<Self> {
         Self::new(
-            Arc::new(init_db(path, args).map_err(RethError::msg)?),
+            init_db(path, args).map_err(RethError::msg)?,
             chain_spec,
             static_file_provider,
             rocksdb_provider,

@@ -7,9 +7,11 @@ use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, ChainStateBlockReader, DBProvider,
-    PruneCheckpointReader, PruneCheckpointWriter, StaticFileProviderFactory, StorageSettingsCache,
+    PruneCheckpointReader, PruneCheckpointWriter, RocksDBProviderFactory,
+    StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
+use reth_storage_api::{ChangeSetReader, StorageChangeSetReader, StorageSettingsCache};
 
 /// Collection of [`Segment`]. Thread-safe, allocated on the heap.
 #[derive(Debug)]
@@ -52,7 +54,10 @@ where
         + PruneCheckpointReader
         + BlockReader<Transaction: Encodable2718>
         + ChainStateBlockReader
-        + StorageSettingsCache,
+        + StorageSettingsCache
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + RocksDBProviderFactory,
 {
     /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
     /// [`PruneModes`].
@@ -71,6 +76,8 @@ where
         } = prune_modes;
 
         Self::default()
+            // Transaction lookup
+            .segment_opt(transaction_lookup.map(TransactionLookup::new))
             // Bodies - run first since file deletion is fast
             .segment_opt(bodies_history.map(Bodies::new))
             // Account history
@@ -84,8 +91,6 @@ where
                 (!receipts_log_filter.is_empty())
                     .then(|| ReceiptsByLogs::new(receipts_log_filter.clone())),
             )
-            // Transaction lookup
-            .segment_opt(transaction_lookup.map(TransactionLookup::new))
             // Sender recovery
             .segment_opt(sender_recovery.map(SenderRecovery::new))
     }

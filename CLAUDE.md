@@ -38,7 +38,7 @@ Reth is a high-performance Ethereum execution client written in Rust, focusing o
 
 2. **Linting**: Run clippy with all features
    ```bash
-   RUSTFLAGS="-D warnings" cargo +nightly clippy --workspace --lib --examples --tests --benches --all-features --locked
+   cargo +nightly clippy --workspace --lib --examples --tests --benches --all-features 
    ```
 
 3. **Testing**: Use nextest for faster test execution
@@ -169,11 +169,10 @@ Based on PR patterns, avoid:
 Before submitting changes, ensure:
 
 1. **Format Check**: `cargo +nightly fmt --all --check`
-2. **Clippy**: No warnings with `RUSTFLAGS="-D warnings"`
+2. **Clippy**: No warnings
 3. **Tests Pass**: All unit and integration tests
 4. **Documentation**: Update relevant docs and add doc comments with `cargo docs --document-private-items`
 5. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
-
 
 ### Opening PRs against <https://github.com/paradigmxyz/reth>
 
@@ -349,10 +348,10 @@ Let's say you want to fix a bug where external IP resolution fails on startup:
    }
    ```
 
-5. **Run checks**:
+5. **Run checks** (IMPORTANT!):
    ```bash
    cargo +nightly fmt --all
-   cargo clippy --all-features
+   cargo clippy --workspace --all-features # Make sure WHOLE WORKSPACE compiles!
    cargo test -p reth-discv4
    ```
 
@@ -374,7 +373,7 @@ Let's say you want to fix a bug where external IP resolution fails on startup:
 cargo +nightly fmt --all
 
 # Run lints
-RUSTFLAGS="-D warnings" cargo +nightly clippy --workspace --all-features --locked
+cargo +nightly clippy --workspace --all-features
 
 # Run tests
 cargo nextest run --workspace

@@ -645,8 +645,16 @@ pub struct RpcServerArgs {
     ///
     /// When enabled, transactions that fail execution will be skipped, and all subsequent
     /// transactions from the same sender will also be skipped.
-    #[arg(long = "testing.skip-invalid-transactions", default_value_t = false)]
+    #[arg(long = "testing.skip-invalid-transactions", default_value_t = true)]
     pub testing_skip_invalid_transactions: bool,
+
+    /// Force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
+    ///
+    /// When enabled, blob transactions submitted via `eth_sendRawTransaction` with EIP-4844
+    /// sidecars will be automatically converted to EIP-7594 format if the next block is Osaka.
+    /// By default this is disabled, meaning transactions are submitted as-is.
+    #[arg(long = "rpc.force-blob-sidecar-upcasting", default_value_t = false)]
+    pub rpc_force_blob_sidecar_upcasting: bool,
 }
 
 impl RpcServerArgs {
@@ -768,6 +776,12 @@ impl RpcServerArgs {
         self.rpc_send_raw_transaction_sync_timeout = timeout;
         self
     }
+
+    /// Enables forced blob sidecar upcasting from EIP-4844 to EIP-7594 format.
+    pub const fn with_force_blob_sidecar_upcasting(mut self) -> Self {
+        self.rpc_force_blob_sidecar_upcasting = true;
+        self
+    }
 }
 
 impl Default for RpcServerArgs {
@@ -859,7 +873,8 @@ impl Default for RpcServerArgs {
             rpc_state_cache,
             gas_price_oracle,
             rpc_send_raw_transaction_sync_timeout,
-            testing_skip_invalid_transactions: false,
+            testing_skip_invalid_transactions: true,
+            rpc_force_blob_sidecar_upcasting: false,
         }
     }
 }
@@ -1036,6 +1051,7 @@ mod tests {
             },
             rpc_send_raw_transaction_sync_timeout: std::time::Duration::from_secs(30),
             testing_skip_invalid_transactions: true,
+            rpc_force_blob_sidecar_upcasting: false,
         };
 
         let parsed_args = CommandParser::<RpcServerArgs>::parse_from([
