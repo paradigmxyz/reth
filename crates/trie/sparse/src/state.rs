@@ -41,7 +41,7 @@ pub struct SparseStateTrie<
     account_rlp_buf: Vec<u8>,
     /// Reusable buffer for proof nodes.
     proof_nodes_buf: Vec<ProofTrieNode>,
-    /// Reuseable buffers for storage trie proof nodes.
+    /// Reusable buffers for storage trie proof nodes.
     ///
     /// The buffer grows up to the number of storage tries present in one multiproof. Even without
     /// chunking, this is up to the number of contracts modified in one transaction.
@@ -378,23 +378,25 @@ where
                 .map(|(account, storage_proofs)| {
                     let revealed_nodes = self.storage.take_or_create_revealed_paths(&account);
                     let trie = self.storage.take_or_create_trie(&account);
-                    (account, storage_proofs, revealed_nodes, trie)
+                    let proof_nodes_buf = self.storage_proof_nodes_bufs.pop().unwrap_or_default();
+                    (account, storage_proofs, revealed_nodes, trie, proof_nodes_buf)
                 })
                 .par_bridge_buffered()
-                .map(|(account, storage_proofs, mut revealed_nodes, mut trie)| {
+                .map(|(account, storage_proofs, mut revealed_nodes, mut trie, mut nodes)| {
                     let result = Self::reveal_storage_v2_proof_nodes_inner(
                         account,
                         storage_proofs,
                         &mut revealed_nodes,
                         &mut trie,
+                        &mut nodes,
                         retain_updates,
                     );
-                    (account, result, revealed_nodes, trie)
+                    (account, result, revealed_nodes, trie, nodes)
                 })
                 .collect();
 
             let mut any_err = Ok(());
-            for (account, result, revealed_nodes, trie) in results {
+            for (account, result, revealed_nodes, trie, proof_nodes_buf) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
                 // Mark this storage trie as hot (accessed this tick)
@@ -410,6 +412,8 @@ where
                 } else {
                     any_err = result.map(|_| ());
                 }
+
+                self.storage_proof_nodes_bufs.push(proof_nodes_buf);
             }
 
             any_err
@@ -474,8 +478,12 @@ where
         &mut self,
         nodes: Vec<ProofTrieNode>,
     ) -> SparseStateTrieResult<()> {
-        let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values: _metric_values } =
-            filter_revealed_v2_proof_nodes(nodes, &mut self.revealed_account_paths)?;
+        let FilteredV2ProofNodes { root_node, new_nodes, metric_values: _metric_values } =
+            filter_revealed_v2_proof_nodes(
+                nodes,
+                &mut self.revealed_account_paths,
+                &mut self.proof_nodes_buf,
+            )?;
 
         #[cfg(feature = "metrics")]
         {
@@ -492,8 +500,11 @@ where
 
         trie.reserve_nodes(new_nodes);
 
-        trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
-        trie.reveal_nodes(&mut nodes)?;
+        trace!(target: "trie::sparse", total_nodes = ?self.proof_nodes_buf.len(), "Revealing account nodes from V2 proof");
+        trie.reveal_nodes(&mut self.proof_nodes_buf)?;
+
+        // Prepare for reuse
+        self.proof_nodes_buf.clear();
 
         Ok(())
     }
@@ -513,6 +524,7 @@ where
             nodes,
             revealed_paths,
             trie,
+            &mut self.proof_nodes_buf,
             self.retain_updates,
         )?;
 
@@ -529,13 +541,14 @@ where
     /// designed to handle a variety of associated public functions.
     fn reveal_storage_v2_proof_nodes_inner(
         account: B256,
-        nodes: Vec<ProofTrieNode>,
+        proof_nodes: Vec<ProofTrieNode>,
         revealed_nodes: &mut HashSet<Nibbles>,
         trie: &mut RevealableSparseTrie<S>,
+        nodes: &mut Vec<ProofTrieNode>,
         retain_updates: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
-        let FilteredV2ProofNodes { root_node, mut nodes, new_nodes, metric_values } =
-            filter_revealed_v2_proof_nodes(nodes, revealed_nodes)?;
+        let FilteredV2ProofNodes { root_node, new_nodes, metric_values } =
+            filter_revealed_v2_proof_nodes(proof_nodes, revealed_nodes, nodes)?;
 
         let trie = if let Some(root_node) = root_node {
             trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
@@ -547,7 +560,10 @@ where
         trie.reserve_nodes(new_nodes);
 
         trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof");
-        trie.reveal_nodes(&mut nodes)?;
+        trie.reveal_nodes(nodes)?;
+
+        // Prepare for reuse
+        nodes.clear();
 
         Ok(metric_values)
     }
@@ -1488,8 +1504,6 @@ fn filter_map_revealed_nodes(
 struct FilteredV2ProofNodes {
     /// Root node which was pulled out of the original node set to be handled specially.
     root_node: Option<ProofTrieNode>,
-    /// Filtered proof nodes. Root node is removed.
-    nodes: Vec<ProofTrieNode>,
     /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
     /// if they are not in the proof.
     new_nodes: usize,
@@ -1502,16 +1516,15 @@ struct FilteredV2ProofNodes {
 ///
 /// Unlike [`filter_map_revealed_nodes`], V2 proof nodes already have masks included in the
 /// `ProofTrieNode` structure, so no separate masks map is needed.
+///
+/// Resulting [trie nodes](`ProofTrieNode`) are pushed to the input `nodes` buffer.
 fn filter_revealed_v2_proof_nodes(
     proof_nodes: Vec<ProofTrieNode>,
     revealed_nodes: &mut HashSet<Nibbles>,
+    nodes: &mut Vec<ProofTrieNode>,
 ) -> SparseStateTrieResult<FilteredV2ProofNodes> {
-    let mut result = FilteredV2ProofNodes {
-        root_node: None,
-        nodes: Vec::with_capacity(proof_nodes.len()),
-        new_nodes: 0,
-        metric_values: Default::default(),
-    };
+    let mut result =
+        FilteredV2ProofNodes { root_node: None, new_nodes: 0, metric_values: Default::default() };
 
     // Count non-EmptyRoot nodes for sanity check. When multiple proofs are extended together,
     // duplicate EmptyRoot nodes may appear (e.g., storage proofs split across chunks for an
@@ -1558,7 +1571,7 @@ fn filter_revealed_v2_proof_nodes(
             continue
         }
 
-        result.nodes.push(node);
+        nodes.push(node);
     }
 
     Ok(result)
