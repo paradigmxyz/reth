@@ -66,7 +66,10 @@ impl Bodies {
                     return Ok(None);
                 };
 
-                if input.previous_checkpoint.is_some_and(|cp| cp.block_number.unwrap_or(0) >= safe)
+                if input
+                    .previous_checkpoint
+                    .and_then(|cp| cp.block_number)
+                    .is_some_and(|block| block >= safe)
                 {
                     // we have pruned what we can
                     return Ok(None)
