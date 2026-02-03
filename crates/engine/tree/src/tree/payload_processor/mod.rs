@@ -71,29 +71,6 @@ use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
 pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
     ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
 
-/// Default node capacity for shrinking the sparse trie. This is used to limit the number of trie
-/// nodes in allocated sparse tries.
-///
-/// Node maps have a key of `Nibbles` and value of `SparseNode`.
-/// The `size_of::<Nibbles>` is 40, and `size_of::<SparseNode>` is 80.
-///
-/// If we have 1 million entries of 120 bytes each, this conservative estimate comes out at around
-/// 120MB.
-pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
-
-/// Default value capacity for shrinking the sparse trie. This is used to limit the number of values
-/// in allocated sparse tries.
-///
-/// There are storage and account values, the largest of the two being account values, which are
-/// essentially `TrieAccount`s.
-///
-/// Account value maps have a key of `Nibbles` and value of `TrieAccount`.
-/// The `size_of::<Nibbles>` is 40, and `size_of::<TrieAccount>` is 104.
-///
-/// If we have 1 million entries of 144 bytes each, this conservative estimate comes out at around
-/// 144MB.
-pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
-
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>,
@@ -133,8 +110,8 @@ where
     prewarm_max_concurrency: usize,
     /// Sparse trie prune depth.
     sparse_trie_prune_depth: usize,
-    /// Maximum storage tries to retain after pruning.
-    sparse_trie_max_storage_tries: usize,
+    /// Maximum memory for sparse trie cache in bytes.
+    sparse_trie_max_memory: usize,
     /// Whether to disable cache metrics recording.
     disable_cache_metrics: bool,
     /// Default hot account tracker to clone when creating a fresh sparse trie.
@@ -193,7 +170,7 @@ where
             sparse_state_trie: SharedPreservedSparseTrie::default(),
             prewarm_max_concurrency: config.prewarm_max_concurrency(),
             sparse_trie_prune_depth: config.sparse_trie_prune_depth(),
-            sparse_trie_max_storage_tries: config.sparse_trie_max_storage_tries(),
+            sparse_trie_max_memory: config.sparse_trie_max_memory(),
             disable_cache_metrics: config.disable_cache_metrics(),
             default_hot_accounts: Arc::new(default_hot_accounts),
         }
@@ -541,7 +518,7 @@ where
         let span = Span::current();
         let disable_sparse_trie_as_cache = !config.enable_sparse_trie_as_cache();
         let prune_depth = self.sparse_trie_prune_depth;
-        let max_storage_tries = self.sparse_trie_max_storage_tries;
+        let max_memory = self.sparse_trie_max_memory;
         let hot_accounts = self.default_hot_accounts.clone();
         let chunk_size =
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
@@ -608,10 +585,7 @@ where
                     target: "engine::tree::payload_processor",
                     "State root receiver dropped, clearing trie"
                 );
-                let trie = task.into_cleared_trie(
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                );
+                let trie = task.into_cleared_trie(max_memory);
                 guard.store(PreservedSparseTrie::cleared(trie));
                 return;
             }
@@ -622,13 +596,7 @@ where
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             if let Some(state_root) = computed_state_root {
                 let start = std::time::Instant::now();
-                let trie = task.into_trie_for_reuse(
-                    prune_depth,
-                    max_storage_tries,
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                    &hot_accounts,
-                );
+                let trie = task.into_trie_for_reuse(prune_depth, max_memory, &hot_accounts);
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
@@ -638,10 +606,7 @@ where
                     target: "engine::tree::payload_processor",
                     "State root computation failed, clearing trie"
                 );
-                let trie = task.into_cleared_trie(
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                );
+                let trie = task.into_cleared_trie(max_memory);
                 guard.store(PreservedSparseTrie::cleared(trie));
             }
         });

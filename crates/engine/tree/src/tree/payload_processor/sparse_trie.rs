@@ -70,31 +70,19 @@ where
     pub(super) fn into_trie_for_reuse(
         self,
         prune_depth: usize,
-        max_storage_tries: usize,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
+        max_memory: usize,
         hot_accounts: &HotAccounts,
     ) -> SparseStateTrie<A, S> {
         match self {
-            Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
-            Self::Cached(task) => task.into_trie_for_reuse(
-                prune_depth,
-                max_storage_tries,
-                max_nodes_capacity,
-                max_values_capacity,
-                hot_accounts,
-            ),
+            Self::Cleared(task) => task.into_cleared_trie(max_memory),
+            Self::Cached(task) => task.into_trie_for_reuse(prune_depth, max_memory, hot_accounts),
         }
     }
 
-    pub(super) fn into_cleared_trie(
-        self,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
-    ) -> SparseStateTrie<A, S> {
+    pub(super) fn into_cleared_trie(self, max_memory: usize) -> SparseStateTrie<A, S> {
         match self {
-            Self::Cleared(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
-            Self::Cached(task) => task.into_cleared_trie(max_nodes_capacity, max_values_capacity),
+            Self::Cleared(task) => task.into_cleared_trie(max_memory),
+            Self::Cached(task) => task.into_cleared_trie(max_memory),
         }
     }
 }
@@ -197,13 +185,9 @@ where
     ///
     /// Use this when the payload was invalid or cancelled - we don't want to preserve
     /// potentially invalid trie state, but we keep the allocations for reuse.
-    pub(super) fn into_cleared_trie(
-        mut self,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
-    ) -> SparseStateTrie<A, S> {
+    pub(super) fn into_cleared_trie(mut self, max_memory: usize) -> SparseStateTrie<A, S> {
         self.trie.clear();
-        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        self.trie.shrink_to_memory(max_memory);
         self.trie
     }
 }
@@ -305,21 +289,21 @@ where
         }
     }
 
-    /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
+    /// Prunes the trie for reuse in the next payload built on top of this one.
     ///
     /// Uses hot account-aware pruning to preserve frequently-accessed accounts and their
     /// storage tries. Should be called after the state root result has been sent.
+    ///
+    /// Note: We don't shrink capacity here since pruning already controls memory by evicting
+    /// cold storage tries, and the capacity will be reused by the next block.
     pub(super) fn into_trie_for_reuse(
         mut self,
         prune_depth: usize,
-        max_storage_tries: usize,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
+        max_memory: usize,
         hot_accounts: &HotAccounts,
     ) -> SparseStateTrie<A, S> {
-        let config = SmartPruneConfig::new(prune_depth, max_storage_tries, hot_accounts);
+        let config = SmartPruneConfig::new(prune_depth, max_memory, hot_accounts);
         self.trie.prune_preserving(&config);
-        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
         self.trie
     }
 
@@ -327,13 +311,9 @@ where
     ///
     /// Use this when the payload was invalid or cancelled - we don't want to preserve
     /// potentially invalid trie state, but we keep the allocations for reuse.
-    pub(super) fn into_cleared_trie(
-        mut self,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
-    ) -> SparseStateTrie<A, S> {
+    pub(super) fn into_cleared_trie(mut self, max_memory: usize) -> SparseStateTrie<A, S> {
         self.trie.clear();
-        self.trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        self.trie.shrink_to_memory(max_memory);
         self.trie
     }
 

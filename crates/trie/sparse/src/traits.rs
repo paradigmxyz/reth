@@ -282,12 +282,11 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 /// converting nodes beyond a certain depth into hash stubs. This is useful for reducing
 /// memory usage when caching tries across payload validations.
 pub trait SparseTrieExt: SparseTrie {
-    /// Returns a cheap O(1) size hint for the trie representing the count of revealed
-    /// (non-Hash) nodes.
+    /// Returns an estimate of the memory usage of this trie in bytes.
     ///
-    /// This is used as a heuristic for prioritizing which storage tries to keep
-    /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
-    fn size_hint(&self) -> usize;
+    /// This is used for memory-based eviction decisions during pruning.
+    /// Larger values indicate larger tries that consume more memory.
+    fn memory_size(&self) -> usize;
 
     /// Prunes the trie while preserving hot accounts at full depth.
     ///
@@ -296,6 +295,11 @@ pub trait SparseTrieExt: SparseTrie {
     ///
     /// Hot accounts (Tier A/B) are preserved at full depth, cold accounts are pruned to
     /// `max_depth`.
+    ///
+    /// The `kind` parameter indicates whether this is a state (account) trie or storage trie,
+    /// allowing different pruning strategies:
+    /// - `State`: Uses depth-based pruning with optional node count limits
+    /// - `Storage`: Uses memory budget to guide eviction decisions
     ///
     /// # Preconditions
     ///
@@ -310,6 +314,7 @@ pub trait SparseTrieExt: SparseTrie {
     fn prune_preserving(
         &mut self,
         config: &crate::hot_accounts::SmartPruneConfig<'_>,
+        kind: crate::hot_accounts::TrieKind,
     ) -> PruneTrieStats;
 
     /// Applies leaf updates to the sparse trie.

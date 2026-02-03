@@ -28,6 +28,27 @@ use alloy_primitives::{address, map::HashSet, B256};
 use reth_trie_common::Nibbles;
 use std::{borrow::Borrow, collections::VecDeque, hash::Hash};
 
+/// Identifies the type of trie being pruned, allowing different strategies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrieKind {
+    /// Account/state trie - uses depth-based pruning and node count limits.
+    State,
+    /// Storage trie - uses memory budget to decide eviction.
+    Storage,
+}
+
+impl TrieKind {
+    /// Returns `true` if this is the state (account) trie.
+    pub const fn is_state(self) -> bool {
+        matches!(self, Self::State)
+    }
+
+    /// Returns `true` if this is a storage trie.
+    pub const fn is_storage(self) -> bool {
+        matches!(self, Self::Storage)
+    }
+}
+
 /// A hot account with pre-computed nibbles for efficient prefix matching.
 ///
 /// Hash and equality are based solely on `address` to allow O(1) lookups in `HashSet` by `B256`.
@@ -351,30 +372,53 @@ impl Hotness {
     }
 
     /// Returns true if this hotness level indicates the storage trie should be preserved.
+    ///
+    /// Only Tier A (system/major contracts) storage is always preserved.
+    /// Tier B (builders/fee recipients) storage can be evicted under memory pressure
+    /// since their storage is typically small or temporary.
     pub const fn should_preserve_storage(self) -> bool {
-        matches!(self, Self::Always | Self::Likely)
+        matches!(self, Self::Always)
     }
 }
 
 /// Configuration for smart pruning with hot account preservation.
+///
+/// Memory is controlled differently for each component:
+/// - **Account trie**: Controlled by `max_depth`. Depth 4 ≈ 65K paths max, depth 2 ≈ 256 paths.
+/// - **Storage tries**: Controlled by `max_memory`. Cold tries are evicted to stay under budget.
 #[derive(Debug)]
 pub struct SmartPruneConfig<'a> {
     /// Maximum depth to keep in account trie (for non-hot accounts).
+    /// Depth N means at most 16^N branch paths are preserved.
     pub max_depth: usize,
-    /// Maximum number of storage tries to keep (soft limit, hot accounts can exceed).
-    pub max_storage_tries: usize,
+    /// Maximum memory budget in bytes for storage tries.
+    /// Used to estimate how many storage tries to keep.
+    pub max_memory: usize,
     /// Hot account tracker.
     pub hot_accounts: &'a HotAccounts,
 }
 
 impl<'a> SmartPruneConfig<'a> {
     /// Creates a new smart prune configuration.
-    pub const fn new(
-        max_depth: usize,
-        max_storage_tries: usize,
-        hot_accounts: &'a HotAccounts,
-    ) -> Self {
-        Self { max_depth, max_storage_tries, hot_accounts }
+    pub const fn new(max_depth: usize, max_memory: usize, hot_accounts: &'a HotAccounts) -> Self {
+        Self { max_depth, max_memory, hot_accounts }
+    }
+
+    /// Estimates the maximum number of storage tries based on memory budget.
+    ///
+    /// Uses a heuristic: average storage trie is ~10KB, so we can estimate
+    /// how many we can afford. Hot accounts are always preserved regardless.
+    pub const fn estimated_max_storage_tries(&self) -> usize {
+        const AVERAGE_STORAGE_TRIE_SIZE: usize = 10 * 1024; // 10 KB estimate
+        self.max_memory / AVERAGE_STORAGE_TRIE_SIZE
+    }
+
+    /// Estimates the maximum number of account trie nodes based on memory budget.
+    ///
+    /// Uses a heuristic: average node is ~120 bytes (Nibbles key + `SparseNode` value).
+    pub const fn estimated_max_account_nodes(&self) -> usize {
+        const AVERAGE_NODE_SIZE: usize = 120; // Nibbles (40) + SparseNode (80)
+        self.max_memory / AVERAGE_NODE_SIZE
     }
 
     /// Checks if a trie path leads to a hot account that should be preserved during pruning.

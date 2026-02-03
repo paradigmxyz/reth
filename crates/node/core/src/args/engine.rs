@@ -2,7 +2,7 @@
 
 use clap::{builder::Resettable, Args};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_MEMORY,
     DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
 };
 use std::sync::OnceLock;
@@ -42,7 +42,7 @@ pub struct DefaultEngineValues {
     cache_metrics_disabled: bool,
     enable_sparse_trie_as_cache: bool,
     sparse_trie_prune_depth: usize,
-    sparse_trie_max_storage_tries: usize,
+    sparse_trie_max_memory: usize,
 }
 
 impl DefaultEngineValues {
@@ -191,9 +191,9 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set the maximum number of storage tries to retain after sparse trie pruning by default
-    pub const fn with_sparse_trie_max_storage_tries(mut self, v: usize) -> Self {
-        self.sparse_trie_max_storage_tries = v;
+    /// Set the maximum memory for sparse trie cache by default
+    pub const fn with_sparse_trie_max_memory(mut self, v: usize) -> Self {
+        self.sparse_trie_max_memory = v;
         self
     }
 }
@@ -223,7 +223,7 @@ impl Default for DefaultEngineValues {
             cache_metrics_disabled: false,
             enable_sparse_trie_as_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
-            sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+            sparse_trie_max_memory: DEFAULT_SPARSE_TRIE_MAX_MEMORY,
         }
     }
 }
@@ -360,9 +360,9 @@ pub struct EngineArgs {
     #[arg(long = "engine.sparse-trie-prune-depth", default_value_t = DefaultEngineValues::get_global().sparse_trie_prune_depth, requires = "enable_sparse_trie_as_cache")]
     pub sparse_trie_prune_depth: usize,
 
-    /// Maximum number of storage tries to retain after sparse trie pruning.
-    #[arg(long = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_storage_tries, requires = "enable_sparse_trie_as_cache")]
-    pub sparse_trie_max_storage_tries: usize,
+    /// Maximum memory for sparse trie cache in bytes.
+    #[arg(long = "engine.sparse-trie-max-memory", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_memory, requires = "enable_sparse_trie_as_cache")]
+    pub sparse_trie_max_memory: usize,
 }
 
 #[allow(deprecated)]
@@ -391,7 +391,7 @@ impl Default for EngineArgs {
             cache_metrics_disabled,
             enable_sparse_trie_as_cache,
             sparse_trie_prune_depth,
-            sparse_trie_max_storage_tries,
+            sparse_trie_max_memory,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -420,7 +420,7 @@ impl Default for EngineArgs {
             cache_metrics_disabled,
             enable_sparse_trie_as_cache,
             sparse_trie_prune_depth,
-            sparse_trie_max_storage_tries,
+            sparse_trie_max_memory,
         }
     }
 }
@@ -452,7 +452,7 @@ impl EngineArgs {
             .without_cache_metrics(self.cache_metrics_disabled)
             .with_enable_sparse_trie_as_cache(self.enable_sparse_trie_as_cache)
             .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
-            .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
+            .with_sparse_trie_max_memory(self.sparse_trie_max_memory)
     }
 }
 
@@ -505,7 +505,7 @@ mod tests {
             cache_metrics_disabled: true,
             enable_sparse_trie_as_cache: true,
             sparse_trie_prune_depth: 10,
-            sparse_trie_max_storage_tries: 100,
+            sparse_trie_max_memory: 512 * 1024 * 1024,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -539,8 +539,8 @@ mod tests {
             "--engine.enable-sparse-trie-as-cache",
             "--engine.sparse-trie-prune-depth",
             "10",
-            "--engine.sparse-trie-max-storage-tries",
-            "100",
+            "--engine.sparse-trie-max-memory",
+            "536870912",
         ])
         .args;
 
