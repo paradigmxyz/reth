@@ -263,7 +263,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                     csoff_writer.truncate(committed_len).map_err(ProviderError::other)?;
                 }
                 std::cmp::Ordering::Less => {
-                    // Sidecar is shorter than header claims - data corruption or incomplete prune
+                    // Unlikely: sidecar is shorter than header claims - data corruption or
+                    // incomplete prune
                     return Err(StaticFileWriterError::new(format!(
                         "Changeset offset sidecar has {} records but header expects {}: {}",
                         csoff_writer.len(),
