@@ -574,6 +574,11 @@ where
     /// Invokes `update_leaves` for the accounts trie and collects any new targets.
     ///
     /// Returns whether any updates were drained (applied to the trie).
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
     fn process_account_leaf_updates(&mut self) -> SparseTrieResult<bool> {
         let updates_len_before = self.account_updates.len();
 
