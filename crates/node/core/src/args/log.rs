@@ -8,8 +8,12 @@ use reth_tracing::{
 };
 use std::{fmt, fmt::Display};
 use tracing::{level_filters::LevelFilter, Level};
+
 /// Constant to convert megabytes to bytes
 const MB_TO_BYTES: u64 = 1024 * 1024;
+
+const PROFILER_TRACING_FILTER: &str =
+    "info,engine=debug,trie=debug,providers=debug,rpc=debug,sync=debug";
 
 /// The log configuration.
 #[derive(Debug, Args)]
@@ -70,7 +74,7 @@ pub struct LogArgs {
         long = "log.samply.filter",
         value_name = "FILTER",
         global = true,
-        default_value = "debug",
+        default_value = PROFILER_TRACING_FILTER,
         hide = true
     )]
     pub samply_filter: String,
@@ -84,7 +88,7 @@ pub struct LogArgs {
         long = "log.tracy.filter",
         value_name = "FILTER",
         global = true,
-        default_value = "debug",
+        default_value = PROFILER_TRACING_FILTER,
         hide = true
     )]
     pub tracy_filter: String,
