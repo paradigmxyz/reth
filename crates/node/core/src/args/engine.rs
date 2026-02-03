@@ -505,7 +505,7 @@ mod tests {
             cache_metrics_disabled: true,
             enable_sparse_trie_as_cache: true,
             sparse_trie_prune_depth: 10,
-            sparse_trie_max_memory: 512 * 1024 * 1024,
+            sparse_trie_max_memory_mb: 512,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
