@@ -83,7 +83,7 @@ impl StaticFileSegment {
 
     /// Returns a short string representation of the segment.
     ///
-    /// Linux threads have a length limit of 15 characters: <https://man7.org/linux/man-pages/man3/pthread_setname_np.3.html#DESCRIPTION.
+    /// Linux threads have a length limit of 15 characters: <https://man7.org/linux/man-pages/man3/pthread_setname_np.3.html#DESCRIPTION>.
     pub const fn as_short_str(&self) -> &'static str {
         match self {
             Self::Headers => "headers",

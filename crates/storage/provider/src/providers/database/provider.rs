@@ -552,20 +552,28 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         thread::scope(|s| {
             // SF writes
-            let sf_handle = s.spawn(|| {
-                let start = Instant::now();
-                sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx)?;
-                Ok::<_, ProviderError>(start.elapsed())
-            });
+            let sf_handle = thread::Builder::new()
+                .name("static-files".into())
+                .spawn_scoped(s, || {
+                    let start = Instant::now();
+                    sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx)?;
+                    Ok::<_, ProviderError>(start.elapsed())
+                })
+                // Same panic happens in `scope.spawn`
+                .expect("failed to spawn thread");
 
             // RocksDB writes
             #[cfg(all(unix, feature = "rocksdb"))]
             let rocksdb_handle = rocksdb_ctx.storage_settings.any_in_rocksdb().then(|| {
-                s.spawn(|| {
-                    let start = Instant::now();
-                    rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)?;
-                    Ok::<_, ProviderError>(start.elapsed())
-                })
+                thread::Builder::new()
+                    .name("rocksdb".into())
+                    .spawn_scoped(s, || {
+                        let start = Instant::now();
+                        rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)?;
+                        Ok::<_, ProviderError>(start.elapsed())
+                    })
+                    // Same panic happens in `scope.spawn`
+                    .expect("failed to spawn thread")
             });
 
             // MDBX writes
