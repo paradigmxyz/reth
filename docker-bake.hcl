@@ -1,8 +1,4 @@
-// Docker Bake configuration for reth and op-reth images
-// Usage:
-//   docker buildx bake ethereum    # Build reth
-//   docker buildx bake optimism    # Build op-reth
-//   docker buildx bake             # Build all
+// Docker Bake configuration for reth images
 
 variable "REGISTRY" {
   default = "ghcr.io/paradigmxyz"
