@@ -1041,15 +1041,7 @@ where
                     .map(|trie| trie.prune_preserving(config))
                     .unwrap_or_default();
 
-                // Keep revealed paths only for hot accounts
-                self.revealed_account_paths.retain(|path| {
-                    if path.len() >= 64 {
-                        let hashed = B256::from_slice(&path.pack()[..32]);
-                        config.hot_accounts.should_preserve(&hashed)
-                    } else {
-                        false
-                    }
-                });
+                self.revealed_account_paths.clear();
 
                 stats
             },
