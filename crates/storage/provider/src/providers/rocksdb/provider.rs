@@ -474,6 +474,17 @@ impl RocksDBProviderInner {
         }
     }
 
+    /// Returns a raw iterator over a column family.
+    ///
+    /// Unlike [`Self::iterator_cf`], raw iterators support `seek()` for efficient
+    /// repositioning without creating a new iterator.
+    fn raw_iterator_cf(&self, cf: &rocksdb::ColumnFamily) -> RocksDBRawIterEnum<'_> {
+        match self {
+            Self::ReadWrite { db, .. } => RocksDBRawIterEnum::ReadWrite(db.raw_iterator_cf(cf)),
+            Self::ReadOnly { db, .. } => RocksDBRawIterEnum::ReadOnly(db.raw_iterator_cf(cf)),
+        }
+    }
+
     /// Returns the path to the database directory.
     fn path(&self) -> &Path {
         match self {
@@ -1317,6 +1328,17 @@ pub enum PruneShardOutcome {
     Unchanged,
 }
 
+/// Tracks pruning outcomes for batch operations.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PrunedIndices {
+    /// Number of shards completely deleted.
+    pub deleted: usize,
+    /// Number of shards that were updated (filtered but still have entries).
+    pub updated: usize,
+    /// Number of shards that were unchanged.
+    pub unchanged: usize,
+}
+
 /// Handle for building a batch of operations atomically.
 ///
 /// Uses `WriteBatchWithTransaction` for atomic writes without full transaction overhead.
@@ -1743,6 +1765,73 @@ impl<'a> RocksDBBatch<'a> {
         )
     }
 
+    /// Prunes account history for multiple addresses in a single iterator pass.
+    ///
+    /// This is more efficient than calling [`Self::prune_account_history_to`] repeatedly
+    /// because it reuses a single raw iterator with `seek()` instead of creating a new
+    /// iterator per address.
+    ///
+    /// `targets` should be sorted by address for optimal performance (matches on-disk key order).
+    pub fn prune_account_history_batch(
+        &mut self,
+        targets: &[(Address, BlockNumber)],
+    ) -> ProviderResult<PrunedIndices> {
+        if targets.is_empty() {
+            return Ok(PrunedIndices::default());
+        }
+
+        let cf = self.provider.get_cf_handle::<tables::AccountsHistory>()?;
+        let mut iter = self.provider.0.raw_iterator_cf(cf);
+        let mut outcomes = PrunedIndices::default();
+
+        for (address, to_block) in targets {
+            let start_key = ShardedKey::new(*address, 0u64);
+            iter.seek(start_key.encode());
+
+            iter.status().map_err(|e| {
+                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+
+            let mut shards = Vec::new();
+            while iter.valid() {
+                let Some(key_bytes) = iter.key() else { break };
+
+                let key = ShardedKey::<Address>::decode(key_bytes)
+                    .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                if key.key != *address {
+                    break;
+                }
+
+                let Some(value_bytes) = iter.value() else { break };
+                let value = BlockNumberList::decompress(value_bytes)
+                    .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                shards.push((key, value));
+                iter.next();
+            }
+
+            match self.prune_history_shards_inner(
+                shards,
+                *to_block,
+                |key| key.highest_block_number,
+                |key| key.highest_block_number == u64::MAX,
+                |batch, key| batch.delete::<tables::AccountsHistory>(key),
+                |batch, key, value| batch.put::<tables::AccountsHistory>(key, value),
+                || ShardedKey::new(*address, u64::MAX),
+            )? {
+                PruneShardOutcome::Deleted => outcomes.deleted += 1,
+                PruneShardOutcome::Updated => outcomes.updated += 1,
+                PruneShardOutcome::Unchanged => outcomes.unchanged += 1,
+            }
+        }
+
+        Ok(outcomes)
+    }
+
     /// Prunes storage history for the given address and storage key, removing blocks <=
     /// `to_block`.
     ///
@@ -1764,6 +1853,80 @@ impl<'a> RocksDBBatch<'a> {
             |batch, key, value| batch.put::<tables::StoragesHistory>(key, value),
             || StorageShardedKey::last(address, storage_key),
         )
+    }
+
+    /// Prunes storage history for multiple (address, `storage_key`) pairs in a single iterator
+    /// pass.
+    ///
+    /// This is more efficient than calling [`Self::prune_storage_history_to`] repeatedly
+    /// because it reuses a single raw iterator with `seek()` instead of creating a new
+    /// iterator per key.
+    ///
+    /// `targets` should be sorted by (address, `storage_key`) for optimal performance
+    /// (matches on-disk key order).
+    pub fn prune_storage_history_batch(
+        &mut self,
+        targets: &[((Address, B256), BlockNumber)],
+    ) -> ProviderResult<PrunedIndices> {
+        if targets.is_empty() {
+            return Ok(PrunedIndices::default());
+        }
+
+        let cf = self.provider.get_cf_handle::<tables::StoragesHistory>()?;
+        let mut iter = self.provider.0.raw_iterator_cf(cf);
+        let mut outcomes = PrunedIndices::default();
+
+        for ((address, storage_key), to_block) in targets {
+            // Seek to start of this (address, storage_key)'s shards
+            let start_key = StorageShardedKey::new(*address, *storage_key, 0u64);
+            iter.seek(start_key.encode());
+
+            // Check iterator status after seek
+            iter.status().map_err(|e| {
+                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+
+            // Collect all shards for this (address, storage_key) pair
+            let mut shards = Vec::new();
+            while iter.valid() {
+                let Some(key_bytes) = iter.key() else { break };
+
+                let key = StorageShardedKey::decode(key_bytes)
+                    .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                // Stop when we reach a different (address, storage_key) pair
+                if key.address != *address || key.sharded_key.key != *storage_key {
+                    break;
+                }
+
+                let Some(value_bytes) = iter.value() else { break };
+                let value = BlockNumberList::decompress(value_bytes)
+                    .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+                shards.push((key, value));
+                iter.next();
+            }
+
+            // Use existing prune_history_shards_inner logic
+            match self.prune_history_shards_inner(
+                shards,
+                *to_block,
+                |key| key.sharded_key.highest_block_number,
+                |key| key.sharded_key.highest_block_number == u64::MAX,
+                |batch, key| batch.delete::<tables::StoragesHistory>(key),
+                |batch, key, value| batch.put::<tables::StoragesHistory>(key, value),
+                || StorageShardedKey::last(*address, *storage_key),
+            )? {
+                PruneShardOutcome::Deleted => outcomes.deleted += 1,
+                PruneShardOutcome::Updated => outcomes.updated += 1,
+                PruneShardOutcome::Unchanged => outcomes.unchanged += 1,
+            }
+        }
+
+        Ok(outcomes)
     }
 
     /// Unwinds storage history to keep only blocks `<= keep_to`.
@@ -2153,6 +2316,67 @@ impl Iterator for RocksDBIterEnum<'_> {
         match self {
             Self::ReadWrite(iter) => iter.next(),
             Self::ReadOnly(iter) => iter.next(),
+        }
+    }
+}
+
+/// Wrapper enum for raw `RocksDB` iterators that works in both read-write and read-only modes.
+///
+/// Unlike [`RocksDBIterEnum`], raw iterators expose `seek()` for efficient repositioning
+/// without reinitializing the iterator.
+enum RocksDBRawIterEnum<'db> {
+    /// Raw iterator from read-write `OptimisticTransactionDB`.
+    ReadWrite(DBRawIteratorWithThreadMode<'db, OptimisticTransactionDB>),
+    /// Raw iterator from read-only `DB`.
+    ReadOnly(DBRawIteratorWithThreadMode<'db, DB>),
+}
+
+impl RocksDBRawIterEnum<'_> {
+    /// Positions the iterator at the first key >= `key`.
+    fn seek(&mut self, key: impl AsRef<[u8]>) {
+        match self {
+            Self::ReadWrite(iter) => iter.seek(key),
+            Self::ReadOnly(iter) => iter.seek(key),
+        }
+    }
+
+    /// Returns true if the iterator is positioned at a valid key-value pair.
+    fn valid(&self) -> bool {
+        match self {
+            Self::ReadWrite(iter) => iter.valid(),
+            Self::ReadOnly(iter) => iter.valid(),
+        }
+    }
+
+    /// Returns the current key, if valid.
+    fn key(&self) -> Option<&[u8]> {
+        match self {
+            Self::ReadWrite(iter) => iter.key(),
+            Self::ReadOnly(iter) => iter.key(),
+        }
+    }
+
+    /// Returns the current value, if valid.
+    fn value(&self) -> Option<&[u8]> {
+        match self {
+            Self::ReadWrite(iter) => iter.value(),
+            Self::ReadOnly(iter) => iter.value(),
+        }
+    }
+
+    /// Advances the iterator to the next key.
+    fn next(&mut self) {
+        match self {
+            Self::ReadWrite(iter) => iter.next(),
+            Self::ReadOnly(iter) => iter.next(),
+        }
+    }
+
+    /// Returns the status of the iterator.
+    fn status(&self) -> Result<(), rocksdb::Error> {
+        match self {
+            Self::ReadWrite(iter) => iter.status(),
+            Self::ReadOnly(iter) => iter.status(),
         }
     }
 }
