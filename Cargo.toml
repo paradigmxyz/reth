@@ -795,3 +795,5 @@ ipnet = "2.11"
 
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
 # alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
+
+nybbles = { git = "https://github.com/alloy-rs/nybbles", rev = "dd5212d" }
