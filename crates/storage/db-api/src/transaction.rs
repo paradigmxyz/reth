@@ -92,4 +92,12 @@ pub trait DbTxMut: Send {
     fn commit_subtxns(&self) -> Result<(), DatabaseError> {
         Ok(())
     }
+
+    /// Enables parallel writes mode only for the specified tables.
+    ///
+    /// This creates subtransactions only for the listed tables, allowing parallel
+    /// writes to those tables while other tables continue using the main transaction.
+    fn enable_parallel_writes_for_tables(&self, _tables: &[&str]) -> Result<(), DatabaseError> {
+        Ok(())
+    }
 }
