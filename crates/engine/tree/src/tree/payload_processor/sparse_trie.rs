@@ -477,6 +477,9 @@ where
                     .entry(address)
                     .or_default()
                     .insert(slot, LeafUpdate::Changed(encoded));
+
+                // Remove an existing storage update if it exists.
+                self.storage_updates.get_mut(&address).and_then(|updates| updates.remove(&slot));
             }
 
             // Make sure account is tracked in `account_updates` so that it is revealed in accounts
@@ -636,9 +639,7 @@ where
             }
         })?;
 
-        let applied_updates = account_updates.len() < updates_len_before;
-
-        Ok(applied_updates)
+        Ok(account_updates.len() < updates_len_before)
     }
 
     /// Iterates through all storage tries for which all updates were processed, computes their
