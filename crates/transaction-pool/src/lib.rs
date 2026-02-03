@@ -610,13 +610,19 @@ where
         self.pool.pending_transactions()
     }
 
-    fn is_transaction_ready(&self, sender: &Address, nonce: u64) -> bool {
-        let pool_data = self.pool.get_pool_data();
-        pool_data
+    fn get_pending_transaction_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        let sender_id = self.pool.get_sender_id(sender);
+        self.pool
+            .get_pool_data()
             .pending()
             .independent_transactions()
-            .values()
-            .any(|tx| tx.transaction.sender() == *sender && tx.transaction.nonce() == nonce)
+            .get(&sender_id)
+            .filter(|tx| tx.transaction.nonce() == nonce)
+            .map(|tx| tx.transaction.clone())
     }
 
     fn pending_transactions_max(
