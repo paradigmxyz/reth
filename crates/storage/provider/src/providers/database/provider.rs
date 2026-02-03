@@ -619,14 +619,12 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 );
             }
 
-            // Enable parallel writes only in edge mode where SF handles receipts/changesets
-            // This allows hashed state, trie updates, and block metadata to write in parallel
-            // Only use parallel path if enable_parallel_writes succeeds
-            let use_parallel_writes = save_mode.with_state()
-                && sf_ctx.write_receipts
-                && self.tx.enable_parallel_writes().is_ok();
+            // Always enable parallel writes - creates subtransactions for all DBIs
+            // This allows cursors to use per-DBI subtransactions even in sequential mode
+            // Subtransactions are committed serially before parent commit
+            let _ = self.tx.enable_parallel_writes();
 
-            // Pre-compute merged hashed state and trie updates before parallel section
+            // Pre-compute merged hashed state and trie updates before write section
             let (merged_hashed_state, merged_trie) = if save_mode.with_state() {
                 let start = Instant::now();
                 let merged_hashed_state: Arc<HashedPostStateSorted> =
@@ -645,8 +643,11 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                 (Arc::new(HashedPostStateSorted::default()), Arc::new(TrieUpdatesSorted::default()))
             };
 
-            if use_parallel_writes {
-                // Parallel MDBX writes - each thread writes to different tables
+            // Determine if we can use parallel threads (edge mode where SF handles receipts/changesets)
+            let use_parallel_threads = save_mode.with_state() && sf_ctx.write_receipts;
+
+            if use_parallel_threads {
+                // Parallel MDBX writes - each thread writes to different tables via subtransactions
                 std::thread::scope(|scope| {
                     // Thread 1: Block metadata (HeaderNumbers, BlockBodyIndices, etc.)
                     let block_handle = scope.spawn(|| -> ProviderResult<Duration> {
@@ -712,7 +713,7 @@ impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvi
                     Ok::<_, ProviderError>(())
                 })?;
             } else {
-                // Sequential MDBX writes (non-edge mode)
+                // Sequential MDBX writes (still uses subtransactions, just single-threaded)
                 for (i, block) in blocks.iter().enumerate() {
                     let recovered_block = block.recovered_block();
 
