@@ -34,10 +34,6 @@ variable "VERGEN_GIT_DIRTY" {
 }
 
 // Common settings for all targets
-group "default" {
-  targets = ["ethereum", "optimism"]
-}
-
 group "nightly" {
   targets = [
     "ethereum-amd64",
