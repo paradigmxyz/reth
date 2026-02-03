@@ -15704,10 +15704,12 @@ LIBMDBX_API int mdbx_txn_create_subtx(MDBX_txn *parent, const MDBX_page_range_t 
   memcpy(txn->dbi_sparse, parent->dbi_sparse, bitmap_bytes);
 #endif /* MDBX_ENABLE_DBI_SPARSE */
 
-  /* Copy parent's dbs and state */
+  /* Copy parent's dbs and state, but clear DBI_FRESH/DIRTY/CREAT flags so that
+   * only DBIs actually modified by this subtxn get merged back to parent */
   memcpy(txn->dbs, parent->dbs, parent->n_dbi * sizeof(tree_t));
   memcpy(txn->dbi_seqs, parent->dbi_seqs, parent->n_dbi * sizeof(uint32_t));
-  memcpy(txn->dbi_state, parent->dbi_state, parent->n_dbi * sizeof(uint8_t));
+  for (size_t i = 0; i < parent->n_dbi; ++i)
+    txn->dbi_state[i] = parent->dbi_state[i] & ~(DBI_FRESH | DBI_CREAT | DBI_DIRTY);
   /* cursors are already zero from calloc */
 
   txn->signature = txn_signature;
@@ -15855,6 +15857,14 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
       page_t *const page = src->items[i].ptr;
       const pgno_t pgno = src->items[i].pgno;
       const unsigned npages = dpl_npages(src, i);
+
+      /* Check if page already exists in parent's dirty list. This can happen
+       * when subtxn touched a page that was already dirty in parent. */
+      const size_t pn = dpl_search(parent, pgno);
+      if (parent->tw.dirtylist->items[pn].pgno == pgno) {
+        /* Page already in parent - skip (it's the same physical page) */
+        continue;
+      }
 
       int rc = dpl_append(parent, pgno, page, npages);
       if (unlikely(rc != MDBX_SUCCESS)) {
@@ -32330,18 +32340,28 @@ __hot int page_touch_modifable(MDBX_txn *txn, const page_t *const mp) {
   tASSERT(txn, !is_largepage(mp) && !is_subpage(mp));
   tASSERT(txn, (txn->flags & MDBX_WRITEMAP) == 0 || MDBX_AVOID_MSYNC);
 
-  const size_t n = dpl_search(txn, mp->pgno);
-  if (MDBX_AVOID_MSYNC && unlikely(txn->tw.dirtylist->items[n].pgno != mp->pgno)) {
-    tASSERT(txn, (txn->flags & MDBX_WRITEMAP));
-    tASSERT(txn, n > 0 && n <= txn->tw.dirtylist->length + 1);
-    VERBOSE("unspill page %" PRIaPGNO, mp->pgno);
+  size_t n = dpl_search(txn, mp->pgno);
+  if (unlikely(txn->tw.dirtylist->items[n].pgno != mp->pgno)) {
+    /* Page not in our dirty list. For parallel subtxns, the page may be in
+     * the parent's dirty list (created before subtxn). Just add it to ours. */
+    if ((txn->flags & txn_parallel_subtx) || MDBX_AVOID_MSYNC) {
+      if (MDBX_AVOID_MSYNC)
+        tASSERT(txn, (txn->flags & MDBX_WRITEMAP));
+      tASSERT(txn, n > 0 && n <= txn->tw.dirtylist->length + 1);
+      VERBOSE("add page %" PRIaPGNO " to subtxn dirty list", mp->pgno);
 #if MDBX_ENABLE_PGOP_STAT
-    txn->env->lck->pgops.unspill.weak += 1;
+      txn->env->lck->pgops.unspill.weak += 1;
 #endif /* MDBX_ENABLE_PGOP_STAT */
-    return page_dirty(txn, (page_t *)mp, 1);
+      int rc = page_dirty(txn, (page_t *)mp, 1);
+      if (unlikely(rc != MDBX_SUCCESS))
+        return rc;
+      /* Re-search after insert since list may have been resorted/reallocated */
+      n = dpl_search(txn, mp->pgno);
+    } else {
+      tASSERT(txn, n > 0 && n <= txn->tw.dirtylist->length);
+    }
   }
 
-  tASSERT(txn, n > 0 && n <= txn->tw.dirtylist->length);
   tASSERT(txn, txn->tw.dirtylist->items[n].pgno == mp->pgno && txn->tw.dirtylist->items[n].ptr == mp);
   if (!MDBX_AVOID_MSYNC || (txn->flags & MDBX_WRITEMAP) == 0) {
     size_t *const ptr = ptr_disp(txn->tw.dirtylist->items[n].ptr, -(ptrdiff_t)sizeof(size_t));
