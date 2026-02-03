@@ -36,6 +36,7 @@ secp256k1 = { workspace = true, features = ["recovery"], optional = true }
 auto_impl.workspace = true
 byteorder = { workspace = true, optional = true }
 bytes.workspace = true
+dashmap = { workspace = true, features = ["inline"], optional = true }
 derive_more.workspace = true
 once_cell.workspace = true
 serde_with = { workspace = true, optional = true }
@@ -116,6 +117,7 @@ arbitrary = [
     "alloy-trie/arbitrary",
     "reth-chainspec/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
+    "dashmap?/arbitrary",
 ]
 serde-bincode-compat = [
     "serde",
@@ -144,6 +146,7 @@ serde = [
     "revm-state/serde",
     "rand_08/serde",
     "alloy-rpc-types-eth?/serde",
+    "dashmap?/serde",
 ]
 reth-codec = [
     "dep:reth-codecs",
@@ -157,4 +160,5 @@ op = [
 rayon = [
     "dep:rayon",
 ]
+dashmap = ["dep:dashmap"]
 rpc-compat = ["alloy-rpc-types-eth"]

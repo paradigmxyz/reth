@@ -37,6 +37,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
+use reth_tasks::spawn_os_thread;
 use reth_trie_db::ChangesetCache;
 use revm::state::EvmState;
 use state::TreeState;
@@ -61,7 +62,6 @@ mod persistence_state;
 pub mod precompile_cache;
 #[cfg(test)]
 mod tests;
-#[expect(unused)]
 mod trie_updates;
 
 use crate::tree::error::AdvancePersistenceError;
@@ -432,7 +432,7 @@ where
             changeset_cache,
         );
         let incoming = task.incoming_tx.clone();
-        std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();
+        spawn_os_thread("engine", || task.run());
         (incoming, outgoing)
     }
 
