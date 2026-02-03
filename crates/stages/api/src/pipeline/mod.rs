@@ -65,8 +65,8 @@ where
 /// Checks if we can safely unwind to the target block given current pruning state.
 ///
 /// Only stages that require account/storage history changesets to unwind (`Execution`,
-/// `AccountHashing`, `StorageHashing`) need this check. Other stages like `Headers`, `Bodies`,
-/// and `SenderRecovery` can unwind without history data.
+/// `AccountHashing`, `StorageHashing`, `MerkleUnwind`) need this check. Other stages like
+/// `Headers`, `Bodies`, and `SenderRecovery` can unwind without history data.
 ///
 /// Returns `Ok(())` if:
 /// - No history-dependent stage needs to unwind (all checkpoints <= unwind target)
