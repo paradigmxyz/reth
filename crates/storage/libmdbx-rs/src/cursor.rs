@@ -2,7 +2,7 @@ use crate::{
     error::{mdbx_result, Error, Result},
     flags::*,
     mdbx_try_optional,
-    transaction::{TransactionKind, RW},
+    transaction::{TransactionKind, TransactionPtr, RW},
     TableObject, Transaction,
 };
 use ffi::{
@@ -20,6 +20,14 @@ where
 {
     txn: Transaction<K>,
     cursor: *mut ffi::MDBX_cursor,
+    /// Optional transaction pointer for parallel writes. When set, write operations
+    /// use this pointer directly instead of going through `self.txn.txn_execute()`.
+    /// This is needed because `new_with_ptr` opens a cursor on a subtransaction,
+    /// but stores the parent transaction in `txn`.
+    ///
+    /// Uses `TransactionPtr` to ensure proper mutex locking for thread-safety,
+    /// as MDBX requires serialized access to transactions.
+    owned_txn_ptr: Option<TransactionPtr>,
 }
 
 impl<K> Cursor<K>
@@ -33,7 +41,39 @@ where
                 mdbx_result(ffi::mdbx_cursor_open(txn_ptr, dbi, &mut cursor))
             })??;
         }
-        Ok(Self { txn, cursor })
+        Ok(Self { txn, cursor, owned_txn_ptr: None })
+    }
+
+    /// Creates a new cursor using a specific transaction pointer.
+    ///
+    /// This is used for parallel writes where the cursor should be opened on
+    /// a subtransaction rather than the parent transaction. The cursor stores
+    /// this pointer and uses it directly for write operations.
+    pub(crate) fn new_with_ptr(
+        txn: Transaction<K>,
+        dbi: ffi::MDBX_dbi,
+        txn_ptr: TransactionPtr,
+    ) -> Result<Self> {
+        let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
+        txn_ptr.txn_execute_fail_on_timeout(|ptr| unsafe {
+            mdbx_result(ffi::mdbx_cursor_open(ptr, dbi, &mut cursor))
+        })??;
+        Ok(Self { txn, cursor, owned_txn_ptr: Some(txn_ptr) })
+    }
+
+    /// Executes a closure on the transaction pointer.
+    ///
+    /// If this cursor was created with `new_with_ptr`, uses the stored txn pointer
+    /// with proper locking. Otherwise, delegates to `self.txn.txn_execute()`.
+    fn execute_on_txn<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
+        if let Some(ref txn_ptr) = self.owned_txn_ptr {
+            txn_ptr.txn_execute_fail_on_timeout(f)
+        } else {
+            self.txn.txn_execute(|txn_ptr| f(txn_ptr))
+        }
     }
 
     fn new_at_position(other: &Self) -> Result<Self> {
@@ -42,7 +82,8 @@ where
 
             let res = ffi::mdbx_cursor_copy(other.cursor(), cursor);
 
-            let s = Self { txn: other.txn.clone(), cursor };
+            let s =
+                Self { txn: other.txn.clone(), cursor, owned_txn_ptr: other.owned_txn_ptr.clone() };
 
             mdbx_result(res)?;
 
@@ -438,11 +479,19 @@ impl Cursor<RW> {
             ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
         let mut data_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
-        mdbx_result(unsafe {
-            self.txn.txn_execute(|_| {
-                ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits())
-            })?
-        })?;
+
+        unsafe {
+            if self.owned_txn_ptr.is_some() {
+                // Bypass locking entirely for parallel cursors - they have independent subtxns
+                let ret = ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits());
+                mdbx_result(ret)?;
+            } else {
+                // Use normal path with locking for non-parallel cursors
+                mdbx_result(self.txn.txn_execute(|_| {
+                    ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits())
+                })?)?;
+            }
+        }
 
         Ok(())
     }
@@ -455,7 +504,7 @@ impl Cursor<RW> {
     /// current key, if the database was opened with [`DatabaseFlags::DUP_SORT`].
     pub fn del(&mut self, flags: WriteFlags) -> Result<()> {
         mdbx_result(unsafe {
-            self.txn.txn_execute(|_| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
+            self.execute_on_txn(|_| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
         })?;
 
         Ok(())
