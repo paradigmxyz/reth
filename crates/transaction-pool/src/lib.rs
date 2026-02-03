@@ -519,7 +519,7 @@ where
         transactions: Vec<Self::Transaction>,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         if transactions.is_empty() {
-            return Vec::new()
+            return Vec::new();
         }
         let validated = self.validate_all(origin, transactions).await;
 
@@ -663,6 +663,13 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.remove_transactions_by_sender(sender)
+    }
+
+    fn prune_transactions(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.prune_transactions(hashes)
     }
 
     fn retain_unknown<A>(&self, announcement: &mut A)

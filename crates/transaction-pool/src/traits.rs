@@ -496,6 +496,26 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Prunes a single transaction corresponding to the given hash.
+    ///
+    /// Returns the pruned transaction if it was found in the pool.
+    ///
+    /// Consumer: Utility
+    fn prune_transaction(
+        &self,
+        hash: TxHash,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.prune_transactions(vec![hash]).pop()
+    }
+
+    /// Prunes and returns transactions corresponding to the given hashes.
+    ///
+    /// Consumer: Utility
+    fn prune_transactions(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
     /// Retains only those hashes that are unknown to the pool.
     /// In other words, removes all transactions from the given set that are currently present in
     /// the pool. Returns hashes already known to the pool.
@@ -1719,7 +1739,7 @@ impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
             match self.st.try_recv() {
                 Ok(event) => {
                     if event.subpool == self.subpool {
-                        return Ok(event)
+                        return Ok(event);
                     }
                 }
                 Err(e) => return Err(e),
@@ -1736,7 +1756,7 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
             match ready!(self.st.poll_recv(cx)) {
                 Some(event) => {
                     if event.subpool == self.subpool {
-                        return Poll::Ready(Some(event))
+                        return Poll::Ready(Some(event));
                     }
                 }
                 None => return Poll::Ready(None),
