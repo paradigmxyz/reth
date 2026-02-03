@@ -17,7 +17,8 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{ops::Deref, sync::Arc};
 
 /// Alias type for each specific `NippyJar`.
-type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, StaticFileSegment), LoadedJar>;
+type LoadedJarRef<'a> =
+    reth_primitives_traits::dashmap::mapref::one::Ref<'a, (u64, StaticFileSegment), LoadedJar>;
 
 /// Helper type to reuse an associated static file mmap handle on created cursors.
 #[derive(Debug)]

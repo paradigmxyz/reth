@@ -204,8 +204,9 @@ impl<N> std::ops::Deref for StaticFileProviderRWRefMut<'_, N> {
 /// Extends `StaticFileProvider` with writing capabilities
 pub struct StaticFileProviderRW<N> {
     /// Reference back to the provider. We need [Weak] here because [`StaticFileProviderRW`] is
-    /// stored in a [`dashmap::DashMap`] inside the parent [`StaticFileProvider`].which is an
-    /// [Arc]. If we were to use an [Arc] here, we would create a reference cycle.
+    /// stored in a [`reth_primitives_traits::dashmap::DashMap`] inside the parent
+    /// [`StaticFileProvider`].which is an [Arc]. If we were to use an [Arc] here, we would
+    /// create a reference cycle.
     reader: Weak<StaticFileProviderInner<N>>,
     /// A [`NippyJarWriter`] instance.
     writer: NippyJarWriter<SegmentHeader>,
