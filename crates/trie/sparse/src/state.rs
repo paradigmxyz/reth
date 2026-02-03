@@ -42,6 +42,9 @@ pub struct SparseStateTrie<
     /// Reusable buffer for proof nodes.
     proof_nodes_buf: Vec<ProofTrieNode>,
     /// Reuseable buffers for storage trie proof nodes.
+    ///
+    /// The buffer grows up to the number of storage tries present in one multiproof. Even without
+    /// chunking, this is up to the number of contracts modified in one transaction.
     storage_proof_nodes_bufs: Vec<Vec<ProofTrieNode>>,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
