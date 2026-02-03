@@ -25,7 +25,46 @@
 //! ```
 
 use alloy_primitives::{address, map::HashSet, B256};
-use std::collections::VecDeque;
+use reth_trie_common::Nibbles;
+use std::{borrow::Borrow, collections::VecDeque, hash::Hash};
+
+/// A hot account with pre-computed nibbles for efficient prefix matching.
+///
+/// Hash and equality are based solely on `address` to allow O(1) lookups in HashSet by B256.
+#[derive(Debug, Clone)]
+pub struct HotAccount {
+    /// The hashed address (keccak256 of the original address).
+    pub address: B256,
+    /// Pre-computed nibbles for efficient trie path matching.
+    pub nibbles: Nibbles,
+}
+
+impl HotAccount {
+    /// Creates a new hot account from a hashed address.
+    pub fn new(address: B256) -> Self {
+        Self { nibbles: Nibbles::unpack(address), address }
+    }
+}
+
+impl PartialEq for HotAccount {
+    fn eq(&self, other: &Self) -> bool {
+        self.address == other.address
+    }
+}
+
+impl Eq for HotAccount {}
+
+impl Hash for HotAccount {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.address.hash(state);
+    }
+}
+
+impl Borrow<B256> for HotAccount {
+    fn borrow(&self) -> &B256 {
+        &self.address
+    }
+}
 
 /// Maximum number of recent fee recipients to track (prevents unbounded growth).
 const MAX_RECENT_FEE_RECIPIENTS: usize = 128;
@@ -37,17 +76,18 @@ const MAX_RECENT_FEE_RECIPIENTS: usize = 128;
 /// - Semi-static addresses (builders, fee recipients)
 #[derive(Debug, Clone)]
 pub struct HotAccounts {
-    /// System contract addresses (hashed) - Tier A.
-    system_contracts: HashSet<B256>,
-    /// Major defi contract addresses (hashed) - Tier A.
-    major_contracts: HashSet<B256>,
-    /// Known builder/searcher addresses (hashed) - Tier B.
-    known_builders: HashSet<B256>,
-    /// Recent fee recipients as a ring buffer (most recent first) - Tier B.
+    /// System contract addresses with pre-computed nibbles - Tier A.
+    system_contracts: HashSet<HotAccount>,
+    /// Major defi contract addresses with pre-computed nibbles - Tier A.
+    major_contracts: HashSet<HotAccount>,
+    /// Known builder/searcher addresses with pre-computed nibbles - Tier B.
+    known_builders: HashSet<HotAccount>,
+    /// Recent fee recipients with pre-computed nibbles - Tier B.
     /// Capped at `MAX_RECENT_FEE_RECIPIENTS` to prevent unbounded growth.
-    recent_fee_recipients: VecDeque<B256>,
-    /// Set for O(1) membership checks of recent fee recipients.
-    recent_fee_recipients_set: HashSet<B256>,
+    /// Uses VecDeque to maintain insertion order for eviction.
+    recent_fee_recipients: VecDeque<HotAccount>,
+    /// Set for O(1) membership checks of recent fee recipients (by address).
+    recent_fee_recipients_set: HashSet<HotAccount>,
 }
 
 impl Default for HotAccounts {
@@ -187,17 +227,17 @@ impl HotAccounts {
 
     /// Adds a system contract address (Tier A - always hot).
     pub fn add_system_contract(&mut self, hashed_address: B256) {
-        self.system_contracts.insert(hashed_address);
+        self.system_contracts.insert(HotAccount::new(hashed_address));
     }
 
     /// Adds a major defi contract address (Tier A - always hot).
     pub fn add_major_contract(&mut self, hashed_address: B256) {
-        self.major_contracts.insert(hashed_address);
+        self.major_contracts.insert(HotAccount::new(hashed_address));
     }
 
     /// Adds a known builder address (Tier B - likely hot).
     pub fn add_builder(&mut self, hashed_address: B256) {
-        self.known_builders.insert(hashed_address);
+        self.known_builders.insert(HotAccount::new(hashed_address));
     }
 
     /// Records a fee recipient for the current block.
@@ -211,14 +251,15 @@ impl HotAccounts {
         }
 
         // Add to ring buffer and set
-        self.recent_fee_recipients.push_front(hashed_address);
-        self.recent_fee_recipients_set.insert(hashed_address);
+        let hot_account = HotAccount::new(hashed_address);
+        self.recent_fee_recipients.push_front(hot_account.clone());
+        self.recent_fee_recipients_set.insert(hot_account);
 
         // Evict oldest if over capacity
         if self.recent_fee_recipients.len() > MAX_RECENT_FEE_RECIPIENTS &&
             let Some(evicted) = self.recent_fee_recipients.pop_back()
         {
-            self.recent_fee_recipients_set.remove(&evicted);
+            self.recent_fee_recipients_set.remove(&evicted.address);
         }
     }
 
@@ -261,25 +302,34 @@ impl HotAccounts {
 
     /// Returns approximate memory usage in bytes.
     pub fn memory_usage(&self) -> usize {
-        self.system_contracts.len() * 32 +
-            self.major_contracts.len() * 32 +
-            self.known_builders.len() * 32 +
-            self.recent_fee_recipients.len() * 32 +
+        // Each HotAccount is B256 (32 bytes) + Nibbles (64 nibbles = 32 bytes + overhead)
+        const HOT_ACCOUNT_SIZE: usize = 32 + 64;
+        self.system_contracts.len() * HOT_ACCOUNT_SIZE +
+            self.major_contracts.len() * HOT_ACCOUNT_SIZE +
+            self.known_builders.len() * HOT_ACCOUNT_SIZE +
+            self.recent_fee_recipients.len() * HOT_ACCOUNT_SIZE +
             self.recent_fee_recipients_set.len() * 32
     }
 
-    /// Returns an iterator over Tier A addresses (system contracts and major contracts).
+    /// Checks if any hot account's nibbles start with the given prefix path.
     ///
-    /// These are the highest priority accounts that should always be preserved.
-    pub fn tier_a_iter(&self) -> impl Iterator<Item = &B256> {
-        self.system_contracts.iter().chain(self.major_contracts.iter())
-    }
+    /// Used during trie pruning to determine if a partial path leads to a hot account.
+    pub fn any_starts_with(&self, prefix: &Nibbles) -> bool {
+        // Check Tier A first (system contracts and major contracts)
+        for hot_account in self.system_contracts.iter().chain(self.major_contracts.iter()) {
+            if hot_account.nibbles.starts_with(prefix) {
+                return true;
+            }
+        }
 
-    /// Returns an iterator over Tier B addresses (known builders and recent fee recipients).
-    ///
-    /// These are semi-static accounts that are likely to be accessed.
-    pub fn tier_b_iter(&self) -> impl Iterator<Item = &B256> {
-        self.known_builders.iter().chain(self.recent_fee_recipients.iter())
+        // Check Tier B (known builders and fee recipients)
+        for hot_account in self.known_builders.iter().chain(self.recent_fee_recipients.iter()) {
+            if hot_account.nibbles.starts_with(prefix) {
+                return true;
+            }
+        }
+
+        false
     }
 }
 
@@ -331,9 +381,7 @@ impl<'a> SmartPruneConfig<'a> {
     ///
     /// For complete account paths (64 nibbles), checks directly against hot accounts.
     /// For partial paths, checks if any hot account's hashed address starts with this prefix.
-    pub fn path_leads_to_hot_account(&self, path: &reth_trie_common::Nibbles) -> bool {
-        use alloy_primitives::B256;
-
+    pub fn path_leads_to_hot_account(&self, path: &Nibbles) -> bool {
         // For complete account paths (64 nibbles), check directly
         if path.len() >= 64 {
             let hashed = B256::from_slice(&path.pack()[..32]);
@@ -341,23 +389,7 @@ impl<'a> SmartPruneConfig<'a> {
         }
 
         // For partial paths, check if any known hot account has this prefix
-        // Check Tier A: system contracts and major contracts
-        for addr in self.hot_accounts.tier_a_iter() {
-            let account_path = reth_trie_common::Nibbles::unpack(*addr);
-            if account_path.starts_with(path) {
-                return true;
-            }
-        }
-
-        // Check Tier B: known builders and fee recipients
-        for addr in self.hot_accounts.tier_b_iter() {
-            let account_path = reth_trie_common::Nibbles::unpack(*addr);
-            if account_path.starts_with(path) {
-                return true;
-            }
-        }
-
-        false
+        self.hot_accounts.any_starts_with(path)
     }
 }
 
