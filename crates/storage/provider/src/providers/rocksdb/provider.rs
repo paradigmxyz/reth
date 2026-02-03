@@ -819,7 +819,6 @@ impl RocksDBProvider {
     }
 
     /// Retrieves the first or last entry from a table based on the iterator mode.
-    #[inline]
     fn get_boundary<T: Table>(
         &self,
         mode: IteratorMode<'_>,
@@ -848,11 +847,13 @@ impl RocksDBProvider {
     }
 
     /// Gets the first (smallest key) entry from the specified table.
+    #[inline]
     pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
         self.get_boundary::<T>(IteratorMode::Start)
     }
 
     /// Gets the last (largest key) entry from the specified table.
+    #[inline]
     pub fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
         self.get_boundary::<T>(IteratorMode::End)
     }
