@@ -1072,9 +1072,8 @@ where
         if hashes.is_empty() {
             return Vec::new();
         }
-        let removed = self.pool.write().prune_transactions(hashes);
 
-        removed
+        self.pool.write().prune_transactions(hashes)
     }
 
     /// Removes and returns all transactions that are present in the pool.
