@@ -133,8 +133,7 @@ fn generate_from_compact(
         let decompressor = zstd.decompressor;
         quote! {
             if flags.__zstd() != 0 {
-                #decompressor.with(|decompressor| {
-                    let decompressor = &mut decompressor.borrow_mut();
+                #decompressor(|decompressor| {
                     let decompressed = decompressor.decompress(buf);
                     let mut original_buf = buf;
 
@@ -203,9 +202,7 @@ fn generate_to_compact(
         let compressor = zstd.compressor;
         lines.push(quote! {
             if zstd {
-                #compressor.with(|compressor| {
-                    let mut compressor = compressor.borrow_mut();
-
+                #compressor(|compressor| {
                     let compressed = compressor.compress(&buffer).expect("Failed to compress.");
                     buf.put(compressed.as_slice());
                 });

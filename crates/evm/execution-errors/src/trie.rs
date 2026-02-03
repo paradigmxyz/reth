@@ -171,7 +171,7 @@ pub enum SparseTrieErrorKind {
         /// Path to the node.
         path: Nibbles,
         /// Node that was at the path when revealing.
-        node: Box<dyn core::fmt::Debug + Send>,
+        node: Box<dyn core::fmt::Debug + Send + Sync>,
     },
     /// RLP error.
     #[error(transparent)]
@@ -184,7 +184,7 @@ pub enum SparseTrieErrorKind {
     },
     /// Other.
     #[error(transparent)]
-    Other(#[from] Box<dyn core::error::Error + Send>),
+    Other(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
 
 /// Trie witness errors.

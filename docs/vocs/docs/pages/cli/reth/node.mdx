@@ -540,6 +540,11 @@ Gas Price Oracle:
 
           When enabled, transactions that fail execution will be skipped, and all subsequent transactions from the same sender will also be skipped.
 
+      --rpc.force-blob-sidecar-upcasting
+          Force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
+
+          When enabled, blob transactions submitted via `eth_sendRawTransaction` with EIP-4844 sidecars will be automatically converted to EIP-7594 format if the next block is Osaka. By default this is disabled, meaning transactions are submitted as-is.
+
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
           Max number of transaction in the pending sub-pool
@@ -832,7 +837,7 @@ Dev testnet:
 
 Pruning:
       --full
-          Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored
+          Run full node. Only the most recent [`MINIMUM_UNWIND_SAFE_DISTANCE`] block states are stored
 
       --minimal
           Run minimal storage mode with maximum pruning and smaller static files.
@@ -1006,6 +1011,19 @@ Engine:
 
       --engine.disable-cache-metrics
           Disable cache metrics recording, which can take up to 50ms with large cached state
+
+      --engine.enable-sparse-trie-as-cache
+          Enable sparse trie as cache
+
+      --engine.sparse-trie-prune-depth <SPARSE_TRIE_PRUNE_DEPTH>
+          Sparse trie prune depth
+
+          [default: 4]
+
+      --engine.sparse-trie-max-storage-tries <SPARSE_TRIE_MAX_STORAGE_TRIES>
+          Maximum number of storage tries to retain after sparse trie pruning
+
+          [default: 100]
 
 ERA:
       --era.enable

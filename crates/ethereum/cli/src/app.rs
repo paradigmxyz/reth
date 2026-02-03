@@ -86,7 +86,7 @@ where
         mut self,
         components: impl CliComponentsBuilder<N>,
         launcher: impl AsyncFnOnce(
-            WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+            WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>,
             Ext,
         ) -> Result<()>,
     ) -> Result<()>
@@ -132,7 +132,7 @@ pub(crate) fn run_commands_with<C, Ext, Rpc, N, SubCmd>(
     runner: CliRunner,
     components: impl CliComponentsBuilder<N>,
     launcher: impl AsyncFnOnce(
-        WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+        WithLaunchContext<NodeBuilder<DatabaseEnv, C::ChainSpec>>,
         Ext,
     ) -> Result<()>,
 ) -> Result<()>
@@ -174,7 +174,7 @@ where
         }
         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<N>()),
         Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<N>()),
+        Commands::Prune(command) => runner.run_command_until_exit(|ctx| command.execute::<N>(ctx)),
         #[cfg(feature = "dev")]
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::ReExecute(command) => runner.run_until_ctrl_c(command.execute::<N>(components)),

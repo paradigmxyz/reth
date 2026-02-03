@@ -1810,13 +1810,32 @@ fn dispatch_storage_proofs(
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &Vec<proof_v2::Target>,
-    storage_targets: B256Map<Vec<proof_v2::Target>>,
+    mut storage_targets: B256Map<Vec<proof_v2::Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
 
+    // Collect hashed addresses from account targets that need their storage roots computed
+    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+
+    // For storage targets with associated account proofs, ensure the first target has
+    // min_len(0) so the root node is returned for storage root computation
+    for (hashed_address, targets) in &mut storage_targets {
+        if account_target_addresses.contains(hashed_address) &&
+            let Some(first) = targets.first_mut()
+        {
+            *first = first.with_min_len(0);
+        }
+    }
+
+    // Sort storage targets by address for optimal dispatch order.
+    // Since trie walk processes accounts in lexicographical order, dispatching in the same order
+    // reduces head-of-line blocking when consuming results.
+    let mut sorted_storage_targets: Vec<_> = storage_targets.into_iter().collect();
+    sorted_storage_targets.sort_unstable_by_key(|(addr, _)| *addr);
+
     // Dispatch all proofs for targeted storage slots
-    for (hashed_address, targets) in storage_targets {
+    for (hashed_address, targets) in sorted_storage_targets {
         // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let input = StorageProofInput::new(hashed_address, targets);

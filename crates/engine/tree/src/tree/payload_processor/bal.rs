@@ -21,7 +21,7 @@ pub fn total_slots(bal: &BlockAccessList) -> usize {
 /// first, followed by read-only slots. The iterator intelligently skips accounts and slots
 /// outside the specified range for efficient traversal.
 #[derive(Debug)]
-pub(crate) struct BALSlotIter<'a> {
+pub struct BALSlotIter<'a> {
     bal: &'a BlockAccessList,
     range: Range<usize>,
     current_index: usize,
@@ -34,7 +34,7 @@ pub(crate) struct BALSlotIter<'a> {
 
 impl<'a> BALSlotIter<'a> {
     /// Creates a new iterator over storage slots within the specified range.
-    pub(crate) fn new(bal: &'a BlockAccessList, range: Range<usize>) -> Self {
+    pub fn new(bal: &'a BlockAccessList, range: Range<usize>) -> Self {
         let mut iter = Self { bal, range, current_index: 0, account_idx: 0, slot_idx: 0 };
         iter.skip_to_range_start();
         iter

@@ -1,7 +1,10 @@
 //! clap [Args](clap::Args) for engine purposes
 
 use clap::{builder::Resettable, Args};
-use reth_engine_primitives::{TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE};
+use reth_engine_primitives::{
+    TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
+    DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
+};
 use std::sync::OnceLock;
 
 use crate::node_config::{
@@ -37,6 +40,9 @@ pub struct DefaultEngineValues {
     account_worker_count: Option<usize>,
     disable_proof_v2: bool,
     cache_metrics_disabled: bool,
+    enable_sparse_trie_as_cache: bool,
+    sparse_trie_prune_depth: usize,
+    sparse_trie_max_storage_tries: usize,
 }
 
 impl DefaultEngineValues {
@@ -172,6 +178,24 @@ impl DefaultEngineValues {
         self.cache_metrics_disabled = v;
         self
     }
+
+    /// Set whether to enable sparse trie as cache by default
+    pub const fn with_enable_sparse_trie_as_cache(mut self, v: bool) -> Self {
+        self.enable_sparse_trie_as_cache = v;
+        self
+    }
+
+    /// Set the sparse trie prune depth by default
+    pub const fn with_sparse_trie_prune_depth(mut self, v: usize) -> Self {
+        self.sparse_trie_prune_depth = v;
+        self
+    }
+
+    /// Set the maximum number of storage tries to retain after sparse trie pruning by default
+    pub const fn with_sparse_trie_max_storage_tries(mut self, v: usize) -> Self {
+        self.sparse_trie_max_storage_tries = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -197,6 +221,9 @@ impl Default for DefaultEngineValues {
             account_worker_count: None,
             disable_proof_v2: false,
             cache_metrics_disabled: false,
+            enable_sparse_trie_as_cache: false,
+            sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
+            sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
         }
     }
 }
@@ -324,6 +351,18 @@ pub struct EngineArgs {
     /// Disable cache metrics recording, which can take up to 50ms with large cached state.
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
+
+    /// Enable sparse trie as cache.
+    #[arg(long = "engine.enable-sparse-trie-as-cache", default_value_t = DefaultEngineValues::get_global().enable_sparse_trie_as_cache, conflicts_with = "disable_proof_v2")]
+    pub enable_sparse_trie_as_cache: bool,
+
+    /// Sparse trie prune depth.
+    #[arg(long = "engine.sparse-trie-prune-depth", default_value_t = DefaultEngineValues::get_global().sparse_trie_prune_depth, requires = "enable_sparse_trie_as_cache")]
+    pub sparse_trie_prune_depth: usize,
+
+    /// Maximum number of storage tries to retain after sparse trie pruning.
+    #[arg(long = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_storage_tries, requires = "enable_sparse_trie_as_cache")]
+    pub sparse_trie_max_storage_tries: usize,
 }
 
 #[allow(deprecated)]
@@ -350,6 +389,9 @@ impl Default for EngineArgs {
             account_worker_count,
             disable_proof_v2,
             cache_metrics_disabled,
+            enable_sparse_trie_as_cache,
+            sparse_trie_prune_depth,
+            sparse_trie_max_storage_tries,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -376,6 +418,9 @@ impl Default for EngineArgs {
             account_worker_count,
             disable_proof_v2,
             cache_metrics_disabled,
+            enable_sparse_trie_as_cache,
+            sparse_trie_prune_depth,
+            sparse_trie_max_storage_tries,
         }
     }
 }
@@ -383,7 +428,7 @@ impl Default for EngineArgs {
 impl EngineArgs {
     /// Creates a [`TreeConfig`] from the engine arguments.
     pub fn tree_config(&self) -> TreeConfig {
-        let mut config = TreeConfig::default()
+        TreeConfig::default()
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
@@ -400,20 +445,14 @@ impl EngineArgs {
             .with_always_process_payload_attributes_on_canonical_head(
                 self.always_process_payload_attributes_on_canonical_head,
             )
-            .with_unwind_canonical_header(self.allow_unwind_canonical_header);
-
-        if let Some(count) = self.storage_worker_count {
-            config = config.with_storage_worker_count(count);
-        }
-
-        if let Some(count) = self.account_worker_count {
-            config = config.with_account_worker_count(count);
-        }
-
-        config = config.with_disable_proof_v2(self.disable_proof_v2);
-        config = config.without_cache_metrics(self.cache_metrics_disabled);
-
-        config
+            .with_unwind_canonical_header(self.allow_unwind_canonical_header)
+            .with_storage_worker_count_opt(self.storage_worker_count)
+            .with_account_worker_count_opt(self.account_worker_count)
+            .with_disable_proof_v2(self.disable_proof_v2)
+            .without_cache_metrics(self.cache_metrics_disabled)
+            .with_enable_sparse_trie_as_cache(self.enable_sparse_trie_as_cache)
+            .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
+            .with_sparse_trie_max_storage_tries(self.sparse_trie_max_storage_tries)
     }
 }
 
@@ -464,6 +503,9 @@ mod tests {
             account_worker_count: Some(8),
             disable_proof_v2: false,
             cache_metrics_disabled: true,
+            enable_sparse_trie_as_cache: true,
+            sparse_trie_prune_depth: 10,
+            sparse_trie_max_storage_tries: 100,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
@@ -494,6 +536,11 @@ mod tests {
             "--engine.account-worker-count",
             "8",
             "--engine.disable-cache-metrics",
+            "--engine.enable-sparse-trie-as-cache",
+            "--engine.sparse-trie-prune-depth",
+            "10",
+            "--engine.sparse-trie-max-storage-tries",
+            "100",
         ])
         .args;
 

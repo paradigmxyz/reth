@@ -222,7 +222,7 @@ impl DatabaseArguments {
 }
 
 /// Wrapper for the libmdbx environment: [Environment]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DatabaseEnv {
     /// Libmdbx-sys environment.
     inner: Environment,
@@ -644,11 +644,8 @@ mod tests {
     use tempfile::TempDir;
 
     /// Create database for testing
-    fn create_test_db(kind: DatabaseEnvKind) -> Arc<DatabaseEnv> {
-        Arc::new(create_test_db_with_path(
-            kind,
-            &tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep(),
-        ))
+    fn create_test_db(kind: DatabaseEnvKind) -> DatabaseEnv {
+        create_test_db_with_path(kind, &tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep())
     }
 
     /// Create database for testing with specified path
@@ -737,7 +734,7 @@ mod tests {
 
     #[test]
     fn db_dup_cursor_delete_first() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
@@ -802,7 +799,7 @@ mod tests {
 
     #[test]
     fn db_cursor_walk_range() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
 
         // PUT (0, 0), (1, 0), (2, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -866,7 +863,7 @@ mod tests {
 
     #[test]
     fn db_cursor_walk_range_on_dup_table() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
 
         let address0 = Address::ZERO;
         let address1 = Address::with_last_byte(1);
@@ -926,7 +923,7 @@ mod tests {
     #[expect(clippy::reversed_empty_ranges)]
     #[test]
     fn db_cursor_walk_range_invalid() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
 
         // PUT (0, 0), (1, 0), (2, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -954,7 +951,7 @@ mod tests {
 
     #[test]
     fn db_walker() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
 
         // PUT (0, 0), (1, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -984,7 +981,7 @@ mod tests {
 
     #[test]
     fn db_reverse_walker() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
 
         // PUT (0, 0), (1, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1014,7 +1011,7 @@ mod tests {
 
     #[test]
     fn db_walk_back() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
 
         // PUT (0, 0), (1, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1053,7 +1050,7 @@ mod tests {
 
     #[test]
     fn db_cursor_seek_exact_or_previous_key() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1077,7 +1074,7 @@ mod tests {
 
     #[test]
     fn db_cursor_insert() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1117,7 +1114,7 @@ mod tests {
 
     #[test]
     fn db_cursor_insert_dup() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
@@ -1135,7 +1132,7 @@ mod tests {
 
     #[test]
     fn db_cursor_delete_current_non_existent() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let key1 = Address::with_last_byte(1);
@@ -1165,7 +1162,7 @@ mod tests {
 
     #[test]
     fn db_cursor_insert_wherever_cursor_is() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         // PUT
@@ -1198,7 +1195,7 @@ mod tests {
 
     #[test]
     fn db_cursor_append() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1225,7 +1222,7 @@ mod tests {
 
     #[test]
     fn db_cursor_append_failure() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1260,7 +1257,7 @@ mod tests {
 
     #[test]
     fn db_cursor_upsert() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
@@ -1295,7 +1292,7 @@ mod tests {
 
     #[test]
     fn db_cursor_dupsort_append() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
 
         let transition_id = 2;
 
@@ -1557,7 +1554,7 @@ mod tests {
 
     #[test]
     fn db_sharded_key() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: DatabaseEnv = create_test_db(DatabaseEnvKind::RW);
         let real_key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
         let shards = 5;

@@ -402,7 +402,13 @@ where
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
-        let env = ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash() };
+        let env = ExecutionEnv {
+            evm_env,
+            hash: input.hash(),
+            parent_hash: input.parent_hash(),
+            parent_state_root: parent_block.state_root(),
+            transaction_count: input.transaction_count(),
+        };
 
         // Plan the strategy used for state root computation.
         let strategy = self.plan_state_root_computation();
@@ -514,6 +520,14 @@ where
                         info!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
+                            // Compare trie updates with serial computation if configured
+                            if self.config.always_compare_trie_updates() {
+                                self.compare_trie_updates_with_serial(
+                                    overlay_factory.clone(),
+                                    &hashed_state,
+                                    trie_updates.clone(),
+                                );
+                            }
                             maybe_state_root = Some((state_root, trie_updates, elapsed))
                         } else {
                             warn!(
@@ -889,6 +903,62 @@ where
             .root_with_updates()?)
     }
 
+    /// Compares trie updates from the state root task with serial state root computation.
+    ///
+    /// This is used for debugging and validating the correctness of the parallel state root
+    /// task implementation. When enabled via `--engine.state-root-task-compare-updates`, this
+    /// method runs a separate serial state root computation and compares the resulting trie
+    /// updates.
+    fn compare_trie_updates_with_serial(
+        &self,
+        overlay_factory: OverlayStateProviderFactory<P>,
+        hashed_state: &HashedPostState,
+        task_trie_updates: TrieUpdates,
+    ) {
+        debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
+
+        match self.compute_state_root_serial(overlay_factory.clone(), hashed_state) {
+            Ok((serial_root, serial_trie_updates)) => {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    ?serial_root,
+                    "Serial state root computation finished for comparison"
+                );
+
+                // Get a database provider to use as trie cursor factory
+                match overlay_factory.database_provider_ro() {
+                    Ok(provider) => {
+                        if let Err(err) = super::trie_updates::compare_trie_updates(
+                            &provider,
+                            task_trie_updates,
+                            serial_trie_updates,
+                        ) {
+                            warn!(
+                                target: "engine::tree::payload_validator",
+                                %err,
+                                "Error comparing trie updates"
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        warn!(
+                            target: "engine::tree::payload_validator",
+                            %err,
+                            "Failed to get database provider for trie update comparison"
+                        );
+                    }
+                }
+            }
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    %err,
+                    "Failed to compute serial state root for comparison"
+                );
+            }
+        }
+    }
+
     /// Validates the block after execution.
     ///
     /// This performs:
@@ -1112,16 +1182,30 @@ where
     /// while the trie input computation is deferred until the overlay is actually needed.
     ///
     /// If parent is on disk (no in-memory blocks), returns `None` for the lazy overlay.
+    ///
+    /// Uses a cached overlay if available for the canonical head (the common case).
     fn get_parent_lazy_overlay(
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> (Option<LazyOverlay>, B256) {
+        // Get blocks leading to the parent to determine the anchor
         let (anchor_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
 
         if blocks.is_empty() {
             debug!(target: "engine::tree::payload_validator", "Parent found on disk, no lazy overlay needed");
             return (None, anchor_hash);
+        }
+
+        // Try to use the cached overlay if it matches both parent hash and anchor
+        if let Some(cached) = state.tree_state.get_cached_overlay(parent_hash, anchor_hash) {
+            debug!(
+                target: "engine::tree::payload_validator",
+                %parent_hash,
+                %anchor_hash,
+                "Using cached canonical overlay"
+            );
+            return (Some(cached.overlay.clone()), cached.anchor_hash);
         }
 
         debug!(

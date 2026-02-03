@@ -181,6 +181,24 @@ RocksDB:
           [default: false]
           [possible values: true, false]
 
+Metrics:
+      --metrics <PROMETHEUS>
+          Enable Prometheus metrics.
+
+          The metrics will be served at the given interface and port.
+
+      --metrics.prometheus.push.url <PUSH_GATEWAY_URL>
+          URL for pushing Prometheus metrics to a push gateway.
+
+          If set, the node will periodically push metrics to the specified push gateway URL.
+
+      --metrics.prometheus.push.interval <SECONDS>
+          Interval in seconds for pushing metrics to push gateway.
+
+          Default: 5 seconds
+
+          [default: 5]
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout

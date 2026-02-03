@@ -76,7 +76,8 @@ impl CacheConfig for EpochCacheConfig {
 type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, EpochCacheConfig>;
 
 /// A wrapper of a state provider and a shared cache.
-pub(crate) struct CachedStateProvider<S> {
+#[derive(Debug)]
+pub struct CachedStateProvider<S> {
     /// The state provider
     state_provider: S,
 
@@ -96,7 +97,7 @@ where
 {
     /// Creates a new [`CachedStateProvider`] from an [`ExecutionCache`], state provider, and
     /// [`CachedStateMetrics`].
-    pub(crate) const fn new(
+    pub const fn new(
         state_provider: S,
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
@@ -114,7 +115,7 @@ impl<S> CachedStateProvider<S> {
     /// [`State`](revm::database::State) also caches internally during block execution and the cache
     /// is then updated after the block with the entire [`BundleState`] output of that block which
     /// contains all accessed accounts,code,storage. See also [`ExecutionCache::insert_state`].
-    pub(crate) const fn prewarm(mut self) -> Self {
+    pub const fn prewarm(mut self) -> Self {
         self.prewarm = true;
         self
     }
@@ -131,7 +132,7 @@ impl<S> CachedStateProvider<S> {
 /// and the fixed-cache internal stats (collisions, size, capacity).
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
-pub(crate) struct CachedStateMetrics {
+pub struct CachedStateMetrics {
     /// Number of times a new execution cache was created
     execution_cache_created_total: Counter,
 
@@ -186,7 +187,7 @@ pub(crate) struct CachedStateMetrics {
 
 impl CachedStateMetrics {
     /// Sets all values to zero, indicating that a new block is being executed.
-    pub(crate) fn reset(&self) {
+    pub fn reset(&self) {
         // code cache
         self.code_cache_hits.set(0);
         self.code_cache_misses.set(0);
@@ -204,7 +205,7 @@ impl CachedStateMetrics {
     }
 
     /// Returns a new zeroed-out instance of [`CachedStateMetrics`].
-    pub(crate) fn zeroed() -> Self {
+    pub fn zeroed() -> Self {
         let zeroed = Self::default();
         zeroed.reset();
         zeroed
@@ -326,7 +327,7 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
 
 /// Represents the status of a key in the cache.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CachedStatus<T> {
+pub enum CachedStatus<T> {
     /// The key is not in the cache (or was invalidated). The value was recalculated.
     NotCached(T),
     /// The key exists in cache and has a specific value.
@@ -487,7 +488,7 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider
 /// Since EIP-6780, SELFDESTRUCT only works within the same transaction where the
 /// contract was created, so we don't need to handle clearing the storage.
 #[derive(Debug, Clone)]
-pub(crate) struct ExecutionCache {
+pub struct ExecutionCache {
     /// Cache for contract bytecode, keyed by code hash.
     code_cache: Arc<FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>>,
 
@@ -519,7 +520,7 @@ impl ExecutionCache {
     ///
     /// Fixed-cache requires power-of-two sizes for efficient indexing.
     /// With epochs enabled, the minimum size is 4096 entries.
-    pub(crate) const fn bytes_to_entries(size_bytes: usize, entry_size: usize) -> usize {
+    pub const fn bytes_to_entries(size_bytes: usize, entry_size: usize) -> usize {
         let entries = size_bytes / entry_size;
         // Round down to nearest power of two
         let rounded = if entries == 0 { 1 } else { (entries + 1).next_power_of_two() >> 1 };
@@ -532,7 +533,7 @@ impl ExecutionCache {
     }
 
     /// Build an [`ExecutionCache`] struct, so that execution caches can be easily cloned.
-    pub(crate) fn new(total_cache_size: usize) -> Self {
+    pub fn new(total_cache_size: usize) -> Self {
         let storage_cache_size = (total_cache_size * 8888) / 10000; // 88.88% of total
         let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
         let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
@@ -566,7 +567,7 @@ impl ExecutionCache {
     }
 
     /// Gets code from cache, or inserts using the provided function.
-    pub(crate) fn get_or_try_insert_code_with<E>(
+    pub fn get_or_try_insert_code_with<E>(
         &self,
         hash: B256,
         f: impl FnOnce() -> Result<Option<Bytecode>, E>,
@@ -585,7 +586,7 @@ impl ExecutionCache {
     }
 
     /// Gets storage from cache, or inserts using the provided function.
-    pub(crate) fn get_or_try_insert_storage_with<E>(
+    pub fn get_or_try_insert_storage_with<E>(
         &self,
         address: Address,
         key: StorageKey,
@@ -605,7 +606,7 @@ impl ExecutionCache {
     }
 
     /// Gets account from cache, or inserts using the provided function.
-    pub(crate) fn get_or_try_insert_account_with<E>(
+    pub fn get_or_try_insert_account_with<E>(
         &self,
         address: Address,
         f: impl FnOnce() -> Result<Option<Account>, E>,
@@ -624,12 +625,7 @@ impl ExecutionCache {
     }
 
     /// Insert storage value into cache.
-    pub(crate) fn insert_storage(
-        &self,
-        address: Address,
-        key: StorageKey,
-        value: Option<StorageValue>,
-    ) {
+    pub fn insert_storage(&self, address: Address, key: StorageKey, value: Option<StorageValue>) {
         self.storage_cache.insert((address, key), value.unwrap_or_default());
     }
 
@@ -662,7 +658,8 @@ impl ExecutionCache {
     ///
     /// Returns an error if the state updates are inconsistent and should be discarded.
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
-    pub(crate) fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
+    #[expect(clippy::result_unit_err)]
+    pub fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
         let _enter =
             debug_span!(target: "engine::tree", "contracts", len = state_updates.contracts.len())
                 .entered();
@@ -771,7 +768,7 @@ impl ExecutionCache {
 /// A saved cache that has been used for executing a specific block, which has been updated for its
 /// execution.
 #[derive(Debug, Clone)]
-pub(crate) struct SavedCache {
+pub struct SavedCache {
     /// The hash of the block these caches were used to execute.
     hash: B256,
 
@@ -791,43 +788,43 @@ pub(crate) struct SavedCache {
 
 impl SavedCache {
     /// Creates a new instance with the internals
-    pub(super) fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
+    pub fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
         Self { hash, caches, metrics, usage_guard: Arc::new(()), disable_cache_metrics: false }
     }
 
     /// Sets whether to disable cache metrics recording.
-    pub(super) const fn with_disable_cache_metrics(mut self, disable: bool) -> Self {
+    pub const fn with_disable_cache_metrics(mut self, disable: bool) -> Self {
         self.disable_cache_metrics = disable;
         self
     }
 
     /// Returns the hash for this cache
-    pub(crate) const fn executed_block_hash(&self) -> B256 {
+    pub const fn executed_block_hash(&self) -> B256 {
         self.hash
     }
 
     /// Splits the cache into its caches, metrics, and `disable_cache_metrics` flag, consuming it.
-    pub(crate) fn split(self) -> (ExecutionCache, CachedStateMetrics, bool) {
+    pub fn split(self) -> (ExecutionCache, CachedStateMetrics, bool) {
         (self.caches, self.metrics, self.disable_cache_metrics)
     }
 
     /// Returns true if the cache is available for use (no other tasks are currently using it).
-    pub(crate) fn is_available(&self) -> bool {
+    pub fn is_available(&self) -> bool {
         Arc::strong_count(&self.usage_guard) == 1
     }
 
     /// Returns the current strong count of the usage guard.
-    pub(crate) fn usage_count(&self) -> usize {
+    pub fn usage_count(&self) -> usize {
         Arc::strong_count(&self.usage_guard)
     }
 
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
-    pub(crate) const fn cache(&self) -> &ExecutionCache {
+    pub const fn cache(&self) -> &ExecutionCache {
         &self.caches
     }
 
     /// Returns the metrics associated with this cache.
-    pub(crate) const fn metrics(&self) -> &CachedStateMetrics {
+    pub const fn metrics(&self) -> &CachedStateMetrics {
         &self.metrics
     }
 

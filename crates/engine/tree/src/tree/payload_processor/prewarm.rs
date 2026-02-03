@@ -49,7 +49,8 @@ use std::{
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 /// Determines the prewarming mode: transaction-based or BAL-based.
-pub(super) enum PrewarmMode<Tx> {
+#[derive(Debug)]
+pub enum PrewarmMode<Tx> {
     /// Prewarm by executing transactions from a stream.
     Transactions(Receiver<Tx>),
     /// Prewarm by prefetching slots from a Block Access List.
@@ -69,7 +70,8 @@ struct IndexedTransaction<Tx> {
 /// individually in parallel.
 ///
 /// Note: This task runs until cancelled externally.
-pub(super) struct PrewarmCacheTask<N, P, Evm>
+#[derive(Debug)]
+pub struct PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
@@ -82,8 +84,6 @@ where
     ctx: PrewarmContext<N, P, Evm>,
     /// How many transactions should be executed in parallel
     max_concurrency: usize,
-    /// The number of transactions to be processed
-    transaction_count_hint: usize,
     /// Sender to emit evm state outcome messages, if any.
     to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
@@ -99,12 +99,11 @@ where
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
-    pub(super) fn new(
+    pub fn new(
         executor: WorkloadExecutor,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-        transaction_count_hint: usize,
         max_concurrency: usize,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
@@ -112,7 +111,7 @@ where
         trace!(
             target: "engine::tree::payload_processor::prewarm",
             max_concurrency,
-            transaction_count_hint,
+            transaction_count = ctx.env.transaction_count,
             "Initialized prewarm task"
         );
 
@@ -122,7 +121,6 @@ where
                 execution_cache,
                 ctx,
                 max_concurrency,
-                transaction_count_hint,
                 to_multi_proof,
                 actions_rx,
                 parent_span: Span::current(),
@@ -146,7 +144,6 @@ where
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
-        let transaction_count_hint = self.transaction_count_hint;
         let span = Span::current();
 
         self.executor.spawn_blocking(move || {
@@ -154,13 +151,14 @@ where
 
             let (done_tx, done_rx) = mpsc::channel();
 
-            // When transaction_count_hint is 0, it means the count is unknown. In this case, spawn
+            // When transaction_count is 0, it means the count is unknown. In this case, spawn
             // max workers to handle potentially many transactions in parallel rather
             // than bottlenecking on a single worker.
-            let workers_needed = if transaction_count_hint == 0 {
+            let transaction_count = ctx.env.transaction_count;
+            let workers_needed = if transaction_count == 0 {
                 max_concurrency
             } else {
-                transaction_count_hint.min(max_concurrency)
+                transaction_count.min(max_concurrency)
             };
 
             // Spawn workers
@@ -370,11 +368,8 @@ where
         name = "prewarm and caching",
         skip_all
     )]
-    pub(super) fn run<Tx>(
-        self,
-        mode: PrewarmMode<Tx>,
-        actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
-    ) where
+    pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
+    where
         Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         // Spawn execution tasks based on mode
@@ -436,23 +431,29 @@ where
 
 /// Context required by tx execution tasks.
 #[derive(Debug, Clone)]
-pub(super) struct PrewarmContext<N, P, Evm>
+pub struct PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
-    pub(super) env: ExecutionEnv<Evm>,
-    pub(super) evm_config: Evm,
-    pub(super) saved_cache: Option<SavedCache>,
+    /// The execution environment.
+    pub env: ExecutionEnv<Evm>,
+    /// The EVM configuration.
+    pub evm_config: Evm,
+    /// The saved cache.
+    pub saved_cache: Option<SavedCache>,
     /// Provider to obtain the state
-    pub(super) provider: StateProviderBuilder<N, P>,
-    pub(super) metrics: PrewarmMetrics,
+    pub provider: StateProviderBuilder<N, P>,
+    /// The metrics for the prewarm task.
+    pub metrics: PrewarmMetrics,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
-    pub(super) terminate_execution: Arc<AtomicBool>,
-    pub(super) precompile_cache_disabled: bool,
-    pub(super) precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    pub terminate_execution: Arc<AtomicBool>,
+    /// Whether the precompile cache is disabled.
+    pub precompile_cache_disabled: bool,
+    /// The precompile cache map.
+    pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Whether V2 proof calculation is enabled.
-    pub(super) v2_proofs_enabled: bool,
+    pub v2_proofs_enabled: bool,
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -852,7 +853,8 @@ fn multiproof_targets_v2_from_state(state: EvmState) -> (VersionedMultiProofTarg
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
 /// execution path without cloning the expensive `BundleState`.
-pub(super) enum PrewarmTaskEvent<R> {
+#[derive(Debug)]
+pub enum PrewarmTaskEvent<R> {
     /// Forcefully terminate all remaining transaction execution.
     TerminateTransactionExecution,
     /// Forcefully terminate the task on demand and update the shared cache with the given output
@@ -882,7 +884,7 @@ pub(super) enum PrewarmTaskEvent<R> {
 /// Metrics for transactions prewarming.
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.prewarm")]
-pub(crate) struct PrewarmMetrics {
+pub struct PrewarmMetrics {
     /// The number of transactions to prewarm
     pub(crate) transactions: Gauge,
     /// A histogram of the number of transactions to prewarm

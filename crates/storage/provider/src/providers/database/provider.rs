@@ -54,7 +54,7 @@ use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, RecoveredBlock, SealedHeader, StorageEntry,
 };
 use reth_prune_types::{
-    PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE,
+    PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -368,7 +368,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             changeset_cache,
             pending_rocksdb_batches: Default::default(),
             commit_order,
-            minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
+            minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
         }
     }
@@ -761,11 +761,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// This includes calculating the resulted state root and comparing it with the parent block
     /// state root.
     pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
-        let changed_accounts = self
-            .tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(from..)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let changed_accounts = self.account_changesets_range(from..)?;
 
         // Unwind account hashes.
         self.unwind_account_hashing(changed_accounts.iter())?;
@@ -773,12 +769,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Unwind account history indices.
         self.unwind_account_history_indices(changed_accounts.iter())?;
 
-        let storage_start = BlockNumberAddress((from, Address::ZERO));
-        let changed_storages = self
-            .tx
-            .cursor_read::<tables::StorageChangeSets>()?
-            .walk_range(storage_start..)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let changed_storages = self.storage_changesets_range(from..)?;
 
         // Unwind storage hashes.
         self.unwind_storage_hashing(changed_storages.iter().copied())?;
@@ -834,10 +825,19 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        // if the block number is the same as the currently best block number on disk we can use the
-        // latest state provider here
-        if block_number == self.best_block_number().unwrap_or_default() {
-            return Ok(Box::new(LatestStateProvider::new(self)))
+        let best_block = self.best_block_number().unwrap_or_default();
+
+        // Reject requests for blocks beyond the best block
+        if block_number > best_block {
+            return Err(ProviderError::BlockNotExecuted {
+                requested: block_number,
+                executed: best_block,
+            });
+        }
+
+        // If requesting state at the best block, use the latest state provider
+        if block_number == best_block {
+            return Ok(Box::new(LatestStateProvider::new(self)));
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -958,7 +958,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             changeset_cache,
             pending_rocksdb_batches: Default::default(),
             commit_order: CommitOrder::Normal,
-            minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
+            minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
         }
     }
@@ -2498,10 +2498,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             block_bodies.first().expect("already checked if there are blocks").first_tx_num();
 
         let storage_range = BlockNumberAddress::range(range.clone());
-        let storage_changeset = if let Some(_highest_block) = self
-            .static_file_provider
-            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets) &&
-            self.cached_storage_settings().storage_changesets_in_static_files
+        let storage_changeset = if self.cached_storage_settings().storage_changesets_in_static_files
         {
             let changesets = self.storage_changesets_range(range.clone())?;
             let mut changeset_writer =
@@ -2511,7 +2508,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         } else {
             self.take::<tables::StorageChangeSets>(storage_range)?
         };
-        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
+        let account_changeset = if self.cached_storage_settings().account_changesets_in_static_files
+        {
+            let changesets = self.account_changesets_range(range)?;
+            let mut changeset_writer =
+                self.static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
+            changeset_writer.prune_account_changesets(block)?;
+            changesets
+        } else {
+            self.take::<tables::AccountChangeSets>(range)?
+        };
 
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
@@ -3614,7 +3620,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3647,7 +3653,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3684,7 +3690,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3722,7 +3728,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3792,7 +3798,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -4185,6 +4191,44 @@ mod tests {
                     assert!(receipt.is_none());
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_try_into_history_rejects_unexecuted_blocks() {
+        use reth_storage_api::TryIntoHistoricalStateProvider;
+
+        let factory = create_test_provider_factory();
+
+        // Insert genesis block to have some data
+        let data = BlockchainTestData::default();
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                crate::OriginalValuesKnown::No,
+                StateWriteConfig::default(),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        // Get a fresh provider - Execution checkpoint is 0, no receipts written beyond genesis
+        let provider = factory.provider().unwrap();
+
+        // Requesting historical state for block 0 (executed) should succeed
+        let result = provider.try_into_history_at_block(0);
+        assert!(result.is_ok(), "Block 0 should be available");
+
+        // Get another provider and request state for block 100 (not executed)
+        let provider = factory.provider().unwrap();
+        let result = provider.try_into_history_at_block(100);
+
+        // Should fail with BlockNotExecuted error
+        match result {
+            Err(ProviderError::BlockNotExecuted { requested: 100, .. }) => {}
+            Err(e) => panic!("Expected BlockNotExecuted error, got: {e:?}"),
+            Ok(_) => panic!("Expected error, got Ok"),
         }
     }
 }

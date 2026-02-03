@@ -19,62 +19,9 @@ use reth_trie_common::{
     Nibbles, ProofTrieNode, RlpNode, StorageMultiProof, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
+#[cfg(feature = "std")]
+use tracing::debug;
 use tracing::{instrument, trace};
-
-/// Provides type-safe re-use of cleared [`SparseStateTrie`]s, which helps to save allocations
-/// across payload runs.
-#[derive(Debug)]
-pub struct ClearedSparseStateTrie<
-    A = SerialSparseTrie, // Account trie implementation
-    S = SerialSparseTrie, // Storage trie implementation
->(SparseStateTrie<A, S>);
-
-impl<A, S> ClearedSparseStateTrie<A, S>
-where
-    A: SparseTrieTrait,
-    S: SparseTrieTrait,
-{
-    /// Creates a [`ClearedSparseStateTrie`] by clearing all the existing internal state of a
-    /// [`SparseStateTrie`] and then storing that instance for later re-use.
-    pub fn from_state_trie(mut trie: SparseStateTrie<A, S>) -> Self {
-        trie.state = trie.state.clear();
-        trie.revealed_account_paths.clear();
-        trie.storage.clear();
-        trie.account_rlp_buf.clear();
-        Self(trie)
-    }
-
-    /// Shrink the cleared sparse trie's capacity to the given node and value size.
-    /// This helps reduce memory usage when the trie has excess capacity.
-    /// The capacity is distributed equally across the account trie and all storage tries.
-    pub fn shrink_to(&mut self, node_size: usize, value_size: usize) {
-        // Count total number of storage tries (active + cleared + default)
-        let storage_tries_count = self.0.storage.tries.len() + self.0.storage.cleared_tries.len();
-
-        // Total tries = 1 account trie + all storage tries
-        let total_tries = 1 + storage_tries_count;
-
-        // Distribute capacity equally among all tries
-        let node_size_per_trie = node_size / total_tries;
-        let value_size_per_trie = value_size / total_tries;
-
-        // Shrink the account trie
-        self.0.state.shrink_nodes_to(node_size_per_trie);
-        self.0.state.shrink_values_to(value_size_per_trie);
-
-        // Give storage tries the remaining capacity after account trie allocation
-        let storage_node_size = node_size.saturating_sub(node_size_per_trie);
-        let storage_value_size = value_size.saturating_sub(value_size_per_trie);
-
-        // Shrink all storage tries (they will redistribute internally)
-        self.0.storage.shrink_to(storage_node_size, storage_value_size);
-    }
-
-    /// Returns the cleared [`SparseStateTrie`], consuming this instance.
-    pub fn into_inner(self) -> SparseStateTrie<A, S> {
-        self.0
-    }
-}
 
 #[derive(Debug)]
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
@@ -125,21 +72,37 @@ impl SparseStateTrie {
 
 impl<A, S> SparseStateTrie<A, S> {
     /// Set the retention of branch node updates and deletions.
-    pub const fn with_updates(mut self, retain_updates: bool) -> Self {
+    pub const fn set_updates(&mut self, retain_updates: bool) {
         self.retain_updates = retain_updates;
+    }
+
+    /// Set the retention of branch node updates and deletions.
+    pub const fn with_updates(mut self, retain_updates: bool) -> Self {
+        self.set_updates(retain_updates);
         self
     }
 
     /// Set the accounts trie to the given `RevealableSparseTrie`.
-    pub fn with_accounts_trie(mut self, trie: RevealableSparseTrie<A>) -> Self {
+    pub fn set_accounts_trie(&mut self, trie: RevealableSparseTrie<A>) {
         self.state = trie;
+    }
+
+    /// Set the accounts trie to the given `RevealableSparseTrie`.
+    pub fn with_accounts_trie(mut self, trie: RevealableSparseTrie<A>) -> Self {
+        self.set_accounts_trie(trie);
         self
     }
 
     /// Set the default trie which will be cloned when creating new storage
     /// [`RevealableSparseTrie`]s.
-    pub fn with_default_storage_trie(mut self, trie: RevealableSparseTrie<S>) -> Self {
+    pub fn set_default_storage_trie(&mut self, trie: RevealableSparseTrie<S>) {
         self.storage.default_trie = trie;
+    }
+
+    /// Set the default trie which will be cloned when creating new storage
+    /// [`RevealableSparseTrie`]s.
+    pub fn with_default_storage_trie(mut self, trie: RevealableSparseTrie<S>) -> Self {
+        self.set_default_storage_trie(trie);
         self
     }
 }
@@ -152,6 +115,11 @@ where
     /// Create new [`SparseStateTrie`]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns mutable reference to account trie.
+    pub const fn trie_mut(&mut self) -> &mut RevealableSparseTrie<A> {
+        &mut self.state
     }
 
     /// Returns `true` if account was already revealed.
@@ -214,14 +182,34 @@ where
         self.storage.tries.get_mut(address).and_then(|e| e.as_revealed_mut())
     }
 
+    /// Returns mutable reference to storage tries.
+    pub const fn storage_tries_mut(&mut self) -> &mut B256Map<RevealableSparseTrie<S>> {
+        &mut self.storage.tries
+    }
+
     /// Takes the storage trie for the provided address.
     pub fn take_storage_trie(&mut self, address: &B256) -> Option<RevealableSparseTrie<S>> {
         self.storage.tries.remove(address)
     }
 
+    /// Takes the storage trie for the provided address, creating a blind one if it doesn't exist.
+    pub fn take_or_create_storage_trie(&mut self, address: &B256) -> RevealableSparseTrie<S> {
+        self.storage.tries.remove(address).unwrap_or_else(|| {
+            self.storage.cleared_tries.pop().unwrap_or_else(|| self.storage.default_trie.clone())
+        })
+    }
+
     /// Inserts storage trie for the provided address.
     pub fn insert_storage_trie(&mut self, address: B256, storage_trie: RevealableSparseTrie<S>) {
         self.storage.tries.insert(address, storage_trie);
+    }
+
+    /// Returns mutable reference to storage sparse trie, creating a blind one if it doesn't exist.
+    pub fn get_or_create_storage_trie_mut(
+        &mut self,
+        address: B256,
+    ) -> &mut RevealableSparseTrie<S> {
+        self.storage.get_or_create_trie_mut(address)
     }
 
     /// Reveal unknown trie paths from multiproof.
@@ -258,6 +246,8 @@ where
         {
             for (account, storage_subtree) in storages {
                 self.reveal_decoded_storage_multiproof(account, storage_subtree)?;
+                // Mark this storage trie as hot (accessed this tick)
+                self.storage.modifications.mark_accessed(account);
             }
 
             Ok(())
@@ -266,7 +256,8 @@ where
         #[cfg(feature = "std")]
         // If std then reveal storage proofs in parallel
         {
-            use rayon::iter::{ParallelBridge, ParallelIterator};
+            use rayon::iter::ParallelIterator;
+            use reth_primitives_traits::ParallelBridgeBuffered;
 
             let retain_updates = self.retain_updates;
 
@@ -280,7 +271,7 @@ where
                     let trie = self.storage.take_or_create_trie(&account);
                     (account, storage_subtree, revealed_nodes, trie)
                 })
-                .par_bridge()
+                .par_bridge_buffered()
                 .map(|(account, storage_subtree, mut revealed_nodes, mut trie)| {
                     let result = Self::reveal_decoded_storage_multiproof_inner(
                         account,
@@ -300,6 +291,8 @@ where
             for (account, revealed_nodes, trie, result) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
+                // Mark this storage trie as hot (accessed this tick)
+                self.storage.modifications.mark_accessed(account);
                 if let Ok(_metric_values) = result {
                     #[cfg(feature = "metrics")]
                     {
@@ -332,14 +325,24 @@ where
         &mut self,
         multiproof: reth_trie_common::DecodedMultiProofV2,
     ) -> SparseStateTrieResult<()> {
-        // Reveal the account proof nodes
-        self.reveal_account_v2_proof_nodes(multiproof.account_proofs)?;
+        // Reveal the account proof nodes.
+        //
+        // Skip revealing account nodes if this result only contains storage proofs.
+        // `reveal_account_v2_proof_nodes` will return an error if empty `nodes` are passed into it
+        // before the accounts trie root was revealed. This might happen in cases when first account
+        // trie proof arrives later than first storage trie proof even though the account trie proof
+        // was requested first.
+        if !multiproof.account_proofs.is_empty() {
+            self.reveal_account_v2_proof_nodes(multiproof.account_proofs)?;
+        }
 
         #[cfg(not(feature = "std"))]
         // If nostd then serially reveal storage proof nodes for each storage trie
         {
             for (account, storage_proofs) in multiproof.storage_proofs {
                 self.reveal_storage_v2_proof_nodes(account, storage_proofs)?;
+                // Mark this storage trie as hot (accessed this tick)
+                self.storage.modifications.mark_accessed(account);
             }
 
             Ok(())
@@ -348,7 +351,8 @@ where
         #[cfg(feature = "std")]
         // If std then reveal storage proofs in parallel
         {
-            use rayon::iter::{ParallelBridge, ParallelIterator};
+            use rayon::iter::ParallelIterator;
+            use reth_primitives_traits::ParallelBridgeBuffered;
 
             let retain_updates = self.retain_updates;
 
@@ -363,7 +367,7 @@ where
                     let trie = self.storage.take_or_create_trie(&account);
                     (account, storage_proofs, revealed_nodes, trie)
                 })
-                .par_bridge()
+                .par_bridge_buffered()
                 .map(|(account, storage_proofs, mut revealed_nodes, mut trie)| {
                     let result = Self::reveal_storage_v2_proof_nodes_inner(
                         account,
@@ -380,6 +384,8 @@ where
             for (account, result, revealed_nodes, trie) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
+                // Mark this storage trie as hot (accessed this tick)
+                self.storage.modifications.mark_accessed(account);
                 if let Ok(_metric_values) = result {
                     #[cfg(feature = "metrics")]
                     {
@@ -460,16 +466,17 @@ where
             self.metrics.increment_skipped_account_nodes(_metric_values.skipped_nodes as u64);
         }
 
-        if let Some(root_node) = root_node {
+        let trie = if let Some(root_node) = root_node {
             trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
-            let trie =
-                self.state.reveal_root(root_node.node, root_node.masks, self.retain_updates)?;
+            self.state.reveal_root(root_node.node, root_node.masks, self.retain_updates)?
+        } else {
+            self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+        };
 
-            trie.reserve_nodes(new_nodes);
+        trie.reserve_nodes(new_nodes);
 
-            trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
-            trie.reveal_nodes(nodes)?;
-        }
+        trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof");
+        trie.reveal_nodes(nodes)?;
 
         Ok(())
     }
@@ -513,15 +520,17 @@ where
         let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values } =
             filter_revealed_v2_proof_nodes(nodes, revealed_nodes)?;
 
-        if let Some(root_node) = root_node {
+        let trie = if let Some(root_node) = root_node {
             trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
-            let trie = trie.reveal_root(root_node.node, root_node.masks, retain_updates)?;
+            trie.reveal_root(root_node.node, root_node.masks, retain_updates)?
+        } else {
+            trie.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+        };
 
-            trie.reserve_nodes(new_nodes);
+        trie.reserve_nodes(new_nodes);
 
-            trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof");
-            trie.reveal_nodes(nodes)?;
-        }
+        trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof");
+        trie.reveal_nodes(nodes)?;
 
         Ok(metric_values)
     }
@@ -714,8 +723,8 @@ where
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.
-    pub fn storage_root(&mut self, account: B256) -> Option<B256> {
-        self.storage.tries.get_mut(&account).and_then(|trie| trie.root())
+    pub fn storage_root(&mut self, account: &B256) -> Option<B256> {
+        self.storage.tries.get_mut(account).and_then(|trie| trie.root())
     }
 
     /// Returns mutable reference to the revealed account sparse trie.
@@ -977,16 +986,42 @@ where
     A: SparseTrieTrait + SparseTrieExt + Default,
     S: SparseTrieTrait + SparseTrieExt + Default + Clone,
 {
-    /// Minimum number of storage tries before parallel pruning is enabled.
-    const PARALLEL_PRUNE_THRESHOLD: usize = 16;
+    /// Clears all trie data while preserving allocations for reuse.
+    ///
+    /// This resets the trie to an empty state but keeps the underlying memory allocations,
+    /// which can significantly reduce allocation overhead when the trie is reused.
+    pub fn clear(&mut self) {
+        self.state.clear();
+        self.revealed_account_paths.clear();
+        self.storage.clear();
+        self.account_rlp_buf.clear();
+    }
 
-    /// Returns true if parallelism should be enabled for pruning the given number of tries.
-    /// Will always return false in `no_std` builds.
-    const fn is_prune_parallelism_enabled(num_tries: usize) -> bool {
-        #[cfg(not(feature = "std"))]
-        return false;
+    /// Shrinks the capacity of the sparse trie to the given node and value sizes.
+    ///
+    /// This helps reduce memory usage when the trie has excess capacity.
+    /// Distributes capacity equally among all tries (account + storage).
+    pub fn shrink_to(&mut self, max_nodes: usize, max_values: usize) {
+        // Count total number of storage tries (active + cleared)
+        let storage_tries_count = self.storage.tries.len() + self.storage.cleared_tries.len();
 
-        num_tries >= Self::PARALLEL_PRUNE_THRESHOLD
+        // Total tries = 1 account trie + all storage tries
+        let total_tries = 1 + storage_tries_count;
+
+        // Distribute capacity equally among all tries
+        let nodes_per_trie = max_nodes / total_tries;
+        let values_per_trie = max_values / total_tries;
+
+        // Shrink the account trie
+        self.state.shrink_nodes_to(nodes_per_trie);
+        self.state.shrink_values_to(values_per_trie);
+
+        // Give storage tries the remaining capacity after account trie allocation
+        let storage_nodes = max_nodes.saturating_sub(nodes_per_trie);
+        let storage_values = max_values.saturating_sub(values_per_trie);
+
+        // Shrink all storage tries (they will redistribute internally)
+        self.storage.shrink_to(storage_nodes, storage_values);
     }
 
     /// Prunes the account trie and selected storage tries to reduce memory usage.
@@ -1002,84 +1037,21 @@ where
     /// # Effects
     ///
     /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
+    #[cfg(feature = "std")]
+    #[instrument(target = "trie::sparse", skip_all, fields(max_depth, max_storage_tries))]
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
-        if let Some(trie) = self.state.as_revealed_mut() {
-            trie.prune(max_depth);
-        }
-        self.revealed_account_paths.clear();
-
-        let mut storage_trie_counts: Vec<(B256, usize)> = self
-            .storage
-            .tries
-            .iter()
-            .map(|(hash, trie)| {
-                let count = match trie {
-                    RevealableSparseTrie::Revealed(t) => t.revealed_node_count(),
-                    RevealableSparseTrie::Blind(_) => 0,
-                };
-                (*hash, count)
-            })
-            .collect();
-
-        // Use O(n) selection instead of O(n log n) sort
-        let tries_to_keep: HashSet<B256> = if storage_trie_counts.len() <= max_storage_tries {
-            storage_trie_counts.iter().map(|(hash, _)| *hash).collect()
-        } else {
-            storage_trie_counts
-                .select_nth_unstable_by(max_storage_tries.saturating_sub(1), |a, b| b.1.cmp(&a.1));
-            storage_trie_counts[..max_storage_tries].iter().map(|(hash, _)| *hash).collect()
-        };
-
-        // Collect keys to avoid borrow conflict
-        let tries_to_clear: Vec<B256> = self
-            .storage
-            .tries
-            .keys()
-            .filter(|hash| !tries_to_keep.contains(*hash))
-            .copied()
-            .collect();
-
-        // Evict storage tries that exceeded limit, saving cleared allocations for reuse
-        for hash in tries_to_clear {
-            if let Some(trie) = self.storage.tries.remove(&hash) {
-                self.storage.cleared_tries.push(trie.clear());
-            }
-            if let Some(mut paths) = self.storage.revealed_paths.remove(&hash) {
-                paths.clear();
-                self.storage.cleared_revealed_paths.push(paths);
-            }
-        }
-
-        // Prune storage tries that are kept
-        if Self::is_prune_parallelism_enabled(tries_to_keep.len()) {
-            #[cfg(feature = "std")]
-            {
-                use rayon::prelude::*;
-
-                self.storage.tries.par_iter_mut().for_each(|(hash, trie)| {
-                    if tries_to_keep.contains(hash) &&
-                        let Some(t) = trie.as_revealed_mut()
-                    {
-                        t.prune(max_depth);
-                    }
-                });
-            }
-        } else {
-            for hash in &tries_to_keep {
-                if let Some(trie) =
-                    self.storage.tries.get_mut(hash).and_then(|t| t.as_revealed_mut())
-                {
+        // Prune state and storage tries in parallel
+        rayon::join(
+            || {
+                if let Some(trie) = self.state.as_revealed_mut() {
                     trie.prune(max_depth);
                 }
-            }
-        }
-
-        // Clear revealed_paths for kept tries
-        for hash in &tries_to_keep {
-            if let Some(paths) = self.storage.revealed_paths.get_mut(hash) {
-                paths.clear();
-            }
-        }
+                self.revealed_account_paths.clear();
+            },
+            || {
+                self.storage.prune(max_depth, max_storage_tries);
+            },
+        );
     }
 }
 
@@ -1098,41 +1070,160 @@ struct StorageTries<S = SerialSparseTrie> {
     cleared_revealed_paths: Vec<HashSet<Nibbles>>,
     /// A default cleared trie instance, which will be cloned when creating new tries.
     default_trie: RevealableSparseTrie<S>,
+    /// Tracks access patterns and modification state of storage tries for smart pruning decisions.
+    modifications: StorageTrieModifications,
+}
+
+#[cfg(feature = "std")]
+impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
+    /// Prunes and evicts storage tries.
+    ///
+    /// Keeps the top `max_storage_tries` by a score combining size and heat.
+    /// Evicts lower-scored tries entirely, prunes kept tries to `max_depth`.
+    fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
+        let fn_start = std::time::Instant::now();
+        let mut stats =
+            StorageTriesPruneStats { total_tries_before: self.tries.len(), ..Default::default() };
+
+        // Update heat for accessed tries
+        self.modifications.update_and_reset();
+
+        // Collect (address, size, score) for all tries
+        // Score = size * heat_multiplier
+        // Hot tries (high heat) get boosted weight
+        let mut trie_info: Vec<(B256, usize, usize)> = self
+            .tries
+            .iter()
+            .map(|(address, trie)| {
+                let size = match trie {
+                    RevealableSparseTrie::Blind(_) => return (*address, 0, 0),
+                    RevealableSparseTrie::Revealed(t) => t.size_hint(),
+                };
+                let heat = self.modifications.heat(address);
+                // Heat multiplier: 1 (cold) to 3 (very hot, heat >= 4)
+                let heat_multiplier = 1 + (heat.min(4) / 2) as usize;
+                (*address, size, size * heat_multiplier)
+            })
+            .collect();
+
+        // Use O(n) selection to find top max_storage_tries by score
+        if trie_info.len() > max_storage_tries {
+            trie_info
+                .select_nth_unstable_by(max_storage_tries.saturating_sub(1), |a, b| b.2.cmp(&a.2));
+            trie_info.truncate(max_storage_tries);
+        }
+        let tries_to_keep: B256Map<usize> =
+            trie_info.iter().map(|(address, size, _)| (*address, *size)).collect();
+        stats.tries_to_keep = tries_to_keep.len();
+
+        // Collect keys to evict
+        let tries_to_clear: Vec<B256> =
+            self.tries.keys().filter(|addr| !tries_to_keep.contains_key(*addr)).copied().collect();
+        stats.tries_to_evict = tries_to_clear.len();
+
+        // Evict storage tries that exceeded limit, saving cleared allocations for reuse
+        for address in &tries_to_clear {
+            if let Some(mut trie) = self.tries.remove(address) {
+                trie.clear();
+                self.cleared_tries.push(trie);
+            }
+            if let Some(mut paths) = self.revealed_paths.remove(address) {
+                paths.clear();
+                self.cleared_revealed_paths.push(paths);
+            }
+            self.modifications.remove(address);
+        }
+
+        // Prune storage tries that are kept, but only if:
+        // - They haven't been pruned since last access
+        // - They're large enough to be worth pruning
+        const MIN_SIZE_TO_PRUNE: usize = 1000;
+        let prune_start = std::time::Instant::now();
+        for (address, size) in &tries_to_keep {
+            if *size < MIN_SIZE_TO_PRUNE {
+                stats.skipped_small += 1;
+                continue; // Small tries aren't worth the DFS cost
+            }
+            let Some(heat_state) = self.modifications.get_mut(address) else {
+                continue; // No heat state = not tracked
+            };
+            // Only prune if backlog >= 2 (skip every other cycle)
+            if heat_state.prune_backlog < 2 {
+                stats.skipped_recently_pruned += 1;
+                continue; // Recently pruned, skip this cycle
+            }
+            if let Some(trie) = self.tries.get_mut(address).and_then(|t| t.as_revealed_mut()) {
+                trie.prune(max_depth);
+                heat_state.prune_backlog = 0; // Reset backlog after prune
+                stats.pruned_count += 1;
+            }
+        }
+        stats.prune_elapsed = prune_start.elapsed();
+
+        // Clear revealed_paths for kept tries
+        for hash in tries_to_keep.keys() {
+            if let Some(paths) = self.revealed_paths.get_mut(hash) {
+                paths.clear();
+            }
+        }
+
+        stats.total_tries_after = self.tries.len();
+        stats.total_elapsed = fn_start.elapsed();
+
+        debug!(
+            target: "trie::sparse",
+            before = stats.total_tries_before,
+            after = stats.total_tries_after,
+            kept = stats.tries_to_keep,
+            evicted = stats.tries_to_evict,
+            pruned = stats.pruned_count,
+            skipped_small = stats.skipped_small,
+            skipped_recent = stats.skipped_recently_pruned,
+            ?stats.prune_elapsed,
+            ?stats.total_elapsed,
+            "StorageTries::prune completed"
+        );
+    }
 }
 
 impl<S: SparseTrieTrait> StorageTries<S> {
     /// Returns all fields to a cleared state, equivalent to the default state, keeping cleared
     /// collections for re-use later when possible.
     fn clear(&mut self) {
-        self.cleared_tries.extend(self.tries.drain().map(|(_, trie)| trie.clear()));
+        self.cleared_tries.extend(self.tries.drain().map(|(_, mut trie)| {
+            trie.clear();
+            trie
+        }));
         self.cleared_revealed_paths.extend(self.revealed_paths.drain().map(|(_, mut set)| {
             set.clear();
             set
         }));
+        self.modifications.clear();
     }
 
-    /// Shrinks the capacity of all storage tries (active, cleared, and default) to the given sizes.
-    /// The capacity is distributed equally among all tries that have allocations.
-    fn shrink_to(&mut self, node_size: usize, value_size: usize) {
-        // Count total number of tries with capacity (active + cleared + default)
-        let active_count = self.tries.len();
-        let cleared_count = self.cleared_tries.len();
-        let total_tries = 1 + active_count + cleared_count;
+    /// Shrinks the capacity of all storage tries to the given total sizes.
+    ///
+    /// Distributes capacity equally among all tries (active + cleared).
+    fn shrink_to(&mut self, max_nodes: usize, max_values: usize) {
+        let total_tries = self.tries.len() + self.cleared_tries.len();
+        if total_tries == 0 {
+            return;
+        }
 
         // Distribute capacity equally among all tries
-        let node_size_per_trie = node_size / total_tries;
-        let value_size_per_trie = value_size / total_tries;
+        let nodes_per_trie = max_nodes / total_tries;
+        let values_per_trie = max_values / total_tries;
 
         // Shrink active storage tries
         for trie in self.tries.values_mut() {
-            trie.shrink_nodes_to(node_size_per_trie);
-            trie.shrink_values_to(value_size_per_trie);
+            trie.shrink_nodes_to(nodes_per_trie);
+            trie.shrink_values_to(values_per_trie);
         }
 
         // Shrink cleared storage tries
         for trie in &mut self.cleared_tries {
-            trie.shrink_nodes_to(node_size_per_trie);
-            trie.shrink_values_to(value_size_per_trie);
+            trie.shrink_nodes_to(nodes_per_trie);
+            trie.shrink_values_to(values_per_trie);
         }
     }
 }
@@ -1164,6 +1255,13 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
         (trie, revealed_paths)
     }
 
+    // Returns mutable reference to storage sparse trie, creating a blind one if it doesn't exist.
+    fn get_or_create_trie_mut(&mut self, address: B256) -> &mut RevealableSparseTrie<S> {
+        self.tries.entry(address).or_insert_with(|| {
+            self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
+        })
+    }
+
     /// Takes the storage trie for the account from the internal `HashMap`, creating it if it
     /// doesn't already exist.
     #[cfg(feature = "std")]
@@ -1180,6 +1278,96 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
         self.revealed_paths
             .remove(account)
             .unwrap_or_else(|| self.cleared_revealed_paths.pop().unwrap_or_default())
+    }
+}
+
+/// Statistics from a storage tries prune operation.
+#[derive(Debug, Default)]
+#[allow(dead_code)]
+struct StorageTriesPruneStats {
+    total_tries_before: usize,
+    total_tries_after: usize,
+    tries_to_keep: usize,
+    tries_to_evict: usize,
+    pruned_count: usize,
+    skipped_small: usize,
+    skipped_recently_pruned: usize,
+    prune_elapsed: core::time::Duration,
+    total_elapsed: core::time::Duration,
+}
+
+/// Per-trie access tracking and prune state.
+///
+/// Tracks how frequently a storage trie is accessed and when it was last pruned,
+/// enabling smart pruning decisions that preserve frequently-used tries.
+#[derive(Debug, Clone, Copy, Default)]
+#[allow(dead_code)]
+struct TrieModificationState {
+    /// Access frequency level (0-255). Incremented each cycle the trie is accessed.
+    /// Used for prioritizing which tries to keep during pruning.
+    heat: u8,
+    /// Prune backlog - cycles since last prune. Incremented each cycle,
+    /// reset to 0 when pruned. Used to decide when pruning is needed.
+    prune_backlog: u8,
+}
+
+/// Tracks access patterns and modification state of storage tries for smart pruning decisions.
+///
+/// Access-based tracking is more accurate than simple generation counting because it tracks
+/// actual access patterns rather than administrative operations (take/insert).
+///
+/// - Access frequency is incremented when a storage proof is revealed (accessed)
+/// - Access frequency decays each prune cycle for tries not accessed that cycle
+/// - Tries with higher access frequency are prioritized for preservation during pruning
+#[derive(Debug, Default)]
+struct StorageTrieModifications {
+    /// Access frequency and prune state per storage trie address.
+    state: B256Map<TrieModificationState>,
+    /// Tracks which tries were accessed in the current cycle (between prune calls).
+    accessed_this_cycle: HashSet<B256>,
+}
+
+#[allow(dead_code)]
+impl StorageTrieModifications {
+    /// Marks a storage trie as accessed this cycle.
+    /// Heat and `prune_backlog` are updated in [`Self::update_and_reset`].
+    #[inline]
+    fn mark_accessed(&mut self, address: B256) {
+        self.accessed_this_cycle.insert(address);
+    }
+
+    /// Returns mutable reference to the heat state for a storage trie.
+    #[inline]
+    fn get_mut(&mut self, address: &B256) -> Option<&mut TrieModificationState> {
+        self.state.get_mut(address)
+    }
+
+    /// Returns the heat level for a storage trie (0 if not tracked).
+    #[inline]
+    fn heat(&self, address: &B256) -> u8 {
+        self.state.get(address).map_or(0, |s| s.heat)
+    }
+
+    /// Updates heat and prune backlog for accessed tries.
+    /// Called at the start of each prune cycle.
+    fn update_and_reset(&mut self) {
+        for address in self.accessed_this_cycle.drain() {
+            let entry = self.state.entry(address).or_default();
+            entry.heat = entry.heat.saturating_add(1);
+            entry.prune_backlog = entry.prune_backlog.saturating_add(1);
+        }
+    }
+
+    /// Removes tracking for a specific address (when trie is evicted).
+    fn remove(&mut self, address: &B256) {
+        self.state.remove(address);
+        self.accessed_this_cycle.remove(address);
+    }
+
+    /// Clears all heat tracking state.
+    fn clear(&mut self) {
+        self.state.clear();
+        self.accessed_this_cycle.clear();
     }
 }
 
@@ -1766,7 +1954,7 @@ mod tests {
                 &provider_factory,
             )
             .unwrap();
-        trie_account_1.storage_root = sparse.storage_root(address_1).unwrap();
+        trie_account_1.storage_root = sparse.storage_root(&address_1).unwrap();
         sparse
             .update_account_leaf(
                 address_path_1,
@@ -1776,7 +1964,7 @@ mod tests {
             .unwrap();
 
         sparse.wipe_storage(address_2).unwrap();
-        trie_account_2.storage_root = sparse.storage_root(address_2).unwrap();
+        trie_account_2.storage_root = sparse.storage_root(&address_2).unwrap();
         sparse
             .update_account_leaf(
                 address_path_2,

@@ -3,7 +3,7 @@ use crate::{
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
-    tree::{error::InsertPayloadError, metrics::EngineApiMetrics, payload_validator::TreeCtx},
+    tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
@@ -30,7 +30,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
-    BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader, ChangeSetReader,
+    BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
     StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
     TransactionVariant,
@@ -55,18 +55,19 @@ pub mod error;
 pub mod instrumented_state;
 mod invalid_headers;
 mod metrics;
-mod payload_processor;
+pub mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;
 pub mod precompile_cache;
 #[cfg(test)]
 mod tests;
-#[expect(unused)]
 mod trie_updates;
 
 use crate::tree::error::AdvancePersistenceError;
 pub use block_buffer::BlockBuffer;
+pub use cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache, SavedCache};
 pub use invalid_headers::InvalidHeaderCache;
+pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
@@ -157,6 +158,16 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
             tree_state: TreeState::new(canonical_block, engine_kind),
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
+    }
+
+    /// Returns a reference to the tree state.
+    pub const fn tree_state(&self) -> &TreeState<N> {
+        &self.tree_state
+    }
+
+    /// Returns true if the block has been marked as invalid.
+    pub fn has_invalid_header(&mut self, hash: &B256) -> bool {
+        self.invalid_headers.get(hash).is_some()
     }
 }
 
@@ -321,11 +332,10 @@ where
         + HashedPostStateProvider
         + Clone
         + 'static,
-    <P as DatabaseProviderFactory>::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
+    P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StageCheckpointReader
         + ChangeSetReader
-        + StorageChangeSetReader
-        + BlockNumReader,
+        + StorageChangeSetReader,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
     V: EngineValidator<T>,
@@ -1406,7 +1416,20 @@ where
         );
         self.changeset_cache.evict(eviction_threshold);
 
+        // Invalidate cached overlay since the anchor has changed
+        self.state.tree_state.invalidate_cached_overlay();
+
         self.on_new_persisted_block()?;
+
+        // Re-prepare overlay for the current canonical head with the new anchor.
+        // Spawn a background task to trigger computation so it's ready when the next payload
+        // arrives.
+        if let Some(overlay) = self.state.tree_state.prepare_canonical_overlay() {
+            rayon::spawn(move || {
+                let _ = overlay.get();
+            });
+        }
+
         Ok(())
     }
 
@@ -2589,19 +2612,27 @@ where
         let block_num_hash = block_id.block;
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
 
-        match self.sealed_header_by_hash(block_num_hash.hash) {
-            Err(err) => {
-                let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block, err.into()).into());
+        // Check if block already exists - first in memory, then DB only if it could be persisted
+        if self.state.tree_state.sealed_header_by_hash(&block_num_hash.hash).is_some() {
+            convert_to_block(self, input)?;
+            return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
+        }
+
+        // Only query DB if block could be persisted (number <= last persisted block).
+        // New blocks from CL always have number > last persisted, so skip DB lookup for them.
+        if block_num_hash.number <= self.persistence_state.last_persisted_block.number {
+            match self.provider.sealed_header_by_hash(block_num_hash.hash) {
+                Err(err) => {
+                    let block = convert_to_block(self, input)?;
+                    return Err(InsertBlockError::new(block, err.into()).into());
+                }
+                Ok(Some(_)) => {
+                    convert_to_block(self, input)?;
+                    return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
+                }
+                Ok(None) => {}
             }
-            Ok(Some(_)) => {
-                // We now assume that we already have this block in the tree. However, we need to
-                // run the conversion to ensure that the block hash is valid.
-                convert_to_block(self, input)?;
-                return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid))
-            }
-            _ => {}
-        };
+        }
 
         // Ensure that the parent state is available.
         match self.state_provider_builder(block_id.parent) {
