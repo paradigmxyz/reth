@@ -244,6 +244,32 @@ impl RocksDBBuilder {
         cf_options
     }
 
+    /// Creates optimized column family options for history tables (`AccountsHistory`,
+    /// `StoragesHistory`).
+    ///
+    /// History tables store address/storage key -> block number shard mappings. These benefit from
+    /// bloom filters because:
+    /// - Many lookups check for keys that don't exist (e.g., checking if an account has history)
+    /// - Bloom filters can quickly eliminate non-existent keys without disk I/O
+    /// - 10 bits per key provides ~1% false positive rate with reasonable memory overhead
+    fn history_column_family_options(cache: &Cache) -> Options {
+        let mut table_options = BlockBasedOptions::default();
+        table_options.set_block_size(DEFAULT_BLOCK_SIZE);
+        table_options.set_cache_index_and_filter_blocks(true);
+        table_options.set_pin_l0_filter_and_index_blocks_in_cache(true);
+        table_options.set_block_cache(cache);
+        table_options.set_bloom_filter(10.0, false);
+
+        let mut cf_options = Options::default();
+        cf_options.set_block_based_table_factory(&table_options);
+        cf_options.set_level_compaction_dynamic_level_bytes(true);
+        cf_options.set_compression_type(DBCompressionType::Lz4);
+        cf_options.set_bottommost_compression_type(DBCompressionType::Zstd);
+        cf_options.set_bottommost_zstd_max_train_bytes(0, true);
+
+        cf_options
+    }
+
     /// Adds a column family for a specific table type.
     pub fn with_table<T: Table>(mut self) -> Self {
         self.column_families.push(T::NAME.to_string());
@@ -307,6 +333,10 @@ impl RocksDBBuilder {
             .map(|name| {
                 let cf_options = if name == tables::TransactionHashNumbers::NAME {
                     Self::tx_hash_numbers_column_family_options(&self.block_cache)
+                } else if name == tables::AccountsHistory::NAME ||
+                    name == tables::StoragesHistory::NAME
+                {
+                    Self::history_column_family_options(&self.block_cache)
                 } else {
                     Self::default_column_family_options(&self.block_cache)
                 };
