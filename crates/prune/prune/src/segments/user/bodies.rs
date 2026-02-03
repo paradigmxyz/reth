@@ -1,11 +1,11 @@
 use crate::{
-    segments::{PruneInput, Segment},
+    segments::{self, PruneInput, Segment},
     PrunerError,
 };
 use alloy_primitives::BlockNumber;
 use reth_provider::{BlockReader, PruneCheckpointReader, StaticFileProviderFactory};
 use reth_prune_types::{
-    PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
+    PruneInterruptReason, PruneMode, PrunePurpose, PruneSegment, SegmentOutput,
     SegmentOutputCheckpoint,
 };
 use reth_static_file_types::StaticFileSegment;
@@ -115,44 +115,9 @@ where
             ));
         };
 
-        // Delete static file jars that are entirely below to_block.
-        // Returns headers of deleted jars so we can compute the actual checkpoint.
-        let deleted_headers = provider
-            .static_file_provider()
-            .delete_segment_below_block(StaticFileSegment::Transactions, to_block + 1)?;
-
-        // No jars were deleted - either to_block falls within the first jar,
-        // or all jars are already above to_block.
-        if deleted_headers.is_empty() {
-            return Ok(SegmentOutput {
-                progress: PruneProgress::Finished,
-                pruned: 0,
-                checkpoint: input
-                    .previous_checkpoint
-                    .map(SegmentOutputCheckpoint::from_prune_checkpoint),
-            })
-        }
-
-        let tx_ranges = deleted_headers.iter().filter_map(|header| header.tx_range());
-
-        let pruned = tx_ranges.clone().map(|range| range.len()).sum::<u64>() as usize;
-
-        // The highest block number in the deleted files is the actual checkpoint. to_block might
-        // refer to a block in the middle of an undeleted file.
-        let checkpoint_block = deleted_headers
-            .iter()
-            .filter_map(|header| header.block_range())
-            .map(|range| range.end())
-            .max();
-
-        Ok(SegmentOutput {
-            progress: PruneProgress::Finished,
-            pruned,
-            checkpoint: Some(SegmentOutputCheckpoint {
-                block_number: checkpoint_block,
-                tx_number: tx_ranges.map(|range| range.end()).max(),
-            }),
-        })
+        // Use the coordinated to_block instead of input.to_block
+        let adjusted_input = PruneInput { to_block, ..input };
+        segments::prune_static_files(provider, adjusted_input, StaticFileSegment::Transactions)
     }
 }
 
