@@ -6707,48 +6707,6 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
                                          size_t count,
                                          MDBX_txn **subtxns);
 
-/** \brief Reserve a contiguous range of pages for parallel writes.
- *
- * \deprecated Use mdbx_txn_create_subtxns() instead, which handles page
- * reservation automatically.
- *
- * Extends the database file and reserves a range of pages that can be
- * partitioned among subtransactions for parallel writes. This function
- * should be called once on the parent transaction before creating subtxs.
- *
- * \param [in] txn          A write transaction handle.
- * \param [in] num_pages    Total number of pages to reserve.
- * \param [out] range       The reserved page range.
- *
- * \returns A non-zero error value on failure and 0 on success.
- * \retval MDBX_EINVAL   txn is NULL or not a write transaction.
- * \retval MDBX_EPERM    txn is already a subtransaction.
- * \retval MDBX_MAP_FULL Not enough space to reserve pages.
- */
-LIBMDBX_API int mdbx_txn_reserve_pages(MDBX_txn *txn, size_t num_pages, MDBX_page_range_t *range);
-
-/** \brief Create a subtransaction for parallel writes.
- *
- * \deprecated Use mdbx_txn_create_subtxns() instead, which enforces
- * one-subtxn-per-DBI and handles page reservation automatically.
- *
- * Creates a subtransaction with its own page sub-allocator, dirtylist,
- * and I/O resources. The subtransaction allocates pages only from the
- * specified range, enabling thread-safe parallel writes.
- *
- * The subtransaction shares the parent's read snapshot but has isolated
- * write state. Each subtransaction should be used from a single thread.
- *
- * \param [in] parent       The parent write transaction.
- * \param [in] range        Page range for this subtransaction to allocate from.
- * \param [out] subtxn      Address where the new subtxn handle will be stored.
- *
- * \returns A non-zero error value on failure and 0 on success.
- * \retval MDBX_EINVAL   parent is NULL, not a write transaction, or range is invalid.
- * \retval MDBX_ENOMEM   Memory allocation failed.
- */
-LIBMDBX_API int mdbx_txn_create_subtx(MDBX_txn *parent, const MDBX_page_range_t *range, MDBX_txn **subtxn);
-
 /** \brief Commit a subtransaction, merging its changes to the parent.
  *
  * Commits the subtransaction by merging its dirtylist into the parent
@@ -6756,7 +6714,7 @@ LIBMDBX_API int mdbx_txn_create_subtx(MDBX_txn *parent, const MDBX_page_range_t 
  *
  * All subtransactions must be committed before the parent can be committed.
  *
- * \param [in] subtxn   A subtransaction handle created by mdbx_txn_create_subtx().
+ * \param [in] subtxn   A subtransaction handle created by mdbx_txn_create_subtxns().
  *
  * \returns A non-zero error value on failure and 0 on success.
  * \retval MDBX_EINVAL   subtxn is NULL or not a subtransaction.
@@ -6769,7 +6727,7 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn);
  * Aborts the subtransaction, discarding all writes. The pages allocated
  * by this subtransaction are NOT returned to the parent's allocator.
  *
- * \param [in] subtxn   A subtransaction handle created by mdbx_txn_create_subtx().
+ * \param [in] subtxn   A subtransaction handle created by mdbx_txn_create_subtxns().
  *
  * \returns A non-zero error value on failure and 0 on success.
  */

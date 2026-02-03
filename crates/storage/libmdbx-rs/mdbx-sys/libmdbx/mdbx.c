@@ -4166,13 +4166,6 @@ enum txn_flags {
 
 /* A database transaction.
  * Every operation requires a transaction handle. */
-/* Sub-allocator for parallel writes: bump allocator over reserved page range */
-typedef struct MDBX_suballoc {
-  pgno_t begin; /* First page in reserved range (inclusive) */
-  pgno_t next;  /* Next page to allocate (bump pointer) */
-  pgno_t end;   /* End of reserved range (exclusive) */
-} MDBX_suballoc_t;
-
 struct MDBX_txn {
   int32_t signature;
   uint32_t flags; /* Transaction Flags */
@@ -4262,7 +4255,6 @@ struct MDBX_txn {
       /* In write txns, next is located the array of cursors for each DB */
 
       /* --- Parallel subtransaction support (reth extension) --- */
-      MDBX_suballoc_t suballoc;     /* Page sub-allocator for this subtxn */
       osal_ioring_t *txn_ioring;    /* Per-txn I/O ring (NULL = use env->ioring) */
       void *txn_page_auxbuf;        /* Per-txn scratch buffer (NULL = use env) */
       MDBX_txn *subparent;          /* Parent txn if this is a parallel subtxn */
@@ -4270,6 +4262,7 @@ struct MDBX_txn {
       MDBX_txn *subtxn_next;        /* Next sibling in parent's subtxn_list */
       MDBX_dbi assigned_dbi;        /* DBI this subtxn is bound to (0 = none/legacy) */
       pnl_t subtxn_repnl;           /* Pre-claimed reclaimed pages for this subtxn */
+      osal_fastmutex_t *subtxn_alloc_mutex; /* Mutex for synchronized parent allocation */
     } tw;
   };
 };
@@ -15619,71 +15612,9 @@ __cold int mdbx_env_chk(MDBX_env *env, const struct MDBX_chk_callbacks *cb, MDBX
  * I/O resources, allowing thread-safe parallel cursor operations.
  *----------------------------------------------------------------------------*/
 
-LIBMDBX_API int mdbx_txn_reserve_pages(MDBX_txn *txn, size_t num_pages, MDBX_page_range_t *range) {
-  if (unlikely(!txn || !range))
-    return MDBX_EINVAL;
-
-  int rc = check_txn(txn, MDBX_TXN_BLOCKED);
-  if (unlikely(rc != MDBX_SUCCESS))
-    return LOG_IFERR(rc);
-
-  if (unlikely(txn->flags & MDBX_TXN_RDONLY))
-    return LOG_IFERR(MDBX_EACCESS);
-
-  if (unlikely(txn->flags & txn_parallel_subtx))
-    return LOG_IFERR(MDBX_EPERM);
-
-  if (unlikely(num_pages == 0)) {
-    range->begin = range->end = 0;
-    return MDBX_SUCCESS;
-  }
-
-  const pgno_t current_end = txn->geo.first_unallocated;
-  const pgno_t new_end = current_end + (pgno_t)num_pages;
-
-  if (unlikely(new_end > txn->geo.upper))
-    return LOG_IFERR(MDBX_MAP_FULL);
-
-  /* Grow the database file if needed */
-  if (new_end > txn->geo.now) {
-    MDBX_env *const env = txn->env;
-    rc = dxb_resize(env, txn->geo.first_unallocated, new_end, txn->geo.upper, implicit_grow);
-    if (unlikely(rc != MDBX_SUCCESS))
-      return LOG_IFERR(rc);
-    txn->geo.now = new_end;
-    txn->flags |= MDBX_TXN_DIRTY;
-  }
-
-  range->begin = current_end;
-  range->end = new_end;
-  txn->geo.first_unallocated = new_end;
-
-  DEBUG("reserved pages %" PRIu64 " to %" PRIu64 " (%zu pages)",
-        range->begin, range->end, num_pages);
-
-  return MDBX_SUCCESS;
-}
-
-LIBMDBX_API int mdbx_txn_create_subtx(MDBX_txn *parent, const MDBX_page_range_t *range, MDBX_txn **subtxn) {
-  if (unlikely(!parent || !range || !subtxn))
-    return MDBX_EINVAL;
-
+/* Internal helper to create a subtxn with assigned DBI */
+static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **subtxn) {
   *subtxn = nullptr;
-
-  int rc = check_txn(parent, MDBX_TXN_BLOCKED);
-  if (unlikely(rc != MDBX_SUCCESS))
-    return LOG_IFERR(rc);
-
-  if (unlikely(parent->flags & MDBX_TXN_RDONLY))
-    return LOG_IFERR(MDBX_EACCESS);
-
-  if (unlikely(!(parent->flags & MDBX_WRITEMAP))) {
-    DEBUG("parallel subtxns require WRITEMAP mode%s", "");
-    return LOG_IFERR(MDBX_INCOMPATIBLE);
-  }
-
-  if (unlikely(range->begin >= range->end))
-    return LOG_IFERR(MDBX_EINVAL);
 
   MDBX_env *const env = parent->env;
 
@@ -15739,9 +15670,6 @@ LIBMDBX_API int mdbx_txn_create_subtx(MDBX_txn *parent, const MDBX_page_range_t 
   txn->nested = nullptr;
 
   txn->tw.subparent = parent;
-  txn->tw.suballoc.begin = (pgno_t)range->begin;
-  txn->tw.suballoc.next = (pgno_t)range->begin;
-  txn->tw.suballoc.end = (pgno_t)range->end;
   txn->tw.subtxn_list = nullptr;
   txn->tw.subtxn_next = nullptr;
 
@@ -15764,24 +15692,15 @@ LIBMDBX_API int mdbx_txn_create_subtx(MDBX_txn *parent, const MDBX_page_range_t 
   txn->tw.txn_page_auxbuf = nullptr;
   txn->tw.txn_ioring = nullptr;
   txn->tw.subtxn_repnl = nullptr; /* Will be set by mdbx_txn_create_subtxns */
+  txn->tw.subtxn_alloc_mutex = parent->tw.subtxn_alloc_mutex; /* Share parent's mutex */
 
   txn->tw.subtxn_next = parent->tw.subtxn_list;
   parent->tw.subtxn_list = txn;
-  txn->tw.assigned_dbi = 0; /* Legacy API: no DBI restriction */
+  txn->tw.assigned_dbi = dbi;
 
-  DEBUG("created parallel subtx %p with pages %" PRIu64 "-%" PRIu64,
-        (void *)txn, range->begin, range->end);
+  DEBUG("created parallel subtx %p for dbi %u", (void *)txn, dbi);
 
   *subtxn = txn;
-  return MDBX_SUCCESS;
-}
-
-/* Internal helper to create a subtxn with assigned DBI */
-static int create_subtxn_with_dbi(MDBX_txn *parent, const MDBX_page_range_t *range, MDBX_dbi dbi, MDBX_txn **subtxn) {
-  int rc = mdbx_txn_create_subtx(parent, range, subtxn);
-  if (rc != MDBX_SUCCESS)
-    return rc;
-  (*subtxn)->tw.assigned_dbi = dbi;
   return MDBX_SUCCESS;
 }
 
@@ -15824,12 +15743,23 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
     }
   }
 
-  /* === GC-FIRST ALLOCATION STRATEGY (NO PRE-RESERVATION) ===
+  /* === GC-FIRST ALLOCATION STRATEGY WITH PARENT FALLBACK ===
    * 1. Harvest available pages from parent's repnl (reclaimed GC pages)
    *    and loose_pages (freed within this txn)
    * 2. Distribute harvested pages among subtxns equally
-   * 3. NO EOF pre-reservation - subtxns fall back to parent on exhaustion
+   * 3. If subtxn exhausts its pool, it locks the mutex and allocates from parent
    */
+
+  /* Allocate mutex for synchronized parent allocation */
+  osal_fastmutex_t *alloc_mutex = osal_malloc(sizeof(osal_fastmutex_t));
+  if (unlikely(!alloc_mutex))
+    return LOG_IFERR(MDBX_ENOMEM);
+  rc = osal_fastmutex_init(alloc_mutex);
+  if (unlikely(rc != MDBX_SUCCESS)) {
+    osal_free(alloc_mutex);
+    return LOG_IFERR(rc);
+  }
+  parent->tw.subtxn_alloc_mutex = alloc_mutex;
 
   /* Count available GC pages */
   size_t gc_available = 0;
@@ -15853,10 +15783,7 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
   size_t gc_offset = 0;
 
   for (size_t i = 0; i < count; ++i) {
-    /* Empty EOF range - no pre-reservation */
-    MDBX_page_range_t range = {0, 0};
-
-    rc = create_subtxn_with_dbi(parent, &range, specs[i].dbi, &subtxns[i]);
+    rc = create_subtxn_with_dbi(parent, specs[i].dbi, &subtxns[i]);
     if (unlikely(rc != MDBX_SUCCESS)) {
       /* Rollback: abort already created subtxns */
       for (size_t j = 0; j < i; ++j) {
@@ -15943,6 +15870,13 @@ static void subtx_unlink_from_parent(MDBX_txn *subtxn) {
   if (*prev == subtxn)
     *prev = subtxn->tw.subtxn_next;
   subtxn->tw.subparent = nullptr;
+
+  /* If this was the last subtxn, cleanup the allocation mutex */
+  if (!parent->tw.subtxn_list && parent->tw.subtxn_alloc_mutex) {
+    osal_fastmutex_destroy(parent->tw.subtxn_alloc_mutex);
+    osal_free(parent->tw.subtxn_alloc_mutex);
+    parent->tw.subtxn_alloc_mutex = nullptr;
+  }
 }
 
 LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
@@ -22862,31 +22796,60 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
   MDBX_txn *const txn = mc->txn;
   MDBX_env *const env = txn->env;
 
-  /* For parallel subtxns: try subtxn_repnl first, then suballoc (legacy), then fail */
+  /* For parallel subtxns: try subtxn_repnl first, then fall back to parent */
   if (txn->flags & txn_parallel_subtx) {
     if (num == 0) {
       ret.page = nullptr;
       ret.err = MDBX_SUCCESS;
       return ret;
     }
-    /* For single-page allocs, try subtxn's pre-claimed GC pages first (new API) */
+    /* For single-page allocs, try subtxn's pre-claimed GC pages first */
     if (num == 1 && txn->tw.subtxn_repnl && MDBX_PNL_GETSIZE(txn->tw.subtxn_repnl) > 0) {
       const size_t idx = MDBX_PNL_GETSIZE(txn->tw.subtxn_repnl);
       const pgno_t pgno = txn->tw.subtxn_repnl[idx];
       MDBX_PNL_SETSIZE(txn->tw.subtxn_repnl, idx - 1);
       return page_alloc_finalize(env, txn, mc, pgno, 1);
     }
-    /* Then try suballoc bump allocator (legacy API with pre-reserved EOF range) */
-    if (txn->tw.suballoc.next + num <= txn->tw.suballoc.end) {
-      const pgno_t pgno = txn->tw.suballoc.next;
-      txn->tw.suballoc.next += (pgno_t)num;
-      return page_alloc_finalize(env, txn, mc, pgno, num);
+    /* Fallback to synchronized parent allocation (EOF extension) */
+    DEBUG("subtxn %p: exhausted subtxn_repnl (need %zu pages), falling back to parent", (void*)txn, num);
+    MDBX_txn *parent = txn->tw.subparent;
+    if (unlikely(!parent || !txn->tw.subtxn_alloc_mutex)) {
+      ret.page = nullptr;
+      ret.err = MDBX_MAP_FULL;
+      return ret;
     }
-    /* Both exhausted - return MAP_FULL */
-    DEBUG("subtxn %p: exhausted both subtxn_repnl and suballoc (need %zu pages)", (void*)txn, num);
-    ret.page = nullptr;
-    ret.err = MDBX_MAP_FULL;
-    return ret;
+    int lock_rc = osal_fastmutex_acquire(txn->tw.subtxn_alloc_mutex);
+    if (unlikely(lock_rc != MDBX_SUCCESS)) {
+      ret.page = nullptr;
+      ret.err = lock_rc;
+      return ret;
+    }
+    /* Allocate from parent's EOF */
+    const pgno_t pgno = parent->geo.first_unallocated;
+    const pgno_t new_first = pgno + (pgno_t)num;
+    if (unlikely(new_first > parent->geo.upper)) {
+      osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+      ret.page = nullptr;
+      ret.err = MDBX_MAP_FULL;
+      return ret;
+    }
+    /* Grow file if needed */
+    if (new_first > parent->geo.now) {
+      int rc = dxb_resize(env, parent->geo.first_unallocated, new_first, parent->geo.upper, implicit_grow);
+      if (unlikely(rc != MDBX_SUCCESS)) {
+        osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+        ret.page = nullptr;
+        ret.err = rc;
+        return ret;
+      }
+      parent->geo.now = new_first;
+      txn->geo.now = new_first;
+      parent->flags |= MDBX_TXN_DIRTY;
+    }
+    parent->geo.first_unallocated = new_first;
+    txn->geo.first_unallocated = new_first;
+    osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+    return page_alloc_finalize(env, txn, mc, pgno, num);
   }
 
 #if MDBX_ENABLE_PROFGC
@@ -23367,24 +23330,57 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
   tASSERT(txn, mc->txn->flags & MDBX_TXN_DIRTY);
   tASSERT(txn, F_ISSET(*cursor_dbi_state(mc), DBI_LINDO | DBI_VALID | DBI_DIRTY));
 
-  /* For parallel subtxns: try subtxn_repnl first, then suballoc (legacy), then fail */
+  /* For parallel subtxns: try subtxn_repnl first, then fall back to parent */
   if (txn->flags & txn_parallel_subtx) {
-    /* First try subtxn's pre-claimed GC pages (new API) */
+    /* Try subtxn's pre-claimed GC pages */
     if (txn->tw.subtxn_repnl && MDBX_PNL_GETSIZE(txn->tw.subtxn_repnl) > 0) {
       const size_t idx = MDBX_PNL_GETSIZE(txn->tw.subtxn_repnl);
       const pgno_t pgno = txn->tw.subtxn_repnl[idx];
       MDBX_PNL_SETSIZE(txn->tw.subtxn_repnl, idx - 1);
       return page_alloc_finalize(txn->env, txn, mc, pgno, 1);
     }
-    /* Then try suballoc bump allocator (legacy API with pre-reserved EOF range) */
-    if (txn->tw.suballoc.next < txn->tw.suballoc.end) {
-      const pgno_t pgno = txn->tw.suballoc.next++;
-      return page_alloc_finalize(txn->env, txn, mc, pgno, 1);
+    /* Fallback to synchronized parent allocation (EOF extension) */
+    DEBUG("subtxn %p: exhausted subtxn_repnl, falling back to parent", (void*)txn);
+    MDBX_txn *parent = txn->tw.subparent;
+    MDBX_env *env = txn->env;
+    pgr_t ret;
+    if (unlikely(!parent || !txn->tw.subtxn_alloc_mutex)) {
+      ret.page = nullptr;
+      ret.err = MDBX_MAP_FULL;
+      return ret;
     }
-    /* Both exhausted - return MAP_FULL */
-    DEBUG("subtxn %p: exhausted both subtxn_repnl and suballoc", (void*)txn);
-    pgr_t ret = {nullptr, MDBX_MAP_FULL};
-    return ret;
+    int lock_rc = osal_fastmutex_acquire(txn->tw.subtxn_alloc_mutex);
+    if (unlikely(lock_rc != MDBX_SUCCESS)) {
+      ret.page = nullptr;
+      ret.err = lock_rc;
+      return ret;
+    }
+    /* Allocate from parent's EOF */
+    const pgno_t pgno = parent->geo.first_unallocated;
+    const pgno_t new_first = pgno + 1;
+    if (unlikely(new_first > parent->geo.upper)) {
+      osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+      ret.page = nullptr;
+      ret.err = MDBX_MAP_FULL;
+      return ret;
+    }
+    /* Grow file if needed */
+    if (new_first > parent->geo.now) {
+      int rc = dxb_resize(env, parent->geo.first_unallocated, new_first, parent->geo.upper, implicit_grow);
+      if (unlikely(rc != MDBX_SUCCESS)) {
+        osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+        ret.page = nullptr;
+        ret.err = rc;
+        return ret;
+      }
+      parent->geo.now = new_first;
+      txn->geo.now = new_first;
+      parent->flags |= MDBX_TXN_DIRTY;
+    }
+    parent->geo.first_unallocated = new_first;
+    txn->geo.first_unallocated = new_first;
+    osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
+    return page_alloc_finalize(env, txn, mc, pgno, 1);
   }
 
   /* If there are any loose pages, just use them */
