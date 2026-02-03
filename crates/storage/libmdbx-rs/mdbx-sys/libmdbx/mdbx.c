@@ -15880,11 +15880,12 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
 
   /* Merge dbi metadata (B-tree roots, stats) for modified databases.
    * Note: This only works correctly when subtxns are committed serially
-   * and don't have overlapping modifications to the same dbi. */
+   * and don't have overlapping modifications to the same dbi.
+   * Only merge DBIs actually dirtied by this subtxn (not inherited DBI_FRESH). */
   for (size_t dbi = 0; dbi < subtxn->n_dbi; ++dbi) {
-    if (subtxn->dbi_state[dbi] & (DBI_DIRTY | DBI_FRESH)) {
+    if (subtxn->dbi_state[dbi] & DBI_DIRTY) {
       parent->dbs[dbi] = subtxn->dbs[dbi];
-      parent->dbi_state[dbi] |= (subtxn->dbi_state[dbi] & (DBI_DIRTY | DBI_FRESH));
+      parent->dbi_state[dbi] |= DBI_DIRTY;
     }
   }
 
