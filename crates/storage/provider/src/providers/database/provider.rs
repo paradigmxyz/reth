@@ -79,7 +79,7 @@ use std::{
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::Arc,
     thread,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tracing::{debug, instrument, trace};
 
@@ -430,7 +430,7 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+impl<TX: DbTx + DbTxMut + Sync + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Executes a closure with a `RocksDB` batch, automatically registering it for commit.
     ///
     /// This helper encapsulates all the cfg-gated `RocksDB` batch handling.
@@ -580,6 +580,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
+            // This must happen BEFORE enabling parallel writes since it uses the main transaction
             if !self.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
@@ -613,56 +614,139 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
-            for (i, block) in blocks.iter().enumerate() {
-                let recovered_block = block.recovered_block();
+            // Enable parallel writes only in edge mode where SF handles receipts/changesets
+            // This allows hashed state, trie updates, and block metadata to write in parallel
+            // TODO: Enable when MDBX parallel subtransactions are fully tested
+            // Only use parallel path if enable_parallel_writes succeeds
+            let use_parallel_writes = false && save_mode.with_state()
+                && sf_ctx.write_receipts
+                && self.tx.enable_parallel_writes().is_ok();
 
+            // Pre-compute merged hashed state and trie updates before parallel section
+            let (merged_hashed_state, merged_trie) = if save_mode.with_state() {
                 let start = Instant::now();
-                self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
-                timings.insert_block += start.elapsed();
-
-                if save_mode.with_state() {
-                    let execution_output = block.execution_outcome();
-
-                    // Write state and changesets to the database.
-                    // Must be written after blocks because of the receipt lookup.
-                    // Skip receipts/account changesets if they're being written to static files.
-                    let start = Instant::now();
-                    self.write_state(
-                        WriteStateInput::Single {
-                            outcome: execution_output,
-                            block: recovered_block.number(),
-                        },
-                        OriginalValuesKnown::No,
-                        StateWriteConfig {
-                            write_receipts: !sf_ctx.write_receipts,
-                            write_account_changesets: !sf_ctx.write_account_changesets,
-                            write_storage_changesets: !sf_ctx.write_storage_changesets,
-                        },
-                    )?;
-                    timings.write_state += start.elapsed();
-                }
-            }
-
-            // Write all hashed state and trie updates in single batches.
-            // This reduces cursor open/close overhead from N calls to 1.
-            if save_mode.with_state() {
-                // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
-                let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().hashed_state),
-                );
-                if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
-                }
+                let merged_hashed_state: Arc<HashedPostStateSorted> =
+                    HashedPostStateSorted::merge_batch(
+                        blocks.iter().rev().map(|b| b.trie_data().hashed_state),
+                    );
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let merged_trie =
+                let merged_trie: Arc<TrieUpdatesSorted> =
                     TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
-                if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
-                }
                 timings.write_trie_updates += start.elapsed();
+
+                (merged_hashed_state, merged_trie)
+            } else {
+                (Arc::new(HashedPostStateSorted::default()), Arc::new(TrieUpdatesSorted::default()))
+            };
+
+            if use_parallel_writes {
+                // Parallel MDBX writes - each thread writes to different tables
+                std::thread::scope(|scope| {
+                    // Thread 1: Block metadata (HeaderNumbers, BlockBodyIndices, etc.)
+                    let block_handle = scope.spawn(|| -> ProviderResult<Duration> {
+                        let mut total = Duration::ZERO;
+                        for (i, block) in blocks.iter().enumerate() {
+                            let start = Instant::now();
+                            self.insert_block_mdbx_only(block.recovered_block(), tx_nums[i])?;
+                            total += start.elapsed();
+                        }
+                        Ok(total)
+                    });
+
+                    // Thread 2: Plain state writes (SF handles receipts/changesets)
+                    let state_handle = scope.spawn(|| -> ProviderResult<Duration> {
+                        let mut total = Duration::ZERO;
+                        for block in blocks.iter() {
+                            let start = Instant::now();
+                            self.write_state(
+                                WriteStateInput::Single {
+                                    outcome: block.execution_outcome(),
+                                    block: block.recovered_block().number(),
+                                },
+                                OriginalValuesKnown::No,
+                                StateWriteConfig {
+                                    write_receipts: false,
+                                    write_account_changesets: false,
+                                    write_storage_changesets: false,
+                                },
+                            )?;
+                            total += start.elapsed();
+                        }
+                        Ok(total)
+                    });
+
+                    // Thread 3: Hashed state
+                    let hashed_handle = if !merged_hashed_state.is_empty() {
+                        Some(scope.spawn(|| -> ProviderResult<()> {
+                            self.write_hashed_state(&merged_hashed_state)
+                        }))
+                    } else {
+                        None
+                    };
+
+                    // Thread 4: Trie updates
+                    let trie_handle = if !merged_trie.is_empty() {
+                        Some(scope.spawn(|| -> ProviderResult<usize> {
+                            self.write_trie_updates_sorted(&merged_trie)
+                        }))
+                    } else {
+                        None
+                    };
+
+                    // Wait and collect results
+                    timings.insert_block = block_handle.join().expect("thread panic")?;
+                    timings.write_state = state_handle.join().expect("thread panic")?;
+                    if let Some(h) = hashed_handle {
+                        h.join().expect("thread panic")?;
+                    }
+                    if let Some(h) = trie_handle {
+                        h.join().expect("thread panic")?;
+                    }
+
+                    Ok::<_, ProviderError>(())
+                })?;
+            } else {
+                // Sequential MDBX writes (non-edge mode)
+                for (i, block) in blocks.iter().enumerate() {
+                    let recovered_block = block.recovered_block();
+
+                    let start = Instant::now();
+                    self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
+                    timings.insert_block += start.elapsed();
+
+                    if save_mode.with_state() {
+                        let execution_output = block.execution_outcome();
+
+                        // Write state and changesets to the database.
+                        // Must be written after blocks because of the receipt lookup.
+                        let start = Instant::now();
+                        self.write_state(
+                            WriteStateInput::Single {
+                                outcome: execution_output,
+                                block: recovered_block.number(),
+                            },
+                            OriginalValuesKnown::No,
+                            StateWriteConfig {
+                                write_receipts: !sf_ctx.write_receipts,
+                                write_account_changesets: !sf_ctx.write_account_changesets,
+                                write_storage_changesets: !sf_ctx.write_storage_changesets,
+                            },
+                        )?;
+                        timings.write_state += start.elapsed();
+                    }
+                }
+
+                // Write hashed state and trie updates
+                if save_mode.with_state() {
+                    if !merged_hashed_state.is_empty() {
+                        self.write_hashed_state(&merged_hashed_state)?;
+                    }
+                    if !merged_trie.is_empty() {
+                        self.write_trie_updates_sorted(&merged_trie)?;
+                    }
+                }
             }
 
             // Full mode: update history indices
@@ -2180,7 +2264,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
+impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> StateWriter
     for DatabaseProvider<TX, N>
 {
     type Receipt = ReceiptTy<N>;
@@ -3101,7 +3185,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
+impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> BlockExecutionWriter
     for DatabaseProvider<TX, N>
 {
     fn take_block_and_execution_above(
@@ -3144,7 +3228,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
+impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> BlockWriter
     for DatabaseProvider<TX, N>
 {
     type Block = BlockTy<N>;
