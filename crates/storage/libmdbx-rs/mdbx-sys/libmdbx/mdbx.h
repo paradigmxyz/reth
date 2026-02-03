@@ -6654,12 +6654,11 @@ LIBMDBX_API int mdbx_env_chk_encount_problem(MDBX_chk_context_t *ctx);
  * \note This is a reth-specific extension to libmdbx.
  *
  * Usage pattern:
- * 1. Begin a write transaction
- * 2. Call mdbx_txn_reserve_pages() to reserve page ranges
- * 3. Create subtransactions with mdbx_txn_create_subtx() for each table/thread
- * 4. Perform parallel writes using cursors on each subtransaction
- * 5. Commit subtransactions with mdbx_subtx_commit()
- * 6. Commit the parent transaction
+ * 1. Begin a write transaction and open all DBIs
+ * 2. Create subtransactions with mdbx_txn_create_subtxns() - each bound to a specific DBI
+ * 3. Perform parallel writes using cursors on each subtransaction (DBI enforced)
+ * 4. Commit subtransactions with mdbx_subtx_commit()
+ * 5. Commit the parent transaction
  */
 
 /** \brief Page range for sub-allocator used in parallel writes.
@@ -6672,7 +6671,43 @@ typedef struct MDBX_page_range {
   uint64_t end;   /**< Last page number in range (exclusive) */
 } MDBX_page_range_t;
 
+/** \brief Specification for a parallel subtransaction.
+ *
+ * Used with mdbx_txn_create_subtxns() to create multiple subtransactions
+ * atomically, each bound to a specific DBI.
+ */
+typedef struct MDBX_subtxn_spec {
+  MDBX_dbi dbi;           /**< DBI this subtxn will write to (enforced) */
+  size_t pages_reserve;   /**< Number of pages to reserve for this subtxn */
+} MDBX_subtxn_spec_t;
+
+/** \brief Create multiple subtransactions for parallel writes.
+ *
+ * Creates all subtransactions atomically, each bound to a specific DBI.
+ * This enforces the invariant that each DBI has at most one subtxn.
+ * Pages are reserved and partitioned automatically.
+ *
+ * Each subtransaction can only open cursors on its assigned DBI. Attempting
+ * to open a cursor on a different DBI will fail with MDBX_EINVAL.
+ *
+ * \param [in] parent       The parent write transaction (must be WRITEMAP).
+ * \param [in] specs        Array of subtxn specifications.
+ * \param [in] count        Number of subtxns to create.
+ * \param [out] subtxns     Array to receive subtxn handles (must be pre-allocated).
+ *
+ * \returns A non-zero error value on failure and 0 on success.
+ * \retval MDBX_EINVAL      Invalid parameters or duplicate DBIs in specs.
+ * \retval MDBX_INCOMPATIBLE  Parent is not WRITEMAP mode.
+ */
+LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
+                                         const MDBX_subtxn_spec_t *specs,
+                                         size_t count,
+                                         MDBX_txn **subtxns);
+
 /** \brief Reserve a contiguous range of pages for parallel writes.
+ *
+ * \deprecated Use mdbx_txn_create_subtxns() instead, which handles page
+ * reservation automatically.
  *
  * Extends the database file and reserves a range of pages that can be
  * partitioned among subtransactions for parallel writes. This function
@@ -6690,6 +6725,9 @@ typedef struct MDBX_page_range {
 LIBMDBX_API int mdbx_txn_reserve_pages(MDBX_txn *txn, size_t num_pages, MDBX_page_range_t *range);
 
 /** \brief Create a subtransaction for parallel writes.
+ *
+ * \deprecated Use mdbx_txn_create_subtxns() instead, which enforces
+ * one-subtxn-per-DBI and handles page reservation automatically.
  *
  * Creates a subtransaction with its own page sub-allocator, dirtylist,
  * and I/O resources. The subtransaction allocates pages only from the

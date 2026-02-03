@@ -4268,6 +4268,7 @@ struct MDBX_txn {
       MDBX_txn *subparent;          /* Parent txn if this is a parallel subtxn */
       MDBX_txn *subtxn_list;        /* List of child parallel subtxns */
       MDBX_txn *subtxn_next;        /* Next sibling in parent's subtxn_list */
+      MDBX_dbi assigned_dbi;        /* DBI this subtxn is bound to (0 = none/legacy) */
     } tw;
   };
 };
@@ -8304,6 +8305,13 @@ int mdbx_cursor_bind(MDBX_txn *txn, MDBX_cursor *mc, MDBX_dbi dbi) {
 
   if (unlikely(dbi == FREE_DBI && !(txn->flags & MDBX_TXN_RDONLY)))
     return LOG_IFERR(MDBX_EACCESS);
+
+  /* Parallel subtxns with assigned_dbi can only use their assigned DBI */
+  if (unlikely((txn->flags & txn_parallel_subtx) && txn->tw.assigned_dbi != 0 && dbi != txn->tw.assigned_dbi)) {
+    DEBUG("subtxn %p bound to dbi %u, cannot open cursor on dbi %u",
+          (void *)txn, txn->tw.assigned_dbi, dbi);
+    return LOG_IFERR(MDBX_EINVAL);
+  }
 
   rc = dbi_check(txn, dbi);
   if (unlikely(rc != MDBX_SUCCESS))
@@ -15668,6 +15676,11 @@ LIBMDBX_API int mdbx_txn_create_subtx(MDBX_txn *parent, const MDBX_page_range_t 
   if (unlikely(parent->flags & MDBX_TXN_RDONLY))
     return LOG_IFERR(MDBX_EACCESS);
 
+  if (unlikely(!(parent->flags & MDBX_WRITEMAP))) {
+    DEBUG("parallel subtxns require WRITEMAP mode%s", "");
+    return LOG_IFERR(MDBX_INCOMPATIBLE);
+  }
+
   if (unlikely(range->begin >= range->end))
     return LOG_IFERR(MDBX_EINVAL);
 
@@ -15731,18 +15744,9 @@ LIBMDBX_API int mdbx_txn_create_subtx(MDBX_txn *parent, const MDBX_page_range_t 
   txn->tw.subtxn_list = nullptr;
   txn->tw.subtxn_next = nullptr;
 
+  /* WRITEMAP mode: pages modified in-place in the mmap, no dirtylist needed */
   txn->tw.dirtylist = nullptr;
-  /* In WRITEMAP mode without MDBX_AVOID_MSYNC, pages are modified in-place
-   * in the mmap. We don't use a dirtylist - just track the count. */
-  if ((parent->flags & MDBX_WRITEMAP) && !MDBX_AVOID_MSYNC) {
-    txn->tw.writemap_dirty_npages = 0;
-  } else {
-    rc = dpl_alloc(txn);
-    if (unlikely(rc != MDBX_SUCCESS)) {
-      osal_free(txn);
-      return LOG_IFERR(rc);
-    }
-  }
+  txn->tw.writemap_dirty_npages = 0;
 
   txn->tw.dirtyroom = env->options.dp_limit;
   txn->tw.dirtylru = parent->tw.dirtylru;
@@ -15755,39 +15759,13 @@ LIBMDBX_API int mdbx_txn_create_subtx(MDBX_txn *parent, const MDBX_page_range_t 
   txn->tw.spilled.list = nullptr;
   txn->tw.prefault_write_activated = parent->tw.prefault_write_activated;
 
-  const size_t auxbuf_size = env->ps * 3;
-  txn->tw.txn_page_auxbuf = osal_malloc(auxbuf_size);
-  if (unlikely(!txn->tw.txn_page_auxbuf)) {
-    dpl_free(txn);
-    osal_free(txn);
-    return LOG_IFERR(MDBX_ENOMEM);
-  }
-  memset(txn->tw.txn_page_auxbuf, 0, env->ps);
-  memset(ptr_disp(txn->tw.txn_page_auxbuf, env->ps), -1, env->ps);
-
-  txn->tw.txn_ioring = osal_calloc(1, sizeof(osal_ioring_t));
-  if (unlikely(!txn->tw.txn_ioring)) {
-    osal_free(txn->tw.txn_page_auxbuf);
-    dpl_free(txn);
-    osal_free(txn);
-    return LOG_IFERR(MDBX_ENOMEM);
-  }
-
-  rc = osal_ioring_create(txn->tw.txn_ioring
-#if defined(_WIN32) || defined(_WIN64)
-                          , false, INVALID_HANDLE_VALUE
-#endif
-  );
-  if (unlikely(rc != MDBX_SUCCESS)) {
-    osal_free(txn->tw.txn_ioring);
-    osal_free(txn->tw.txn_page_auxbuf);
-    dpl_free(txn);
-    osal_free(txn);
-    return LOG_IFERR(rc);
-  }
+  /* WRITEMAP mode: no ioring or auxbuf needed (no spill-to-disk) */
+  txn->tw.txn_page_auxbuf = nullptr;
+  txn->tw.txn_ioring = nullptr;
 
   txn->tw.subtxn_next = parent->tw.subtxn_list;
   parent->tw.subtxn_list = txn;
+  txn->tw.assigned_dbi = 0; /* Legacy API: no DBI restriction */
 
   DEBUG("created parallel subtx %p with pages %" PRIu64 "-%" PRIu64,
         (void *)txn, range->begin, range->end);
@@ -15796,28 +15774,98 @@ LIBMDBX_API int mdbx_txn_create_subtx(MDBX_txn *parent, const MDBX_page_range_t 
   return MDBX_SUCCESS;
 }
 
+/* Internal helper to create a subtxn with assigned DBI */
+static int create_subtxn_with_dbi(MDBX_txn *parent, const MDBX_page_range_t *range, MDBX_dbi dbi, MDBX_txn **subtxn) {
+  int rc = mdbx_txn_create_subtx(parent, range, subtxn);
+  if (rc != MDBX_SUCCESS)
+    return rc;
+  (*subtxn)->tw.assigned_dbi = dbi;
+  return MDBX_SUCCESS;
+}
+
+LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
+                                         const MDBX_subtxn_spec_t *specs,
+                                         size_t count,
+                                         MDBX_txn **subtxns) {
+  if (unlikely(!parent || !specs || !subtxns || count == 0))
+    return MDBX_EINVAL;
+
+  /* Initialize output array */
+  for (size_t i = 0; i < count; ++i)
+    subtxns[i] = nullptr;
+
+  int rc = check_txn(parent, MDBX_TXN_BLOCKED);
+  if (unlikely(rc != MDBX_SUCCESS))
+    return LOG_IFERR(rc);
+
+  if (unlikely(parent->flags & MDBX_TXN_RDONLY))
+    return LOG_IFERR(MDBX_EACCESS);
+
+  if (unlikely(!(parent->flags & MDBX_WRITEMAP))) {
+    DEBUG("parallel subtxns require WRITEMAP mode%s", "");
+    return LOG_IFERR(MDBX_INCOMPATIBLE);
+  }
+
+  /* Check for duplicate DBIs in specs */
+  for (size_t i = 0; i < count; ++i) {
+    rc = dbi_check(parent, specs[i].dbi);
+    if (unlikely(rc != MDBX_SUCCESS)) {
+      DEBUG("invalid dbi %u in specs[%zu]", specs[i].dbi, i);
+      return LOG_IFERR(rc);
+    }
+    for (size_t j = i + 1; j < count; ++j) {
+      if (specs[i].dbi == specs[j].dbi) {
+        DEBUG("duplicate dbi %u in specs at indices %zu and %zu",
+              specs[i].dbi, i, j);
+        return LOG_IFERR(MDBX_EINVAL);
+      }
+    }
+  }
+
+  /* Calculate total pages needed */
+  size_t total_pages = 0;
+  for (size_t i = 0; i < count; ++i) {
+    total_pages += specs[i].pages_reserve;
+  }
+
+  /* Reserve all pages at once */
+  MDBX_page_range_t full_range;
+  rc = mdbx_txn_reserve_pages(parent, total_pages, &full_range);
+  if (unlikely(rc != MDBX_SUCCESS))
+    return rc;
+
+  /* Create subtxns with partitioned ranges */
+  uint64_t current_page = full_range.begin;
+  for (size_t i = 0; i < count; ++i) {
+    MDBX_page_range_t range;
+    range.begin = current_page;
+    range.end = current_page + specs[i].pages_reserve;
+    current_page = range.end;
+
+    rc = create_subtxn_with_dbi(parent, &range, specs[i].dbi, &subtxns[i]);
+    if (unlikely(rc != MDBX_SUCCESS)) {
+      /* Rollback: abort already created subtxns */
+      for (size_t j = 0; j < i; ++j) {
+        if (subtxns[j]) {
+          mdbx_subtx_abort(subtxns[j]);
+          subtxns[j] = nullptr;
+        }
+      }
+      return rc;
+    }
+  }
+
+  return MDBX_SUCCESS;
+}
+
 static void subtx_free_resources(MDBX_txn *subtxn) {
-  if (subtxn->tw.txn_ioring) {
-    osal_ioring_destroy(subtxn->tw.txn_ioring);
-    osal_free(subtxn->tw.txn_ioring);
-    subtxn->tw.txn_ioring = nullptr;
-  }
-  if (subtxn->tw.txn_page_auxbuf) {
-    osal_free(subtxn->tw.txn_page_auxbuf);
-    subtxn->tw.txn_page_auxbuf = nullptr;
-  }
-  if (subtxn->tw.dirtylist) {
-    dpl_free(subtxn);
-  }
-  if (subtxn->tw.retired_pages) {
+  /* WRITEMAP mode: no ioring, auxbuf, or dirtylist to free */
+  if (subtxn->tw.retired_pages)
     pnl_free(subtxn->tw.retired_pages);
-  }
-  if (subtxn->tw.repnl) {
+  if (subtxn->tw.repnl)
     pnl_free(subtxn->tw.repnl);
-  }
-  if (subtxn->tw.spilled.list) {
+  if (subtxn->tw.spilled.list)
     pnl_free(subtxn->tw.spilled.list);
-  }
   subtxn->signature = 0;
 }
 
@@ -15851,44 +15899,13 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
   if (unlikely(!parent))
     return LOG_IFERR(MDBX_BAD_TXN);
 
-  DEBUG("committing parallel subtx %p, dirtylist length %zu",
-        (void *)subtxn, subtxn->tw.dirtylist ? subtxn->tw.dirtylist->length : 0);
+  DEBUG("committing parallel subtx %p, dirty_npages %zu",
+        (void *)subtxn, (size_t)subtxn->tw.writemap_dirty_npages);
 
-  /* Merge dirty pages/state into parent */
-  if (subtxn->tw.dirtylist && subtxn->tw.dirtylist->length > 0) {
-    /* Non-WRITEMAP: merge dirtylist entries */
-    dpl_t *const src = subtxn->tw.dirtylist;
-    const size_t count = src->length;
-
-    for (size_t i = 1; i <= count; ++i) {
-      page_t *const page = src->items[i].ptr;
-      const pgno_t pgno = src->items[i].pgno;
-      const unsigned npages = dpl_npages(src, i);
-
-      /* Check if page already exists in parent's dirty list. This can happen
-       * when subtxn touched a page that was already dirty in parent. */
-      const size_t pn = dpl_search(parent, pgno);
-      if (parent->tw.dirtylist->items[pn].pgno == pgno) {
-        /* Page already in parent - skip (it's the same physical page) */
-        continue;
-      }
-
-      int rc = dpl_append(parent, pgno, page, npages);
-      if (unlikely(rc != MDBX_SUCCESS)) {
-        subtxn->flags |= MDBX_TXN_ERROR;
-        return LOG_IFERR(rc);
-      }
-      parent->tw.dirtyroom--;
-    }
-
-    src->length = 0;
+  /* WRITEMAP: pages already modified in-place, just merge the counter */
+  parent->tw.writemap_dirty_npages += subtxn->tw.writemap_dirty_npages;
+  if (subtxn->tw.writemap_dirty_npages > 0)
     parent->flags |= MDBX_TXN_DIRTY;
-  } else if ((subtxn->flags & MDBX_WRITEMAP) && !MDBX_AVOID_MSYNC) {
-    /* WRITEMAP: pages already modified in-place, just merge the counter */
-    parent->tw.writemap_dirty_npages += subtxn->tw.writemap_dirty_npages;
-    if (subtxn->tw.writemap_dirty_npages > 0)
-      parent->flags |= MDBX_TXN_DIRTY;
-  }
 
   /* Merge dbi metadata (B-tree roots, stats) for modified databases.
    * Note: This only works correctly when subtxns are committed serially

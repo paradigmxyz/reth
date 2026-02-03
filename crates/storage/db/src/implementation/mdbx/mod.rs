@@ -677,7 +677,7 @@ mod tests {
     ///
     /// This demonstrates using the parallel subtxn API to write to two different
     /// tables concurrently from separate threads, then committing serially.
-    /// Uses pure FFI to create a non-WriteMap environment (WriteMap doesn't support nested txns).
+    /// Uses pure FFI to test parallel writes with WriteMap mode (required for parallel subtxns).
     #[test]
     fn db_parallel_writes_two_tables() {
         use std::{
@@ -691,13 +691,18 @@ mod tests {
         let path = CString::new(tempdir.path().to_str().unwrap()).unwrap();
 
         unsafe {
-            // Create environment without WriteMap
+            // Create environment with WriteMap (required for parallel subtxns)
             let mut env: *mut ffi::MDBX_env = ptr::null_mut();
             let rc = ffi::mdbx_env_create(&mut env);
             assert_eq!(rc, 0, "mdbx_env_create failed");
 
             ffi::mdbx_env_set_option(env, ffi::MDBX_opt_max_db, 4);
-            let rc = ffi::mdbx_env_open(env, path.as_ptr(), ffi::MDBX_NOSTICKYTHREADS, 0o644);
+            let rc = ffi::mdbx_env_open(
+                env,
+                path.as_ptr(),
+                ffi::MDBX_NOSTICKYTHREADS | ffi::MDBX_WRITEMAP,
+                0o644,
+            );
             assert_eq!(rc, 0, "mdbx_env_open failed");
 
             // Begin parent write transaction

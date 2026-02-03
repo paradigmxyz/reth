@@ -22,12 +22,12 @@ fn test_parallel_subtx_basic() {
     let path = std::ffi::CString::new(dir.path().to_str().unwrap()).unwrap();
 
     unsafe {
-        // Create environment
+        // Create environment with WRITEMAP (required for parallel subtxns)
         let mut env: *mut ffi::MDBX_env = ptr::null_mut();
         let rc = ffi::mdbx_env_create(&mut env);
         assert_eq!(rc, 0, "mdbx_env_create failed");
 
-        let rc = ffi::mdbx_env_open(env, path.as_ptr(), ffi::MDBX_env_flags_t::default(), 0o644);
+        let rc = ffi::mdbx_env_open(env, path.as_ptr(), ffi::MDBX_WRITEMAP, 0o644);
         assert_eq!(rc, 0, "mdbx_env_open failed");
 
         // Begin write transaction
@@ -118,7 +118,7 @@ fn test_parallel_subtx_abort() {
         let rc = ffi::mdbx_env_create(&mut env);
         assert_eq!(rc, 0);
 
-        let rc = ffi::mdbx_env_open(env, path.as_ptr(), ffi::MDBX_env_flags_t::default(), 0o644);
+        let rc = ffi::mdbx_env_open(env, path.as_ptr(), ffi::MDBX_WRITEMAP, 0o644);
         assert_eq!(rc, 0);
 
         // Begin write transaction
@@ -200,7 +200,7 @@ fn test_parallel_subtx_threaded() {
     unsafe {
         let mut env: *mut ffi::MDBX_env = ptr::null_mut();
         ffi::mdbx_env_create(&mut env);
-        ffi::mdbx_env_open(env, path.as_ptr(), ffi::MDBX_env_flags_t::default(), 0o644);
+        ffi::mdbx_env_open(env, path.as_ptr(), ffi::MDBX_WRITEMAP, 0o644);
 
         // Begin write transaction
         let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
@@ -295,7 +295,7 @@ fn test_parallel_subtx_different_dbis() {
         let mut env: *mut ffi::MDBX_env = ptr::null_mut();
         ffi::mdbx_env_create(&mut env);
         ffi::mdbx_env_set_option(env, ffi::MDBX_opt_max_db, 4);
-        ffi::mdbx_env_open(env, path.as_ptr(), ffi::MDBX_NOSTICKYTHREADS, 0o644);
+        ffi::mdbx_env_open(env, path.as_ptr(), ffi::MDBX_NOSTICKYTHREADS | ffi::MDBX_WRITEMAP, 0o644);
 
         // Begin write transaction
         let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
