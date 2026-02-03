@@ -354,6 +354,14 @@ impl DataReader {
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let offset_mmap = unsafe { Mmap::map(&offset_file)? };
 
+        // Hint to the kernel that access patterns are random, which deprioritizes these pages
+        // for eviction relative to sequentially-accessed pages (like MDBX).
+        #[cfg(unix)]
+        {
+            data_mmap.advise(memmap2::Advice::Random).ok();
+            offset_mmap.advise(memmap2::Advice::Random).ok();
+        }
+
         // First byte is the size of one offset in bytes
         let offset_size = offset_mmap[0];
 
