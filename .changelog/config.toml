@@ -15,6 +15,6 @@ members = ["reth", "op-reth"]
 
 # Packages to ignore (internal/test-only crates)
 ignore = [
-  "reth-testing-utils",
-  "reth-bench",
+    "reth-testing-utils",
+    "reth-bench",
 ]
