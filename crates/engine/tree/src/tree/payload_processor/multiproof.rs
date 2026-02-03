@@ -22,7 +22,7 @@ use reth_trie_parallel::{
         AccountMultiproofInput, ProofResult, ProofResultContext, ProofResultMessage,
         ProofWorkerHandle,
     },
-    targets_v2::{ChunkedMultiProofTargetsV2, MultiProofTargetsV2},
+    targets_v2::MultiProofTargetsV2,
 };
 use revm_primitives::map::{hash_map, B256Map};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
@@ -63,7 +63,7 @@ const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
-const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
+pub(crate) const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
@@ -311,11 +311,7 @@ impl VersionedMultiProofTargets {
     fn chunking_length(&self) -> usize {
         match self {
             Self::Legacy(targets) => targets.chunking_length(),
-            Self::V2(targets) => {
-                // For V2, count accounts + storage slots
-                targets.account_targets.len() +
-                    targets.storage_targets.values().map(|slots| slots.len()).sum::<usize>()
-            }
+            Self::V2(targets) => targets.chunking_length(),
         }
     }
 
@@ -367,9 +363,7 @@ impl VersionedMultiProofTargets {
             Self::Legacy(targets) => {
                 Box::new(MultiProofTargets::chunks(targets, chunk_size).map(Self::Legacy))
             }
-            Self::V2(targets) => {
-                Box::new(ChunkedMultiProofTargetsV2::new(targets, chunk_size).map(Self::V2))
-            }
+            Self::V2(targets) => Box::new(targets.chunks(chunk_size).map(Self::V2)),
         }
     }
 }
@@ -1494,7 +1488,7 @@ fn get_proof_targets(
 /// Dispatches work items as a single unit or in chunks based on target size and worker
 /// availability.
 #[allow(clippy::too_many_arguments)]
-fn dispatch_with_chunking<T, I>(
+pub(crate) fn dispatch_with_chunking<T, I>(
     items: T,
     chunking_len: usize,
     chunk_size: Option<usize>,
