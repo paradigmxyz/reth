@@ -367,10 +367,27 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let mut csoff_writer =
             ChangesetOffsetWriter::new(&csoff_path, committed_len).map_err(ProviderError::other)?;
 
-        // If we have offsets, validate the last one doesn't exceed actual rows
-        if committed_len > 0 && actual_rows > 0 {
+        // If we have offsets, validate they don't exceed actual rows
+        if committed_len > 0 {
+            // Edge case: if actual_rows is 0 but we have offsets, all offsets are invalid
+            if actual_rows == 0 {
+                tracing::warn!(
+                    target: "reth::static_file",
+                    path = %csoff_path.display(),
+                    committed_len,
+                    "Truncating all changeset offsets - data file is empty"
+                );
+                csoff_writer.truncate(0).map_err(ProviderError::other)?;
+                self.writer.user_header_mut().set_changeset_offsets_len(0);
+                self.writer.user_header_mut().prune(committed_len);
+                self.writer.commit().map_err(ProviderError::other)?;
+                self.changeset_offsets = Some(csoff_writer);
+                return Ok(());
+            }
+            // Use with_len to respect committed length (writer already healed file to this length)
             let mut reader =
-                ChangesetOffsetReader::new(&csoff_path).map_err(ProviderError::other)?;
+                ChangesetOffsetReader::with_len(&csoff_path, committed_len)
+                    .map_err(ProviderError::other)?;
 
             if let Some(last_offset) =
                 reader.get(committed_len - 1).map_err(ProviderError::other)?
@@ -798,8 +815,10 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             self.writer.rows() as u64
         } else {
             // Read offset for the block after last_block from sidecar
+            // Use with_len to respect the committed length from header, not file length
             let mut reader =
-                ChangesetOffsetReader::new(&csoff_path).map_err(ProviderError::other)?;
+                ChangesetOffsetReader::with_len(&csoff_path, changeset_offsets_len)
+                    .map_err(ProviderError::other)?;
             if let Some(next_offset) = reader.get(blocks_to_keep).map_err(ProviderError::other)? {
                 next_offset.offset()
             } else {
