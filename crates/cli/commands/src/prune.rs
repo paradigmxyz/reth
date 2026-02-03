@@ -80,7 +80,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
             });
 
             // Use batched pruning with a limit to bound memory, running in a loop until complete.
-            const DELETE_LIMIT: usize = 200_000;
+            //
+            // A limit of 20_000_000 results in a max memory usage of ~5G.
+            const DELETE_LIMIT: usize = 20_000_000;
             let mut pruner = PrunerBuilder::new(config)
                 .delete_limit(DELETE_LIMIT)
                 .build_with_provider_factory(provider_factory);
