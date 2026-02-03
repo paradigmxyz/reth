@@ -670,11 +670,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     where
         F: FnOnce(&mut StaticFileProviderRWRefMut<'_, N>) -> ProviderResult<()> + Send + 'env,
     {
-        scope.spawn(move || {
-            let mut w = self.get_writer(first_block_number, segment)?;
-            f(&mut w)?;
-            w.sync_all()
-        })
+        thread::Builder::new()
+            .name(format!("{segment}"))
+            .spawn_scoped(scope, move || {
+                let mut w = self.get_writer(first_block_number, segment)?;
+                f(&mut w)?;
+                w.sync_all()
+            })
+            // Same panic happens in `scope.spawn`
+            .expect("failed to spawn thread")
     }
 
     /// Writes all static file data for multiple blocks in parallel per-segment.
