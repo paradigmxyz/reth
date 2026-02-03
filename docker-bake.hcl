@@ -39,7 +39,15 @@ group "default" {
 }
 
 group "nightly" {
-  targets = ["ethereum", "ethereum-profiling", "ethereum-edge-profiling", "optimism", "optimism-profiling"]
+  targets = [
+    "ethereum-amd64",
+    "ethereum-arm64",
+    "ethereum-profiling",
+    "ethereum-edge-profiling",
+    "optimism-amd64",
+    "optimism-arm64",
+    "optimism-profiling"
+  ]
 }
 
 // Base target with shared configuration
@@ -98,10 +106,6 @@ target "ethereum-arm64" {
   tags = ["${REGISTRY}/reth:${TAG}"]
 }
 
-group "ethereum" {
-  targets = ["ethereum-amd64", "ethereum-arm64"]
-}
-
 target "ethereum-profiling" {
   inherits = ["_base_profiling"]
   args = {
@@ -141,10 +145,6 @@ target "optimism-arm64" {
     MANIFEST_PATH = "crates/optimism/bin"
   }
   tags = ["${REGISTRY}/op-reth:${TAG}"]
-}
-
-group "optimism" {
-  targets = ["optimism-amd64", "optimism-arm64"]
 }
 
 target "optimism-profiling" {
