@@ -534,9 +534,9 @@ impl ExecutionCache {
 
     /// Build an [`ExecutionCache`] struct, so that execution caches can be easily cloned.
     pub fn new(total_cache_size: usize) -> Self {
+        let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
         let storage_cache_size = (total_cache_size * 8888) / 10000; // 88.88% of total
         let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
-        let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
 
         let code_capacity = Self::bytes_to_entries(code_cache_size, CODE_CACHE_ENTRY_SIZE);
         let storage_capacity = Self::bytes_to_entries(storage_cache_size, STORAGE_CACHE_ENTRY_SIZE);
