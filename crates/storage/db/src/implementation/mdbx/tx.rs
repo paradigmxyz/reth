@@ -505,6 +505,18 @@ impl DbTxMut for Tx<RW> {
             self.new_cursor()
         }
     }
+
+    fn enable_parallel_writes(&self) -> Result<(), DatabaseError> {
+        Tx::enable_parallel_writes(self)
+    }
+
+    fn is_parallel_writes_enabled(&self) -> bool {
+        Tx::is_parallel_writes_enabled(self)
+    }
+
+    fn commit_subtxns(&self) -> Result<(), DatabaseError> {
+        Tx::commit_subtxns(self)
+    }
 }
 
 #[cfg(test)]

@@ -76,4 +76,20 @@ pub trait DbTxMut: Send {
     fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError>;
     /// `DupCursor` mut.
     fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError>;
+
+    /// Enables parallel writes mode, allowing multiple threads to write to different tables
+    /// simultaneously. Must be called before any parallel cursor operations.
+    fn enable_parallel_writes(&self) -> Result<(), DatabaseError> {
+        Ok(())
+    }
+
+    /// Returns whether parallel writes mode is currently enabled.
+    fn is_parallel_writes_enabled(&self) -> bool {
+        false
+    }
+
+    /// Commits all sub-transactions created during parallel writes.
+    fn commit_subtxns(&self) -> Result<(), DatabaseError> {
+        Ok(())
+    }
 }
