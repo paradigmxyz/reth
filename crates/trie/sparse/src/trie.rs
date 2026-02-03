@@ -1984,6 +1984,16 @@ impl SparseNode {
             }
         }
     }
+
+    /// Returns the memory size of this node in bytes.
+    pub const fn memory_size(&self) -> usize {
+        match self {
+            Self::Empty | Self::Hash(_) | Self::Branch { .. } => core::mem::size_of::<Self>(),
+            Self::Leaf { key, .. } | Self::Extension { key, .. } => {
+                core::mem::size_of::<Self>() + key.len()
+            }
+        }
+    }
 }
 
 /// A helper struct used to store information about a node that has been removed
