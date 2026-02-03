@@ -431,7 +431,7 @@ where
             changeset_cache,
         );
         let incoming = task.incoming_tx.clone();
-        std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();
+        std::thread::Builder::new().name("engine".to_string()).spawn(|| task.run()).unwrap();
         (incoming, outgoing)
     }
 
