@@ -1116,7 +1116,6 @@ where
             categorize_duration,
             sort_duration,
             eviction_duration,
-            memory_calc_duration,
         } = storage_result;
 
         let mut stats = account_stats;
@@ -1152,10 +1151,6 @@ where
                 .prune
                 .storage_eviction_duration
                 .record(eviction_duration.as_micros() as f64);
-            self.metrics
-                .prune
-                .storage_memory_calc_duration
-                .record(memory_calc_duration.as_micros() as f64);
             self.metrics.prune.storage_tries_categorized.record(tries_categorized as f64);
         }
 
@@ -1208,7 +1203,7 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
         config: &crate::hot_accounts::SmartPruneConfig<'_>,
     ) -> StorageTriePruneResult {
         use crate::{hot_accounts::TrieKind, PruneTrieStats};
-        use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+        use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 
         let fn_start = std::time::Instant::now();
 
@@ -1217,23 +1212,34 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
         self.modifications.update_and_reset();
         let update_tracking_duration = update_tracking_start.elapsed();
 
-        // Section 2: Categorize tries by hotness and collect memory sizes
+        // Section 2: Categorize tries by hotness and collect memory sizes (parallel)
         let categorize_start = std::time::Instant::now();
-        let mut hot_tries: Vec<(B256, usize)> = Vec::new(); // (address, memory)
-        let mut cold_tries: Vec<(B256, usize, u8)> = Vec::new(); // (address, memory, heat)
         let tries_categorized = self.tries.len();
 
-        for (address, trie) in &self.tries {
-            let mem = match trie {
-                RevealableSparseTrie::Blind(_) => 0,
-                RevealableSparseTrie::Revealed(t) => t.memory_size(),
-            };
+        // Collect (address, memory, is_hot, heat) tuples in parallel
+        let categorized: Vec<_> = self
+            .tries
+            .par_iter()
+            .map(|(address, trie)| {
+                let mem = match trie {
+                    RevealableSparseTrie::Blind(_) => 0,
+                    RevealableSparseTrie::Revealed(t) => t.memory_size(),
+                };
+                let is_hot = config.hot_accounts.should_preserve_storage(address);
+                // Only compute heat for cold tries
+                let heat = if is_hot { 0 } else { self.modifications.heat(address) };
+                (*address, mem, is_hot, heat)
+            })
+            .collect();
 
-            if config.hot_accounts.should_preserve_storage(address) {
-                hot_tries.push((*address, mem));
+        // Partition into hot and cold tries
+        let mut hot_tries: Vec<(B256, usize)> = Vec::new();
+        let mut cold_tries: Vec<(B256, usize, u8)> = Vec::new();
+        for (address, mem, is_hot, heat) in categorized {
+            if is_hot {
+                hot_tries.push((address, mem));
             } else {
-                let heat = self.modifications.heat(address);
-                cold_tries.push((*address, mem, heat));
+                cold_tries.push((address, mem, heat));
             }
         }
 
@@ -1374,17 +1380,10 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             }
         }
 
-        // Section 5: Calculate final memory
-        let memory_calc_start = std::time::Instant::now();
-        let total_memory = self
-            .tries
-            .values()
-            .map(|t| match t {
-                RevealableSparseTrie::Blind(_) => 0,
-                RevealableSparseTrie::Revealed(t) => t.memory_size(),
-            })
-            .sum();
-        let memory_calc_duration = memory_calc_start.elapsed();
+        // Use pre-computed memory from categorization (lags by one block after pruning, but avoids
+        // expensive re-iteration). This is the memory of tries we kept (hot + cold that fit
+        // budget).
+        let total_memory = hot_memory + cold_memory;
 
         let duration = fn_start.elapsed();
 
@@ -1402,7 +1401,6 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             categorize_us = categorize_duration.as_micros(),
             sort_us = sort_duration.as_micros(),
             eviction_us = eviction_duration.as_micros(),
-            memory_calc_us = memory_calc_duration.as_micros(),
             elapsed = ?duration,
             "StorageTries::prune_preserving completed"
         );
@@ -1420,7 +1418,6 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             categorize_duration,
             sort_duration,
             eviction_duration,
-            memory_calc_duration,
         }
     }
 }
@@ -1454,8 +1451,6 @@ struct StorageTriePruneResult {
     sort_duration: core::time::Duration,
     /// Time spent evicting cold tries.
     eviction_duration: core::time::Duration,
-    /// Time spent calculating final memory.
-    memory_calc_duration: core::time::Duration,
 }
 
 impl<S: SparseTrieTrait> StorageTries<S> {

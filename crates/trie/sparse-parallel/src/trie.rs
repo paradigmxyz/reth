@@ -2247,18 +2247,6 @@ impl ParallelSparseTrie {
         size += self.branch_node_masks.len() *
             (core::mem::size_of::<Nibbles>() + core::mem::size_of::<BranchNodeMasks>());
 
-        // Updates if present
-        if let Some(updates) = &self.updates {
-            size += updates.updated_nodes.len() *
-                (core::mem::size_of::<Nibbles>() + core::mem::size_of::<BranchNodeCompact>());
-            size += updates.removed_nodes.len() * core::mem::size_of::<Nibbles>();
-        }
-
-        // Update actions buffers
-        for buf in &self.update_actions_buffers {
-            size += buf.capacity() * core::mem::size_of::<SparseTrieUpdatesAction>();
-        }
-
         size
     }
 }
@@ -2957,25 +2945,24 @@ impl SparseSubtrie {
     }
 
     /// Returns a heuristic for the in-memory size of this subtrie in bytes.
+    ///
+    /// Uses capacity-based estimation to avoid iterating all entries.
     pub(crate) fn memory_size(&self) -> usize {
+        // Base struct size
         let mut size = core::mem::size_of::<Self>();
 
-        // Nodes map: key (Nibbles) + value (SparseNode)
-        for (path, node) in &self.nodes {
-            size += core::mem::size_of::<Nibbles>();
-            size += path.len(); // Nibbles heap allocation
-            size += node.memory_size();
-        }
+        // Nodes map: Nibbles (40 bytes, all inline) + SparseNode (72 bytes, all inline)
+        // No heap allocations - Nibbles uses U256 internally which is stack-allocated
+        const NODE_ENTRY_SIZE: usize =
+            core::mem::size_of::<Nibbles>() + core::mem::size_of::<SparseNode>();
+        size += self.nodes.capacity() * NODE_ENTRY_SIZE;
 
-        // Values map: key (Nibbles) + value (Vec<u8>)
-        for (path, value) in &self.inner.values {
-            size += core::mem::size_of::<Nibbles>();
-            size += path.len(); // Nibbles heap allocation
-            size += core::mem::size_of::<Vec<u8>>() + value.capacity();
+        // Values map: track accurately since Vec<u8> has variable heap size
+        for value in self.inner.values.values() {
+            size += core::mem::size_of::<Nibbles>() +
+                core::mem::size_of::<Vec<u8>>() +
+                value.capacity();
         }
-
-        // Buffers
-        size += self.inner.buffers.memory_size();
 
         size
     }
@@ -3451,19 +3438,6 @@ impl SparseSubtrieBuffers {
         self.branch_child_buf.clear();
         self.branch_value_stack_buf.clear();
         self.rlp_buf.clear();
-    }
-
-    /// Returns a heuristic for the in-memory size of these buffers in bytes.
-    const fn memory_size(&self) -> usize {
-        let mut size = core::mem::size_of::<Self>();
-
-        size += self.path_stack.capacity() * core::mem::size_of::<RlpNodePathStackItem>();
-        size += self.rlp_node_stack.capacity() * core::mem::size_of::<RlpNodeStackItem>();
-        size += self.branch_child_buf.capacity() * core::mem::size_of::<Nibbles>();
-        size += self.branch_value_stack_buf.capacity() * core::mem::size_of::<RlpNode>();
-        size += self.rlp_buf.capacity();
-
-        size
     }
 }
 
