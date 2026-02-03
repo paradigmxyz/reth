@@ -167,8 +167,25 @@ impl ChangesetOffsetReader {
 
     /// Opens with an explicit length (from header metadata).
     /// Any records beyond `len` are ignored.
+    ///
+    /// Returns an error if the file has fewer records than `len` (data corruption).
     pub fn with_len(path: impl AsRef<Path>, len: u64) -> io::Result<Self> {
-        let file = File::open(path)?;
+        let file = File::open(&path)?;
+        let file_len = file.metadata()?.len();
+        let records_in_file = file_len / Self::RECORD_SIZE as u64;
+
+        if records_in_file < len {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Changeset offset sidecar has {} records but expected at least {}: {}",
+                    records_in_file,
+                    len,
+                    path.as_ref().display()
+                ),
+            ));
+        }
+
         Ok(Self { file, len })
     }
 
@@ -427,6 +444,26 @@ mod tests {
 
         // Try to open with committed_len=3 (header claims more than file has)
         let result = ChangesetOffsetWriter::new(&path, 3);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn test_reader_with_len_shorter_than_file_errors() {
+        // If header claims more records than file has, with_len should error (data corruption).
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.csoff");
+
+        // Write 1 record
+        {
+            let mut writer = ChangesetOffsetWriter::new(&path, 0).unwrap();
+            writer.append(&ChangesetOffset::new(0, 5)).unwrap();
+            writer.sync().unwrap();
+        }
+
+        // Try to open reader with len=3 (header claims more than file has)
+        let result = ChangesetOffsetReader::with_len(&path, 3);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
