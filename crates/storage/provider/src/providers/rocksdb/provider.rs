@@ -818,6 +818,7 @@ impl RocksDBProvider {
         Ok(())
     }
 
+    #[inline]
     fn get_boundary<T: Table>(
         &self,
         mode: IteratorMode<'_>,
