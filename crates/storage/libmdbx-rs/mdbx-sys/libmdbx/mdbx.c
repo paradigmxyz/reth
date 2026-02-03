@@ -4269,6 +4269,7 @@ struct MDBX_txn {
       MDBX_txn *subtxn_list;        /* List of child parallel subtxns */
       MDBX_txn *subtxn_next;        /* Next sibling in parent's subtxn_list */
       MDBX_dbi assigned_dbi;        /* DBI this subtxn is bound to (0 = none/legacy) */
+      pnl_t subtxn_repnl;           /* Pre-claimed reclaimed pages for this subtxn */
     } tw;
   };
 };
@@ -15762,6 +15763,7 @@ LIBMDBX_API int mdbx_txn_create_subtx(MDBX_txn *parent, const MDBX_page_range_t 
   /* WRITEMAP mode: no ioring or auxbuf needed (no spill-to-disk) */
   txn->tw.txn_page_auxbuf = nullptr;
   txn->tw.txn_ioring = nullptr;
+  txn->tw.subtxn_repnl = nullptr; /* Will be set by mdbx_txn_create_subtxns */
 
   txn->tw.subtxn_next = parent->tw.subtxn_list;
   parent->tw.subtxn_list = txn;
@@ -15822,25 +15824,71 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
     }
   }
 
+  /* === GC-FIRST ALLOCATION STRATEGY ===
+   * 1. Harvest available pages from parent's repnl (reclaimed GC pages)
+   *    and loose_pages (freed within this txn)
+   * 2. Distribute harvested pages among subtxns
+   * 3. Only reserve EOF pages if GC pages are insufficient
+   */
+
+  /* Count available GC pages */
+  size_t gc_available = 0;
+  if (parent->tw.repnl)
+    gc_available += MDBX_PNL_GETSIZE(parent->tw.repnl);
+  gc_available += parent->tw.loose_count;
+
+  DEBUG("parallel subtxns: %zu GC pages available (repnl=%zu, loose=%zu)",
+        gc_available,
+        parent->tw.repnl ? MDBX_PNL_GETSIZE(parent->tw.repnl) : 0,
+        parent->tw.loose_count);
+
   /* Calculate total pages needed */
   size_t total_pages = 0;
   for (size_t i = 0; i < count; ++i) {
     total_pages += specs[i].pages_reserve;
   }
 
-  /* Reserve all pages at once */
-  MDBX_page_range_t full_range;
-  rc = mdbx_txn_reserve_pages(parent, total_pages, &full_range);
-  if (unlikely(rc != MDBX_SUCCESS))
-    return rc;
+  /* Determine how many pages come from GC vs EOF */
+  size_t gc_to_use = (gc_available < total_pages) ? gc_available : total_pages;
+  size_t eof_needed = total_pages - gc_to_use;
 
-  /* Create subtxns with partitioned ranges */
-  uint64_t current_page = full_range.begin;
+  /* Reserve EOF pages only if needed */
+  MDBX_page_range_t eof_range = {0, 0};
+  if (eof_needed > 0) {
+    rc = mdbx_txn_reserve_pages(parent, eof_needed, &eof_range);
+    if (unlikely(rc != MDBX_SUCCESS))
+      return rc;
+  }
+
+  DEBUG("parallel subtxns: using %zu GC pages + %zu EOF pages (%" PRIu64 "-%" PRIu64 ")",
+        gc_to_use, eof_needed, eof_range.begin, eof_range.end);
+
+  /* Create subtxns and distribute pages */
+  size_t gc_offset = 0;  /* Offset into parent's repnl */
+  uint64_t eof_current = eof_range.begin;
+
   for (size_t i = 0; i < count; ++i) {
+    size_t pages_wanted = specs[i].pages_reserve;
+
+    /* Calculate how many GC pages this subtxn gets */
+    size_t gc_for_this = 0;
+    if (gc_to_use > 0 && gc_offset < gc_to_use) {
+      /* Distribute GC pages proportionally (or equally for simplicity) */
+      size_t gc_remaining = gc_to_use - gc_offset;
+      size_t subtxns_remaining = count - i;
+      gc_for_this = gc_remaining / subtxns_remaining;
+      if (gc_for_this > pages_wanted)
+        gc_for_this = pages_wanted;
+    }
+
+    /* Remaining pages come from EOF */
+    size_t eof_for_this = pages_wanted - gc_for_this;
+
+    /* Create the subtxn with EOF range (may be empty if all from GC) */
     MDBX_page_range_t range;
-    range.begin = current_page;
-    range.end = current_page + specs[i].pages_reserve;
-    current_page = range.end;
+    range.begin = eof_current;
+    range.end = eof_current + eof_for_this;
+    eof_current = range.end;
 
     rc = create_subtxn_with_dbi(parent, &range, specs[i].dbi, &subtxns[i]);
     if (unlikely(rc != MDBX_SUCCESS)) {
@@ -15853,6 +15901,50 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
       }
       return rc;
     }
+
+    /* Allocate and populate subtxn's private repnl from parent's repnl */
+    if (gc_for_this > 0) {
+      pnl_t subtxn_pnl = pnl_alloc(gc_for_this);
+      if (unlikely(!subtxn_pnl)) {
+        for (size_t j = 0; j <= i; ++j) {
+          if (subtxns[j]) {
+            mdbx_subtx_abort(subtxns[j]);
+            subtxns[j] = nullptr;
+          }
+        }
+        return LOG_IFERR(MDBX_ENOMEM);
+      }
+
+      /* Copy pages from parent's repnl */
+      pnl_t parent_repnl = parent->tw.repnl;
+      size_t parent_repnl_size = parent_repnl ? MDBX_PNL_GETSIZE(parent_repnl) : 0;
+
+      for (size_t j = 0; j < gc_for_this && gc_offset < parent_repnl_size; ++j, ++gc_offset) {
+        pnl_append_prereserved(subtxn_pnl, parent_repnl[gc_offset + 1]);
+      }
+
+      /* If we still need more, take from loose_pages */
+      while (MDBX_PNL_GETSIZE(subtxn_pnl) < gc_for_this && parent->tw.loose_pages) {
+        page_t *lp = parent->tw.loose_pages;
+        parent->tw.loose_pages = page_next(lp);
+        parent->tw.loose_count--;
+        pnl_append_prereserved(subtxn_pnl, lp->pgno);
+      }
+
+      subtxns[i]->tw.subtxn_repnl = subtxn_pnl;
+      DEBUG("subtxn %zu: assigned %zu GC pages", i, MDBX_PNL_GETSIZE(subtxn_pnl));
+    }
+  }
+
+  /* Clear parent's repnl of pages we distributed (they're now owned by subtxns) */
+  if (parent->tw.repnl && gc_offset > 0) {
+    size_t remaining = MDBX_PNL_GETSIZE(parent->tw.repnl) - gc_offset;
+    if (remaining > 0) {
+      /* Shift remaining pages down */
+      memmove(&parent->tw.repnl[1], &parent->tw.repnl[gc_offset + 1],
+              remaining * sizeof(pgno_t));
+    }
+    MDBX_PNL_SETSIZE(parent->tw.repnl, remaining);
   }
 
   return MDBX_SUCCESS;
@@ -15866,6 +15958,8 @@ static void subtx_free_resources(MDBX_txn *subtxn) {
     pnl_free(subtxn->tw.repnl);
   if (subtxn->tw.spilled.list)
     pnl_free(subtxn->tw.spilled.list);
+  if (subtxn->tw.subtxn_repnl)
+    pnl_free(subtxn->tw.subtxn_repnl);
   subtxn->signature = 0;
 }
 
@@ -22799,13 +22893,21 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
   MDBX_txn *const txn = mc->txn;
   MDBX_env *const env = txn->env;
 
-  /* For parallel subtxns, use the bump allocator from reserved range */
+  /* For parallel subtxns: try subtxn_repnl first, then suballoc (EOF range) */
   if (txn->flags & txn_parallel_subtx) {
     if (num == 0) {
       ret.page = nullptr;
       ret.err = MDBX_SUCCESS;
       return ret;
     }
+    /* For single-page allocs, try subtxn's pre-claimed GC pages first */
+    if (num == 1 && txn->tw.subtxn_repnl && MDBX_PNL_GETSIZE(txn->tw.subtxn_repnl) > 0) {
+      const size_t idx = MDBX_PNL_GETSIZE(txn->tw.subtxn_repnl);
+      const pgno_t pgno = txn->tw.subtxn_repnl[idx];
+      MDBX_PNL_SETSIZE(txn->tw.subtxn_repnl, idx - 1);
+      return page_alloc_finalize(env, txn, mc, pgno, 1);
+    }
+    /* Fall back to bump allocator from reserved EOF range (works for multi-page too) */
     if (txn->tw.suballoc.next + num <= txn->tw.suballoc.end) {
       const pgno_t pgno = txn->tw.suballoc.next;
       txn->tw.suballoc.next += (pgno_t)num;
@@ -23294,8 +23396,16 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
   tASSERT(txn, mc->txn->flags & MDBX_TXN_DIRTY);
   tASSERT(txn, F_ISSET(*cursor_dbi_state(mc), DBI_LINDO | DBI_VALID | DBI_DIRTY));
 
-  /* For parallel subtxns, use the bump allocator from reserved range */
+  /* For parallel subtxns: try subtxn_repnl first, then suballoc (EOF range) */
   if (txn->flags & txn_parallel_subtx) {
+    /* First try subtxn's pre-claimed GC pages */
+    if (txn->tw.subtxn_repnl && MDBX_PNL_GETSIZE(txn->tw.subtxn_repnl) > 0) {
+      const size_t idx = MDBX_PNL_GETSIZE(txn->tw.subtxn_repnl);
+      const pgno_t pgno = txn->tw.subtxn_repnl[idx];
+      MDBX_PNL_SETSIZE(txn->tw.subtxn_repnl, idx - 1);
+      return page_alloc_finalize(txn->env, txn, mc, pgno, 1);
+    }
+    /* Fall back to bump allocator from reserved EOF range */
     if (txn->tw.suballoc.next < txn->tw.suballoc.end) {
       const pgno_t pgno = txn->tw.suballoc.next++;
       return page_alloc_finalize(txn->env, txn, mc, pgno, 1);
