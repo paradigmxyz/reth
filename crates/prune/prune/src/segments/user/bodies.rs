@@ -49,7 +49,8 @@ impl Bodies {
 
         // Determine the safe prune target, if any.
         // tx_lookup's next_pruned_block tells us what block it will prune next.
-        // - None: tx_lookup has finished pruning (reached its target), bodies can prune freely
+        // - None: tx_lookup will never prune more blocks (e.g. Before(N) reached its target), so
+        //   bodies can prune freely
         // - Some(next) > to_block: tx_lookup is ahead of our target, so we're safe to prune
         //   to_block
         // - Some(next) <= to_block: tx_lookup still needs to prune blocks we want to delete, so we
