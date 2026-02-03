@@ -540,7 +540,7 @@ mod tests {
             "--engine.sparse-trie-prune-depth",
             "10",
             "--engine.sparse-trie-max-memory-mb",
-            "536870912",
+            "512",
         ])
         .args;
 
