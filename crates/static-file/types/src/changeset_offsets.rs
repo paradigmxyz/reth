@@ -308,4 +308,63 @@ mod tests {
         let range = reader.get_range(0, 5).unwrap();
         assert_eq!(range.len(), 2);
     }
+
+    #[test]
+    fn test_truncate_uncommitted_records() {
+        // Simulates crash recovery where sidecar has more records than committed header length.
+        // The caller (StaticFileProviderRW::new) should truncate the sidecar to match.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.csoff");
+
+        // Simulate: wrote 3 records, synced sidecar, but header only committed len=2
+        {
+            let mut writer = ChangesetOffsetWriter::new(&path).unwrap();
+            writer.append(&ChangesetOffset::new(0, 5)).unwrap();
+            writer.append(&ChangesetOffset::new(5, 10)).unwrap();
+            writer.append(&ChangesetOffset::new(15, 7)).unwrap(); // uncommitted
+            writer.sync().unwrap();
+            assert_eq!(writer.len(), 3);
+        }
+
+        // On "restart", caller detects mismatch and truncates to committed length
+        let committed_len = 2u64;
+        {
+            let mut writer = ChangesetOffsetWriter::new(&path).unwrap();
+            assert_eq!(writer.len(), 3); // Still has all records
+
+            // Caller heals by truncating to committed length
+            writer.truncate(committed_len).unwrap();
+            assert_eq!(writer.len(), 2);
+        }
+
+        // Verify file is now correct length and new appends go to the right place
+        {
+            let mut writer = ChangesetOffsetWriter::new(&path).unwrap();
+            assert_eq!(writer.len(), 2);
+
+            // Append a new record - should be at index 2, not index 3
+            writer.append(&ChangesetOffset::new(15, 20)).unwrap();
+            writer.sync().unwrap();
+            assert_eq!(writer.len(), 3);
+        }
+
+        // Verify the records are correct
+        {
+            let mut reader = ChangesetOffsetReader::new(&path).unwrap();
+            assert_eq!(reader.len(), 3);
+
+            let entry0 = reader.get(0).unwrap().unwrap();
+            assert_eq!(entry0.offset(), 0);
+            assert_eq!(entry0.num_changes(), 5);
+
+            let entry1 = reader.get(1).unwrap().unwrap();
+            assert_eq!(entry1.offset(), 5);
+            assert_eq!(entry1.num_changes(), 10);
+
+            // This should be the NEW record, not the old uncommitted one
+            let entry2 = reader.get(2).unwrap().unwrap();
+            assert_eq!(entry2.offset(), 15);
+            assert_eq!(entry2.num_changes(), 20); // Not 7 from the old uncommitted record
+        }
+    }
 }
