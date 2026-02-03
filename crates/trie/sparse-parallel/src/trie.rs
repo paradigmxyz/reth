@@ -106,7 +106,7 @@ pub struct ParallelSparseTrie {
     /// This contains the trie nodes for the upper part of the trie.
     upper_subtrie: Box<SparseSubtrie>,
     /// An array containing the subtries at the second level of the trie.
-    lower_subtries: [LowerSparseSubtrie; NUM_LOWER_SUBTRIES],
+    lower_subtries: Box<[LowerSparseSubtrie; NUM_LOWER_SUBTRIES]>,
     /// Set of prefixes (key paths) that have been marked as updated.
     /// This is used to track which parts of the trie need to be recalculated.
     prefix_set: PrefixSetMut,
@@ -138,7 +138,9 @@ impl Default for ParallelSparseTrie {
                 nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
                 ..Default::default()
             }),
-            lower_subtries: [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES],
+            lower_subtries: Box::new(
+                [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES],
+            ),
             prefix_set: PrefixSetMut::default(),
             updates: None,
             branch_node_masks: BranchNodeMasksMap::default(),
@@ -184,11 +186,12 @@ impl SparseTrie for ParallelSparseTrie {
             |ProofTrieNode { path: path_a, .. }, ProofTrieNode { path: path_b, .. }| {
                 let subtrie_type_a = SparseSubtrieType::from_path(path_a);
                 let subtrie_type_b = SparseSubtrieType::from_path(path_b);
-                subtrie_type_a.cmp(&subtrie_type_b).then(path_a.cmp(path_b))
+                subtrie_type_a.cmp(&subtrie_type_b).then_with(|| path_a.cmp(path_b))
             },
         );
 
         // Update the top-level branch node masks. This is simple and can't be done in parallel.
+        self.branch_node_masks.reserve(nodes.len());
         for ProofTrieNode { path, masks, .. } in &nodes {
             if let Some(branch_masks) = masks {
                 self.branch_node_masks.insert(*path, *branch_masks);
@@ -202,9 +205,7 @@ impl SparseTrie for ParallelSparseTrie {
             .iter()
             .position(|n| !SparseSubtrieType::path_len_is_upper(n.path.len()))
             .unwrap_or(nodes.len());
-
-        let upper_nodes = &nodes[..num_upper_nodes];
-        let lower_nodes = &nodes[num_upper_nodes..];
+        let (upper_nodes, lower_nodes) = nodes.split_at(num_upper_nodes);
 
         // Reserve the capacity of the upper subtrie's `nodes` HashMap before iterating, so we don't
         // end up making many small capacity changes as we loop.
@@ -913,6 +914,19 @@ impl SparseTrie for ParallelSparseTrie {
     fn take_updates(&mut self) -> SparseTrieUpdates {
         match self.updates.take() {
             Some(updates) => {
+                // Sync branch_node_masks with what's being committed to DB.
+                // This ensures that on subsequent root() calls, the masks reflect the actual
+                // DB state, which is needed for correct removal detection.
+                for (path, node) in &updates.updated_nodes {
+                    self.branch_node_masks.insert(
+                        *path,
+                        BranchNodeMasks { tree_mask: node.tree_mask, hash_mask: node.hash_mask },
+                    );
+                }
+                for path in &updates.removed_nodes {
+                    self.branch_node_masks.remove(path);
+                }
+
                 // NOTE: we need to preserve Some case
                 self.updates = Some(SparseTrieUpdates::with_capacity(
                     updates.updated_nodes.len(),
@@ -926,7 +940,9 @@ impl SparseTrie for ParallelSparseTrie {
 
     fn wipe(&mut self) {
         self.upper_subtrie.wipe();
-        self.lower_subtries = [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES];
+        for trie in &mut *self.lower_subtries {
+            trie.wipe();
+        }
         self.prefix_set = PrefixSetMut::all();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
         self.subtrie_heat.clear();
@@ -935,7 +951,7 @@ impl SparseTrie for ParallelSparseTrie {
     fn clear(&mut self) {
         self.upper_subtrie.clear();
         self.upper_subtrie.nodes.insert(Nibbles::default(), SparseNode::Empty);
-        for subtrie in &mut self.lower_subtries {
+        for subtrie in &mut *self.lower_subtries {
             subtrie.clear();
         }
         self.prefix_set.clear();
@@ -1020,7 +1036,7 @@ impl SparseTrie for ParallelSparseTrie {
         self.upper_subtrie.shrink_nodes_to(size_per_subtrie);
 
         // Shrink lower subtries (works for both revealed and blind with allocation)
-        for subtrie in &mut self.lower_subtries {
+        for subtrie in &mut *self.lower_subtries {
             subtrie.shrink_nodes_to(size_per_subtrie);
         }
 
@@ -1039,7 +1055,7 @@ impl SparseTrie for ParallelSparseTrie {
         self.upper_subtrie.shrink_values_to(size_per_subtrie);
 
         // Shrink lower subtries (works for both revealed and blind with allocation)
-        for subtrie in &mut self.lower_subtries {
+        for subtrie in &mut *self.lower_subtries {
             subtrie.shrink_values_to(size_per_subtrie);
         }
     }
@@ -1093,7 +1109,7 @@ impl SparseTrieExt for ParallelSparseTrie {
                     SparseNode::Extension { key, .. } => {
                         let mut child = path;
                         child.extend(key);
-                        SmallVec::from_buf_and_len([child; 16], 1)
+                        SmallVec::from_slice(&[child])
                     }
                     SparseNode::Branch { state_mask, .. } => {
                         let mut children = SmallVec::new();
@@ -1167,7 +1183,7 @@ impl SparseTrieExt for ParallelSparseTrie {
         // Upper prune roots that are prefixes of lower subtrie root paths cause the entire
         // subtrie to be cleared (preserving allocations for reuse).
         if !roots_upper.is_empty() {
-            for subtrie in &mut self.lower_subtries {
+            for subtrie in &mut *self.lower_subtries {
                 let should_clear = subtrie.as_revealed_ref().is_some_and(|s| {
                     let search_idx = roots_upper.partition_point(|(root, _)| root <= &s.path);
                     search_idx > 0 && s.path.starts_with(&roots_upper[search_idx - 1].0)
@@ -1441,8 +1457,6 @@ impl ParallelSparseTrie {
     ///
     /// Returns `None` if a lower subtrie does not exist for the given path.
     fn subtrie_for_path(&self, path: &Nibbles) -> Option<&SparseSubtrie> {
-        // We can't just call `lower_subtrie_for_path` and return `upper_subtrie` if it returns
-        // None, because Rust complains about double mutable borrowing `self`.
         if SparseSubtrieType::path_len_is_upper(path.len()) {
             Some(&self.upper_subtrie)
         } else {
@@ -2117,6 +2131,50 @@ impl ParallelSparseTrie {
             self.lower_subtries[index] = LowerSparseSubtrie::Revealed(subtrie);
             self.subtrie_heat.mark_modified(index);
         }
+    }
+
+    /// Returns a heuristic for the in-memory size of this trie in bytes.
+    ///
+    /// This is an approximation that accounts for:
+    /// - The upper subtrie nodes and values
+    /// - All revealed lower subtries nodes and values
+    /// - The prefix set keys
+    /// - The branch node masks map
+    /// - Updates if retained
+    /// - Update action buffers
+    ///
+    /// Note: Heap allocations for hash maps may be larger due to load factor overhead.
+    pub fn memory_size(&self) -> usize {
+        let mut size = core::mem::size_of::<Self>();
+
+        // Upper subtrie
+        size += self.upper_subtrie.memory_size();
+
+        // Lower subtries (both Revealed and Blind with allocation)
+        for subtrie in self.lower_subtries.iter() {
+            size += subtrie.memory_size();
+        }
+
+        // Prefix set keys
+        size += self.prefix_set.len() * core::mem::size_of::<Nibbles>();
+
+        // Branch node masks map
+        size += self.branch_node_masks.len() *
+            (core::mem::size_of::<Nibbles>() + core::mem::size_of::<BranchNodeMasks>());
+
+        // Updates if present
+        if let Some(updates) = &self.updates {
+            size += updates.updated_nodes.len() *
+                (core::mem::size_of::<Nibbles>() + core::mem::size_of::<BranchNodeCompact>());
+            size += updates.removed_nodes.len() * core::mem::size_of::<Nibbles>();
+        }
+
+        // Update actions buffers
+        for buf in &self.update_actions_buffers {
+            size += buf.capacity() * core::mem::size_of::<SparseTrieUpdatesAction>();
+        }
+
+        size
     }
 }
 
@@ -2812,6 +2870,30 @@ impl SparseSubtrie {
     pub(crate) fn shrink_values_to(&mut self, size: usize) {
         self.inner.values.shrink_to(size);
     }
+
+    /// Returns a heuristic for the in-memory size of this subtrie in bytes.
+    pub(crate) fn memory_size(&self) -> usize {
+        let mut size = core::mem::size_of::<Self>();
+
+        // Nodes map: key (Nibbles) + value (SparseNode)
+        for (path, node) in &self.nodes {
+            size += core::mem::size_of::<Nibbles>();
+            size += path.len(); // Nibbles heap allocation
+            size += node.memory_size();
+        }
+
+        // Values map: key (Nibbles) + value (Vec<u8>)
+        for (path, value) in &self.inner.values {
+            size += core::mem::size_of::<Nibbles>();
+            size += path.len(); // Nibbles heap allocation
+            size += core::mem::size_of::<Vec<u8>>() + value.capacity();
+        }
+
+        // Buffers
+        size += self.inner.buffers.memory_size();
+
+        size
+    }
 }
 
 /// Helper type for [`SparseSubtrie`] to mutably access only a subset of fields from the original
@@ -3285,6 +3367,19 @@ impl SparseSubtrieBuffers {
         self.branch_value_stack_buf.clear();
         self.rlp_buf.clear();
     }
+
+    /// Returns a heuristic for the in-memory size of these buffers in bytes.
+    const fn memory_size(&self) -> usize {
+        let mut size = core::mem::size_of::<Self>();
+
+        size += self.path_stack.capacity() * core::mem::size_of::<RlpNodePathStackItem>();
+        size += self.rlp_node_stack.capacity() * core::mem::size_of::<RlpNodeStackItem>();
+        size += self.branch_child_buf.capacity() * core::mem::size_of::<Nibbles>();
+        size += self.branch_value_stack_buf.capacity() * core::mem::size_of::<RlpNode>();
+        size += self.rlp_buf.capacity();
+
+        size
+    }
 }
 
 /// RLP node path stack item.
@@ -3318,7 +3413,10 @@ struct ChangedSubtrie {
 /// If the path is shorter than [`UPPER_TRIE_MAX_DEPTH`] nibbles.
 fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
     debug_assert_eq!(UPPER_TRIE_MAX_DEPTH, 2);
-    path.get_byte_unchecked(0) as usize
+    let idx = path.get_byte_unchecked(0) as usize;
+    // SAFETY: always true.
+    unsafe { core::hint::assert_unchecked(idx < NUM_LOWER_SUBTRIES) };
+    idx
 }
 
 /// Checks if `path` is a strict descendant of any root in a sorted slice.
@@ -8894,5 +8992,42 @@ mod tests {
         let expected_single =
             b256!("f000000000000000000000000000000000000000000000000000000000000000");
         assert_eq!(ParallelSparseTrie::nibbles_to_padded_b256(&single), expected_single);
+    }
+
+    #[test]
+    fn test_memory_size() {
+        // Test that memory_size returns a reasonable value for an empty trie
+        let trie = ParallelSparseTrie::default();
+        let empty_size = trie.memory_size();
+
+        // Should at least be the size of the struct itself
+        assert!(empty_size >= core::mem::size_of::<ParallelSparseTrie>());
+
+        // Create a trie with some data
+        let mut trie = ParallelSparseTrie::default();
+        let nodes = vec![
+            ProofTrieNode {
+                path: Nibbles::from_nibbles_unchecked([0x1, 0x2]),
+                node: TrieNode::Leaf(LeafNode {
+                    key: Nibbles::from_nibbles_unchecked([0x3, 0x4]),
+                    value: vec![1, 2, 3],
+                }),
+                masks: None,
+            },
+            ProofTrieNode {
+                path: Nibbles::from_nibbles_unchecked([0x5, 0x6]),
+                node: TrieNode::Leaf(LeafNode {
+                    key: Nibbles::from_nibbles_unchecked([0x7, 0x8]),
+                    value: vec![4, 5, 6],
+                }),
+                masks: None,
+            },
+        ];
+        trie.reveal_nodes(nodes).unwrap();
+
+        let populated_size = trie.memory_size();
+
+        // Populated trie should use more memory than an empty one
+        assert!(populated_size > empty_size);
     }
 }
