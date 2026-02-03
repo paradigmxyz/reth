@@ -62,11 +62,15 @@ impl Compact for BranchNodeCompact {
         buf_size += self.tree_mask.to_compact(buf);
         buf_size += self.hash_mask.to_compact(buf);
 
-        if let Some(root_hash) = self.root_hash {
+        if let Some(root_hash) = &self.root_hash {
             buf_size += B256::len_bytes();
             buf.put_slice(root_hash.as_slice());
         }
 
+        unsafe {
+            let src = self.hashes.as_fla
+            buf.put_slice(src);
+        }
         for hash in self.hashes.iter() {
             buf_size += B256::len_bytes();
             buf.put_slice(hash.as_slice());
@@ -99,10 +103,17 @@ impl Compact for BranchNodeCompact {
 
         // Consume all remaining hashes.
         let mut hashes = Vec::<B256>::with_capacity(num_hashes);
-        for _ in 0..num_hashes {
-            hashes.push(B256::from_slice(&buf[..hash_len]));
-            buf.advance(hash_len);
+        let bytes = num_hashes * hash_len;
+        buf[..bytes].as_chunks().0
+        unsafe {
+            hashes
+                .spare_capacity_mut()
+                .as_mut_ptr()
+                .cast::<u8>()
+                .copy_from_nonoverlapping(buf.as_ptr(), bytes);
+            hashes.set_len(num_hashes);
         }
+        buf.advance(bytes);
 
         (Self::new(state_mask, tree_mask, hash_mask, hashes, root_hash), buf)
     }
