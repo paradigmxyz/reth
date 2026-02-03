@@ -59,7 +59,7 @@ jobs:
 
   state:
     name: Ethereum state tests
-    runs-on: depot-ubuntu-latest-8
+    runs-on: depot-ubuntu-latest-64
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
@@ -92,8 +92,9 @@ jobs:
           cache-on-failure: true
       - name: Run state tests
         run: |
-          sudo sysctl -w vm.max_map_count=1048576
-          RAYON_NUM_THREADS=1 cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
+          sudo sysctl -w vm.max_map_count=1000000000
+          export RAYON_NUM_THREADS=1
+          cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
 
   doc:
     name: doc tests
