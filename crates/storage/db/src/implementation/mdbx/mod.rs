@@ -1370,7 +1370,7 @@ mod tests {
             .expect(ERROR_ETH_ADDRESS);
 
         {
-            let env = create_test_db_with_path(DatabaseEnvKind::RW, &path);
+            let env = create_test_db_with_path(DatabaseEnvKind::RW, path);
 
             // PUT
             let result = env.update(|tx| {
@@ -1381,7 +1381,7 @@ mod tests {
         }
 
         let env = DatabaseEnv::open(
-            &path,
+            path,
             DatabaseEnvKind::RO,
             DatabaseArguments::new(ClientVersion::default()),
         )
