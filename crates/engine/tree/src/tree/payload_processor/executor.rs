@@ -1,10 +1,7 @@
 //! Executor for mixed I/O and CPU workloads.
 
-use std::{sync::OnceLock, time::Duration};
-use tokio::{
-    runtime::{Builder, Handle, Runtime},
-    task::JoinHandle,
-};
+use reth_trie_parallel::root::get_tokio_runtime_handle;
+use tokio::{runtime::Handle, task::JoinHandle};
 
 /// An executor for mixed I/O and CPU workloads.
 ///
@@ -45,29 +42,6 @@ struct WorkloadExecutorInner {
 
 impl WorkloadExecutorInner {
     fn new() -> Self {
-        fn get_runtime_handle() -> Handle {
-            Handle::try_current().unwrap_or_else(|_| {
-                // Create a new runtime if no runtime is available
-                static RT: OnceLock<Runtime> = OnceLock::new();
-
-                let rt = RT.get_or_init(|| {
-                    Builder::new_multi_thread()
-                        .enable_all()
-                        // Keep the threads alive for at least the block time, which is 12 seconds
-                        // at the time of writing, plus a little extra.
-                        //
-                        // This is to prevent the costly process of spawning new threads on every
-                        // new block, and instead reuse the existing
-                        // threads.
-                        .thread_keep_alive(Duration::from_secs(15))
-                        .build()
-                        .unwrap()
-                });
-
-                rt.handle().clone()
-            })
-        }
-
-        Self { handle: get_runtime_handle() }
+        Self { handle: get_tokio_runtime_handle() }
     }
 }
