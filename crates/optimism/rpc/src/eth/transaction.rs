@@ -4,19 +4,22 @@ use crate::{OpEthApi, OpEthApiError, SequencerClient};
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use futures::StreamExt;
-use op_alloy_consensus::{transaction::OpTransactionInfo, OpTransaction};
+use op_alloy_consensus::{
+    transaction::{OpDepositInfo, OpTransactionInfo},
+    OpTransaction,
+};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::{BlockBody, SignedTransaction};
+use reth_primitives_traits::{Recovered, SignedTransaction, SignerRecoverable, WithEncoded};
 use reth_rpc_eth_api::{
-    helpers::{spec::SignersForRpc, EthTransactions, LoadReceipt, LoadTransaction},
-    try_into_op_tx_info, EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
-    RpcReceipt, TxInfoMapper,
+    helpers::{spec::SignersForRpc, EthTransactions, LoadReceipt, LoadTransaction, SpawnBlocking},
+    EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore, RpcReceipt,
+    TxInfoMapper,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
-use reth_storage_api::{errors::ProviderError, ReceiptProvider};
+use reth_rpc_eth_types::{block::convert_transaction_receipt, EthApiError, TransactionSource};
+use reth_storage_api::{errors::ProviderError, ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_transaction_pool::{
-    AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
+    AddedTransactionOutcome, PoolPooledTx, PoolTransaction, TransactionOrigin, TransactionPool,
 };
 use std::{
     fmt::{Debug, Formatter},
@@ -39,11 +42,11 @@ where
         self.inner.eth_api.send_raw_transaction_sync_timeout()
     }
 
-    /// Decodes and recovers the transaction and submits it to the pool.
-    ///
-    /// Returns the hash of the transaction.
-    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
-        let recovered = recover_raw_transaction(&tx)?;
+    async fn send_transaction(
+        &self,
+        tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
+    ) -> Result<B256, Self::Error> {
+        let (tx, recovered) = tx.split();
 
         // broadcast raw transaction to subscribers if there is any.
         self.eth_api().broadcast_raw_transaction(tx.clone());
@@ -106,7 +109,7 @@ where
                             if let Some(flashblock) = flashblock.flatten() {
                                 // if flashblocks are supported, attempt to find id from the pending block
                                 if let Some(receipt) = flashblock
-                                .find_and_convert_transaction_receipt(hash, this.tx_resp_builder())
+                                .find_and_convert_transaction_receipt(hash, this.converter())
                                 {
                                     return receipt;
                                 }
@@ -116,11 +119,18 @@ where
                         canonical_notification = canonical_stream.next() => {
                             if let Some(notification) = canonical_notification {
                                 let chain = notification.committed();
-                                for block in chain.blocks_iter() {
-                                    if block.body().contains_transaction(&hash)
-                                        && let Some(receipt) = this.transaction_receipt(hash).await? {
-                                            return Ok(receipt);
-                                        }
+                                if let Some((block, tx, receipt, all_receipts)) =
+                                    chain.find_transaction_and_receipt_by_hash(hash) &&
+                                    let Some(receipt) = convert_transaction_receipt(
+                                        block,
+                                        all_receipts,
+                                        tx,
+                                        receipt,
+                                        this.converter(),
+                                    )
+                                    .transpose()?
+                                {
+                                    return Ok(receipt);
                                 }
                             } else {
                                 // Canonical stream ended
@@ -162,7 +172,7 @@ where
                 // if flashblocks are supported, attempt to find id from the pending block
                 if let Ok(Some(pending_block)) = this.pending_flashblock().await &&
                     let Some(Ok(receipt)) = pending_block
-                        .find_and_convert_transaction_receipt(hash, this.tx_resp_builder())
+                        .find_and_convert_transaction_receipt(hash, this.converter())
                 {
                     return Ok(Some(receipt));
                 }
@@ -179,6 +189,53 @@ where
     OpEthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
 {
+    async fn transaction_by_hash(
+        &self,
+        hash: B256,
+    ) -> Result<Option<TransactionSource<ProviderTx<Self::Provider>>>, Self::Error> {
+        // 1. Try to find the transaction on disk (historical blocks)
+        if let Some((tx, meta)) = self
+            .spawn_blocking_io(move |this| {
+                this.provider()
+                    .transaction_by_hash_with_meta(hash)
+                    .map_err(Self::Error::from_eth_err)
+            })
+            .await?
+        {
+            let transaction = tx
+                .try_into_recovered_unchecked()
+                .map_err(|_| EthApiError::InvalidTransactionSignature)?;
+
+            return Ok(Some(TransactionSource::Block {
+                transaction,
+                index: meta.index,
+                block_hash: meta.block_hash,
+                block_number: meta.block_number,
+                base_fee: meta.base_fee,
+            }));
+        }
+
+        // 2. check flashblocks (sequencer preconfirmations)
+        if let Ok(Some(pending_block)) = self.pending_flashblock().await &&
+            let Some(indexed_tx) = pending_block.block().find_indexed(hash)
+        {
+            let meta = indexed_tx.meta();
+            return Ok(Some(TransactionSource::Block {
+                transaction: indexed_tx.recovered_tx().cloned(),
+                index: meta.index,
+                block_hash: meta.block_hash,
+                block_number: meta.block_number,
+                base_fee: meta.base_fee,
+            }));
+        }
+
+        // 3. check local pool
+        if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.clone_into_consensus()) {
+            return Ok(Some(TransactionSource::Pool(tx)));
+        }
+
+        Ok(None)
+    }
 }
 
 impl<N, Rpc> OpEthApi<N, Rpc>
@@ -228,6 +285,18 @@ where
     type Err = ProviderError;
 
     fn try_map(&self, tx: &T, tx_info: TransactionInfo) -> Result<Self::Out, ProviderError> {
-        try_into_op_tx_info(&self.provider, tx, tx_info)
+        let deposit_meta = if tx.is_deposit() {
+            self.provider.receipt_by_hash(*tx.tx_hash())?.and_then(|receipt| {
+                receipt.as_deposit_receipt().map(|receipt| OpDepositInfo {
+                    deposit_receipt_version: receipt.deposit_receipt_version,
+                    deposit_nonce: receipt.deposit_nonce,
+                })
+            })
+        } else {
+            None
+        }
+        .unwrap_or_default();
+
+        Ok(OpTransactionInfo::new(tx_info, deposit_meta))
     }
 }

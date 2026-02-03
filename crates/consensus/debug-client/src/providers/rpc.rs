@@ -1,5 +1,5 @@
 use crate::BlockProvider;
-use alloy_provider::{Network, Provider, ProviderBuilder};
+use alloy_provider::{ConnectionConfig, Network, Provider, ProviderBuilder, WebSocketConfig};
 use alloy_transport::TransportResult;
 use futures::{Stream, StreamExt};
 use reth_node_api::Block;
@@ -25,7 +25,19 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
         convert: impl Fn(N::BlockResponse) -> PrimitiveBlock + Send + Sync + 'static,
     ) -> eyre::Result<Self> {
         Ok(Self {
-            provider: Arc::new(ProviderBuilder::default().connect(rpc_url).await?),
+            provider: Arc::new(
+                ProviderBuilder::default()
+                    .connect_with_config(
+                        rpc_url,
+                        ConnectionConfig::default().with_max_retries(u32::MAX).with_ws_config(
+                            WebSocketConfig::default()
+                                // allow larger messages/frames for big blocks
+                                .max_frame_size(Some(128 * 1024 * 1024))
+                                .max_message_size(Some(128 * 1024 * 1024)),
+                        ),
+                    )
+                    .await?,
+            ),
             url: rpc_url.to_string(),
             convert: Arc::new(convert),
         })
@@ -61,34 +73,42 @@ where
     type Block = PrimitiveBlock;
 
     async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
-        let Ok(mut stream) = self.full_block_stream().await.inspect_err(|err| {
-            warn!(
-                target: "consensus::debug-client",
-                %err,
-                url=%self.url,
-                "Failed to subscribe to blocks",
-            );
-        }) else {
-            return
-        };
+        loop {
+            let Ok(mut stream) = self.full_block_stream().await.inspect_err(|err| {
+                warn!(
+                    target: "consensus::debug-client",
+                    %err,
+                    url=%self.url,
+                    "Failed to subscribe to blocks",
+                );
+            }) else {
+                return
+            };
 
-        while let Some(res) = stream.next().await {
-            match res {
-                Ok(block) => {
-                    if tx.send((self.convert)(block)).await.is_err() {
-                        // Channel closed.
-                        break;
+            while let Some(res) = stream.next().await {
+                match res {
+                    Ok(block) => {
+                        if tx.send((self.convert)(block)).await.is_err() {
+                            // Channel closed - receiver dropped, exit completely.
+                            return;
+                        }
+                    }
+                    Err(err) => {
+                        warn!(
+                            target: "consensus::debug-client",
+                            %err,
+                            url=%self.url,
+                            "Failed to fetch a block",
+                        );
                     }
                 }
-                Err(err) => {
-                    warn!(
-                        target: "consensus::debug-client",
-                        %err,
-                        url=%self.url,
-                        "Failed to fetch a block",
-                    );
-                }
             }
+            // if stream terminated we want to re-establish it again
+            debug!(
+                target: "consensus::debug-client",
+                url=%self.url,
+                "Re-establishing block subscription",
+            );
         }
     }
 

@@ -295,7 +295,7 @@ mod tests {
         if let Some(expected_lowest) = test_case.expected_lowest_block {
             let static_provider = factory.static_file_provider();
             assert_eq!(
-                static_provider.get_lowest_static_file_block(StaticFileSegment::Transactions),
+                static_provider.get_lowest_range_end(StaticFileSegment::Transactions),
                 Some(expected_lowest)
             );
             assert_eq!(
@@ -458,7 +458,10 @@ mod tests {
             // Set up initial state if provided
             if let Some(initial_range) = initial_range {
                 *writer.user_header_mut() = SegmentHeader::new(
-                    initial_range,
+                    // Expected block range needs to have a fixed size that's determined by the
+                    // provider itself
+                    static_provider
+                        .find_fixed_range(StaticFileSegment::Transactions, initial_range.start()),
                     Some(initial_range),
                     Some(initial_range),
                     StaticFileSegment::Transactions,
@@ -470,25 +473,21 @@ mod tests {
 
             // Verify initial state
             assert_eq!(
-                static_provider.get_lowest_static_file_block(StaticFileSegment::Transactions),
+                static_provider.get_lowest_range_end(StaticFileSegment::Transactions),
                 expected_before_update,
                 "Test case {}: Initial min_block mismatch",
                 idx
             );
 
-            // Update to new range
-            *writer.user_header_mut() = SegmentHeader::new(
-                updated_range,
-                Some(updated_range),
-                Some(updated_range),
-                StaticFileSegment::Transactions,
-            );
+            // Update to new block and tx ranges
+            writer.user_header_mut().set_block_range(updated_range.start(), updated_range.end());
+            writer.user_header_mut().set_tx_range(updated_range.start(), updated_range.end());
             writer.inner().set_dirty();
             writer.commit().unwrap(); // update_index is called inside
 
             // Verify min_block was updated (not stuck at stale value)
             assert_eq!(
-                static_provider.get_lowest_static_file_block(StaticFileSegment::Transactions),
+                static_provider.get_lowest_range_end(StaticFileSegment::Transactions),
                 Some(expected_after_update),
                 "Test case {}: min_block should be updated to {} (not stuck at stale value)",
                 idx,

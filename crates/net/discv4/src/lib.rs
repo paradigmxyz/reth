@@ -459,7 +459,7 @@ pub struct Discv4Service {
     ingress: IngressReceiver,
     /// Sender for sending outgoing messages
     ///
-    /// Sends outgoind messages to the UDP task.
+    /// Sends outgoing messages to the UDP task.
     egress: EgressSender,
     /// Buffered pending pings to apply backpressure.
     ///
@@ -479,7 +479,7 @@ pub struct Discv4Service {
     pending_find_nodes: HashMap<PeerId, FindNodeRequest>,
     /// Currently active ENR requests
     pending_enr_requests: HashMap<PeerId, EnrRequestState>,
-    /// Copy of he sender half of the commands channel for [Discv4]
+    /// Copy of the sender half of the commands channel for [Discv4]
     to_service: mpsc::UnboundedSender<Discv4Command>,
     /// Receiver half of the commands channel for [Discv4]
     commands_rx: mpsc::UnboundedReceiver<Discv4Command>,
@@ -625,10 +625,13 @@ impl Discv4Service {
         self.lookup_interval = tokio::time::interval(duration);
     }
 
-    /// Sets the external Ip to the configured external IP if [`NatResolver::ExternalIp`].
+    /// Sets the external Ip to the configured external IP if [`NatResolver::ExternalIp`] or
+    /// [`NatResolver::ExternalAddr`]. In the case of [`NatResolver::ExternalAddr`], it will return
+    /// the first IP address found for the domain associated with the discv4 UDP port.
     fn resolve_external_ip(&mut self) {
         if let Some(r) = &self.resolve_external_ip_interval &&
-            let Some(external_ip) = r.resolver().as_external_ip()
+            let Some(external_ip) =
+                r.resolver().clone().as_external_ip(self.local_node_record.udp_port)
         {
             self.set_external_ip_addr(external_ip);
         }
@@ -1628,7 +1631,7 @@ impl Discv4Service {
             .filter(|entry| entry.node.value.is_expired())
             .map(|n| n.node.value)
             .collect::<Vec<_>>();
-        nodes.sort_by(|a, b| a.last_seen.cmp(&b.last_seen));
+        nodes.sort_by_key(|a| a.last_seen);
         let to_ping = nodes.into_iter().map(|n| n.record).take(MAX_NODES_PING).collect::<Vec<_>>();
         for node in to_ping {
             self.try_ping(node, PingReason::RePing)

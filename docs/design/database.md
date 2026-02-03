@@ -2,8 +2,8 @@
 
 ## Abstractions
 
-- We created a [Database trait abstraction](https://github.com/paradigmxyz/reth/blob/main/crates/cli/commands/src/db/mod.rs) using Rust Stable GATs which frees us from being bound to a single database implementation. We currently use MDBX, but are exploring [redb](https://github.com/cberner/redb) as an alternative.
-- We then iterated on [`Transaction`](https://github.com/paradigmxyz/reth/blob/main/crates/storage/errors/src/db.rs) as a non-leaky abstraction with helpers for strictly-typed and unit-tested higher-level database abstractions.
+- We created a [Database trait abstraction](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/database.rs) using Rust Stable GATs which frees us from being bound to a single database implementation. We currently use MDBX, but are exploring [redb](https://github.com/cberner/redb) as an alternative.
+- We then iterated on [`Transaction`](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/transaction.rs) as a non-leaky abstraction with helpers for strictly-typed and unit-tested higher-level database abstractions.
 
 ## Codecs
 
@@ -13,9 +13,9 @@
   - It also enables [out-of-the-box fuzzing](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/tables/codecs/fuzz/mod.rs) using [trailofbits/test-fuzz](https://github.com/trailofbits/test-fuzz).
 - We implemented that trait for the following encoding formats:
   - [Ethereum-specific Compact Encoding](https://github.com/paradigmxyz/reth/blob/main/crates/storage/codecs/derive/src/compact/mod.rs): A lot of Ethereum datatypes have unnecessary zeros when serialized, or optional (e.g. on empty hashes) which would be nice not to pay in storage costs.
-    - [Erigon](https://github.com/ledgerwatch/erigon/blob/12ee33a492f5d240458822d052820d9998653a63/docs/programmers_guide/db_walkthrough.MD) achieves that by having a `bitfield` set on Table "PlainState which adds a bitfield to Accounts.
+    - [Erigon](https://github.com/ledgerwatch/erigon/blob/12ee33a492f5d240458822d052820d9998653a63/docs/programmers_guide/db_walkthrough.MD) achieves that by having a `bitfield` set on Table "PlainState" which adds a bitfield to Accounts.
     - [Akula](https://github.com/akula-bft/akula/) expanded it for other tables and datatypes manually. It also saved some more space by storing the length of certain types (U256, u64) using the [`modular_bitfield`](https://docs.rs/modular-bitfield/latest/modular_bitfield/) crate, which compacts this information.
-    - We generalized it for all types, by writing a derive macro that autogenerates code for implementing the trait. It, also generates the interfaces required for fuzzing using ToB/test-fuzz:
+    - We generalized it for all types, by writing a derive macro that autogenerates code for implementing the trait. It also generates the interfaces required for fuzzing using ToB/test-fuzz:
   - [Scale Encoding](https://github.com/paritytech/parity-scale-codec)
   - [Postcard Encoding](https://github.com/jamesmunns/postcard)
   - Passthrough (called `no_codec` in the codebase)

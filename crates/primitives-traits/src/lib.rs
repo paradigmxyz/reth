@@ -164,7 +164,7 @@ pub use alloy_primitives::{logs_bloom, Log, LogData};
 pub mod proofs;
 
 mod storage;
-pub use storage::StorageEntry;
+pub use storage::{StorageEntry, ValueWithSubKey};
 
 pub mod sync;
 
@@ -187,6 +187,12 @@ pub mod serde_bincode_compat;
 /// Heuristic size trait
 pub mod size;
 pub use size::InMemorySize;
+
+/// Rayon utilities
+#[cfg(feature = "rayon")]
+pub mod rayon;
+#[cfg(feature = "rayon")]
+pub use rayon::ParallelBridgeBuffered;
 
 /// Node traits
 pub mod node;

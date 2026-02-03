@@ -290,6 +290,9 @@ pub struct IndexHistoryCheckpoint {
 }
 
 /// Saves the progress of `MerkleChangeSets` stage.
+///
+/// Note: This type is only kept for backward compatibility with the Compact codec.
+/// The `MerkleChangeSets` stage has been removed.
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
@@ -328,7 +331,9 @@ impl EntitiesCheckpoint {
         // Truncate to 2 decimal places, rounding down so that 99.999% becomes 99.99% and not 100%.
         #[cfg(not(feature = "std"))]
         {
-            Some(format!("{:.2}%", (percentage * 100.0) / 100.0))
+            // Manual floor implementation using integer arithmetic for no_std
+            let scaled = (percentage * 100.0) as u64;
+            Some(format!("{:.2}%", scaled as f64 / 100.0))
         }
         #[cfg(feature = "std")]
         Some(format!("{:.2}%", (percentage * 100.0).floor() / 100.0))
@@ -399,9 +404,6 @@ impl StageCheckpoint {
             StageId::IndexStorageHistory | StageId::IndexAccountHistory => {
                 StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint::default())
             }
-            StageId::MerkleChangeSets => {
-                StageUnitCheckpoint::MerkleChangeSets(MerkleChangeSetsCheckpoint::default())
-            }
             _ => return self,
         });
         _ = self.stage_checkpoint.map(|mut checkpoint| checkpoint.set_block_range(from, to));
@@ -454,6 +456,9 @@ pub enum StageUnitCheckpoint {
     /// Saves the progress of Index History stage.
     IndexHistory(IndexHistoryCheckpoint),
     /// Saves the progress of `MerkleChangeSets` stage.
+    ///
+    /// Note: This variant is only kept for backward compatibility with the Compact codec.
+    /// The `MerkleChangeSets` stage has been removed.
     MerkleChangeSets(MerkleChangeSetsCheckpoint),
 }
 
@@ -465,8 +470,7 @@ impl StageUnitCheckpoint {
             Self::Account(AccountHashingCheckpoint { block_range, .. }) |
             Self::Storage(StorageHashingCheckpoint { block_range, .. }) |
             Self::Execution(ExecutionCheckpoint { block_range, .. }) |
-            Self::IndexHistory(IndexHistoryCheckpoint { block_range, .. }) |
-            Self::MerkleChangeSets(MerkleChangeSetsCheckpoint { block_range, .. }) => {
+            Self::IndexHistory(IndexHistoryCheckpoint { block_range, .. }) => {
                 let old_range = *block_range;
                 *block_range = CheckpointBlockRange { from, to };
 
@@ -490,7 +494,7 @@ macro_rules! stage_unit_checkpoints {
         impl StageCheckpoint {
             $(
                 #[doc = $fn_get_doc]
-pub const fn $fn_get_name(&self) -> Option<$checkpoint_ty> {
+                pub const fn $fn_get_name(&self) -> Option<$checkpoint_ty> {
                     match self.stage_checkpoint {
                         Some(StageUnitCheckpoint::$enum_variant(checkpoint)) => Some(checkpoint),
                         _ => None,
@@ -498,7 +502,7 @@ pub const fn $fn_get_name(&self) -> Option<$checkpoint_ty> {
                 }
 
                 #[doc = $fn_build_doc]
-pub const fn $fn_build_name(
+                pub const fn $fn_build_name(
                     mut self,
                     checkpoint: $checkpoint_ty,
                 ) -> Self {
@@ -564,15 +568,6 @@ stage_unit_checkpoints!(
         index_history_stage_checkpoint,
         /// Sets the stage checkpoint to index history.
         with_index_history_stage_checkpoint
-    ),
-    (
-        6,
-        MerkleChangeSets,
-        MerkleChangeSetsCheckpoint,
-        /// Returns the merkle changesets stage checkpoint, if any.
-        merkle_changesets_stage_checkpoint,
-        /// Sets the stage checkpoint to merkle changesets.
-        with_merkle_changesets_stage_checkpoint
     )
 );
 

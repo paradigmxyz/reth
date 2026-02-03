@@ -3,16 +3,15 @@ use eyre::{eyre, Result};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::launcher::Launcher;
 use reth_cli_runner::CliRunner;
+use reth_node_core::args::{OtlpInitStatus, OtlpLogsStatus};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_node::{OpExecutorProvider, OpNode};
 use reth_rpc_server_types::RpcModuleValidator;
 use reth_tracing::{FileWorkerGuard, Layers};
-use reth_tracing_otlp::OtlpProtocol;
 use std::{fmt, sync::Arc};
-use tracing::info;
-use url::Url;
+use tracing::{info, warn};
 
 /// A wrapper around a parsed CLI that handles command execution.
 #[derive(Debug)]
@@ -68,7 +67,7 @@ where
         self.init_tracing(&runner)?;
 
         // Install the prometheus recorder to be sure to record all metrics
-        let _ = install_prometheus_recorder();
+        install_prometheus_recorder();
 
         let components = |spec: Arc<OpChainSpec>| {
             (OpExecutorProvider::optimism(spec.clone()), Arc::new(OpBeaconConsensus::new(spec)))
@@ -99,13 +98,17 @@ where
                 runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<OpNode>()),
+            Commands::Db(command) => {
+                runner.run_blocking_command_until_exit(|ctx| command.execute::<OpNode>(ctx))
+            }
             Commands::Stage(command) => {
                 runner.run_command_until_exit(|ctx| command.execute::<OpNode, _>(ctx, components))
             }
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<OpNode>()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<OpNode>()),
+            Commands::Prune(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<OpNode>(ctx))
+            }
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::ReExecute(command) => {
@@ -122,47 +125,32 @@ where
         if self.guard.is_none() {
             let mut layers = self.layers.take().unwrap_or_default();
 
-            #[cfg(feature = "otlp")]
-            {
-                self.cli.traces.validate()?;
-                if let Some(endpoint) = &self.cli.traces.otlp {
-                    info!(target: "reth::cli", "Starting OTLP tracing export to {:?}", endpoint);
-                    self.init_otlp_export(&mut layers, endpoint, runner)?;
-                }
-            }
+            let otlp_status = runner.block_on(self.cli.traces.init_otlp_tracing(&mut layers))?;
+            let otlp_logs_status = runner.block_on(self.cli.traces.init_otlp_logs(&mut layers))?;
 
             self.guard = self.cli.logs.init_tracing_with_layers(layers)?;
             info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
-        }
-        Ok(())
-    }
 
-    /// Initialize OTLP tracing export based on protocol type.
-    ///
-    /// For gRPC, `block_on` is required because tonic's channel initialization needs
-    /// a tokio runtime context, even though `with_span_layer` itself is not async.
-    #[cfg(feature = "otlp")]
-    fn init_otlp_export(
-        &self,
-        layers: &mut Layers,
-        endpoint: &Url,
-        runner: &CliRunner,
-    ) -> Result<()> {
-        let endpoint = endpoint.clone();
-        let protocol = self.cli.traces.protocol;
-        let level_filter = self.cli.traces.otlp_filter.clone();
-
-        match protocol {
-            OtlpProtocol::Grpc => {
-                runner.block_on(async {
-                    layers.with_span_layer("reth".to_string(), endpoint, level_filter, protocol)
-                })?;
+            match otlp_status {
+                OtlpInitStatus::Started(endpoint) => {
+                    info!(target: "reth::cli", "Started OTLP {:?} tracing export to {endpoint}", self.cli.traces.protocol);
+                }
+                OtlpInitStatus::NoFeature => {
+                    warn!(target: "reth::cli", "Provided OTLP tracing arguments do not have effect, compile with the `otlp` feature")
+                }
+                OtlpInitStatus::Disabled => {}
             }
-            OtlpProtocol::Http => {
-                layers.with_span_layer("reth".to_string(), endpoint, level_filter, protocol)?;
+
+            match otlp_logs_status {
+                OtlpLogsStatus::Started(endpoint) => {
+                    info!(target: "reth::cli", "Started OTLP {:?} logs export to {endpoint}", self.cli.traces.protocol);
+                }
+                OtlpLogsStatus::NoFeature => {
+                    warn!(target: "reth::cli", "Provided OTLP logs arguments do not have effect, compile with the `otlp-logs` feature")
+                }
+                OtlpLogsStatus::Disabled => {}
             }
         }
-
         Ok(())
     }
 }

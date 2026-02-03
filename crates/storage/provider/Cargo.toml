@@ -17,7 +17,6 @@ reth-chainspec.workspace = true
 reth-execution-types.workspace = true
 reth-ethereum-primitives = { workspace = true, features = ["reth-codec"] }
 reth-primitives-traits = { workspace = true, features = ["reth-codec", "secp256k1"] }
-reth-fs-util.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
 reth-storage-api = { workspace = true, features = ["std", "db-api"] }
@@ -62,6 +61,10 @@ tokio = { workspace = true, features = ["sync"], optional = true }
 # parallel utils
 rayon.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+# rocksdb: jemalloc is recommended production workload
+rocksdb = { workspace = true, features = ["jemalloc"], optional = true }
+
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
@@ -82,6 +85,8 @@ rand.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
+edge = ["reth-storage-api/edge", "rocksdb"]
+rocksdb = ["dep:rocksdb"]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",

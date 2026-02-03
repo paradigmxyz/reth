@@ -5,14 +5,13 @@ use reth_db_api::{database::Database, table::TableImporter, tables};
 use reth_db_common::DbTool;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
-    providers::{ProviderNodeTypes, StaticFileProvider},
+    providers::{ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{stages::StorageHashingStage, Stage, StageCheckpoint, UnwindInput};
-use std::sync::Arc;
 use tracing::info;
 
-pub(crate) async fn dump_hashing_storage_stage<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
+pub(crate) async fn dump_hashing_storage_stage<N: ProviderNodeTypes<DB = DatabaseEnv>>(
     db_tool: &DbTool<N>,
     from: u64,
     to: u64,
@@ -26,9 +25,10 @@ pub(crate) async fn dump_hashing_storage_stage<N: ProviderNodeTypes<DB = Arc<Dat
     if should_run {
         dry_run(
             ProviderFactory::<N>::new(
-                Arc::new(output_db),
+                output_db,
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
+                RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
             )?,
             to,
             from,

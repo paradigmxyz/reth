@@ -14,7 +14,7 @@ use reth_payload_primitives::{
     validate_execution_requests, validate_version_specific_fields, EngineApiMessageVersion,
     EngineObjectValidationError, NewPayloadError, PayloadOrAttributes,
 };
-use reth_primitives_traits::RecoveredBlock;
+use reth_primitives_traits::SealedBlock;
 use std::sync::Arc;
 
 /// Validator for the ethereum engine API.
@@ -43,12 +43,11 @@ where
 {
     type Block = Block;
 
-    fn ensure_well_formed_payload(
+    fn convert_payload_to_block(
         &self,
         payload: ExecutionData,
-    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
-        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+        self.inner.ensure_well_formed_payload(payload).map_err(Into::into)
     }
 }
 

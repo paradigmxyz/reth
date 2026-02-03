@@ -24,13 +24,13 @@ use tracing::trace;
 pub struct TxPoolApi<Pool, Eth> {
     /// An interface to interact with the pool
     pool: Pool,
-    tx_resp_builder: Eth,
+    converter: Eth,
 }
 
 impl<Pool, Eth> TxPoolApi<Pool, Eth> {
     /// Creates a new instance of `TxpoolApi`.
-    pub const fn new(pool: Pool, tx_resp_builder: Eth) -> Self {
-        Self { pool, tx_resp_builder }
+    pub const fn new(pool: Pool, converter: Eth) -> Self {
+        Self { pool, converter }
     }
 }
 
@@ -65,10 +65,10 @@ where
 
         let mut content = TxpoolContent::default();
         for pending in pending {
-            insert::<_, Eth>(&pending.transaction, &mut content.pending, &self.tx_resp_builder)?;
+            insert::<_, Eth>(&pending.transaction, &mut content.pending, &self.converter)?;
         }
         for queued in queued {
-            insert::<_, Eth>(&queued.transaction, &mut content.queued, &self.tx_resp_builder)?;
+            insert::<_, Eth>(&queued.transaction, &mut content.queued, &self.converter)?;
         }
 
         Ok(content)

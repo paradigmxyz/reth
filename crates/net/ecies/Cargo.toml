@@ -25,9 +25,6 @@ pin-project.workspace = true
 
 tracing = { workspace = true, features = ["attributes"] }
 
-# HeaderBytes
-generic-array.workspace = true
-typenum.workspace = true
 byteorder.workspace = true
 
 # crypto
@@ -37,8 +34,10 @@ secp256k1 = { workspace = true, features = ["global-context", "std", "recovery",
 rand_08.workspace = true
 concat-kdf.workspace = true
 sha2.workspace = true
-sha3.workspace = true
 aes.workspace = true
 hmac.workspace = true
 block-padding.workspace = true
 cipher = { workspace = true, features = ["block-padding"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net", "rt", "macros"] }

@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
     fs::File,
-    io::Read,
+    io::{self, Read, Write},
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -201,11 +201,11 @@ impl<H: NippyJarHeader> NippyJar<H> {
         let config_path = path.with_extension(CONFIG_FILE_EXTENSION);
         let config_file = File::open(&config_path)
             .inspect_err(|e| {
-                warn!( ?path, %e, "Failed to load static file jar");
+                warn!(?path, %e, "Failed to load static file jar");
             })
             .map_err(|err| reth_fs_util::FsPathError::open(err, config_path))?;
 
-        let mut obj = Self::load_from_reader(config_file)?;
+        let mut obj = Self::load_from_reader(io::BufReader::new(config_file))?;
         obj.path = path.to_path_buf();
         Ok(obj)
     }
@@ -213,6 +213,11 @@ impl<H: NippyJarHeader> NippyJar<H> {
     /// Deserializes an instance of [`Self`] from a [`Read`] type.
     pub fn load_from_reader<R: Read>(reader: R) -> Result<Self, NippyJarError> {
         Ok(bincode::deserialize_from(reader)?)
+    }
+
+    /// Serializes an instance of [`Self`] to a [`Write`] type.
+    pub fn save_to_writer<W: Write>(&self, writer: W) -> Result<(), NippyJarError> {
+        Ok(bincode::serialize_into(writer, self)?)
     }
 
     /// Returns the path for the data file
@@ -258,9 +263,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Writes all necessary configuration to file.
     fn freeze_config(&self) -> Result<(), NippyJarError> {
-        Ok(reth_fs_util::atomic_write_file(&self.config_path(), |file| {
-            bincode::serialize_into(file, &self)
-        })?)
+        Ok(reth_fs_util::atomic_write_file(&self.config_path(), |file| self.save_to_writer(file))?)
     }
 }
 
@@ -415,9 +418,14 @@ impl DataReader {
         &self.data_mmap[range]
     }
 
-    /// Returns total size of data
+    /// Returns total size of data file.
     pub fn size(&self) -> usize {
         self.data_mmap.len()
+    }
+
+    /// Returns total size of offsets file.
+    pub fn offsets_size(&self) -> usize {
+        self.offset_mmap.len()
     }
 }
 
@@ -1038,10 +1046,10 @@ mod tests {
         assert_eq!(writer.rows(), 0);
         assert_eq!(writer.max_row_size(), 0);
         assert_eq!(File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize, 0);
-        // Only the byte that indicates how many bytes per offset should be left
+        // Offset size byte (1) + final offset (8) = 9 bytes
         assert_eq!(
             File::open(writer.offsets_path()).unwrap().metadata().unwrap().len() as usize,
-            1
+            9
         );
         writer.commit().unwrap();
         assert!(!writer.is_dirty());

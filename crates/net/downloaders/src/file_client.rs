@@ -83,10 +83,32 @@ impl From<&'static str> for FileClientError {
 }
 
 impl<B: FullBlock> FileClient<B> {
+    /// Create a new file client from a slice of sealed blocks.
+    pub fn from_blocks(blocks: impl IntoIterator<Item = SealedBlock<B>>) -> Self {
+        let blocks: Vec<_> = blocks.into_iter().collect();
+        let capacity = blocks.len();
+
+        let mut headers = HashMap::with_capacity(capacity);
+        let mut hash_to_number = HashMap::with_capacity(capacity);
+        let mut bodies = HashMap::with_capacity(capacity);
+
+        for block in blocks {
+            let number = block.number();
+            let hash = block.hash();
+            let (header, body) = block.split_sealed_header_body();
+
+            headers.insert(number, header.into_header());
+            hash_to_number.insert(hash, number);
+            bodies.insert(hash, body);
+        }
+
+        Self { headers, hash_to_number, bodies }
+    }
+
     /// Create a new file client from a file path.
     pub async fn new<P: AsRef<Path>>(
         path: P,
-        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B>>,
     ) -> Result<Self, FileClientError> {
         let file = File::open(path).await?;
         Self::from_file(file, consensus).await
@@ -95,7 +117,7 @@ impl<B: FullBlock> FileClient<B> {
     /// Initialize the [`FileClient`] with a file directly.
     pub(crate) async fn from_file(
         mut file: File,
-        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B>>,
     ) -> Result<Self, FileClientError> {
         // get file len from metadata before reading
         let metadata = file.metadata().await?;
@@ -200,7 +222,7 @@ impl<B: FullBlock> FileClient<B> {
 }
 
 struct FileClientBuilder<B: Block> {
-    pub consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+    pub consensus: Arc<dyn Consensus<B>>,
     pub parent_header: Option<SealedHeader<B::Header>>,
 }
 
@@ -562,7 +584,7 @@ impl ChunkedFileReader {
     /// are available before processing. For plain files, it uses the original chunking logic.
     pub async fn next_chunk<B: FullBlock>(
         &mut self,
-        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B>>,
         parent_header: Option<SealedHeader<B::Header>>,
     ) -> Result<Option<FileClient<B>>, FileClientError> {
         let Some(chunk_len) = self.read_next_chunk().await? else { return Ok(None) };
@@ -726,7 +748,7 @@ mod tests {
         downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 
         let headers = downloader.next().await.unwrap();
-        assert_eq!(headers, Ok(vec![p0, p1, p2]));
+        assert_eq!(headers.unwrap(), vec![p0, p1, p2]);
         assert!(downloader.next().await.is_none());
         assert!(downloader.next().await.is_none());
     }

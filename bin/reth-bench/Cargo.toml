@@ -16,20 +16,27 @@ workspace = true
 # reth
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
+reth-engine-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-fs-util.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-primitives-traits.workspace = true
+reth-rpc-api.workspace = true
+
 reth-tracing.workspace = true
+reth-chainspec.workspace = true
 
 # alloy
 alloy-eips.workspace = true
 alloy-json-rpc.workspace = true
-alloy-primitives.workspace = true
-alloy-provider = { workspace = true, features = ["engine-api", "reqwest-rustls-tls"], default-features = false }
+alloy-consensus.workspace = true
+alloy-network.workspace = true
+alloy-primitives = { workspace = true, features = ["rand"] }
+alloy-provider = { workspace = true, features = ["engine-api", "pubsub", "reqwest-rustls-tls"], default-features = false }
 alloy-pubsub.workspace = true
-alloy-rpc-client.workspace = true
-alloy-rpc-types-engine.workspace = true
+alloy-rpc-client = { workspace = true, features = ["pubsub"] }
+alloy-rpc-types-engine = { workspace = true, features = ["kzg"] }
 alloy-transport-http.workspace = true
 alloy-transport-ipc.workspace = true
 alloy-transport-ws.workspace = true
@@ -38,7 +45,7 @@ op-alloy-consensus = { workspace = true, features = ["alloy-compat"] }
 op-alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
 
 # reqwest
-reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots"] }
+reqwest.workspace = true
 
 # tower
 tower.workspace = true
@@ -50,6 +57,9 @@ tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+# url parsing
+url.workspace = true
+
 # async
 async-trait.workspace = true
 futures.workspace = true
@@ -58,6 +68,7 @@ tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thre
 # misc
 clap = { workspace = true, features = ["derive", "env"] }
 eyre.workspace = true
+color-eyre.workspace = true
 thiserror.workspace = true
 humantime.workspace = true
 
@@ -79,7 +90,11 @@ jemalloc = [
     "reth-node-core/jemalloc",
 ]
 jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
-tracy-allocator = ["reth-cli-util/tracy-allocator"]
+tracy-allocator = ["reth-cli-util/tracy-allocator", "tracy"]
+tracy = [
+    "reth-node-core/tracy",
+    "reth-tracing/tracy",
+]
 
 min-error-logs = [
     "tracing/release_max_level_error",

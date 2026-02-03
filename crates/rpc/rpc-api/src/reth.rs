@@ -24,4 +24,14 @@ pub trait RethApi {
         item = reth_chain_state::CanonStateNotification
     )]
     async fn reth_subscribe_chain_notifications(&self) -> jsonrpsee::core::SubscriptionResult;
+
+    /// Subscribe to persisted block notifications.
+    ///
+    /// Emits a notification with the block number and hash when a new block is persisted to disk.
+    #[subscription(
+        name = "subscribePersistedBlock",
+        unsubscribe = "unsubscribePersistedBlock",
+        item = alloy_eips::BlockNumHash
+    )]
+    async fn reth_subscribe_persisted_block(&self) -> jsonrpsee::core::SubscriptionResult;
 }

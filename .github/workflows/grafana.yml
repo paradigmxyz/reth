@@ -10,7 +10,7 @@ jobs:
   check-dashboard:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Check for ${DS_PROMETHEUS} in overview.json
         run: |
           if grep -Fn '${DS_PROMETHEUS}' etc/grafana/dashboards/overview.json; then

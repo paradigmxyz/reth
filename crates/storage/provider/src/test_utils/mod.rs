@@ -1,11 +1,13 @@
 use crate::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
+    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider},
     HashingWriter, ProviderFactory, TrieWriter,
 };
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_db::{
-    test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
+    test_utils::{
+        create_test_rocksdb_dir, create_test_rw_db, create_test_static_files_dir, TempDatabase,
+    },
     DatabaseEnv,
 };
 use reth_errors::ProviderResult;
@@ -34,8 +36,8 @@ pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
 >;
 
 /// Mock [`reth_node_types::NodeTypesWithDB`] for testing.
-pub type MockNodeTypesWithDB<DB = TempDatabase<DatabaseEnv>> =
-    NodeTypesWithDBAdapter<MockNodeTypes, Arc<DB>>;
+pub type MockNodeTypesWithDB<DB = Arc<TempDatabase<DatabaseEnv>>> =
+    NodeTypesWithDBAdapter<MockNodeTypes, DB>;
 
 /// Creates test provider factory with mainnet chain spec.
 pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
@@ -54,11 +56,17 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     chain_spec: Arc<N::ChainSpec>,
 ) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
     let (static_dir, _) = create_test_static_files_dir();
+    let (rocksdb_dir, _) = create_test_rocksdb_dir();
     let db = create_test_rw_db();
+    let rocksdb_path = rocksdb_dir.keep();
     ProviderFactory::new(
         db,
         chain_spec,
         StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
+        RocksDBBuilder::new(&rocksdb_path)
+            .with_default_tables()
+            .build()
+            .expect("failed to create test RocksDB provider"),
     )
     .expect("failed to create test provider factory")
 }
@@ -87,9 +95,7 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
 
-    let (root, updates) = StateRoot::from_tx(provider.tx_ref())
-        .root_with_updates()
-        .map_err(reth_db::DatabaseError::from)?;
+    let (root, updates) = StateRoot::from_tx(provider.tx_ref()).root_with_updates()?;
     provider.write_trie_updates(updates).unwrap();
 
     provider.commit()?;

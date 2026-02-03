@@ -1,0 +1,121 @@
+---
+description: Reth-specific API for balance changes and chain notifications.
+---
+
+# `reth` Namespace
+
+The `reth` API provides reth-specific methods that are not part of the standard Ethereum JSON-RPC specification. These methods offer additional functionality for monitoring balance changes and subscribing to chain state notifications.
+
+## `reth_getBalanceChangesInBlock`
+
+Returns all ETH balance changes that occurred in a specific block.
+
+This method is useful for tracking value transfers, mining rewards, and other balance modifications without having to trace every transaction in a block.
+
+The method accepts a block identifier (number, hash, or tag like `latest`) and returns a map of addresses to their new balances.
+
+| Client | Method invocation                                              |
+| ------ | -------------------------------------------------------------- |
+| RPC    | `{"method": "reth_getBalanceChangesInBlock", "params": [block]}` |
+
+### Example
+
+```js
+// > {"jsonrpc":"2.0","id":1,"method":"reth_getBalanceChangesInBlock","params":["latest"]}
+{"jsonrpc":"2.0","id":1,"result":{"0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5":"0x1bc16d674ec80000","0x388c818ca8b9251b393131c08a736a67ccb19297":"0x0"}}
+```
+
+The result is a mapping of addresses to their new balance after the block was executed. Only addresses whose balance changed during block execution are included.
+
+## `reth_subscribeChainNotifications`, `reth_unsubscribeChainNotifications`
+
+Subscribe to canonical chain state notifications. This creates a subscription that emits notifications whenever the canonical chain state changes.
+
+Like other subscription methods, this returns the ID of the subscription, which is then used in all events subsequently.
+
+To unsubscribe from chain notifications, call `reth_unsubscribeChainNotifications` with the subscription ID.
+
+| Client | Method invocation                                                          |
+| ------ | -------------------------------------------------------------------------- |
+| RPC    | `{"method": "reth_subscribeChainNotifications", "params": []}`             |
+| RPC    | `{"method": "reth_unsubscribeChainNotifications", "params": [subscription_id]}` |
+
+### Event Types
+
+The subscription emits events with the following structure:
+
+```json
+{
+    "jsonrpc": "2.0",
+    "method": "reth_subscription",
+    "params": {
+        "subscription": "0xcd0c3e8af590364c09d0fa6a1210faf5",
+        "result": {
+            "Commit": { // or "Reorg"
+                "new": {
+                    // Chain segment with blocks, receipts, etc.
+                },
+                "old": {
+                    // Only present for "Reorg": chain segment that was reverted
+                }
+            }
+        }
+    }
+}
+```
+
+- **Commit**: New blocks are added to the canonical chain. Contains only `new` with the committed chain segment.
+- **Reorg**: Chain reorganization occurred. Contains both `old` (reverted blocks) and `new` (replacement blocks).
+
+This is particularly useful for applications that need to react immediately to chain state changes, such as indexers, monitoring tools, or ExEx (Execution Extensions).
+
+### Example
+
+```js
+// > {"jsonrpc":"2.0","id":1,"method":"reth_subscribeChainNotifications","params":[]}
+// responds with subscription ID
+{"jsonrpc":"2.0","id":1,"result":"0xcd0c3e8af590364c09d0fa6a1210faf5"}
+
+// Example notification when new blocks are committed
+{"jsonrpc":"2.0","method":"reth_subscription","params":{"subscription":"0xcd0c3e8af590364c09d0fa6a1210faf5","result":{"Commit":{"new":{"blocks":[...],"receipts":[...],"first_block":1000,"last_block":1000}}}}}
+
+// Unsubscribe
+// > {"jsonrpc":"2.0","id":2,"method":"reth_unsubscribeChainNotifications","params":["0xcd0c3e8af590364c09d0fa6a1210faf5"]}
+{"jsonrpc":"2.0","id":2,"result":true}
+```
+
+:::note
+This subscription is only available over WebSocket and IPC transports, as HTTP does not support server-initiated messages.
+:::
+
+## `reth_subscribePersistedBlock`, `reth_unsubscribePersistedBlock`
+
+Subscribe to persisted block notifications. This creates a subscription that emits a notification with the block number and hash when a new block is persisted to disk.
+
+Like other subscription methods, this returns the ID of the subscription, which is then used in all events subsequently.
+
+To unsubscribe from persisted block notifications, call `reth_unsubscribePersistedBlock` with the subscription ID.
+
+| Client | Method invocation                                                          |
+| ------ | -------------------------------------------------------------------------- |
+| RPC    | `{"method": "reth_subscribePersistedBlock", "params": []}`                 |
+| RPC    | `{"method": "reth_unsubscribePersistedBlock", "params": [subscription_id]}` |
+
+### Example
+
+```js
+// > {"jsonrpc":"2.0","id":1,"method":"reth_subscribePersistedBlock","params":[]}
+// responds with subscription ID
+{"jsonrpc":"2.0","id":1,"result":"0xab1c2d3e4f590364c09d0fa6a1210faf5"}
+
+// Example notification when a block is persisted
+{"jsonrpc":"2.0","method":"reth_subscription","params":{"subscription":"0xab1c2d3e4f590364c09d0fa6a1210faf5","result":{"number":"0x1a2b3c","hash":"0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}}}
+
+// Unsubscribe
+// > {"jsonrpc":"2.0","id":2,"method":"reth_unsubscribePersistedBlock","params":["0xab1c2d3e4f590364c09d0fa6a1210faf5"]}
+{"jsonrpc":"2.0","id":2,"result":true}
+```
+
+:::note
+This subscription is only available over WebSocket and IPC transports, as HTTP does not support server-initiated messages.
+:::

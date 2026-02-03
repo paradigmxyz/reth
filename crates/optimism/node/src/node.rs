@@ -165,6 +165,7 @@ impl OpNode {
             self.args;
         ComponentsBuilder::default()
             .node_types::<Node>()
+            .executor(OpExecutorBuilder::default())
             .pool(
                 OpPoolBuilder::default()
                     .with_enable_tx_conditional(self.args.enable_tx_conditional)
@@ -173,7 +174,6 @@ impl OpNode {
                         self.args.supervisor_safety_level,
                     ),
             )
-            .executor(OpExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::new(
                 OpPayloadBuilder::new(compute_pending_block)
                     .with_da_config(self.da_config.clone())
@@ -194,6 +194,7 @@ impl OpNode {
             .with_min_suggested_priority_fee(self.args.min_suggested_priority_fee)
             .with_historical_rpc(self.args.historical_rpc.clone())
             .with_flashblocks(self.args.flashblocks_url.clone())
+            .with_flashblock_consensus(self.args.flashblock_consensus)
     }
 
     /// Instantiates the [`ProviderFactoryBuilder`] for an opstack node.
@@ -217,13 +218,13 @@ impl OpNode {
     /// use reth_db::open_db_read_only;
     /// use reth_optimism_chainspec::OpChainSpecBuilder;
     /// use reth_optimism_node::OpNode;
-    /// use reth_provider::providers::StaticFileProvider;
-    /// use std::sync::Arc;
+    /// use reth_provider::providers::{RocksDBProvider, StaticFileProvider};
     ///
     /// let factory = OpNode::provider_factory_builder()
-    ///     .db(Arc::new(open_db_read_only("db", Default::default()).unwrap()))
+    ///     .db(open_db_read_only("db", Default::default()).unwrap())
     ///     .chainspec(OpChainSpecBuilder::base_mainnet().build().into())
     ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
+    ///     .rocksdb_provider(RocksDBProvider::builder("db/rocksdb").build().unwrap())
     ///     .build_provider_factory();
     /// ```
     pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
@@ -695,6 +696,8 @@ pub struct OpAddOnsBuilder<NetworkT, RpcMiddleware = Identity> {
     tokio_runtime: Option<tokio::runtime::Handle>,
     /// A URL pointing to a secure websocket service that streams out flashblocks.
     flashblocks_url: Option<Url>,
+    /// Enable flashblock consensus client to drive chain forward.
+    flashblock_consensus: bool,
 }
 
 impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
@@ -711,6 +714,7 @@ impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
             rpc_middleware: Identity::new(),
             tokio_runtime: None,
             flashblocks_url: None,
+            flashblock_consensus: false,
         }
     }
 }
@@ -779,6 +783,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             tokio_runtime,
             _nt,
             flashblocks_url,
+            flashblock_consensus,
             ..
         } = self;
         OpAddOnsBuilder {
@@ -793,12 +798,19 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             rpc_middleware,
             tokio_runtime,
             flashblocks_url,
+            flashblock_consensus,
         }
     }
 
     /// With a URL pointing to a flashblocks secure websocket subscription.
     pub fn with_flashblocks(mut self, flashblocks_url: Option<Url>) -> Self {
         self.flashblocks_url = flashblocks_url;
+        self
+    }
+
+    /// With a flashblock consensus client to drive chain forward.
+    pub const fn with_flashblock_consensus(mut self, flashblock_consensus: bool) -> Self {
+        self.flashblock_consensus = flashblock_consensus;
         self
     }
 }
@@ -826,6 +838,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             rpc_middleware,
             tokio_runtime,
             flashblocks_url,
+            flashblock_consensus,
             ..
         } = self;
 
@@ -835,7 +848,8 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
                     .with_sequencer(sequencer_url.clone())
                     .with_sequencer_headers(sequencer_headers.clone())
                     .with_min_suggested_priority_fee(min_suggested_priority_fee)
-                    .with_flashblocks(flashblocks_url),
+                    .with_flashblocks(flashblocks_url)
+                    .with_flashblock_consensus(flashblock_consensus),
                 PVB::default(),
                 EB::default(),
                 EVB::default(),
@@ -942,14 +956,19 @@ impl<T> OpPoolBuilder<T> {
     }
 }
 
-impl<Node, T> PoolBuilder<Node> for OpPoolBuilder<T>
+impl<Node, T, Evm> PoolBuilder<Node, Evm> for OpPoolBuilder<T>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
     T: EthPoolTransaction<Consensus = TxTy<Node::Types>> + OpPooledTx,
+    Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + Clone + 'static,
 {
-    type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, T>;
+    type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, Evm, T>;
 
-    async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
+    async fn build_pool(
+        self,
+        ctx: &BuilderContext<Node>,
+        evm_config: Evm,
+    ) -> eyre::Result<Self::Pool> {
         let Self { pool_config_overrides, .. } = self;
 
         // supervisor used for interop
@@ -967,27 +986,27 @@ where
             .await;
 
         let blob_store = reth_node_builder::components::create_blob_store(ctx)?;
-        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
-            .no_eip4844()
-            .with_head_timestamp(ctx.head().timestamp)
-            .with_max_tx_input_bytes(ctx.config().txpool.max_tx_input_bytes)
-            .kzg_settings(ctx.kzg_settings()?)
-            .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
-            .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
-            .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
-            .with_additional_tasks(
-                pool_config_overrides
-                    .additional_validation_tasks
-                    .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
-            )
-            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
-            .map(|validator| {
-                OpTransactionValidator::new(validator)
-                    // In --dev mode we can't require gas fees because we're unable to decode
-                    // the L1 block info
-                    .require_l1_data_gas_fee(!ctx.config().dev.dev)
-                    .with_supervisor(supervisor_client.clone())
-            });
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone(), evm_config)
+                .no_eip4844()
+                .with_max_tx_input_bytes(ctx.config().txpool.max_tx_input_bytes)
+                .kzg_settings(ctx.kzg_settings()?)
+                .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
+                .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
+                .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
+                .with_additional_tasks(
+                    pool_config_overrides
+                        .additional_validation_tasks
+                        .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
+                )
+                .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
+                .map(|validator| {
+                    OpTransactionValidator::new(validator)
+                        // In --dev mode we can't require gas fees because we're unable to decode
+                        // the L1 block info
+                        .require_l1_data_gas_fee(!ctx.config().dev.dev)
+                        .with_supervisor(supervisor_client.clone())
+                });
 
         let final_pool_config = pool_config_overrides.apply(ctx.pool_config());
 

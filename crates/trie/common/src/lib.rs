@@ -11,13 +11,17 @@
 
 extern crate alloc;
 
+/// Lazy initialization wrapper for trie data.
+mod lazy;
+pub use lazy::{LazyTrieData, SortedTrieData};
+
 /// In-memory hashed state.
 mod hashed_state;
 pub use hashed_state::*;
 
 /// Input for trie computation.
 mod input;
-pub use input::TrieInput;
+pub use input::{TrieInput, TrieInputSorted};
 
 /// The implementation of hash builder.
 pub mod hash_builder;
@@ -36,10 +40,13 @@ mod nibbles;
 pub use nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey};
 
 mod storage;
-pub use storage::{StorageTrieEntry, TrieChangeSetsEntry};
+pub use storage::StorageTrieEntry;
 
 mod subnode;
 pub use subnode::StoredSubNode;
+
+mod trie;
+pub use trie::{BranchNodeMasks, BranchNodeMasksMap, ProofTrieNode};
 
 /// The implementation of a container for storing intermediate changes to a trie.
 /// The container indicates when the trie has been modified.
@@ -51,6 +58,9 @@ pub use proofs::triehash;
 pub use proofs::*;
 
 pub mod root;
+
+/// Incremental ordered trie root computation.
+pub mod ordered_root;
 
 /// Buffer for trie updates.
 pub mod updates;
@@ -68,7 +78,10 @@ mod utils;
 /// Read more: <https://github.com/paradigmxyz/reth/issues/11370>
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub mod serde_bincode_compat {
-    pub use super::updates::serde_bincode_compat as updates;
+    pub use super::{
+        hashed_state::serde_bincode_compat as hashed_state,
+        updates::serde_bincode_compat as updates,
+    };
 }
 
 /// Re-export

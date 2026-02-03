@@ -7,9 +7,10 @@ use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, ChainStateBlockReader, DBProvider,
     DatabaseProviderFactory, NodePrimitivesProvider, PruneCheckpointReader, PruneCheckpointWriter,
-    StaticFileProviderFactory,
+    RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
+use reth_storage_api::{ChangeSetReader, StorageChangeSetReader, StorageSettingsCache};
 use std::time::Duration;
 use tokio::sync::watch;
 
@@ -43,7 +44,7 @@ impl PrunerBuilder {
     }
 
     /// Sets the configuration for every part of the data that can be pruned.
-    pub const fn segments(mut self, segments: PruneModes) -> Self {
+    pub fn segments(mut self, segments: PruneModes) -> Self {
         self.segments = segments;
         self
     }
@@ -80,6 +81,11 @@ impl PrunerBuilder {
                                 + PruneCheckpointReader
                                 + BlockReader<Transaction: Encodable2718>
                                 + ChainStateBlockReader
+                                + StorageSettingsCache
+                                + StageCheckpointReader
+                                + ChangeSetReader
+                                + StorageChangeSetReader
+                                + RocksDBProviderFactory
                                 + StaticFileProviderFactory<
                     Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
                 >,
@@ -112,7 +118,12 @@ impl PrunerBuilder {
             + BlockReader<Transaction: Encodable2718>
             + ChainStateBlockReader
             + PruneCheckpointWriter
-            + PruneCheckpointReader,
+            + PruneCheckpointReader
+            + StorageSettingsCache
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + RocksDBProviderFactory,
     {
         let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
 

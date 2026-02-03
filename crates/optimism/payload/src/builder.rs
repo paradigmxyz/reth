@@ -9,7 +9,6 @@ use alloy_primitives::{B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
 use reth_basic_payload_builder::*;
-use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{
     block::BlockExecutorFor,
@@ -19,16 +18,16 @@ use reth_evm::{
     op_revm::{constants::L1_BLOCK_CONTRACT, L1BlockInfo},
     ConfigureEvm, Database,
 };
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::BlockExecutionOutput;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{transaction::OpTransaction, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
+use reth_optimism_primitives::{transaction::OpTransaction, L2_TO_L1_MESSAGE_PASSER_ADDRESS};
 use reth_optimism_txpool::{
     estimated_da_size::DataAvailabilitySized,
     interop::{is_valid_interop, MaybeInteropTransaction},
     OpPooledTx,
 };
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::{BuildNextEnv, PayloadBuilderAttributes};
+use reth_payload_primitives::{BuildNextEnv, BuiltPayloadExecutedBlock, PayloadBuilderAttributes};
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives_traits::{
     HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, SignedTransaction, TxTy,
@@ -376,19 +375,16 @@ impl<Txs> OpBuilder<'_, Txs> {
         let sealed_block = Arc::new(block.sealed_block().clone());
         debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
 
-        let execution_outcome = ExecutionOutcome::new(
-            db.take_bundle(),
-            vec![execution_result.receipts],
-            block.number(),
-            Vec::new(),
-        );
+        let execution_outcome =
+            BlockExecutionOutput { state: db.take_bundle(), result: execution_result };
 
         // create the executed block data
-        let executed: ExecutedBlock<N> = ExecutedBlock {
+        let executed: BuiltPayloadExecutedBlock<N> = BuiltPayloadExecutedBlock {
             recovered_block: Arc::new(block),
             execution_output: Arc::new(execution_outcome),
-            hashed_state: Arc::new(hashed_state),
-            trie_updates: Arc::new(trie_updates),
+            // Keep unsorted; conversion to sorted happens when needed downstream
+            hashed_state: either::Either::Left(Arc::new(hashed_state)),
+            trie_updates: either::Either::Left(Arc::new(trie_updates)),
         };
 
         let no_tx_pool = ctx.attributes().no_tx_pool();
@@ -435,7 +431,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         if ctx.chain_spec.is_isthmus_active_at_timestamp(ctx.attributes().timestamp()) {
             // force load `L2ToL1MessagePasser.sol` so l2 withdrawals root can be computed even if
             // no l2 withdrawals in block
-            _ = db.load_cache_account(ADDRESS_L2_TO_L1_MESSAGE_PASSER)?;
+            _ = db.load_cache_account(L2_TO_L1_MESSAGE_PASSER_ADDRESS)?;
         }
 
         let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number: _ } =
@@ -634,7 +630,7 @@ where
             if sequencer_tx.value().is_eip4844() {
                 return Err(PayloadBuilderError::other(
                     OpPayloadBuilderError::BlobTransactionRejected,
-                ))
+                ));
             }
 
             // Convert the transaction to a [RecoveredTx]. This is

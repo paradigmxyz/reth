@@ -8,6 +8,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+// `url` is needed for serde support on `reqwest::Url`
+use url as _;
+
 pub mod block;
 pub mod builder;
 pub mod cache;
@@ -23,6 +26,8 @@ pub mod transaction;
 pub mod tx_forward;
 pub mod utils;
 
+pub use alloy_rpc_types_eth::FillTransaction;
+pub use block::CachedTransaction;
 pub use builder::config::{EthConfig, EthFilterConfig};
 pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,
@@ -35,5 +40,5 @@ pub use gas_oracle::{
 };
 pub use id_provider::EthSubscriptionIdProvider;
 pub use pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-pub use transaction::{FillTransactionResult, TransactionSource};
+pub use transaction::TransactionSource;
 pub use tx_forward::ForwardConfig;

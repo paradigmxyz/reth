@@ -8,8 +8,8 @@ use reth_primitives_traits::{Account, StorageEntry};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Hashing Writer
-#[auto_impl(&, Arc, Box)]
-pub trait HashingWriter: Send + Sync {
+#[auto_impl(&, Box)]
+pub trait HashingWriter: Send {
     /// Unwind and clear account hashing.
     ///
     /// # Returns
@@ -57,7 +57,7 @@ pub trait HashingWriter: Send + Sync {
     /// Mapping of hashed keys of updated accounts to their respective updated hashed slots.
     fn unwind_storage_hashing_range(
         &self,
-        range: impl RangeBounds<BlockNumberAddress>,
+        range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>>;
 
     /// Iterates over storages and inserts them to hashing table.

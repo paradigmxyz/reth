@@ -31,7 +31,7 @@ pub use builder::{add_ons::AddOns, *};
 
 mod launch;
 pub use launch::{
-    debug::{DebugNode, DebugNodeLauncher},
+    debug::{DebugNode, DebugNodeLauncher, DebugNodeLauncherFuture, DefaultDebugBlockProvider},
     engine::EngineNodeLauncher,
     *,
 };

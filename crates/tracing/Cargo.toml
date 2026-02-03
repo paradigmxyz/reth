@@ -21,13 +21,17 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "ansi"
 tracing-appender.workspace = true
 tracing-journald.workspace = true
 tracing-logfmt.workspace = true
+tracing-samply.workspace = true
+tracing-tracy = { workspace = true, optional = true }
+tracy-client = { workspace = true, optional = true, features = ["demangle"] }
 
 # misc
 clap = { workspace = true, features = ["derive"] }
 eyre.workspace = true
 rolling-file.workspace = true
-url = { workspace = true, optional = true }
 
 [features]
 default = ["otlp"]
-otlp = ["reth-tracing-otlp", "dep:url"]
+otlp = ["reth-tracing-otlp"]
+otlp-logs = ["reth-tracing-otlp/otlp-logs"]
+tracy = ["tracing-tracy", "tracy-client"]

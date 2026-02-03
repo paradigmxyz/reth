@@ -21,15 +21,19 @@ on:
         required: false
         type: string
         description: "Optional cargo package path"
+      artifact_name:
+        required: false
+        type: string
+        default: "artifacts"
+        description: "Name for the uploaded artifact"
 
 jobs:
   prepare-reth:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
-    runs-on:
-      group: Reth
+    runs-on: depot-ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - run: mkdir artifacts
 
       - name: Set up Docker Buildx
@@ -39,7 +43,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: .github/assets/hive/Dockerfile
+          file: .github/scripts/hive/Dockerfile
           tags: ${{ inputs.image_tag }}
           outputs: type=docker,dest=./artifacts/reth_image.tar
           build-args: |
@@ -51,7 +55,7 @@ jobs:
 
       - name: Upload reth image
         id: upload
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
-          name: artifacts
+          name: ${{ inputs.artifact_name }}
           path: ./artifacts

@@ -2,21 +2,11 @@
 //!
 //! Transaction wrapper that labels transaction with its origin.
 
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{NodePrimitives, Recovered, SignedTransaction};
 use reth_rpc_convert::{RpcConvert, RpcTransaction};
-use serde::{Deserialize, Serialize};
-
-/// Response type for `eth_fillTransaction` RPC method.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FillTransactionResult<T> {
-    /// RLP-encoded transaction bytes
-    pub raw: Bytes,
-    /// Filled transaction object
-    pub tx: T,
-}
 
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -59,12 +49,14 @@ impl<T: SignedTransaction> TransactionSource<T> {
         match self {
             Self::Pool(tx) => resp_builder.fill_pending(tx),
             Self::Block { transaction, index, block_hash, block_number, base_fee } => {
+                #[allow(clippy::needless_update)]
                 let tx_info = TransactionInfo {
                     hash: Some(transaction.trie_hash()),
                     index: Some(index),
                     block_hash: Some(block_hash),
                     block_number: Some(block_number),
                     base_fee,
+                    ..Default::default()
                 };
 
                 resp_builder.fill(transaction, tx_info)
@@ -79,6 +71,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
                 let hash = tx.trie_hash();
                 (tx, TransactionInfo { hash: Some(hash), ..Default::default() })
             }
+            #[allow(clippy::needless_update)]
             Self::Block { transaction, index, block_hash, block_number, base_fee } => {
                 let hash = transaction.trie_hash();
                 (
@@ -89,6 +82,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
                         base_fee,
+                        ..Default::default()
                     },
                 )
             }

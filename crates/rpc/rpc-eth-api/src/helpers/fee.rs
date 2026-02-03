@@ -13,7 +13,9 @@ use reth_rpc_eth_types::{
     fee_history::calculate_reward_percentiles_for_block, utils::checked_blob_gas_used_ratio,
     EthApiError, FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
-use reth_storage_api::{BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderHeader};
+use reth_storage_api::{
+    BlockIdReader, BlockNumReader, BlockReaderIdExt, HeaderProvider, ProviderHeader,
+};
 use tracing::debug;
 
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
@@ -92,6 +94,17 @@ pub trait EthFees:
                 newest_block = BlockNumberOrTag::Latest;
             }
 
+            // For explicit block numbers, validate against chain head before resolution
+            if let BlockNumberOrTag::Number(requested) = newest_block {
+                let latest_block =
+                    self.provider().best_block_number().map_err(Self::Error::from_eth_err)?;
+                if requested > latest_block {
+                    return Err(
+                        EthApiError::RequestBeyondHead { requested, head: latest_block }.into()
+                    )
+                }
+            }
+
             let end_block = self
                 .provider()
                 .block_number_for_id(newest_block.into())
@@ -110,7 +123,8 @@ pub trait EthFees:
             // increasing and 0 <= p <= 100
             // Note: The types used ensure that the percentiles are never < 0
             if let Some(percentiles) = &reward_percentiles &&
-                percentiles.windows(2).any(|w| w[0] > w[1] || w[0] > 100.)
+                (percentiles.iter().any(|p| *p < 0.0 || *p > 100.0) ||
+                    percentiles.windows(2).any(|w| w[0] > w[1]))
             {
                 return Err(EthApiError::InvalidRewardPercentiles.into())
             }

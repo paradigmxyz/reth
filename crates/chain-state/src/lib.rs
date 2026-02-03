@@ -11,6 +11,12 @@
 mod in_memory;
 pub use in_memory::*;
 
+mod deferred_trie;
+pub use deferred_trie::*;
+
+mod lazy_overlay;
+pub use lazy_overlay::*;
+
 mod noop;
 
 mod chain_info;
@@ -20,7 +26,8 @@ mod notifications;
 pub use notifications::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications, ForkChoiceStream,
-    ForkChoiceSubscriptions,
+    ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
+    WatchValueStream,
 };
 
 mod memory_overlay;

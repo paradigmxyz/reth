@@ -675,10 +675,6 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
     fn transactions_by_block(
         &self,
         block: BlockHashOrNumber,
@@ -1361,7 +1357,7 @@ where
         self
     }
 
-    fn commit(self) -> ProviderResult<bool> {
+    fn commit(self) -> ProviderResult<()> {
         unimplemented!("commit not supported for RPC provider")
     }
 
@@ -1571,10 +1567,6 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn transaction_block(&self, _id: TxNumber) -> Result<Option<BlockNumber>, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
     fn transactions_by_block(
         &self,
         _block: alloy_rpc_types::BlockHashOrNumber,
@@ -1750,6 +1742,17 @@ where
         _block_number: BlockNumber,
         _address: Address,
     ) -> ProviderResult<Option<reth_db_api::models::AccountBeforeTx>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn account_changesets_range(
+        &self,
+        _range: impl std::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, reth_db_api::models::AccountBeforeTx)>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
         Err(ProviderError::UnsupportedProvider)
     }
 }

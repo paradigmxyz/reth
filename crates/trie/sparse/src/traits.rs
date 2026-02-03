@@ -4,21 +4,32 @@ use core::fmt::Debug;
 
 use alloc::{borrow::Cow, vec, vec::Vec};
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256Map, HashMap, HashSet},
     B256,
 };
-use alloy_trie::{BranchNodeCompact, TrieMask};
+use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{Nibbles, TrieNode};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 
 use crate::provider::TrieNodeProvider;
+
+/// Describes an update to a leaf in the sparse trie.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeafUpdate {
+    /// The leaf value has been changed to the given RLP-encoded value.
+    /// Empty Vec indicates the leaf has been removed.
+    Changed(Vec<u8>),
+    /// The leaf value may have changed, but the new value is not yet known.
+    /// Used for optimistic prewarming when the actual value is unavailable.
+    Touched,
+}
 
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
 /// This trait abstracts over different sparse trie implementations (serial vs parallel)
 /// while providing a unified interface for the core trie operations needed by the
-/// [`crate::SparseTrie`] enum.
-pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
+/// [`crate::RevealableSparseTrie`] enum.
+pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Configures the trie to have the given root node revealed.
     ///
     /// # Arguments
@@ -29,17 +40,30 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     ///
     /// # Returns
     ///
-    /// Self if successful, or an error if revealing fails.
+    /// `Ok(())` if successful, or an error if revealing fails.
     ///
     /// # Panics
     ///
     /// May panic if the trie is not new/cleared, and has already revealed nodes.
-    fn with_root(
-        self,
+    fn set_root(
+        &mut self,
         root: TrieNode,
-        masks: TrieMasks,
+        masks: Option<BranchNodeMasks>,
         retain_updates: bool,
-    ) -> SparseTrieResult<Self>;
+    ) -> SparseTrieResult<()>;
+
+    /// Configures the trie to have the given root node revealed.
+    ///
+    /// See [`Self::set_root`] for more details.
+    fn with_root(
+        mut self,
+        root: TrieNode,
+        masks: Option<BranchNodeMasks>,
+        retain_updates: bool,
+    ) -> SparseTrieResult<Self> {
+        self.set_root(root, masks, retain_updates)?;
+        Ok(self)
+    }
 
     /// Configures the trie to retain information about updates.
     ///
@@ -50,11 +74,15 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     /// # Arguments
     ///
     /// * `retain_updates` - Whether to track updates
+    fn set_updates(&mut self, retain_updates: bool);
+
+    /// Configures the trie to retain information about updates.
     ///
-    /// # Returns
-    ///
-    /// Self for method chaining.
-    fn with_updates(self, retain_updates: bool) -> Self;
+    /// See [`Self::set_updates`] for more details.
+    fn with_updates(mut self, retain_updates: bool) -> Self {
+        self.set_updates(retain_updates);
+        self
+    }
 
     /// Reserves capacity for additional trie nodes.
     ///
@@ -72,9 +100,9 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
         &mut self,
         path: Nibbles,
         node: TrieNode,
-        masks: TrieMasks,
+        masks: Option<BranchNodeMasks>,
     ) -> SparseTrieResult<()> {
-        self.reveal_nodes(vec![RevealedSparseNode { path, node, masks }])
+        self.reveal_nodes(vec![ProofTrieNode { path, node, masks }])
     }
 
     /// Reveals one or more trie nodes if they have not been revealed before.
@@ -91,7 +119,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     /// # Returns
     ///
     /// `Ok(())` if successful, or an error if any of the nodes was not revealed.
-    fn reveal_nodes(&mut self, nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()>;
+    fn reveal_nodes(&mut self, nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()>;
 
     /// Updates the value of a leaf node at the specified path.
     ///
@@ -232,34 +260,61 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     fn shrink_values_to(&mut self, size: usize);
 }
 
-/// Struct for passing around branch node mask information.
+/// Extension trait for sparse tries that support pruning.
 ///
-/// Branch nodes can have up to 16 children (one for each nibble).
-/// The masks represent which children are stored in different ways:
-/// - `hash_mask`: Indicates which children are stored as hashes in the database
-/// - `tree_mask`: Indicates which children are complete subtrees stored in the database
-///
-/// These masks are essential for efficient trie traversal and serialization, as they
-/// determine how nodes should be encoded and stored on disk.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct TrieMasks {
-    /// Branch node hash mask, if any.
+/// This trait provides the `prune` method for sparse trie implementations that support
+/// converting nodes beyond a certain depth into hash stubs. This is useful for reducing
+/// memory usage when caching tries across payload validations.
+pub trait SparseTrieExt: SparseTrie {
+    /// Returns a cheap O(1) size hint for the trie representing the count of revealed
+    /// (non-Hash) nodes.
     ///
-    /// When a bit is set, the corresponding child node's hash is stored in the trie.
-    ///
-    /// This mask enables selective hashing of child nodes.
-    pub hash_mask: Option<TrieMask>,
-    /// Branch node tree mask, if any.
-    ///
-    /// When a bit is set, the corresponding child subtree is stored in the database.
-    pub tree_mask: Option<TrieMask>,
-}
+    /// This is used as a heuristic for prioritizing which storage tries to keep
+    /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
+    fn size_hint(&self) -> usize;
 
-impl TrieMasks {
-    /// Helper function, returns both fields `hash_mask` and `tree_mask` as [`None`]
-    pub const fn none() -> Self {
-        Self { hash_mask: None, tree_mask: None }
-    }
+    /// Replaces nodes beyond `max_depth` with hash stubs and removes their descendants.
+    ///
+    /// Depth counts nodes traversed (not nibbles), so extension nodes count as 1 depth
+    /// regardless of key length. `max_depth == 0` prunes all children of the root node.
+    ///
+    /// # Preconditions
+    ///
+    /// Must be called after `root()` to ensure all nodes have computed hashes.
+    /// Calling on a trie without computed hashes will result in no pruning.
+    ///
+    /// # Behavior
+    ///
+    /// - Embedded nodes (RLP < 32 bytes) are preserved since they have no hash
+    /// - Returns 0 if `max_depth` exceeds trie depth or trie is empty
+    ///
+    /// # Returns
+    ///
+    /// The number of nodes converted to hash stubs.
+    fn prune(&mut self, max_depth: usize) -> usize;
+
+    /// Applies leaf updates to the sparse trie.
+    ///
+    /// When a [`LeafUpdate::Changed`] is successfully applied, it is removed from the
+    /// given [`B256Map`]. If it could not be applied due to blinded nodes, it remains
+    /// in the map and the callback is invoked with the required proof target.
+    ///
+    /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
+    /// `updates` map can be reused to retry the update.
+    ///
+    /// The callback receives `(key, min_len)` where `key` is the full 32-byte hashed key
+    /// (right-padded with zeros from the blinded path) and `min_len` is the minimum depth
+    /// at which proof nodes should be returned.
+    ///
+    /// The callback may be invoked multiple times for the same target across retry loops.
+    /// Callers should deduplicate if needed.
+    ///
+    /// [`LeafUpdate::Touched`] behaves identically except it does not modify the leaf value.
+    fn update_leaves(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        proof_required_fn: impl FnMut(B256, u8),
+    ) -> SparseTrieResult<()>;
 }
 
 /// Tracks modifications to the sparse trie structure.
@@ -274,6 +329,17 @@ pub struct SparseTrieUpdates {
     pub removed_nodes: HashSet<Nibbles>,
     /// Flag indicating whether the trie was wiped.
     pub wiped: bool,
+}
+
+impl SparseTrieUpdates {
+    /// Initialize a [`Self`] with given capacities.
+    pub fn with_capacity(num_updated_nodes: usize, num_removed_nodes: usize) -> Self {
+        Self {
+            updated_nodes: HashMap::with_capacity_and_hasher(num_updated_nodes, Default::default()),
+            removed_nodes: HashSet::with_capacity_and_hasher(num_removed_nodes, Default::default()),
+            wiped: false,
+        }
+    }
 }
 
 /// Error type for a leaf lookup operation
@@ -306,15 +372,4 @@ pub enum LeafLookup {
     Exists,
     /// Leaf does not exist (exclusion proof found).
     NonExistent,
-}
-
-/// Carries all information needed by a sparse trie to reveal a particular node.
-#[derive(Debug, PartialEq, Eq)]
-pub struct RevealedSparseNode {
-    /// Path of the node.
-    pub path: Nibbles,
-    /// The node itself.
-    pub node: TrieNode,
-    /// Tree and hash masks for the node, if known.
-    pub masks: TrieMasks,
 }

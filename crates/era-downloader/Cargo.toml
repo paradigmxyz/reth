@@ -15,12 +15,11 @@ alloy-primitives.workspace = true
 
 # reth
 reth-fs-util.workspace = true
+reth-era.workspace = true
 
 # http
 bytes.workspace = true
 reqwest.workspace = true
-reqwest.default-features = false
-reqwest.features = ["stream", "rustls-tls-native-roots"]
 
 # async
 tokio.workspace = true
