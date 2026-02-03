@@ -2878,7 +2878,7 @@ impl SparseSubtrie {
         for (path, node) in &self.nodes {
             size += core::mem::size_of::<Nibbles>();
             size += path.len(); // Nibbles heap allocation
-            size += sparse_node_memory_size(node);
+            size += node.memory_size();
         }
 
         // Values map: key (Nibbles) + value (Vec<u8>)
@@ -2892,18 +2892,6 @@ impl SparseSubtrie {
         size += self.inner.buffers.memory_size();
 
         size
-    }
-}
-
-/// Returns the in-memory size of a [`SparseNode`].
-const fn sparse_node_memory_size(node: &SparseNode) -> usize {
-    match node {
-        SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Branch { .. } => {
-            core::mem::size_of::<SparseNode>()
-        }
-        SparseNode::Leaf { key, .. } | SparseNode::Extension { key, .. } => {
-            core::mem::size_of::<SparseNode>() + key.len()
-        }
     }
 }
 
