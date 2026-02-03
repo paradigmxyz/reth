@@ -1,0 +1,19 @@
+name: Changelog
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm install -g @anthropic-ai/claude-cli
+      - uses: wevm/changelogs-rs/gen@master
+        with:
+          ai: 'claude -x'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
