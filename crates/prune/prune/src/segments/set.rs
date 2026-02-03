@@ -76,6 +76,8 @@ where
         } = prune_modes;
 
         Self::default()
+            // Transaction lookup
+            .segment_opt(transaction_lookup.map(TransactionLookup::new))
             // Bodies - run first since file deletion is fast
             .segment_opt(bodies_history.map(Bodies::new))
             // Account history
@@ -89,8 +91,6 @@ where
                 (!receipts_log_filter.is_empty())
                     .then(|| ReceiptsByLogs::new(receipts_log_filter.clone())),
             )
-            // Transaction lookup
-            .segment_opt(transaction_lookup.map(TransactionLookup::new))
             // Sender recovery
             .segment_opt(sender_recovery.map(SenderRecovery::new))
     }
