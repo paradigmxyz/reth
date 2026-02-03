@@ -21,7 +21,7 @@ use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeCompact, BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef,
-    LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, TrieMask, TrieMaskExt, TrieNode, EMPTY_ROOT_HASH,
+    LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, TrieMask, TrieNode, EMPTY_ROOT_HASH,
 };
 use tracing::{debug, instrument, trace};
 
@@ -421,7 +421,7 @@ impl fmt::Display for SerialSparseTrie {
                 SparseNode::Branch { state_mask, .. } => {
                     writeln!(f, "{packed_path} -> {node:?}")?;
 
-                    for i in state_mask.iter_set_bits().rev() {
+                    for i in state_mask.iter().rev() {
                         let mut child_path = path;
                         child_path.push_unchecked(i);
                         if let Some(child_node) = self.nodes_ref().get(&child_path) {
@@ -502,7 +502,7 @@ impl SparseTrieTrait for SerialSparseTrie {
             TrieNode::Branch(branch) => {
                 // For a branch node, iterate over all children
                 let mut stack_ptr = branch.as_ref().first_child_index();
-                for idx in branch.state_mask.iter_set_bits() {
+                for idx in branch.state_mask.iter() {
                     let mut child_path = path;
                     child_path.push_unchecked(idx);
                     // Reveal each child node or hash it has
@@ -1495,7 +1495,7 @@ impl SerialSparseTrie {
                     } else {
                         unchanged_prefix_set.insert(path);
 
-                        for bit in state_mask.iter_set_bits().rev() {
+                        for bit in state_mask.iter().rev() {
                             let mut child_path = path;
                             child_path.push_unchecked(bit);
                             paths.push((child_path, level + 1));
@@ -1652,7 +1652,7 @@ impl SerialSparseTrie {
                     buffers.branch_child_buf.clear();
                     // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
                     // from the stack and keep walking in the sorted order.
-                    for bit in state_mask.iter_set_bits().rev() {
+                    for bit in state_mask.iter().rev() {
                         let mut child = path;
                         child.push_unchecked(bit);
                         buffers.branch_child_buf.push(child);

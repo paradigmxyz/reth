@@ -1,4 +1,4 @@
-use crate::{BranchNodeCompact, Nibbles, StoredSubNode, TrieMaskExt};
+use crate::{BranchNodeCompact, Nibbles, StoredSubNode};
 use alloy_primitives::B256;
 use alloy_trie::proof::AddedRemovedKeys;
 
@@ -61,7 +61,7 @@ impl CursorSubNode {
             .as_ref()
             .filter(|n| n.root_hash.is_none())
             .map_or(SubNodePosition::ParentBranch, |n| {
-                SubNodePosition::Child(n.state_mask.iter_set_bits().next().unwrap())
+                SubNodePosition::Child(n.state_mask.iter().next().unwrap())
             });
         Self::new_with_full_key(key, node, position)
     }

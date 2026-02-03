@@ -10,7 +10,7 @@ use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, SparseTrieResu
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
-    ProofTrieNode, RlpNode, TrieMaskExt, TrieNode,
+    ProofTrieNode, RlpNode, TrieNode,
 };
 use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider},
@@ -2087,7 +2087,7 @@ impl ParallelSparseTrie {
                 // in the lower subtrie, and reveal accordingly.
                 if !SparseSubtrieType::path_len_is_upper(path.len() + 1) {
                     let mut stack_ptr = branch.as_ref().first_child_index();
-                    for idx in branch.state_mask.iter_set_bits() {
+                    for idx in branch.state_mask.iter() {
                         let mut child_path = path;
                         child_path.push_unchecked(idx);
                         self.lower_subtrie_for_path_mut(&child_path)
@@ -2629,7 +2629,7 @@ impl SparseSubtrie {
             TrieNode::Branch(branch) => {
                 // For a branch node, iterate over all children
                 let mut stack_ptr = branch.as_ref().first_child_index();
-                for idx in branch.state_mask.iter_set_bits() {
+                for idx in branch.state_mask.iter() {
                     let mut child_path = path;
                     child_path.push_unchecked(idx);
                     if Self::is_child_same_level(&path, &child_path) {
@@ -3067,7 +3067,7 @@ impl SparseSubtrieInner {
                 self.buffers.branch_child_buf.clear();
                 // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
                 // from the stack and keep walking in the sorted order.
-                for bit in state_mask.iter_set_bits().rev() {
+                for bit in state_mask.iter().rev() {
                     let mut child = path;
                     child.push_unchecked(bit);
                     self.buffers.branch_child_buf.push(child);
