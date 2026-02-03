@@ -33,6 +33,7 @@ mod database;
 mod environment;
 mod error;
 mod flags;
+pub mod parallel;
 mod transaction;
 mod txn_manager;
 
