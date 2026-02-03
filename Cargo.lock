@@ -6271,8 +6271,9 @@ dependencies = [
 
 [[package]]
 name = "nybbles"
-version = "0.4.7"
-source = "git+https://github.com/alloy-rs/nybbles?rev=dd5212d#dd5212d04e39624afb03228c1a963ed19ec26b16"
+version = "0.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d49ff0c0d00d4a502b39df9af3a525e1efeb14b9dabb5bb83335284c1309210"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
