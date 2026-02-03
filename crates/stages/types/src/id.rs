@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use reth_prune_types::PruneModes;
 #[cfg(feature = "std")]
 use std::{collections::HashMap, sync::OnceLock};
 
@@ -113,6 +114,18 @@ impl StageId {
     /// Returns true indicating if it's the finish stage [`StageId::Finish`]
     pub const fn is_finish(&self) -> bool {
         matches!(self, Self::Finish)
+    }
+
+    /// Returns an iterator over stages that are active based on configuration.
+    ///
+    /// Optional stages like [`StageId::Era`] and [`StageId::PruneSenderRecovery`] are only
+    /// included when their corresponding configuration is enabled.
+    pub fn active(era_enabled: bool, prune_modes: &PruneModes) -> impl Iterator<Item = Self> {
+        Self::ALL.into_iter().filter(move |id| match id {
+            Self::Era => era_enabled,
+            Self::PruneSenderRecovery => prune_modes.sender_recovery.is_some(),
+            _ => true,
+        })
     }
 
     /// Get a pre-encoded raw Vec, for example, to be used as the DB key for
