@@ -860,8 +860,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_code_hash: Option<B256>,
     ) -> Result<(), PoolError> {
         // Short circuit if the sender has neither delegation nor pending delegation.
-        if (on_chain_code_hash.is_none() || on_chain_code_hash == Some(KECCAK_EMPTY))
-            && !self.all_transactions.auths.contains_key(&transaction.sender_id())
+        if (on_chain_code_hash.is_none() || on_chain_code_hash == Some(KECCAK_EMPTY)) &&
+            !self.all_transactions.auths.contains_key(&transaction.sender_id())
         {
             return Ok(());
         }
@@ -961,8 +961,8 @@ impl<T: TransactionOrdering> TxPool<T> {
                 Destination::Pool(move_to) => {
                     debug_assert_ne!(&move_to, &current, "destination must be different");
                     let moved = self.move_transaction(current, move_to, &id);
-                    if matches!(move_to, SubPool::Pending)
-                        && let Some(tx) = moved
+                    if matches!(move_to, SubPool::Pending) &&
+                        let Some(tx) = moved
                     {
                         trace!(target: "txpool", hash=%tx.transaction.hash(), "Promoted transaction to pending");
                         outcome.promoted.push(tx);
@@ -1881,8 +1881,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
             // overdraft
             let id = new_blob_tx.transaction_id;
             let mut descendants = self.descendant_txs_inclusive(&id).peekable();
-            if let Some((maybe_replacement, _)) = descendants.peek()
-                && **maybe_replacement == new_blob_tx.transaction_id
+            if let Some((maybe_replacement, _)) = descendants.peek() &&
+                **maybe_replacement == new_blob_tx.transaction_id
             {
                 // replacement transaction
                 descendants.next();
