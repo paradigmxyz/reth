@@ -556,7 +556,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 .name("static-files".into())
                 .spawn_scoped(s, || {
                     let start = Instant::now();
-                    sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx)?;
+                    sf_provider.write_blocks_data(s, &blocks, &tx_nums, &sf_ctx)?;
                     Ok::<_, ProviderError>(start.elapsed())
                 })
                 // Same panic happens in `scope.spawn`
@@ -569,7 +569,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     .name("rocksdb".into())
                     .spawn_scoped(s, || {
                         let start = Instant::now();
-                        rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)?;
+                        rocksdb_provider.write_blocks_data(s, &blocks, &tx_nums, &rocksdb_ctx)?;
                         Ok::<_, ProviderError>(start.elapsed())
                     })
                     // Same panic happens in `scope.spawn`

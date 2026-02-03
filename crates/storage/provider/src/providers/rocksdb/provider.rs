@@ -1138,43 +1138,42 @@ impl RocksDBProvider {
     /// the provided storage settings. Each operation runs in parallel with its own batch,
     /// pushing to `ctx.pending_batches` for later commit.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(num_blocks = blocks.len(), first_block = ctx.first_block_number))]
-    pub(crate) fn write_blocks_data<N: reth_node_types::NodePrimitives>(
-        &self,
-        blocks: &[ExecutedBlock<N>],
-        tx_nums: &[TxNumber],
-        ctx: RocksDBWriteCtx,
+    pub(crate) fn write_blocks_data<'scope, 'env: 'scope, N: reth_node_types::NodePrimitives>(
+        &'env self,
+        s: &'scope thread::Scope<'scope, 'env>,
+        blocks: &'env [ExecutedBlock<N>],
+        tx_nums: &'env [TxNumber],
+        ctx: &'env RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         if !ctx.storage_settings.any_in_rocksdb() {
             return Ok(());
         }
 
-        thread::scope(|s| {
-            let handles: Vec<_> = [
-                (ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
-                    ctx.prune_tx_lookup.is_none_or(|m| !m.is_full()))
-                .then(|| s.spawn(|| self.write_tx_hash_numbers(blocks, tx_nums, &ctx))),
-                ctx.storage_settings
-                    .account_history_in_rocksdb
-                    .then(|| s.spawn(|| self.write_account_history(blocks, &ctx))),
-                ctx.storage_settings
-                    .storages_history_in_rocksdb
-                    .then(|| s.spawn(|| self.write_storage_history(blocks, &ctx))),
-            ]
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, h)| h.map(|h| (i, h)))
-            .collect();
+        let handles: Vec<_> = [
+            (ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
+                ctx.prune_tx_lookup.is_none_or(|m| !m.is_full()))
+            .then(|| s.spawn(|| self.write_tx_hash_numbers(blocks, tx_nums, ctx))),
+            ctx.storage_settings
+                .account_history_in_rocksdb
+                .then(|| s.spawn(|| self.write_account_history(blocks, ctx))),
+            ctx.storage_settings
+                .storages_history_in_rocksdb
+                .then(|| s.spawn(|| self.write_storage_history(blocks, ctx))),
+        ]
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, h)| h.map(|h| (i, h)))
+        .collect();
 
-            for (i, handle) in handles {
-                handle.join().map_err(|_| {
-                    ProviderError::Database(DatabaseError::Other(format!(
-                        "rocksdb write thread {i} panicked"
-                    )))
-                })??;
-            }
+        for (i, handle) in handles {
+            handle.join().map_err(|_| {
+                ProviderError::Database(DatabaseError::Other(format!(
+                    "rocksdb write thread {i} panicked"
+                )))
+            })??;
+        }
 
-            Ok(())
-        })
+        Ok(())
     }
 
     /// Writes transaction hash to number mappings for the given blocks.

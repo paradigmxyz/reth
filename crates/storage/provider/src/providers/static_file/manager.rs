@@ -685,11 +685,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// This spawns separate threads for each segment type and each thread calls `sync_all()` on its
     /// writer when done.
     #[instrument(level = "debug", target = "providers::static_file", skip_all)]
-    pub fn write_blocks_data(
-        &self,
-        blocks: &[ExecutedBlock<N>],
-        tx_nums: &[TxNumber],
-        ctx: StaticFileWriteCtx,
+    pub fn write_blocks_data<'scope, 'env: 'scope>(
+        &'env self,
+        s: &'scope thread::Scope<'scope, 'env>,
+        blocks: &'env [ExecutedBlock<N>],
+        tx_nums: &'env [TxNumber],
+        ctx: &'env StaticFileWriteCtx,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             return Ok(());
@@ -697,70 +698,66 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         let first_block_number = blocks[0].recovered_block().number();
 
-        thread::scope(|s| {
-            let h_headers =
-                self.spawn_segment_writer(s, StaticFileSegment::Headers, first_block_number, |w| {
-                    Self::write_headers(w, blocks)
-                });
+        let h_headers =
+            self.spawn_segment_writer(s, StaticFileSegment::Headers, first_block_number, |w| {
+                Self::write_headers(w, blocks)
+            });
 
-            let h_txs = self.spawn_segment_writer(
+        let h_txs = self.spawn_segment_writer(
+            s,
+            StaticFileSegment::Transactions,
+            first_block_number,
+            |w| Self::write_transactions(w, blocks, tx_nums),
+        );
+
+        let h_senders = ctx.write_senders.then(|| {
+            self.spawn_segment_writer(
                 s,
-                StaticFileSegment::Transactions,
+                StaticFileSegment::TransactionSenders,
                 first_block_number,
-                |w| Self::write_transactions(w, blocks, tx_nums),
-            );
+                |w| Self::write_transaction_senders(w, blocks, tx_nums),
+            )
+        });
 
-            let h_senders = ctx.write_senders.then(|| {
-                self.spawn_segment_writer(
-                    s,
-                    StaticFileSegment::TransactionSenders,
-                    first_block_number,
-                    |w| Self::write_transaction_senders(w, blocks, tx_nums),
-                )
-            });
+        let h_receipts = ctx.write_receipts.then(|| {
+            self.spawn_segment_writer(s, StaticFileSegment::Receipts, first_block_number, |w| {
+                Self::write_receipts(w, blocks, tx_nums, ctx)
+            })
+        });
 
-            let h_receipts = ctx.write_receipts.then(|| {
-                self.spawn_segment_writer(s, StaticFileSegment::Receipts, first_block_number, |w| {
-                    Self::write_receipts(w, blocks, tx_nums, &ctx)
-                })
-            });
+        let h_account_changesets = ctx.write_account_changesets.then(|| {
+            self.spawn_segment_writer(
+                s,
+                StaticFileSegment::AccountChangeSets,
+                first_block_number,
+                |w| Self::write_account_changesets(w, blocks),
+            )
+        });
 
-            let h_account_changesets = ctx.write_account_changesets.then(|| {
-                self.spawn_segment_writer(
-                    s,
-                    StaticFileSegment::AccountChangeSets,
-                    first_block_number,
-                    |w| Self::write_account_changesets(w, blocks),
-                )
-            });
+        let h_storage_changesets = ctx.write_storage_changesets.then(|| {
+            self.spawn_segment_writer(
+                s,
+                StaticFileSegment::StorageChangeSets,
+                first_block_number,
+                |w| Self::write_storage_changesets(w, blocks),
+            )
+        });
 
-            let h_storage_changesets = ctx.write_storage_changesets.then(|| {
-                self.spawn_segment_writer(
-                    s,
-                    StaticFileSegment::StorageChangeSets,
-                    first_block_number,
-                    |w| Self::write_storage_changesets(w, blocks),
-                )
-            });
-
-            h_headers.join().map_err(|_| StaticFileWriterError::ThreadPanic("headers"))??;
-            h_txs.join().map_err(|_| StaticFileWriterError::ThreadPanic("transactions"))??;
-            if let Some(h) = h_senders {
-                h.join().map_err(|_| StaticFileWriterError::ThreadPanic("senders"))??;
-            }
-            if let Some(h) = h_receipts {
-                h.join().map_err(|_| StaticFileWriterError::ThreadPanic("receipts"))??;
-            }
-            if let Some(h) = h_account_changesets {
-                h.join()
-                    .map_err(|_| StaticFileWriterError::ThreadPanic("account_changesets"))??;
-            }
-            if let Some(h) = h_storage_changesets {
-                h.join()
-                    .map_err(|_| StaticFileWriterError::ThreadPanic("storage_changesets"))??;
-            }
-            Ok(())
-        })
+        h_headers.join().map_err(|_| StaticFileWriterError::ThreadPanic("headers"))??;
+        h_txs.join().map_err(|_| StaticFileWriterError::ThreadPanic("transactions"))??;
+        if let Some(h) = h_senders {
+            h.join().map_err(|_| StaticFileWriterError::ThreadPanic("senders"))??;
+        }
+        if let Some(h) = h_receipts {
+            h.join().map_err(|_| StaticFileWriterError::ThreadPanic("receipts"))??;
+        }
+        if let Some(h) = h_account_changesets {
+            h.join().map_err(|_| StaticFileWriterError::ThreadPanic("account_changesets"))??;
+        }
+        if let Some(h) = h_storage_changesets {
+            h.join().map_err(|_| StaticFileWriterError::ThreadPanic("storage_changesets"))??;
+        }
+        Ok(())
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and start index that can be
