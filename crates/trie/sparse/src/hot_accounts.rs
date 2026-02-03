@@ -30,7 +30,7 @@ use std::{borrow::Borrow, collections::VecDeque, hash::Hash};
 
 /// A hot account with pre-computed nibbles for efficient prefix matching.
 ///
-/// Hash and equality are based solely on `address` to allow O(1) lookups in HashSet by B256.
+/// Hash and equality are based solely on `address` to allow O(1) lookups in `HashSet` by `B256`.
 #[derive(Debug, Clone)]
 pub struct HotAccount {
     /// The hashed address (keccak256 of the original address).
@@ -84,7 +84,7 @@ pub struct HotAccounts {
     known_builders: HashSet<HotAccount>,
     /// Recent fee recipients with pre-computed nibbles - Tier B.
     /// Capped at `MAX_RECENT_FEE_RECIPIENTS` to prevent unbounded growth.
-    /// Uses VecDeque to maintain insertion order for eviction.
+    /// Uses `VecDeque` to maintain insertion order for eviction.
     recent_fee_recipients: VecDeque<HotAccount>,
     /// Set for O(1) membership checks of recent fee recipients (by address).
     recent_fee_recipients_set: HashSet<HotAccount>,
