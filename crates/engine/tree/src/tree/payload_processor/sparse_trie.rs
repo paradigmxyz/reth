@@ -356,11 +356,6 @@ where
                     };
 
                     self.on_multiproof_message(update);
-
-                    while let Ok(update) = self.updates.try_recv() {
-                        self.on_multiproof_message(update);
-                    }
-
                     self.process_new_updates()?;
                     self.dispatch_pending_targets();
                 }
