@@ -265,7 +265,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         let db_service =
             PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
         let join_handle = std::thread::Builder::new()
-            .name("Persistence Service".to_string())
+            .name("persistence".to_string())
             .spawn(|| {
                 if let Err(err) = db_service.run() {
                     error!(target: "engine::persistence", ?err, "Persistence service failed");

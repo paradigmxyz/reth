@@ -73,13 +73,13 @@ impl SparseStateTrie {
 impl<A, S> SparseStateTrie<A, S> {
     /// Returns a reference to the storage tries.
     #[doc(hidden)]
-    pub fn storage(&self) -> &StorageTries<S> {
+    pub const fn storage(&self) -> &StorageTries<S> {
         &self.storage
     }
 
     /// Returns a mutable reference to the storage tries.
     #[doc(hidden)]
-    pub fn storage_mut(&mut self) -> &mut StorageTries<S> {
+    pub const fn storage_mut(&mut self) -> &mut StorageTries<S> {
         &mut self.storage
     }
 }
@@ -1252,34 +1252,68 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
         // Prune kept cold tries that have accumulated prune backlog.
         // Only prune storage tries over 1MB - smaller ones don't benefit much from depth pruning.
         let cold_evicted = tries_to_evict.len();
-        let mut stats = PruneTrieStats::default();
         const MIN_SIZE_TO_PRUNE: usize = 1024 * 1024; // 1 MB
-        for (address, mem) in &tries_to_keep_prunable {
-            if *mem < MIN_SIZE_TO_PRUNE {
-                continue;
-            }
-            let Some(heat_state) = self.modifications.get_mut(address) else { continue };
-            if heat_state.prune_backlog < 2 {
-                continue;
-            }
-            if let Some(trie) = self.tries.get_mut(address).and_then(|t| t.as_revealed_mut()) {
-                stats += trie.prune_preserving(config, TrieKind::Storage);
+
+        // Collect addresses eligible for pruning
+        let addresses_to_prune: Vec<_> = tries_to_keep_prunable
+            .iter()
+            .filter(|(addr, mem)| {
+                *mem >= MIN_SIZE_TO_PRUNE &&
+                    self.modifications.state.get(addr).is_some_and(|s| s.prune_backlog >= 2)
+            })
+            .map(|(addr, _)| *addr)
+            .collect();
+
+        // Prune storage tries in parallel
+        use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+        let stats: PruneTrieStats = self
+            .tries
+            .par_iter_mut()
+            .filter_map(|(addr, trie)| {
+                if !addresses_to_prune.contains(addr) {
+                    return None;
+                }
+                trie.as_revealed_mut().map(|t| t.prune_preserving(config, TrieKind::Storage))
+            })
+            .reduce(PruneTrieStats::default, |mut acc, s| {
+                acc += s;
+                acc
+            });
+
+        // Reset prune_backlog for pruned tries
+        for addr in &addresses_to_prune {
+            if let Some(heat_state) = self.modifications.state.get_mut(addr) {
                 heat_state.prune_backlog = 0;
             }
         }
 
         // If all cold tries evicted and hot memory still exceeds budget, prune hot tries too.
         // We can't evict them but we can depth-prune to reduce memory.
-        if tries_to_keep_prunable.is_empty() && hot_memory > max_memory {
-            for (address, mem) in &hot_tries {
-                if *mem < MIN_SIZE_TO_PRUNE {
-                    continue;
-                }
-                if let Some(trie) = self.tries.get_mut(address).and_then(|t| t.as_revealed_mut()) {
-                    stats += trie.prune_preserving(config, TrieKind::Storage);
-                }
-            }
-        }
+        let hot_stats = if tries_to_keep_prunable.is_empty() && hot_memory > max_memory {
+            let hot_addresses: Vec<_> = hot_tries
+                .iter()
+                .filter(|(_, mem)| *mem >= MIN_SIZE_TO_PRUNE)
+                .map(|(addr, _)| *addr)
+                .collect();
+
+            self.tries
+                .par_iter_mut()
+                .filter_map(|(addr, trie)| {
+                    if !hot_addresses.contains(addr) {
+                        return None;
+                    }
+                    trie.as_revealed_mut().map(|t| t.prune_preserving(config, TrieKind::Storage))
+                })
+                .reduce(PruneTrieStats::default, |mut acc, s| {
+                    acc += s;
+                    acc
+                })
+        } else {
+            PruneTrieStats::default()
+        };
+
+        let mut stats = stats;
+        stats += hot_stats;
 
         // Clear revealed_paths for prunable tries only (not hot)
         for (addr, _) in &tries_to_keep_prunable {
@@ -1360,7 +1394,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
 
 impl<S: SparseTrieTrait + Clone> StorageTries<S> {
     /// Returns a mutable reference to the storage trie modifications tracker.
-    pub fn modifications_mut(&mut self) -> &mut StorageTrieModifications {
+    pub const fn modifications_mut(&mut self) -> &mut StorageTrieModifications {
         &mut self.modifications
     }
 
@@ -1497,7 +1531,7 @@ impl StorageTrieModifications {
     ///
     /// - Accessed tries: heat increments by 1
     /// - Non-accessed tries: heat decays by 1
-    /// - All tries: prune_backlog increments
+    /// - All tries: `prune_backlog` increments
     pub fn update_and_reset(&mut self) {
         // First, create entries for newly accessed addresses not yet in state
         for address in &self.accessed_this_cycle {

@@ -23,7 +23,7 @@ reth-evm = { workspace = true, features = ["metrics"] }
 reth-network-p2p.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
-reth-primitives-traits = { workspace = true, features = ["rayon"] }
+reth-primitives-traits = { workspace = true, features = ["rayon", "dashmap"] }
 reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
@@ -62,7 +62,6 @@ metrics.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
-dashmap.workspace = true
 schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true
