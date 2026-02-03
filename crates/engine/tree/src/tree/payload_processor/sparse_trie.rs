@@ -304,7 +304,7 @@ where
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             finished_state_updates: Default::default(),
             pending_targets: Default::default(),
-            pending_updates: 0,
+            pending_updates: Default::default(),
             metrics,
         }
     }
