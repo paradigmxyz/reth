@@ -19,7 +19,7 @@ use reth_trie_sparse::{
 };
 use smallvec::SmallVec;
 use std::cmp::{Ord, Ordering, PartialOrd};
-use tracing::{debug, instrument, trace};
+use tracing::{debug, debug_span, instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
 /// [`ParallelSparseTrie`]. All longer paths belong to a lower subtrie.
@@ -1228,6 +1228,7 @@ impl SparseTrieExt for ParallelSparseTrie {
         nodes_converted
     }
 
+    #[instrument(level = "debug", target = "reth_trie_parallel::trie", skip_all)]
     fn update_leaves(
         &mut self,
         updates: &mut alloy_primitives::map::B256Map<reth_trie_sparse::LeafUpdate>,
@@ -1243,6 +1244,9 @@ impl SparseTrieExt for ParallelSparseTrie {
             let full_path = Nibbles::unpack(key);
             // Remove upfront - we'll re-insert if the operation fails due to blinded node.
             let update = updates.remove(&key).unwrap();
+
+            let is_changed = matches!(update, LeafUpdate::Changed(_));
+            let _span = debug_span!("processing leaf update", ?key, ?is_changed).entered();
 
             match update {
                 LeafUpdate::Changed(value) => {
