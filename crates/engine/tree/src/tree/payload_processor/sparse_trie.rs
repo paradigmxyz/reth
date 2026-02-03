@@ -529,6 +529,8 @@ where
         skip_all
     )]
     fn process_new_updates(&mut self) -> SparseTrieResult<()> {
+        self.pending_updates = 0;
+
         // Firstly apply all new storage and account updates to the tries.
         self.process_leaf_updates(true)?;
 
