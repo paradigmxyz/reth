@@ -336,17 +336,21 @@ where
                     (account, storage_subtree, revealed_nodes, trie)
                 })
                 .par_bridge_buffered()
-                .map(|(account, storage_subtree, mut revealed_nodes, mut trie)| {
-                    let result = Self::reveal_decoded_storage_multiproof_inner(
-                        account,
-                        storage_subtree,
-                        &mut revealed_nodes,
-                        &mut trie,
-                        retain_updates,
-                    );
+                .map_init(
+                    Vec::new,
+                    |nodes, (account, storage_subtree, mut revealed_nodes, mut trie)| {
+                        let result = Self::reveal_decoded_storage_multiproof_inner(
+                            account,
+                            storage_subtree,
+                            &mut revealed_nodes,
+                            &mut trie,
+                            nodes,
+                            retain_updates,
+                        );
 
-                    (account, revealed_nodes, trie, result)
-                })
+                        (account, revealed_nodes, trie, result)
+                    },
+                )
                 .collect();
 
             // Return `revealed_nodes` and `RevealableSparseTrie` for each account, incrementing
@@ -484,16 +488,13 @@ where
         account_subtree: DecodedProofNodes,
         branch_node_masks: BranchNodeMasksMap,
     ) -> SparseStateTrieResult<()> {
-        let FilterMappedProofNodes {
-            root_node,
-            mut nodes,
-            new_nodes,
-            metric_values: _metric_values,
-        } = filter_map_revealed_nodes(
-            account_subtree,
-            &mut self.revealed_account_paths,
-            &branch_node_masks,
-        )?;
+        let FilterMappedProofNodes { root_node, new_nodes, metric_values: _metric_values } =
+            filter_map_revealed_nodes(
+                account_subtree,
+                &mut self.revealed_account_paths,
+                &branch_node_masks,
+                &mut self.proof_nodes_buf,
+            )?;
         #[cfg(feature = "metrics")]
         {
             self.metrics.increment_total_account_nodes(_metric_values.total_nodes as u64);
@@ -510,8 +511,11 @@ where
             // supports doing so.
             trie.reserve_nodes(new_nodes);
 
-            trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes");
-            trie.reveal_nodes(&mut nodes)?;
+            trace!(target: "trie::sparse", total_nodes = ?self.proof_nodes_buf.len(), "Revealing account nodes");
+            trie.reveal_nodes(&mut self.proof_nodes_buf)?;
+
+            // Prepare for reuse
+            self.proof_nodes_buf.clear();
         }
 
         Ok(())
@@ -626,6 +630,7 @@ where
             storage_subtree,
             revealed_paths,
             trie,
+            &mut self.proof_nodes_buf,
             self.retain_updates,
         )?;
 
@@ -645,13 +650,15 @@ where
         storage_subtree: DecodedStorageMultiProof,
         revealed_nodes: &mut HashSet<Nibbles>,
         trie: &mut RevealableSparseTrie<S>,
+        nodes: &mut Vec<ProofTrieNode>,
         retain_updates: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
-        let FilterMappedProofNodes { root_node, mut nodes, new_nodes, metric_values } =
+        let FilterMappedProofNodes { root_node, new_nodes, metric_values } =
             filter_map_revealed_nodes(
                 storage_subtree.subtree,
                 revealed_nodes,
                 &storage_subtree.branch_node_masks,
+                nodes,
             )?;
 
         if let Some(root_node) = root_node {
@@ -664,7 +671,10 @@ where
             trie.reserve_nodes(new_nodes);
 
             trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes");
-            trie.reveal_nodes(&mut nodes)?;
+            trie.reveal_nodes(nodes)?;
+
+            // Prepare for reuse
+            nodes.clear();
         }
 
         Ok(metric_values)
@@ -1452,8 +1462,6 @@ struct ProofNodesMetricValues {
 struct FilterMappedProofNodes {
     /// Root node which was pulled out of the original node set to be handled specially.
     root_node: Option<ProofTrieNode>,
-    /// Filtered, decoded and unsorted proof nodes. Root node is removed.
-    nodes: Vec<ProofTrieNode>,
     /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
     /// if they are not in the proof.
     new_nodes: usize,
@@ -1468,13 +1476,10 @@ fn filter_map_revealed_nodes(
     proof_nodes: DecodedProofNodes,
     revealed_nodes: &mut HashSet<Nibbles>,
     branch_node_masks: &BranchNodeMasksMap,
+    nodes: &mut Vec<ProofTrieNode>,
 ) -> SparseStateTrieResult<FilterMappedProofNodes> {
-    let mut result = FilterMappedProofNodes {
-        root_node: None,
-        nodes: Vec::with_capacity(proof_nodes.len()),
-        new_nodes: 0,
-        metric_values: Default::default(),
-    };
+    let mut result =
+        FilterMappedProofNodes { root_node: None, new_nodes: 0, metric_values: Default::default() };
 
     let proof_nodes_len = proof_nodes.len();
     for (path, proof_node) in proof_nodes.into_inner() {
@@ -1525,7 +1530,7 @@ fn filter_map_revealed_nodes(
             continue
         }
 
-        result.nodes.push(node);
+        nodes.push(node);
     }
 
     Ok(result)
@@ -2079,9 +2084,14 @@ mod tests {
 
         let branch_node_masks = BranchNodeMasksMap::default();
 
-        let decoded =
-            filter_map_revealed_nodes(proof_nodes, &mut revealed_nodes, &branch_node_masks)
-                .unwrap();
+        let mut nodes = Vec::new();
+        let decoded = filter_map_revealed_nodes(
+            proof_nodes,
+            &mut revealed_nodes,
+            &branch_node_masks,
+            &mut nodes,
+        )
+        .unwrap();
 
         assert_eq!(
             decoded,
@@ -2091,11 +2101,7 @@ mod tests {
                     node: branch,
                     masks: None,
                 }),
-                nodes: vec![ProofTrieNode {
-                    path: Nibbles::from_nibbles([0x1]),
-                    node: leaf,
-                    masks: None,
-                }],
+
                 // Branch, two of its children, one leaf
                 new_nodes: 4,
                 // Metric values
@@ -2106,6 +2112,10 @@ mod tests {
                     skipped_nodes: 1,
                 },
             }
+        );
+        assert_eq!(
+            nodes,
+            vec![ProofTrieNode { path: Nibbles::from_nibbles([0x1]), node: leaf, masks: None }]
         );
     }
 }
