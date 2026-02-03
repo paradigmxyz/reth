@@ -29,8 +29,7 @@ use tracing::{instrument, trace};
 /// until after the `preserved_sparse_trie` lock is released.
 #[derive(Debug, Default)]
 pub struct DeferredDrops {
-    /// Proof nodes buffers that can be dropped after lock release.
-    /// Contains both account and storage proof node buffers.
+    /// Each nodes reveal operation creates a new buffer, uses it, and pushes it here.
     pub proof_nodes_bufs: Vec<Vec<ProofTrieNode>>,
 }
 
@@ -50,10 +49,7 @@ pub struct SparseStateTrie<
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
     account_rlp_buf: Vec<u8>,
-    /// Consumed proof nodes buffers (both account and storage) for deferred dropping.
-    ///
-    /// Each reveal operation creates a new buffer, uses it, and pushes it here.
-    /// These are collected via [`Self::take_deferred_drops`] and dropped after locks are released.
+    /// Holds data that should be dropped after any locks are released.
     deferred_drops: DeferredDrops,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
@@ -123,7 +119,7 @@ impl<A, S> SparseStateTrie<A, S> {
         self
     }
 
-    /// Takes the proof nodes buffers for deferred dropping.
+    /// Takes the data structures for deferred dropping.
     ///
     /// This allows the caller to drop the buffers after releasing any locks,
     /// avoiding expensive deallocations while holding locks.
