@@ -1554,6 +1554,70 @@ impl<'a> RocksDBBatch<'a> {
         Ok(())
     }
 
+    /// Generic helper for unwinding history shards.
+    ///
+    /// Mirrors MDBX `unwind_history_shards` behavior:
+    /// - Deletes shards entirely above `keep_to`
+    /// - Truncates boundary shards and re-keys to `u64::MAX` sentinel
+    /// - Preserves shards entirely below `keep_to`
+    #[allow(clippy::too_many_arguments)]
+    fn unwind_history_inner<K>(
+        &mut self,
+        shards: Vec<(K, BlockNumberList)>,
+        keep_to: BlockNumber,
+        get_highest: impl Fn(&K) -> u64,
+        is_sentinel: impl Fn(&K) -> bool,
+        delete_shard: impl Fn(&mut Self, K) -> ProviderResult<()>,
+        put_shard: impl Fn(&mut Self, &BlockNumberList) -> ProviderResult<()>,
+    ) -> ProviderResult<()>
+    where
+        K: Clone,
+    {
+        if shards.is_empty() {
+            return Ok(());
+        }
+
+        let boundary_idx =
+            shards.iter().position(|(key, _)| is_sentinel(key) || get_highest(key) > keep_to);
+
+        let Some(boundary_idx) = boundary_idx else {
+            let (last_key, last_value) = shards.last().expect("shards is non-empty");
+            if !is_sentinel(last_key) {
+                delete_shard(self, last_key.clone())?;
+                put_shard(self, last_value)?;
+            }
+            return Ok(());
+        };
+
+        for (key, _) in shards.iter().skip(boundary_idx + 1) {
+            delete_shard(self, key.clone())?;
+        }
+
+        let (boundary_key, boundary_list) = &shards[boundary_idx];
+
+        delete_shard(self, boundary_key.clone())?;
+
+        let new_last =
+            BlockNumberList::new_pre_sorted(boundary_list.iter().take_while(|&b| b <= keep_to));
+
+        if new_last.is_empty() {
+            if boundary_idx == 0 {
+                return Ok(());
+            }
+
+            let (prev_key, prev_value) = &shards[boundary_idx - 1];
+            if !is_sentinel(prev_key) {
+                delete_shard(self, prev_key.clone())?;
+                put_shard(self, prev_value)?;
+            }
+            return Ok(());
+        }
+
+        put_shard(self, &new_last)?;
+
+        Ok(())
+    }
+
     /// Unwinds account history for the given address, keeping only blocks <= `keep_to`.
     ///
     /// Mirrors MDBX `unwind_history_shards` behavior:
@@ -1566,66 +1630,16 @@ impl<'a> RocksDBBatch<'a> {
         keep_to: BlockNumber,
     ) -> ProviderResult<()> {
         let shards = self.provider.account_history_shards(address)?;
-        if shards.is_empty() {
-            return Ok(());
-        }
-
-        // Find the first shard that might contain blocks > keep_to.
-        // A shard is affected if it's the sentinel (u64::MAX) or its highest_block_number > keep_to
-        let boundary_idx = shards.iter().position(|(key, _)| {
-            key.highest_block_number == u64::MAX || key.highest_block_number > keep_to
-        });
-
-        // Repair path: no shards affected means all blocks <= keep_to, just ensure sentinel exists
-        let Some(boundary_idx) = boundary_idx else {
-            let (last_key, last_value) = shards.last().expect("shards is non-empty");
-            if last_key.highest_block_number != u64::MAX {
-                self.delete::<tables::AccountsHistory>(last_key.clone())?;
-                self.put::<tables::AccountsHistory>(
-                    ShardedKey::new(address, u64::MAX),
-                    last_value,
-                )?;
-            }
-            return Ok(());
-        };
-
-        // Delete all shards strictly after the boundary (they are entirely > keep_to)
-        for (key, _) in shards.iter().skip(boundary_idx + 1) {
-            self.delete::<tables::AccountsHistory>(key.clone())?;
-        }
-
-        // Process the boundary shard: filter out blocks > keep_to
-        let (boundary_key, boundary_list) = &shards[boundary_idx];
-
-        // Delete the boundary shard (we'll either drop it or rewrite at u64::MAX)
-        self.delete::<tables::AccountsHistory>(boundary_key.clone())?;
-
-        // Build truncated list once; check emptiness directly (avoids double iteration)
-        let new_last =
-            BlockNumberList::new_pre_sorted(boundary_list.iter().take_while(|&b| b <= keep_to));
-
-        if new_last.is_empty() {
-            // Boundary shard is now empty. Previous shard becomes the last and must be keyed
-            // u64::MAX.
-            if boundary_idx == 0 {
-                // Nothing left for this address
-                return Ok(());
-            }
-
-            let (prev_key, prev_value) = &shards[boundary_idx - 1];
-            if prev_key.highest_block_number != u64::MAX {
-                self.delete::<tables::AccountsHistory>(prev_key.clone())?;
-                self.put::<tables::AccountsHistory>(
-                    ShardedKey::new(address, u64::MAX),
-                    prev_value,
-                )?;
-            }
-            return Ok(());
-        }
-
-        self.put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &new_last)?;
-
-        Ok(())
+        self.unwind_history_inner(
+            shards,
+            keep_to,
+            |key| key.highest_block_number,
+            |key| key.highest_block_number == u64::MAX,
+            |batch, key| batch.delete::<tables::AccountsHistory>(key),
+            |batch, value| {
+                batch.put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), value)
+            },
+        )
     }
 
     /// Prunes history shards, removing blocks <= `to_block`.
@@ -1753,70 +1767,19 @@ impl<'a> RocksDBBatch<'a> {
         keep_to: BlockNumber,
     ) -> ProviderResult<()> {
         let shards = self.provider.storage_history_shards(address, storage_key)?;
-        if shards.is_empty() {
-            return Ok(());
-        }
-
-        // Find the first shard that might contain blocks > keep_to.
-        // A shard is affected if it's the sentinel (u64::MAX) or its highest_block_number > keep_to
-        let boundary_idx = shards.iter().position(|(key, _)| {
-            key.sharded_key.highest_block_number == u64::MAX ||
-                key.sharded_key.highest_block_number > keep_to
-        });
-
-        // Repair path: no shards affected means all blocks <= keep_to, just ensure sentinel exists
-        let Some(boundary_idx) = boundary_idx else {
-            let (last_key, last_value) = shards.last().expect("shards is non-empty");
-            if last_key.sharded_key.highest_block_number != u64::MAX {
-                self.delete::<tables::StoragesHistory>(last_key.clone())?;
-                self.put::<tables::StoragesHistory>(
+        self.unwind_history_inner(
+            shards,
+            keep_to,
+            |key| key.sharded_key.highest_block_number,
+            |key| key.sharded_key.highest_block_number == u64::MAX,
+            |batch, key| batch.delete::<tables::StoragesHistory>(key),
+            |batch, value| {
+                batch.put::<tables::StoragesHistory>(
                     StorageShardedKey::last(address, storage_key),
-                    last_value,
-                )?;
-            }
-            return Ok(());
-        };
-
-        // Delete all shards strictly after the boundary (they are entirely > keep_to)
-        for (key, _) in shards.iter().skip(boundary_idx + 1) {
-            self.delete::<tables::StoragesHistory>(key.clone())?;
-        }
-
-        // Process the boundary shard: filter out blocks > keep_to
-        let (boundary_key, boundary_list) = &shards[boundary_idx];
-
-        // Delete the boundary shard (we'll either drop it or rewrite at u64::MAX)
-        self.delete::<tables::StoragesHistory>(boundary_key.clone())?;
-
-        // Build truncated list once; check emptiness directly (avoids double iteration)
-        let new_last =
-            BlockNumberList::new_pre_sorted(boundary_list.iter().take_while(|&b| b <= keep_to));
-
-        if new_last.is_empty() {
-            // Boundary shard is now empty. Previous shard becomes the last and must be keyed
-            // u64::MAX.
-            if boundary_idx == 0 {
-                // Nothing left for this (address, storage_key) pair
-                return Ok(());
-            }
-
-            let (prev_key, prev_value) = &shards[boundary_idx - 1];
-            if prev_key.sharded_key.highest_block_number != u64::MAX {
-                self.delete::<tables::StoragesHistory>(prev_key.clone())?;
-                self.put::<tables::StoragesHistory>(
-                    StorageShardedKey::last(address, storage_key),
-                    prev_value,
-                )?;
-            }
-            return Ok(());
-        }
-
-        self.put::<tables::StoragesHistory>(
-            StorageShardedKey::last(address, storage_key),
-            &new_last,
-        )?;
-
-        Ok(())
+                    value,
+                )
+            },
+        )
     }
 
     /// Clears all account history shards for the given address.
