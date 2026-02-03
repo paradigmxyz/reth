@@ -23,16 +23,6 @@ use reth_trie_common::{
 use tracing::debug;
 use tracing::{instrument, trace};
 
-/// Holds data that should be dropped after any locks are released.
-///
-/// This is used to defer expensive deallocations (like proof node buffers)
-/// until after the `preserved_sparse_trie` lock is released.
-#[derive(Debug, Default)]
-pub struct DeferredDrops {
-    /// Proof nodes buffer that can be dropped after lock release.
-    pub proof_nodes_buf: Vec<ProofTrieNode>,
-}
-
 #[derive(Debug)]
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<
@@ -49,8 +39,10 @@ pub struct SparseStateTrie<
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
     account_rlp_buf: Vec<u8>,
-    /// Reusable buffer for proof nodes, to avoid allocations across payload runs.
+    /// Reusable buffer for proof nodes.
     proof_nodes_buf: Vec<ProofTrieNode>,
+    /// Reuseable buffers for storage trie proof nodes.
+    storage_proof_nodes_bufs: Vec<Vec<ProofTrieNode>>,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -69,6 +61,7 @@ where
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             proof_nodes_buf: Vec::new(),
+            storage_proof_nodes_bufs: Vec::new(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -117,14 +110,6 @@ impl<A, S> SparseStateTrie<A, S> {
     pub fn with_default_storage_trie(mut self, trie: RevealableSparseTrie<S>) -> Self {
         self.set_default_storage_trie(trie);
         self
-    }
-
-    /// Takes the proof nodes buffer for deferred dropping.
-    ///
-    /// This allows the caller to drop the buffer after releasing any locks,
-    /// avoiding expensive deallocations while holding locks.
-    pub fn take_deferred_drops(&mut self) -> DeferredDrops {
-        DeferredDrops { proof_nodes_buf: core::mem::take(&mut self.proof_nodes_buf) }
     }
 }
 
@@ -290,30 +275,28 @@ where
                 .map(|(account, storage_subtree)| {
                     let revealed_nodes = self.storage.take_or_create_revealed_paths(&account);
                     let trie = self.storage.take_or_create_trie(&account);
-                    (account, storage_subtree, revealed_nodes, trie)
+                    let proof_nodes_buf = self.storage_proof_nodes_bufs.pop().unwrap_or_default();
+                    (account, storage_subtree, revealed_nodes, trie, proof_nodes_buf)
                 })
                 .par_bridge_buffered()
-                .map_init(
-                    Vec::new,
-                    |nodes, (account, storage_subtree, mut revealed_nodes, mut trie)| {
-                        let result = Self::reveal_decoded_storage_multiproof_inner(
-                            account,
-                            storage_subtree,
-                            &mut revealed_nodes,
-                            &mut trie,
-                            nodes,
-                            retain_updates,
-                        );
+                .map(|(account, storage_subtree, mut revealed_nodes, mut trie, mut nodes)| {
+                    let result = Self::reveal_decoded_storage_multiproof_inner(
+                        account,
+                        storage_subtree,
+                        &mut revealed_nodes,
+                        &mut trie,
+                        &mut nodes,
+                        retain_updates,
+                    );
 
-                        (account, revealed_nodes, trie, result)
-                    },
-                )
+                    (account, revealed_nodes, trie, result, nodes)
+                })
                 .collect();
 
             // Return `revealed_nodes` and `RevealableSparseTrie` for each account, incrementing
             // metrics and returning the last error seen if any.
             let mut any_err = Ok(());
-            for (account, revealed_nodes, trie, result) in results {
+            for (account, revealed_nodes, trie, result, proof_nodes_buf) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
                 // Mark this storage trie as hot (accessed this tick)
@@ -329,6 +312,8 @@ where
                 } else {
                     any_err = result.map(|_| ());
                 }
+
+                self.storage_proof_nodes_bufs.push(proof_nodes_buf);
             }
 
             any_err

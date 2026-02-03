@@ -587,14 +587,11 @@ where
                     target: "engine::tree::payload_processor",
                     "State root receiver dropped, clearing trie"
                 );
-                let (trie, deferred) = task.into_cleared_trie(
+                let trie = task.into_cleared_trie(
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
                 guard.store(PreservedSparseTrie::cleared(trie));
-                // Drop guard before deferred to release lock before expensive deallocations
-                drop(guard);
-                drop(deferred);
                 return;
             }
 
@@ -602,9 +599,9 @@ where
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            let deferred = if let Some(state_root) = computed_state_root {
+            if let Some(state_root) = computed_state_root {
                 let start = std::time::Instant::now();
-                let (trie, deferred) = task.into_trie_for_reuse(
+                let trie = task.into_trie_for_reuse(
                     prune_depth,
                     max_storage_tries,
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
@@ -614,22 +611,17 @@ where
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
                 guard.store(PreservedSparseTrie::anchored(trie, state_root));
-                deferred
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
                     "State root computation failed, clearing trie"
                 );
-                let (trie, deferred) = task.into_cleared_trie(
+                let trie = task.into_cleared_trie(
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
                 guard.store(PreservedSparseTrie::cleared(trie));
-                deferred
-            };
-            // Drop guard before deferred to release lock before expensive deallocations
-            drop(guard);
-            drop(deferred);
+            }
         });
     }
 
