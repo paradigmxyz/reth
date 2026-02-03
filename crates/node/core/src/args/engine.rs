@@ -42,7 +42,7 @@ pub struct DefaultEngineValues {
     cache_metrics_disabled: bool,
     enable_sparse_trie_as_cache: bool,
     sparse_trie_prune_depth: usize,
-    sparse_trie_max_memory: usize,
+    sparse_trie_max_memory_mb: usize,
 }
 
 impl DefaultEngineValues {
@@ -191,9 +191,9 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set the maximum memory for sparse trie cache by default
-    pub const fn with_sparse_trie_max_memory(mut self, v: usize) -> Self {
-        self.sparse_trie_max_memory = v;
+    /// Set the maximum memory for sparse trie cache by default (in megabytes)
+    pub const fn with_sparse_trie_max_memory_mb(mut self, v: usize) -> Self {
+        self.sparse_trie_max_memory_mb = v;
         self
     }
 }
@@ -223,7 +223,7 @@ impl Default for DefaultEngineValues {
             cache_metrics_disabled: false,
             enable_sparse_trie_as_cache: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
-            sparse_trie_max_memory: DEFAULT_SPARSE_TRIE_MAX_MEMORY,
+            sparse_trie_max_memory_mb: DEFAULT_SPARSE_TRIE_MAX_MEMORY / (1024 * 1024),
         }
     }
 }
@@ -360,9 +360,9 @@ pub struct EngineArgs {
     #[arg(long = "engine.sparse-trie-prune-depth", default_value_t = DefaultEngineValues::get_global().sparse_trie_prune_depth, requires = "enable_sparse_trie_as_cache")]
     pub sparse_trie_prune_depth: usize,
 
-    /// Maximum memory for sparse trie cache in bytes.
-    #[arg(long = "engine.sparse-trie-max-memory", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_memory, requires = "enable_sparse_trie_as_cache")]
-    pub sparse_trie_max_memory: usize,
+    /// Maximum memory for sparse trie cache in megabytes.
+    #[arg(long = "engine.sparse-trie-max-memory-mb", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_memory_mb, requires = "enable_sparse_trie_as_cache")]
+    pub sparse_trie_max_memory_mb: usize,
 }
 
 #[allow(deprecated)]
@@ -391,7 +391,7 @@ impl Default for EngineArgs {
             cache_metrics_disabled,
             enable_sparse_trie_as_cache,
             sparse_trie_prune_depth,
-            sparse_trie_max_memory,
+            sparse_trie_max_memory_mb,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -420,7 +420,7 @@ impl Default for EngineArgs {
             cache_metrics_disabled,
             enable_sparse_trie_as_cache,
             sparse_trie_prune_depth,
-            sparse_trie_max_memory,
+            sparse_trie_max_memory_mb,
         }
     }
 }
@@ -452,7 +452,7 @@ impl EngineArgs {
             .without_cache_metrics(self.cache_metrics_disabled)
             .with_enable_sparse_trie_as_cache(self.enable_sparse_trie_as_cache)
             .with_sparse_trie_prune_depth(self.sparse_trie_prune_depth)
-            .with_sparse_trie_max_memory(self.sparse_trie_max_memory)
+            .with_sparse_trie_max_memory(self.sparse_trie_max_memory_mb * 1024 * 1024)
     }
 }
 

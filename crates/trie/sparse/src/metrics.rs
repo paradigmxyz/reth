@@ -88,6 +88,10 @@ pub struct PruneTrieMetrics {
     pub hot_storage_tries_preserved: Histogram,
     /// Histogram of storage tries evicted (cold accounts)
     pub cold_storage_tries_evicted: Histogram,
+    /// Histogram of storage tries that were depth-pruned
+    pub storage_tries_pruned: Histogram,
+    /// Histogram of storage tries depth-pruning duration in microseconds
+    pub storage_tries_prune_duration: Histogram,
     /// Histogram of state trie pruning duration in microseconds
     pub state_prune_duration: Histogram,
     /// Histogram of storage tries pruning duration in microseconds

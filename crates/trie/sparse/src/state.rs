@@ -1081,10 +1081,7 @@ where
         let fn_start = std::time::Instant::now();
 
         // Prune state and storage tries in parallel
-        let (
-            (account_stats, state_prune_duration, state_memory),
-            (storage_stats, hot_preserved, cold_evicted, storage_prune_duration, storage_memory),
-        ) = rayon::join(
+        let ((account_stats, state_prune_duration, state_memory), storage_result) = rayon::join(
             || {
                 let start = std::time::Instant::now();
 
@@ -1106,6 +1103,16 @@ where
             || self.storage.prune_preserving(config),
         );
 
+        let StorageTriePruneResult {
+            stats: storage_stats,
+            hot_preserved,
+            cold_evicted,
+            pruned: storage_pruned,
+            prune_duration: storage_prune_duration,
+            duration: storage_duration,
+            total_memory: storage_memory,
+        } = storage_result;
+
         let mut stats = account_stats;
         stats += storage_stats;
 
@@ -1115,11 +1122,13 @@ where
             self.metrics.prune.skipped_hot_accounts.record(stats.skipped_hot_accounts as f64);
             self.metrics.prune.hot_storage_tries_preserved.record(hot_preserved as f64);
             self.metrics.prune.cold_storage_tries_evicted.record(cold_evicted as f64);
-            self.metrics.prune.state_prune_duration.record(state_prune_duration.as_micros() as f64);
+            self.metrics.prune.storage_tries_pruned.record(storage_pruned as f64);
             self.metrics
                 .prune
-                .storage_prune_duration
+                .storage_tries_prune_duration
                 .record(storage_prune_duration.as_micros() as f64);
+            self.metrics.prune.state_prune_duration.record(state_prune_duration.as_micros() as f64);
+            self.metrics.prune.storage_prune_duration.record(storage_duration.as_micros() as f64);
             self.metrics.prune.state_memory_bytes.record(state_memory as f64);
             self.metrics.prune.storage_memory_bytes.record(storage_memory as f64);
         }
@@ -1168,13 +1177,12 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
     /// 1. Hot accounts (Tier A/B) are never evicted
     /// 2. Cold accounts are sorted by heat (coldest first)
     /// 3. Evict coldest tries until total memory is under budget
-    ///
-    /// Returns `(prune_stats, hot_preserved, cold_evicted, duration, total_memory)`.
     fn prune_preserving(
         &mut self,
         config: &crate::hot_accounts::SmartPruneConfig<'_>,
-    ) -> (crate::PruneTrieStats, usize, usize, core::time::Duration, usize) {
+    ) -> StorageTriePruneResult {
         use crate::{hot_accounts::TrieKind, PruneTrieStats};
+        use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
         let fn_start = std::time::Instant::now();
 
@@ -1265,7 +1273,8 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             .collect();
 
         // Prune storage tries in parallel
-        use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+        let prune_start = std::time::Instant::now();
+        let pruned_count = addresses_to_prune.len();
         let stats: PruneTrieStats = self
             .tries
             .par_iter_mut()
@@ -1279,6 +1288,7 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
                 acc += s;
                 acc
             });
+        let prune_duration = prune_start.elapsed();
 
         // Reset prune_backlog for pruned tries
         for addr in &addresses_to_prune {
@@ -1346,8 +1356,35 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             "StorageTries::prune_preserving completed"
         );
 
-        (stats, hot_count, cold_evicted, duration, total_memory)
+        StorageTriePruneResult {
+            stats,
+            hot_preserved: hot_count,
+            cold_evicted,
+            pruned: pruned_count,
+            prune_duration,
+            duration,
+            total_memory,
+        }
     }
+}
+
+/// Result of storage trie pruning with eviction statistics.
+#[derive(Debug, Default)]
+struct StorageTriePruneResult {
+    /// Pruning statistics (nodes skipped, etc.).
+    stats: crate::PruneTrieStats,
+    /// Number of hot storage tries preserved.
+    hot_preserved: usize,
+    /// Number of cold storage tries evicted.
+    cold_evicted: usize,
+    /// Number of storage tries that were depth-pruned.
+    pruned: usize,
+    /// Duration of depth-pruning.
+    prune_duration: core::time::Duration,
+    /// Duration of the entire pruning operation.
+    duration: core::time::Duration,
+    /// Total memory used by storage tries after pruning.
+    total_memory: usize,
 }
 
 impl<S: SparseTrieTrait> StorageTries<S> {
