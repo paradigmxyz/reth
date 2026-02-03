@@ -988,6 +988,15 @@ impl SparseTrie for ParallelSparseTrie {
                 })
         }
 
+        self.find_leaf_unlikely(full_path).inspect(|output| {
+            assert!(
+                *output != LeafLookup::Exists,
+                "target leaf {full_path:?} found, even though value wasn't in values hashmap"
+            );
+        })
+    }
+
+    fn find_leaf_unlikely(&self, full_path: &Nibbles) -> Result<LeafLookup, LeafLookupError> {
         // If the value does not exist in the `values` map, then this means that the leaf either:
         // - Does not exist in the trie
         // - Is missing from the witness
@@ -1008,7 +1017,7 @@ impl SparseTrie for ParallelSparseTrie {
                     return Err(LeafLookupError::BlindedNode { path: curr_path, hash });
                 }
                 FindNextToLeafOutcome::Found => {
-                    panic!("target leaf {full_path:?} found at path {curr_path:?}, even though value wasn't in values hashmap");
+                    return Ok(LeafLookup::Exists);
                 }
                 FindNextToLeafOutcome::ContinueFrom(next_path) => {
                     curr_path = next_path;
@@ -1279,7 +1288,7 @@ impl SparseTrieExt for ParallelSparseTrie {
                 }
                 LeafUpdate::Touched => {
                     // Touched is read-only: check if path is accessible, request proof if blinded.
-                    match self.find_leaf(&full_path, None) {
+                    match self.find_leaf_unlikely(&full_path) {
                         Err(LeafLookupError::BlindedNode { path, .. }) => {
                             let (target_key, min_len) =
                                 Self::proof_target_for_path(key, &full_path, &path);

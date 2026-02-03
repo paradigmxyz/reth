@@ -221,6 +221,13 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError>;
 
+    /// Same as `find_leaf`, but implies that the leaf is unlikely to exist in the trie. This might
+    /// be useful as a performance optimization when caller is primarily interested in the nodes
+    /// that are missing in the trie preceeding the leaf.
+    fn find_leaf_unlikely(&self, full_path: &Nibbles) -> Result<LeafLookup, LeafLookupError> {
+        self.find_leaf(full_path, None)
+    }
+
     /// Returns a reference to the current sparse trie updates.
     ///
     /// If no updates have been made/recorded, returns an empty update set.
