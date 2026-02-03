@@ -6678,14 +6678,17 @@ typedef struct MDBX_page_range {
  */
 typedef struct MDBX_subtxn_spec {
   MDBX_dbi dbi;           /**< DBI this subtxn will write to (enforced) */
-  size_t pages_reserve;   /**< Number of pages to reserve for this subtxn */
 } MDBX_subtxn_spec_t;
 
 /** \brief Create multiple subtransactions for parallel writes.
  *
  * Creates all subtransactions atomically, each bound to a specific DBI.
  * This enforces the invariant that each DBI has at most one subtxn.
- * Pages are reserved and partitioned automatically.
+ *
+ * Pages are distributed from parent's reclaimed GC pages (repnl) and
+ * loose_pages. No EOF pre-reservation is done. If a subtxn exhausts its
+ * pre-claimed pages, it returns MDBX_MAP_FULL and the caller must handle
+ * synchronized fallback to parent allocation.
  *
  * Each subtransaction can only open cursors on its assigned DBI. Attempting
  * to open a cursor on a different DBI will fail with MDBX_EINVAL.
