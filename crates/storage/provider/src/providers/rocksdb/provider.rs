@@ -21,6 +21,7 @@ use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
     provider::{ProviderError, ProviderResult},
 };
+use reth_tasks::spawn_scoped_os_thread;
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
@@ -39,6 +40,9 @@ use tracing::instrument;
 
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
+
+/// Raw key-value result from a `RocksDB` iterator.
+type RawKVResult = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>;
 
 /// Statistics for a single `RocksDB` table (column family).
 #[derive(Debug, Clone)]
@@ -818,11 +822,14 @@ impl RocksDBProvider {
         Ok(())
     }
 
-    /// Gets the first (smallest key) entry from the specified table.
-    pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+    /// Retrieves the first or last entry from a table based on the iterator mode.
+    fn get_boundary<T: Table>(
+        &self,
+        mode: IteratorMode<'_>,
+    ) -> ProviderResult<Option<(T::Key, T::Value)>> {
         self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
             let cf = this.get_cf_handle::<T>()?;
-            let mut iter = this.0.iterator_cf(cf, IteratorMode::Start);
+            let mut iter = this.0.iterator_cf(cf, mode);
 
             match iter.next() {
                 Some(Ok((key_bytes, value_bytes))) => {
@@ -843,29 +850,16 @@ impl RocksDBProvider {
         })
     }
 
-    /// Gets the last (largest key) entry from the specified table.
-    pub fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
-        self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
-            let cf = this.get_cf_handle::<T>()?;
-            let mut iter = this.0.iterator_cf(cf, IteratorMode::End);
+    /// Gets the first (smallest key) entry from the specified table.
+    #[inline]
+    pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        self.get_boundary::<T>(IteratorMode::Start)
+    }
 
-            match iter.next() {
-                Some(Ok((key_bytes, value_bytes))) => {
-                    let key = <T::Key as reth_db_api::table::Decode>::decode(&key_bytes)
-                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-                    let value = T::Value::decompress(&value_bytes)
-                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-                    Ok(Some((key, value)))
-                }
-                Some(Err(e)) => {
-                    Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    })))
-                }
-                None => Ok(None),
-            }
-        })
+    /// Gets the last (largest key) entry from the specified table.
+    #[inline]
+    pub fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        self.get_boundary::<T>(IteratorMode::End)
     }
 
     /// Creates an iterator over all entries in the specified table.
@@ -1159,13 +1153,21 @@ impl RocksDBProvider {
             let handles: Vec<_> = [
                 (ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
                     ctx.prune_tx_lookup.is_none_or(|m| !m.is_full()))
-                .then(|| s.spawn(|| self.write_tx_hash_numbers(blocks, tx_nums, &ctx))),
-                ctx.storage_settings
-                    .account_history_in_rocksdb
-                    .then(|| s.spawn(|| self.write_account_history(blocks, &ctx))),
-                ctx.storage_settings
-                    .storages_history_in_rocksdb
-                    .then(|| s.spawn(|| self.write_storage_history(blocks, &ctx))),
+                .then(|| {
+                    spawn_scoped_os_thread(s, "rocksdb-tx-hash", || {
+                        self.write_tx_hash_numbers(blocks, tx_nums, &ctx)
+                    })
+                }),
+                ctx.storage_settings.account_history_in_rocksdb.then(|| {
+                    spawn_scoped_os_thread(s, "rocksdb-account-history", || {
+                        self.write_account_history(blocks, &ctx)
+                    })
+                }),
+                ctx.storage_settings.storages_history_in_rocksdb.then(|| {
+                    spawn_scoped_os_thread(s, "rocksdb-storage-history", || {
+                        self.write_storage_history(blocks, &ctx)
+                    })
+                }),
             ]
             .into_iter()
             .enumerate()
@@ -2147,29 +2149,7 @@ impl<T: Table> Iterator for RocksDBIter<'_, T> {
     type Item = ProviderResult<(T::Key, T::Value)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (key_bytes, value_bytes) = match self.inner.next()? {
-            Ok(kv) => kv,
-            Err(e) => {
-                return Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))))
-            }
-        };
-
-        // Decode key
-        let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
-            Ok(k) => k,
-            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
-        };
-
-        // Decompress value
-        let value = match T::Value::decompress(&value_bytes) {
-            Ok(v) => v,
-            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
-        };
-
-        Some(Ok((key, value)))
+        Some(decode_iter_item::<T>(self.inner.next()?))
     }
 }
 
@@ -2218,30 +2198,29 @@ impl<T: Table> Iterator for RocksTxIter<'_, T> {
     type Item = ProviderResult<(T::Key, T::Value)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (key_bytes, value_bytes) = match self.inner.next()? {
-            Ok(kv) => kv,
-            Err(e) => {
-                return Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))))
-            }
-        };
-
-        // Decode key
-        let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
-            Ok(k) => k,
-            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
-        };
-
-        // Decompress value
-        let value = match T::Value::decompress(&value_bytes) {
-            Ok(v) => v,
-            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
-        };
-
-        Some(Ok((key, value)))
+        Some(decode_iter_item::<T>(self.inner.next()?))
     }
+}
+
+/// Decodes a raw key-value pair from a `RocksDB` iterator into typed table entries.
+///
+/// Handles both error propagation from the underlying iterator and
+/// decoding/decompression of the key and value bytes.
+fn decode_iter_item<T: Table>(result: RawKVResult) -> ProviderResult<(T::Key, T::Value)> {
+    let (key_bytes, value_bytes) = result.map_err(|e| {
+        ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+            message: e.to_string().into(),
+            code: -1,
+        }))
+    })?;
+
+    let key = <T::Key as reth_db_api::table::Decode>::decode(&key_bytes)
+        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+    let value = T::Value::decompress(&value_bytes)
+        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+    Ok((key, value))
 }
 
 /// Converts Reth's [`LogLevel`] to `RocksDB`'s [`rocksdb::LogLevel`].

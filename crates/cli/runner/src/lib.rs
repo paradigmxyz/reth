@@ -83,22 +83,7 @@ impl CliRunner {
             task_manager.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);
         }
 
-        // `drop(tokio_runtime)` would block the current thread until its pools
-        // (including blocking pool) are shutdown. Since we want to exit as soon as possible, drop
-        // it on a separate thread and wait for up to 5 seconds for this operation to
-        // complete.
-        let (tx, rx) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("tokio-runtime-shutdown".to_string())
-            .spawn(move || {
-                drop(tokio_runtime);
-                let _ = tx.send(());
-            })
-            .unwrap();
-
-        let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
-            debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
-        });
+        tokio_shutdown(tokio_runtime, true);
 
         command_res
     }
@@ -137,19 +122,7 @@ impl CliRunner {
             task_manager.graceful_shutdown_with_timeout(self.config.graceful_shutdown_timeout);
         }
 
-        // Shutdown the runtime on a separate thread
-        let (tx, rx) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("tokio-runtime-shutdown".to_string())
-            .spawn(move || {
-                drop(tokio_runtime);
-                let _ = tx.send(());
-            })
-            .unwrap();
-
-        let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
-            debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
-        });
+        tokio_shutdown(tokio_runtime, true);
 
         command_res
     }
@@ -179,13 +152,7 @@ impl CliRunner {
         tokio_runtime
             .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))?;
 
-        // drop the tokio runtime on a separate thread because drop blocks until its pools
-        // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
-        // the current thread but we want to exit right away.
-        std::thread::Builder::new()
-            .name("tokio-runtime-shutdown".to_string())
-            .spawn(move || drop(tokio_runtime))
-            .unwrap();
+        tokio_shutdown(tokio_runtime, false);
 
         Ok(())
     }
@@ -327,4 +294,28 @@ where
     }
 
     Ok(())
+}
+
+/// Shut down the given Tokio runtime, and wait for it if `wait` is set.
+///
+/// `drop(tokio_runtime)` would block the current thread until its pools
+/// (including blocking pool) are shutdown. Since we want to exit as soon as possible, drop
+/// it on a separate thread and wait for up to 5 seconds for this operation to
+/// complete.
+fn tokio_shutdown(rt: tokio::runtime::Runtime, wait: bool) {
+    // Shutdown the runtime on a separate thread
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("tokio-shutdown".to_string())
+        .spawn(move || {
+            drop(rt);
+            let _ = tx.send(());
+        })
+        .unwrap();
+
+    if wait {
+        let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
+            debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
+        });
+    }
 }

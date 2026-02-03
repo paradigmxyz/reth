@@ -30,6 +30,7 @@ use std::{
         Arc, OnceLock,
     },
     task::{ready, Context, Poll},
+    thread,
 };
 use tokio::{
     runtime::Handle,
@@ -47,6 +48,51 @@ pub mod pool;
 
 /// Global [`TaskExecutor`] instance that can be accessed from anywhere.
 static GLOBAL_EXECUTOR: OnceLock<TaskExecutor> = OnceLock::new();
+
+/// Spawns an OS thread with the current tokio runtime context propagated.
+///
+/// This function captures the current tokio runtime handle (if available) and enters it
+/// in the newly spawned thread. This ensures that code running in the spawned thread can
+/// use [`Handle::current()`], [`Handle::spawn_blocking()`], and other tokio utilities that
+/// require a runtime context.
+#[track_caller]
+pub fn spawn_os_thread<F, T>(name: &str, f: F) -> thread::JoinHandle<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let handle = Handle::try_current().ok();
+    thread::Builder::new()
+        .name(name.to_string())
+        .spawn(move || {
+            let _guard = handle.as_ref().map(Handle::enter);
+            f()
+        })
+        .unwrap_or_else(|e| panic!("failed to spawn thread {name:?}: {e}"))
+}
+
+/// Spawns a scoped OS thread with the current tokio runtime context propagated.
+///
+/// This is the scoped thread version of [`spawn_os_thread`], for use with [`std::thread::scope`].
+#[track_caller]
+pub fn spawn_scoped_os_thread<'scope, 'env, F, T>(
+    scope: &'scope thread::Scope<'scope, 'env>,
+    name: &str,
+    f: F,
+) -> thread::ScopedJoinHandle<'scope, T>
+where
+    F: FnOnce() -> T + Send + 'scope,
+    T: Send + 'scope,
+{
+    let handle = Handle::try_current().ok();
+    thread::Builder::new()
+        .name(name.to_string())
+        .spawn_scoped(scope, move || {
+            let _guard = handle.as_ref().map(Handle::enter);
+            f()
+        })
+        .unwrap_or_else(|e| panic!("failed to spawn scoped thread {name:?}: {e}"))
+}
 
 /// A type that can spawn tasks.
 ///
