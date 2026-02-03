@@ -106,7 +106,7 @@ pub struct ParallelSparseTrie {
     /// This contains the trie nodes for the upper part of the trie.
     upper_subtrie: Box<SparseSubtrie>,
     /// An array containing the subtries at the second level of the trie.
-    lower_subtries: [LowerSparseSubtrie; NUM_LOWER_SUBTRIES],
+    lower_subtries: Box<[LowerSparseSubtrie; NUM_LOWER_SUBTRIES]>,
     /// Set of prefixes (key paths) that have been marked as updated.
     /// This is used to track which parts of the trie need to be recalculated.
     prefix_set: PrefixSetMut,
@@ -138,7 +138,9 @@ impl Default for ParallelSparseTrie {
                 nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
                 ..Default::default()
             }),
-            lower_subtries: [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES],
+            lower_subtries: Box::new(
+                [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES],
+            ),
             prefix_set: PrefixSetMut::default(),
             updates: None,
             branch_node_masks: BranchNodeMasksMap::default(),
@@ -184,11 +186,12 @@ impl SparseTrie for ParallelSparseTrie {
             |ProofTrieNode { path: path_a, .. }, ProofTrieNode { path: path_b, .. }| {
                 let subtrie_type_a = SparseSubtrieType::from_path(path_a);
                 let subtrie_type_b = SparseSubtrieType::from_path(path_b);
-                subtrie_type_a.cmp(&subtrie_type_b).then(path_a.cmp(path_b))
+                subtrie_type_a.cmp(&subtrie_type_b).then_with(|| path_a.cmp(path_b))
             },
         );
 
         // Update the top-level branch node masks. This is simple and can't be done in parallel.
+        self.branch_node_masks.reserve(nodes.len());
         for ProofTrieNode { path, masks, .. } in &nodes {
             if let Some(branch_masks) = masks {
                 self.branch_node_masks.insert(*path, *branch_masks);
@@ -202,9 +205,7 @@ impl SparseTrie for ParallelSparseTrie {
             .iter()
             .position(|n| !SparseSubtrieType::path_len_is_upper(n.path.len()))
             .unwrap_or(nodes.len());
-
-        let upper_nodes = &nodes[..num_upper_nodes];
-        let lower_nodes = &nodes[num_upper_nodes..];
+        let (upper_nodes, lower_nodes) = nodes.split_at(num_upper_nodes);
 
         // Reserve the capacity of the upper subtrie's `nodes` HashMap before iterating, so we don't
         // end up making many small capacity changes as we loop.
@@ -949,7 +950,9 @@ impl SparseTrie for ParallelSparseTrie {
 
     fn wipe(&mut self) {
         self.upper_subtrie.wipe();
-        self.lower_subtries = [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES];
+        for trie in &mut *self.lower_subtries {
+            trie.wipe();
+        }
         self.prefix_set = PrefixSetMut::all();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
         self.subtrie_modifications.clear();
@@ -958,7 +961,7 @@ impl SparseTrie for ParallelSparseTrie {
     fn clear(&mut self) {
         self.upper_subtrie.clear();
         self.upper_subtrie.nodes.insert(Nibbles::default(), SparseNode::Empty);
-        for subtrie in &mut self.lower_subtries {
+        for subtrie in &mut *self.lower_subtries {
             subtrie.clear();
         }
         self.prefix_set.clear();
@@ -1043,7 +1046,7 @@ impl SparseTrie for ParallelSparseTrie {
         self.upper_subtrie.shrink_nodes_to(size_per_subtrie);
 
         // Shrink lower subtries (works for both revealed and blind with allocation)
-        for subtrie in &mut self.lower_subtries {
+        for subtrie in &mut *self.lower_subtries {
             subtrie.shrink_nodes_to(size_per_subtrie);
         }
 
@@ -1062,7 +1065,7 @@ impl SparseTrie for ParallelSparseTrie {
         self.upper_subtrie.shrink_values_to(size_per_subtrie);
 
         // Shrink lower subtries (works for both revealed and blind with allocation)
-        for subtrie in &mut self.lower_subtries {
+        for subtrie in &mut *self.lower_subtries {
             subtrie.shrink_values_to(size_per_subtrie);
         }
     }
@@ -1124,7 +1127,7 @@ impl SparseTrieExt for ParallelSparseTrie {
                     SparseNode::Extension { key, .. } => {
                         let mut child = path;
                         child.extend(key);
-                        SmallVec::from_buf_and_len([child; 16], 1)
+                        SmallVec::from_slice(&[child])
                     }
                     SparseNode::Branch { state_mask, .. } => {
                         let mut children = SmallVec::new();
@@ -1203,7 +1206,7 @@ impl SparseTrieExt for ParallelSparseTrie {
         // Upper prune roots that are prefixes of lower subtrie root paths cause the entire
         // subtrie to be cleared (preserving allocations for reuse).
         if !roots_upper.is_empty() {
-            for subtrie in &mut self.lower_subtries {
+            for subtrie in &mut *self.lower_subtries {
                 let should_clear = subtrie.as_revealed_ref().is_some_and(|s| {
                     let search_idx = roots_upper.partition_point(|(root, _)| root <= &s.path);
                     search_idx > 0 && s.path.starts_with(&roots_upper[search_idx - 1].0)
@@ -1488,8 +1491,6 @@ impl ParallelSparseTrie {
     ///
     /// Returns `None` if a lower subtrie does not exist for the given path.
     fn subtrie_for_path(&self, path: &Nibbles) -> Option<&SparseSubtrie> {
-        // We can't just call `lower_subtrie_for_path` and return `upper_subtrie` if it returns
-        // None, because Rust complains about double mutable borrowing `self`.
         if SparseSubtrieType::path_len_is_upper(path.len()) {
             Some(&self.upper_subtrie)
         } else {
@@ -2184,7 +2185,7 @@ impl ParallelSparseTrie {
         size += self.upper_subtrie.memory_size();
 
         // Lower subtries (both Revealed and Blind with allocation)
-        for subtrie in &self.lower_subtries {
+        for subtrie in self.lower_subtries.iter() {
             size += subtrie.memory_size();
         }
 
@@ -3446,7 +3447,10 @@ struct ChangedSubtrie {
 /// If the path is shorter than [`UPPER_TRIE_MAX_DEPTH`] nibbles.
 fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
     debug_assert_eq!(UPPER_TRIE_MAX_DEPTH, 2);
-    path.get_byte_unchecked(0) as usize
+    let idx = path.get_byte_unchecked(0) as usize;
+    // SAFETY: always true.
+    unsafe { core::hint::assert_unchecked(idx < NUM_LOWER_SUBTRIES) };
+    idx
 }
 
 /// Checks if `path` is a strict descendant of any root in a sorted slice.

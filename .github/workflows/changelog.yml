@@ -1,8 +1,7 @@
 name: Changelog
 
 on:
-  pull_request:
-    types: [opened, synchronize]
+  workflow_dispatch:
 
 jobs:
   changelog:

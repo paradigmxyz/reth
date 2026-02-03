@@ -405,6 +405,16 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// Consumer: RPC
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns a pending transaction if it exists and is ready for immediate execution
+    /// (i.e., has the lowest nonce among the sender's pending transactions).
+    fn get_pending_transaction_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.best_transactions().find(|tx| tx.sender() == sender && tx.nonce() == nonce)
+    }
+
     /// Returns first `max` transactions that can be included in the next block.
     /// See <https://github.com/paradigmxyz/reth/issues/12767#issuecomment-2493223579>
     ///

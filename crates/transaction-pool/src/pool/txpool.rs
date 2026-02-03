@@ -560,6 +560,18 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.txs_iter(sender).map(|(_, tx)| Arc::clone(&tx.transaction)).collect()
     }
 
+    /// Returns a pending transaction sent by the given sender with the given nonce.
+    pub(crate) fn get_pending_transaction_by_sender_and_nonce(
+        &self,
+        sender: SenderId,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.all_transactions
+            .txs_iter(sender)
+            .find(|(id, tx)| id.nonce == nonce && tx.subpool == SubPool::Pending)
+            .map(|(_, tx)| Arc::clone(&tx.transaction))
+    }
+
     /// Updates only the pending fees without triggering subpool updates.
     /// Returns the previous base fee and blob fee values.
     const fn update_pending_fees_only(
