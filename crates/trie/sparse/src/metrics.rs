@@ -100,4 +100,18 @@ pub struct PruneTrieMetrics {
     pub state_memory_bytes: Histogram,
     /// Histogram of total storage tries memory usage in bytes after pruning
     pub storage_memory_bytes: Histogram,
+
+    // Granular timing metrics for StorageTries::prune_preserving sections
+    /// Time spent updating access tracking and resetting per-cycle flags (microseconds)
+    pub storage_update_tracking_duration: Histogram,
+    /// Time spent categorizing tries by hotness and collecting memory sizes (microseconds)
+    pub storage_categorize_duration: Histogram,
+    /// Time spent sorting cold tries by heat (microseconds)
+    pub storage_sort_duration: Histogram,
+    /// Time spent evicting cold tries from HashMap (microseconds)
+    pub storage_eviction_duration: Histogram,
+    /// Time spent calculating final memory after pruning (microseconds)
+    pub storage_memory_calc_duration: Histogram,
+    /// Number of tries iterated during categorization
+    pub storage_tries_categorized: Histogram,
 }

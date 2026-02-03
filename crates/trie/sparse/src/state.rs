@@ -1111,6 +1111,12 @@ where
             prune_duration: storage_prune_duration,
             duration: storage_duration,
             total_memory: storage_memory,
+            tries_categorized,
+            update_tracking_duration,
+            categorize_duration,
+            sort_duration,
+            eviction_duration,
+            memory_calc_duration,
         } = storage_result;
 
         let mut stats = account_stats;
@@ -1131,6 +1137,26 @@ where
             self.metrics.prune.storage_prune_duration.record(storage_duration.as_micros() as f64);
             self.metrics.prune.state_memory_bytes.record(state_memory as f64);
             self.metrics.prune.storage_memory_bytes.record(storage_memory as f64);
+
+            // Granular timing metrics
+            self.metrics
+                .prune
+                .storage_update_tracking_duration
+                .record(update_tracking_duration.as_micros() as f64);
+            self.metrics
+                .prune
+                .storage_categorize_duration
+                .record(categorize_duration.as_micros() as f64);
+            self.metrics.prune.storage_sort_duration.record(sort_duration.as_micros() as f64);
+            self.metrics
+                .prune
+                .storage_eviction_duration
+                .record(eviction_duration.as_micros() as f64);
+            self.metrics
+                .prune
+                .storage_memory_calc_duration
+                .record(memory_calc_duration.as_micros() as f64);
+            self.metrics.prune.storage_tries_categorized.record(tries_categorized as f64);
         }
 
         debug!(
@@ -1186,12 +1212,16 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
 
         let fn_start = std::time::Instant::now();
 
-        // Update access tracking: decay heat and reset per-cycle access flags
+        // Section 1: Update access tracking
+        let update_tracking_start = std::time::Instant::now();
         self.modifications.update_and_reset();
+        let update_tracking_duration = update_tracking_start.elapsed();
 
-        // Categorize tries by hotness and collect memory sizes
+        // Section 2: Categorize tries by hotness and collect memory sizes
+        let categorize_start = std::time::Instant::now();
         let mut hot_tries: Vec<(B256, usize)> = Vec::new(); // (address, memory)
         let mut cold_tries: Vec<(B256, usize, u8)> = Vec::new(); // (address, memory, heat)
+        let tries_categorized = self.tries.len();
 
         for (address, trie) in &self.tries {
             let mem = match trie {
@@ -1209,9 +1239,12 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
 
         let hot_memory: usize = hot_tries.iter().map(|(_, m)| m).sum();
         let hot_count = hot_tries.len();
+        let categorize_duration = categorize_start.elapsed();
 
-        // Sort cold tries by heat descending (hottest first = highest heat kept first)
+        // Section 3: Sort cold tries by heat descending
+        let sort_start = std::time::Instant::now();
         cold_tries.sort_unstable_by(|(_, _, heat_a), (_, _, heat_b)| heat_b.cmp(heat_a));
+        let sort_duration = sort_start.elapsed();
 
         // Calculate how much memory we can use for cold tries
         let max_memory = config.max_memory;
@@ -1244,7 +1277,8 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             }
         }
 
-        // Evict selected tries
+        // Section 4: Evict selected tries
+        let eviction_start = std::time::Instant::now();
         for address in &tries_to_evict {
             if let Some(mut trie) = self.tries.remove(address) {
                 trie.clear();
@@ -1256,6 +1290,7 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             }
             self.modifications.remove(address);
         }
+        let eviction_duration = eviction_start.elapsed();
 
         // Prune kept cold tries that have accumulated prune backlog.
         // Only prune storage tries over 1MB - smaller ones don't benefit much from depth pruning.
@@ -1332,7 +1367,8 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             }
         }
 
-        let duration = fn_start.elapsed();
+        // Section 5: Calculate final memory
+        let memory_calc_start = std::time::Instant::now();
         let total_memory = self
             .tries
             .values()
@@ -1341,6 +1377,9 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
                 RevealableSparseTrie::Revealed(t) => t.memory_size(),
             })
             .sum();
+        let memory_calc_duration = memory_calc_start.elapsed();
+
+        let duration = fn_start.elapsed();
 
         debug!(
             target: "trie::sparse",
@@ -1352,6 +1391,11 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             kept_prunable = tries_to_keep_prunable.len(),
             skipped_modified = stats.skipped_modified,
             skipped_hot_accounts = stats.skipped_hot_accounts,
+            update_tracking_us = update_tracking_duration.as_micros(),
+            categorize_us = categorize_duration.as_micros(),
+            sort_us = sort_duration.as_micros(),
+            eviction_us = eviction_duration.as_micros(),
+            memory_calc_us = memory_calc_duration.as_micros(),
             elapsed = ?duration,
             "StorageTries::prune_preserving completed"
         );
@@ -1364,6 +1408,12 @@ impl<S: SparseTrieTrait + SparseTrieExt> StorageTries<S> {
             prune_duration,
             duration,
             total_memory,
+            tries_categorized,
+            update_tracking_duration,
+            categorize_duration,
+            sort_duration,
+            eviction_duration,
+            memory_calc_duration,
         }
     }
 }
@@ -1385,6 +1435,20 @@ struct StorageTriePruneResult {
     duration: core::time::Duration,
     /// Total memory used by storage tries after pruning.
     total_memory: usize,
+    /// Number of tries categorized.
+    tries_categorized: usize,
+
+    // Granular timing for different sections
+    /// Time spent updating access tracking.
+    update_tracking_duration: core::time::Duration,
+    /// Time spent categorizing tries by hotness.
+    categorize_duration: core::time::Duration,
+    /// Time spent sorting cold tries by heat.
+    sort_duration: core::time::Duration,
+    /// Time spent evicting cold tries.
+    eviction_duration: core::time::Duration,
+    /// Time spent calculating final memory.
+    memory_calc_duration: core::time::Duration,
 }
 
 impl<S: SparseTrieTrait> StorageTries<S> {
