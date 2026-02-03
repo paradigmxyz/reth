@@ -205,9 +205,6 @@ where
     }
 }
 
-/// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
-const MAX_PENDING_UPDATES: usize = 100;
-
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie> {
     /// Sender for proof results.
@@ -233,6 +230,11 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     account_updates: B256Map<LeafUpdate>,
     /// Storage trie updates. hashed address -> slot -> update.
     storage_updates: B256Map<B256Map<LeafUpdate>>,
+
+    /// Account updates that are buffered but were not yet applied to the trie.
+    new_account_updates: B256Map<LeafUpdate>,
+    /// Storage updates that are buffered but were not yet applied to the trie.
+    new_storage_updates: B256Map<B256Map<LeafUpdate>>,
     /// Account updates that are blocked by storage root calculation or account reveal.
     ///
     /// Those are being moved into `account_updates` once storage roots
@@ -259,9 +261,6 @@ pub(super) struct SparseTrieCacheTask<A = SerialSparseTrie, S = SerialSparseTrie
     finished_state_updates: bool,
     /// Pending targets to be dispatched to the proof workers.
     pending_targets: MultiProofTargetsV2,
-    /// Number of pending execution/prewarming updates received but not yet passed to
-    /// `update_leaves`.
-    pending_updates: usize,
 
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
@@ -291,13 +290,14 @@ where
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             account_updates: Default::default(),
             storage_updates: Default::default(),
+            new_account_updates: Default::default(),
+            new_storage_updates: Default::default(),
             pending_account_updates: Default::default(),
             fetched_account_targets: Default::default(),
             fetched_storage_targets: Default::default(),
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             finished_state_updates: Default::default(),
             pending_targets: Default::default(),
-            pending_updates: Default::default(),
             metrics,
         }
     }
@@ -356,7 +356,13 @@ where
                     };
 
                     self.on_multiproof_message(update);
-                    self.pending_updates += 1;
+
+                    while let Ok(update) = self.updates.try_recv() {
+                        self.on_multiproof_message(update);
+                    }
+
+                    self.process_new_updates()?;
+                    self.dispatch_pending_targets();
                 }
                 recv(self.proof_result_rx) -> message => {
                     let Ok(result) = message else {
@@ -382,17 +388,6 @@ where
                 // storage roots and promoting account updates.
                 self.dispatch_pending_targets();
                 self.promote_pending_account_updates()?;
-                self.dispatch_pending_targets();
-            } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
-                // If we don't have any pending updates OR we've accumulated a lot already, apply
-                // them to the trie,
-                self.process_leaf_updates()?;
-                self.dispatch_pending_targets();
-            } else if self.updates.is_empty() ||
-                self.pending_targets.chunking_length() > self.chunk_size.unwrap_or_default()
-            {
-                // Make sure to dispatch targets if we don't have any updates or if we've
-                // accumulated a lot of them.
                 self.dispatch_pending_targets();
             }
 
@@ -442,13 +437,13 @@ where
 
         for target in targets.account_targets {
             // Only touch accounts that are not yet present in the updates set.
-            self.account_updates.entry(target.key()).or_insert(LeafUpdate::Touched);
+            self.new_account_updates.entry(target.key()).or_insert(LeafUpdate::Touched);
         }
 
         for (address, slots) in targets.storage_targets {
             for slot in slots {
                 // Only touch storages that are not yet present in the updates set.
-                self.storage_updates
+                self.new_storage_updates
                     .entry(address)
                     .or_default()
                     .entry(slot.key())
@@ -457,7 +452,7 @@ where
 
             // Touch corresponding account leaf to make sure its revealed in accounts trie for
             // storage root update.
-            self.account_updates.entry(address).or_insert(LeafUpdate::Touched);
+            self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
         }
     }
 
@@ -478,7 +473,7 @@ where
                 } else {
                     alloy_rlp::encode_fixed_size(&value).to_vec()
                 };
-                self.storage_updates
+                self.new_storage_updates
                     .entry(address)
                     .or_default()
                     .insert(slot, LeafUpdate::Changed(encoded));
@@ -486,7 +481,7 @@ where
 
             // Make sure account is tracked in `account_updates` so that it is revealed in accounts
             // trie for storage root update.
-            self.account_updates.entry(address).or_insert(LeafUpdate::Touched);
+            self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
 
             // Make sure account is tracked in `pending_account_updates` so that once storage root
             // is computed, it will be updated in the accounts trie.
@@ -498,7 +493,7 @@ where
             //
             // This might overwrite an existing update, which is fine, because storage root from it
             // is already tracked in the trie and can be easily fetched again.
-            self.account_updates.insert(address, LeafUpdate::Touched);
+            self.new_account_updates.insert(address, LeafUpdate::Touched);
 
             // Track account in `pending_account_updates` so that once storage root is computed,
             // it will be updated in the accounts trie.
@@ -515,6 +510,48 @@ where
         })
     }
 
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
+    fn process_new_updates(&mut self) -> SparseTrieResult<()> {
+        // Firstly apply all new storage and account updates to the tries.
+        self.process_leaf_updates(true)?;
+
+        for (address, mut new) in self.new_storage_updates.drain() {
+            let updates = self.storage_updates.entry(address).or_default();
+            for (slot, new) in new.drain() {
+                match updates.entry(slot) {
+                    Entry::Occupied(mut entry) => {
+                        // Only overwrite existing entries with new values
+                        if new.is_changed() {
+                            entry.insert(new);
+                        }
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(new);
+                    }
+                }
+            }
+        }
+
+        for (address, new) in self.new_account_updates.drain() {
+            match self.account_updates.entry(address) {
+                Entry::Occupied(mut entry) => {
+                    if new.is_changed() {
+                        entry.insert(new);
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(new);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Applies all account and storage leaf updates to corresponding tries and collects any new
     /// multiproof targets.
     #[instrument(
@@ -522,12 +559,12 @@ where
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    fn process_leaf_updates(&mut self) -> SparseTrieResult<()> {
-        self.pending_updates = 0;
+    fn process_leaf_updates(&mut self, new: bool) -> SparseTrieResult<()> {
+        let storage_updates =
+            if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
         // Start with processing all storage updates in parallel.
-        let storage_results = self
-            .storage_updates
+        let storage_results = storage_updates
             .iter_mut()
             .map(|(address, updates)| {
                 let trie = self.trie.take_or_create_storage_trie(address);
@@ -566,7 +603,7 @@ where
         }
 
         // Process account trie updates and fill the account targets.
-        self.process_account_leaf_updates()?;
+        self.process_account_leaf_updates(new)?;
 
         Ok(())
     }
@@ -574,12 +611,14 @@ where
     /// Invokes `update_leaves` for the accounts trie and collects any new targets.
     ///
     /// Returns whether any updates were drained (applied to the trie).
-    fn process_account_leaf_updates(&mut self) -> SparseTrieResult<bool> {
-        let updates_len_before = self.account_updates.len();
+    fn process_account_leaf_updates(&mut self, new: bool) -> SparseTrieResult<bool> {
+        let account_updates =
+            if new { &mut self.new_account_updates } else { &mut self.account_updates };
 
-        self.trie.trie_mut().update_leaves(
-            &mut self.account_updates,
-            |target, min_len| match self.fetched_account_targets.entry(target) {
+        let updates_len_before = account_updates.len();
+
+        self.trie.trie_mut().update_leaves(account_updates, |target, min_len| {
+            match self.fetched_account_targets.entry(target) {
                 Entry::Occupied(mut entry) => {
                     if min_len < *entry.get() {
                         entry.insert(min_len);
@@ -594,10 +633,12 @@ where
                         .account_targets
                         .push(Target::new(target).with_min_len(min_len));
                 }
-            },
-        )?;
+            }
+        })?;
 
-        Ok(self.account_updates.len() < updates_len_before)
+        let applied_updates = account_updates.len() < updates_len_before;
+
+        Ok(applied_updates)
     }
 
     /// Iterates through all storage tries for which all updates were processed, computes their
@@ -609,7 +650,7 @@ where
         skip_all
     )]
     fn promote_pending_account_updates(&mut self) -> SparseTrieResult<()> {
-        self.process_leaf_updates()?;
+        self.process_leaf_updates(false)?;
 
         if self.pending_account_updates.is_empty() {
             return Ok(());
@@ -702,7 +743,7 @@ where
             //
             // We need to keep iterating if any updates are being drained because that might
             // indicate that more pending account updates can be promoted.
-            if !self.process_account_leaf_updates()? {
+            if !self.process_account_leaf_updates(false)? {
                 break
             }
         }
