@@ -95,7 +95,7 @@ impl<K: TransactionKind> Tx<K> {
     pub fn new_cursor<T: Table>(&self) -> Result<Cursor<K, T>, DatabaseError> {
         let inner = self
             .inner
-            .cursor_with_dbi(self.get_dbi::<T>()?)
+            .cursor(self.get_dbi::<T>()?)
             .map_err(|e| DatabaseError::InitCursor(e.into()))?;
 
         Ok(Cursor::new_with_metrics(
