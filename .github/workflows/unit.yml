@@ -90,7 +90,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: RAYON_NUM_THREADS=2 cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
+      - run: RAYON_NUM_THREADS=1 cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
 
   doc:
     name: doc tests
