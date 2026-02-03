@@ -11,7 +11,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - run: git fetch origin main
+        with:
+          fetch-depth: 0
       - run: npm install -g @anthropic-ai/claude-code
       - uses: wevm/changelogs-rs/gen@master
         with:
