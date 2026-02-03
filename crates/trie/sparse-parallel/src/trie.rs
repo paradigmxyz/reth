@@ -1,7 +1,7 @@
 use crate::LowerSparseSubtrie;
 use alloc::borrow::Cow;
 use alloy_primitives::{
-    map::{Entry, HashMap},
+    map::{B256Map, Entry, HashMap},
     B256,
 };
 use alloy_rlp::Decodable;
@@ -1235,91 +1235,93 @@ impl SparseTrieExt for ParallelSparseTrie {
     ) -> SparseTrieResult<()> {
         use reth_trie_sparse::{provider::NoRevealProvider, LeafUpdate};
 
-        // Separate Touched entries (read-only) from Changed entries (mutating).
-        // Touched entries can be processed in parallel since find_leaf is read-only.
-        let (touched_keys, changed_entries): (Vec<_>, Vec<_>) = updates
-            .drain()
-            .partition(|(_, update)| matches!(update, LeafUpdate::Touched));
-
-        // Process Touched entries in parallel - find_leaf is read-only
+        // Process Touched entries in parallel - find_leaf is read-only.
+        // We iterate over updates directly, collecting only blinded results.
         #[cfg(feature = "std")]
-        let blinded_touched: Vec<_> = {
-            use rayon::iter::{IntoParallelIterator, ParallelIterator};
-            touched_keys
-                .into_par_iter()
-                .filter_map(|(key, _)| {
+        let mut blinded_touched = {
+            use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+            updates
+                .par_iter()
+                .filter_map(|(&key, update)| {
+                    if !matches!(update, LeafUpdate::Touched) {
+                        return None;
+                    }
                     let full_path = Nibbles::unpack(key);
                     match self.find_leaf(&full_path, None) {
                         Err(LeafLookupError::BlindedNode { path, .. }) => {
                             let (target_key, min_len) =
                                 Self::proof_target_for_path(key, &full_path, &path);
-                            Some((key, target_key, min_len))
+                            Some((key, (target_key, min_len)))
                         }
                         Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => None,
                     }
                 })
-                .collect()
+                .collect::<B256Map<_>>()
         };
 
         #[cfg(not(feature = "std"))]
-        let blinded_touched: Vec<_> = touched_keys
-            .into_iter()
-            .filter_map(|(key, _)| {
+        let mut blinded_touched = updates
+            .iter()
+            .filter_map(|(&key, update)| {
+                if !matches!(update, LeafUpdate::Touched) {
+                    return None;
+                }
                 let full_path = Nibbles::unpack(key);
                 match self.find_leaf(&full_path, None) {
                     Err(LeafLookupError::BlindedNode { path, .. }) => {
                         let (target_key, min_len) =
                             Self::proof_target_for_path(key, &full_path, &path);
-                        Some((key, target_key, min_len))
+                        Some((key, (target_key, min_len)))
                     }
                     Ok(_) | Err(LeafLookupError::ValueMismatch { .. }) => None,
                 }
             })
-            .collect();
+            .collect::<B256Map<_>>();
 
-        // Re-insert blinded Touched entries and call proof_required_fn
-        for (key, target_key, min_len) in blinded_touched {
-            proof_required_fn(target_key, min_len);
-            updates.insert(key, LeafUpdate::Touched);
-        }
+        // Process all entries in a single retain pass
+        let mut error: Option<SparseTrieError> = None;
+        updates.retain(|&key, update| {
+            if error.is_some() {
+                return true;
+            }
 
-        // Process Changed entries sequentially (they mutate state)
-        for (key, update) in changed_entries {
-            let full_path = Nibbles::unpack(key);
-            let LeafUpdate::Changed(value) = update else { unreachable!() };
+            match update {
+                LeafUpdate::Touched => {
+                    if let Some((target, min_len)) = blinded_touched.remove(&key) {
+                        proof_required_fn(target, min_len);
+                        true
+                    } else {
+                        false
+                    }
+                }
+                LeafUpdate::Changed(value) => {
+                    let full_path = Nibbles::unpack(key);
 
-            if value.is_empty() {
-                // Removal: remove_leaf with NoRevealProvider is atomic - returns a
-                // retriable error before any mutations (via pre_validate_reveal_chain).
-                match self.remove_leaf(&full_path, NoRevealProvider) {
-                    Ok(()) => {}
-                    Err(e) => {
-                        if let Some(path) = Self::get_retriable_path(&e) {
-                            let (target_key, min_len) =
-                                Self::proof_target_for_path(key, &full_path, &path);
-                            proof_required_fn(target_key, min_len);
-                            updates.insert(key, LeafUpdate::Changed(value));
-                        } else {
-                            return Err(e);
+                    let result = if value.is_empty() {
+                        self.remove_leaf(&full_path, NoRevealProvider)
+                    } else {
+                        self.update_leaf(full_path.clone(), value.clone(), NoRevealProvider)
+                    };
+
+                    match result {
+                        Ok(()) => false,
+                        Err(e) => {
+                            if let Some(path) = Self::get_retriable_path(&e) {
+                                let (target_key, min_len) =
+                                    Self::proof_target_for_path(key, &full_path, &path);
+                                proof_required_fn(target_key, min_len);
+                            } else {
+                                error = Some(e);
+                            }
+
+                            true
                         }
                     }
                 }
-            } else {
-                // Update/insert: update_leaf is atomic - cleans up on error.
-                if let Err(e) = self.update_leaf(full_path, value.clone(), NoRevealProvider) {
-                    if let Some(path) = Self::get_retriable_path(&e) {
-                        let (target_key, min_len) =
-                            Self::proof_target_for_path(key, &full_path, &path);
-                        proof_required_fn(target_key, min_len);
-                        updates.insert(key, LeafUpdate::Changed(value));
-                    } else {
-                        return Err(e);
-                    }
-                }
             }
-        }
+        });
 
-        Ok(())
+        error.map_or(Ok(()), Err)
     }
 }
 
