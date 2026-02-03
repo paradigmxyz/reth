@@ -74,7 +74,10 @@ target "_base_amd64" {
   inherits  = ["_base"]
   platforms = ["linux/amd64"]
   args = {
-    # pclmulqdq required for rocksdb: https://github.com/rust-rocksdb/rust-rocksdb/issues/1069
+    # `x86-64-v3` features match the 2013 Intel Haswell architecture, excluding Intel-specific instructions;
+    # see: https://en.wikipedia.org/wiki/X86-64
+    #
+    # `pclmulqdq` is required for rocksdb: https://github.com/rust-rocksdb/rust-rocksdb/issues/1069
     RUSTFLAGS = "-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq"
   }
 }
