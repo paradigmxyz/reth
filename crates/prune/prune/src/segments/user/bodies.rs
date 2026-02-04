@@ -59,17 +59,14 @@ impl Bodies {
             None => Some(input.to_block),
             Some(tx_lookup_next) if tx_lookup_next > input.to_block => Some(input.to_block),
             Some(tx_lookup_next) => {
-                // We can only prune bodies up to the block BEFORE tx_lookup's next target.
-                // tx_lookup_next is the next block tx_lookup will prune, meaning it still needs
-                // to read transactions from that block. We must preserve those transactions,
-                // so bodies can only safely delete up to (tx_lookup_next - 1).
+                // Bodies can only prune up to (tx_lookup_next - 1) since tx_lookup still needs
+                // to read transactions from tx_lookup_next block.
                 let Some(safe) = tx_lookup_next.checked_sub(1) else {
                     return Ok(None);
                 };
 
                 if input.previous_checkpoint.is_some_and(|cp| cp.block_number.unwrap_or(0) >= safe)
                 {
-                    // we have pruned what we can
                     return Ok(None)
                 }
 
@@ -147,7 +144,7 @@ mod tests {
     ///
     /// Each jar contains sequential transaction ranges for testing deletion logic.
     fn setup_static_file_jars<P: StaticFileProviderFactory>(provider: &P, tip_block: u64) {
-        let num_jars = (tip_block + 1) / DEFAULT_BLOCKS_PER_STATIC_FILE;
+        let num_jars = (tip_block / DEFAULT_BLOCKS_PER_STATIC_FILE) + 1;
         let txs_per_jar = 1000;
         let static_file_provider = provider.static_file_provider();
 
