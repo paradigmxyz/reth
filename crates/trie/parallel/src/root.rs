@@ -264,6 +264,9 @@ impl From<StateProofError> for ParallelStateRootError {
         match error {
             StateProofError::Database(err) => Self::Provider(ProviderError::Database(err)),
             StateProofError::Rlp(err) => Self::Provider(ProviderError::Rlp(err)),
+            StateProofError::TrieInconsistency(msg) => {
+                Self::Provider(ProviderError::TrieWitnessError(msg))
+            }
         }
     }
 }
