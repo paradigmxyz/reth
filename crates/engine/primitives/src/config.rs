@@ -527,7 +527,10 @@ impl TreeConfig {
     /// Setter for the number of storage proof worker threads.
     ///
     /// No-op if it's [`None`].
-    pub fn with_storage_worker_count_opt(mut self, storage_worker_count: Option<usize>) -> Self {
+    pub const fn with_storage_worker_count_opt(
+        mut self,
+        storage_worker_count: Option<usize>,
+    ) -> Self {
         if let Some(count) = storage_worker_count {
             self.storage_worker_count = count;
         }
@@ -542,7 +545,10 @@ impl TreeConfig {
     /// Setter for the number of account proof worker threads.
     ///
     /// No-op if it's [`None`].
-    pub fn with_account_worker_count_opt(mut self, account_worker_count: Option<usize>) -> Self {
+    pub const fn with_account_worker_count_opt(
+        mut self,
+        account_worker_count: Option<usize>,
+    ) -> Self {
         if let Some(count) = account_worker_count {
             self.account_worker_count = count;
         }
