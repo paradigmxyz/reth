@@ -1329,13 +1329,16 @@ pub enum PruneShardOutcome {
 }
 
 /// Tracks pruning outcomes for batch operations.
+///
+/// Each counter represents the number of **targets** (addresses or storage keys)
+/// that had that outcome, not the number of individual shards affected.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PrunedIndices {
-    /// Number of shards completely deleted.
+    /// Number of targets whose shards were completely deleted.
     pub deleted: usize,
-    /// Number of shards that were updated (filtered but still have entries).
+    /// Number of targets whose shards were updated (filtered but still have entries).
     pub updated: usize,
-    /// Number of shards that were unchanged.
+    /// Number of targets that were unchanged (no blocks <= `to_block`).
     pub unchanged: usize,
 }
 
@@ -1782,8 +1785,8 @@ impl<'a> RocksDBBatch<'a> {
         }
 
         debug_assert!(
-            targets.windows(2).all(|w| w[0].0 <= w[1].0),
-            "targets must be sorted by address for correctness"
+            targets.windows(2).all(|w| w[0].0 < w[1].0),
+            "targets must be sorted by address with no duplicates for correctness"
         );
 
         // ShardedKey<Address> layout: [address: 20][block: 8] = 28 bytes
@@ -1850,6 +1853,14 @@ impl<'a> RocksDBBatch<'a> {
                 iter.next();
             }
 
+            // Check for iterator errors after traversal
+            iter.status().map_err(|e| {
+                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+
             match self.prune_history_shards_inner(
                 shards,
                 *to_block,
@@ -1909,8 +1920,8 @@ impl<'a> RocksDBBatch<'a> {
         }
 
         debug_assert!(
-            targets.windows(2).all(|w| w[0].0 <= w[1].0),
-            "targets must be sorted by (address, storage_key) for correctness"
+            targets.windows(2).all(|w| w[0].0 < w[1].0),
+            "targets must be sorted by (address, storage_key) with no duplicates for correctness"
         );
 
         // StorageShardedKey layout: [address: 20][storage_key: 32][block: 8] = 60 bytes
@@ -1976,6 +1987,14 @@ impl<'a> RocksDBBatch<'a> {
                 shards.push((key, value));
                 iter.next();
             }
+
+            // Check for iterator errors after traversal
+            iter.status().map_err(|e| {
+                ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
 
             // Use existing prune_history_shards_inner logic
             match self.prune_history_shards_inner(

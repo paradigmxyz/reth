@@ -221,12 +221,15 @@ pub enum PruneShardOutcome {
 }
 
 /// Tracks pruning outcomes for batch operations (stub).
+///
+/// Each counter represents the number of **targets** (addresses or storage keys)
+/// that had that outcome, not the number of individual shards affected.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PrunedIndices {
-    /// Number of shards completely deleted.
+    /// Number of targets whose shards were completely deleted.
     pub deleted: usize,
-    /// Number of shards that were updated (filtered but still have entries).
+    /// Number of targets whose shards were updated (filtered but still have entries).
     pub updated: usize,
-    /// Number of shards that were unchanged.
+    /// Number of targets that were unchanged (no blocks <= `to_block`).
     pub unchanged: usize,
 }
