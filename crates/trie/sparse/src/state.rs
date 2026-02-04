@@ -5,7 +5,7 @@ use crate::{
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
-    map::{B256Map, HashSet},
+    map::{B256Map, B256Set, HashSet},
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
@@ -1038,7 +1038,12 @@ where
     ///
     /// - Clears `revealed_account_paths` and `revealed_paths` for all storage tries
     #[cfg(feature = "std")]
-    #[instrument(target = "trie::sparse", skip_all, fields(max_depth, max_storage_tries))]
+    #[instrument(
+        name = "SparseStateTrie::prune",
+        target = "trie::sparse",
+        skip_all,
+        fields(max_depth, max_storage_tries)
+    )]
     pub fn prune(&mut self, max_depth: usize, max_storage_tries: usize) {
         // Prune state and storage tries in parallel
         rayon::join(
@@ -1324,7 +1329,7 @@ struct StorageTrieModifications {
     /// Access frequency and prune state per storage trie address.
     state: B256Map<TrieModificationState>,
     /// Tracks which tries were accessed in the current cycle (between prune calls).
-    accessed_this_cycle: HashSet<B256>,
+    accessed_this_cycle: B256Set,
 }
 
 #[allow(dead_code)]

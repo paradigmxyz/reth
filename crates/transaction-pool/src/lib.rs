@@ -307,7 +307,7 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::{Address, TxHash, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
@@ -316,7 +316,7 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{HeaderTy, Recovered};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
@@ -759,7 +759,7 @@ where
         self.pool.get_pending_transactions_by_origin(origin)
     }
 
-    fn unique_senders(&self) -> HashSet<Address> {
+    fn unique_senders(&self) -> AddressSet {
         self.pool.unique_senders()
     }
 

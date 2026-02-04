@@ -116,9 +116,9 @@ pub(crate) struct Args {
 
     /// Optional fixed delay between engine API calls (passed to reth-bench).
     ///
-    /// When set, reth-bench uses wait-time mode and disables persistence-based flow.
-    /// This flag remains for compatibility with older scripts.
-    #[arg(long, value_name = "DURATION", hide = true)]
+    /// Can be combined with `--wait-for-persistence`: when both are set,
+    /// waits at least this duration, and also waits for persistence if needed.
+    #[arg(long, value_name = "DURATION")]
     pub wait_time: Option<String>,
 
     /// Wait for blocks to be persisted before sending the next batch (passed to reth-bench).
@@ -126,6 +126,9 @@ pub(crate) struct Args {
     /// When enabled, waits for every Nth block to be persisted using the
     /// `reth_subscribePersistedBlock` subscription. This ensures the benchmark
     /// doesn't outpace persistence.
+    ///
+    /// Can be combined with `--wait-time`: when both are set, waits at least
+    /// wait-time, and also waits for persistence if the block hasn't been persisted yet.
     #[arg(long)]
     pub wait_for_persistence: bool,
 

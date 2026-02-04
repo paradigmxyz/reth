@@ -745,9 +745,10 @@ mod tests {
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
-        let (_, rocksdb_path) = create_test_rocksdb_dir();
+        let (_rocksdb_dir, rocksdb_path) = create_test_rocksdb_dir();
+        let _db_tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
         let factory = ProviderFactory::<MockNodeTypesWithDB<DatabaseEnv>>::new_with_database_path(
-            tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep(),
+            _db_tempdir.path(),
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -785,8 +786,9 @@ mod tests {
                 transaction_lookup: Some(PruneMode::Full),
                 ..PruneModes::default()
             };
-            let factory = create_test_provider_factory();
-            let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
+            // Keep factory alive until provider is dropped to prevent TempDatabase cleanup
+            let factory = create_test_provider_factory().with_prune_modes(prune_modes);
+            let provider = factory.provider_rw().unwrap();
             assert_matches!(provider.insert_block(&block.clone().try_recover().unwrap()), Ok(_));
             assert_matches!(provider.transaction_sender(0), Ok(None));
             assert_matches!(
