@@ -112,3 +112,16 @@ jobs:
             "ghcr.io/${{ github.repository_owner }}" \
             "${{ steps.params.outputs.ethereum_tags }}" \
             "${{ steps.params.outputs.optimism_tags }}"
+
+  notify:
+    name: Notify on failure
+    runs-on: ubuntu-latest
+    needs: build
+    if: failure() && github.event_name == 'schedule'
+    steps:
+      - name: Slack Webhook Action
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
