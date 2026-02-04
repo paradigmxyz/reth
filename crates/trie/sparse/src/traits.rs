@@ -188,6 +188,13 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// The root hash of the trie.
     fn root(&mut self) -> B256;
 
+    /// Returns `true` if the root hash is already cached and calling `root()` will be cheap.
+    ///
+    /// This checks whether there are any pending changes that would require recalculating
+    /// the root hash. When `true`, calling `root()` will return the cached value without
+    /// any hash computation.
+    fn is_root_cached(&self) -> bool;
+
     /// Recalculates and updates the RLP hashes of subtries deeper than a certain level. The level
     /// is defined in the implementation.
     ///

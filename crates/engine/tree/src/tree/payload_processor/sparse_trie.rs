@@ -11,7 +11,7 @@ use crate::tree::{
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::ParallelIterator;
 use reth_primitives_traits::{Account, ParallelBridgeBuffered};
 use reth_trie::{
     proof_v2::Target, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, Nibbles,
@@ -718,52 +718,48 @@ where
             return Ok(());
         }
 
-        let roots = self
-            .trie
+        let span = debug_span!("compute_storage_roots").entered();
+        self.trie
             .storage_tries_mut()
-            .par_iter_mut()
-            .filter(|(address, _)| {
-                self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty())
+            .iter_mut()
+            .filter(|(address, trie)| {
+                self.storage_updates.get(*address).is_some_and(|updates| updates.is_empty()) &&
+                    !trie.is_root_cached()
             })
-            .map(|(address, trie)| {
-                let root =
-                    trie.root().expect("updates are drained, trie should be revealed by now");
-
-                (address, root)
-            })
-            .collect::<Vec<_>>();
-
-        for (addr, storage_root) in roots {
-            // If the storage root is known and we have a pending update for this account, encode it
-            // into a proper update.
-            if let Entry::Occupied(entry) = self.pending_account_updates.entry(*addr) &&
-                entry.get().is_some()
-            {
-                let account = entry.remove().expect("just checked, should be Some");
-                let encoded = if account.is_none_or(|account| account.is_empty()) &&
-                    storage_root == EMPTY_ROOT_HASH
-                {
-                    Vec::new()
-                } else {
-                    self.account_rlp_buf.clear();
-                    account
-                        .unwrap_or_default()
-                        .into_trie_account(storage_root)
-                        .encode(&mut self.account_rlp_buf);
-                    self.account_rlp_buf.clone()
-                };
-                self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
-            }
-        }
+            .par_bridge_buffered()
+            .for_each(|(address, trie)| {
+                let _guard = span.clone().entered();
+                let _span = debug_span!("compute_storage_root", ?address).entered();
+                trie.root().expect("updates are drained, trie should be revealed by now");
+            });
+        drop(span);
 
         loop {
             let span = debug_span!("promote_pending_updates").entered();
             // Now handle pending account updates that can be upgraded to a proper update.
             let account_rlp_buf = &mut self.account_rlp_buf;
             self.pending_account_updates.retain(|addr, account| {
-                // If account has pending storage updates, it is still pending.
-                if self.storage_updates.get(addr).is_some_and(|updates| !updates.is_empty()) {
-                    return true;
+                if let Some(updates) = self.storage_updates.get(addr) {
+                    if !updates.is_empty() {
+                        // If account has pending storage updates, it is still pending.
+                        return true;
+                    } else if let Some(account) = account.take() {
+                        let storage_root = self.trie.storage_root(addr).expect("updates are drained, trie should be revealed by now");
+                        let encoded = if account.is_none_or(|account| account.is_empty()) &&
+                            storage_root == EMPTY_ROOT_HASH
+                        {
+                            Vec::new()
+                        } else {
+                            account_rlp_buf.clear();
+                            account
+                                .unwrap_or_default()
+                                .into_trie_account(storage_root)
+                                .encode(account_rlp_buf);
+                            account_rlp_buf.clone()
+                        };
+                        self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                        return false;
+                    }
                 }
 
                 // Get the current account state either from the trie or from latest account update.
