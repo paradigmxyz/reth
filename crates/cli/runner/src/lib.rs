@@ -219,7 +219,7 @@ impl CliRunnerConfig {
 /// Creates a new default tokio multi-thread [Runtime](tokio::runtime::Runtime) with all features
 /// enabled
 pub fn tokio_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
-    Builder::new_multi_thread()
+    tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         // Keep the threads alive for at least the block time (12 seconds) plus buffer.
         // This prevents the costly process of spawning new threads on every
