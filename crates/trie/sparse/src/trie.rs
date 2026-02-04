@@ -1,6 +1,6 @@
 use crate::{
-    provider::TrieNodeProvider, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieExt,
-    SparseTrieUpdates,
+    provider::TrieNodeProvider, LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait,
+    SparseTrieExt, SparseTrieUpdates,
 };
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
@@ -20,7 +20,7 @@ use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNode};
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum RevealableSparseTrie<T> {
+pub enum RevealableSparseTrie<T = ParallelSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
     /// This is the default state. In this state, the trie cannot be directly queried or modified

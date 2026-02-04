@@ -28,9 +28,8 @@ use reth_trie_parallel::{
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    LeafUpdate, SparseStateTrie, SparseTrie, SparseTrieExt,
+    LeafUpdate, ParallelSparseTrie, SparseStateTrie, SparseTrie, SparseTrieExt,
 };
-use reth_trie_sparse_parallel::ParallelSparseTrie;
 use revm_primitives::{hash_map::Entry, B256Map};
 use smallvec::SmallVec;
 use std::{

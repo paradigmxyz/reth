@@ -13,10 +13,9 @@ use reth_trie_sparse::{
     provider::{DefaultTrieNodeProvider, DefaultTrieNodeProviderFactory},
     RevealableSparseTrie, SparseStateTrie, SparseTrie,
 };
-use reth_trie_sparse_parallel::ParallelSparseTrie;
 
 /// Type alias for the sparse state trie using parallel implementation.
-type SparseTrieImpl = SparseStateTrie<ParallelSparseTrie, ParallelSparseTrie>;
+type SparseTrieImpl = SparseStateTrie;
 
 /// Trait for stateless trie implementations that can be used for stateless validation.
 pub trait StatelessTrie: core::fmt::Debug {

@@ -39,8 +39,9 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{RevealableSparseTrie, SparseStateTrie};
-use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
+use reth_trie_sparse::{
+    ParallelSparseTrie, ParallelismThresholds, RevealableSparseTrie, SparseStateTrie,
+};
 use std::{
     collections::BTreeMap,
     ops::Not,

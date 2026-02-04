@@ -18,7 +18,6 @@ reth-primitives-traits.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-sparse.workspace = true
-reth-trie-sparse-parallel.workspace = true
 reth-trie-common = { workspace = true, features = ["rayon"] }
 
 revm-database.workspace = true

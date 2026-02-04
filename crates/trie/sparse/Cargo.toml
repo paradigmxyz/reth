@@ -26,6 +26,7 @@ alloy-rlp.workspace = true
 # misc
 auto_impl.workspace = true
 rayon = { workspace = true, optional = true }
+smallvec.workspace = true
 
 # metrics
 reth-metrics = { workspace = true, optional = true }
@@ -39,7 +40,6 @@ reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie-db = { workspace = true, features = ["test-utils"] }
-reth-trie-sparse-parallel.workspace = true
 reth-tracing.workspace = true
 
 arbitrary.workspace = true
@@ -81,6 +81,7 @@ arbitrary = [
     "alloy-trie/arbitrary",
     "reth-primitives-traits/arbitrary",
     "reth-trie-common/arbitrary",
+    "smallvec/arbitrary",
 ]
 
 [[bench]]
