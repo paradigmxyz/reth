@@ -350,9 +350,30 @@ where
     pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
+        let mut total_select_wait = Duration::ZERO;
+        let mut total_on_update = Duration::ZERO;
+        let mut total_on_proof_result = Duration::ZERO;
+        let mut total_dispatch_targets = Duration::ZERO;
+        let mut total_promote_pending = Duration::ZERO;
+        let mut total_process_leaf_updates = Duration::ZERO;
+        let mut loop_iterations: u64 = 0;
+
         loop {
+            loop_iterations += 1;
+
+            self.metrics
+                .sparse_trie_updates_channel_len_histogram
+                .record(self.updates.len() as f64);
+            self.metrics
+                .sparse_trie_proof_results_channel_len_histogram
+                .record(self.proof_result_rx.len() as f64);
+
+            let select_start = Instant::now();
             crossbeam_channel::select_biased! {
                 recv(self.updates) -> message => {
+                    total_select_wait += select_start.elapsed();
+
+                    let update_start = Instant::now();
                     let update = match message {
                         Ok(m) => m,
                         Err(_) => {
@@ -362,8 +383,12 @@ where
 
                     self.on_multiproof_message(update);
                     self.pending_updates += 1;
+                    total_on_update += update_start.elapsed();
                 }
                 recv(self.proof_result_rx) -> message => {
+                    total_select_wait += select_start.elapsed();
+
+                    let proof_start = Instant::now();
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
                     };
@@ -379,26 +404,42 @@ where
                     }
 
                     self.on_proof_result(result)?;
+                    total_on_proof_result += proof_start.elapsed();
                 },
             }
 
             if self.updates.is_empty() && self.proof_result_rx.is_empty() {
                 // If we don't have any pending messages, we can spend some time on computing
                 // storage roots and promoting account updates.
+                let dispatch_start = Instant::now();
                 self.dispatch_pending_targets();
+                total_dispatch_targets += dispatch_start.elapsed();
+
+                let promote_start = Instant::now();
                 self.promote_pending_account_updates()?;
+                total_promote_pending += promote_start.elapsed();
+
+                let dispatch_start = Instant::now();
                 self.dispatch_pending_targets();
+                total_dispatch_targets += dispatch_start.elapsed();
             } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
                 // If we don't have any pending updates OR we've accumulated a lot already, apply
                 // them to the trie,
+                let leaf_start = Instant::now();
                 self.process_leaf_updates()?;
+                total_process_leaf_updates += leaf_start.elapsed();
+
+                let dispatch_start = Instant::now();
                 self.dispatch_pending_targets();
+                total_dispatch_targets += dispatch_start.elapsed();
             } else if self.updates.is_empty() ||
                 self.pending_targets.chunking_length() > self.chunk_size.unwrap_or_default()
             {
                 // Make sure to dispatch targets if we don't have any updates or if we've
                 // accumulated a lot of them.
+                let dispatch_start = Instant::now();
                 self.dispatch_pending_targets();
+                total_dispatch_targets += dispatch_start.elapsed();
             }
 
             if self.finished_state_updates &&
@@ -408,6 +449,16 @@ where
                 break;
             }
         }
+
+        self.metrics.sparse_trie_select_wait_duration_histogram.record(total_select_wait);
+        self.metrics.sparse_trie_on_update_duration_histogram.record(total_on_update);
+        self.metrics.sparse_trie_on_proof_result_duration_histogram.record(total_on_proof_result);
+        self.metrics.sparse_trie_dispatch_targets_duration_histogram.record(total_dispatch_targets);
+        self.metrics.sparse_trie_promote_pending_duration_histogram.record(total_promote_pending);
+        self.metrics
+            .sparse_trie_process_leaf_updates_duration_histogram
+            .record(total_process_leaf_updates);
+        self.metrics.sparse_trie_loop_iterations_histogram.record(loop_iterations as f64);
 
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 

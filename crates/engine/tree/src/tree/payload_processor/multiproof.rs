@@ -585,6 +585,25 @@ pub(crate) struct MultiProofTaskMetrics {
     pub into_trie_for_reuse_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub sparse_trie_cache_wait_duration_histogram: Histogram,
+
+    /// Time spent waiting in channel select (blocking wait for messages).
+    pub sparse_trie_select_wait_duration_histogram: Histogram,
+    /// Time spent processing incoming update messages.
+    pub sparse_trie_on_update_duration_histogram: Histogram,
+    /// Time spent processing incoming proof result messages.
+    pub sparse_trie_on_proof_result_duration_histogram: Histogram,
+    /// Time spent in dispatch_pending_targets.
+    pub sparse_trie_dispatch_targets_duration_histogram: Histogram,
+    /// Time spent in promote_pending_account_updates.
+    pub sparse_trie_promote_pending_duration_histogram: Histogram,
+    /// Time spent in process_leaf_updates.
+    pub sparse_trie_process_leaf_updates_duration_histogram: Histogram,
+    /// Number of messages in updates channel when polled.
+    pub sparse_trie_updates_channel_len_histogram: Histogram,
+    /// Number of messages in proof results channel when polled.
+    pub sparse_trie_proof_results_channel_len_histogram: Histogram,
+    /// Number of loop iterations.
+    pub sparse_trie_loop_iterations_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
