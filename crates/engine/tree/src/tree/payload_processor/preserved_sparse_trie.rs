@@ -28,6 +28,27 @@ impl SharedPreservedSparseTrie {
     pub(super) fn lock(&self) -> PreservedTrieGuard<'_> {
         PreservedTrieGuard(self.0.lock())
     }
+
+    /// Waits until the sparse trie lock becomes available.
+    ///
+    /// This acquires and immediately releases the lock, ensuring that any
+    /// ongoing operations complete before returning. Useful for synchronization
+    /// before starting payload processing.
+    ///
+    /// Returns the time spent waiting for the lock.
+    pub(super) fn wait_for_availability(&self) -> std::time::Duration {
+        let start = std::time::Instant::now();
+        let _guard = self.0.lock();
+        let elapsed = start.elapsed();
+        if elapsed.as_millis() > 5 {
+            debug!(
+                target: "engine::tree::payload_processor",
+                blocked_for=?elapsed,
+                "Waited for preserved sparse trie to become available"
+            );
+        }
+        elapsed
+    }
 }
 
 /// Guard that holds the lock on the preserved trie.

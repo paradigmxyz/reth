@@ -77,7 +77,8 @@ impl EngineMessageStore {
                     })?,
                 )?;
             }
-            BeaconEngineMessage::NewPayload { payload, tx: _tx } => {
+            BeaconEngineMessage::NewPayload { payload, tx: _tx } |
+            BeaconEngineMessage::NewPayloadWaitForCaches { payload, tx: _tx } => {
                 let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
                 fs::write(
                     self.path.join(filename),
