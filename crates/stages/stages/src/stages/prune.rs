@@ -169,13 +169,15 @@ where
 
         // Adjust the checkpoint to the highest pruned block number of the Sender Recovery segment
         if !result.done {
-            let checkpoint = provider
+            // If checkpoint doesn't exist (e.g., when starting from a snapshot database),
+            // use the input checkpoint as a safe default. This prevents infinite retry loops
+            // when the prune checkpoint table is empty.
+            let block_number = provider
                 .get_prune_checkpoint(PruneSegment::SenderRecovery)?
-                .ok_or(StageError::MissingPruneCheckpoint(PruneSegment::SenderRecovery))?;
+                .and_then(|c| c.block_number)
+                .unwrap_or(input.checkpoint().block_number);
 
-            // `unwrap_or_default` is safe because we know that genesis block doesn't have any
-            // transactions and senders
-            result.checkpoint = StageCheckpoint::new(checkpoint.block_number.unwrap_or_default());
+            result.checkpoint = StageCheckpoint::new(block_number);
         }
 
         Ok(result)
