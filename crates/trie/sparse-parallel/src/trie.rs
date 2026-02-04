@@ -838,6 +838,10 @@ impl SparseTrie for ParallelSparseTrie {
         self.prefix_set.is_empty()
     }
 
+    fn num_changes(&self) -> usize {
+        self.prefix_set.len()
+    }
+
     #[instrument(level = "trace", target = "trie::sparse::parallel", skip(self))]
     fn update_subtrie_hashes(&mut self) {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
