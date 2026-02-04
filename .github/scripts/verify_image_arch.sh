@@ -47,7 +47,6 @@ if [[ "$TARGETS" == *"nightly"* ]]; then
     verify_image "${REGISTRY}/reth:nightly-profiling" amd64
     verify_image "${REGISTRY}/reth:nightly-edge-profiling" amd64
     verify_image "${REGISTRY}/op-reth:nightly-profiling" amd64
-    verify_image "${REGISTRY}/op-reth:nightly-edge-profiling" amd64
 else
     for tag in $(echo "$ETHEREUM_TAGS" | tr ',' ' '); do
         verify_image "$tag" amd64 arm64
