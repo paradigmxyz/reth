@@ -104,7 +104,6 @@ jobs:
             optimism.tags=${{ steps.params.outputs.optimism_tags }}
 
       - name: Verify image architectures
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         run: |
           verify_image() {
             local image="$1"
