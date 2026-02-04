@@ -168,16 +168,11 @@ impl ChangesetOffsetReader {
     /// Record size in bytes.
     const RECORD_SIZE: usize = 16;
 
-    /// Opens the changeset offset file for reading.
-    pub fn new(path: impl AsRef<Path>) -> io::Result<Self> {
-        let file = File::open(path)?;
-        let len = file.metadata()?.len() / Self::RECORD_SIZE as u64;
-        Ok(Self { file, len })
-    }
-
-    /// Opens with an explicit length (from header metadata).
-    /// Any records beyond `len` are ignored.
-    pub fn with_len(path: impl AsRef<Path>, len: u64) -> io::Result<Self> {
+    /// Opens the changeset offset file for reading with an explicit length.
+    ///
+    /// The `len` parameter (from header metadata) bounds the reader - any records
+    /// beyond this length are ignored. This ensures we only read committed data.
+    pub fn new(path: impl AsRef<Path>, len: u64) -> io::Result<Self> {
         let file = File::open(path)?;
         Ok(Self { file, len })
     }
@@ -258,7 +253,7 @@ mod tests {
 
         // Read
         {
-            let mut reader = ChangesetOffsetReader::new(&path).unwrap();
+            let mut reader = ChangesetOffsetReader::new(&path, 3).unwrap();
             assert_eq!(reader.len(), 3);
 
             let entry = reader.get(0).unwrap().unwrap();
@@ -291,7 +286,7 @@ mod tests {
         writer.truncate(2).unwrap();
         assert_eq!(writer.len(), 2);
 
-        let mut reader = ChangesetOffsetReader::new(&path).unwrap();
+        let mut reader = ChangesetOffsetReader::new(&path, 2).unwrap();
         assert_eq!(reader.len(), 2);
         assert!(reader.get(2).unwrap().is_none());
     }
@@ -324,7 +319,7 @@ mod tests {
         assert_eq!(std::fs::metadata(&path).unwrap().len(), 16);
 
         // Verify the complete record is readable
-        let mut reader = ChangesetOffsetReader::new(&path).unwrap();
+        let mut reader = ChangesetOffsetReader::new(&path, 1).unwrap();
         assert_eq!(reader.len(), 1);
         let entry = reader.get(0).unwrap().unwrap();
         assert_eq!(entry.offset(), 100);
@@ -332,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn test_with_len_bounds_reads() {
+    fn test_len_bounds_reads() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("test.csoff");
 
@@ -346,8 +341,8 @@ mod tests {
             assert_eq!(writer.len(), 3);
         }
 
-        // Open with explicit len=2, ignoring the 3rd record
-        let mut reader = ChangesetOffsetReader::with_len(&path, 2).unwrap();
+        // Open with len=2, ignoring the 3rd record
+        let mut reader = ChangesetOffsetReader::new(&path, 2).unwrap();
         assert_eq!(reader.len(), 2);
 
         // First two records should be readable
@@ -404,7 +399,7 @@ mod tests {
 
         // Verify the records are correct
         {
-            let mut reader = ChangesetOffsetReader::new(&path).unwrap();
+            let mut reader = ChangesetOffsetReader::new(&path, 3).unwrap();
             assert_eq!(reader.len(), 3);
 
             let entry0 = reader.get(0).unwrap().unwrap();

@@ -591,7 +591,7 @@ mod tests {
         assert_eq!(get_header_block_count(&provider, 0), 5);
 
         // Verify offsets are correct
-        let mut reader = ChangesetOffsetReader::new(&sidecar_path).unwrap();
+        let mut reader = ChangesetOffsetReader::new(&sidecar_path, 5).unwrap();
 
         let o0 = reader.get(0).unwrap().unwrap();
         assert_eq!(o0.offset(), 0);
@@ -736,9 +736,9 @@ mod tests {
 
     #[test]
     fn test_prune_with_uncommitted_sidecar_records() {
-        // REGRESSION: truncate_changesets() used ChangesetOffsetReader::new() which reads
-        // file size from disk. After a crash, sidecar may have uncommitted records.
-        // The fix uses with_len(changeset_offsets_len) instead.
+        // REGRESSION: truncate_changesets() previously read file size from disk instead of
+        // using the committed length from header. After a crash, sidecar may have uncommitted
+        // records. The fix uses ChangesetOffsetReader::new() with explicit length.
         //
         // SCENARIO: Simulate crash where sidecar has more records than header claims,
         // then prune. The prune should use header's block count, not sidecar's.

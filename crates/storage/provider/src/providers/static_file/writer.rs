@@ -387,8 +387,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         // Step 2: Validate sidecar offsets against actual NippyJar state
         let valid_blocks = if actual_sidecar_blocks > 0 && actual_nippy_rows > 0 {
-            let mut reader =
-                ChangesetOffsetReader::new(&csoff_path).map_err(ProviderError::other)?;
+            let mut reader = ChangesetOffsetReader::new(&csoff_path, actual_sidecar_blocks)
+                .map_err(ProviderError::other)?;
 
             // Find last block where offset + num_changes <= actual_nippy_rows
             let mut valid = 0u64;
@@ -868,9 +868,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             self.writer.rows() as u64
         } else {
             // Read offset for the block after last_block from sidecar.
-            // Use with_len() to respect the committed length from header, ignoring any
-            // uncommitted records that may exist in the file after a crash.
-            let mut reader = ChangesetOffsetReader::with_len(&csoff_path, changeset_offsets_len)
+            // Use committed length from header, ignoring any uncommitted records
+            // that may exist in the file after a crash.
+            let mut reader = ChangesetOffsetReader::new(&csoff_path, changeset_offsets_len)
                 .map_err(ProviderError::other)?;
             if let Some(next_offset) = reader.get(blocks_to_keep).map_err(ProviderError::other)? {
                 next_offset.offset()

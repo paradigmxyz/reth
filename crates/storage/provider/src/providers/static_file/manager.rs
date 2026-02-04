@@ -2404,7 +2404,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
                     .with_extension("csoff");
                 if csoff_path.exists() {
                     let len = header.changeset_offsets_len();
-                    let mut reader = ChangesetOffsetReader::with_len(&csoff_path, len)
+                    let mut reader = ChangesetOffsetReader::new(&csoff_path, len)
                         .map_err(ProviderError::other)?;
                     let offsets = reader.get_range(0, len).map_err(ProviderError::other)?;
                     for offset in offsets {
@@ -2530,7 +2530,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
                     .with_extension("csoff");
                 if csoff_path.exists() {
                     let len = header.changeset_offsets_len();
-                    let mut reader = ChangesetOffsetReader::with_len(&csoff_path, len)
+                    let mut reader = ChangesetOffsetReader::new(&csoff_path, len)
                         .map_err(ProviderError::other)?;
                     let offsets = reader.get_range(0, len).map_err(ProviderError::other)?;
                     for offset in offsets {

@@ -116,7 +116,9 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
             return Ok(None);
         }
 
-        let mut reader = ChangesetOffsetReader::new(&csoff_path).map_err(ProviderError::other)?;
+        let len = header.changeset_offsets_len();
+        let mut reader =
+            ChangesetOffsetReader::new(&csoff_path, len).map_err(ProviderError::other)?;
         reader.get(index).map_err(ProviderError::other)
     }
 
@@ -142,7 +144,7 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
         }
 
         let mut reader =
-            ChangesetOffsetReader::with_len(&csoff_path, len).map_err(ProviderError::other)?;
+            ChangesetOffsetReader::new(&csoff_path, len).map_err(ProviderError::other)?;
         let offsets = reader.get_range(0, len).map_err(ProviderError::other)?;
         Ok(Some(offsets))
     }
