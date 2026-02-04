@@ -24,3 +24,10 @@ slow-timeout = { period = "2m", terminate-after = 10 }
 [[profile.default.overrides]]
 filter = "package(reth-node-ethereum) and binary(e2e)"
 slow-timeout = { period = "1m", terminate-after = 5 }
+
+# Limit ef-tests concurrency to prevent MDBX memory exhaustion
+# Each test creates its own database, and running too many in parallel
+# can exhaust the vm.max_map_count limit
+[[profile.default.overrides]]
+filter = "package(ef-tests)"
+threads-required = "num-cpus"
