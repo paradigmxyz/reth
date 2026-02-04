@@ -475,6 +475,11 @@ where
         nodes: Vec<ProofTrieNode>,
     ) -> SparseStateTrieResult<()> {
         if self.skip_proof_node_filtering {
+            let capacity = estimate_v2_proof_capacity(&nodes);
+
+            #[cfg(feature = "metrics")]
+            self.metrics.increment_total_account_nodes(nodes.len() as u64);
+
             let root_node = nodes.iter().find(|n| n.path.is_empty());
             let trie = if let Some(root_node) = root_node {
                 trace!(target: "trie::sparse", ?root_node, "Revealing root account node from V2 proof");
@@ -486,7 +491,7 @@ where
             } else {
                 self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
             };
-            trie.reserve_nodes(nodes.len());
+            trie.reserve_nodes(capacity);
             trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes from V2 proof (unfiltered)");
             trie.reveal_nodes(nodes)?;
             return Ok(())
@@ -555,6 +560,10 @@ where
         skip_filtering: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
         if skip_filtering {
+            let capacity = estimate_v2_proof_capacity(&nodes);
+            let metric_values =
+                ProofNodesMetricValues { total_nodes: nodes.len(), skipped_nodes: 0 };
+
             let root_node = nodes.iter().find(|n| n.path.is_empty());
             let trie = if let Some(root_node) = root_node {
                 trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node from V2 proof");
@@ -562,10 +571,10 @@ where
             } else {
                 trie.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
             };
-            trie.reserve_nodes(nodes.len());
+            trie.reserve_nodes(capacity);
             trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes from V2 proof (unfiltered)");
             trie.reveal_nodes(nodes)?;
-            return Ok(ProofNodesMetricValues::default())
+            return Ok(metric_values)
         }
 
         let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values } =
@@ -1526,6 +1535,29 @@ struct FilteredV2ProofNodes {
     new_nodes: usize,
     /// Values which are being returned so they can be incremented into metrics.
     metric_values: ProofNodesMetricValues,
+}
+
+/// Calculates capacity estimation for V2 proof nodes without filtering.
+///
+/// This counts nodes and their children (for branch and extension nodes) to provide
+/// proper capacity hints for `reserve_nodes`. Used when `skip_proof_node_filtering` is
+/// enabled and no filtering is performed.
+fn estimate_v2_proof_capacity(nodes: &[ProofTrieNode]) -> usize {
+    let mut capacity = nodes.len();
+
+    for node in nodes {
+        match &node.node {
+            TrieNode::Branch(branch) => {
+                capacity += branch.state_mask.count_ones() as usize;
+            }
+            TrieNode::Extension(_) => {
+                capacity += 1;
+            }
+            _ => {}
+        };
+    }
+
+    capacity
 }
 
 /// Filters V2 proof nodes that are already revealed, separates the root node if present, and
