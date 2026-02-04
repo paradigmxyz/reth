@@ -4253,17 +4253,22 @@ struct MDBX_txn {
         size_t writemap_spilled_npages;
       };
       /* Per-transaction scratch buffer for DUPSORT put() operations.
-       * This enables thread-safe parallel subtransactions on DupSort tables. */
+       * Basal txns use env->page_auxbuf (shared), nested/parallel subtxns allocate
+       * their own to enable concurrent thread-safe DupSort operations. */
       void *page_auxbuf;
       /* In write txns, next is located the array of cursors for each DB */
 
-      /* --- Parallel subtransaction support (reth extension) --- */
+      /* --- Parallel subtransaction support (reth extension) ---
+       * Enables multiple sibling subtxns for parallel writes within one parent txn.
+       * Key invariant: 1 DBI = 1 SUBTXN (each subtxn operates on exactly one assigned DBI).
+       * Subtxns share parent's geometry but have isolated dirty page tracking. */
       osal_ioring_t *txn_ioring;    /* Per-txn I/O ring (NULL = use env->ioring) */
       void *txn_page_auxbuf;        /* Per-txn scratch buffer (NULL = use env) */
       MDBX_txn *subparent;          /* Parent txn if this is a parallel subtxn */
-      MDBX_txn *subtxn_list;        /* List of child parallel subtxns */
+      /* Sibling linked list: parent->subtxn_list is head, each subtxn links via subtxn_next */
+      MDBX_txn *subtxn_list;        /* Head of child parallel subtxns list */
       MDBX_txn *subtxn_next;        /* Next sibling in parent's subtxn_list */
-      MDBX_dbi assigned_dbi;        /* DBI this subtxn is bound to (0 = none/legacy) */
+      MDBX_dbi assigned_dbi;        /* DBI this subtxn is bound to (0 = unbound) */
       pnl_t subtxn_repnl;           /* Pre-claimed reclaimed pages for this subtxn */
       osal_fastmutex_t *subtxn_alloc_mutex; /* Mutex for synchronized parent allocation */
     } tw;
@@ -8307,7 +8312,8 @@ int mdbx_cursor_bind(MDBX_txn *txn, MDBX_cursor *mc, MDBX_dbi dbi) {
   if (unlikely(dbi == FREE_DBI && !(txn->flags & MDBX_TXN_RDONLY)))
     return LOG_IFERR(MDBX_EACCESS);
 
-  /* Parallel subtxns with assigned_dbi can only use their assigned DBI */
+  /* Enforce 1:1 DBI mapping for parallel subtxns. Each subtxn is bound to exactly
+   * one DBI to prevent cross-DBI access, ensuring isolation between parallel subtxns. */
   if (unlikely((txn->flags & txn_parallel_subtx) && txn->tw.assigned_dbi != 0 && dbi != txn->tw.assigned_dbi)) {
     DEBUG("subtxn %p bound to dbi %u, cannot open cursor on dbi %u",
           (void *)txn, txn->tw.assigned_dbi, dbi);
@@ -13003,6 +13009,8 @@ int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, M
       return LOG_IFERR(rc);
     }
 
+    /* Timing instrumentation for nested transaction performance analysis.
+     * These DEBUG logs are zero-cost in release builds (MDBX_DEBUG=0). */
     DEBUG("%s", "subtxn: begin start");
     if (env->options.spill_parent4child_denominator) {
       /* Spill dirty-pages of parent to provide dirtyroom for child txn */
@@ -13068,6 +13076,7 @@ int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, M
     }
     if (unlikely(rc != MDBX_SUCCESS)) {
     nested_failed:
+      /* Cleanup per-subtxn page_auxbuf on failure */
       if (txn->tw.page_auxbuf)
         osal_free(txn->tw.page_auxbuf);
       pnl_free(txn->tw.repnl);
@@ -13132,7 +13141,8 @@ int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, M
     txn->owner = parent->owner;
     txn->tw.troika = parent->tw.troika;
 
-    /* Allocate per-subtxn page_auxbuf for thread-safe parallel DupSort operations */
+    /* Nested subtxns need their own page_auxbuf for thread-safe DupSort operations.
+     * Without this, cursor_put() would use env->page_auxbuf shared with parent. */
     DEBUG("%s", "subtxn: page_auxbuf alloc");
     txn->tw.page_auxbuf = osal_malloc(env->ps * NUM_METAS);
     if (unlikely(!txn->tw.page_auxbuf)) {
@@ -15732,7 +15742,8 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   txn->tw.txn_ioring = nullptr;
   txn->tw.txn_page_auxbuf = nullptr;
 
-  /* Allocate per-subtxn page_auxbuf for thread-safe parallel DupSort operations */
+  /* Parallel subtxns MUST have their own page_auxbuf because siblings run concurrently.
+   * Without this, concurrent cursor_put() DupSort operations would corrupt each other's data. */
   txn->tw.page_auxbuf = osal_malloc(env->ps * NUM_METAS);
   if (unlikely(!txn->tw.page_auxbuf)) {
     pnl_free(txn->tw.repnl);
@@ -15755,6 +15766,12 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   return MDBX_SUCCESS;
 }
 
+/* Create multiple sibling subtransactions for parallel writes (reth extension).
+ *
+ * Purpose: Enables concurrent writes to different DBIs within a single parent txn.
+ * Invariant: 1 DBI = 1 SUBTXN - each subtxn is assigned exactly one DBI from specs.
+ * Constraints: Subtxns share parent's geometry but have isolated dirty page tracking.
+ *              Requires WRITEMAP mode. DBIs in specs must be unique. */
 LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
                                          const MDBX_subtxn_spec_t *specs,
                                          size_t count,
@@ -15897,8 +15914,10 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
   return MDBX_SUCCESS;
 }
 
+/* Release resources allocated for parallel subtxn. Called on commit/abort. */
 static void subtx_free_resources(MDBX_txn *subtxn) {
   /* WRITEMAP mode: no ioring, txn_page_auxbuf, or dirtylist to free */
+  /* Free per-subtxn page_auxbuf allocated for thread-safe DupSort operations */
   if (subtxn->tw.page_auxbuf)
     osal_free(subtxn->tw.page_auxbuf);
   if (subtxn->tw.retired_pages)
@@ -15932,6 +15951,11 @@ static void subtx_unlink_from_parent(MDBX_txn *subtxn) {
   }
 }
 
+/* Commit a parallel subtxn, merging its changes into the parent txn.
+ *
+ * WRITEMAP mode: pages are already modified in-place; we merge metadata only.
+ * Assumes no page conflicts due to 1 DBI = 1 SUBTXN invariant - each subtxn
+ * modifies disjoint pages. Merges dirty page count, DBI metadata, and page lists. */
 LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
   if (unlikely(!subtxn))
     return MDBX_EINVAL;
@@ -17413,6 +17437,7 @@ __hot int cursor_put(MDBX_cursor *mc, const MDBX_val *key, MDBX_val *data, unsig
   page_t *sub_root = nullptr;
   bool insert_key, insert_data;
   uint16_t fp_flags = P_LEAF;
+  /* Use txn's page_auxbuf if available (subtxns), else fall back to env's shared buffer */
   page_t *fp = mc->txn->tw.page_auxbuf ? mc->txn->tw.page_auxbuf : env->page_auxbuf;
   fp->txnid = mc->txn->front_txnid;
   insert_key = insert_data = (rc != MDBX_SUCCESS);
@@ -17552,6 +17577,7 @@ __hot int cursor_put(MDBX_cursor *mc, const MDBX_val *key, MDBX_val *data, unsig
          * mp: new (sub-)page.
          * xdata: node data with new sub-page or sub-DB. */
         size_t growth = 0; /* growth in page size.*/
+        /* Use txn's page_auxbuf if available (subtxns), else fall back to env's shared buffer */
         page_t *mp = fp = xdata.iov_base = mc->txn->tw.page_auxbuf ? mc->txn->tw.page_auxbuf : env->page_auxbuf;
         mp->pgno = mc->pg[mc->top]->pgno;
 
@@ -22945,6 +22971,9 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
       ret.err = MDBX_MAP_FULL;
       return ret;
     }
+    /* Mutex protects page allocation across parallel sibling subtxns.
+     * Without this, siblings could read the same first_unallocated and
+     * allocate duplicate pages. */
     int lock_rc = osal_fastmutex_acquire(txn->tw.subtxn_alloc_mutex);
     if (unlikely(lock_rc != MDBX_SUCCESS)) {
       ret.page = nullptr;
@@ -22975,7 +23004,8 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
     }
     parent->geo.first_unallocated = new_first;
     txn->geo.first_unallocated = new_first;
-    // Sync all sibling subtxns to prevent stale geo.first_unallocated
+    /* After allocating pages, propagate new first_unallocated to all siblings.
+     * Without this, a sibling could see stale geo and allocate the same pages. */
     for (MDBX_txn *sibling = parent->tw.subtxn_list; sibling; sibling = sibling->tw.subtxn_next) {
       sibling->geo.first_unallocated = new_first;
       if (new_first > sibling->geo.now)
@@ -23482,6 +23512,9 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
       ret.err = MDBX_MAP_FULL;
       return ret;
     }
+    /* Mutex protects page allocation across parallel sibling subtxns.
+     * Without this, siblings could read the same first_unallocated and
+     * allocate duplicate pages. */
     int lock_rc = osal_fastmutex_acquire(txn->tw.subtxn_alloc_mutex);
     if (unlikely(lock_rc != MDBX_SUCCESS)) {
       ret.page = nullptr;
@@ -23512,7 +23545,8 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
     }
     parent->geo.first_unallocated = new_first;
     txn->geo.first_unallocated = new_first;
-    // Sync all sibling subtxns to prevent stale geo.first_unallocated
+    /* After allocating pages, propagate new first_unallocated to all siblings.
+     * Without this, a sibling could see stale geo and allocate the same pages. */
     for (MDBX_txn *sibling = parent->tw.subtxn_list; sibling; sibling = sibling->tw.subtxn_next) {
       sibling->geo.first_unallocated = new_first;
     }
