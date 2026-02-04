@@ -944,9 +944,14 @@ impl RocksDBProvider {
         Ok(())
     }
 
-    /// Flushes and compacts all tables to reclaim disk space.
+    /// Flushes and compacts all tables in `RocksDB`.
     ///
-    /// Use after large delete operations like pruning.
+    /// This:
+    /// 1. Flushes all column family memtables to SST files
+    /// 2. Flushes the Write-Ahead Log (WAL) with sync
+    /// 3. Triggers manual compaction on all column families to reclaim disk space
+    ///
+    /// Use this after large delete operations (like pruning) to reclaim disk space.
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
