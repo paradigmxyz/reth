@@ -1099,6 +1099,13 @@ impl SparseTrieExt for ParallelSparseTrie {
             return PruneTrieOutcome::default();
         }
 
+        // For state trie with finite excess memory, use fast subtrie-based pruning.
+        // This is O(256) instead of O(millions) - clears entire subtries rather than DFS.
+        if let reth_trie_sparse::hot_accounts::TrieKind::State { excess_memory } = kind {
+            self.prune_by_subtrie(excess_memory, config.hot_accounts);
+            return PruneTrieOutcome::default();
+        }
+
         // Track bytes freed during pruning - stop once we've freed enough (state trie only)
         let mut bytes_freed = 0usize;
 
