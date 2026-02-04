@@ -910,7 +910,7 @@ where
     /// Cached bytecode for accounts
     ///
     /// Since the state provider is short-lived, we don't worry about memory leaks.
-code_store: DashMap<B256, Bytecode>,
+    code_store: DashMap<B256, Bytecode>,
     /// Whether to use Reth-specific RPC methods for better performance
     reth_rpc_support: bool,
 }
