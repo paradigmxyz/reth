@@ -1261,7 +1261,7 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
     }
 
     // Returns mutable reference to storage sparse trie, creating a blind one if it doesn't exist.
-    fn get_or_create_trie_mut(&mut self, address: B256) -> &mut RevealableSparseTrie<S> {
+    pub fn get_or_create_trie_mut(&mut self, address: B256) -> &mut RevealableSparseTrie<S> {
         self.tries.entry(address).or_insert_with(|| {
             self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
         })
