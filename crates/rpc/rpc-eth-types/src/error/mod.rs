@@ -453,8 +453,8 @@ where
             DebugInspectorError::Database(err) => Self::Internal(RethError::other(err)),
             #[cfg(feature = "js-tracer")]
             DebugInspectorError::JsInspector(err) => err.into(),
-            #[cfg(not(feature = "js-tracer"))]
-            DebugInspectorError::JsInspector(_) => Self::Unsupported("JS Tracer is not enabled"),
+            #[allow(unreachable_patterns)]
+            _ => Self::Unsupported("unsupported tracer error"),
         }
     }
 }
