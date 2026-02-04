@@ -4,13 +4,14 @@ use crate::{
     LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrie,
     SparseTrieExt, SparseTrieUpdates,
 };
-use alloc::borrow::Cow;
+use alloc::{borrow::Cow, boxed::Box, vec, vec::Vec};
 use alloy_primitives::{
     map::{Entry, HashMap},
     B256,
 };
 use alloy_rlp::Decodable;
 use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
+use core::cmp::{Ord, Ordering, PartialOrd};
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
@@ -18,7 +19,6 @@ use reth_trie_common::{
     ProofTrieNode, RlpNode, TrieNode,
 };
 use smallvec::SmallVec;
-use std::cmp::{Ord, Ordering, PartialOrd};
 use tracing::{debug, instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
@@ -972,7 +972,7 @@ impl SparseTrie for ParallelSparseTrie {
         // First, do a quick check if the value exists in either the upper or lower subtrie's values
         // map. We assume that if there exists a leaf node, then its value will be in the `values`
         // map.
-        if let Some(actual_value) = std::iter::once(self.upper_subtrie.as_ref())
+        if let Some(actual_value) = core::iter::once(self.upper_subtrie.as_ref())
             .chain(self.lower_subtrie_for_path(full_path))
             .filter_map(|subtrie| subtrie.inner.values.get(full_path))
             .next()

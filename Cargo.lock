@@ -11298,7 +11298,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",
- "reth-testing-utils",
  "reth-tracing",
  "reth-trie",
  "reth-trie-common",

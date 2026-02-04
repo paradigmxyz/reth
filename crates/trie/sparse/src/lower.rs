@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+
 use crate::parallel::SparseSubtrie;
 use reth_trie_common::Nibbles;
 
