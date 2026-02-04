@@ -969,14 +969,13 @@ where
         &self,
         canonical_header: &SealedHeader<N::BlockHeader>,
     ) -> ProviderResult<()> {
-        let new_head_number = canonical_header.number();
-        let new_head_hash = canonical_header.hash();
+        // Load the block into memory if it's not already present
+        self.ensure_block_in_memory(canonical_header.number(), canonical_header.hash())?;
 
         // Update the canonical head header
         self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
 
-        // Load the block into memory if it's not already present
-        self.ensure_block_in_memory(new_head_number, new_head_hash)
+        Ok(())
     }
 
     /// Ensures a block is loaded into memory if not already present.

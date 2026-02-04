@@ -10,7 +10,10 @@ use crate::{
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Typed2718};
 use alloy_eips::{BlockNumberOrTag, Decodable2718, Encodable2718};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes};
+use alloy_primitives::{
+    map::{AddressSet, HashSet},
+    Address, BlockHash, BlockNumber, Bytes,
+};
 use alloy_rlp::Encodable;
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
@@ -28,7 +31,6 @@ use reth_tasks::TaskSpawner;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Borrow,
-    collections::HashSet,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::Arc,
@@ -670,7 +672,7 @@ fn load_accounts<Client, I>(
     client: Client,
     at: BlockHash,
     addresses: I,
-) -> Result<LoadedAccounts, Box<(HashSet<Address>, ProviderError)>>
+) -> Result<LoadedAccounts, Box<(AddressSet, ProviderError)>>
 where
     I: IntoIterator<Item = Address>,
     Client: StateProviderFactory,

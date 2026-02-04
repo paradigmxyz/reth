@@ -17,7 +17,7 @@ use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{BranchNode, BranchNodeMasks, Nibbles, ProofTrieNode, RlpNode, TrieNode};
 use std::cmp::Ordering;
-use tracing::{instrument, trace};
+use tracing::{error, instrument, trace};
 
 mod value;
 pub use value::*;
@@ -1159,19 +1159,40 @@ where
 
         trace!(target: TRACE_TARGET, "Starting loop");
         loop {
+            // Save the previous lower bound to detect forward progress.
+            let prev_uncalculated_lower_bound = uncalculated_lower_bound;
+
             // Determine the range of keys of the overall trie which need to be re-computed.
             let Some((calc_lower_bound, calc_upper_bound)) = self.next_uncached_key_range(
                 &mut targets,
                 trie_cursor_state,
                 &sub_trie_targets.prefix,
                 sub_trie_upper_bound.as_ref(),
-                uncalculated_lower_bound,
+                prev_uncalculated_lower_bound,
             )?
             else {
                 // If `next_uncached_key_range` determines that there can be no more keys then
                 // complete the computation.
                 break;
             };
+
+            // Forward-progress guard: detect trie inconsistencies that would cause infinite loops.
+            // If `next_uncached_key_range` returns a range that starts before the previous
+            // lower bound, we've gone backwards and would loop forever.
+            //
+            // This can specifically happen when there is a cached branch which shouldn't exist, or
+            // if state mask bit is set on a cached branch which shouldn't be.
+            if let Some(prev_lower) = prev_uncalculated_lower_bound.as_ref() &&
+                calc_lower_bound < *prev_lower
+            {
+                let msg = format!(
+                    "next_uncached_key_range went backwards: calc_lower={calc_lower_bound:?} < \
+                     prev_lower={prev_lower:?}, calc_upper={calc_upper_bound:?}, prefix={:?}",
+                    sub_trie_targets.prefix,
+                );
+                error!(target: TRACE_TARGET, "{msg}");
+                return Err(StateProofError::TrieInconsistency(msg));
+            }
 
             // Calculate the trie for that range of keys
             self.calculate_key_range(

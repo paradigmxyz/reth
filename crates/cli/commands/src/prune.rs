@@ -12,6 +12,8 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
+#[cfg(all(unix, feature = "edge"))]
+use reth_provider::RocksDBProviderFactory;
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
@@ -85,7 +87,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
             const DELETE_LIMIT: usize = 20_000_000;
             let mut pruner = PrunerBuilder::new(config)
                 .delete_limit(DELETE_LIMIT)
-                .build_with_provider_factory(provider_factory);
+                .build_with_provider_factory(provider_factory.clone());
 
             let mut total_pruned = 0usize;
             loop {
@@ -122,6 +124,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                     "Pruning batch complete, continuing..."
                 );
             }
+        }
+
+        // Flush and compact RocksDB to reclaim disk space after pruning
+        #[cfg(all(unix, feature = "edge"))]
+        {
+            info!(target: "reth::cli", "Flushing and compacting RocksDB...");
+            provider_factory.rocksdb_provider().flush_and_compact()?;
+            info!(target: "reth::cli", "RocksDB compaction complete");
         }
 
         Ok(())
