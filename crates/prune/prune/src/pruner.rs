@@ -149,21 +149,7 @@ where
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        let message = match output.progress {
-            PruneProgress::HasMoreData(_) => "Pruner interrupted and has more data to prune",
-            PruneProgress::Finished => "Pruner finished",
-        };
-
-        debug!(
-            target: "pruner",
-            %tip_block_number,
-            ?elapsed,
-            ?deleted_entries,
-            ?limiter,
-            ?output,
-            ?stats,
-            "{message}",
-        );
+        output.debug_log(tip_block_number, deleted_entries, elapsed);
 
         self.event_sender.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
 

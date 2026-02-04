@@ -1,8 +1,4 @@
-// Docker Bake configuration for reth and op-reth images
-// Usage:
-//   docker buildx bake ethereum    # Build reth
-//   docker buildx bake optimism    # Build op-reth
-//   docker buildx bake             # Build all
+// Docker Bake configuration for reth images
 
 variable "REGISTRY" {
   default = "ghcr.io/paradigmxyz"
@@ -35,29 +31,81 @@ variable "VERGEN_GIT_DIRTY" {
 
 // Common settings for all targets
 group "default" {
-  targets = ["ethereum", "optimism"]
+  targets = [
+    "ethereum",
+    "optimism"
+  ]
+}
+
+group "ethereum" {
+  targets = [
+    "ethereum"
+  ]
+}
+
+group "optimism" {
+  targets = [
+    "optimism"
+  ]
 }
 
 group "nightly" {
-  targets = ["ethereum", "ethereum-profiling", "ethereum-edge-profiling", "optimism", "optimism-profiling", "optimism-edge-profiling"]
+  targets = [
+    "ethereum",
+    "ethereum-profiling",
+    "ethereum-edge-profiling",
+    "optimism",
+    "optimism-profiling",
+    "optimism-edge-profiling"
+  ]
 }
 
 // Base target with shared configuration
 target "_base" {
   dockerfile = "Dockerfile.depot"
-  platforms  = ["linux/amd64", "linux/arm64"]
   args = {
-    BUILD_PROFILE      = "${BUILD_PROFILE}"
-    FEATURES           = "${FEATURES}"
-    VERGEN_GIT_SHA     = "${VERGEN_GIT_SHA}"
+    BUILD_PROFILE       = "${BUILD_PROFILE}"
+    FEATURES            = "${FEATURES}"
+    VERGEN_GIT_SHA      = "${VERGEN_GIT_SHA}"
     VERGEN_GIT_DESCRIBE = "${VERGEN_GIT_DESCRIBE}"
-    VERGEN_GIT_DIRTY   = "${VERGEN_GIT_DIRTY}"
+    VERGEN_GIT_DIRTY    = "${VERGEN_GIT_DIRTY}"
+  }
+  secret = [
+    {
+      type = "env"
+      id   = "DEPOT_TOKEN"
+    }
+  ]
+}
+
+// amd64 base with x86-64-v3 optimizations
+target "_base_amd64" {
+  inherits  = ["_base"]
+  platforms = ["linux/amd64"]
+  args = {
+    # `x86-64-v3` features match the 2013 Intel Haswell architecture, excluding Intel-specific instructions;
+    # see: https://en.wikipedia.org/wiki/X86-64
+    #
+    # `pclmulqdq` is required for rocksdb: https://github.com/rust-rocksdb/rust-rocksdb/issues/1069
+    RUSTFLAGS = "-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq"
   }
 }
 
-// Ethereum (reth)
+// arm64 base
+target "_base_arm64" {
+  inherits  = ["_base"]
+  platforms = ["linux/arm64"]
+}
+
+target "_base_profiling" {
+  inherits  = ["_base_amd64"]
+  platforms = ["linux/amd64"]
+}
+
+// Ethereum (reth) - multi-platform
 target "ethereum" {
-  inherits = ["_base"]
+  inherits  = ["_base"]
+  platforms = ["linux/amd64", "linux/arm64"]
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
@@ -66,7 +114,8 @@ target "ethereum" {
 }
 
 target "ethereum-profiling" {
-  inherits = ["_base"]
+  inherits  = ["_base_profiling"]
+  platforms = ["linux/amd64"]
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
@@ -77,7 +126,8 @@ target "ethereum-profiling" {
 }
 
 target "ethereum-edge-profiling" {
-  inherits = ["_base"]
+  inherits  = ["_base_profiling"]
+  platforms = ["linux/amd64"]
   args = {
     BINARY        = "reth"
     MANIFEST_PATH = "bin/reth"
@@ -87,9 +137,10 @@ target "ethereum-edge-profiling" {
   tags = ["${REGISTRY}/reth:nightly-edge-profiling"]
 }
 
-// Optimism (op-reth)
+// Optimism (op-reth) - multi-platform
 target "optimism" {
-  inherits = ["_base"]
+  inherits  = ["_base"]
+  platforms = ["linux/amd64", "linux/arm64"]
   args = {
     BINARY        = "op-reth"
     MANIFEST_PATH = "crates/optimism/bin"
@@ -98,7 +149,8 @@ target "optimism" {
 }
 
 target "optimism-profiling" {
-  inherits = ["_base"]
+  inherits  = ["_base_profiling"]
+  platforms = ["linux/amd64"]
   args = {
     BINARY        = "op-reth"
     MANIFEST_PATH = "crates/optimism/bin"
@@ -109,7 +161,8 @@ target "optimism-profiling" {
 }
 
 target "optimism-edge-profiling" {
-  inherits = ["_base"]
+  inherits  = ["_base_profiling"]
+  platforms = ["linux/amd64"]
   args = {
     BINARY        = "op-reth"
     MANIFEST_PATH = "crates/optimism/bin"

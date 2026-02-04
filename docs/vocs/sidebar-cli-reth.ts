@@ -175,6 +175,10 @@ export const rethCliSidebar: SidebarItem = {
                 {
                     text: "reth db account-storage",
                     link: "/cli/reth/db/account-storage"
+                },
+                {
+                    text: "reth db state",
+                    link: "/cli/reth/db/state"
                 }
             ]
         },

@@ -1192,6 +1192,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
             .pending_block_kind(self.config.pending_block_kind)
             .raw_tx_forwarder(self.config.raw_tx_forwarder)
             .evm_memory_limit(self.config.rpc_evm_memory_limit)
+            .force_blob_sidecar_upcasting(self.config.force_blob_sidecar_upcasting)
     }
 }
 

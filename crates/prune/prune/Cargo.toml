@@ -17,6 +17,7 @@ reth-exex-types.workspace = true
 reth-db-api.workspace = true
 reth-errors.workspace = true
 reth-provider.workspace = true
+reth-storage-api.workspace = true
 reth-tokio-util.workspace = true
 reth-config.workspace = true
 reth-prune-types.workspace = true
@@ -41,11 +42,15 @@ rayon.workspace = true
 tokio.workspace = true
 rustc-hash.workspace = true
 
+[features]
+rocksdb = ["reth-provider/rocksdb"]
+
 [dev-dependencies]
 # reth
 reth-db = { workspace = true, features = ["test-utils"] }
-reth-stages = { workspace = true, features = ["test-utils"] }
+reth-stages = { workspace = true, features = ["test-utils", "rocksdb"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
+reth-storage-api.workspace = true
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
 

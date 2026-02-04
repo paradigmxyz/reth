@@ -182,6 +182,9 @@ pub enum Eip4844PoolTransactionError {
     /// Thrown if blob transaction has an EIP-4844 style sidecar after Osaka.
     #[error("unexpected eip-4844 sidecar after osaka")]
     UnexpectedEip4844SidecarAfterOsaka,
+    /// Thrown if blob transaction has an EIP-7594 style sidecar but EIP-7594 support is disabled.
+    #[error("eip-7594 sidecar disallowed")]
+    Eip7594SidecarDisallowed,
 }
 
 /// Represents all errors that can happen when validating transactions for the pool for EIP-7702
@@ -374,7 +377,8 @@ impl InvalidPoolTransactionError {
                         true
                     }
                     Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka |
-                    Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka => {
+                    Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka |
+                    Eip4844PoolTransactionError::Eip7594SidecarDisallowed => {
                         // for now we do not want to penalize peers for broadcasting different
                         // sidecars
                         false

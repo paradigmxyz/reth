@@ -47,6 +47,17 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 /// Default maximum concurrency for prewarm task.
 pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 
+/// Default depth for sparse trie pruning.
+///
+/// Nodes at this depth and below are converted to hash stubs to reduce memory.
+/// Depth 4 means we keep roughly 16^4 = 65536 potential branch paths at most.
+pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
+
+/// Default maximum number of storage tries to keep after pruning.
+///
+/// Storage tries beyond this limit are cleared (but allocations preserved).
+pub const DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES: usize = 100;
+
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
@@ -110,8 +121,6 @@ pub struct TreeConfig {
     disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
     disable_prewarming: bool,
-    /// Whether to disable the parallel sparse trie state root algorithm.
-    disable_parallel_sparse_trie: bool,
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
@@ -150,10 +159,16 @@ pub struct TreeConfig {
     storage_worker_count: usize,
     /// Number of account proof worker threads.
     account_worker_count: usize,
-    /// Whether to enable V2 storage proofs.
-    enable_proof_v2: bool,
+    /// Whether to disable V2 storage proofs.
+    disable_proof_v2: bool,
     /// Whether to disable cache metrics recording (can be expensive with large cached state).
     disable_cache_metrics: bool,
+    /// Whether to enable sparse trie as cache.
+    enable_sparse_trie_as_cache: bool,
+    /// Depth for sparse trie pruning after state root computation.
+    sparse_trie_prune_depth: usize,
+    /// Maximum number of storage tries to retain after pruning.
+    sparse_trie_max_storage_tries: usize,
 }
 
 impl Default for TreeConfig {
@@ -168,7 +183,6 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
-            disable_parallel_sparse_trie: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
@@ -182,8 +196,11 @@ impl Default for TreeConfig {
             allow_unwind_canonical_header: false,
             storage_worker_count: default_storage_worker_count(),
             account_worker_count: default_account_worker_count(),
-            enable_proof_v2: false,
+            disable_proof_v2: false,
             disable_cache_metrics: false,
+            enable_sparse_trie_as_cache: false,
+            sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
+            sparse_trie_max_storage_tries: DEFAULT_SPARSE_TRIE_MAX_STORAGE_TRIES,
         }
     }
 }
@@ -201,7 +218,6 @@ impl TreeConfig {
         always_compare_trie_updates: bool,
         disable_state_cache: bool,
         disable_prewarming: bool,
-        disable_parallel_sparse_trie: bool,
         state_provider_metrics: bool,
         cross_block_cache_size: usize,
         has_enough_parallelism: bool,
@@ -215,8 +231,10 @@ impl TreeConfig {
         allow_unwind_canonical_header: bool,
         storage_worker_count: usize,
         account_worker_count: usize,
-        enable_proof_v2: bool,
+        disable_proof_v2: bool,
         disable_cache_metrics: bool,
+        sparse_trie_prune_depth: usize,
+        sparse_trie_max_storage_tries: usize,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -228,7 +246,6 @@ impl TreeConfig {
             always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
-            disable_parallel_sparse_trie,
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
@@ -242,8 +259,11 @@ impl TreeConfig {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-            enable_proof_v2,
+            disable_proof_v2,
             disable_cache_metrics,
+            enable_sparse_trie_as_cache: false,
+            sparse_trie_prune_depth,
+            sparse_trie_max_storage_tries,
         }
     }
 
@@ -285,7 +305,8 @@ impl TreeConfig {
     /// Return the multiproof task chunk size, using the V2 default if V2 proofs are enabled
     /// and the chunk size is at the default value.
     pub const fn effective_multiproof_chunk_size(&self) -> usize {
-        if self.enable_proof_v2 && self.multiproof_chunk_size == DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE
+        if !self.disable_proof_v2 &&
+            self.multiproof_chunk_size == DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE
         {
             DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE_V2
         } else {
@@ -307,11 +328,6 @@ impl TreeConfig {
     /// Returns whether or not state provider metrics are enabled.
     pub const fn state_provider_metrics(&self) -> bool {
         self.state_provider_metrics
-    }
-
-    /// Returns whether or not the parallel sparse trie is disabled.
-    pub const fn disable_parallel_sparse_trie(&self) -> bool {
-        self.disable_parallel_sparse_trie
     }
 
     /// Returns whether or not state cache is disabled.
@@ -451,15 +467,6 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for whether to disable the parallel sparse trie
-    pub const fn with_disable_parallel_sparse_trie(
-        mut self,
-        disable_parallel_sparse_trie: bool,
-    ) -> Self {
-        self.disable_parallel_sparse_trie = disable_parallel_sparse_trie;
-        self
-    }
-
     /// Setter for whether multiproof task should chunk proof targets.
     pub const fn with_multiproof_chunking_enabled(
         mut self,
@@ -521,8 +528,12 @@ impl TreeConfig {
     }
 
     /// Setter for the number of storage proof worker threads.
-    pub fn with_storage_worker_count(mut self, storage_worker_count: usize) -> Self {
-        self.storage_worker_count = storage_worker_count.max(MIN_WORKER_COUNT);
+    ///
+    /// No-op if it's [`None`].
+    pub fn with_storage_worker_count_opt(mut self, storage_worker_count: Option<usize>) -> Self {
+        if let Some(count) = storage_worker_count {
+            self.storage_worker_count = count.max(MIN_WORKER_COUNT);
+        }
         self
     }
 
@@ -532,19 +543,23 @@ impl TreeConfig {
     }
 
     /// Setter for the number of account proof worker threads.
-    pub fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
-        self.account_worker_count = account_worker_count.max(MIN_WORKER_COUNT);
+    ///
+    /// No-op if it's [`None`].
+    pub fn with_account_worker_count_opt(mut self, account_worker_count: Option<usize>) -> Self {
+        if let Some(count) = account_worker_count {
+            self.account_worker_count = count.max(MIN_WORKER_COUNT);
+        }
         self
     }
 
-    /// Return whether V2 storage proofs are enabled.
-    pub const fn enable_proof_v2(&self) -> bool {
-        self.enable_proof_v2
+    /// Return whether V2 storage proofs are disabled.
+    pub const fn disable_proof_v2(&self) -> bool {
+        self.disable_proof_v2
     }
 
-    /// Setter for whether to enable V2 storage proofs.
-    pub const fn with_enable_proof_v2(mut self, enable_proof_v2: bool) -> Self {
-        self.enable_proof_v2 = enable_proof_v2;
+    /// Setter for whether to disable V2 storage proofs.
+    pub const fn with_disable_proof_v2(mut self, disable_proof_v2: bool) -> Self {
+        self.disable_proof_v2 = disable_proof_v2;
         self
     }
 
@@ -556,6 +571,39 @@ impl TreeConfig {
     /// Setter for whether to disable cache metrics recording.
     pub const fn without_cache_metrics(mut self, disable_cache_metrics: bool) -> Self {
         self.disable_cache_metrics = disable_cache_metrics;
+        self
+    }
+
+    /// Returns whether sparse trie as cache is enabled.
+    pub const fn enable_sparse_trie_as_cache(&self) -> bool {
+        self.enable_sparse_trie_as_cache
+    }
+
+    /// Setter for whether to enable sparse trie as cache.
+    pub const fn with_enable_sparse_trie_as_cache(mut self, value: bool) -> Self {
+        self.enable_sparse_trie_as_cache = value;
+        self
+    }
+
+    /// Returns the sparse trie prune depth.
+    pub const fn sparse_trie_prune_depth(&self) -> usize {
+        self.sparse_trie_prune_depth
+    }
+
+    /// Setter for sparse trie prune depth.
+    pub const fn with_sparse_trie_prune_depth(mut self, depth: usize) -> Self {
+        self.sparse_trie_prune_depth = depth;
+        self
+    }
+
+    /// Returns the maximum number of storage tries to retain after pruning.
+    pub const fn sparse_trie_max_storage_tries(&self) -> usize {
+        self.sparse_trie_max_storage_tries
+    }
+
+    /// Setter for maximum storage tries to retain.
+    pub const fn with_sparse_trie_max_storage_tries(mut self, max_tries: usize) -> Self {
+        self.sparse_trie_max_storage_tries = max_tries;
         self
     }
 }

@@ -251,6 +251,8 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     }
 
     /// Creates a preconfigured node for testing purposes with a specific datadir.
+    ///
+    /// The entire `datadir` will be cleaned up when the node is dropped.
     #[cfg(feature = "test-utils")]
     pub fn testing_node_with_datadir(
         mut self,
@@ -268,7 +270,7 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
         let data_dir =
             path.unwrap_or_chain_default(self.config.chain.chain(), self.config.datadir.clone());
 
-        let db = reth_db::test_utils::create_test_rw_db_with_path(data_dir.db());
+        let db = reth_db::test_utils::create_test_rw_db_with_datadir(data_dir.data_dir());
 
         WithLaunchContext { builder: self.with_database(db), task_executor }
     }

@@ -17,7 +17,6 @@ use reth_provider::{providers::ProviderNodeTypes, DBProvider, StaticFileProvider
 use reth_static_file_types::StaticFileSegment;
 use std::{
     hash::{BuildHasher, Hasher},
-    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
@@ -90,7 +89,7 @@ impl Command {
     /// Execute `db checksum` command
     pub fn execute<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         self,
-        tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+        tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     ) -> eyre::Result<()> {
         warn!("This command should be run without the node running!");
 
@@ -117,7 +116,7 @@ fn checksum_hasher() -> impl Hasher {
 }
 
 fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
-    tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+    tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
     segment: StaticFileSegment,
     start_block: Option<u64>,
     end_block: Option<u64>,
