@@ -15728,9 +15728,18 @@ static int create_subtxn_with_dbi(MDBX_txn *parent, MDBX_dbi dbi, MDBX_txn **sub
   txn->tw.spilled.list = nullptr;
   txn->tw.prefault_write_activated = parent->tw.prefault_write_activated;
 
-  /* WRITEMAP mode: no ioring or auxbuf needed (no spill-to-disk) */
-  txn->tw.txn_page_auxbuf = nullptr;
+  /* WRITEMAP mode: no ioring needed (no spill-to-disk) */
   txn->tw.txn_ioring = nullptr;
+  txn->tw.txn_page_auxbuf = nullptr;
+
+  /* Allocate per-subtxn page_auxbuf for thread-safe parallel DupSort operations */
+  txn->tw.page_auxbuf = osal_malloc(env->ps * NUM_METAS);
+  if (unlikely(!txn->tw.page_auxbuf)) {
+    pnl_free(txn->tw.repnl);
+    pnl_free(txn->tw.retired_pages);
+    osal_free(txn);
+    return LOG_IFERR(MDBX_ENOMEM);
+  }
   txn->tw.subtxn_repnl = nullptr; /* Will be set by mdbx_txn_create_subtxns */
   txn->tw.subtxn_alloc_mutex = parent->tw.subtxn_alloc_mutex; /* Share parent's mutex */
 
@@ -15889,7 +15898,9 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
 }
 
 static void subtx_free_resources(MDBX_txn *subtxn) {
-  /* WRITEMAP mode: no ioring, auxbuf, or dirtylist to free */
+  /* WRITEMAP mode: no ioring, txn_page_auxbuf, or dirtylist to free */
+  if (subtxn->tw.page_auxbuf)
+    osal_free(subtxn->tw.page_auxbuf);
   if (subtxn->tw.retired_pages)
     pnl_free(subtxn->tw.retired_pages);
   if (subtxn->tw.repnl)
