@@ -513,7 +513,6 @@ where
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
-        let span = Span::current();
         let disable_sparse_trie_as_cache = !config.enable_sparse_trie_as_cache();
         let prune_depth = self.sparse_trie_prune_depth;
         let max_storage_tries = self.sparse_trie_max_storage_tries;
@@ -521,7 +520,8 @@ where
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size());
 
         self.executor.spawn_blocking(move || {
-            let _enter = span.entered();
+            let _enter = debug_span!(target: "engine::tree::payload_processor", "sparse_trie_task")
+                .entered();
 
             // Reuse a stored SparseStateTrie if available, applying continuation logic.
             // If this payload's parent state root matches the preserved trie's anchor,

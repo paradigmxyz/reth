@@ -135,6 +135,7 @@ where
     /// Receives [`SparseTrieUpdate`]s until the channel is closed, applying each update
     /// to the trie. Once all updates are processed, computes and returns the final state root.
     #[instrument(
+        name = "SparseTrieTask::run",
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
@@ -338,6 +339,7 @@ where
     ///
     /// This concludes once the last state update has been received and processed.
     #[instrument(
+        name = "SparseTrieCacheTask::run",
         level = "debug",
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
