@@ -581,7 +581,11 @@ where
     fn process_leaf_updates(&mut self) -> SparseTrieResult<()> {
         self.pending_updates = 0;
 
+        let total_start = Instant::now();
+        let num_storage_accounts = self.storage_updates.len();
+
         // Start with processing all storage updates in parallel.
+        let prep_start = Instant::now();
         let storage_results = self
             .storage_updates
             .iter_mut()
@@ -611,7 +615,9 @@ where
                 SparseTrieResult::Ok((address, targets, fetched, trie))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let parallel_elapsed = prep_start.elapsed();
 
+        let reinsert_start = Instant::now();
         for (address, targets, fetched, trie) in storage_results {
             self.fetched_storage_targets.insert(*address, fetched);
             self.trie.insert_storage_trie(*address, trie);
@@ -620,9 +626,20 @@ where
                 self.pending_targets.storage_targets.entry(*address).or_default().extend(targets);
             }
         }
+        let reinsert_elapsed = reinsert_start.elapsed();
 
         // Process account trie updates and fill the account targets.
+        let account_start = Instant::now();
         self.process_account_leaf_updates()?;
+        let account_elapsed = account_start.elapsed();
+
+        let total_elapsed = total_start.elapsed();
+        if num_storage_accounts > 0 || self.account_updates.len() > 0 {
+            println!(
+                "process_leaf_updates total={total_elapsed:?} parallel={parallel_elapsed:?} reinsert={reinsert_elapsed:?} accounts={account_elapsed:?} storage_tries={num_storage_accounts} account_updates={}",
+                self.account_updates.len()
+            );
+        }
 
         Ok(())
     }
